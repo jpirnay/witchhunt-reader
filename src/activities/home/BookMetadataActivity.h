@@ -27,9 +27,10 @@ class BookMetadataActivity final : public ActivityWithSubactivity {
   BookMetadata metadata;
   bool updateRequired = false;
   bool initialRenderDone = false;
+  bool shouldExit = false;
 
   static void taskTrampoline(void* param);
-  [[noreturn]] void displayTaskLoop();
+  void displayTaskLoop();
   void render() const;
 
   // Extract metadata from book file
