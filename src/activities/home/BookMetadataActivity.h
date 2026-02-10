@@ -22,12 +22,21 @@ struct BookMetadata {
 class BookMetadataActivity final : public ActivityWithSubactivity {
  private:
   TaskHandle_t displayTaskHandle = nullptr;
-  SemaphoreHandle_t renderingMutex = nullptr;
 
   BookMetadata metadata;
   bool updateRequired = false;
   bool initialRenderDone = false;
-  bool shouldExit = false;
+  volatile bool shouldExit = false;  // visible to display task
+
+  // Simple watchdog state
+  volatile unsigned long lastRenderStartMs = 0;
+  volatile unsigned long lastRenderEndMs = 0;
+  volatile bool renderInProgress = false;
+  volatile bool forceDeleteWanted = false;
+  static constexpr unsigned long RENDER_WATCHDOG_MS = 5000;  // ms before considering render stuck
+
+  // Ignore input for a short time after entering to avoid responding to stale events
+  unsigned long inputIgnoreUntilMs = 0;  // millis() value until which input is ignored
 
   static void taskTrampoline(void* param);
   void displayTaskLoop();
@@ -41,4 +50,5 @@ class BookMetadataActivity final : public ActivityWithSubactivity {
   void onEnter() override;
   void onExit() override;
   void loop() override;
+  bool isReadyForReset() const override { return displayTaskHandle == nullptr; }
 };
