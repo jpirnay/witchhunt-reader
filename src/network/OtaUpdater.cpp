@@ -1,6 +1,7 @@
 #include "OtaUpdater.h"
 
 #include <ArduinoJson.h>
+#include <Logging.h>
 
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
@@ -39,7 +40,7 @@ esp_err_t event_handler(esp_http_client_event_t* event) {
       local_buf = static_cast<char*>(calloc(content_len + 1, sizeof(char)));
       output_len = 0;
       if (local_buf == NULL) {
-        Serial.printf("[%lu] [OTA] HTTP Client Out of Memory Failed, Allocation %d\n", millis(), content_len);
+        LOG("OTA", "HTTP Client Out of Memory Failed, Allocation %d", content_len);
         return ESP_ERR_NO_MEM;
       }
     }

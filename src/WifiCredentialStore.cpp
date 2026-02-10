@@ -1,7 +1,7 @@
 #include "WifiCredentialStore.h"
 
 #include <HalStorage.h>
-#include <HardwareSerial.h>
+#include <Logging.h>
 #include <Serialization.h>
 
 // Initialize the static instance
@@ -21,7 +21,7 @@ constexpr size_t KEY_LENGTH = sizeof(OBFUSCATION_KEY);
 }  // namespace
 
 void WifiCredentialStore::obfuscate(std::string& data) const {
-  Serial.printf("[%lu] [WCS] Obfuscating/deobfuscating %zu bytes\n", millis(), data.size());
+  LOG("WCS", "Obfuscating/deobfuscating %zu bytes", data.size());
   for (size_t i = 0; i < data.size(); i++) {
     data[i] ^= OBFUSCATION_KEY[i % KEY_LENGTH];
   }
@@ -45,8 +45,7 @@ bool WifiCredentialStore::saveToFile() const {
   for (const auto& cred : credentials) {
     // Write SSID (plaintext - not sensitive)
     serialization::writeString(file, cred.ssid);
-    Serial.printf("[%lu] [WCS] Saving SSID: %s, password length: %zu\n", millis(), cred.ssid.c_str(),
-                  cred.password.size());
+    LOG("WCS", "Saving SSID: %s, password length: %zu", cred.ssid.c_str(), cred.password.size());
 
     // Write password (obfuscated)
     std::string obfuscatedPwd = cred.password;
@@ -55,7 +54,7 @@ bool WifiCredentialStore::saveToFile() const {
   }
 
   file.close();
-  Serial.printf("[%lu] [WCS] Saved %zu WiFi credentials to file\n", millis(), credentials.size());
+  LOG("WCS", "Saved %zu WiFi credentials to file", credentials.size());
   return true;
 }
 
