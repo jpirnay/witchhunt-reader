@@ -7,11 +7,11 @@
 #include <string>
 #include <vector>
 
-#include "../Activity.h"
+#include "../ActivityWithSubactivity.h"
 #include "RecentBooksStore.h"
 #include "util/ButtonNavigator.h"
 
-class MyLibraryActivity final : public Activity {
+class MyLibraryActivity final : public ActivityWithSubactivity {
  private:
   TaskHandle_t displayTaskHandle = nullptr;
   SemaphoreHandle_t renderingMutex = nullptr;
@@ -41,7 +41,7 @@ class MyLibraryActivity final : public Activity {
                              const std::function<void()>& onGoHome,
                              const std::function<void(const std::string& path)>& onSelectBook,
                              std::string initialPath = "/")
-      : Activity("MyLibrary", renderer, mappedInput),
+      : ActivityWithSubactivity("MyLibrary", renderer, mappedInput),
         basepath(initialPath.empty() ? "/" : std::move(initialPath)),
         onSelectBook(onSelectBook),
         onGoHome(onGoHome) {}

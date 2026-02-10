@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "BookMetadataActivity.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -65,7 +66,7 @@ void MyLibraryActivity::loadFiles() {
 }
 
 void MyLibraryActivity::onEnter() {
-  Activity::onEnter();
+  ActivityWithSubactivity::onEnter();
 
   renderingMutex = xSemaphoreCreateMutex();
 
@@ -83,7 +84,7 @@ void MyLibraryActivity::onEnter() {
 }
 
 void MyLibraryActivity::onExit() {
-  Activity::onExit();
+  ActivityWithSubactivity::onExit();
 
   // Wait until not rendering to delete task to avoid killing mid-instruction to EPD
   xSemaphoreTake(renderingMutex, portMAX_DELAY);
@@ -169,6 +170,20 @@ void MyLibraryActivity::loop() {
     selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
     updateRequired = true;
   });
+
+  // Handle metadata button (PageForward) for selected book
+  if (mappedInput.wasReleased(MappedInputManager::Button::PageForward) && !files.empty() &&
+      !files[selectorIndex].empty() && files[selectorIndex].back() != '/') {
+    // Create full path for the selected book
+    std::string bookPath = basepath;
+    if (bookPath.back() != '/') bookPath += "/";
+    bookPath += files[selectorIndex];
+
+    // Launch metadata activity
+    auto metadataActivity = new BookMetadataActivity(renderer, mappedInput, bookPath);
+    enterNewActivity(metadataActivity);
+    return;
+  }
 }
 
 void MyLibraryActivity::displayTaskLoop() {
@@ -206,6 +221,11 @@ void MyLibraryActivity::render() const {
   // Help text
   const auto labels = mappedInput.mapLabels("« Home", "Open", "Up", "Down");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+  // Show side button hint for metadata when a book is selected
+  if (!files.empty() && !files[selectorIndex].empty() && files[selectorIndex].back() != '/') {
+    GUI.drawSideButtonHints(renderer, nullptr, "Info");
+  }
 
   renderer.displayBuffer();
 }
