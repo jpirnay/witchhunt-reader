@@ -1,5 +1,6 @@
 #include "ZipFile.h"
 
+#include <Arduino.h>
 #include <HalStorage.h>
 #include <InflateReader.h>
 #include <Logging.h>
@@ -17,6 +18,17 @@ struct ZipInflateCtx {
 namespace {
 constexpr uint16_t ZIP_METHOD_STORED = 0;
 constexpr uint16_t ZIP_METHOD_DEFLATED = 8;
+constexpr size_t ZIP_INFLATE_READ_CHUNK = 1024;
+
+inline void updateMinFreeHeap(uint32_t* minFreeHeap) {
+  if (!minFreeHeap) {
+    return;
+  }
+  const uint32_t now = ESP.getFreeHeap();
+  if (now < *minFreeHeap) {
+    *minFreeHeap = now;
+  }
+}
 
 int zipReadCallback(uzlib_uncomp* uncomp) {
   auto* ctx = reinterpret_cast<ZipInflateCtx*>(uncomp);
@@ -381,11 +393,78 @@ int ZipFile::fillUncompressedSizes(std::vector<SizeTarget>& targets, std::vector
   return matched;
 }
 
-uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const bool trailingNullByte) {
+bool ZipFile::findFirstDeflatedEntry(std::string* filename) {
+  if (!filename) {
+    return false;
+  }
+
+  const bool wasOpen = isOpen();
+  if (!wasOpen && !open()) {
+    return false;
+  }
+
+  if (!loadZipDetails()) {
+    if (!wasOpen) {
+      close();
+    }
+    return false;
+  }
+
+  file.seek(zipDetails.centralDirOffset);
+
+  uint32_t sig;
+  while (file.available()) {
+    if (file.read(&sig, 4) != 4 || sig != 0x02014b50) {
+      break;
+    }
+
+    file.seekCur(6);
+    uint16_t method;
+    file.read(&method, 2);
+    file.seekCur(8);
+    uint32_t compressedSize, uncompressedSize;
+    file.read(&compressedSize, 4);
+    file.read(&uncompressedSize, 4);
+    uint16_t nameLen, m, k;
+    file.read(&nameLen, 2);
+    file.read(&m, 2);
+    file.read(&k, 2);
+    file.seekCur(12);
+
+    if (nameLen == 0) {
+      file.seekCur(m + k);
+      continue;
+    }
+
+    std::string entryName(nameLen, '\0');
+    if (file.read(entryName.data(), nameLen) != nameLen) {
+      break;
+    }
+
+    if (method == ZIP_METHOD_DEFLATED && compressedSize > 0 && uncompressedSize > 0) {
+      *filename = std::move(entryName);
+      if (!wasOpen) {
+        close();
+      }
+      return true;
+    }
+
+    file.seekCur(m + k);
+  }
+
+  if (!wasOpen) {
+    close();
+  }
+  return false;
+}
+
+uint8_t* ZipFile::readFileToMemoryLegacy(const char* filename, size_t* size, const bool trailingNullByte,
+                                         uint32_t* minFreeHeap) {
   const bool wasOpen = isOpen();
   if (!wasOpen && !open()) {
     return nullptr;
   }
+  updateMinFreeHeap(minFreeHeap);
 
   FileStatSlim fileStat = {};
   if (!loadFileStatSlim(filename, &fileStat)) {
@@ -416,6 +495,7 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
     }
     return nullptr;
   }
+  updateMinFreeHeap(minFreeHeap);
 
   if (fileStat.method == ZIP_METHOD_STORED) {
     // no deflation, just read content
@@ -441,6 +521,7 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
       }
       return nullptr;
     }
+    updateMinFreeHeap(minFreeHeap);
 
     const size_t dataRead = file.read(deflatedData, deflatedDataSize);
     if (!wasOpen) {
@@ -476,6 +557,120 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
       close();
     }
     return nullptr;
+  }
+
+  if (trailingNullByte) data[inflatedDataSize] = '\0';
+  if (size) *size = inflatedDataSize;
+  return data;
+}
+
+uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const bool trailingNullByte,
+                                   uint32_t* minFreeHeap) {
+  const bool wasOpen = isOpen();
+  if (!wasOpen && !open()) {
+    return nullptr;
+  }
+  updateMinFreeHeap(minFreeHeap);
+
+  FileStatSlim fileStat = {};
+  if (!loadFileStatSlim(filename, &fileStat)) {
+    if (!wasOpen) {
+      close();
+    }
+    return nullptr;
+  }
+
+  const long fileOffset = getDataOffset(fileStat);
+  if (fileOffset < 0) {
+    if (!wasOpen) {
+      close();
+    }
+    return nullptr;
+  }
+
+  file.seek(fileOffset);
+
+  const auto deflatedDataSize = fileStat.compressedSize;
+  const auto inflatedDataSize = fileStat.uncompressedSize;
+  const auto dataSize = trailingNullByte ? inflatedDataSize + 1 : inflatedDataSize;
+  const auto data = static_cast<uint8_t*>(malloc(dataSize));
+  if (data == nullptr) {
+    LOG_ERR("ZIP", "Failed to allocate memory for output buffer (%zu bytes)", dataSize);
+    if (!wasOpen) {
+      close();
+    }
+    return nullptr;
+  }
+  updateMinFreeHeap(minFreeHeap);
+
+  if (fileStat.method == ZIP_METHOD_STORED) {
+    const size_t dataRead = file.read(data, inflatedDataSize);
+    if (!wasOpen) {
+      close();
+    }
+
+    if (dataRead != inflatedDataSize) {
+      LOG_ERR("ZIP", "Failed to read data");
+      free(data);
+      return nullptr;
+    }
+  } else if (fileStat.method == ZIP_METHOD_DEFLATED) {
+    const size_t readChunk =
+        (deflatedDataSize > 0 && deflatedDataSize < ZIP_INFLATE_READ_CHUNK) ? deflatedDataSize : ZIP_INFLATE_READ_CHUNK;
+    const auto fileReadBuffer = static_cast<uint8_t*>(malloc(readChunk));
+    if (fileReadBuffer == nullptr) {
+      LOG_ERR("ZIP", "Failed to allocate memory for decompression read buffer");
+      if (!wasOpen) {
+        close();
+      }
+      free(data);
+      return nullptr;
+    }
+    updateMinFreeHeap(minFreeHeap);
+
+    bool success = false;
+    {
+      ZipInflateCtx ctx;
+      ctx.file = &file;
+      ctx.fileRemaining = deflatedDataSize;
+      ctx.readBuf = fileReadBuffer;
+      ctx.readBufSize = readChunk;
+
+      if (!ctx.reader.init(true)) {
+        LOG_ERR("ZIP", "Failed to init inflate reader");
+        free(fileReadBuffer);
+        if (!wasOpen) {
+          close();
+        }
+        free(data);
+        return nullptr;
+      }
+      updateMinFreeHeap(minFreeHeap);
+
+      ctx.reader.setReadCallback(zipReadCallback);
+      success = ctx.reader.read(data, inflatedDataSize);
+    }
+    free(fileReadBuffer);
+
+    if (!success) {
+      LOG_ERR("ZIP", "Failed to inflate file");
+      if (!wasOpen) {
+        close();
+      }
+      free(data);
+      return nullptr;
+    }
+  } else {
+    LOG_ERR("ZIP", "Unsupported compression method");
+    if (!wasOpen) {
+      close();
+    }
+    free(data);
+    return nullptr;
+  }
+
+  if (!wasOpen) {
+    close();
   }
 
   if (trailingNullByte) data[inflatedDataSize] = '\0';

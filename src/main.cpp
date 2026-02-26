@@ -9,6 +9,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
+#include <ZipFile.h>
 #include <builtinFonts/all.h>
 
 #include <cstring>
@@ -289,6 +290,77 @@ void setupDisplayAndFonts() {
   LOG_DBG("MAIN", "Fonts setup");
 }
 
+#ifdef ENABLE_ZIP_INFLATE_BENCHMARK
+struct ZipInflateBenchResult {
+  bool ok = false;
+  uint32_t elapsedMs = 0;
+  uint32_t freeHeapBefore = 0;
+  uint32_t freeHeapAfter = 0;
+  uint32_t peakHeapUse = 0;
+  size_t outputSize = 0;
+};
+
+ZipInflateBenchResult runZipInflateBenchOnce(ZipFile& zip, const char* entryName, const bool legacyMode) {
+  ZipInflateBenchResult result;
+  result.freeHeapBefore = ESP.getFreeHeap();
+  uint32_t minFreeHeap = result.freeHeapBefore;
+  const uint32_t startMs = millis();
+
+  uint8_t* out = legacyMode ? zip.readFileToMemoryLegacy(entryName, &result.outputSize, false, &minFreeHeap)
+                            : zip.readFileToMemory(entryName, &result.outputSize, false, &minFreeHeap);
+
+  result.elapsedMs = millis() - startMs;
+  result.ok = out != nullptr;
+
+  if (out) {
+    free(out);
+  }
+
+  result.freeHeapAfter = ESP.getFreeHeap();
+  if (result.freeHeapAfter < minFreeHeap) {
+    minFreeHeap = result.freeHeapAfter;
+  }
+  result.peakHeapUse = result.freeHeapBefore - minFreeHeap;
+  return result;
+}
+
+void runZipInflateBenchmark() {
+  if (APP_STATE.openEpubPath.empty()) {
+    LOG_DBG("ZIPBM", "Skipped benchmark: no open EPUB path in app state");
+    return;
+  }
+
+  ZipFile zip(APP_STATE.openEpubPath);
+  std::string entryName;
+  if (!zip.findFirstDeflatedEntry(&entryName)) {
+    LOG_DBG("ZIPBM", "Skipped benchmark: no deflated entry found in %s", APP_STATE.openEpubPath.c_str());
+    return;
+  }
+
+  if (!zip.open()) {
+    LOG_ERR("ZIPBM", "Failed to open EPUB for benchmark: %s", APP_STATE.openEpubPath.c_str());
+    return;
+  }
+
+  const ZipInflateBenchResult legacy = runZipInflateBenchOnce(zip, entryName.c_str(), true);
+  const ZipInflateBenchResult streaming = runZipInflateBenchOnce(zip, entryName.c_str(), false);
+  zip.close();
+
+  LOG_INF("ZIPBM", "Entry: %s", entryName.c_str());
+  LOG_INF("ZIPBM", "Legacy    ok:%s time:%lu ms peakHeap:%lu B before:%lu after:%lu out:%u", legacy.ok ? "yes" : "no",
+          legacy.elapsedMs, legacy.peakHeapUse, legacy.freeHeapBefore, legacy.freeHeapAfter,
+          static_cast<unsigned>(legacy.outputSize));
+  LOG_INF("ZIPBM", "Streaming ok:%s time:%lu ms peakHeap:%lu B before:%lu after:%lu out:%u",
+          streaming.ok ? "yes" : "no", streaming.elapsedMs, streaming.peakHeapUse, streaming.freeHeapBefore,
+          streaming.freeHeapAfter, static_cast<unsigned>(streaming.outputSize));
+
+  if (legacy.ok && streaming.ok && legacy.outputSize != streaming.outputSize) {
+    LOG_ERR("ZIPBM", "Output size mismatch legacy:%u streaming:%u", static_cast<unsigned>(legacy.outputSize),
+            static_cast<unsigned>(streaming.outputSize));
+  }
+}
+#endif
+
 void setup() {
   t1 = millis();
 
@@ -349,6 +421,10 @@ void setup() {
 
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
+
+#ifdef ENABLE_ZIP_INFLATE_BENCHMARK
+  runZipInflateBenchmark();
+#endif
 
   // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
   // crashed (indicated by readerActivityLoadCount > 0)

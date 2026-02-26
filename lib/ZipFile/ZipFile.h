@@ -65,8 +65,14 @@ class ZipFile {
   // targets must be sorted by (hash, len). sizes[target.index] receives uncompressedSize.
   // Returns number of targets matched.
   int fillUncompressedSizes(std::vector<SizeTarget>& targets, std::vector<uint32_t>& sizes);
+  // Finds the first deflated (method 8) entry in the zip and writes its path.
+  bool findFirstDeflatedEntry(std::string* filename);
   // Due to the memory required to run each of these, it is recommended to not preopen the zip file for multiple
   // These functions will open and close the zip as needed
-  uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
+  uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false,
+                            uint32_t* minFreeHeap = nullptr);
+  // Legacy implementation (loads full deflated payload before inflate). Kept for benchmarking.
+  uint8_t* readFileToMemoryLegacy(const char* filename, size_t* size = nullptr, bool trailingNullByte = false,
+                                  uint32_t* minFreeHeap = nullptr);
   bool readFileToStream(const char* filename, Print& out, size_t chunkSize);
 };
