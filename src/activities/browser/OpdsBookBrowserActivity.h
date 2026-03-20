@@ -43,6 +43,8 @@ class OpdsBookBrowserActivity final : public Activity {
   std::string statusMessage;
   size_t downloadProgress = 0;
   size_t downloadTotal = 0;
+  bool cancelRequested = false;
+  std::string searchUrlTemplate;  // Feed-level search URL template ({searchTerms} placeholder)
 
   void checkAndConnectWifi();
   void launchWifiSelection();
@@ -51,5 +53,6 @@ class OpdsBookBrowserActivity final : public Activity {
   void navigateToEntry(const OpdsEntry& entry);
   void navigateBack();
   void downloadBook(const OpdsEntry& book);
+  void launchSearch();
   bool preventAutoSleep() override { return true; }
 };

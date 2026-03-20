@@ -10,7 +10,8 @@
  */
 class HttpDownloader {
  public:
-  using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
+  // Called after each chunk; return true to continue, false to abort
+  using ProgressCallback = std::function<bool(size_t downloaded, size_t total)>;
 
   enum DownloadError {
     OK = 0,

@@ -44,4 +44,20 @@ std::string buildUrl(const std::string& serverUrl, const std::string& path) {
   return urlWithProtocol + "/" + path;
 }
 
+std::string urlEncode(const std::string& str) {
+  std::string result;
+  result.reserve(str.size() * 3);
+  for (const unsigned char c : str) {
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+        c == '.' || c == '~') {
+      result += static_cast<char>(c);
+    } else {
+      char hex[4];
+      snprintf(hex, sizeof(hex), "%%%02X", c);
+      result += hex;
+    }
+  }
+  return result;
+}
+
 }  // namespace UrlUtils

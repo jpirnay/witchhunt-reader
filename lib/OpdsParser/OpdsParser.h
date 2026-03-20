@@ -69,6 +69,11 @@ class OpdsParser final : public Print {
   std::vector<OpdsEntry> getEntries() && { return std::move(entries); }
 
   /**
+   * Get the OPDS search URL template (contains "{searchTerms}" placeholder), or empty if not found.
+   */
+  const std::string& getSearchUrlTemplate() const { return feedSearchUrlTemplate; }
+
+  /**
    * Get only book entries (legacy compatibility).
    * @return Vector of book entries
    */
@@ -90,6 +95,7 @@ class OpdsParser final : public Print {
 
   XML_Parser parser = nullptr;
   std::vector<OpdsEntry> entries;
+  std::string feedSearchUrlTemplate;  // Feed-level search URL template with {searchTerms}
   OpdsEntry currentEntry;
   std::string currentText;
 

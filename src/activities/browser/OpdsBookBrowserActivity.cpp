@@ -10,6 +10,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
@@ -113,23 +114,28 @@ void OpdsBookBrowserActivity::loop() {
 
     // Handle navigation
     if (!entries.empty()) {
+      // Left button is Search; previous navigation uses Up side button only to avoid conflict
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+        launchSearch();
+      } else {
+        buttonNavigator.onRelease({MappedInputManager::Button::Up}, [this] {
+          selectorIndex = ButtonNavigator::previousIndex(selectorIndex, static_cast<int>(entries.size()));
+          requestUpdate();
+        });
+      }
+
       buttonNavigator.onNextRelease([this] {
-        selectorIndex = ButtonNavigator::nextIndex(selectorIndex, entries.size());
+        selectorIndex = ButtonNavigator::nextIndex(selectorIndex, static_cast<int>(entries.size()));
         requestUpdate();
       });
 
-      buttonNavigator.onPreviousRelease([this] {
-        selectorIndex = ButtonNavigator::previousIndex(selectorIndex, entries.size());
+      buttonNavigator.onContinuous({MappedInputManager::Button::Up}, [this] {
+        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, static_cast<int>(entries.size()), PAGE_ITEMS);
         requestUpdate();
       });
 
       buttonNavigator.onNextContinuous([this] {
-        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
-        requestUpdate();
-      });
-
-      buttonNavigator.onPreviousContinuous([this] {
-        selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
+        selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, static_cast<int>(entries.size()), PAGE_ITEMS);
         requestUpdate();
       });
     }
@@ -182,6 +188,8 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       const int barY = pageHeight / 2 + 20;
       GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
     }
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
     return;
   }
@@ -192,7 +200,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   if (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) {
     confirmLabel = tr(STR_DOWNLOAD);
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_SEARCH), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (entries.empty()) {
@@ -260,6 +268,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
 
   entries = std::move(parser).getEntries();
   LOG_DBG("OPDS", "Found %d entries", entries.size());
+  searchUrlTemplate = parser.getSearchUrlTemplate();
   selectorIndex = 0;
 
   if (entries.empty()) {
@@ -311,6 +320,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   statusMessage = book.title;
   downloadProgress = 0;
   downloadTotal = 0;
+  cancelRequested = false;
   requestUpdate(true);
 
   // Build full download URL
@@ -327,10 +337,23 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   const auto result =
       HttpDownloader::downloadToFile(downloadUrl, filename, [this](const size_t downloaded, const size_t total) {
+        // Poll input so Back button press is detected during the blocking download
+        mappedInput.update();
+        if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+          cancelRequested = true;
+        }
         downloadProgress = downloaded;
         downloadTotal = total;
         requestUpdate(true);  // Force update to refresh progress bar
+        return !cancelRequested;
       });
+
+  if (result == HttpDownloader::ABORTED) {
+    LOG_DBG("OPDS", "Download cancelled: %s", filename.c_str());
+    state = BrowserState::BROWSING;
+    requestUpdate();
+    return;
+  }
 
   if (result == HttpDownloader::OK) {
     LOG_DBG("OPDS", "Download complete: %s", filename.c_str());
@@ -388,4 +411,38 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
     errorMessage = tr(STR_WIFI_CONN_FAILED);
     requestUpdate();
   }
+}
+
+void OpdsBookBrowserActivity::launchSearch() {
+  if (searchUrlTemplate.empty()) {
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_SEARCH_NOT_SUPPORTED);
+    requestUpdate();
+    return;
+  }
+
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH), "", 100, false),
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          return;
+        }
+        const auto& kb = std::get<KeyboardResult>(result.data);
+        if (kb.text.empty()) {
+          return;
+        }
+        std::string searchPath = searchUrlTemplate;
+        const size_t pos = searchPath.find("{searchTerms}");
+        if (pos != std::string::npos) {
+          searchPath.replace(pos, 13, UrlUtils::urlEncode(kb.text));
+        }
+        navigationHistory.push_back(currentPath);
+        currentPath = searchPath;
+        state = BrowserState::LOADING;
+        statusMessage = tr(STR_LOADING);
+        entries.clear();
+        selectorIndex = 0;
+        requestUpdate(true);
+        fetchFeed(searchPath);
+      });
 }

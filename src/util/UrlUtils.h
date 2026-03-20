@@ -25,4 +25,9 @@ std::string extractHost(const std::string& url);
  */
 std::string buildUrl(const std::string& serverUrl, const std::string& path);
 
+/**
+ * Percent-encode a string for safe use in a URL path or query value.
+ */
+std::string urlEncode(const std::string& str);
+
 }  // namespace UrlUtils

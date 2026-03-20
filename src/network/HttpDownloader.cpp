@@ -23,16 +23,23 @@ class FileWriteStream final : public Stream {
   size_t write(uint8_t byte) override { return write(&byte, 1); }
 
   size_t write(const uint8_t* buffer, size_t size) override {
+    if (aborted_) {
+      // Discard remaining data so HTTPClient can drain cleanly
+      return size;
+    }
     // Write-through stream for HTTPClient::writeToStream with progress tracking.
     const size_t written = file_.write(buffer, size);
     if (written != size) {
       writeOk_ = false;
     }
     downloaded_ += written;
-    if (progress_ && total_ > 0) {
-      progress_(downloaded_, total_);
+    if (progress_) {
+      const bool continueDownload = progress_(downloaded_, total_);
+      if (!continueDownload) {
+        aborted_ = true;
+      }
     }
-    return written;
+    return size;  // Always return requested size to keep HTTP client flowing
   }
 
   int available() override { return 0; }
@@ -42,12 +49,14 @@ class FileWriteStream final : public Stream {
 
   size_t downloaded() const { return downloaded_; }
   bool ok() const { return writeOk_; }
+  bool aborted() const { return aborted_; }
 
  private:
   FsFile& file_;
   size_t total_;
   size_t downloaded_ = 0;
   bool writeOk_ = true;
+  bool aborted_ = false;
   HttpDownloader::ProgressCallback progress_;
 };
 }  // namespace
@@ -162,6 +171,12 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 
   file.close();
   http.end();
+
+  if (fileStream.aborted()) {
+    LOG_DBG("HTTP", "Download cancelled by user");
+    Storage.remove(destPath.c_str());
+    return ABORTED;
+  }
 
   if (writeResult < 0) {
     LOG_ERR("HTTP", "writeToStream error: %d", writeResult);
