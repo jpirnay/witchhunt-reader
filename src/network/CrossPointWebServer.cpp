@@ -351,7 +351,7 @@ void CrossPointWebServer::scanFiles(const char* path, bool showHidden,
     auto fileName = String(name);
 
     // Skip hidden items (starting with ".")
-    bool shouldHide = fileName.startsWith(".");
+    bool shouldHide = !SETTINGS.showHiddenFiles && fileName.startsWith(".");
     bool shouldProtect = false;
 
     // Check against explicitly hidden items list
