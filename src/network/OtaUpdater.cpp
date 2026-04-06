@@ -61,6 +61,7 @@ esp_err_t event_handler(esp_http_client_event_t* event) {
 } /* namespace */
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
+  lastErrorDetail.clear();
   JsonDocument filter;
   esp_err_t esp_err;
   JsonDocument doc;
@@ -90,12 +91,14 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   esp_http_client_handle_t client_handle = esp_http_client_init(&client_config);
   if (!client_handle) {
     LOG_ERR("OTA", "HTTP Client Handle Failed");
+    lastErrorDetail = "HTTP client init failed";
     return INTERNAL_UPDATE_ERROR;
   }
 
   esp_err = esp_http_client_set_header(client_handle, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_http_client_set_header Failed : %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("Set header: ") + esp_err_to_name(esp_err);
     esp_http_client_cleanup(client_handle);
     return INTERNAL_UPDATE_ERROR;
   }
@@ -103,15 +106,31 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   esp_err = esp_http_client_perform(client_handle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_http_client_perform Failed : %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("HTTP request: ") + esp_err_to_name(esp_err);
     esp_http_client_cleanup(client_handle);
     return HTTP_ERROR;
   }
+
+  const int statusCode = esp_http_client_get_status_code(client_handle);
 
   /* esp_http_client_close will be called inside cleanup as well*/
   esp_err = esp_http_client_cleanup(client_handle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_http_client_cleanup Failed : %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("Cleanup: ") + esp_err_to_name(esp_err);
     return INTERNAL_UPDATE_ERROR;
+  }
+
+  if (statusCode != 200) {
+    LOG_ERR("OTA", "HTTP status %d", statusCode);
+    lastErrorDetail = "HTTP status " + std::to_string(statusCode);
+    return HTTP_ERROR;
+  }
+
+  if (local_buf == NULL) {
+    LOG_ERR("OTA", "No response data received");
+    lastErrorDetail = "Empty response";
+    return HTTP_ERROR;
   }
 
   filter["tag_name"] = true;
@@ -121,16 +140,19 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   const DeserializationError error = deserializeJson(doc, local_buf, DeserializationOption::Filter(filter));
   if (error) {
     LOG_ERR("OTA", "JSON parse failed: %s", error.c_str());
+    lastErrorDetail = std::string("JSON: ") + error.c_str();
     return JSON_PARSE_ERROR;
   }
 
   if (!doc["tag_name"].is<std::string>()) {
     LOG_ERR("OTA", "No tag_name found");
+    lastErrorDetail = "No version tag in response";
     return JSON_PARSE_ERROR;
   }
 
   if (!doc["assets"].is<JsonArray>()) {
     LOG_ERR("OTA", "No assets found");
+    lastErrorDetail = "No assets in release";
     return JSON_PARSE_ERROR;
   }
 
@@ -148,6 +170,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
 
   if (!updateAvailable) {
     LOG_ERR("OTA", "No firmware.bin asset found");
+    lastErrorDetail = "No firmware.bin in release assets";
     return NO_UPDATE;
   }
 
@@ -201,7 +224,9 @@ bool OtaUpdater::isUpdateNewer() const {
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
 OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate() {
+  lastErrorDetail.clear();
   if (!isUpdateNewer()) {
+    lastErrorDetail = "Current version is up to date";
     return UPDATE_OLDER_ERROR;
   }
 
@@ -235,6 +260,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate() {
   esp_err = esp_https_ota_begin(&ota_config, &ota_handle);
   if (esp_err != ESP_OK) {
     LOG_DBG("OTA", "HTTP OTA Begin Failed: %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("OTA begin: ") + esp_err_to_name(esp_err);
     return INTERNAL_UPDATE_ERROR;
   }
 
@@ -251,12 +277,14 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate() {
 
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_https_ota_perform Failed: %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("Download: ") + esp_err_to_name(esp_err);
     esp_https_ota_finish(ota_handle);
     return HTTP_ERROR;
   }
 
   if (!esp_https_ota_is_complete_data_received(ota_handle)) {
     LOG_ERR("OTA", "esp_https_ota_is_complete_data_received Failed: %s", esp_err_to_name(esp_err));
+    lastErrorDetail = "Incomplete download";
     esp_https_ota_finish(ota_handle);
     return INTERNAL_UPDATE_ERROR;
   }
@@ -264,6 +292,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate() {
   esp_err = esp_https_ota_finish(ota_handle);
   if (esp_err != ESP_OK) {
     LOG_ERR("OTA", "esp_https_ota_finish Failed: %s", esp_err_to_name(esp_err));
+    lastErrorDetail = std::string("Finalize: ") + esp_err_to_name(esp_err);
     return INTERNAL_UPDATE_ERROR;
   }
 

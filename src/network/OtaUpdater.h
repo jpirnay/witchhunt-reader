@@ -34,6 +34,10 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
+  const std::string& getLastErrorDetail() const { return lastErrorDetail; }
   OtaUpdaterError checkForUpdate();
   OtaUpdaterError installUpdate();
+
+ private:
+  std::string lastErrorDetail;
 };
