@@ -106,6 +106,10 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
                                  cornerRadius, false, false, true, true, Color::LightGray);
       }
 
+      const Rect coverRect{tileX + hPaddingInSelection, tileY + hPaddingInSelection,
+                           tileWidth - 2 * hPaddingInSelection, coverHeight};
+      drawProgressBadge(renderer, coverRect, getRecentBookProgressPercent(recentBooks[i]));
+
       int currentY = tileY + coverHeight + hPaddingInSelection + 5;
       for (const auto& line : titleLines) {
         renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, currentY, line.c_str(), true);
