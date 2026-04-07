@@ -1,8 +1,8 @@
 #pragma once
-#include <Epub.h>
-
 #include <functional>
 #include <memory>
+
+class Epub;
 
 #include "KOReaderSyncClient.h"
 #include "ProgressMapper.h"
@@ -21,11 +21,10 @@
 class KOReaderSyncActivity final : public Activity {
  public:
   explicit KOReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                const std::shared_ptr<Epub>& epub, const std::string& epubPath, int currentSpineIndex,
-                                int currentPage, int totalPagesInSpine, uint16_t paragraphIndex = 0,
+                                  const std::string& epubPath, int currentSpineIndex, int currentPage,
+                                  int totalPagesInSpine, uint16_t paragraphIndex = 0,
                                 bool hasParagraphIndex = false)
       : Activity("KOReaderSync", renderer, mappedInput),
-        epub(epub),
         epubPath(epubPath),
         currentSpineIndex(currentSpineIndex),
         currentPage(currentPage),
@@ -47,13 +46,17 @@ class KOReaderSyncActivity final : public Activity {
     WIFI_SELECTION,
     CONNECTING,
     SYNCING,
+    MAPPING,
     SHOWING_RESULT,
+    RECONNECTING,
     UPLOADING,
     UPLOAD_COMPLETE,
     NO_REMOTE_PROGRESS,
     SYNC_FAILED,
     NO_CREDENTIALS
   };
+
+  enum class NetworkAction { FetchRemote, UploadPrepared };
 
   std::shared_ptr<Epub> epub;
   std::string epubPath;
@@ -64,8 +67,11 @@ class KOReaderSyncActivity final : public Activity {
   bool hasLocalParagraphIndex;
 
   State state = WIFI_SELECTION;
+  NetworkAction pendingNetworkAction = NetworkAction::FetchRemote;
   std::string statusMessage;
   std::string documentHash;
+  std::string remoteChapterLabel;
+  std::string localChapterLabel;
 
   // Remote progress data
   bool hasRemoteProgress = false;
@@ -82,8 +88,13 @@ class KOReaderSyncActivity final : public Activity {
   unsigned long uploadCompleteTime = 0;
   bool closeRequested = false;
 
+  bool ensureEpubLoaded();
+  void releaseEpub();
+  bool prepareComparisonData();
+  bool prepareLocalUploadData();
+  void startWifiSelection(NetworkAction action);
   void onWifiSelectionComplete(bool success);
-  void performSync();
+  void performFetch();
   void performUpload();
   void closeCancelled();
 };

@@ -10,6 +10,7 @@
 
 class EpubReaderActivity final : public Activity {
   std::shared_ptr<Epub> epub;
+  std::string epubPath;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;
   int nextPageNumber = 0;
@@ -58,6 +59,8 @@ class EpubReaderActivity final : public Activity {
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void handleSyncResult(const ActivityResult& result);
+  bool ensureEpubLoaded();
+  void startKOReaderSync();
   void applyOrientation(uint8_t orientation);
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride);
@@ -71,7 +74,9 @@ class EpubReaderActivity final : public Activity {
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
-      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
+        : Activity("EpubReader", renderer, mappedInput),
+          epub(std::move(epub)),
+          epubPath(this->epub ? this->epub->getPath() : std::string()) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

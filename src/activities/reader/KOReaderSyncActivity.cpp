@@ -1,5 +1,6 @@
 #include "KOReaderSyncActivity.h"
 
+#include <Epub.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -12,6 +13,78 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+bool KOReaderSyncActivity::ensureEpubLoaded() {
+  if (epub) {
+    return true;
+  }
+
+  auto loadedEpub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+  loadedEpub->setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
+  if (!loadedEpub->load(true, true)) {
+    LOG_ERR("KOSync", "Failed to load EPUB for offline mapping: %s", epubPath.c_str());
+    return false;
+  }
+
+  epub = std::move(loadedEpub);
+  return true;
+}
+
+void KOReaderSyncActivity::releaseEpub() { epub.reset(); }
+
+bool KOReaderSyncActivity::prepareComparisonData() {
+  if (!ensureEpubLoaded()) {
+    return false;
+  }
+
+  KOReaderPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
+  remotePosition = ProgressMapper::toCrossPoint(epub, koPos, currentSpineIndex, totalPagesInSpine);
+
+  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
+                                 hasLocalParagraphIndex};
+  localProgress = ProgressMapper::toKOReader(epub, localPos);
+
+  const int remoteTocIndex = epub->getTocIndexForSpineIndex(remotePosition.spineIndex);
+  const int localTocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
+  remoteChapterLabel = (remoteTocIndex >= 0)
+                           ? epub->getTocItem(remoteTocIndex).title
+                           : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(remotePosition.spineIndex + 1));
+  localChapterLabel = (localTocIndex >= 0)
+                          ? epub->getTocItem(localTocIndex).title
+                          : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(currentSpineIndex + 1));
+
+  releaseEpub();
+  return true;
+}
+
+bool KOReaderSyncActivity::prepareLocalUploadData() {
+  if (!localProgress.xpath.empty()) {
+    return true;
+  }
+
+  if (!ensureEpubLoaded()) {
+    return false;
+  }
+
+  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
+                                 hasLocalParagraphIndex};
+  localProgress = ProgressMapper::toKOReader(epub, localPos);
+  releaseEpub();
+  return true;
+}
+
+void KOReaderSyncActivity::startWifiSelection(const NetworkAction action) {
+  pendingNetworkAction = action;
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_DBG("KOSync", "Already connected to WiFi");
+    onWifiSelectionComplete(true);
+    return;
+  }
+
+  LOG_DBG("KOSync", "Launching WifiSelectionActivity...");
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+}
 
 void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -27,24 +100,38 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
 
   {
     RenderLock lock(*this);
-    state = SYNCING;
-    statusMessage = tr(STR_SYNCING_TIME);
+    if (pendingNetworkAction == NetworkAction::FetchRemote) {
+      state = SYNCING;
+      statusMessage = tr(STR_SYNCING_TIME);
+    } else {
+      state = RECONNECTING;
+      statusMessage = tr(STR_UPLOAD_PROGRESS);
+    }
   }
   requestUpdate(true);
 
-  // Sync time with NTP before making API requests
-  HalClock::syncNtp();
+  if (pendingNetworkAction == NetworkAction::FetchRemote) {
+    if (!HalClock::isSynced()) {
+      LOG_DBG("KOSync", "Clock unsynced, attempting NTP before sync");
+      HalClock::syncNtp();
+    } else {
+      LOG_DBG("KOSync", "Clock already synced, skipping pre-sync NTP");
+    }
 
-  {
-    RenderLock lock(*this);
-    statusMessage = tr(STR_CALC_HASH);
+    {
+      RenderLock lock(*this);
+      statusMessage = tr(STR_CALC_HASH);
+    }
+    requestUpdate(true);
+
+    performFetch();
+    return;
   }
-  requestUpdate(true);
 
-  performSync();
+  performUpload();
 }
 
-void KOReaderSyncActivity::performSync() {
+void KOReaderSyncActivity::performFetch() {
   // Calculate document hash based on user's preferred method
   if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
     documentHash = KOReaderDocumentId::calculateFromFilename(epubPath);
@@ -69,8 +156,28 @@ void KOReaderSyncActivity::performSync() {
   }
   requestUpdateAndWait();
 
+  const auto authProbeResult = KOReaderSyncClient::authenticate();
+  LOG_DBG("KOSync", "Pre-fetch auth probe result: %s (%s)", KOReaderSyncClient::errorString(authProbeResult),
+          KOReaderSyncClient::lastFailureDetail());
+  if (authProbeResult != KOReaderSyncClient::OK) {
+    HalClock::wifiOff(true);
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = KOReaderSyncClient::errorString(authProbeResult);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        statusMessage += " — ";
+        statusMessage += detail;
+      }
+    }
+    requestUpdate(true);
+    return;
+  }
+
   // Fetch remote progress
   const auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+  HalClock::wifiOff(true);
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
     // No remote progress - offer to upload
@@ -104,23 +211,26 @@ void KOReaderSyncActivity::performSync() {
   hasRemoteProgress = true;
   {
     RenderLock lock(*this);
+    state = MAPPING;
     statusMessage = tr(STR_MAPPING_REMOTE);
   }
   requestUpdateAndWait();
 
-  KOReaderPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
-  remotePosition = ProgressMapper::toCrossPoint(epub, koPos, currentSpineIndex, totalPagesInSpine);
-
-  // Calculate local progress in KOReader format (for display)
   {
     RenderLock lock(*this);
     statusMessage = tr(STR_MAPPING_LOCAL);
   }
   requestUpdateAndWait();
 
-  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
-                                 hasLocalParagraphIndex};
-  localProgress = ProgressMapper::toKOReader(epub, localPos);
+  if (!prepareComparisonData()) {
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = tr(STR_HASH_FAILED);
+    }
+    requestUpdate(true);
+    return;
+  }
 
   {
     RenderLock lock(*this);
@@ -137,6 +247,21 @@ void KOReaderSyncActivity::performSync() {
 }
 
 void KOReaderSyncActivity::performUpload() {
+  if (!prepareLocalUploadData()) {
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = tr(STR_HASH_FAILED);
+    }
+    requestUpdate(true);
+    return;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    startWifiSelection(NetworkAction::UploadPrepared);
+    return;
+  }
+
   {
     RenderLock lock(*this);
     state = UPLOADING;
@@ -144,15 +269,10 @@ void KOReaderSyncActivity::performUpload() {
   }
   requestUpdateAndWait();
 
-  // Convert current position to KOReader format
-  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
-                                 hasLocalParagraphIndex};
-  KOReaderPosition koPos = ProgressMapper::toKOReader(epub, localPos);
-
   KOReaderProgress progress;
   progress.document = documentHash;
-  progress.progress = koPos.xpath;
-  progress.percentage = koPos.percentage;
+  progress.progress = localProgress.xpath;
+  progress.percentage = localProgress.percentage;
 
   const auto result = KOReaderSyncClient::updateProgress(progress);
 
@@ -193,17 +313,7 @@ void KOReaderSyncActivity::onEnter() {
     return;
   }
 
-  // Check if already connected (e.g. from settings page auth)
-  if (WiFi.status() == WL_CONNECTED) {
-    LOG_DBG("KOSync", "Already connected to WiFi");
-    onWifiSelectionComplete(true);
-    return;
-  }
-
-  // Launch WiFi selection subactivity
-  LOG_DBG("KOSync", "Launching WifiSelectionActivity...");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  startWifiSelection(NetworkAction::FetchRemote);
 }
 
 void KOReaderSyncActivity::onExit() {
@@ -240,7 +350,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     return;
   }
 
-  if (state == SYNCING || state == UPLOADING) {
+  if (state == SYNCING || state == MAPPING || state == RECONNECTING || state == UPLOADING) {
     renderer.drawCenteredText(UI_10_FONT_ID, 300, statusMessage.c_str(), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
     return;
@@ -251,19 +361,10 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, 120, tr(STR_PROGRESS_FOUND), true, EpdFontFamily::BOLD);
 
     // Get chapter names from TOC
-    const int remoteTocIndex = epub->getTocIndexForSpineIndex(remotePosition.spineIndex);
-    const int localTocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
-    const std::string remoteChapter =
-        (remoteTocIndex >= 0) ? epub->getTocItem(remoteTocIndex).title
-                              : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(remotePosition.spineIndex + 1));
-    const std::string localChapter =
-        (localTocIndex >= 0) ? epub->getTocItem(localTocIndex).title
-                             : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(currentSpineIndex + 1));
-
     // Remote progress - chapter and page
     renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 160, tr(STR_REMOTE_LABEL), true);
     char remoteChapterStr[128];
-    snprintf(remoteChapterStr, sizeof(remoteChapterStr), "  %s", remoteChapter.c_str());
+    snprintf(remoteChapterStr, sizeof(remoteChapterStr), "  %s", remoteChapterLabel.c_str());
     renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 185, remoteChapterStr);
     char remotePageStr[64];
     snprintf(remotePageStr, sizeof(remotePageStr), tr(STR_PAGE_OVERALL_FORMAT), remotePosition.pageNumber + 1,
@@ -279,7 +380,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     // Local progress - chapter and page
     renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 270, tr(STR_LOCAL_LABEL), true);
     char localChapterStr[128];
-    snprintf(localChapterStr, sizeof(localChapterStr), "  %s", localChapter.c_str());
+    snprintf(localChapterStr, sizeof(localChapterStr), "  %s", localChapterLabel.c_str());
     renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 295, localChapterStr);
     char localPageStr[64];
     snprintf(localPageStr, sizeof(localPageStr), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), currentPage + 1, totalPagesInSpine,
