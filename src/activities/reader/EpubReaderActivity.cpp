@@ -2138,23 +2138,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     logReaderMemSnapshot("bw_store_begin");
     bool bwBufferStored = false;
     if (shouldAttemptBwSnapshot) {
-      // Snapshot must cover every BW pixel drawn outside the grayscale text region —
-      // status bar (in top/bottom margins), truncated-section hint, edge progress bars.
-      // The AA pass clears the whole BW buffer to 0x00, renders text-only, and pushes
-      // grayscale; rows outside the restored band end up zero, causing a BW/grayscale
-      // mismatch in the status bar area on the next page turn — visible as ghosting
-      // at the bottom in Landscape CCW (issue #256).
-      //
-      // The X argument is only meaningful in portrait (where panel rows map to logical
-      // X); in landscape, panel rows map to logical Y and the X range doesn't affect
-      // the saved row band. Spanning the full logical Y therefore saves the full panel
-      // rows in landscape (≈ full framebuffer), while in portrait we keep the
-      // optimization by clipping to the content X band — the status bar still fits
-      // since it's anchored to the same content margins.
-      const int contentLeft = orientedMarginLeft;
-      const int contentRight = std::max(contentLeft, renderer.getScreenWidth() - orientedMarginRight);
-      bwBufferStored =
-          renderer.storeBwBufferRect(contentLeft, 0, contentRight - contentLeft, renderer.getScreenHeight());
+      // Snapshot the full framebuffer. The AA pass calls clearScreen(0x00) which
+      // touches every panel row, and restoreBwBuffer() ends with
+      // cleanupGrayscaleBuffers(frameBuffer) that syncs the controller's belief
+      // from the framebuffer — so any row not in the snapshot ends up zero in the
+      // FB and the controller drifts out of sync with what's physically on the
+      // panel, producing ghosting on the next page turn (issue #256).
+      bwBufferStored = renderer.storeBwBuffer();
     } else if (aaEnabledForThisRender) {
       LOG_INF("ERS", "Skipping BW snapshot precheck (free=%lu contig=%lu, need free>=%lu contig>=%lu)", bwStoreFreeHeap,
               bwStoreContigHeap, static_cast<uint32_t>(BW_SNAPSHOT_MIN_FREE_HEAP_BYTES),
@@ -2308,12 +2298,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     const uint32_t freeHeap = esp_get_free_heap_size();
     const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
     if (freeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES && contigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES) {
-      // See the matching snapshot site above for why the full logical Y is needed:
-      // partial bands leave the status bar rows zeroed during the AA pass and the
-      // controller ghosts them on the next page turn (issue #256).
-      const int contentLeft = orientedMarginLeft;
-      const int contentRight = std::max(contentLeft, renderer.getScreenWidth() - orientedMarginRight);
-      if (renderer.storeBwBufferRect(contentLeft, 0, contentRight - contentLeft, renderer.getScreenHeight())) {
+      // Full-framebuffer snapshot — see the matching site above for the rationale (issue #256).
+      if (renderer.storeBwBuffer()) {
         renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
         renderer.clearScreen(0x00);
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
