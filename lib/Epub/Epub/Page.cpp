@@ -215,6 +215,21 @@ void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, co
   }
 }
 
+void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int yOffset,
+                           const bool forceLoadLargeImages) const {
+  // Only do the costly decode pass when there's at least one image that would
+  // actually require a PNG/JPG decoder allocation. Cached and placeholder paths
+  // do not need the contiguous heap headroom, so skipping the iteration entirely
+  // saves the no-op overhead on text-only pages (the common case).
+  for (auto& element : elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& ib = static_cast<const PageImage&>(*element).getImageBlock();
+    if (ib.wouldShowPlaceholder(forceLoadLargeImages)) continue;
+    if (ib.hasPixelCache()) continue;
+    static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages);
+  }
+}
+
 bool Page::hasPlaceholderImages(const bool forceLoadLargeImages) const {
   for (const auto& el : elements) {
     if (el->getTag() == TAG_PageImage) {
