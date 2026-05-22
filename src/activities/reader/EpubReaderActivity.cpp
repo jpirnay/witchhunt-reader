@@ -104,62 +104,6 @@ void logReaderMemSnapshot(const char* stage) {
 inline void logReaderMemSnapshot(const char*) {}
 #endif
 
-bool computePageDynamicYBand(const Page& page, const GfxRenderer& renderer, const int fontId, const int viewportHeight,
-                             int* outTop, int* outBottom) {
-  if (viewportHeight <= 0 || !outTop || !outBottom) {
-    return false;
-  }
-
-  bool hasRange = false;
-  int minY = viewportHeight;
-  int maxY = -1;
-  const int lineHeight = std::max(1, renderer.getLineHeight(fontId));
-
-  for (const auto& el : page.elements) {
-    if (!el) continue;
-
-    const int elementTop = el->yPos;
-    int elementBottom = elementTop;
-    switch (el->getTag()) {
-      case TAG_PageLine:
-        elementBottom = el->yPos + lineHeight;
-        break;
-      case TAG_PageImage: {
-        const auto& img = static_cast<const PageImage&>(*el);
-        elementBottom = el->yPos + img.getImageBlock().getHeight();
-        break;
-      }
-      case TAG_PageTable: {
-        const auto& table = static_cast<const PageTableFragment&>(*el);
-        elementBottom = el->yPos + table.getTotalHeight();
-        break;
-      }
-      default:
-        continue;
-    }
-
-    minY = std::min(minY, elementTop);
-    maxY = std::max(maxY, elementBottom);
-    hasRange = true;
-  }
-
-  if (!hasRange) {
-    return false;
-  }
-
-  constexpr int BAND_PAD_PX = 2;
-  minY = std::max(0, minY - BAND_PAD_PX);
-  maxY = std::min(viewportHeight, maxY + BAND_PAD_PX);
-
-  if (minY >= maxY) {
-    return false;
-  }
-
-  *outTop = minY;
-  *outBottom = maxY;
-  return true;
-}
-
 // Tiled grayscale: render each plane band-by-band into a small scratch and
 // stream straight to the controller, leaving the BW framebuffer intact so no
 // storeBwBuffer / restoreBwBuffer is needed. Controller RAM is re-synced from
@@ -2191,20 +2135,23 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     logReaderMemSnapshot("bw_store_begin");
     bool bwBufferStored = false;
     if (shouldAttemptBwSnapshot) {
+      // Snapshot must cover every BW pixel drawn outside the grayscale text region —
+      // status bar (in top/bottom margins), truncated-section hint, edge progress bars.
+      // The AA pass clears the whole BW buffer to 0x00, renders text-only, and pushes
+      // grayscale; rows outside the restored band end up zero, causing a BW/grayscale
+      // mismatch in the status bar area on the next page turn — visible as ghosting
+      // at the bottom in Landscape CCW (issue #256).
+      //
+      // The X argument is only meaningful in portrait (where panel rows map to logical
+      // X); in landscape, panel rows map to logical Y and the X range doesn't affect
+      // the saved row band. Spanning the full logical Y therefore saves the full panel
+      // rows in landscape (≈ full framebuffer), while in portrait we keep the
+      // optimization by clipping to the content X band — the status bar still fits
+      // since it's anchored to the same content margins.
       const int contentLeft = orientedMarginLeft;
       const int contentRight = std::max(contentLeft, renderer.getScreenWidth() - orientedMarginRight);
-      const int contentBottom = std::max(contentTop, renderer.getScreenHeight() - orientedMarginBottom);
-
-      int bandTop = 0;
-      int bandBottom = std::max(0, contentBottom - contentTop);
-      if (!computePageDynamicYBand(*page, renderer, getEffectiveReaderFontId(), bandBottom, &bandTop, &bandBottom)) {
-        bandTop = 0;
-        bandBottom = std::max(0, contentBottom - contentTop);
-      }
-
-      const int snapshotTop = contentTop + bandTop;
-      const int snapshotHeight = std::max(0, bandBottom - bandTop);
-      bwBufferStored = renderer.storeBwBufferRect(contentLeft, snapshotTop, contentRight - contentLeft, snapshotHeight);
+      bwBufferStored =
+          renderer.storeBwBufferRect(contentLeft, 0, contentRight - contentLeft, renderer.getScreenHeight());
     } else {
       LOG_INF("ERS", "Skipping BW snapshot precheck (free=%lu contig=%lu, need free>=%lu contig>=%lu)", bwStoreFreeHeap,
               bwStoreContigHeap, static_cast<uint32_t>(BW_SNAPSHOT_MIN_FREE_HEAP_BYTES),
@@ -2359,18 +2306,12 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     const uint32_t freeHeap = esp_get_free_heap_size();
     const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
     if (freeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES && contigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES) {
+      // See the matching snapshot site above for why the full logical Y is needed:
+      // partial bands leave the status bar rows zeroed during the AA pass and the
+      // controller ghosts them on the next page turn (issue #256).
       const int contentLeft = orientedMarginLeft;
       const int contentRight = std::max(contentLeft, renderer.getScreenWidth() - orientedMarginRight);
-      const int contentBottom = std::max(contentTop, renderer.getScreenHeight() - orientedMarginBottom);
-      int bandTop = 0;
-      int bandBottom = std::max(0, contentBottom - contentTop);
-      if (!computePageDynamicYBand(page, renderer, getEffectiveReaderFontId(), bandBottom, &bandTop, &bandBottom)) {
-        bandTop = 0;
-        bandBottom = std::max(0, contentBottom - contentTop);
-      }
-      const int snapshotTop = contentTop + bandTop;
-      const int snapshotHeight = std::max(0, bandBottom - bandTop);
-      if (renderer.storeBwBufferRect(contentLeft, snapshotTop, contentRight - contentLeft, snapshotHeight)) {
+      if (renderer.storeBwBufferRect(contentLeft, 0, contentRight - contentLeft, renderer.getScreenHeight())) {
         renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
         renderer.clearScreen(0x00);
         renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
