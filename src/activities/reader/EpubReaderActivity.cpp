@@ -118,7 +118,8 @@ inline void logReaderMemSnapshot(const char*) {}
 // renderCharImpl culls out-of-band glyphs before bitmap decode so the cost
 // stays close to one render. Only renderTextOnly() is called here, matching the
 // legacy AA pass — images and HRs do not participate in grayscale.
-bool runTiledGrayscalePass(GfxRenderer& renderer, Page& page, int fontId, int marginLeft, int contentTop, bool fastAA) {
+bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, int marginLeft, int contentTop,
+                           bool fastAA) {
   if (!renderer.supportsStripGrayscale()) return false;
 
   // Push the SETTINGS toggle into the SDK before the AA refresh. No-op on X4;
@@ -2126,11 +2127,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   } else {
     // Legacy fallback: save (partial) BW frame, render LSB+MSB planes into the
     // live framebuffer, display, then restore. Pre-check heap to avoid entering
-    // the chunk-retry path when success is unlikely.
+    // the chunk-retry path when success is unlikely. Skip the snapshot entirely
+    // when AA is off — there is nothing to restore from since no grayscale pass
+    // will run.
     const uint32_t bwStoreFreeHeap = esp_get_free_heap_size();
     const uint32_t bwStoreContigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    const bool shouldAttemptBwSnapshot =
-        bwStoreFreeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES && bwStoreContigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES;
+    const bool shouldAttemptBwSnapshot = aaEnabledForThisRender && bwStoreFreeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES &&
+                                         bwStoreContigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES;
 
     logReaderMemSnapshot("bw_store_begin");
     bool bwBufferStored = false;
@@ -2152,15 +2155,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       const int contentRight = std::max(contentLeft, renderer.getScreenWidth() - orientedMarginRight);
       bwBufferStored =
           renderer.storeBwBufferRect(contentLeft, 0, contentRight - contentLeft, renderer.getScreenHeight());
-    } else {
+    } else if (aaEnabledForThisRender) {
       LOG_INF("ERS", "Skipping BW snapshot precheck (free=%lu contig=%lu, need free>=%lu contig>=%lu)", bwStoreFreeHeap,
               bwStoreContigHeap, static_cast<uint32_t>(BW_SNAPSHOT_MIN_FREE_HEAP_BYTES),
               static_cast<uint32_t>(BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES));
     }
     const auto tBwStore = millis();
     logReaderMemSnapshot("bw_store_end");
-    if (!bwBufferStored) {
-      if (aaEnabledForThisRender && !antiAliasingSuspendedLowMemory) {
+    if (aaEnabledForThisRender && !bwBufferStored) {
+      if (!antiAliasingSuspendedLowMemory) {
         antiAliasingSuspendedLowMemory = true;
         const uint32_t freeHeapNow = esp_get_free_heap_size();
         const uint32_t contigHeapNow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
@@ -2297,8 +2300,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // support strip grayscale or when the strip scratch can't be allocated.
   const bool aaConfigured = SETTINGS.textAntiAliasing && !antiAliasingSuspendedLowMemory;
   if (aaConfigured) {
-    Page& pageRef = const_cast<Page&>(page);
-    if (runTiledGrayscalePass(renderer, pageRef, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
+    if (runTiledGrayscalePass(renderer, page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                               SETTINGS.fastAntiAliasing)) {
       return;
     }

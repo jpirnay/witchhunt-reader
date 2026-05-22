@@ -851,7 +851,14 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
       // Fast path: 1-bit BW mode, non-rotated text — byte-level framebuffer writes, no drawPixel() per pixel.
       if constexpr (rotation == TextRotation::None) {
         if (renderMode == GfxRenderer::BW) {
-          renderGlyphFastBW(renderer.getFrameBuffer(), bitmap, width, height, innerBase, outerBase, pixelState,
+          // Use getWriteTarget() for buffer-routing symmetry with the 2-bit fast path above.
+          // renderGlyphFastBW is NOT strip-aware (no fbOriginY/fbRows in its signature), so it
+          // can only safely write to the full framebuffer. Today no caller activates a strip in
+          // BW mode (only the grayscale planes do), so this is equivalent to getFrameBuffer().
+          // The assert is a tripwire if a future BW-under-strip path is added without
+          // retrofitting renderGlyphFastBW with strip-aware row math.
+          assert(!renderer.isStripActive());
+          renderGlyphFastBW(renderer.getWriteTarget(), bitmap, width, height, innerBase, outerBase, pixelState,
                             renderer.getOrientation(), renderer.getDisplayWidth(), renderer.getDisplayHeight(),
                             renderer.getDisplayWidthBytes());
           return;
