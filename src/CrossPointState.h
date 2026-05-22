@@ -96,6 +96,9 @@ class CrossPointState {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   bool recentBooksGridView = false;  // true = grid/thumbnail view, false = list view
+  // When false, setup() skips the boot screen on wake and instead restores the
+  // saved framebuffer overlaid with a loading icon (Quick Resume).
+  bool showBootScreen = true;
   KOReaderSyncSessionState koReaderSyncSession;
   PendingBookmarkJumpState pendingBookmarkJump;
   ~CrossPointState() = default;

@@ -25,6 +25,7 @@ class CrossPointSettings {
     BLANK = 4,
     COVER_CUSTOM = 5,
     OVERLAY = 6,
+    QUICK_RESUME = 7,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -34,6 +35,11 @@ class CrossPointSettings {
     BLACK_AND_WHITE = 1,
     INVERTED_BLACK_AND_WHITE = 2,
     SLEEP_SCREEN_COVER_FILTER_COUNT
+  };
+  enum QUICK_RESUME_SLEEP_SCREEN {
+    QUICK_RESUME_NEVER = 0,
+    QUICK_RESUME_AFTER_TIMEOUT = 1,
+    QUICK_RESUME_SLEEP_SCREEN_COUNT
   };
 
   // Status bar enum - legacy
@@ -198,6 +204,9 @@ class CrossPointSettings {
   uint8_t sleepCoverOverlay = 0;
   // Sleep image pick mode (random vs sequential walk-through)
   uint8_t sleepImagePickMode = PICK_RANDOM;
+  // Quick Resume on Timeout: keep current page on display with a moon icon when sleeping by timeout,
+  // and on wake restore the page directly (skipping the boot screen).
+  uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
   // Status bar settings (statusBar, statusBarProgressBar, statusBarProgressBarThickness retained for migration only)
   uint8_t statusBar = FULL;
   uint8_t statusBarChapterPageCount = 1;
@@ -378,6 +387,10 @@ class CrossPointSettings {
   void saveStartupToNvs() const;
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+
+  // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
+  // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.
+  static void normalizeDependentSettings(CrossPointSettings& settings);
 
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;

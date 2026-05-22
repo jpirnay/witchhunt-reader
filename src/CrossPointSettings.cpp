@@ -40,6 +40,12 @@ void enforceFixedShortActions(CrossPointSettings& settings) {
 
 }  // namespace
 
+void CrossPointSettings::normalizeDependentSettings(CrossPointSettings& settings) {
+  if (settings.sleepScreen == SLEEP_SCREEN_MODE::QUICK_RESUME) {
+    settings.quickResumeSleepScreen = QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
+  }
+}
+
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
                              settings.frontButtonRight};

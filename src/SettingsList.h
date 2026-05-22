@@ -54,7 +54,7 @@ inline const std::vector<SettingInfo> list = {
                       "sleepTimeout", StrId::STR_CAT_DISPLAY),
     SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
                       {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER, StrId::STR_NONE_OPT,
-                       StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY},
+                       StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY, StrId::STR_QUICK_RESUME},
                       "sleepScreen", StrId::STR_CAT_DISPLAY)
         .withSubcategory(StrId::STR_MENU_DISP_SLEEP),
     SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
@@ -68,6 +68,8 @@ inline const std::vector<SettingInfo> list = {
         "sleepCoverOverlay", StrId::STR_CAT_DISPLAY),
     SettingInfo::Enum(StrId::STR_SLEEP_IMAGE_PICK_MODE, &CrossPointSettings::sleepImagePickMode,
                       {StrId::STR_RANDOM, StrId::STR_SEQUENTIAL}, "sleepImagePickMode", StrId::STR_CAT_DISPLAY),
+    SettingInfo::Enum(StrId::STR_QUICK_RESUME_TIMEOUT, &CrossPointSettings::quickResumeSleepScreen,
+                      {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, "quickResumeSleepScreen", StrId::STR_CAT_DISPLAY),
     SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
                       {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                       StrId::STR_CAT_DISPLAY)

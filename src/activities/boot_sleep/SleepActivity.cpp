@@ -24,6 +24,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/Logo120.h"
+#include "images/MoonIcon.h"
 
 namespace {
 
@@ -353,6 +354,18 @@ size_t pickSleepImageIndex(size_t numFiles) {
 void SleepActivity::onEnter() {
   Activity::onEnter();
   RenderLock lock(*this);
+
+  // Quick Resume: paint a moon icon over the current page and keep the framebuffer
+  // intact for the next wake. Applies always when the user picked Quick Resume as
+  // sleep screen, or only on timeout sleeps when "Quick Resume on Timeout" is on.
+  const bool renderQuickResume =
+      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+      (fromTimeout &&
+       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+  if (renderQuickResume) {
+    return renderLastScreenSleepScreen();
+  }
+
   // For OVERLAY mode the popup is suppressed so the frame buffer (reader page) stays intact
   if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
@@ -801,6 +814,15 @@ void SleepActivity::renderCoverSleepScreen() const {
 
 void SleepActivity::renderBlankSleepScreen() const {
   renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+}
+
+void SleepActivity::renderLastScreenSleepScreen() const {
+  // Keep whatever is currently in the framebuffer (the reader page) and overlay a small moon
+  // icon to signal sleep. main.cpp persists the framebuffer to SD so the next wake can restore
+  // it before the boot screen would otherwise paint.
+  const auto pageHeight = renderer.getScreenHeight();
+  renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 

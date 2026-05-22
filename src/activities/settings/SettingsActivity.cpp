@@ -286,6 +286,7 @@ void SettingsActivity::toggleCurrentSetting() {
                                                                             : FontSelectionActivity::Target::EPUB;
     startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, target),
                            [this](const ActivityResult&) {
+                             CrossPointSettings::normalizeDependentSettings(SETTINGS);
                              SETTINGS.saveToFile();
                              needsHalfRefresh = true;
                            });
@@ -294,6 +295,7 @@ void SettingsActivity::toggleCurrentSetting() {
 
   if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult& result) {
+      CrossPointSettings::normalizeDependentSettings(SETTINGS);
       SETTINGS.saveToFile();
       needsHalfRefresh = true;
       const auto* menuResult = std::get_if<MenuResult>(&result.data);
@@ -301,6 +303,7 @@ void SettingsActivity::toggleCurrentSetting() {
         auto activity = createActivityForAction(static_cast<SettingAction>(menuResult->action), renderer, mappedInput);
         if (activity) {
           startActivityForResult(std::move(activity), [this](const ActivityResult&) {
+            CrossPointSettings::normalizeDependentSettings(SETTINGS);
             SETTINGS.saveToFile();
             needsHalfRefresh = true;
           });
@@ -323,6 +326,7 @@ void SettingsActivity::toggleCurrentSetting() {
   }
 
   setting.toggleValue();
+  CrossPointSettings::normalizeDependentSettings(SETTINGS);
   SETTINGS.saveToFile();
 }
 

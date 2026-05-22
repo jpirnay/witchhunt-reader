@@ -124,7 +124,8 @@ class ActivityManager {
   void goToBrowser();
   void goToReader(std::string path);
   void goToKOReaderSync();
-  void goToSleep();
+  // fromTimeout=true marks this as an auto-sleep (used to gate Quick Resume on Timeout).
+  void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToWeather();

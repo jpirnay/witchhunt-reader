@@ -87,6 +87,7 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["readerActivityLoadCount"] = s.readerActivityLoadCount;
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["recentBooksGridView"] = s.recentBooksGridView;
+  doc["showBootScreen"] = s.showBootScreen;
   // Information about a pending KOReader sync session
   JsonObject sync = doc["koReaderSyncSession"].to<JsonObject>();
   sync["active"] = s.koReaderSyncSession.active;
@@ -146,6 +147,7 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.readerActivityLoadCount = doc["readerActivityLoadCount"] | (uint8_t)0;
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   s.recentBooksGridView = doc["recentBooksGridView"] | false;
+  s.showBootScreen = doc["showBootScreen"] | true;
   JsonObject sync = doc["koReaderSyncSession"].as<JsonObject>();
   s.koReaderSyncSession.active = sync["active"] | false;
   s.koReaderSyncSession.epubPath = sync["epubPath"] | std::string("");
@@ -343,6 +345,10 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.txtSdFontFamilyName[sizeof(s.txtSdFontFamilyName) - 1] = '\0';
   s.moveFinishedBooksToCompleted = doc["moveFinishedBooksToCompleted"] | (uint8_t)0;
   s.removeFinishedBooksFromRecents = doc["removeFinishedBooksFromRecents"] | (uint8_t)0;
+
+  const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
+  CrossPointSettings::normalizeDependentSettings(s);
+  if (s.quickResumeSleepScreen != quickResumeBeforeNormalize && needsResave) *needsResave = true;
 
   LOG_DBG("CPS", "Settings loaded from file");
 

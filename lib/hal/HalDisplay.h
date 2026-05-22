@@ -17,8 +17,10 @@ class HalDisplay {
     FAST_REFRESH   // Fast refresh using custom LUT
   };
 
-  // Initialize the display hardware and driver
-  void begin();
+  // Initialize the display hardware and driver.
+  // When seamless=true, skip the on-wake resync so existing panel content is preserved
+  // (used by Quick Resume to bring back the last reader page without a boot screen).
+  void begin(bool seamless = false);
 
   // Display dimensions
   static constexpr uint16_t DISPLAY_WIDTH = EInkDisplay::DISPLAY_WIDTH;

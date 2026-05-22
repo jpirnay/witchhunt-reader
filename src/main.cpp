@@ -38,6 +38,7 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
@@ -134,7 +135,25 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 
+// How the device is coming back to life, resolved once at boot. Both resume
+// flows suppress the splash and leave the panel holding its pre-boot frame; a
+// plain boot shows the splash. See setup() for the resolution.
+enum class BootResume : uint8_t {
+  Splash,       // cold boot, flash, panic, or plain reboot
+  Silent,       // heap-defrag ESP.restart() (RTC flag; lost on power loss)
+  QuickResume,  // wake from a quick-resume deep sleep (SD flag; survives power loss)
+};
+
+// Latched true once enterDeepSleep() commits to sleeping, before it tears down
+// the current activity. WiFi activities call silentRestart() in onExit() to
+// clear heap fragmentation on the way out, but deep sleep is a full chip reset
+// on wake and already clears the heap, so rebooting here would just power the
+// device back up against the user's sleep gesture. Never cleared:
+// startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
+static bool deepSleepInProgress = false;
+
 void silentRestart() {
+  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=home)");
@@ -143,6 +162,7 @@ void silentRestart() {
 }
 
 void silentRestartToReader() {
+  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   silentRebootTarget = SILENT_REBOOT_TARGET_READER;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=reader)");
@@ -150,8 +170,56 @@ void silentRestartToReader() {
   ESP.restart();
 }
 
-// Enter deep sleep mode
-void enterDeepSleep() {
+// ---- Quick Resume framebuffer persistence ----
+//
+// Quick Resume keeps the last reader page on screen during deep sleep (just overlaid with a moon
+// icon) and skips the boot screen on wake by restoring the saved framebuffer + a loading icon.
+// The buffer is persisted to SD only when the user actually enabled the feature.
+constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
+
+static void saveSleepFrameBuffer() {
+  FsFile file;
+  if (!Storage.openFileForWrite("SLP", SLEEP_FRAME_FILE, file)) {
+    return;
+  }
+  const size_t bufferSize = renderer.getBufferSize();
+  const size_t written = file.write(renderer.getFrameBuffer(), bufferSize);
+  file.close();
+  if (written != bufferSize) {
+    LOG_DBG("MAIN", "Quick Resume frame save short write: %u/%u", static_cast<unsigned>(written),
+            static_cast<unsigned>(bufferSize));
+    Storage.remove(SLEEP_FRAME_FILE);
+  }
+}
+
+// Restores the previously saved framebuffer into the display buffer. Returns false if the file is
+// missing or the size does not match — in that case the caller should fall back to a boot screen.
+// The file is always removed (success or failure) so a future cold boot does not see a stale frame.
+static bool loadSleepFrameBuffer() {
+  FsFile file;
+  if (!Storage.openFileForRead("SLP", SLEEP_FRAME_FILE, file)) {
+    return false;
+  }
+  const size_t bufferSize = display.getBufferSize();
+  const size_t fileSize = file.size();
+  const int bytesRead = file.read(display.getFrameBuffer(), bufferSize);
+  file.close();
+  Storage.remove(SLEEP_FRAME_FILE);
+  if (fileSize != bufferSize || bytesRead < 0 || static_cast<size_t>(bytesRead) != bufferSize) {
+    LOG_DBG("MAIN", "Quick Resume frame size mismatch (file=%u, read=%d, expected=%u)", static_cast<unsigned>(fileSize),
+            bytesRead, static_cast<unsigned>(bufferSize));
+    return false;
+  }
+  return true;
+}
+
+// Earliest millis() value at which a held-power-button press is allowed to trigger sleep.
+// Set near the end of setup() so a wake-press held a bit too long does not bounce straight
+// back into deep sleep before the user sees the page.
+static unsigned long allowSleepAt = 0;
+
+// Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
+void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
           gpio.isPressed(HalGPIO::BTN_POWER), digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
@@ -166,6 +234,13 @@ void enterDeepSleep() {
   if (APP_STATE.lastSleepFromReader) {
     APP_STATE.readerActivityLoadCount = 0;
   }
+
+  const bool isQuickResumeSleep =
+      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
+      (fromTimeout &&
+       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
+  APP_STATE.showBootScreen = !isQuickResumeSleep;
+
   APP_STATE.saveToFile();
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
@@ -173,7 +248,17 @@ void enterDeepSleep() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
   }
-  activityManager.goToSleep();
+
+  // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
+  // a WiFi activity would otherwise silentRestart() here and reboot instead.
+  deepSleepInProgress = true;
+  activityManager.goToSleep(fromTimeout);
+
+  // Persist the moon-icon-overlaid framebuffer after goToSleep() has painted it.
+  if (isQuickResumeSleep) {
+    saveSleepFrameBuffer();
+  }
+
   halTiltSensor.deepSleep();
 
   display.deepSleep();
@@ -183,8 +268,8 @@ void enterDeepSleep() {
   powerManager.startDeepSleep(gpio, keepLpAlive);
 }
 
-void setupDisplayAndFonts() {
-  display.begin();
+void setupDisplayAndFonts(bool seamless = false) {
+  display.begin(seamless);
   renderer.begin();
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
@@ -354,6 +439,9 @@ void setup() {
   }
 
   SETTINGS.loadFromFile();
+  // APP_STATE is needed before display init so Quick Resume can skip the on-wake resync
+  // and so the seamless-wake path can paint the LoadingIcon over the restored framebuffer.
+  APP_STATE.loadFromFile();
 
   HalSystem::checkPanic();
   HalSystem::clearPanic();  // TODO: move this to an activity when we have one to display the panic info
@@ -368,20 +456,45 @@ void setup() {
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
-  setupDisplayAndFonts();
+  // Resolve the single boot-presentation decision. Skipping the splash also
+  // skips the panel-clearing pass and the X3 initial-full-sync arming (see
+  // HalDisplay::begin), so the first paint is FAST_REFRESH (~500ms) over the
+  // retained frame and input dispatches against a visible UI.
+  const BootResume resume = isSilentReboot              ? BootResume::Silent
+                            : !APP_STATE.showBootScreen ? BootResume::QuickResume
+                                                        : BootResume::Splash;
 
-  if (!isSilentReboot) {
-    activityManager.goToBoot();
-  } else {
-    // After a silent reboot the panel still shows the previous session's pixels but
-    // the SDK's RED-RAM diff buffer was cleared by begin(). A FAST refresh would only
-    // flip pixels the SDK *thinks* changed, leaving the old screen visible. Force the
-    // first paint to HALF_REFRESH so the panel cleanly repaints; subsequent paints
-    // resume FAST as normal.
-    renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+  setupDisplayAndFonts(resume != BootResume::Splash);
+
+  switch (resume) {
+    case BootResume::Silent:
+      // After a silent reboot the panel still shows the previous session's pixels but
+      // the SDK's RED-RAM diff buffer was cleared by begin(). A FAST refresh would only
+      // flip pixels the SDK *thinks* changed, leaving the old screen visible. Force the
+      // first paint to HALF_REFRESH so the panel cleanly repaints; subsequent paints
+      // resume FAST as normal.
+      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+      break;
+    case BootResume::QuickResume:
+      // One-shot flag: re-arm the splash for the next non-quick-resume boot. Save
+      // before any painting so a hang in the blocking paint path can't strand
+      // us in a quick-resume-with-no-frame loop on the next boot.
+      APP_STATE.showBootScreen = true;
+      APP_STATE.saveToFile();
+      if (loadSleepFrameBuffer()) {
+        // Frame restored: swap the sleep moon for the loading icon.
+        const auto pageHeight = renderer.getScreenHeight();
+        renderer.drawImage(LoadingIcon, 0, pageHeight - LOADINGICON_HEIGHT, LOADINGICON_WIDTH, LOADINGICON_HEIGHT);
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      } else {
+        activityManager.goToBoot();  // frame file missing, fall back to the splash
+      }
+      break;
+    case BootResume::Splash:
+      activityManager.goToBoot();
+      break;
   }
 
-  APP_STATE.loadFromFile();
   HalClock::restore();
   RECENT_BOOKS.loadFromFile();
   GLOBAL_BOOKMARKS.load();
@@ -391,10 +504,10 @@ void setup() {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
     activityManager.replaceActivity(
         std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInputManager, /*recoveryMode=*/true));
-  } else if (isSilentReboot && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_READER &&
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
-  } else if (isSilentReboot) {
+  } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
@@ -420,6 +533,11 @@ void setup() {
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();
+
+  // Block held-power sleep for the first 2 seconds. On Quick Resume the user often releases
+  // the wake-press a fraction late; without this guard the loop() power-hold check would
+  // immediately fire enterDeepSleep().
+  allowSleepAt = millis() + 2000;
 }
 
 void loop() {
@@ -496,7 +614,7 @@ void loop() {
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
-    enterDeepSleep();
+    enterDeepSleep(/*fromTimeout=*/true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
@@ -510,7 +628,7 @@ void loop() {
     powerHoldStart = millis();
     LOG_DBG("MAIN", "loop: power button press detected (fresh edge)");
   }
-  if (gpio.isPressed(HalGPIO::BTN_POWER) && powerHoldStart > 0) {
+  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) && powerHoldStart > 0) {
     const unsigned long heldTime = millis() - powerHoldStart;
     if (heldTime > SETTINGS.getPowerButtonDuration()) {
       // If the screenshot combination is potentially being pressed, don't sleep
