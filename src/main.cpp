@@ -182,8 +182,14 @@ static void saveSleepFrameBuffer() {
   if (!Storage.openFileForWrite("SLP", SLEEP_FRAME_FILE, file)) {
     return;
   }
-  file.write(renderer.getFrameBuffer(), renderer.getBufferSize());
+  const size_t bufferSize = renderer.getBufferSize();
+  const size_t written = file.write(renderer.getFrameBuffer(), bufferSize);
   file.close();
+  if (written != bufferSize) {
+    LOG_DBG("MAIN", "Quick Resume frame save short write: %u/%u", static_cast<unsigned>(written),
+            static_cast<unsigned>(bufferSize));
+    Storage.remove(SLEEP_FRAME_FILE);
+  }
 }
 
 // Restores the previously saved framebuffer into the display buffer. Returns false if the file is
@@ -195,10 +201,16 @@ static bool loadSleepFrameBuffer() {
     return false;
   }
   const size_t bufferSize = display.getBufferSize();
+  const size_t fileSize = file.size();
   const int bytesRead = file.read(display.getFrameBuffer(), bufferSize);
   file.close();
   Storage.remove(SLEEP_FRAME_FILE);
-  return static_cast<size_t>(bytesRead) == bufferSize;
+  if (fileSize != bufferSize || bytesRead < 0 || static_cast<size_t>(bytesRead) != bufferSize) {
+    LOG_DBG("MAIN", "Quick Resume frame size mismatch (file=%u, read=%d, expected=%u)", static_cast<unsigned>(fileSize),
+            bytesRead, static_cast<unsigned>(bufferSize));
+    return false;
+  }
+  return true;
 }
 
 // Earliest millis() value at which a held-power-button press is allowed to trigger sleep.

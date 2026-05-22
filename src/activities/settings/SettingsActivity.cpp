@@ -303,6 +303,7 @@ void SettingsActivity::toggleCurrentSetting() {
         auto activity = createActivityForAction(static_cast<SettingAction>(menuResult->action), renderer, mappedInput);
         if (activity) {
           startActivityForResult(std::move(activity), [this](const ActivityResult&) {
+            CrossPointSettings::normalizeDependentSettings(SETTINGS);
             SETTINGS.saveToFile();
             needsHalfRefresh = true;
           });
