@@ -131,6 +131,12 @@ class Page {
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool forceLoadLargeImages = true) const;
   void renderTextOnly(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Decode any missing .pxc pixel caches for images on this page. Called before the
+  // BW render so the large (~60 KB contiguous) PNG decoder allocation runs while heap
+  // contig is at its peak — before font prewarm and BW backup chunks fragment it.
+  // Writes pixels to the framebuffer as a side effect (decoder requirement); callers
+  // must clearScreen() afterward if the framebuffer needs to be clean.
+  void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages) const;
   bool serialize(FsFile& file) const;

@@ -31,6 +31,10 @@ class ImageBlock final : public Block {
   // False when: forceLoad is true, image is not large, or pixel cache already exists.
   bool wouldShowPlaceholder(bool forceLoad) const;
 
+  // True when the .pxc pixel cache file exists for this image at the current
+  // dither setting. Used by warm-cache paths to skip already-cached images.
+  bool hasPixelCache() const;
+
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 

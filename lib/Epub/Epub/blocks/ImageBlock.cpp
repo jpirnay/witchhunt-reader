@@ -116,6 +116,11 @@ bool ImageBlock::isLargeImage() const {
   return largeImageCached == 1;
 }
 
+bool ImageBlock::hasPixelCache() const {
+  const ImageDitherMode ditherMode = imageDitherModeFromSetting(SETTINGS.imageDithering);
+  return Storage.exists(getCachePath(imagePath, ditherMode).c_str());
+}
+
 bool ImageBlock::wouldShowPlaceholder(bool forceLoad) const {
   if (forceLoad) return false;
   if (!isLargeImage()) return false;

@@ -1969,22 +1969,37 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   logReaderMemSnapshot("render_start");
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
-  logReaderMemSnapshot("prewarm_begin");
 
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(*page, viewportHeight);
 
+  // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
+  // reduce heap contig below the ~60 KB the PNG/JPG decoder needs. The decode
+  // writes pixels into the framebuffer as a side effect, so we reclear before
+  // the real BW render begins. Skips when no decode is needed (all images cached
+  // or the page is text-only). Mirrors the effectiveForceLoad rule used by the
+  // BW render below so placeholder logic is identical.
+  const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad);
+  renderer.clearScreen();
+
+  logReaderMemSnapshot("prewarm_begin");
+
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   const uint32_t heapBefore = esp_get_free_heap_size();
+  const uint32_t contigBefore = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   auto scope = fcm->createPrewarmScope();
   page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);  // scan pass
   scope.endScanAndPrewarm();
   const uint32_t heapAfter = esp_get_free_heap_size();
+  const uint32_t contigAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   fcm->logStats("prewarm");
   const auto tPrewarm = millis();
 
-  LOG_DBG("ERS", "Heap: before=%lu after=%lu delta=%ld", heapBefore, heapAfter,
-          (int32_t)heapAfter - (int32_t)heapBefore);
+  // contig= reports the largest contiguous block, which is what large allocations
+  // (e.g. 60 KB PNG decoder) actually need. free=N with contig<<N means fragmentation.
+  LOG_DBG("ERS", "Heap: before=%lu (contig=%lu) after=%lu (contig=%lu) delta=%ld", heapBefore, contigBefore, heapAfter,
+          contigAfter, (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
 
   const bool aaConfigured = SETTINGS.textAntiAliasing;

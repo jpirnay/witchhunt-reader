@@ -171,12 +171,18 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
   return f->seek(pos);
 }
 
-// The PNG decoder (PNGdec) is ~42 KB due to internal zlib decompression buffers.
-// We heap-allocate it on demand rather than using a static instance, so this memory
-// is only consumed while actually decoding/querying PNG images. This is critical on
-// the ESP32-C3 where total RAM is ~320 KB.
-constexpr size_t PNG_DECODER_APPROX_SIZE = 44 * 1024;                          // ~42 KB + overhead
-constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 16 * 1024;  // decoder + 16 KB headroom
+// The PNG decoder (PNGdec) is large due to internal zlib decompression buffers
+// (~40 KB ucZLIB + 16 KB ucPixels at PNG_MAX_BUFFERED_PIXELS=16416 + smaller
+// fields ≈ 60 KB). We heap-allocate it on demand rather than using a static
+// instance, so this memory is only consumed while actually decoding/querying
+// PNG images. This is critical on the ESP32-C3 where total RAM is ~320 KB.
+// Use sizeof(PNG) so the precheck stays accurate if PNG_MAX_BUFFERED_PIXELS
+// or other PNGdec buffers are resized.
+constexpr size_t PNG_DECODER_APPROX_SIZE = sizeof(PNG);
+// Headroom covers heap fragmentation: free heap is the *sum* of all free
+// blocks but `new` needs a single contiguous block. 32 KB headroom on a
+// ~60 KB allocation has historically been enough on this device.
+constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 32 * 1024;
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
