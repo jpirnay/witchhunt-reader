@@ -17,6 +17,8 @@ class Epub {
   std::string tocNcxItem;
   // the nav file (EPUB 3)
   std::string tocNavItem;
+  // the page-map.xml file (EPUB 2.01 printed page list, separate from NCX <pageList>)
+  std::string pageMapItem;
   // where is the EPUBfile?
   std::string filepath;
   // the base path for items in the EPUB file
@@ -38,6 +40,7 @@ class Epub {
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCacheMode cacheMode);
   bool parseTocNcxFile() const;
   bool parseTocNavFile() const;
+  bool parsePageMapFile() const;
   void parseCssFiles() const;
 
  public:

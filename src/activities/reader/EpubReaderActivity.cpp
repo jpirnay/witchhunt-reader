@@ -2370,7 +2370,13 @@ void EpubReaderActivity::renderStatusBar() const {
 
   const bool isStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
                                                       static_cast<uint16_t>(section->currentPage));
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, isStarred);
+  std::string printedPageLabel;
+  if (section) {
+    if (const auto label = section->getPrintedPageLabelForPage(static_cast<uint16_t>(section->currentPage))) {
+      printedPageLabel = *label;
+    }
+  }
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, isStarred, printedPageLabel);
 
   lastStatusBarPage = currentPage;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
