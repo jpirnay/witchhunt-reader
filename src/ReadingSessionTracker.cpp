@@ -77,7 +77,7 @@ void ReadingSessionTracker::end() {
   LOG_DBG("RST", "Session end doc=%s secs=%u pages=%u prog=%u wall=%lld", docId.c_str(), seconds,
           pagesTurnedThisSession, lastKnownProgress, (long long)walltime);
 
-  if (seconds > 0 && !docId.empty()) {
+  if (!docId.empty()) {
     READING_STATS.recordSession(docId, title, author, seconds, pagesTurnedThisSession, lastKnownProgress,
                                 static_cast<time_t>(walltime));
     if (!READING_STATS.saveToFile()) {
