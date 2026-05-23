@@ -64,8 +64,8 @@ ReadingStatsStore ReadingStatsStore::instance;
 void ReadingStatsStore::recordSession(const std::string& docId, const std::string& title, const std::string& author,
                                       uint32_t sessionSeconds, uint32_t sessionPagesTurned, uint8_t progress,
                                       time_t walltimeEpoch) {
-  if (docId.empty() || sessionSeconds == 0) {
-    // Nothing to credit. Title-update-only flows go through a different path.
+  if (docId.empty()) {
+    // Title-update-only flows go through a different path.
     return;
   }
 
