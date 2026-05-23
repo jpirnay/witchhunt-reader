@@ -2662,6 +2662,11 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
 void EpubReaderActivity::openReaderMenu() {
   const int currentPage = section ? section->currentPage + 1 : 0;
   const int totalPages = section ? section->pageCount : 0;
+
+  if (!epub) {
+    return;
+  }
+
   float bookProgress = 0.0f;
   if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
     const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
@@ -2674,15 +2679,10 @@ void EpubReaderActivity::openReaderMenu() {
   // Show the "Go to printed page" item only when this book has at least one integer-labelled
   // entry in pagelist.bin. Roman-only or empty page lists are excluded — the numeric input
   // dialog can't address them anyway.
-  bool hasPrintedPages = false;
-  if (epub) {
-    for (const auto& entry : epub->loadPrintedPageList()) {
-      if (parsePrintedPageLabel(entry.label).has_value()) {
-        hasPrintedPages = true;
-        break;
-      }
-    }
-  }
+  const auto printedPageList = epub->loadPrintedPageList();
+  const bool hasPrintedPages = std::any_of(printedPageList.begin(), printedPageList.end(), [](const auto& entry) {
+    return parsePrintedPageLabel(entry.label).has_value();
+  });
 
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(
