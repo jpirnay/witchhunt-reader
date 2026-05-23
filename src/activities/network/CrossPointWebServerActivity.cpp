@@ -32,6 +32,15 @@ constexpr int QR_CODE_HEIGHT = 198;
 // DNS server for captive portal (redirects all DNS queries to our IP)
 DNSServer* dnsServer = nullptr;
 constexpr uint16_t DNS_PORT = 53;
+
+void stopDnsServer() {
+  if (!dnsServer) {
+    return;
+  }
+  dnsServer->stop();
+  delete dnsServer;
+  dnsServer = nullptr;
+}
 }  // namespace
 
 void CrossPointWebServerActivity::onEnter() {
@@ -65,6 +74,8 @@ void CrossPointWebServerActivity::onExit() {
   Activity::onExit();
 
   state = WebServerActivityState::SHUTTING_DOWN;
+  stopDnsServer();
+  MDNS.end();
 
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -205,6 +216,7 @@ void CrossPointWebServerActivity::startAccessPoint() {
 
   // Start DNS server for captive portal behavior
   // This redirects all DNS queries to our IP, making any domain typed resolve to us
+  stopDnsServer();
   dnsServer = new DNSServer();
   dnsServer->setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer->start(DNS_PORT, "*", apIP);
