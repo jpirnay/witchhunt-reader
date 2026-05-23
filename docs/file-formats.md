@@ -111,7 +111,7 @@ if (parsedSize != fileSize) {
 
 ### Current version
 
-`SECTION_FILE_VERSION = 28`. The on-disk layout has evolved past the v21 pattern shown below; the ImHex pattern is preserved for archeology but no longer reflects all fields. Changes since v21 (read `lib/Epub/Epub/Section.cpp` `header::*` constants for the authoritative layout):
+`SECTION_FILE_VERSION = 29`. The on-disk layout has evolved past the v21 pattern shown below; the ImHex pattern is preserved for archeology but no longer reflects all fields. Changes since v21 (read `lib/Epub/Epub/Section.cpp` `header::*` constants for the authoritative layout):
 
 - `parseComplete` (`bool`) inserted before `pageCount` so a truncated parse can be detected on reload.
 - `paragraphLutOffset` extended: each per-page entry is now `u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex` (added the running `<li>` count for KOReader list-item XPath sync).

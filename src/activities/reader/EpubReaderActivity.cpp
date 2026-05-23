@@ -122,30 +122,6 @@ void logReaderMemSnapshot(const char* stage) {
 inline void logReaderMemSnapshot(const char*) {}
 #endif
 
-// Integrity bisector. Logs at every probe site (unconditional, not gated) and
-// fires an ERR when integrity transitions from ok -> fail so we can pinpoint
-// which render phase corrupts the heap. Free/contig included so we can see if
-// the corruption coincides with a specific allocation pattern. Calling
-// heap_caps_check_integrity_all is ~O(blocks) — not free but fine at phase
-// boundaries during onEnter / first render.
-void logIntegrityProbe(const char* stage) {
-  static bool sLastOk = true;
-  const bool ok = heap_caps_check_integrity_all(true);
-  const uint32_t freeHeap = esp_get_free_heap_size();
-  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  if (ok != sLastOk) {
-    if (ok) {
-      LOG_DBG("INTG", "[%s] integrity recovered (free=%lu contig=%lu)", stage, freeHeap, contigHeap);
-    } else {
-      LOG_ERR("INTG", "[%s] integrity FAIL — corruption introduced here (free=%lu contig=%lu)", stage, freeHeap,
-              contigHeap);
-    }
-    sLastOk = ok;
-  } else {
-    LOG_DBG("INTG", "[%s] %s free=%lu contig=%lu", stage, ok ? "ok" : "fail", freeHeap, contigHeap);
-  }
-}
-
 // Tiled grayscale: render each plane band-by-band into a small scratch and
 // stream straight to the controller, leaving the BW framebuffer intact so no
 // storeBwBuffer / restoreBwBuffer is needed. Controller RAM is re-synced from
@@ -198,20 +174,15 @@ bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, 
     }
   };
 
-  logIntegrityProbe("tiledGray_after_scratchAlloc");
   renderPlane(GfxRenderer::GRAYSCALE_LSB, true);
-  logIntegrityProbe("tiledGray_after_lsbPlane");
   renderPlane(GfxRenderer::GRAYSCALE_MSB, false);
-  logIntegrityProbe("tiledGray_after_msbPlane");
 
   renderer.setRenderMode(GfxRenderer::BW);
   renderer.displayGrayBuffer();
-  logIntegrityProbe("tiledGray_after_displayGrayBuffer");
 
   // BW framebuffer is intact; re-sync controller RAM for the next differential
   // page turn directly from it.
   renderer.cleanupGrayscaleWithFrameBuffer();
-  logIntegrityProbe("tiledGray_after_cleanup");
   return true;
 }
 
@@ -300,7 +271,6 @@ int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
   logReaderMemSnapshot("onEnter_begin");
-  logIntegrityProbe("onEnter_begin");
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach detectPageTurn() — see ReaderUtils::InputDrainGuard.
@@ -1793,7 +1763,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
     return;
   }
-  logIntegrityProbe("render_entry");
 
   const int spineCount = epub->getSpineItemsCount();
   if (spineCount <= 0) {
@@ -1938,13 +1907,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           auto p = section->loadPageFromSectionFile();
           section->currentPage = savedPage;
           if (p && !p->hasImages()) {
-            logIntegrityProbe("preRender_before_renderPageContentOnly");
             section->currentPage = nextPage;
             renderPageContentOnly(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
             section->currentPage = savedPage;
             preRenderedPage = {true, currentSpineIndex, nextPage};
             LOG_DBG("ERS", "Pre-rendered page %d/%d", nextPage, section->pageCount - 1);
-            logIntegrityProbe("preRender_after_renderPageContentOnly");
           }
         }
       }
@@ -2027,7 +1994,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       LOG_DBG("ERS", "Cache found, skipping build...");
     }
     lastRenderStats.sectionLoadMs = millis() - sectionStart;
-    logIntegrityProbe("render_after_sectionLoad");
 
     if (section->isTruncatedCache() && currentSpineIndex != lastWarnedTruncatedSpineIndex) {
       lastWarnedTruncatedSpineIndex = currentSpineIndex;
@@ -2065,7 +2031,6 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     const unsigned long pageLoadStart = millis();
     auto p = section->loadPageFromSectionFile();
     lastRenderStats.pageLoadMs = millis() - pageLoadStart;
-    logIntegrityProbe("render_after_pageLoad");
     if (!p) {
       LOG_ERR("ERS", "Failed to load page from SD - clearing section cache");
       section->clearCache();
@@ -2092,10 +2057,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       truncatedSectionHintRendersRemaining--;
     }
     LOG_DBG("ERS", "Rendered page in %dms", lastRenderStats.requestRenderMs);
-    logIntegrityProbe("render_after_renderContents");
   }
   silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
-  logIntegrityProbe("render_after_silentIndex");
   pendingProgressSave.spineIndex = currentSpineIndex;
   pendingProgressSave.page = section->currentPage;
   pendingProgressSave.pageCount = section->pageCount;
@@ -2175,7 +2138,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
-  logIntegrityProbe("renderContents_entry");
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
@@ -2191,7 +2153,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad);
   renderer.clearScreen();
-  logIntegrityProbe("renderContents_after_warmImages");
 
   logReaderMemSnapshot("prewarm_begin");
 
@@ -2211,7 +2172,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   LOG_DBG("ERS", "Heap: before=%lu (contig=%lu) after=%lu (contig=%lu) delta=%ld", heapBefore, contigBefore, heapAfter,
           contigAfter, (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
-  logIntegrityProbe("renderContents_after_fontPrewarm");
 
   const bool aaConfigured = getEffectiveTextAntiAliasing();
   bool aaEnabledForThisRender = aaConfigured;
@@ -2263,7 +2223,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
   logReaderMemSnapshot("after_bw_render");
-  logIntegrityProbe("renderContents_after_bwRender");
 
   if (imagePageWithAA) {
     // Double FAST_REFRESH with selective image blanking (pablohc's technique):
@@ -2311,7 +2270,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   uint32_t tiledGrayMs = 0;
   if (aaEnabledForThisRender) {
     logReaderMemSnapshot("tiled_gray_begin");
-    logIntegrityProbe("renderContents_before_tiledGray");
     const auto tTiledBegin = millis();
     grayscaleDone = runTiledGrayscalePass(renderer, *page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                                           SETTINGS.fastAntiAliasing);
@@ -2319,7 +2277,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       tiledGrayMs = millis() - tTiledBegin;
       fcm->logStats("tiled_gray");
       logReaderMemSnapshot("tiled_gray_end");
-      logIntegrityProbe("renderContents_after_tiledGray");
     }
   }
 
