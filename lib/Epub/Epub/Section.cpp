@@ -966,6 +966,18 @@ std::optional<std::string> Section::getPrintedPageLabelFromCache(const std::stri
   return std::string("(") + labelsOnPage.front() + "/" + labelsOnPage.back() + ")";
 }
 
+std::optional<std::string> Section::getNearestPrintedPageLabelAtOrBefore(uint16_t page) const {
+  // pageBreakLabels is built in document order (i.e. ascending pageIndex), so the last
+  // entry whose page is <= `page` is the "you're currently reading at or after this
+  // printed page" hint. Returns the raw label (no parens, no slash-collapsing).
+  std::optional<std::string> best;
+  for (const auto& [labelPage, label] : pageBreakLabels) {
+    if (labelPage > page) break;
+    best = label;
+  }
+  return best;
+}
+
 std::optional<std::string> Section::getPrintedPageLabelForPage(uint16_t page) const {
   // Collect every printed-page label whose anchor lands on this exact rendered page.
   // Multiple labels can co-occur when a short device page contains more than one EPUB

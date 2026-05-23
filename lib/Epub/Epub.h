@@ -89,4 +89,15 @@ class Epub {
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
   CssParser* getCssParser() const { return cssParser.get(); }
   int resolveHrefToSpineIndex(const std::string& href) const;
+
+  // Printed-page list (from NCX <pageList> / EPUB 3 nav page-list / EPUB 2.01 page-map.xml).
+  // One entry per printed-page anchor: spine href + fragment id + visible label.
+  struct PrintedPageEntry {
+    std::string href;
+    std::string anchor;
+    std::string label;
+  };
+  // Reads <cachePath>/pagelist.bin. Returns empty vector when the book has no printed-page data.
+  // Inexpensive — only invoked from menu paths, not page-turn hot paths.
+  std::vector<PrintedPageEntry> loadPrintedPageList() const;
 };

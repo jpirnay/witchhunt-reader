@@ -1301,6 +1301,30 @@ float Epub::calculateProgress(const int currentSpineIndex, const float currentSp
   return totalProgress / static_cast<float>(bookSize);
 }
 
+std::vector<Epub::PrintedPageEntry> Epub::loadPrintedPageList() const {
+  std::vector<PrintedPageEntry> entries;
+  const auto pageListPath = getCachePath() + "/pagelist.bin";
+  if (!Storage.exists(pageListPath.c_str())) {
+    return entries;
+  }
+  FsFile f;
+  if (!Storage.openFileForRead("EBP", pageListPath, f)) {
+    return entries;
+  }
+  uint16_t count = 0;
+  serialization::readPod(f, count);
+  entries.reserve(count);
+  for (uint16_t i = 0; i < count; i++) {
+    PrintedPageEntry e;
+    serialization::readString(f, e.href);
+    serialization::readString(f, e.anchor);
+    serialization::readString(f, e.label);
+    entries.push_back(std::move(e));
+  }
+  f.close();
+  return entries;
+}
+
 int Epub::resolveHrefToSpineIndex(const std::string& href) const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return -1;
 

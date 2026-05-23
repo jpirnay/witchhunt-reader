@@ -94,6 +94,11 @@ class Section {
   // one or more EPUB pagebreak markers / NCX <pageList> / page-map entries land on it.
   // Returns nullopt when no printed-page anchor falls on this exact page.
   std::optional<std::string> getPrintedPageLabelForPage(uint16_t page) const;
+  // Like getPrintedPageLabelForPage but returns the most recent printed-page label at or
+  // before `page` (raw label, no parens). Useful for pre-filling jump-to-page dialogs when
+  // the current rendered page doesn't itself carry an anchor. Returns nullopt when no
+  // printed-page anchor exists on this or any earlier page in the section.
+  std::optional<std::string> getNearestPrintedPageLabelAtOrBefore(uint16_t page) const;
 
   // Standalone lookup that doesn't require a loaded Section. Walks the book's sections cache
   // directory, finds any cache variant for `spineIndex`, reads its printed-page label map,
