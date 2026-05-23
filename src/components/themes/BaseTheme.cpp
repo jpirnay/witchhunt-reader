@@ -794,7 +794,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   const bool hasProgressText = SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount;
   const bool hasStatusItems = hasProgressText || SETTINGS.statusBarBattery || !title.empty() ||
                               SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE ||
-                              (SETTINGS.useClock && SETTINGS.statusBarClock);
+                              (SETTINGS.useClock && SETTINGS.statusBarClock) || !printedPageLabel.empty();
   if (!hasStatusItems) {
     return;
   }
@@ -812,6 +812,9 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                                      : screenHeight - orientedMarginBottom - paddingBottom - adjacentProgressHeight -
                                            statusItemsHeight + 4;
   int progressTextWidth = 0;
+  const int printedLabelWidth =
+      printedPageLabel.empty() ? 0 : renderer.getTextWidth(SMALL_FONT_ID, printedPageLabel.c_str());
+  const int printedLabelGap = printedLabelWidth > 0 && hasProgressText ? 8 : 0;
 
   if (hasProgressText) {
     // Right-aligned device page counter / progress percentage. The printed-page label, if any,
@@ -828,16 +831,17 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     }
 
     const int progressStrWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);
-    const int printedLabelWidth =
-        printedPageLabel.empty() ? 0 : renderer.getTextWidth(SMALL_FONT_ID, printedPageLabel.c_str());
-    const int printedLabelGap = printedLabelWidth > 0 ? 8 : 0;
     progressTextWidth = progressStrWidth + printedLabelGap + printedLabelWidth;
 
     const int textX = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight - progressStrWidth;
     renderer.drawText(SMALL_FONT_ID, textX, textY, progressStr);
-    if (!printedPageLabel.empty()) {
+    if (printedLabelWidth > 0) {
       renderer.drawText(SMALL_FONT_ID, textX - printedLabelGap - printedLabelWidth, textY, printedPageLabel.c_str());
     }
+  } else if (printedLabelWidth > 0) {
+    progressTextWidth = printedLabelWidth;
+    const int textX = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight - printedLabelWidth;
+    renderer.drawText(SMALL_FONT_ID, textX, textY, printedPageLabel.c_str());
   }
 
   // Draw Battery

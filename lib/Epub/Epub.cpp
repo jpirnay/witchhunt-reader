@@ -25,10 +25,11 @@ namespace {
 // <nav epub:type="page-list"> share the same writer.
 template <typename Entry>
 void writePageListBin(const std::string& cachePath, const std::vector<Entry>& pageList) {
+  const auto pageListPath = cachePath + "/pagelist.bin";
   if (pageList.empty()) {
+    Storage.remove(pageListPath.c_str());
     return;
   }
-  const auto pageListPath = cachePath + "/pagelist.bin";
   FsFile pageListFile;
   if (!Storage.openFileForWrite("EBP", pageListPath, pageListFile)) {
     LOG_ERR("EBP", "Could not write pagelist.bin");

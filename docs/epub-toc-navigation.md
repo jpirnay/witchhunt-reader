@@ -177,7 +177,7 @@ Only one of (2), (3a), or (3b) writes the cache file `<book-cache>/pagelist.bin`
 
 Written once per book at index time; consumed once per section build. Format:
 
-```
+```text
 [uint16_t entryCount]
 [String href][String anchor][String label]    // repeated entryCount times
 ```

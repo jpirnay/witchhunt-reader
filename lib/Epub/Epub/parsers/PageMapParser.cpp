@@ -68,7 +68,13 @@ void XMLCALL PageMapParser::startElement(void* userData, const XML_Char* name, c
 
   // We only care about <page name="..." href="..."/> elements. The wrapping <page-map>
   // root is ignored (no need for a state machine — every page element carries its data).
-  if (strcmp(name, "page") != 0) {
+  const char* localName = strrchr(name, ':');
+  if (localName) {
+    localName++;
+  } else {
+    localName = name;
+  }
+  if (strcmp(localName, "page") != 0) {
     return;
   }
 

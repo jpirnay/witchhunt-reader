@@ -264,7 +264,7 @@ if (parsedSize != fileSize) {
 
 Per-book cache file produced at index time from one of the EPUB printed-page sources (NCX `<pageList>`, EPUB 3 nav `<nav epub:type="page-list">`, or EPUB 2.01 `page-map.xml`). Consumed once per section build by `Section::createSectionFile`. Absent for books that have no printed-page data.
 
-```
+```text
 u16 entryCount
 struct PageListEntry {
     String href;    // normalised spine href, e.g. "OEBPS/c9_split_000.xhtml"

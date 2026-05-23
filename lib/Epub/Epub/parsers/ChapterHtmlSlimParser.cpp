@@ -507,6 +507,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     self->recordPageBreakLabel(label);
     if (!idAttr.empty()) {
       self->anchorData.emplace_back(idAttr, static_cast<uint16_t>(self->completedPageCount));
+      self->pendingAnchorId = idAttr;
     }
   }
 

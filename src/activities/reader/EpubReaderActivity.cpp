@@ -737,7 +737,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             // Resolve the typed label back to a (href, anchor) by linear scan. Entries are
             // small (typically <500 even for long books) and this fires once per user action.
             for (const auto& entry : entries) {
-              if (entry.label == pick.label) {
+              const auto entryLabelValue = parsePrintedPageLabel(entry.label);
+              const auto pickLabelValue = parsePrintedPageLabel(pick.label);
+              if (entry.label == pick.label ||
+                  (entryLabelValue && pickLabelValue && *entryLabelValue == *pickLabelValue)) {
                 const int spineIdx = epub->resolveHrefToSpineIndex(entry.href);
                 if (spineIdx < 0) {
                   LOG_DBG("ERS", "printed-page jump: could not resolve spine for href=%s", entry.href.c_str());
