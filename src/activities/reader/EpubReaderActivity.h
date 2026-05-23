@@ -320,6 +320,7 @@ class EpubReaderActivity final : public Activity {
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
+  bool getEffectiveBionicReading() const;
   uint8_t getEffectiveImageRendering() const;
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
