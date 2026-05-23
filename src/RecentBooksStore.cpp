@@ -18,34 +18,27 @@ RecentBooksStore RecentBooksStore::instance;
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& series, const std::string& coverBmpPath) {
-  int8_t embeddedStyleOverride = -1;
-  int8_t imageRenderingOverride = -1;
-  int8_t fontFamilyOverride = -1;
-  std::string sdFontFamilyOverride;
-  int8_t fontSizeOverride = -1;
-  int8_t bionicReadingOverride = -1;
-  int8_t paragraphAlignmentOverride = -1;
+  RecentBook newBook{path, title, author, series, coverBmpPath};
 
   pruneMissing();
 
-  // Remove existing entry if present
+  // Remove existing entry if present, preserving its per-book overrides.
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
-    embeddedStyleOverride = it->embeddedStyleOverride;
-    imageRenderingOverride = it->imageRenderingOverride;
-    fontFamilyOverride = it->fontFamilyOverride;
-    sdFontFamilyOverride = it->sdFontFamilyOverride;
-    fontSizeOverride = it->fontSizeOverride;
-    bionicReadingOverride = it->bionicReadingOverride;
-    paragraphAlignmentOverride = it->paragraphAlignmentOverride;
+    newBook.embeddedStyleOverride = it->embeddedStyleOverride;
+    newBook.imageRenderingOverride = it->imageRenderingOverride;
+    newBook.fontFamilyOverride = it->fontFamilyOverride;
+    newBook.sdFontFamilyOverride = it->sdFontFamilyOverride;
+    newBook.fontSizeOverride = it->fontSizeOverride;
+    newBook.bionicReadingOverride = it->bionicReadingOverride;
+    newBook.paragraphAlignmentOverride = it->paragraphAlignmentOverride;
+    newBook.textAntiAliasingOverride = it->textAntiAliasingOverride;
+    newBook.hyphenationOverride = it->hyphenationOverride;
     recentBooks.erase(it);
   }
 
-  // Add to front
-  recentBooks.insert(recentBooks.begin(), {path, title, author, series, coverBmpPath, embeddedStyleOverride,
-                                           imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
-                                           fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride});
+  recentBooks.insert(recentBooks.begin(), std::move(newBook));
 
   // Trim to max size
   if (recentBooks.size() > MAX_RECENT_BOOKS) {
@@ -181,6 +174,21 @@ bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t 
   if (it == recentBooks.end()) {
     return false;
   }
+  return setReaderOverrides(path, embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride,
+                            sdFontFamilyOverride, fontSizeOverride, static_cast<int8_t>(bionicReadingOverride ? 1 : 0),
+                            paragraphAlignmentOverride, it->textAntiAliasingOverride, it->hyphenationOverride);
+}
+
+bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t embeddedStyleOverride,
+                                          const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
+                                          const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride,
+                                          const int8_t bionicReadingOverride, const int8_t paragraphAlignmentOverride,
+                                          const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride) {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it == recentBooks.end()) {
+    return false;
+  }
 
   it->embeddedStyleOverride = embeddedStyleOverride;
   it->imageRenderingOverride = imageRenderingOverride;
@@ -189,6 +197,8 @@ bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t 
   it->fontSizeOverride = fontSizeOverride;
   it->bionicReadingOverride = bionicReadingOverride;
   it->paragraphAlignmentOverride = paragraphAlignmentOverride;
+  it->textAntiAliasingOverride = textAntiAliasingOverride;
+  it->hyphenationOverride = hyphenationOverride;
   return saveToFile();
 }
 

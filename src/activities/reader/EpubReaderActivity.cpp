@@ -33,6 +33,7 @@
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "QrDisplayActivity.h"
+#include "QuickOverridesActivity.h"
 #include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
@@ -333,6 +334,8 @@ void EpubReaderActivity::onEnter() {
                                   ? static_cast<bool>(currentBook.bionicReadingOverride)
                                   : static_cast<bool>(SETTINGS.bionicReading);
   bookParagraphAlignmentOverride = currentBook.paragraphAlignmentOverride;
+  bookTextAntiAliasingOverride = currentBook.textAntiAliasingOverride;
+  bookHyphenationOverride = currentBook.hyphenationOverride;
   logReaderMemSnapshot("onEnter_after_recent_books");
 
   // Start a reading-stats session. We use the cheap filename-based hash here:
@@ -1350,6 +1353,15 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
                                                   const std::string& sdFontFamilyOverride,
                                                   const int8_t fontSizeOverride, const bool bionicReadingOverride,
                                                   const int8_t paragraphAlignmentOverride) {
+  applyBookReaderOverrides(embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
+                           fontSizeOverride, static_cast<int8_t>(bionicReadingOverride ? 1 : 0),
+                           paragraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride);
+}
+
+void EpubReaderActivity::applyBookReaderOverrides(
+    const int8_t embeddedStyleOverride, const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
+    const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
+    const int8_t paragraphAlignmentOverride, const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride) {
   if (!epub) {
     return;
   }
@@ -1363,11 +1375,12 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
     normalizedFontFamilyOverride = -1;
   }
 
+  const bool bionicAsBool = bionicReadingOverride > 0;
   if (bookEmbeddedStyleOverride == embeddedStyleOverride && bookImageRenderingOverride == imageRenderingOverride &&
       bookFontFamilyOverride == normalizedFontFamilyOverride &&
       bookSdFontFamilyOverride == normalizedSdFontFamilyOverride && bookFontSizeOverride == fontSizeOverride &&
-      bookBionicReadingOverride == bionicReadingOverride &&
-      bookParagraphAlignmentOverride == paragraphAlignmentOverride) {
+      bookBionicReadingOverride == bionicAsBool && bookParagraphAlignmentOverride == paragraphAlignmentOverride &&
+      bookTextAntiAliasingOverride == textAntiAliasingOverride && bookHyphenationOverride == hyphenationOverride) {
     return;
   }
 
@@ -1376,11 +1389,14 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
   bookFontFamilyOverride = normalizedFontFamilyOverride;
   bookSdFontFamilyOverride = normalizedSdFontFamilyOverride;
   bookFontSizeOverride = fontSizeOverride;
-  bookBionicReadingOverride = bionicReadingOverride;
+  bookBionicReadingOverride = bionicAsBool;
   bookParagraphAlignmentOverride = paragraphAlignmentOverride;
+  bookTextAntiAliasingOverride = textAntiAliasingOverride;
+  bookHyphenationOverride = hyphenationOverride;
   RECENT_BOOKS.setReaderOverrides(epub->getPath(), bookEmbeddedStyleOverride, bookImageRenderingOverride,
                                   bookFontFamilyOverride, bookSdFontFamilyOverride, bookFontSizeOverride,
-                                  bookBionicReadingOverride, bookParagraphAlignmentOverride);
+                                  bookBionicReadingOverride, bookParagraphAlignmentOverride,
+                                  bookTextAntiAliasingOverride, bookHyphenationOverride);
 
   RenderLock lock(*this);
   if (section) {
@@ -1403,6 +1419,20 @@ uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
     return static_cast<uint8_t>(bookImageRenderingOverride);
   }
   return SETTINGS.imageRendering;
+}
+
+bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
+  if (bookTextAntiAliasingOverride >= 0) {
+    return bookTextAntiAliasingOverride != 0;
+  }
+  return SETTINGS.textAntiAliasing != 0;
+}
+
+bool EpubReaderActivity::getEffectiveHyphenation() const {
+  if (bookHyphenationOverride >= 0) {
+    return bookHyphenationOverride != 0;
+  }
+  return SETTINGS.hyphenationEnabled != 0;
 }
 
 uint8_t EpubReaderActivity::getEffectiveParagraphAlignment() const {
@@ -1690,7 +1720,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   lastRenderStats.embeddedStyle = getEffectiveEmbeddedStyle();
   lastRenderStats.imageRendering = getEffectiveImageRendering();
   lastRenderStats.effectiveFontId = getEffectiveReaderFontId();
-  lastRenderStats.textAntiAliasing = SETTINGS.textAntiAliasing;
+  lastRenderStats.textAntiAliasing = getEffectiveTextAntiAliasing();
   lastRenderStats.freeHeapBefore = esp_get_free_heap_size();
   lastRenderStats.largestFreeBlockBefore = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   showTruncatedSectionHintThisRender = false;
@@ -1775,7 +1805,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
     if (!section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                  viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle, bookBionicReadingOverride,
+                                  viewportHeight, getEffectiveHyphenation(), embeddedStyle, bookBionicReadingOverride,
                                   imageRendering)) {
       LOG_DBG("ERS", "Cache not found, building...");
       lastRenderStats.cacheRebuilt = true;
@@ -1797,7 +1827,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       renderer.clearSdCardFontAccumulation();
       if (!section->createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                      viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle,
+                                      viewportHeight, getEffectiveHyphenation(), embeddedStyle,
                                       bookBionicReadingOverride, imageRendering, progressFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
@@ -1819,12 +1849,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       renderer.clearSdCardFontAccumulation();
       if (!section->createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                      viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle,
+                                      viewportHeight, getEffectiveHyphenation(), embeddedStyle,
                                       bookBionicReadingOverride, imageRendering, progressFn)) {
         LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
         section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                  SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                 viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle, bookBionicReadingOverride,
+                                 viewportHeight, getEffectiveHyphenation(), embeddedStyle, bookBionicReadingOverride,
                                  imageRendering);
       }
     } else {
@@ -1945,7 +1975,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   Section nextSection(epub, nextSpineIndex, renderer);
   if (nextSection.loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                  viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle, bookBionicReadingOverride,
+                                  viewportHeight, getEffectiveHyphenation(), embeddedStyle, bookBionicReadingOverride,
                                   imageRendering)) {
     return;
   }
@@ -1955,7 +1985,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   renderer.clearSdCardFontAccumulation();
   if (!nextSection.createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                      SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                     viewportHeight, SETTINGS.hyphenationEnabled, embeddedStyle,
+                                     viewportHeight, getEffectiveHyphenation(), embeddedStyle,
                                      bookBionicReadingOverride, imageRendering)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
@@ -2010,7 +2040,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           contigAfter, (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
 
-  const bool aaConfigured = SETTINGS.textAntiAliasing;
+  const bool aaConfigured = getEffectiveTextAntiAliasing();
   bool aaEnabledForThisRender = aaConfigured;
   if (aaConfigured && antiAliasingSuspendedLowMemory) {
     const uint32_t freeHeapNow = esp_get_free_heap_size();
@@ -2288,7 +2318,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // Grayscale AA pass. Prefer the tiled strip path (no BW snapshot needed);
   // fall back to the legacy storeBwBufferRect path on controllers that don't
   // support strip grayscale or when the strip scratch can't be allocated.
-  const bool aaConfigured = SETTINGS.textAntiAliasing && !antiAliasingSuspendedLowMemory;
+  const bool aaConfigured = getEffectiveTextAntiAliasing() && !antiAliasingSuspendedLowMemory;
   if (aaConfigured) {
     if (runTiledGrayscalePass(renderer, page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                               SETTINGS.fastAntiAliasing)) {
@@ -2575,6 +2605,22 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   return true;
 }
 
+void EpubReaderActivity::openQuickOverrides() {
+  ReaderUtils::enforceExitFullRefresh(renderer);
+  startActivityForResult(
+      std::make_unique<QuickOverridesActivity>(
+          renderer, mappedInput, bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
+          bookSdFontFamilyOverride, bookFontSizeOverride, static_cast<int8_t>(bookBionicReadingOverride ? 1 : 0),
+          bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride),
+      [this](const ActivityResult& result) {
+        const auto& menu = std::get<MenuResult>(result.data);
+        applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
+                                 menu.sdFontFamilyOverride, menu.fontSizeOverride,
+                                 static_cast<int8_t>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride,
+                                 menu.textAntiAliasingOverride, menu.hyphenationOverride);
+      });
+}
+
 void EpubReaderActivity::openReaderMenu() {
   const int currentPage = section ? section->currentPage + 1 : 0;
   const int totalPages = section ? section->pageCount : 0;
@@ -2761,6 +2807,11 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       break;
     case BA::BTN_KOREADER_SYNC:
       launchKOReaderSync(SyncLaunchMode::COMPARE);
+      break;
+    case BA::BTN_QUICK_OVERRIDES:
+      if (epub) {
+        openQuickOverrides();
+      }
       break;
     default:
       break;
