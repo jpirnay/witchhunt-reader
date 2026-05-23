@@ -19,13 +19,16 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
+#include <optional>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
+#include "EpubReaderPrintedPageInputActivity.h"
 #include "EpubRenderBenchmarkActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
@@ -47,6 +50,20 @@
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
+
+// Parse a printed-page label as a non-negative integer. Returns nullopt for empty strings,
+// strings with non-digit characters (e.g. roman "iv"), and overflow. Used both to gate the
+// "go to printed page" menu item and to compute min/max for the numeric input.
+std::optional<int> parsePrintedPageLabel(const std::string& label) {
+  if (label.empty()) return std::nullopt;
+  int value = 0;
+  for (char c : label) {
+    if (c < '0' || c > '9') return std::nullopt;
+    value = value * 10 + (c - '0');
+    if (value > 999999) return std::nullopt;  // sanity
+  }
+  return value;
+}
 // pages per minute, first item is 1 to prevent division by zero if accessed
 constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 
@@ -680,6 +697,64 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             if (!result.isCancelled) {
               jumpToPercent(std::get<PercentResult>(result.data).percent);
             }
+          });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::GO_TO_PRINTED_PAGE: {
+      if (!epub) break;
+      auto entries = epub->loadPrintedPageList();
+      // Compute the integer label range from parseable entries; non-integer labels are
+      // ignored (the dialog is numeric-only).
+      int minLabel = std::numeric_limits<int>::max();
+      int maxLabel = std::numeric_limits<int>::min();
+      for (const auto& entry : entries) {
+        if (const auto n = parsePrintedPageLabel(entry.label)) {
+          if (*n < minLabel) minLabel = *n;
+          if (*n > maxLabel) maxLabel = *n;
+        }
+      }
+      if (maxLabel < minLabel) break;  // no integer labels — shouldn't happen if menu item was shown
+
+      // Pre-fill with the printed page the reader is currently on (or the nearest one before
+      // it — rendered device pages rarely carry an anchor themselves, but they sit between
+      // two printed pages, so the closest prior anchor is the "you're here" hint). Falls
+      // back to the lowest integer label in the book if no prior anchor exists.
+      int initialValue = minLabel;
+      if (section) {
+        if (const auto rawLabel =
+                section->getNearestPrintedPageLabelAtOrBefore(static_cast<uint16_t>(section->currentPage))) {
+          if (const auto n = parsePrintedPageLabel(*rawLabel)) {
+            initialValue = *n;
+          }
+        }
+      }
+
+      startActivityForResult(
+          std::make_unique<EpubReaderPrintedPageInputActivity>(renderer, mappedInput, initialValue, minLabel, maxLabel),
+          [this, entries = std::move(entries)](const ActivityResult& result) {
+            if (result.isCancelled) return;
+            const auto& pick = std::get<PrintedPageResult>(result.data);
+            // Resolve the typed label back to a (href, anchor) by linear scan. Entries are
+            // small (typically <500 even for long books) and this fires once per user action.
+            for (const auto& entry : entries) {
+              if (entry.label == pick.label) {
+                const int spineIdx = epub->resolveHrefToSpineIndex(entry.href);
+                if (spineIdx < 0) {
+                  LOG_DBG("ERS", "printed-page jump: could not resolve spine for href=%s", entry.href.c_str());
+                  return;
+                }
+                {
+                  RenderLock lock(*this);
+                  currentSpineIndex = spineIdx;
+                  navTarget =
+                      entry.anchor.empty() ? NavigationTarget::makePage(0) : NavigationTarget::makeAnchor(entry.anchor);
+                  section.reset();
+                }
+                requestUpdate();
+                return;
+              }
+            }
+            LOG_DBG("ERS", "printed-page jump: label '%s' not found in pagelist", pick.label.c_str());
           });
       break;
     }
@@ -2592,13 +2667,27 @@ void EpubReaderActivity::openReaderMenu() {
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
   const bool isCurrentPageStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
                                                                  static_cast<uint16_t>(section->currentPage));
+
+  // Show the "Go to printed page" item only when this book has at least one integer-labelled
+  // entry in pagelist.bin. Roman-only or empty page lists are excluded — the numeric input
+  // dialog can't address them anyway.
+  bool hasPrintedPages = false;
+  if (epub) {
+    for (const auto& entry : epub->loadPrintedPageList()) {
+      if (parsePrintedPageLabel(entry.label).has_value()) {
+        hasPrintedPages = true;
+        break;
+      }
+    }
+  }
+
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(
           renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
           !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
           bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
-          bookParagraphAlignmentOverride, !bookmarkStore.isEmpty(), isCurrentPageStarred),
+          bookParagraphAlignmentOverride, !bookmarkStore.isEmpty(), isCurrentPageStarred, hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
