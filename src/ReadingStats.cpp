@@ -86,8 +86,14 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
 
   it->totalSeconds += sessionSeconds;
   it->pagesTurned += sessionPagesTurned;
-  it->sessions += 1;
   it->progress = progress;
+  // A zero-second call is a progress-flush from silentRestart(): we want the
+  // updated progress/title persisted but the session counter must not tick.
+  // Otherwise every heap-defrag reboot would inflate sessions by one.
+  if (sessionSeconds > 0) {
+    it->sessions += 1;
+    globalTotalSessions += 1;
+  }
   if (walltimeEpoch != 0) {
     if (it->firstReadEpoch == 0) it->firstReadEpoch = walltimeEpoch;
     it->lastReadEpoch = walltimeEpoch;
@@ -100,7 +106,6 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
   }
 
   globalTotalSeconds += sessionSeconds;
-  globalTotalSessions += 1;
   globalTotalPagesTurned += sessionPagesTurned;
 }
 
