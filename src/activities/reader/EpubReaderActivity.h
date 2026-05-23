@@ -233,7 +233,7 @@ class EpubReaderActivity final : public Activity {
   int8_t bookFontFamilyOverride = -1;
   std::string bookSdFontFamilyOverride;
   int8_t bookFontSizeOverride = -1;
-  bool bookBionicReadingOverride = false;
+  int8_t bookBionicReadingOverride = -1;
   int8_t bookParagraphAlignmentOverride = -1;
   int8_t bookTextAntiAliasingOverride = -1;
   int8_t bookHyphenationOverride = -1;
