@@ -480,10 +480,6 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
         }
       }
       pageListFile.close();
-      LOG_DBG("SCT", "Loaded %u printed-page anchors for %s (of %u total in pagelist.bin)",
-              static_cast<unsigned>(externalPageBreakAnchors.size()), localPath.c_str(), static_cast<unsigned>(count));
-    } else {
-      LOG_DBG("SCT", "No pagelist.bin in cache (skipping printed-page labels)");
     }
   }
 
@@ -651,8 +647,6 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   for (const auto& entry : visitor.getPageBreakLabels()) {
     this->pageBreakLabels.emplace_back(entry.first, entry.second);
   }
-  LOG_DBG("SCT", "Recorded %u printed-page labels for spine=%d", static_cast<unsigned>(this->pageBreakLabels.size()),
-          spineIndex);
 
   file.close();
 

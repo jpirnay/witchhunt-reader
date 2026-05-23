@@ -714,8 +714,6 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
     const auto pageListPath = getCachePath() + "/pagelist.bin";
     if (!Storage.exists(pageListPath.c_str())) {
       parsePageMapFile();
-    } else {
-      LOG_DBG("EBP", "page-map.xml present but pagelist.bin already written by NCX/nav; skipping");
     }
   }
 
