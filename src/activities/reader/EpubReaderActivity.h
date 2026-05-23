@@ -242,8 +242,10 @@ class EpubReaderActivity final : public Activity {
   int8_t bookFontFamilyOverride = -1;
   std::string bookSdFontFamilyOverride;
   int8_t bookFontSizeOverride = -1;
-  bool bookBionicReadingOverride = false;
+  int8_t bookBionicReadingOverride = -1;
   int8_t bookParagraphAlignmentOverride = -1;
+  int8_t bookTextAntiAliasingOverride = -1;
+  int8_t bookHyphenationOverride = -1;
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
@@ -308,10 +310,20 @@ class EpubReaderActivity final : public Activity {
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                                 bool bionicReadingOverride, int8_t paragraphAlignmentOverride);
+  // Wider variant that also covers AA and hyphenation. Used by QuickOverridesActivity;
+  // the narrower overload above funnels through here, preserving the AA/hyphenation
+  // values currently held on this activity.
+  void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
+                                const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
+                                int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
+                                int8_t textAntiAliasingOverride, int8_t hyphenationOverride);
   void openReaderMenu();
+  void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
   uint8_t getEffectiveImageRendering() const;
   uint8_t getEffectiveParagraphAlignment() const;
+  bool getEffectiveTextAntiAliasing() const;
+  bool getEffectiveHyphenation() const;
   int getEffectiveReaderFontId() const;
   float getEffectiveReaderLineCompression() const;
   bool stepPageState(bool isForwardTurn);

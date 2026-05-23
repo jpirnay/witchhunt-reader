@@ -179,7 +179,7 @@ inline const std::vector<SettingInfo> list = {
       StrId::STR_BTN_ACT_OPEN_BOOKMARKS, StrId::STR_BTN_ACT_STAR_PAGE, StrId::STR_BTN_ACT_FOOTNOTES,              \
       StrId::STR_BTN_ACT_NEXT_SECTION, StrId::STR_BTN_ACT_PREV_SECTION, StrId::STR_BTN_ACT_EXIT_READER,           \
       StrId::STR_BTN_ACT_READER_MENU, StrId::STR_BTN_ACT_TOGGLE_BIONIC_READING, StrId::STR_BTN_ACT_KOREADER_SYNC, \
-      StrId::STR_BTN_ACT_CYCLE_FONT_SIZE, StrId::STR_BTN_ACT_CYCLE_ORIENTATION
+      StrId::STR_BTN_ACT_CYCLE_FONT_SIZE, StrId::STR_BTN_ACT_CYCLE_ORIENTATION, StrId::STR_BTN_ACT_QUICK_OVERRIDES
 
     // Back button: short=exit reader, double=ignore, long=go home
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortBack, {StrId::STR_BTN_DEF_EXIT_READER},

@@ -23,6 +23,10 @@ struct RecentBook {
   int8_t bionicReadingOverride = -1;
   // -1 = use global setting, otherwise CrossPointSettings::PARAGRAPH_ALIGNMENT value.
   int8_t paragraphAlignmentOverride = -1;
+  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
+  int8_t textAntiAliasingOverride = -1;
+  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
+  int8_t hyphenationOverride = -1;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -89,6 +93,12 @@ class RecentBooksStore {
   bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
                           int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                           bool bionicReadingOverride, int8_t paragraphAlignmentOverride);
+  // Master overload — covers every per-book override. The narrower overloads above
+  // all funnel through here, preserving any fields they don't take as arguments.
+  bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
+                          int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
+                          int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
+                          int8_t textAntiAliasingOverride, int8_t hyphenationOverride);
 };
 
 // Helper macro to access recent books store
