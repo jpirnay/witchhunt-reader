@@ -188,68 +188,86 @@ inline const std::vector<SettingInfo> list = {
         .withSubmenu(StrId::STR_BTN_BACK),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleBack,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoubleBack", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_BACK),
+        .withSubmenu(StrId::STR_BTN_BACK)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongBack,
                       {StrId::STR_BTN_DEF_GO_HOME, BTN_ACT_OPTIONS}, "btnLongBack", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_BACK),
+        .withSubmenu(StrId::STR_BTN_BACK)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Confirm button: short=reader menu, double=ignore, long=KOReader sync
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortConfirm,
                       {StrId::STR_BTN_DEF_READER_MENU}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
         .withSubmenu(StrId::STR_BTN_CONFIRM),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleConfirm,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoubleConfirm", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_CONFIRM),
+        .withSubmenu(StrId::STR_BTN_CONFIRM)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongConfirm,
                       {StrId::STR_BTN_DEF_KOREADER_SYNC, BTN_ACT_OPTIONS}, "btnLongConfirm", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_CONFIRM),
+        .withSubmenu(StrId::STR_BTN_CONFIRM)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Left button: short=previous page, double=ignore, long=chapter back
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortLeft,
                       {StrId::STR_BTN_DEF_PREV_PAGE, BTN_ACT_OPTIONS}, "btnShortLeft", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_LEFT),
+        .withSubmenu(StrId::STR_BTN_LEFT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleLeft,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoubleLeft", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_LEFT),
+        .withSubmenu(StrId::STR_BTN_LEFT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongLeft,
                       {StrId::STR_BTN_DEF_CHAPTER_BACK, BTN_ACT_OPTIONS}, "btnLongLeft", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_LEFT),
+        .withSubmenu(StrId::STR_BTN_LEFT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Right button: short=next page, double=ignore, long=chapter forward
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortRight,
                       {StrId::STR_BTN_DEF_NEXT_PAGE, BTN_ACT_OPTIONS}, "btnShortRight", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_RIGHT),
+        .withSubmenu(StrId::STR_BTN_RIGHT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoubleRight,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoubleRight", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_RIGHT),
+        .withSubmenu(StrId::STR_BTN_RIGHT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongRight,
                       {StrId::STR_BTN_DEF_CHAPTER_FORWARD, BTN_ACT_OPTIONS}, "btnLongRight", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_RIGHT),
+        .withSubmenu(StrId::STR_BTN_RIGHT)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Page Back button: short=previous page, double=ignore, long=chapter back
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortPageBack,
                       {StrId::STR_BTN_DEF_PREV_PAGE, BTN_ACT_OPTIONS}, "btnShortPageBack", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_UP),
+        .withSubmenu(StrId::STR_BTN_UP)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoublePageBack,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoublePageBack", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_UP),
+        .withSubmenu(StrId::STR_BTN_UP)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPageBack,
                       {StrId::STR_BTN_DEF_CHAPTER_BACK, BTN_ACT_OPTIONS}, "btnLongPageBack", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_UP),
+        .withSubmenu(StrId::STR_BTN_UP)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Page Forward button: short=next page, double=ignore, long=chapter forward
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortPageForward,
                       {StrId::STR_BTN_DEF_NEXT_PAGE, BTN_ACT_OPTIONS}, "btnShortPageForward", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_DOWN),
+        .withSubmenu(StrId::STR_BTN_DOWN)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoublePageForward,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoublePageForward", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_DOWN),
+        .withSubmenu(StrId::STR_BTN_DOWN)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPageForward,
                       {StrId::STR_BTN_DEF_CHAPTER_FORWARD, BTN_ACT_OPTIONS}, "btnLongPageForward",
                       StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_DOWN),
+        .withSubmenu(StrId::STR_BTN_DOWN)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     // Power button: short=ignore, double=ignore, long=sleep (via hold timer, not event system)
     SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortPower,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnShortPower", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_POWER),
+        .withSubmenu(StrId::STR_BTN_POWER)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_DOUBLE_PRESS, &CrossPointSettings::btnDoublePower,
                       {StrId::STR_BTN_DEF_IGNORE, BTN_ACT_OPTIONS}, "btnDoublePower", StrId::STR_CAT_CONTROLS)
-        .withSubmenu(StrId::STR_BTN_POWER),
+        .withSubmenu(StrId::STR_BTN_POWER)
+        .withSelectorActivity(SettingSelectorKind::ButtonAction),
     SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPower, {StrId::STR_BTN_DEF_SLEEP},
                       "btnLongPower", StrId::STR_CAT_CONTROLS)
         .withSubmenu(StrId::STR_BTN_POWER),

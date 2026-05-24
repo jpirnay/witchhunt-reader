@@ -13,6 +13,11 @@ enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
 enum class SettingDeviceTarget { BOTH, X3, X4 };
 
+// Which full-screen selector activity to open for an entry that has
+// `.withSelectorActivity()` set. Routed in
+// SettingsActivity::toggleCurrentSetting / SettingsSubmenuActivity::toggleCurrentItem.
+enum class SettingSelectorKind { Font, ButtonAction };
+
 enum class SettingAction {
   None,
   RemapFrontButtons,
@@ -222,15 +227,17 @@ struct SettingInfo {
   }
 
   bool isSeparator = false;
-  bool usesSelectorActivity = false;        // Confirm opens a full-screen selector instead of inline cycling
+  bool usesSelectorActivity = false;  // Confirm opens a full-screen selector instead of inline cycling
+  SettingSelectorKind selectorKind = SettingSelectorKind::Font;
   StrId subcategory = StrId::STR_NONE_OPT;  // Triggers a separator row on first use and on change
   StrId submenu = StrId::STR_NONE_OPT;      // Routes item into a submenu; hidden from main list
 
   // Marks this entry as requiring a full-screen selector activity on Confirm
   // (instead of inline value cycling). The SettingsActivity / SettingsSubmenuActivity
   // intercept entries with this flag before toggleValue() is called.
-  SettingInfo& withSelectorActivity() {
+  SettingInfo& withSelectorActivity(SettingSelectorKind kind = SettingSelectorKind::Font) {
     usesSelectorActivity = true;
+    selectorKind = kind;
     return *this;
   }
 

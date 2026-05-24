@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 
+#include "ButtonActionSelectionActivity.h"
 #include "CrossPointSettings.h"
 #include "FontSelectionActivity.h"
 #include "MappedInputManager.h"
@@ -56,14 +57,18 @@ void SettingsSubmenuActivity::toggleCurrentItem() {
   if (setting.isSeparator) return;
 
   if (setting.usesSelectorActivity) {
-    const auto target = (setting.valueGetter == txtFontFamilyDynamicGetter) ? FontSelectionActivity::Target::TXT
-                                                                            : FontSelectionActivity::Target::EPUB;
-    startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, target),
-                           [this](const ActivityResult&) {
-                             SETTINGS.saveToFile();
-                             needsHalfRefresh = true;
-                             requestUpdate();
-                           });
+    auto resultCb = [this](const ActivityResult&) {
+      SETTINGS.saveToFile();
+      needsHalfRefresh = true;
+      requestUpdate();
+    };
+    if (setting.selectorKind == SettingSelectorKind::ButtonAction) {
+      startActivityForResult(std::make_unique<ButtonActionSelectionActivity>(renderer, mappedInput, setting), resultCb);
+    } else {
+      const auto target = (setting.valueGetter == txtFontFamilyDynamicGetter) ? FontSelectionActivity::Target::TXT
+                                                                              : FontSelectionActivity::Target::EPUB;
+      startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, target), resultCb);
+    }
     return;
   }
 

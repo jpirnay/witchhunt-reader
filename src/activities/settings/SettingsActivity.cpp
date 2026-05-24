@@ -8,6 +8,7 @@
 
 #include <cstring>
 
+#include "ButtonActionSelectionActivity.h"
 #include "CrossPointSettings.h"
 #include "FontSelectionActivity.h"
 #include "MappedInputManager.h"
@@ -282,14 +283,18 @@ void SettingsActivity::toggleCurrentSetting() {
   if (setting.isSeparator) return;
 
   if (setting.usesSelectorActivity) {
-    const auto target = (setting.valueGetter == txtFontFamilyDynamicGetter) ? FontSelectionActivity::Target::TXT
-                                                                            : FontSelectionActivity::Target::EPUB;
-    startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, target),
-                           [this](const ActivityResult&) {
-                             CrossPointSettings::normalizeDependentSettings(SETTINGS);
-                             SETTINGS.saveToFile();
-                             needsHalfRefresh = true;
-                           });
+    auto resultCb = [this](const ActivityResult&) {
+      CrossPointSettings::normalizeDependentSettings(SETTINGS);
+      SETTINGS.saveToFile();
+      needsHalfRefresh = true;
+    };
+    if (setting.selectorKind == SettingSelectorKind::ButtonAction) {
+      startActivityForResult(std::make_unique<ButtonActionSelectionActivity>(renderer, mappedInput, setting), resultCb);
+    } else {
+      const auto target = (setting.valueGetter == txtFontFamilyDynamicGetter) ? FontSelectionActivity::Target::TXT
+                                                                              : FontSelectionActivity::Target::EPUB;
+      startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, target), resultCb);
+    }
     return;
   }
 
