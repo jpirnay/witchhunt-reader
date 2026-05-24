@@ -115,7 +115,7 @@ inline const std::vector<SettingInfo> list = {
     // (~2.4 s panel time, X4-accurate grays) for the 7-frame community LUT
     // (~130 ms, mid-tones slightly darker). See open-x4-sdk
     // EInkDisplay::setFastGrayscaleLut for trade-offs.
-    SettingInfo::Toggle(StrId::STR_FAST_AA, &CrossPointSettings::fastAntiAliasing, "fastAntiAliasing",
+    SettingInfo::Toggle(StrId::STR_FAST_AA, &CrossPointSettings::fastAntiAliasing, "fastAntiAliasingV2",
                         StrId::STR_CAT_READER)
         .withSubmenu(StrId::STR_MENU_READER_FONT)
         .withDeviceTarget(SettingDeviceTarget::X3),
