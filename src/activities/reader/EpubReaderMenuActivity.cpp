@@ -11,6 +11,24 @@
 #include "fontIds.h"
 
 namespace {
+// Three-state cycle helper for overrides represented as int8_t with -1 = default.
+// Mirrors the helpers in QuickOverridesActivity.cpp; kept duplicated rather
+// than extracted so each activity stays self-contained for 16 lines of code.
+//   slot 0 -> -1 (default)
+//   slot 1 -> 1  (on)
+//   slot 2 -> 0  (off)
+uint8_t threeStateSlotFromOverride(int8_t value) {
+  if (value < 0) return 0;
+  if (value > 0) return 1;
+  return 2;
+}
+
+int8_t threeStateOverrideFromSlot(uint8_t slot) {
+  if (slot == 0) return -1;
+  if (slot == 1) return 1;
+  return 0;
+}
+
 // Returns the localized name of the family currently used as the global default
 // for the reader. When the user has selected an SD card font globally, the
 // override menu's "Default" label should reflect that family by name even
@@ -40,7 +58,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
     const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
     const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness, const bool initialBionicReadingOverride,
-    const int8_t initialParagraphAlignmentOverride, const bool hasStarredPages, const bool isCurrentPageStarred,
+    const int8_t initialParagraphAlignmentOverride, const int8_t initialTextAntiAliasingOverride,
+    const int8_t initialHyphenationOverride, const bool hasStarredPages, const bool isCurrentPageStarred,
     const bool hasPrintedPages)
     : MenuListActivity("EpubReaderMenu", renderer, mappedInput),
       currentPageStarred(isCurrentPageStarred),
@@ -53,6 +72,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingTextDarkness(initialTextDarkness),
       pendingBionicReading(initialBionicReadingOverride),
       pendingParagraphAlignmentOverride(initialParagraphAlignmentOverride),
+      pendingTextAntiAliasingOverride(initialTextAntiAliasingOverride),
+      pendingHyphenationOverride(initialHyphenationOverride),
       title(title),
       currentPage(currentPage),
       totalPages(totalPages),
@@ -242,6 +263,32 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                           })
                           .withSubmenu(StrId::STR_READER_OVERRIDES));
 
+  // Text anti-aliasing: default / on / off (mirrors QuickOverrides)
+  menuItems.push_back(
+      SettingInfo::DynamicEnumCtx(
+          StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+          [](const void* ctx) -> uint8_t {
+            return threeStateSlotFromOverride(
+                static_cast<const EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride);
+          },
+          [](void* ctx, uint8_t v) {
+            static_cast<EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride = threeStateOverrideFromSlot(v);
+          })
+          .withSubmenu(StrId::STR_READER_OVERRIDES));
+
+  // Hyphenation: default / on / off (mirrors QuickOverrides)
+  menuItems.push_back(
+      SettingInfo::DynamicEnumCtx(
+          StrId::STR_HYPHENATION, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+          [](const void* ctx) -> uint8_t {
+            return threeStateSlotFromOverride(
+                static_cast<const EpubReaderMenuActivity*>(ctx)->pendingHyphenationOverride);
+          },
+          [](void* ctx, uint8_t v) {
+            static_cast<EpubReaderMenuActivity*>(ctx)->pendingHyphenationOverride = threeStateOverrideFromSlot(v);
+          })
+          .withSubmenu(StrId::STR_READER_OVERRIDES));
+
   // Helper functions, reading ruler, auto page turn, orientation
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_UTILS));
   // Auto page turn: ACTION type with custom cycling in onActionSelected
@@ -336,7 +383,8 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   setResult(MenuResult{static_cast<int>(action), -1, pendingOrientation, selectedPageTurnOption,
                        pendingEmbeddedStyleOverride, pendingImageRenderingOverride, pendingFontFamilyOverride,
                        pendingSdFontFamilyOverride, pendingFontSizeOverride, pendingTextDarkness,
-                       static_cast<uint8_t>(pendingBionicReading), pendingParagraphAlignmentOverride});
+                       static_cast<uint8_t>(pendingBionicReading), pendingParagraphAlignmentOverride,
+                       pendingTextAntiAliasingOverride, pendingHyphenationOverride});
   finish();
 }
 
@@ -372,7 +420,9 @@ void EpubReaderMenuActivity::onBackPressed() {
                            pendingFontSizeOverride,
                            pendingTextDarkness,
                            static_cast<uint8_t>(pendingBionicReading),
-                           pendingParagraphAlignmentOverride};
+                           pendingParagraphAlignmentOverride,
+                           pendingTextAntiAliasingOverride,
+                           pendingHyphenationOverride};
   setResult(std::move(result));
   finish();
 }

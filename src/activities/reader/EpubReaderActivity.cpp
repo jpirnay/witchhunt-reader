@@ -2797,7 +2797,8 @@ void EpubReaderActivity::openReaderMenu() {
           renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
           !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
           bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, getEffectiveBionicReading(),
-          bookParagraphAlignmentOverride, !bookmarkStore.isEmpty(), isCurrentPageStarred, hasPrintedPages),
+          bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
+          !bookmarkStore.isEmpty(), isCurrentPageStarred, hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
@@ -2805,7 +2806,8 @@ void EpubReaderActivity::openReaderMenu() {
         toggleAutoPageTurn(menu.pageTurnOption);
         applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                                  menu.sdFontFamilyOverride, menu.fontSizeOverride,
-                                 static_cast<bool>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride);
+                                 static_cast<bool>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride,
+                                 menu.textAntiAliasingOverride, menu.hyphenationOverride);
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }
