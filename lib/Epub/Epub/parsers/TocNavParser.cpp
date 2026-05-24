@@ -4,6 +4,7 @@
 #include <Logging.h>
 
 #include "../BookMetadataCache.h"
+#include "PageListSink.h"
 
 bool TocNavParser::setup() {
   parser = XML_ParserCreate(nullptr);
@@ -178,7 +179,7 @@ void XMLCALL TocNavParser::endElement(void* userData, const XML_Char* name) {
   // ---- Page-list nav close handlers (checked before TOC handlers because IN_PL_* states
   // sort after IN_NAV_TOC, but we want exact-state matching either way).
   if (strcmp(name, "a") == 0 && self->state == IN_PL_ANCHOR) {
-    if (!self->currentPageLabel.empty() && !self->currentPageHref.empty()) {
+    if (self->pageListSink && !self->currentPageLabel.empty() && !self->currentPageHref.empty()) {
       std::string href = FsHelpers::normalisePath(self->baseContentPath + self->currentPageHref);
       std::string anchor;
       const size_t pos = href.find('#');
@@ -186,10 +187,10 @@ void XMLCALL TocNavParser::endElement(void* userData, const XML_Char* name) {
         anchor = href.substr(pos + 1);
         href = href.substr(0, pos);
       }
-      self->pageList.push_back({std::move(href), std::move(anchor), std::move(self->currentPageLabel)});
-      self->currentPageLabel.clear();
-      self->currentPageHref.clear();
+      self->pageListSink->addEntry(href, anchor, self->currentPageLabel);
     }
+    self->currentPageLabel.clear();
+    self->currentPageHref.clear();
     self->state = IN_PL_LI;
     return;
   }

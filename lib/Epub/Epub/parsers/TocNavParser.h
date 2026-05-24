@@ -3,9 +3,9 @@
 #include <expat.h>
 
 #include <string>
-#include <vector>
 
 class BookMetadataCache;
+class PageListSink;
 
 // Parser for EPUB 3 nav.xhtml navigation documents
 // Parses HTML5 nav elements with epub:type="toc" (table of contents) and
@@ -25,22 +25,15 @@ class TocNavParser final : public Print {
     IN_PL_ANCHOR,      // Inside <a> (within page-list nav)
   };
 
- public:
-  // One printed-page entry from <nav epub:type="page-list">: file href (normalised),
-  // anchor fragment, and visible label. Matches TocNcxParser::PageListEntry in shape so
-  // both parsers can feed the same pagelist.bin writer.
-  struct PageListEntry {
-    std::string href;
-    std::string anchor;
-    std::string label;
-  };
-
  private:
   const std::string& baseContentPath;
   size_t remainingSize;
   XML_Parser parser = nullptr;
   ParserState state = START;
   BookMetadataCache* cache;
+  // Page-list entries are streamed straight to disk via this sink. Owned by
+  // the caller (Epub.cpp); may be null when no page-list output is wanted.
+  PageListSink* pageListSink;
 
   // Track nesting depth for <ol> elements to determine TOC depth
   uint8_t olDepth = 0;
@@ -53,21 +46,19 @@ class TocNavParser final : public Print {
   uint8_t plOlDepth = 0;
   std::string currentPageLabel;
   std::string currentPageHref;
-  std::vector<PageListEntry> pageList;
 
   static void startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void characterData(void* userData, const XML_Char* s, int len);
   static void endElement(void* userData, const XML_Char* name);
 
  public:
-  explicit TocNavParser(const std::string& baseContentPath, const size_t xmlSize, BookMetadataCache* cache)
-      : baseContentPath(baseContentPath), remainingSize(xmlSize), cache(cache) {}
+  explicit TocNavParser(const std::string& baseContentPath, const size_t xmlSize, BookMetadataCache* cache,
+                        PageListSink* pageListSink)
+      : baseContentPath(baseContentPath), remainingSize(xmlSize), cache(cache), pageListSink(pageListSink) {}
   ~TocNavParser() override;
 
   bool setup();
 
   size_t write(uint8_t) override;
   size_t write(const uint8_t* buffer, size_t size) override;
-
-  const std::vector<PageListEntry>& getPageList() const { return pageList; }
 };

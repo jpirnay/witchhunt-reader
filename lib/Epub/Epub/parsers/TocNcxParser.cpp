@@ -4,6 +4,7 @@
 #include <Logging.h>
 
 #include "../BookMetadataCache.h"
+#include "PageListSink.h"
 
 bool TocNcxParser::setup() {
   parser = XML_ParserCreate(nullptr);
@@ -228,7 +229,7 @@ void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
   }
 
   if (self->state == IN_PAGE_TARGET && strcmp(name, "pageTarget") == 0) {
-    if (!self->currentPageLabel.empty() && !self->currentPageSrc.empty()) {
+    if (self->pageListSink && !self->currentPageLabel.empty() && !self->currentPageSrc.empty()) {
       std::string href = FsHelpers::normalisePath(self->baseContentPath + self->currentPageSrc);
       std::string anchor;
       const size_t pos = href.find('#');
@@ -236,7 +237,7 @@ void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
         anchor = href.substr(pos + 1);
         href = href.substr(0, pos);
       }
-      self->pageList.push_back({std::move(href), std::move(anchor), self->currentPageLabel});
+      self->pageListSink->addEntry(href, anchor, self->currentPageLabel);
     }
     self->currentPageLabel.clear();
     self->currentPageSrc.clear();
