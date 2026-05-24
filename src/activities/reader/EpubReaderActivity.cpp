@@ -129,10 +129,11 @@ inline void logReaderMemSnapshot(const char*) {}
 //
 // Returns true when the strip path ran end-to-end (controller now holds the AA
 // planes and the live BW frame is clean). Returns false when the controller
-// doesn't support strip grayscale OR the scratch allocation fails — caller
-// should fall back to the legacy storeBwBufferRect path.
+// doesn't support strip grayscale OR the session strip scratch isn't held
+// (acquireStripScratch in onEnter failed, e.g. heap was already too tight at
+// reader open). Caller should fall back to the legacy storeBwBufferRect path.
 //
-// The page is re-rendered ceil(panelHeight/STRIP_ROWS) times per plane, but
+// The page is re-rendered ceil(panelHeight/stripRows) times per plane, but
 // renderCharImpl culls out-of-band glyphs before bitmap decode so the cost
 // stays close to one render. Only renderTextOnly() is called here, matching the
 // legacy AA pass — images and HRs do not participate in grayscale.
@@ -146,31 +147,27 @@ bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, 
   // effect on the next page flip without rebooting.
   renderer.setFastGrayscaleLut(fastAA);
 
-  // Strip height trades scratch size for the number of re-renders. Each render
-  // pays layout + glyph-cull overhead even when bitmap decode is skipped, so
-  // fewer/bigger bands win as long as the scratch fits. 240 rows × ~100 bytes
-  // ≈ ~24 KB — still well below the legacy partial-snapshot footprint while
-  // cutting X3 (480 px) to 2 bands/plane and X4 (800 px) to 4 bands/plane.
-  constexpr int STRIP_ROWS = 240;
-  const int gh = renderer.getDisplayHeight();
-  const int gwBytes = renderer.getDisplayWidthBytes();
-
-  auto scratch = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[static_cast<size_t>(gwBytes) * STRIP_ROWS]);
-  if (!scratch) {
-    LOG_INF("ERS", "Tiled grayscale: scratch alloc failed (%d bytes); falling back to legacy path",
-            gwBytes * STRIP_ROWS);
+  // Strip scratch is owned by GfxRenderer for the reader session
+  // (acquireStripScratch in onEnter, releaseStripScratch in onExit). Allocating
+  // per page turn fragmented the ESP32-C3 heap badly enough to flip AA into the
+  // "suspended low memory" state after a few pages, so this path now refuses
+  // and falls back to the legacy snapshot if no session scratch is held.
+  uint8_t* const scratch = renderer.getStripScratch();
+  const int stripRows = renderer.getStripScratchRows();
+  if (!scratch || stripRows <= 0) {
     return false;
   }
+  const int gh = renderer.getDisplayHeight();
 
   auto renderPlane = [&](GfxRenderer::RenderMode mode, bool lsbPlane) {
     renderer.setRenderMode(mode);
-    for (int y = 0; y < gh; y += STRIP_ROWS) {
-      const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
-      renderer.beginStripTarget(scratch.get(), y, rows);
+    for (int y = 0; y < gh; y += stripRows) {
+      const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
+      renderer.beginStripTarget(scratch, y, rows);
       renderer.clearScreen(0x00);
       page.renderTextOnly(renderer, fontId, marginLeft, contentTop);
       renderer.endStripTarget();
-      renderer.writeGrayscalePlaneStrip(lsbPlane, scratch.get(), y, rows);
+      renderer.writeGrayscalePlaneStrip(lsbPlane, scratch, y, rows);
     }
   };
 
@@ -288,6 +285,14 @@ void EpubReaderActivity::onEnter() {
   }
   logReaderMemSnapshot("onEnter_after_orientation");
 
+  // Allocate the strip scratch once per reader session so tiled grayscale
+  // (runTiledGrayscalePass) doesn't have to malloc ~24 KB on every page turn.
+  // Failure is non-fatal: the AA pass falls back to the legacy snapshot path.
+  if (!renderer.acquireStripScratch()) {
+    LOG_INF("ERS", "Strip scratch unavailable; tiled grayscale will fall back to legacy snapshot");
+  }
+  logReaderMemSnapshot("onEnter_after_strip_scratch");
+
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
 
@@ -402,6 +407,7 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
+  renderer.releaseStripScratch();
   logReaderMemSnapshot("onExit_after_release");
 }
 

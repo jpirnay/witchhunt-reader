@@ -85,6 +85,26 @@ class GfxRenderer {
   mutable int stripRows_ = 0;
   mutable bool stripActive_ = false;
 
+  // Precomputed orientation→physicalY linear coefficients for the band-cull
+  // fast path. Latched once in beginStripTarget() and used by every
+  // glyphIntersectsStrip() call to avoid the 4-case rotateCoordinates switch
+  // per glyph. phyY = stripPhyYStepX_ * x + stripPhyYStepY_ * y + stripPhyYBase_,
+  // with steps in {-1, 0, 1}. Orientation can't change mid-pass; the strip
+  // session is the natural latch point.
+  mutable int8_t stripPhyYStepX_ = 0;
+  mutable int8_t stripPhyYStepY_ = 0;
+  mutable int stripPhyYBase_ = 0;
+
+  // Session-owned strip scratch. acquireStripScratch() allocates once (sized
+  // STRIP_SCRATCH_TARGET_BYTES, rounded to a whole number of rows of
+  // panelWidthBytes) and the buffer persists until releaseStripScratch().
+  // Allocating per page turn fragments the tight ESP32-C3 heap badly enough
+  // to cause AA to suspend after a few pages; hold one buffer for the reader
+  // session instead. The strip height we pick at acquire time is exposed via
+  // getStripScratchRows() so the caller plans its band loop around it.
+  uint8_t* stripScratch_ = nullptr;
+  int stripScratchRows_ = 0;
+
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
   void freeBwBufferChunks();
@@ -108,7 +128,10 @@ class GfxRenderer {
         orientation(static_cast<int>(Portrait)),
         fadingFix(false),
         textDarkness(1) {}
-  ~GfxRenderer() { freeBwBufferChunks(); }
+  ~GfxRenderer() {
+    freeBwBufferChunks();
+    releaseStripScratch();
+  }
 
   static constexpr int VIEWABLE_MARGIN_TOP = 9;
   static constexpr int VIEWABLE_MARGIN_RIGHT = 3;
@@ -244,6 +267,22 @@ class GfxRenderer {
   // grayscale planes band-by-band without a full second buffer.
   void beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const;
   void endStripTarget() const;
+
+  // Session-owned strip scratch lifecycle. Reader activities call acquire on
+  // onEnter() and release on onExit(); the buffer is then reused across all
+  // page-turn AA passes for that session. Acquire is idempotent and returns
+  // true on success or when the buffer is already held. Sizing uses the
+  // current panel geometry, so begin() must have run first.
+  bool acquireStripScratch();
+  void releaseStripScratch();
+  uint8_t* getStripScratch() const { return stripScratch_; }
+  int getStripScratchRows() const { return stripScratchRows_; }
+
+  // Target byte budget for the session-owned strip scratch. ~24 KB lands at
+  // 240 rows on both X4 (100 B/row, panel 480) → 2 bands/plane and X3
+  // (99 B/row, panel 528) → 3 bands/plane. acquire clamps to panelHeight so
+  // a smaller panel never over-allocates.
+  static constexpr int STRIP_SCRATCH_TARGET_BYTES = 24000;
 
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
   // When a strip target is active these return the band scratch plus its

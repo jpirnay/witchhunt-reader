@@ -1945,6 +1945,32 @@ void GfxRenderer::beginStripTarget(uint8_t* scratch, int stripY0, int stripRows)
   stripY0_ = stripY0;
   stripRows_ = stripRows;
   stripActive_ = true;
+
+  // Latch the orientation→phyY linear coefficients used by glyphIntersectsStrip()
+  // so the cull is one multiply-add per bbox corner instead of a switch.
+  // Derived from rotateCoordinates() with only the y-output retained.
+  switch (getOrientation()) {
+    case Portrait:
+      stripPhyYStepX_ = -1;
+      stripPhyYStepY_ = 0;
+      stripPhyYBase_ = panelHeight - 1;
+      break;
+    case LandscapeClockwise:
+      stripPhyYStepX_ = 0;
+      stripPhyYStepY_ = -1;
+      stripPhyYBase_ = panelHeight - 1;
+      break;
+    case PortraitInverted:
+      stripPhyYStepX_ = 1;
+      stripPhyYStepY_ = 0;
+      stripPhyYBase_ = 0;
+      break;
+    case LandscapeCounterClockwise:
+      stripPhyYStepX_ = 0;
+      stripPhyYStepY_ = 1;
+      stripPhyYBase_ = 0;
+      break;
+  }
 }
 
 void GfxRenderer::endStripTarget() const {
@@ -1954,16 +1980,44 @@ void GfxRenderer::endStripTarget() const {
   stripRows_ = 0;
 }
 
+bool GfxRenderer::acquireStripScratch() {
+  if (stripScratch_) return true;
+  if (panelWidthBytes == 0 || panelHeight == 0) {
+    LOG_ERR("GFX", "acquireStripScratch called before begin()");
+    return false;
+  }
+  int rows = STRIP_SCRATCH_TARGET_BYTES / panelWidthBytes;
+  if (rows < 1) rows = 1;
+  if (rows > static_cast<int>(panelHeight)) rows = panelHeight;
+  const size_t bytes = static_cast<size_t>(panelWidthBytes) * rows;
+  stripScratch_ = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  if (!stripScratch_) {
+    LOG_INF("GFX", "Strip scratch alloc failed (%zu bytes)", bytes);
+    return false;
+  }
+  stripScratchRows_ = rows;
+  return true;
+}
+
+void GfxRenderer::releaseStripScratch() {
+  if (!stripScratch_) return;
+  heap_caps_free(stripScratch_);
+  stripScratch_ = nullptr;
+  stripScratchRows_ = 0;
+}
+
 bool GfxRenderer::glyphIntersectsStrip(int x0, int y0, int x1, int y1) const {
   if (!stripActive_) {
     return true;
   }
-  // Rotate the two opposite bbox corners to physical coords. For 90-degree
-  // orientations the physical bbox stays axis-aligned, so min/max of the two
-  // rotated corners' Y bounds the glyph's physical y-extent.
-  int ax, ay, bx, by;
-  rotateCoordinates(getOrientation(), x0, y0, &ax, &ay, panelWidth, panelHeight);
-  rotateCoordinates(getOrientation(), x1, y1, &bx, &by, panelWidth, panelHeight);
+  // Use the precomputed (stepX, stepY, base) latched in beginStripTarget() so
+  // each call is two multiply-adds + a range check, no rotateCoordinates
+  // switch. The four 90-degree orientations all reduce to "phyY depends on
+  // exactly one of (x, y)" — exactly one of stepX/stepY is non-zero — so phyY
+  // is monotonic across the bbox and the two opposite-corner phyY values
+  // bracket the full physical y-extent.
+  const int ay = stripPhyYStepX_ * x0 + stripPhyYStepY_ * y0 + stripPhyYBase_;
+  const int by = stripPhyYStepX_ * x1 + stripPhyYStepY_ * y1 + stripPhyYBase_;
   const int minY = ay < by ? ay : by;
   const int maxY = ay > by ? ay : by;
   return !(maxY < stripY0_ || minY >= stripY0_ + stripRows_);
