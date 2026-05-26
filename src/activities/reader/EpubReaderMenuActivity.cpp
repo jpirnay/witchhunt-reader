@@ -477,6 +477,14 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
         return std::string(tr(STR_DEFAULT_VALUE)) + " (" + I18N.get(item.enumValues[defaultIndex]) + ")";
       }
     }
+    if (item.nameId == StrId::STR_TEXT_AA && pendingTextAntiAliasingOverride < 0) {
+      const auto defaultEffective = (SETTINGS.textAntiAliasing != 0) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return std::string(tr(STR_DEFAULT_VALUE)) + " (" + defaultEffective + ")";
+    }
+    if (item.nameId == StrId::STR_HYPHENATION && pendingHyphenationOverride < 0) {
+      const auto defaultEffective = (SETTINGS.hyphenationEnabled != 0) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return std::string(tr(STR_DEFAULT_VALUE)) + " (" + defaultEffective + ")";
+    }
   }
 
   // DynamicEnum items use the standard display
@@ -516,6 +524,14 @@ void EpubReaderMenuActivity::openSubmenu(const SettingInfo& submenuEntry) {
       if (valueIndex < item.enumValues.size()) {
         return std::string(tr(STR_DEFAULT_VALUE)) + " (" + I18N.get(item.enumValues[valueIndex]) + ")";
       }
+    }
+    if (item.nameId == StrId::STR_TEXT_AA && pendingTextAntiAliasingOverride < 0) {
+      const auto defaultEffective = (SETTINGS.textAntiAliasing != 0) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return std::string(tr(STR_DEFAULT_VALUE)) + " (" + defaultEffective + ")";
+    }
+    if (item.nameId == StrId::STR_HYPHENATION && pendingHyphenationOverride < 0) {
+      const auto defaultEffective = (SETTINGS.hyphenationEnabled != 0) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      return std::string(tr(STR_DEFAULT_VALUE)) + " (" + defaultEffective + ")";
     }
     return item.getDisplayValue();
   };
