@@ -146,8 +146,8 @@ class Page {
   // monochromeOutput selects which cache variant to warm (BW or grayscale).
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
                        bool monochromeOutput = true) const;
-  bool hasPlaceholderImages(bool forceLoadLargeImages) const;
-  bool allImagesArePlaceholders(bool forceLoadLargeImages) const;
+  bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
+  bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
 

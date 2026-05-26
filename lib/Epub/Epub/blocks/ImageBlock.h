@@ -28,8 +28,9 @@ class ImageBlock final : public Block {
   bool isLargeImage() const;
 
   // Returns true if this image would be shown as a placeholder given forceLoad.
-  // False when: forceLoad is true, image is not large, or pixel cache already exists.
-  bool wouldShowPlaceholder(bool forceLoad) const;
+  // False when: forceLoad is true, image is not large, or the mode-specific cache exists.
+  // monochromeOutput selects which cache to check (BW or grayscale), matching render().
+  bool wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) const;
 
   // True when the 1-bit .pxc pixel cache exists (BW plane rendering).
   // Used by warm-cache paths to skip already-cached images.

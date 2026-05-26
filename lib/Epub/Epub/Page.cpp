@@ -235,7 +235,7 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
   for (auto& element : elements) {
     if (element->getTag() != TAG_PageImage) continue;
     const auto& ib = static_cast<const PageImage&>(*element).getImageBlock();
-    if (ib.wouldShowPlaceholder(forceLoadLargeImages)) continue;
+    if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
     // Check whether the appropriate cache already exists
     const bool alreadyCached = monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache();
     if (alreadyCached) continue;
@@ -244,10 +244,11 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
   }
 }
 
-bool Page::hasPlaceholderImages(const bool forceLoadLargeImages) const {
+bool Page::hasPlaceholderImages(const bool forceLoadLargeImages, const bool monochromeOutput) const {
   for (const auto& el : elements) {
     if (el->getTag() == TAG_PageImage) {
-      if (static_cast<const PageImage&>(*el).getImageBlock().wouldShowPlaceholder(forceLoadLargeImages)) {
+      if (static_cast<const PageImage&>(*el).getImageBlock().wouldShowPlaceholder(forceLoadLargeImages,
+                                                                                  monochromeOutput)) {
         return true;
       }
     }
@@ -255,12 +256,13 @@ bool Page::hasPlaceholderImages(const bool forceLoadLargeImages) const {
   return false;
 }
 
-bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages) const {
+bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages, const bool monochromeOutput) const {
   bool anyImage = false;
   for (const auto& el : elements) {
     if (el->getTag() == TAG_PageImage) {
       anyImage = true;
-      if (!static_cast<const PageImage&>(*el).getImageBlock().wouldShowPlaceholder(forceLoadLargeImages)) {
+      if (!static_cast<const PageImage&>(*el).getImageBlock().wouldShowPlaceholder(forceLoadLargeImages,
+                                                                                   monochromeOutput)) {
         return false;
       }
     }

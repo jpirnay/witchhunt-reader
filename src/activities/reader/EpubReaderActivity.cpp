@@ -2151,18 +2151,36 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(*page, viewportHeight);
 
+  // Resolve the effective AA flag once — used for both the warm pass and the real render.
+  // antiAliasingSuspendedLowMemory can suppress AA even when it's configured on; we check
+  // for recovery here (before font prewarm) so the warm cache variant matches the render variant.
+  const bool aaConfigured = getEffectiveTextAntiAliasing();
+  bool aaEnabledForThisRender = aaConfigured;
+  if (aaConfigured && antiAliasingSuspendedLowMemory) {
+    const uint32_t freeHeapNow = esp_get_free_heap_size();
+    const uint32_t contigHeapNow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    if (freeHeapNow >= AA_RECOVERY_FREE_HEAP_BYTES && contigHeapNow >= AA_RECOVERY_CONTIG_HEAP_BYTES) {
+      antiAliasingSuspendedLowMemory = false;
+      LOG_INF("ERS", "Re-enabling text anti-aliasing after heap recovery (free=%lu contig=%lu)", freeHeapNow,
+              contigHeapNow);
+    } else {
+      aaEnabledForThisRender = false;
+    }
+  }
+  lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
+
+  // imageMonochrome drives both the warm cache variant and the real BW render:
+  // false = 4-level grayscale cache (AA on), true = 1-bit BW cache (AA off).
+  const bool imageMonochrome = !aaEnabledForThisRender;
+
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~60 KB the PNG/JPG decoder needs. The decode
   // writes pixels into the framebuffer as a side effect, so we reclear before
   // the real BW render begins. Skips when no decode is needed (all images cached
   // or the page is text-only). Mirrors the effectiveForceLoad rule used by the
   // BW render below so placeholder logic is identical.
-  //
-  // When AA is configured, warm the 4-level grayscale cache so it can be replayed
-  // in the GRAYSCALE_LSB/MSB passes. When AA is off, warm the 1-bit BW cache.
   const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-  const bool aaConfiguredForWarm = getEffectiveTextAntiAliasing();
-  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, !aaConfiguredForWarm);
+  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome);
   renderer.clearScreen();
 
   logReaderMemSnapshot("prewarm_begin");
@@ -2184,38 +2202,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
           contigAfter, (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
 
-  const bool aaConfigured = getEffectiveTextAntiAliasing();
-  bool aaEnabledForThisRender = aaConfigured;
-  if (aaConfigured && antiAliasingSuspendedLowMemory) {
-    const uint32_t freeHeapNow = esp_get_free_heap_size();
-    const uint32_t contigHeapNow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    if (freeHeapNow >= AA_RECOVERY_FREE_HEAP_BYTES && contigHeapNow >= AA_RECOVERY_CONTIG_HEAP_BYTES) {
-      antiAliasingSuspendedLowMemory = false;
-      LOG_INF("ERS", "Re-enabling text anti-aliasing after heap recovery (free=%lu contig=%lu)", freeHeapNow,
-              contigHeapNow);
-    } else {
-      aaEnabledForThisRender = false;
-    }
-  }
-  lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
-
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-  pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad);
+  pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
   // Force special handling for pages with at least one real (decoded) image when anti-aliasing is on.
   // Mixed pages (some decoded, some placeholder) still need the AA codepath.
-  bool imagePageWithAA =
-      page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad) && aaEnabledForThisRender;
+  bool imagePageWithAA = page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
+                         aaEnabledForThisRender;
   bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
   lastRenderStats.imagePageWithAA = imagePageWithAA;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   logReaderMemSnapshot("before_bw_render");
-  // monochromeOutput=false when AA is on: use 4-level Bayer cache so the grayscale
-  // passes can layer gray tones on top. monochromeOutput=true when AA is off: 1-bit
-  // Atkinson gives clean halftone without mid-gray collapse in BW-only mode.
-  const bool imageMonochrome = !aaEnabledForThisRender;
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
                imageMonochrome);
   renderStatusBar();
@@ -2273,7 +2272,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
   // Only schedule the half-refresh if at least one real image was decoded on this page.
   // Placeholder-only pages don't deposit grayscale data that needs settling.
-  if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad) &&
+  if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
       getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
     pendingHalfRefreshAfterImagePage = true;
   }

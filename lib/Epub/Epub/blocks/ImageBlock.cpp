@@ -124,12 +124,12 @@ bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(im
 
 bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(getGrayscaleCachePath(imagePath).c_str()); }
 
-bool ImageBlock::wouldShowPlaceholder(bool forceLoad) const {
+bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) const {
   if (forceLoad) return false;
   if (!isLargeImage()) return false;
-  // Either BW or grayscale cache suffices to skip the placeholder
-  return !Storage.exists(getBwCachePath(imagePath).c_str()) &&
-         !Storage.exists(getGrayscaleCachePath(imagePath).c_str());
+  // Check only the cache variant that render() will actually use for this mode.
+  const std::string& cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
+  return !Storage.exists(cachePath.c_str());
 }
 
 void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, const int y) const {
@@ -182,7 +182,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   }
 
   // No pixel cache — check if this is a large image that should show a placeholder
-  if (wouldShowPlaceholder(forceLoad)) {
+  if (wouldShowPlaceholder(forceLoad, monochromeOutput)) {
     LOG_DBG("IMG", "Large image placeholder at %d,%d (%dx%d): %s", x, y, width, height, imagePath.c_str());
     renderPlaceholder(renderer, x, y);
     return;
