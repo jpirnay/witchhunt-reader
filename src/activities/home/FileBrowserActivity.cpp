@@ -208,10 +208,12 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
         clearFileMetadata(entryPath);
         if (!Storage.remove(entryPath.c_str())) {
           LOG_ERR("FBR", "Failed to remove file: %s", entryPath.c_str());
+          dir.close();
           return false;
         }
       }
     }
+    dir.close();
   }
   return true;
 }
