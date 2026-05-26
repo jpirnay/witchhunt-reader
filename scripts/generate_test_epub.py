@@ -1015,7 +1015,8 @@ def main():
 <li>pre element: leading/trailing blank lines</li>
 <li>pre with inline code element</li>
 <li>horizontal rules between paragraphs</li>
-<li>superscript and subscript rendering</li>
+<li>superscript and subscript rendering (&lt;sup&gt;/&lt;sub&gt; tags)</li>
+<li>superscript and subscript via CSS vertical-align property</li>
 <li>list rendering: ul, ol, nested, start/value attributes, bare li</li>
 </ul>
 """,
@@ -1205,6 +1206,51 @@ greet("World");</code></pre>
 <h2>Long runs</h2>
 <p>This word<sup>has a rather long superscript attached to it</sup> continuing normally.</p>
 <p>This word<sub>has a rather long subscript attached to it</sub> continuing normally.</p>
+""",
+                ),
+                [],
+            ),
+            (
+                "5b. vertical-align CSS",
+                make_chapter(
+                    "vertical-align CSS Superscript and Subscript",
+                    """<style>
+.sup-css { vertical-align: super; }
+.sub-css { vertical-align: sub; }
+.baseline-reset { vertical-align: baseline; }
+</style>
+
+<h2>Inline style: vertical-align super (should match &lt;sup&gt;)</h2>
+<p>E = mc<span style="vertical-align:super">2</span> (inline style super)</p>
+<p>2<span style="vertical-align:super">10</span> = 1024</p>
+<p>x<span style="vertical-align:super">n</span> + y<span style="vertical-align:super">n</span> = z<span style="vertical-align:super">n</span></p>
+
+<h2>Inline style: vertical-align sub (should match &lt;sub&gt;)</h2>
+<p>Water is H<span style="vertical-align:sub">2</span>O (inline style sub)</p>
+<p>CO<span style="vertical-align:sub">2</span> carbon dioxide</p>
+<p>C<span style="vertical-align:sub">6</span>H<span style="vertical-align:sub">12</span>O<span style="vertical-align:sub">6</span> glucose</p>
+
+<h2>Stylesheet class: vertical-align super</h2>
+<p>E = mc<span class="sup-css">2</span> (class-based super)</p>
+<p>Footnote<span class="sup-css">1</span> and another<span class="sup-css">2</span></p>
+
+<h2>Stylesheet class: vertical-align sub</h2>
+<p>H<span class="sub-css">2</span>O (class-based sub)</p>
+<p>a<span class="sub-css">1</span>, a<span class="sub-css">2</span>, ..., a<span class="sub-css">n</span></p>
+
+<h2>Mixed: tag-based vs CSS-based side by side</h2>
+<p>Tag: H<sub>2</sub>O &#8212; CSS: H<span style="vertical-align:sub">2</span>O (should look identical)</p>
+<p>Tag: mc<sup>2</sup> &#8212; CSS: mc<span style="vertical-align:super">2</span> (should look identical)</p>
+
+<h2>baseline reset cancels inherited super</h2>
+<p>Outer<span style="vertical-align:super">raised<span class="baseline-reset">normal</span>raised</span>outer</p>
+
+<h2>vertical-align super with bold and italic</h2>
+<p>Bold super: x<span style="vertical-align:super"><b>2</b></span> and italic sub: H<span style="vertical-align:sub"><i>n</i></span></p>
+
+<h2>Long run via CSS</h2>
+<p>This word<span style="vertical-align:super">has a rather long superscript via CSS</span> continuing normally.</p>
+<p>This word<span style="vertical-align:sub">has a rather long subscript via CSS</span> continuing normally.</p>
 """,
                 ),
                 [],
