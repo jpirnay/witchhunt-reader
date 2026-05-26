@@ -150,6 +150,74 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
   }
 }
 
+// Iterative post-order traversal: clear book caches then delete files/dirs.
+// Adapted from upstream PR #1892 (WuTofu) to handle our EPUB+XTC cache clearing.
+bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
+  auto file = Storage.open(fullPath.c_str());
+  if (!file) {
+    LOG_ERR("FBR", "Failed to open for removal: %s", fullPath.c_str());
+    return false;
+  }
+  if (!file.isDirectory()) {
+    file.close();
+    clearFileMetadata(fullPath);
+    return Storage.remove(fullPath.c_str());
+  }
+  file.close();
+
+  constexpr size_t NAME_BUF = 500;
+  char nameBuf[NAME_BUF];
+
+  // Stack of (path, postOrder): postOrder=true means rmdir this path after its children.
+  std::vector<std::pair<std::string, bool>> stack;
+  stack.reserve(16);
+  stack.push_back({fullPath, false});
+
+  while (!stack.empty()) {
+    auto [currentPath, postOrder] = std::move(stack.back());
+    stack.pop_back();
+
+    if (postOrder) {
+      if (!Storage.rmdir(currentPath.c_str())) {
+        LOG_ERR("FBR", "Failed to rmdir: %s", currentPath.c_str());
+        return false;
+      }
+      continue;
+    }
+
+    auto dir = Storage.open(currentPath.c_str());
+    if (!dir || !dir.isDirectory()) {
+      LOG_ERR("FBR", "Failed to open dir: %s", currentPath.c_str());
+      return false;
+    }
+
+    stack.push_back({currentPath, true});
+
+    dir.rewindDirectory();
+    for (auto entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+      entry.getName(nameBuf, NAME_BUF);
+      if (strcmp(nameBuf, ".") == 0 || strcmp(nameBuf, "..") == 0) continue;
+      std::string entryPath = currentPath;
+      if (entryPath.back() != '/') entryPath += '/';
+      entryPath += nameBuf;
+      const bool isDir = entry.isDirectory();
+      entry.close();
+      if (isDir) {
+        stack.push_back({std::move(entryPath), false});
+      } else {
+        clearFileMetadata(entryPath);
+        if (!Storage.remove(entryPath.c_str())) {
+          LOG_ERR("FBR", "Failed to remove file: %s", entryPath.c_str());
+          dir.close();
+          return false;
+        }
+      }
+    }
+    dir.close();
+  }
+  return true;
+}
+
 void FileBrowserActivity::loop() {
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
@@ -529,8 +597,13 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
       [this, fullPath, isDirectory](const ActivityResult& res) {
         if (!res.isCancelled) {
           LOG_DBG("FBR", "Attempting to delete: %s", fullPath.c_str());
-          clearFileMetadata(fullPath);
-          const bool deleted = isDirectory ? Storage.removeDir(fullPath.c_str()) : Storage.remove(fullPath.c_str());
+          bool deleted;
+          if (isDirectory) {
+            deleted = removeDirRecursive(fullPath);
+          } else {
+            clearFileMetadata(fullPath);
+            deleted = Storage.remove(fullPath.c_str());
+          }
           if (deleted) {
             LOG_DBG("FBR", "Deleted successfully");
             loadFiles();
