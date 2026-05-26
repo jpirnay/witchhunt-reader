@@ -176,20 +176,15 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
     }
   }
 
-  auto isSupportedCoverType = [](const std::string& path) {
-    return FsHelpers::hasJpgExtension(path) || FsHelpers::hasPngExtension(path);
-  };
-
-  auto hasReadableSupportedCover = [&](const std::string& path) {
-    if (path.empty() || !isSupportedCoverType(path)) return false;
+  auto hasReadableCover = [&](const std::string& path) {
+    if (path.empty()) return false;
     size_t coverSize = 0;
     return getItemSize(path, &coverSize);
   };
 
-  if (!hasReadableSupportedCover(bookMetadata.coverItemHref)) {
+  if (!hasReadableCover(bookMetadata.coverItemHref)) {
     if (!bookMetadata.coverItemHref.empty()) {
-      LOG_DBG("EBP", "Cover href unresolved/unsupported, trying common cover candidates: %s",
-              bookMetadata.coverItemHref.c_str());
+      LOG_DBG("EBP", "Cover href unresolved, trying common cover candidates: %s", bookMetadata.coverItemHref.c_str());
     }
 
     std::vector<std::string> baseDirs;
