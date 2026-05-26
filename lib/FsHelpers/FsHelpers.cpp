@@ -109,5 +109,4 @@ void sanitizePathComponentForFat32(const char* input, char* output, size_t maxLe
   output[i] = '\0';
 }
 
-
 }  // namespace FsHelpers
