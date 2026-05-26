@@ -1,42 +1,10 @@
 #include <OpdsParser.h>
+#include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
-
-static int testsPassed = 0;
-static int testsFailed = 0;
-
-#define ASSERT_TRUE(cond)                                                \
-  do {                                                                   \
-    if (!(cond)) {                                                       \
-      fprintf(stderr, "  FAIL: %s:%d: %s\n", __FILE__, __LINE__, #cond); \
-      testsFailed++;                                                     \
-      return;                                                            \
-    }                                                                    \
-  } while (0)
-
-#define ASSERT_EQ(a, b)                                                         \
-  do {                                                                          \
-    if ((a) != (b)) {                                                           \
-      fprintf(stderr, "  FAIL: %s:%d: %s != %s\n", __FILE__, __LINE__, #a, #b); \
-      testsFailed++;                                                            \
-      return;                                                                   \
-    }                                                                           \
-  } while (0)
-
-#define ASSERT_SIZE(a, b)                                                                                         \
-  do {                                                                                                            \
-    if ((a) != (b)) {                                                                                             \
-      fprintf(stderr, "  FAIL: %s:%d: %s == %zu, expected %zu\n", __FILE__, __LINE__, #a, static_cast<size_t>(a), \
-              static_cast<size_t>(b));                                                                            \
-      testsFailed++;                                                                                              \
-      return;                                                                                                     \
-    }                                                                                                             \
-  } while (0)
-
-#define PASS() testsPassed++
+#include <vector>
 
 namespace {
 bool parseSingleBookEntry(OpdsEntry& entryOut, const char* href, const char* type = "application/epub+zip") {
@@ -58,13 +26,11 @@ bool parseSingleBookEntry(OpdsEntry& entryOut, const char* href, const char* typ
   parser.flush();
 
   if (parser.error()) {
-    fprintf(stderr, "  FAIL: %s:%d: parser.error()\n", __FILE__, __LINE__);
-    testsFailed++;
+    ADD_FAILURE() << "parser.error() returned true";
     return false;
   }
   if (entries.size() != 1) {
-    fprintf(stderr, "  FAIL: %s:%d: entries.size() == %zu, expected 1\n", __FILE__, __LINE__, entries.size());
-    testsFailed++;
+    ADD_FAILURE() << "entries.size() == " << entries.size() << ", expected 1";
     return false;
   }
   entryOut = entries.front();
@@ -73,74 +39,57 @@ bool parseSingleBookEntry(OpdsEntry& entryOut, const char* href, const char* typ
 
 bool assertSingleFormat(const OpdsEntry& entry, const char* formatKey, const char* fileExtension) {
   if (entry.type != OpdsEntryType::BOOK) {
-    fprintf(stderr, "  FAIL: %s:%d: entry.type != OpdsEntryType::BOOK\n", __FILE__, __LINE__);
-    testsFailed++;
+    ADD_FAILURE() << "entry.type != OpdsEntryType::BOOK";
     return false;
   }
   if (entry.acquisitionLinks.size() != 1) {
-    fprintf(stderr, "  FAIL: %s:%d: entry.acquisitionLinks.size() == %zu, expected 1\n", __FILE__, __LINE__,
-            entry.acquisitionLinks.size());
-    testsFailed++;
+    ADD_FAILURE() << "entry.acquisitionLinks.size() == " << entry.acquisitionLinks.size() << ", expected 1";
     return false;
   }
   if (entry.acquisitionLinks[0].formatKey != formatKey) {
-    fprintf(stderr, "  FAIL: %s:%d: formatKey actual='%s' expected='%s'\n", __FILE__, __LINE__,
-            entry.acquisitionLinks[0].formatKey.c_str(), formatKey);
-    testsFailed++;
+    ADD_FAILURE() << "formatKey actual='" << entry.acquisitionLinks[0].formatKey << "' expected='" << formatKey << "'";
     return false;
   }
   if (entry.acquisitionLinks[0].fileExtension != fileExtension) {
-    fprintf(stderr, "  FAIL: %s:%d: fileExtension actual='%s' expected='%s'\n", __FILE__, __LINE__,
-            entry.acquisitionLinks[0].fileExtension.c_str(), fileExtension);
-    testsFailed++;
+    ADD_FAILURE() << "fileExtension actual='" << entry.acquisitionLinks[0].fileExtension << "' expected='"
+                  << fileExtension << "'";
     return false;
   }
   return true;
 }
 }  // namespace
 
-void testEpubExtension() {
-  printf("testEpubExtension...\n");
+TEST(OpdsParser, EpubExtension) {
   OpdsEntry entry;
-  if (!parseSingleBookEntry(entry, "/books/example.epub")) return;
+  ASSERT_TRUE(parseSingleBookEntry(entry, "/books/example.epub"));
   ASSERT_TRUE(assertSingleFormat(entry, "epub", ".epub"));
-  PASS();
 }
 
-void testKepubDoubleExtension() {
-  printf("testKepubDoubleExtension...\n");
+TEST(OpdsParser, KepubDoubleExtension) {
   OpdsEntry entry;
-  if (!parseSingleBookEntry(entry, "/books/example.kepub.epub")) return;
+  ASSERT_TRUE(parseSingleBookEntry(entry, "/books/example.kepub.epub"));
   ASSERT_TRUE(assertSingleFormat(entry, "kepub", ".kepub.epub"));
-  PASS();
 }
 
-void testBareKepubExtension() {
-  printf("testBareKepubExtension...\n");
+TEST(OpdsParser, BareKepubExtension) {
   OpdsEntry entry;
-  if (!parseSingleBookEntry(entry, "/books/example.kepub")) return;
+  ASSERT_TRUE(parseSingleBookEntry(entry, "/books/example.kepub"));
   ASSERT_TRUE(assertSingleFormat(entry, "kepub", ".kepub.epub"));
-  PASS();
 }
 
-void testSlashTerminatedKepubPath() {
-  printf("testSlashTerminatedKepubPath...\n");
+TEST(OpdsParser, SlashTerminatedKepubPath) {
   OpdsEntry entry;
-  if (!parseSingleBookEntry(entry, "/opds/download/6516/kepub/")) return;
+  ASSERT_TRUE(parseSingleBookEntry(entry, "/opds/download/6516/kepub/"));
   ASSERT_TRUE(assertSingleFormat(entry, "kepub", ".kepub.epub"));
-  PASS();
 }
 
-void testSlashTerminatedEpubPath() {
-  printf("testSlashTerminatedEpubPath...\n");
+TEST(OpdsParser, SlashTerminatedEpubPath) {
   OpdsEntry entry;
-  if (!parseSingleBookEntry(entry, "/opds/download/6516/epub/")) return;
+  ASSERT_TRUE(parseSingleBookEntry(entry, "/opds/download/6516/epub/"));
   ASSERT_TRUE(assertSingleFormat(entry, "epub", ".epub"));
-  PASS();
 }
 
-void testDistinctAcquisitionFormatsRemainSeparate() {
-  printf("testDistinctAcquisitionFormatsRemainSeparate...\n");
+TEST(OpdsParser, DistinctAcquisitionFormatsRemainSeparate) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -161,18 +110,16 @@ void testDistinctAcquisitionFormatsRemainSeparate() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 1);
+  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
   const auto& links = entries.front().acquisitionLinks;
-  ASSERT_SIZE(links.size(), 4);
+  ASSERT_EQ(links.size(), static_cast<size_t>(4));
   ASSERT_EQ(links[0].formatKey, "epub");
   ASSERT_EQ(links[1].formatKey, "kepub");
   ASSERT_EQ(links[2].formatKey, "txt");
   ASSERT_EQ(links[3].formatKey, "md");
-  PASS();
 }
 
-void testUnsupportedMimeType() {
-  printf("testUnsupportedMimeType...\n");
+TEST(OpdsParser, UnsupportedMimeType) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -190,12 +137,10 @@ void testUnsupportedMimeType() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 0);
-  PASS();
+  ASSERT_EQ(entries.size(), static_cast<size_t>(0));
 }
 
-void testEmptyHrefOrType() {
-  printf("testEmptyHrefOrType...\n");
+TEST(OpdsParser, EmptyHrefOrType) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -231,12 +176,10 @@ void testEmptyHrefOrType() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 0);
-  PASS();
+  ASSERT_EQ(entries.size(), static_cast<size_t>(0));
 }
 
-void testDuplicateAcquisitionLinks() {
-  printf("testDuplicateAcquisitionLinks...\n");
+TEST(OpdsParser, DuplicateAcquisitionLinks) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -255,18 +198,16 @@ void testDuplicateAcquisitionLinks() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 1);
+  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
   const auto& links = entries.front().acquisitionLinks;
-  ASSERT_SIZE(links.size(), 2);
+  ASSERT_EQ(links.size(), static_cast<size_t>(2));
   ASSERT_EQ(links[0].formatKey, "epub");
   ASSERT_EQ(links[0].href, "/books/example.epub");
   ASSERT_EQ(links[1].formatKey, "epub");
   ASSERT_EQ(links[1].href, "/books/example-copy.epub");
-  PASS();
 }
 
-void testIdenticalHrefAcquisitionLinksAreDeduplicated() {
-  printf("testIdenticalHrefAcquisitionLinksAreDeduplicated...\n");
+TEST(OpdsParser, IdenticalHrefAcquisitionLinksAreDeduplicated) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -285,16 +226,14 @@ void testIdenticalHrefAcquisitionLinksAreDeduplicated() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 1);
+  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
   const auto& links = entries.front().acquisitionLinks;
-  ASSERT_SIZE(links.size(), 1);
+  ASSERT_EQ(links.size(), static_cast<size_t>(1));
   ASSERT_EQ(links[0].formatKey, "epub");
   ASSERT_EQ(links[0].href, "/books/example.epub");
-  PASS();
 }
 
-void testSlashVariantHrefAcquisitionLinksAreDeduplicated() {
-  printf("testSlashVariantHrefAcquisitionLinksAreDeduplicated...\n");
+TEST(OpdsParser, SlashVariantHrefAcquisitionLinksAreDeduplicated) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
@@ -313,29 +252,9 @@ void testSlashVariantHrefAcquisitionLinksAreDeduplicated() {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_SIZE(entries.size(), 1);
+  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
   const auto& links = entries.front().acquisitionLinks;
-  ASSERT_SIZE(links.size(), 1);
+  ASSERT_EQ(links.size(), static_cast<size_t>(1));
   ASSERT_EQ(links[0].formatKey, "epub");
   ASSERT_EQ(links[0].href, "/books/example.epub");
-  PASS();
-}
-
-int main() {
-  printf("=== OPDS Parser Tests ===\n\n");
-
-  testEpubExtension();
-  testKepubDoubleExtension();
-  testBareKepubExtension();
-  testSlashTerminatedKepubPath();
-  testSlashTerminatedEpubPath();
-  testDistinctAcquisitionFormatsRemainSeparate();
-  testUnsupportedMimeType();
-  testEmptyHrefOrType();
-  testDuplicateAcquisitionLinks();
-  testIdenticalHrefAcquisitionLinksAreDeduplicated();
-  testSlashVariantHrefAcquisitionLinksAreDeduplicated();
-
-  printf("\n=== Results: %d passed, %d failed ===\n", testsPassed, testsFailed);
-  return testsFailed > 0 ? 1 : 0;
 }

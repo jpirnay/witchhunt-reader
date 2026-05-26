@@ -14,8 +14,7 @@ Run a single suite directly:
 Google Test is fetched via CMake FetchContent on first configure; the pinned
 version lives in test/CMakeLists.txt.
 
-Shell-script based tests (additional suites not yet migrated to gtest):
+Shell-script based tests (suites that cannot be built with the host CMake
+toolchain due to embedded-only dependencies):
 
-  bash test/run_url_utils_test.sh
-  bash test/run_opds_parser_test.sh
   bash test/run_epub_css_test.sh
