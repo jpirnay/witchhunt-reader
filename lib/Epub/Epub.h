@@ -42,6 +42,7 @@ class Epub {
   bool parseTocNavFile() const;
   bool parsePageMapFile() const;
   void parseCssFiles() const;
+  void discoverCssFilesFromZip();
 
  public:
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
