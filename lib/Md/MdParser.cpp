@@ -128,8 +128,13 @@ std::vector<Span> parseInline(const std::string& text) {
       continue;
     }
 
-    // ~~ — toggle strikethrough
+    // ~~ — toggle strikethrough; only open if a closing ~~ exists ahead
     if (c == '~' && i + 1 < text.size() && text[i + 1] == '~') {
+      if (!strike && text.find("~~", i + 2) == std::string::npos) {
+        current.append("~~");
+        i += 2;
+        continue;
+      }
       emitSpan();
       strike = !strike;
       i += 2;
