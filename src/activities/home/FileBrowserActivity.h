@@ -15,6 +15,7 @@ class FileBrowserActivity final : public Activity {
 
  private:
   void clearFileMetadata(const std::string& fullPath);
+  bool removeDirRecursive(const std::string& fullPath);
   void openContextMenu();
   void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry);
   void doMarkAsRead(const std::string& fullPath);
