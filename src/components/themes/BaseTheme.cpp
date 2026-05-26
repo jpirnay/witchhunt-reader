@@ -765,7 +765,7 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const bool isStarred,
-                              const std::string& printedPageLabel) const {
+                              const std::string& printedPageLabel, const bool fillMargin) const {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -773,7 +773,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   const auto screenHeight = renderer.getScreenHeight();
   const auto screenWidth = renderer.getScreenWidth();
-  const int progressBarMaxWidth = screenWidth - orientedMarginLeft - orientedMarginRight;
+  // fillMargin: extend bar edge-to-edge under the bezel, adapted from upstream PR #2138
+  const int barMarginLeft = fillMargin ? 0 : orientedMarginLeft;
+  const int barMarginRight = fillMargin ? 0 : orientedMarginRight;
+  const int progressBarMaxWidth = screenWidth - barMarginLeft - barMarginRight;
 
   auto drawEdgeProgressBar = [&](const uint8_t progressBar, const uint8_t thickness, const bool topEdge) {
     const int barHeight = progressBarPixelHeight(progressBar, thickness, metrics);
@@ -782,9 +785,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     }
     const int progress = statusBarProgressPercent(progressBar, bookProgress, currentPage, pageCount);
     const int barWidth = progressBarMaxWidth * progress / 100;
+    const int extraBottom = (!topEdge && fillMargin) ? orientedMarginBottom - 1 : 0;
     const int y =
         topEdge ? orientedMarginTop + paddingBottom : screenHeight - orientedMarginBottom - paddingBottom - barHeight;
-    renderer.fillRect(orientedMarginLeft, y, barWidth, barHeight, true);
+    renderer.fillRect(barMarginLeft, y, barWidth, barHeight + extraBottom, true);
   };
 
   // Draw progress bars first; status items are then placed inside the reserved band for their selected edge.
