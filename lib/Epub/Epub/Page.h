@@ -58,7 +58,8 @@ class PageImage final : public PageElement {
   PageImage(std::shared_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
       : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad);
+  void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
+                           bool monochromeOutput = true);
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
@@ -129,16 +130,24 @@ class Page {
     footnotes.push_back(entry);
   }
 
-  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool forceLoadLargeImages = true) const;
+  // monochromeOutput=true: 1-bit Atkinson BW cache (AA off); false: 4-level Bayer cache (AA on)
+  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool forceLoadLargeImages = true,
+              bool monochromeOutput = true) const;
   void renderTextOnly(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Replay the 4-level grayscale image cache into the current renderer mode (GRAYSCALE_LSB / MSB).
+  // Called by AA grayscale passes after renderTextOnly() so images get proper gray tones.
+  // No-op for images without a grayscale cache (they degrade gracefully to BW-only).
+  void renderImagesFromGrayscaleCache(GfxRenderer& renderer, int xOffset, int yOffset) const;
   // Decode any missing .pxc pixel caches for images on this page. Called before the
   // BW render so the large (~60 KB contiguous) PNG decoder allocation runs while heap
   // contig is at its peak — before font prewarm and BW backup chunks fragment it.
   // Writes pixels to the framebuffer as a side effect (decoder requirement); callers
   // must clearScreen() afterward if the framebuffer needs to be clean.
-  void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages) const;
-  bool hasPlaceholderImages(bool forceLoadLargeImages) const;
-  bool allImagesArePlaceholders(bool forceLoadLargeImages) const;
+  // monochromeOutput selects which cache variant to warm (BW or grayscale).
+  void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
+                       bool monochromeOutput = true) const;
+  bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
+  bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
 
