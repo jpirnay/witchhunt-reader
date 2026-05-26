@@ -310,7 +310,7 @@ void SettingsActivity::toggleCurrentSetting() {
       cfg = {.titleId = StrId::STR_REFRESH_FREQ,
              .hintId = StrId::STR_SLIDER_STEP_HINT,
              .minValue = 0,
-             .maxValue = 50,
+             .maxValue = 60,
              .initialValue = SETTINGS.refreshFrequencyPages,
              .suffix = tr(STR_PAGES_SUFFIX),
              .zeroLabel = tr(STR_NEVER)};

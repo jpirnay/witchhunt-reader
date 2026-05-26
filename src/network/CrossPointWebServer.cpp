@@ -1447,7 +1447,7 @@ void CrossPointWebServer::handleGetSettings() const {
   appendValueSetting("sleepTimeoutMinutes", I18N.get(StrId::STR_TIME_TO_SLEEP), I18N.get(StrId::STR_CAT_DISPLAY), "",
                      SETTINGS.sleepTimeoutMinutes, 0, 60, 1);
   appendValueSetting("refreshFrequencyPages", I18N.get(StrId::STR_REFRESH_FREQ), I18N.get(StrId::STR_CAT_DISPLAY),
-                     I18N.get(StrId::STR_MENU_DISP_REFRESH), SETTINGS.refreshFrequencyPages, 0, 50, 1);
+                     I18N.get(StrId::STR_MENU_DISP_REFRESH), SETTINGS.refreshFrequencyPages, 0, 60, 1);
 
   result += "]";
   server->send(200, "application/json", result);
@@ -1540,7 +1540,7 @@ void CrossPointWebServer::handlePostSettings() {
   }
   if (doc["refreshFrequencyPages"].is<int>()) {
     const int v = doc["refreshFrequencyPages"].as<int>();
-    if (v >= 0 && v <= 50) {
+    if (v >= 0 && v <= 60) {
       SETTINGS.refreshFrequencyPages = static_cast<uint8_t>(v);
       applied++;
     }

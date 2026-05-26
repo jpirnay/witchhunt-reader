@@ -295,7 +295,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     if (needsResave) *needsResave = true;
   } else {
     const uint8_t v = doc["refreshFrequencyPages"] | s.refreshFrequencyPages;
-    s.refreshFrequencyPages = (v <= 50) ? v : 15;
+    s.refreshFrequencyPages = (v <= 60) ? v : 15;
   }
 
   const auto settings = getSettingsList();

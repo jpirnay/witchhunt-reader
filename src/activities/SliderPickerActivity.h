@@ -26,7 +26,9 @@ class SliderPickerActivity : public Activity {
   };
 
   explicit SliderPickerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Config config)
-      : Activity("SliderPicker", renderer, mappedInput), value(config.initialValue), cfg(std::move(config)) {}
+      : Activity("SliderPicker", renderer, mappedInput),
+        value(std::max(config.minValue, std::min(config.maxValue, config.initialValue))),
+        cfg(std::move(config)) {}
 
   void onEnter() override;
   void onExit() override;

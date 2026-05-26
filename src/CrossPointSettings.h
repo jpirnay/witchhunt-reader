@@ -263,7 +263,7 @@ class CrossPointSettings {
   uint8_t refreshFrequency = REFRESH_15;
   // Auto-sleep timeout in minutes (0 = never sleep, 1–60). Replaces sleepTimeout enum.
   uint8_t sleepTimeoutMinutes = 10;
-  // Full-refresh frequency in pages (0 = never full-refresh, 1–50). Replaces refreshFrequency enum.
+  // Full-refresh frequency in pages (0 = never full-refresh, 1–60). Replaces refreshFrequency enum.
   uint8_t refreshFrequencyPages = 15;
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
