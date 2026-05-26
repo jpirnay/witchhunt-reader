@@ -31,14 +31,24 @@ class ImageBlock final : public Block {
   // False when: forceLoad is true, image is not large, or pixel cache already exists.
   bool wouldShowPlaceholder(bool forceLoad) const;
 
-  // True when the .pxc pixel cache file exists for this image at the current
-  // dither setting. Used by warm-cache paths to skip already-cached images.
+  // True when the 1-bit .pxc pixel cache exists (BW plane rendering).
+  // Used by warm-cache paths to skip already-cached images.
   bool hasPixelCache() const;
+
+  // True when the 4-level .pxc pixel cache exists (grayscale AA rendering).
+  bool hasGrayscaleCache() const;
+
+  // Render the 4-level cache into the framebuffer using the renderer's current
+  // mode (GRAYSCALE_LSB or GRAYSCALE_MSB). No-op if no grayscale cache exists.
+  // Called by the AA grayscale passes to give images proper gray tones.
+  void renderGrayscaleFromCache(GfxRenderer& renderer, int x, int y) const;
 
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 
-  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true);
+  // monochromeOutput=true: 1-bit Atkinson dither → BW-plane rendering (AA off)
+  // monochromeOutput=false: 4-level Bayer dither → also replayed in grayscale passes (AA on)
+  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true);
   bool serialize(FsFile& file);
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 

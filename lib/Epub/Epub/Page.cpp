@@ -30,8 +30,9 @@ void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffse
   imageBlock->render(renderer, xPos + xOffset, yPos + yOffset);
 }
 
-void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad) {
-  imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad);
+void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad,
+                                    const bool monochromeOutput) {
+  imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad, monochromeOutput);
 }
 
 bool PageImage::serialize(FsFile& file) {
@@ -205,18 +206,28 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
 }
 
 void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
-                  const bool forceLoadLargeImages) const {
+                  const bool forceLoadLargeImages, const bool monochromeOutput) const {
   for (auto& element : elements) {
     if (element->getTag() == TAG_PageImage) {
-      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages);
+      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
+                                                            monochromeOutput);
     } else {
       element->render(renderer, fontId, xOffset, yOffset);
     }
   }
 }
 
-void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int yOffset,
-                           const bool forceLoadLargeImages) const {
+void Page::renderImagesFromGrayscaleCache(GfxRenderer& renderer, const int xOffset, const int yOffset) const {
+  for (const auto& element : elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& pi = static_cast<const PageImage&>(*element);
+    const auto& ib = pi.getImageBlock();
+    ib.renderGrayscaleFromCache(renderer, pi.xPos + xOffset, pi.yPos + yOffset);
+  }
+}
+
+void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoadLargeImages,
+                           const bool monochromeOutput) const {
   // Only do the costly decode pass when there's at least one image that would
   // actually require a PNG/JPG decoder allocation. Cached and placeholder paths
   // do not need the contiguous heap headroom, so skipping the iteration entirely
@@ -225,8 +236,11 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
     if (element->getTag() != TAG_PageImage) continue;
     const auto& ib = static_cast<const PageImage&>(*element).getImageBlock();
     if (ib.wouldShowPlaceholder(forceLoadLargeImages)) continue;
-    if (ib.hasPixelCache()) continue;
-    static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages);
+    // Check whether the appropriate cache already exists
+    const bool alreadyCached = monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache();
+    if (alreadyCached) continue;
+    static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
+                                                          monochromeOutput);
   }
 }
 

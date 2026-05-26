@@ -6,7 +6,6 @@
 #include <Logging.h>
 #include <Serialization.h>
 
-#include "../../../../src/CrossPointSettings.h"
 #include "../../../../src/fontIds.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
@@ -25,13 +24,18 @@ bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str());
 
 namespace {
 
-std::string getCachePath(const std::string& imagePath, ImageDitherMode ditherMode) {
-  // Replace extension with .pxc (pixel cache)
-  size_t dotPos = imagePath.rfind('.');
-  if (dotPos != std::string::npos) {
-    return imagePath.substr(0, dotPos) + getImageDitherCacheSuffix(ditherMode) + ".pxc";
-  }
-  return imagePath + getImageDitherCacheSuffix(ditherMode) + ".pxc";
+// BW-plane cache: 1-bit Atkinson, only values 0/3, for AA-off rendering.
+std::string getBwCachePath(const std::string& imagePath) {
+  size_t dot = imagePath.rfind('.');
+  if (dot != std::string::npos) return imagePath.substr(0, dot) + ".1bit.pxc";
+  return imagePath + ".1bit.pxc";
+}
+
+// Grayscale cache: 4-level Bayer (0–3), replayed in GRAYSCALE_LSB/MSB passes when AA is on.
+std::string getGrayscaleCachePath(const std::string& imagePath) {
+  size_t dot = imagePath.rfind('.');
+  if (dot != std::string::npos) return imagePath.substr(0, dot) + ".bayer.pxc";
+  return imagePath + ".bayer.pxc";
 }
 
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
@@ -116,22 +120,20 @@ bool ImageBlock::isLargeImage() const {
   return largeImageCached == 1;
 }
 
-bool ImageBlock::hasPixelCache() const {
-  const ImageDitherMode ditherMode = imageDitherModeFromSetting(SETTINGS.imageDithering);
-  return Storage.exists(getCachePath(imagePath, ditherMode).c_str());
-}
+bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
+
+bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(getGrayscaleCachePath(imagePath).c_str()); }
 
 bool ImageBlock::wouldShowPlaceholder(bool forceLoad) const {
   if (forceLoad) return false;
   if (!isLargeImage()) return false;
-  // If the pixel cache already exists the render is instant — no placeholder needed
-  const ImageDitherMode ditherMode = imageDitherModeFromSetting(SETTINGS.imageDithering);
-  const std::string pxcPath = [&] {
-    size_t dot = imagePath.rfind('.');
-    return (dot != std::string::npos ? imagePath.substr(0, dot) : imagePath) + getImageDitherCacheSuffix(ditherMode) +
-           ".pxc";
-  }();
-  return !Storage.exists(pxcPath.c_str());
+  // Either BW or grayscale cache suffices to skip the placeholder
+  return !Storage.exists(getBwCachePath(imagePath).c_str()) &&
+         !Storage.exists(getGrayscaleCachePath(imagePath).c_str());
+}
+
+void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, const int y) const {
+  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height);
 }
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
@@ -156,8 +158,10 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
   }
 }
 
-void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad) {
-  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
+void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
+                        const bool monochromeOutput) {
+  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) mono=%d", x, y, imagePath.c_str(), width, height,
+          monochromeOutput ? 1 : 0);
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
@@ -169,9 +173,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
+  // Select cache path based on rendering mode
+  const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
+
   // Try to render from pixel cache first (always, regardless of forceLoad)
-  const ImageDitherMode ditherMode = imageDitherModeFromSetting(SETTINGS.imageDithering);
-  std::string cachePath = getCachePath(imagePath, ditherMode);
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
     return;
   }
@@ -206,7 +211,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   config.maxHeight = height;
   config.useGrayscale = true;
   config.useDithering = true;
-  config.ditherMode = ditherMode;
+  config.monochromeOutput = monochromeOutput;
   config.performanceMode = false;
   config.useExactDimensions = true;
   config.cachePath = cachePath;

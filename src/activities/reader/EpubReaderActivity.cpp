@@ -166,6 +166,7 @@ bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, 
       renderer.beginStripTarget(scratch, y, rows);
       renderer.clearScreen(0x00);
       page.renderTextOnly(renderer, fontId, marginLeft, contentTop);
+      page.renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
       renderer.endStripTarget();
       renderer.writeGrayscalePlaneStrip(lsbPlane, scratch, y, rows);
     }
@@ -2156,8 +2157,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // the real BW render begins. Skips when no decode is needed (all images cached
   // or the page is text-only). Mirrors the effectiveForceLoad rule used by the
   // BW render below so placeholder logic is identical.
+  //
+  // When AA is configured, warm the 4-level grayscale cache so it can be replayed
+  // in the GRAYSCALE_LSB/MSB passes. When AA is off, warm the 1-bit BW cache.
   const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad);
+  const bool aaConfiguredForWarm = getEffectiveTextAntiAliasing();
+  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, !aaConfiguredForWarm);
   renderer.clearScreen();
 
   logReaderMemSnapshot("prewarm_begin");
@@ -2207,7 +2212,12 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   logReaderMemSnapshot("before_bw_render");
-  page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad);
+  // monochromeOutput=false when AA is on: use 4-level Bayer cache so the grayscale
+  // passes can layer gray tones on top. monochromeOutput=true when AA is off: 1-bit
+  // Atkinson gives clean halftone without mid-gray collapse in BW-only mode.
+  const bool imageMonochrome = !aaEnabledForThisRender;
+  page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
+               imageMonochrome);
   renderStatusBar();
   if (showTruncatedSectionHintThisRender) {
     const int hintX = orientedMarginLeft + 4;
@@ -2243,7 +2253,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad);
+      page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
+                   imageMonochrome);
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
@@ -2342,6 +2353,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
+      page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
       logReaderMemSnapshot("gray_lsb_end");
@@ -2351,6 +2363,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
+      page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
       logReaderMemSnapshot("gray_msb_end");
