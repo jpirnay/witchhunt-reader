@@ -425,6 +425,18 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     const std::string_view displayValue = stripTrailingImportant(propValueBuf);
     style.display = (displayValue == "none") ? CssDisplay::None : CssDisplay::Block;
     style.defined.display = 1;
+  } else if (propNameBuf == "vertical-align") {
+    const std::string_view va = stripTrailingImportant(propValueBuf);
+    if (va == "super") {
+      style.verticalAlign = CssVerticalAlign::Super;
+      style.defined.verticalAlign = 1;
+    } else if (va == "sub") {
+      style.verticalAlign = CssVerticalAlign::Sub;
+      style.defined.verticalAlign = 1;
+    } else if (va == "baseline") {
+      style.verticalAlign = CssVerticalAlign::Baseline;
+      style.defined.verticalAlign = 1;
+    }
   }
 }
 
