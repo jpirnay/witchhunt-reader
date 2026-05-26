@@ -142,36 +142,11 @@ float CrossPointSettings::getReaderLineCompression() const {
 }
 
 unsigned long CrossPointSettings::getSleepTimeoutMs() const {
-  switch (sleepTimeout) {
-    case SLEEP_1_MIN:
-      return 1UL * 60 * 1000;
-    case SLEEP_5_MIN:
-      return 5UL * 60 * 1000;
-    case SLEEP_10_MIN:
-    default:
-      return 10UL * 60 * 1000;
-    case SLEEP_15_MIN:
-      return 15UL * 60 * 1000;
-    case SLEEP_30_MIN:
-      return 30UL * 60 * 1000;
-  }
+  if (sleepTimeoutMinutes == 0) return ULONG_MAX;
+  return static_cast<unsigned long>(sleepTimeoutMinutes) * 60UL * 1000UL;
 }
 
-int CrossPointSettings::getRefreshFrequency() const {
-  switch (refreshFrequency) {
-    case REFRESH_1:
-      return 1;
-    case REFRESH_5:
-      return 5;
-    case REFRESH_10:
-      return 10;
-    case REFRESH_15:
-    default:
-      return 15;
-    case REFRESH_30:
-      return 30;
-  }
-}
+int CrossPointSettings::getRefreshFrequency() const { return static_cast<int>(refreshFrequencyPages); }
 
 int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, uint8_t size) {
   switch (family) {

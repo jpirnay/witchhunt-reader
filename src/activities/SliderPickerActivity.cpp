@@ -1,39 +1,33 @@
-#include "EpubReaderPercentSelectionActivity.h"
+#include "SliderPickerActivity.h"
 
 #include <GfxRenderer.h>
 #include <I18n.h>
 
 #include "MappedInputManager.h"
+#include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
-// Fine/coarse slider step sizes for percent adjustments.
 constexpr int kSmallStep = 1;
 constexpr int kLargeStep = 10;
 }  // namespace
 
-void EpubReaderPercentSelectionActivity::onEnter() {
+void SliderPickerActivity::onEnter() {
   Activity::onEnter();
-  // Set up rendering task and mark first frame dirty.
   requestUpdate();
 }
 
-void EpubReaderPercentSelectionActivity::onExit() { Activity::onExit(); }
+void SliderPickerActivity::onExit() { Activity::onExit(); }
 
-void EpubReaderPercentSelectionActivity::adjustPercent(const int delta) {
-  // Apply delta and clamp within 0-100.
-  percent += delta;
-  if (percent < 0) {
-    percent = 0;
-  } else if (percent > 100) {
-    percent = 100;
-  }
+void SliderPickerActivity::adjustValue(const int delta) {
+  value += delta;
+  if (value < cfg.minValue) value = cfg.minValue;
+  if (value > cfg.maxValue) value = cfg.maxValue;
   requestUpdate();
 }
 
-void EpubReaderPercentSelectionActivity::loop() {
-  // Back cancels, confirm selects, arrows adjust the percent.
+void SliderPickerActivity::loop() {
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
     if (ev.button == MappedInputManager::Button::Back && ev.type == ButtonEventManager::PressType::Short) {
@@ -45,60 +39,60 @@ void EpubReaderPercentSelectionActivity::loop() {
     }
 
     if (ev.button == MappedInputManager::Button::Confirm && ev.type == ButtonEventManager::PressType::Short) {
-      setResult(PercentResult{percent});
+      setResult(PercentResult{value});
       finish();
       return;
     }
 
     if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
         ev.type == ButtonEventManager::PressType::Short) {
-      adjustPercent(-kSmallStep);
+      adjustValue(-kSmallStep);
       return;
     }
 
     if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
         ev.type == ButtonEventManager::PressType::Short) {
-      adjustPercent(kSmallStep);
+      adjustValue(kSmallStep);
       return;
     }
   }
 
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] { adjustPercent(kLargeStep); });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] { adjustPercent(-kLargeStep); });
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] { adjustValue(kLargeStep); });
+  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] { adjustValue(-kLargeStep); });
 }
 
-void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
+void SliderPickerActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  // Title and numeric percent value.
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_GO_TO_PERCENT), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, 15, I18N.get(cfg.titleId), true, EpdFontFamily::BOLD);
 
-  const std::string percentText = std::to_string(percent) + "%";
-  renderer.drawCenteredText(UI_12_FONT_ID, 90, percentText.c_str(), true, EpdFontFamily::BOLD);
+  std::string valueText;
+  if (!cfg.zeroLabel.empty() && value == cfg.minValue) {
+    valueText = cfg.zeroLabel;
+  } else {
+    valueText = std::to_string(value) + cfg.suffix;
+  }
+  renderer.drawCenteredText(UI_12_FONT_ID, 90, valueText.c_str(), true, EpdFontFamily::BOLD);
 
-  // Draw slider track.
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   constexpr int barWidth = 360;
   constexpr int barHeight = 16;
   const int barX = contentRect.x + (contentRect.width - barWidth) / 2;
-  const int barY = 140;
+  constexpr int barY = 140;
 
   renderer.drawRect(barX, barY, barWidth, barHeight);
 
-  // Fill slider based on percent.
-  const int fillWidth = (barWidth - 4) * percent / 100;
+  const int range = cfg.maxValue - cfg.minValue;
+  const int fillWidth = range > 0 ? (barWidth - 4) * (value - cfg.minValue) / range : 0;
   if (fillWidth > 0) {
     renderer.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4);
   }
 
-  // Draw a simple knob centered at the current percent.
   const int knobX = barX + 2 + fillWidth - 2;
   renderer.fillRect(knobX, barY - 4, 4, barHeight + 8, true);
 
-  // Hint text for step sizes.
-  renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, tr(STR_PERCENT_STEP_HINT), true);
+  renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, I18N.get(cfg.hintId), true);
 
-  // Button hints follow the current front button layout.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 

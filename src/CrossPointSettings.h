@@ -258,10 +258,13 @@ class CrossPointSettings {
   uint8_t txtFontSize = MEDIUM;
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
-  // Auto-sleep timeout setting (default 10 minutes)
+  // Legacy enum fields — kept for JSON migration only; not used at runtime.
   uint8_t sleepTimeout = SLEEP_10_MIN;
-  // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
+  // Auto-sleep timeout in minutes (0 = never sleep, 1–60). Replaces sleepTimeout enum.
+  uint8_t sleepTimeoutMinutes = 10;
+  // Full-refresh frequency in pages (0 = never full-refresh, 1–50). Replaces refreshFrequency enum.
+  uint8_t refreshFrequencyPages = 15;
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
   uint8_t hyphenationEnabled = 0;

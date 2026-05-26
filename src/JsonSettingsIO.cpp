@@ -223,6 +223,8 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   }
   doc["moveFinishedBooksToCompleted"] = s.moveFinishedBooksToCompleted;
   doc["removeFinishedBooksFromRecents"] = s.removeFinishedBooksFromRecents;
+  doc["sleepTimeoutMinutes"] = s.sleepTimeoutMinutes;
+  doc["refreshFrequencyPages"] = s.refreshFrequencyPages;
 
   String json;
   serializeJson(doc, json);
@@ -271,6 +273,31 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   migrateMissingStatusSetting("statusBarItemsPosition", s.statusBarItemsPosition, "statusBarItemsPosition",
                               CrossPointSettings::STATUS_BAR_ITEMS_BOTTOM,
                               CrossPointSettings::STATUS_BAR_ITEMS_POSITION_COUNT);
+
+  // Migrate legacy sleepTimeout enum → sleepTimeoutMinutes (minutes, 0=never).
+  if (doc["sleepTimeoutMinutes"].isNull()) {
+    static const uint8_t kSleepMinutes[] = {1, 5, 10, 15, 30};
+    const uint8_t legacyIdx = clamp(doc["sleepTimeout"] | (uint8_t)CrossPointSettings::SLEEP_10_MIN,
+                                    CrossPointSettings::SLEEP_TIMEOUT_COUNT, CrossPointSettings::SLEEP_10_MIN);
+    s.sleepTimeoutMinutes = kSleepMinutes[legacyIdx];
+    if (needsResave) *needsResave = true;
+  } else {
+    const uint8_t v = doc["sleepTimeoutMinutes"] | s.sleepTimeoutMinutes;
+    s.sleepTimeoutMinutes = (v <= 60) ? v : 10;
+  }
+
+  // Migrate legacy refreshFrequency enum → refreshFrequencyPages (pages, 0=never).
+  if (doc["refreshFrequencyPages"].isNull()) {
+    static const uint8_t kRefreshPages[] = {1, 5, 10, 15, 30};
+    const uint8_t legacyIdx = clamp(doc["refreshFrequency"] | (uint8_t)CrossPointSettings::REFRESH_15,
+                                    CrossPointSettings::REFRESH_FREQUENCY_COUNT, CrossPointSettings::REFRESH_15);
+    s.refreshFrequencyPages = kRefreshPages[legacyIdx];
+    if (needsResave) *needsResave = true;
+  } else {
+    const uint8_t v = doc["refreshFrequencyPages"] | s.refreshFrequencyPages;
+    s.refreshFrequencyPages = (v <= 50) ? v : 15;
+  }
+
   const auto settings = getSettingsList();
 
   for (const auto& info : settings) {

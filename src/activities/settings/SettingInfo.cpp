@@ -48,6 +48,7 @@ std::string SettingInfo::getDisplayValue() const {
       return {};
     }
     case SettingType::ACTION:
+      if (stringGetter) return callStringGetter();
       return std::string(">>");
     case SettingType::STRING:
       return {};
