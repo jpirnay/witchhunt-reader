@@ -137,9 +137,15 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
 }
 
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
+  const int freq = SETTINGS.getRefreshFrequency();
+  if (freq == 0) {
+    // Never full-refresh: always use fast display.
+    renderer.displayBuffer();
+    return;
+  }
   if (pagesUntilFullRefresh <= 1) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    pagesUntilFullRefresh = freq;
   } else {
     renderer.displayBuffer();
     pagesUntilFullRefresh--;

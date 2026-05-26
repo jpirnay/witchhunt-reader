@@ -47,11 +47,23 @@ inline std::string getKoReaderUsername(void*) { return KOREADER_STORE.getUsernam
 
 inline std::string getKoReaderPassword(void*) { return KOREADER_STORE.getPassword(); }
 
+inline std::string getSleepTimeoutDisplay(void*) {
+  const uint8_t v = SETTINGS.sleepTimeoutMinutes;
+  if (v == 0) return std::string(tr(STR_NEVER));
+  return std::to_string(v) + tr(STR_MIN_SUFFIX);
+}
+
+inline std::string getRefreshFrequencyDisplay(void*) {
+  const uint8_t v = SETTINGS.refreshFrequencyPages;
+  if (v == 0) return std::string(tr(STR_NEVER));
+  return std::to_string(v) + tr(STR_PAGES_SUFFIX);
+}
+
 inline const std::vector<SettingInfo> list = {
     // --- Display ---
-    SettingInfo::Enum(StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeout,
-                      {StrId::STR_MIN_1, StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30},
-                      "sleepTimeout", StrId::STR_CAT_DISPLAY),
+    SettingInfo::Action(StrId::STR_TIME_TO_SLEEP, SettingAction::SleepTimeoutPicker)
+        .withDisplayGetter(getSleepTimeoutDisplay)
+        .withCategory(StrId::STR_CAT_DISPLAY),
     SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
                       {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER, StrId::STR_NONE_OPT,
                        StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY, StrId::STR_QUICK_RESUME},
@@ -74,10 +86,9 @@ inline const std::vector<SettingInfo> list = {
                       {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                       StrId::STR_CAT_DISPLAY)
         .withSubcategory(StrId::STR_MENU_DISP_BATTERY),
-    SettingInfo::Enum(
-        StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
-        {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
-        "refreshFrequency", StrId::STR_CAT_DISPLAY)
+    SettingInfo::Action(StrId::STR_REFRESH_FREQ, SettingAction::RefreshFrequencyPicker)
+        .withDisplayGetter(getRefreshFrequencyDisplay)
+        .withCategory(StrId::STR_CAT_DISPLAY)
         .withSubcategory(StrId::STR_MENU_DISP_REFRESH),
     SettingInfo::Toggle(StrId::STR_REFRESH_AFTER_IMAGE_PAGES, &CrossPointSettings::halfRefreshAfterImagePage,
                         "halfRefreshAfterImagePage", StrId::STR_CAT_DISPLAY)

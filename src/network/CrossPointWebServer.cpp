@@ -1424,6 +1424,31 @@ void CrossPointWebServer::handleGetSettings() const {
     result += jsonEntry;
   }
 
+  // Expose sleepTimeoutMinutes and refreshFrequencyPages as VALUE entries.
+  auto appendValueSetting = [&](const char* key, const char* name, const char* category, const char* subcategory,
+                                int value, int min, int max, int step) {
+    doc.clear();
+    doc["key"] = key;
+    doc["name"] = name;
+    doc["category"] = category;
+    doc["subcategory"] = subcategory;
+    doc["submenu"] = "";
+    doc["type"] = "value";
+    doc["value"] = value;
+    doc["min"] = min;
+    doc["max"] = max;
+    doc["step"] = step;
+    String entry;
+    serializeJson(doc, entry);
+    if (seenFirst) result += ",";
+    seenFirst = true;
+    result += entry;
+  };
+  appendValueSetting("sleepTimeoutMinutes", I18N.get(StrId::STR_TIME_TO_SLEEP), I18N.get(StrId::STR_CAT_DISPLAY), "",
+                     SETTINGS.sleepTimeoutMinutes, 0, 60, 1);
+  appendValueSetting("refreshFrequencyPages", I18N.get(StrId::STR_REFRESH_FREQ), I18N.get(StrId::STR_CAT_DISPLAY),
+                     I18N.get(StrId::STR_MENU_DISP_REFRESH), SETTINGS.refreshFrequencyPages, 0, 60, 1);
+
   result += "]";
   server->send(200, "application/json", result);
   LOG_DBG("WEB", "Served settings API");
@@ -1502,6 +1527,22 @@ void CrossPointWebServer::handlePostSettings() {
       }
       default:
         break;
+    }
+  }
+
+  // Handle sleepTimeoutMinutes and refreshFrequencyPages posted as VALUE types.
+  if (doc["sleepTimeoutMinutes"].is<int>()) {
+    const int v = doc["sleepTimeoutMinutes"].as<int>();
+    if (v >= 0 && v <= 60) {
+      SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(v);
+      applied++;
+    }
+  }
+  if (doc["refreshFrequencyPages"].is<int>()) {
+    const int v = doc["refreshFrequencyPages"].as<int>();
+    if (v >= 0 && v <= 60) {
+      SETTINGS.refreshFrequencyPages = static_cast<uint8_t>(v);
+      applied++;
     }
   }
 

@@ -32,6 +32,8 @@ enum class SettingAction {
   SyncTime,
   Weather,
   ReadingStats,
+  SleepTimeoutPicker,
+  RefreshFrequencyPicker,
   Submenu,
 };
 
@@ -146,6 +148,14 @@ struct SettingInfo {
     return s;
   }
 
+  // Attach a stateless display-value getter to an ACTION entry so it shows the current
+  // value instead of ">>". ctx is passed through; nullptr for stateless lambdas.
+  SettingInfo& withDisplayGetter(StringGetterFn fn, void* ctx = nullptr) {
+    stringGetter = fn;
+    accessorCtx = ctx;
+    return *this;
+  }
+
   static SettingInfo Value(StrId nameId, uint8_t CrossPointSettings::* ptr, const ValueRange valueRange,
                            const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
     SettingInfo s;
@@ -231,6 +241,11 @@ struct SettingInfo {
   // intercept entries with this flag before toggleValue() is called.
   SettingInfo& withSelectorActivity() {
     usesSelectorActivity = true;
+    return *this;
+  }
+
+  SettingInfo& withCategory(StrId cat) {
+    category = cat;
     return *this;
   }
 
