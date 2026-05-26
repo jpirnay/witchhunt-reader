@@ -1015,7 +1015,8 @@ def main():
 <li>pre element: leading/trailing blank lines</li>
 <li>pre with inline code element</li>
 <li>horizontal rules between paragraphs</li>
-<li>superscript and subscript rendering</li>
+<li>superscript and subscript rendering (&lt;sup&gt;/&lt;sub&gt; tags)</li>
+<li>superscript and subscript via CSS vertical-align property</li>
 <li>list rendering: ul, ol, nested, start/value attributes, bare li</li>
 </ul>
 """,
@@ -1087,6 +1088,87 @@ greet("World");</code></pre>
 <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
 <hr/>
 <p>End of horizontal rule tests.</p>
+""",
+                ),
+                [],
+            ),
+            (
+                "5. Superscript and Subscript",
+                make_chapter(
+                    "Superscript and Subscript",
+                    """
+<h2>Basic superscript</h2>
+<p>E = mc<sup>2</sup> is Einstein's mass-energy equivalence.</p>
+<p>The area of a circle is &#960;r<sup>2</sup>.</p>
+<p>2<sup>10</sup> = 1024.</p>
+<p>x<sup>n</sup> + y<sup>n</sup> = z<sup>n</sup></p>
+
+<h2>Basic subscript</h2>
+<p>Water is H<sub>2</sub>O.</p>
+<p>Carbon dioxide is CO<sub>2</sub>.</p>
+<p>The sequence a<sub>1</sub>, a<sub>2</sub>, a<sub>3</sub>, ..., a<sub>n</sub>.</p>
+<p>Glucose: C<sub>6</sub>H<sub>12</sub>O<sub>6</sub>.</p>
+
+<h2>Mixed sup and sub</h2>
+<p>The pH of water is 7, meaning [H<sub>3</sub>O<sup>+</sup>] = 10<sup>-7</sup> mol/L.</p>
+<p>Footnote reference<sup>1</sup> and another<sup>2</sup> in the same sentence.</p>
+
+<h2>Ordinals</h2>
+<p>On the 1<sup>st</sup> of January, the 2<sup>nd</sup> quarter begins on the 3<sup>rd</sup> month.</p>
+
+<h2>Nested with bold and italic</h2>
+<p>Speed of light: c = 2.998 &#215; 10<sup>8</sup> m/s.</p>
+<p>Avogadro: 6.022 &#215; 10<sup>23</sup> mol<sup>-1</sup>.</p>
+<p>Bold superscript: x<sup><b>2</b></sup> and italic subscript: H<sub><i>n</i></sub>.</p>
+
+<h2>Long runs</h2>
+<p>This word<sup>has a rather long superscript attached to it</sup> continuing normally.</p>
+<p>This word<sub>has a rather long subscript attached to it</sub> continuing normally.</p>
+""",
+                ),
+                [],
+            ),
+            (
+                "5b. vertical-align CSS",
+                make_chapter(
+                    "vertical-align CSS Superscript and Subscript",
+                    """<style>
+.sup-css { vertical-align: super; }
+.sub-css { vertical-align: sub; }
+.baseline-reset { vertical-align: baseline; }
+</style>
+
+<h2>Inline style: vertical-align super (should match &lt;sup&gt;)</h2>
+<p>E = mc<span style="vertical-align:super">2</span> (inline style super)</p>
+<p>2<span style="vertical-align:super">10</span> = 1024</p>
+<p>x<span style="vertical-align:super">n</span> + y<span style="vertical-align:super">n</span> = z<span style="vertical-align:super">n</span></p>
+
+<h2>Inline style: vertical-align sub (should match &lt;sub&gt;)</h2>
+<p>Water is H<span style="vertical-align:sub">2</span>O (inline style sub)</p>
+<p>CO<span style="vertical-align:sub">2</span> carbon dioxide</p>
+<p>C<span style="vertical-align:sub">6</span>H<span style="vertical-align:sub">12</span>O<span style="vertical-align:sub">6</span> glucose</p>
+
+<h2>Stylesheet class: vertical-align super</h2>
+<p>E = mc<span class="sup-css">2</span> (class-based super)</p>
+<p>Footnote<span class="sup-css">1</span> and another<span class="sup-css">2</span></p>
+
+<h2>Stylesheet class: vertical-align sub</h2>
+<p>H<span class="sub-css">2</span>O (class-based sub)</p>
+<p>a<span class="sub-css">1</span>, a<span class="sub-css">2</span>, ..., a<span class="sub-css">n</span></p>
+
+<h2>Mixed: tag-based vs CSS-based side by side</h2>
+<p>Tag: H<sub>2</sub>O &#8212; CSS: H<span style="vertical-align:sub">2</span>O (should look identical)</p>
+<p>Tag: mc<sup>2</sup> &#8212; CSS: mc<span style="vertical-align:super">2</span> (should look identical)</p>
+
+<h2>baseline reset cancels inherited super</h2>
+<p>Outer<span style="vertical-align:super">raised<span class="baseline-reset">normal</span>raised</span>outer</p>
+
+<h2>vertical-align super with bold and italic</h2>
+<p>Bold super: x<span style="vertical-align:super"><b>2</b></span> and italic sub: H<span style="vertical-align:sub"><i>n</i></span></p>
+
+<h2>Long run via CSS</h2>
+<p>This word<span style="vertical-align:super">has a rather long superscript via CSS</span> continuing normally.</p>
+<p>This word<span style="vertical-align:sub">has a rather long subscript via CSS</span> continuing normally.</p>
 """,
                 ),
                 [],
@@ -1169,42 +1251,6 @@ greet("World");</code></pre>
 <li><i>Italic</i> item text</li>
 <li>Item with <b>bold</b> and <i>italic</i> mixed</li>
 </ul>
-""",
-                ),
-                [],
-            ),
-            (
-                "5. Superscript and Subscript",
-                make_chapter(
-                    "Superscript and Subscript",
-                    """
-<h2>Basic superscript</h2>
-<p>E = mc<sup>2</sup> is Einstein's mass-energy equivalence.</p>
-<p>The area of a circle is &#960;r<sup>2</sup>.</p>
-<p>2<sup>10</sup> = 1024.</p>
-<p>x<sup>n</sup> + y<sup>n</sup> = z<sup>n</sup></p>
-
-<h2>Basic subscript</h2>
-<p>Water is H<sub>2</sub>O.</p>
-<p>Carbon dioxide is CO<sub>2</sub>.</p>
-<p>The sequence a<sub>1</sub>, a<sub>2</sub>, a<sub>3</sub>, ..., a<sub>n</sub>.</p>
-<p>Glucose: C<sub>6</sub>H<sub>12</sub>O<sub>6</sub>.</p>
-
-<h2>Mixed sup and sub</h2>
-<p>The pH of water is 7, meaning [H<sub>3</sub>O<sup>+</sup>] = 10<sup>-7</sup> mol/L.</p>
-<p>Footnote reference<sup>1</sup> and another<sup>2</sup> in the same sentence.</p>
-
-<h2>Ordinals</h2>
-<p>On the 1<sup>st</sup> of January, the 2<sup>nd</sup> quarter begins on the 3<sup>rd</sup> month.</p>
-
-<h2>Nested with bold and italic</h2>
-<p>Speed of light: c = 2.998 &#215; 10<sup>8</sup> m/s.</p>
-<p>Avogadro: 6.022 &#215; 10<sup>23</sup> mol<sup>-1</sup>.</p>
-<p>Bold superscript: x<sup><b>2</b></sup> and italic subscript: H<sub><i>n</i></sub>.</p>
-
-<h2>Long runs</h2>
-<p>This word<sup>has a rather long superscript attached to it</sup> continuing normally.</p>
-<p>This word<sub>has a rather long subscript attached to it</sub> continuing normally.</p>
 """,
                 ),
                 [],

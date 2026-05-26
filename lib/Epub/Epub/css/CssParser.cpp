@@ -68,10 +68,10 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
-constexpr size_t CSS_FIXED_STYLE_BYTES =
-    4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint16_t);
+constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
+                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t);
 static_assert(CSS_FIXED_STYLE_BYTES == 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           sizeof(uint8_t) + sizeof(uint16_t),
+                                           sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t),
               "CSS_FIXED_STYLE_BYTES must match the compiled style payload layout");
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
@@ -425,6 +425,18 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     const std::string_view displayValue = stripTrailingImportant(propValueBuf);
     style.display = (displayValue == "none") ? CssDisplay::None : CssDisplay::Block;
     style.defined.display = 1;
+  } else if (propNameBuf == "vertical-align") {
+    const std::string_view va = stripTrailingImportant(propValueBuf);
+    if (va == "super") {
+      style.verticalAlign = CssVerticalAlign::Super;
+      style.defined.verticalAlign = 1;
+    } else if (va == "sub") {
+      style.verticalAlign = CssVerticalAlign::Sub;
+      style.defined.verticalAlign = 1;
+    } else if (va == "baseline") {
+      style.verticalAlign = CssVerticalAlign::Baseline;
+      style.defined.verticalAlign = 1;
+    }
   }
 }
 
@@ -902,6 +914,13 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.imageHeight = (definedBits & 1 << 13) != 0;
   style.defined.imageWidth = (definedBits & 1 << 14) != 0;
   style.defined.display = (definedBits & 1 << 15) != 0;
+  uint8_t vertAlignVal = 0;
+  uint8_t vertAlignDefined = 0;
+  if (file.read(&vertAlignVal, 1) != 1 || file.read(&vertAlignDefined, 1) != 1) {
+    return false;
+  }
+  style.verticalAlign = static_cast<CssVerticalAlign>(vertAlignVal);
+  style.defined.verticalAlign = vertAlignDefined != 0 ? 1 : 0;
   return true;
 }
 
@@ -947,6 +966,8 @@ void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
   if (style.defined.imageWidth) definedBits |= 1 << 14;
   if (style.defined.display) definedBits |= 1 << 15;
   file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
+  file.write(static_cast<uint8_t>(style.verticalAlign));
+  file.write(static_cast<uint8_t>(style.defined.verticalAlign));
 }
 
 void CssParser::touchHotRule(const std::string& selector) const {
@@ -1268,6 +1289,8 @@ bool CssParser::saveToCache() const {
     if (style.defined.imageWidth) definedBits |= 1 << 14;
     if (style.defined.display) definedBits |= 1 << 15;
     file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
+    file.write(static_cast<uint8_t>(style.verticalAlign));
+    file.write(static_cast<uint8_t>(style.defined.verticalAlign));
   }
 
   LOG_DBG("CSS", "Saved %u rules to cache", ruleCount);
