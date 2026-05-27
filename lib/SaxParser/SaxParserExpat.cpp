@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "SaxParser.h"
+#include "SaxParser/SaxParser.h"
 
 // Internal state held in the opaque impl_ pointer.
 struct SaxParserImpl {
