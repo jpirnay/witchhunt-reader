@@ -114,26 +114,14 @@ std::string trim(const std::string& in) {
 }  // namespace
 
 bool ContentOpfParser::setup() {
-  parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  if (!saxParser_.init(this, startElement, endElement, characterData)) {
     LOG_DBG("COF", "Couldn't allocate memory for parser");
     return false;
   }
-
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
   return true;
 }
 
 ContentOpfParser::~ContentOpfParser() {
-  if (parser) {
-    XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-    XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-    XML_SetCharacterDataHandler(parser, nullptr);
-    XML_ParserFree(parser);
-    parser = nullptr;
-  }
   if (tempItemStore) {
     tempItemStore.close();
   }
@@ -146,50 +134,23 @@ ContentOpfParser::~ContentOpfParser() {
 size_t ContentOpfParser::write(const uint8_t data) { return write(&data, 1); }
 
 size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
-  if (!parser) return 0;
+  if (!saxParser_.isActive()) return 0;
 
   stats.writeCalls++;
   stats.bytesParsed += size;
 
-  const uint8_t* currentBufferPos = buffer;
-  auto remainingInBuffer = size;
-
-  while (remainingInBuffer > 0) {
-    void* const buf = XML_GetBuffer(parser, 1024);
-
-    if (!buf) {
-      LOG_ERR("COF", "Couldn't allocate memory for buffer");
-      XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-      XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-      XML_SetCharacterDataHandler(parser, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return 0;
-    }
-
-    const auto toRead = remainingInBuffer < 1024 ? remainingInBuffer : 1024;
-    memcpy(buf, currentBufferPos, toRead);
-
-    if (XML_ParseBuffer(parser, static_cast<int>(toRead), remainingSize == toRead) == XML_STATUS_ERROR) {
-      LOG_DBG("COF", "Parse error at line %lu: %s", XML_GetCurrentLineNumber(parser),
-              XML_ErrorString(XML_GetErrorCode(parser)));
-      XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-      XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-      XML_SetCharacterDataHandler(parser, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return 0;
-    }
-
-    currentBufferPos += toRead;
-    remainingInBuffer -= toRead;
-    remainingSize -= toRead;
+  remainingSize -= size;
+  if (!saxParser_.feed(buffer, size)) {
+    LOG_DBG("COF", "Parse error at line %d: %s", saxParser_.errorLine(), saxParser_.errorString());
+    return 0;
   }
-
+  if (remainingSize == 0) {
+    saxParser_.finalize();
+  }
   return size;
 }
 
-void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
+void ContentOpfParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ContentOpfParser*>(userData);
   (void)atts;
 
@@ -482,7 +443,7 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   }
 }
 
-void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, const int len) {
+void ContentOpfParser::characterData(void* userData, const char* s, const int len) {
   auto* self = static_cast<ContentOpfParser*>(userData);
 
   if (self->state == IN_BOOK_TITLE) {
@@ -528,7 +489,7 @@ void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, 
   }
 }
 
-void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) {
+void ContentOpfParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ContentOpfParser*>(userData);
   (void)name;
 

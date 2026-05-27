@@ -38,9 +38,12 @@ target_compile_options(crosspoint_test_common INTERFACE
 enable_testing()
 include(GoogleTest)
 
+add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParser)
+
 add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
 add_subdirectory(url_utils)
+add_subdirectory(sax_parser)
 add_subdirectory(opds_parser)
 add_subdirectory(opds_format_label)
 add_subdirectory(md_parser)

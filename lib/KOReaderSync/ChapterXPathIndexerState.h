@@ -38,7 +38,7 @@ struct StackState {
     siblingCounters.resize(32);
   }
 
-  void pushElement(const XML_Char* rawName) {
+  void pushElement(const char* rawName) {
     const size_t depth = stack.size();
     if (siblingCounters.size() <= depth) {
       siblingCounters.resize(depth + 1);
@@ -78,7 +78,7 @@ struct StackState {
     stack.pop_back();
   }
 
-  void onCharData(const XML_Char*, int) {}
+  void onCharData(const char*, int) {}
 
   int bodyIdx() const {
     for (int i = static_cast<int>(stack.size()) - 1; i >= 0; i--) {
@@ -145,22 +145,22 @@ struct StackState {
 };
 
 template <typename StateT>
-void XMLCALL parserStartCb(void* ud, const XML_Char* name, const XML_Char**) {
+void parserStartCb(void* ud, const char* name, const char**) {
   static_cast<StateT*>(ud)->onStartElement(name);
 }
 
 template <typename StateT>
-void XMLCALL parserEndCb(void* ud, const XML_Char*) {
+void parserEndCb(void* ud, const char*) {
   static_cast<StateT*>(ud)->onEndElement();
 }
 
 template <typename StateT>
-void XMLCALL parserCharCb(void* ud, const XML_Char* text, const int len) {
+void parserCharCb(void* ud, const char* text, const int len) {
   static_cast<StateT*>(ud)->onCharData(text, len);
 }
 
 template <typename StateT>
-void XMLCALL parserDefaultCb(void* ud, const XML_Char* text, const int len) {
+void parserDefaultCb(void* ud, const char* text, const int len) {
   if (isEntityRef(text, len)) {
     static_cast<StateT*>(ud)->onCharData(text, len);
   }

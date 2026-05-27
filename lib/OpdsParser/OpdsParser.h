@@ -1,10 +1,11 @@
 #pragma once
 #include <Print.h>
-#include <expat.h>
 
 #include <functional>
 #include <string>
 #include <vector>
+
+#include <SaxParser/SaxParser.h>
 
 /**
  * Type of OPDS entry.
@@ -86,19 +87,17 @@ class OpdsParser final : public Print {
   std::function<void(OpdsEntry)> onEntryParsed;
 
  private:
-  // Expat callbacks
-  static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
-  static void XMLCALL endElement(void* userData, const XML_Char* name);
-  static void XMLCALL characterData(void* userData, const XML_Char* s, int len);
+  static void startElement(void* userData, const char* name, const char** atts);
+  static void endElement(void* userData, const char* name);
+  static void characterData(void* userData, const char* s, int len);
 
   std::string searchTemplate;
   std::string osdUrl;
   std::string nextPageUrl;
   std::string prevPageUrl;
-  // Helper to find attribute value
-  static const char* findAttribute(const XML_Char** atts, const char* name);
+  static const char* findAttribute(const char** atts, const char* name);
 
-  XML_Parser parser = nullptr;
+  SaxParser saxParser_;
   OpdsEntry currentEntry;
   std::string currentText;
 

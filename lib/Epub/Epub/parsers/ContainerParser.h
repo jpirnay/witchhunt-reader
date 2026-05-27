@@ -3,7 +3,7 @@
 
 #include <string>
 
-#include "expat.h"
+#include <SaxParser/SaxParser.h>
 
 class ContainerParser final : public Print {
   enum ParserState {
@@ -13,11 +13,11 @@ class ContainerParser final : public Print {
   };
 
   size_t remainingSize;
-  XML_Parser parser = nullptr;
+  SaxParser saxParser_;
   ParserState state = START;
 
-  static void startElement(void* userData, const XML_Char* name, const XML_Char** atts);
-  static void endElement(void* userData, const XML_Char* name);
+  static void startElement(void* userData, const char* name, const char** atts);
+  static void endElement(void* userData, const char* name);
 
  public:
   std::string fullPath;

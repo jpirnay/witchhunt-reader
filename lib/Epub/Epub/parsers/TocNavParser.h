@@ -1,8 +1,9 @@
 #pragma once
 #include <Print.h>
-#include <expat.h>
 
 #include <string>
+
+#include <SaxParser/SaxParser.h>
 
 class BookMetadataCache;
 class PageListSink;
@@ -28,7 +29,7 @@ class TocNavParser final : public Print {
  private:
   const std::string& baseContentPath;
   size_t remainingSize;
-  XML_Parser parser = nullptr;
+  SaxParser saxParser_;
   ParserState state = START;
   BookMetadataCache* cache;
   // Page-list entries are streamed straight to disk via this sink. Owned by
@@ -47,9 +48,9 @@ class TocNavParser final : public Print {
   std::string currentPageLabel;
   std::string currentPageHref;
 
-  static void startElement(void* userData, const XML_Char* name, const XML_Char** atts);
-  static void characterData(void* userData, const XML_Char* s, int len);
-  static void endElement(void* userData, const XML_Char* name);
+  static void startElement(void* userData, const char* name, const char** atts);
+  static void characterData(void* userData, const char* s, int len);
+  static void endElement(void* userData, const char* name);
 
  public:
   explicit TocNavParser(const std::string& baseContentPath, const size_t xmlSize, BookMetadataCache* cache,
