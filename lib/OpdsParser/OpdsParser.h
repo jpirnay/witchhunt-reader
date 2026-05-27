@@ -1,11 +1,10 @@
 #pragma once
 #include <Print.h>
+#include <SaxParser/SaxParser.h>
 
 #include <functional>
 #include <string>
 #include <vector>
-
-#include <SaxParser/SaxParser.h>
 
 /**
  * Type of OPDS entry.

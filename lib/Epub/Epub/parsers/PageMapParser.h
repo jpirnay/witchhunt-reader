@@ -1,9 +1,8 @@
 #pragma once
 #include <Print.h>
+#include <SaxParser/SaxParser.h>
 
 #include <string>
-
-#include <SaxParser/SaxParser.h>
 
 class PageListSink;
 
