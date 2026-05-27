@@ -5,9 +5,9 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <SaxParser/SaxParser.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
-#include <SaxParser/SaxParser.h>
 
 #include <algorithm>
 #include <cctype>

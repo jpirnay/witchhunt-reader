@@ -1,12 +1,12 @@
 #pragma once
 #include <Print.h>
+#include <SaxParser/SaxParser.h>
 
 #include <algorithm>
 #include <deque>
 #include <vector>
 
 #include "Epub.h"
-#include <SaxParser/SaxParser.h>
 
 class BookMetadataCache;
 

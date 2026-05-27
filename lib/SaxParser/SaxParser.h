@@ -5,9 +5,9 @@
 
 // Callback signatures matching the existing XMLCALL static-function pattern.
 // atts is a null-terminated flat array of alternating key/value pairs (expat convention).
-using SaxStartCb   = void (*)(void* userData, const char* name, const char** atts);
-using SaxEndCb     = void (*)(void* userData, const char* name);
-using SaxCharCb    = void (*)(void* userData, const char* s, int len);
+using SaxStartCb = void (*)(void* userData, const char* name, const char** atts);
+using SaxEndCb = void (*)(void* userData, const char* name);
+using SaxCharCb = void (*)(void* userData, const char* s, int len);
 using SaxDefaultCb = void (*)(void* userData, const char* s, int len);  // entities / default
 
 // XML_Char compatibility alias: expat defined XML_Char as char; we keep the
@@ -43,16 +43,16 @@ class SaxParser {
   uint32_t byteOffset() const;
 
   // Error details — populated on feed()/finalize() returning false.
-  int         errorLine()   const { return errorLine_; }
+  int errorLine() const { return errorLine_; }
   const char* errorString() const { return errorString_ ? errorString_ : ""; }
 
-  bool isActive()  const { return impl_ != nullptr; }
+  bool isActive() const { return impl_ != nullptr; }
   // True after stop() has been called — distinguishes intentional early exit from errors.
   bool isStopped() const { return stopped_; }
 
  private:
-  void*       impl_        = nullptr;
-  bool        stopped_     = false;
-  int         errorLine_   = 0;
+  void* impl_ = nullptr;
+  bool stopped_ = false;
+  int errorLine_ = 0;
   const char* errorString_ = nullptr;
 };

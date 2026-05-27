@@ -1,16 +1,16 @@
-#include "SaxParser.h"
-
 #include <expat.h>
+
+#include "SaxParser.h"
 
 // Internal state held in the opaque impl_ pointer.
 struct SaxParserImpl {
   XML_Parser parser = nullptr;
 
-  SaxStartCb   startCb   = nullptr;
-  SaxEndCb     endCb     = nullptr;
-  SaxCharCb    charCb    = nullptr;
+  SaxStartCb startCb = nullptr;
+  SaxEndCb endCb = nullptr;
+  SaxCharCb charCb = nullptr;
   SaxDefaultCb defaultCb = nullptr;
-  void*        userData  = nullptr;
+  void* userData = nullptr;
 
   // Wrappers that adapt expat's XML_Char* signatures to the SaxParser char* signatures.
   // expat defines XML_Char as char (when XML_UNICODE is not set), so these are casts only.
@@ -49,22 +49,21 @@ SaxParser::~SaxParser() {
   impl_ = nullptr;
 }
 
-bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxCharCb charCb,
-                     SaxDefaultCb defaultCb) {
+bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxCharCb charCb, SaxDefaultCb defaultCb) {
   // Destroy any previous state.
   this->~SaxParser();
 
   XML_Parser parser = XML_ParserCreate(nullptr);
   if (!parser) return false;
 
-  auto* impl       = new SaxParserImpl;
-  impl->parser     = parser;
-  impl->userData   = userData;
-  impl->startCb    = startCb;
-  impl->endCb      = endCb;
-  impl->charCb     = charCb;
-  impl->defaultCb  = defaultCb;
-  impl_            = impl;
+  auto* impl = new SaxParserImpl;
+  impl->parser = parser;
+  impl->userData = userData;
+  impl->startCb = startCb;
+  impl->endCb = endCb;
+  impl->charCb = charCb;
+  impl->defaultCb = defaultCb;
+  impl_ = impl;
 
   XML_SetUserData(parser, impl);
   XML_SetElementHandler(parser, SaxParserImpl::expatStart, SaxParserImpl::expatEnd);
@@ -95,11 +94,11 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       if (XML_GetErrorCode(impl->parser) == XML_ERROR_ABORTED) {
         return true;  // stop() was called — intentional early exit, not an error
       }
-      errorLine_   = static_cast<int>(XML_GetCurrentLineNumber(impl->parser));
+      errorLine_ = static_cast<int>(XML_GetCurrentLineNumber(impl->parser));
       errorString_ = XML_ErrorString(XML_GetErrorCode(impl->parser));
       return false;
     }
-    cursor    += chunk;
+    cursor += chunk;
     remaining -= chunk;
   }
   return true;
@@ -113,7 +112,7 @@ bool SaxParser::finalize() {
   bool ok = true;
   if (XML_ParseBuffer(impl->parser, 0, 1) == XML_STATUS_ERROR) {
     if (XML_GetErrorCode(impl->parser) != XML_ERROR_ABORTED) {
-      errorLine_   = static_cast<int>(XML_GetCurrentLineNumber(impl->parser));
+      errorLine_ = static_cast<int>(XML_GetCurrentLineNumber(impl->parser));
       errorString_ = XML_ErrorString(XML_GetErrorCode(impl->parser));
       ok = false;
     }
