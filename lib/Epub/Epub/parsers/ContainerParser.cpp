@@ -3,6 +3,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstring>
 
 bool ContainerParser::setup() {
   if (!saxParser_.init(this, startElement, endElement)) {
