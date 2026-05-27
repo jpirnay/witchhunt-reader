@@ -16,7 +16,7 @@ target_include_directories(SaxParser PUBLIC
   ${EXPAT_INCLUDE_DIRS}
 )
 
-target_compile_definitions(SaxParser PUBLIC
+target_compile_definitions(SaxParser PRIVATE
   XML_GE=0
   XML_CONTEXT_BYTES=1024
 )
