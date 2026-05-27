@@ -1,6 +1,5 @@
-#include <gtest/gtest.h>
-
 #include <SaxParser/SaxParser.h>
+#include <gtest/gtest.h>
 
 #include <cstring>
 #include <string>
@@ -50,11 +49,16 @@ TEST(SaxParser, ParseMinimalDocument) {
   ASSERT_TRUE(p.finalize());
 
   ASSERT_EQ(c.events.size(), 5u);
-  EXPECT_EQ(c.events[0].type, Event::Type::Start); EXPECT_EQ(c.events[0].name, "root");
-  EXPECT_EQ(c.events[1].type, Event::Type::Start); EXPECT_EQ(c.events[1].name, "child");
-  EXPECT_EQ(c.events[2].type, Event::Type::Char);  EXPECT_EQ(c.events[2].text, "hello");
-  EXPECT_EQ(c.events[3].type, Event::Type::End);   EXPECT_EQ(c.events[3].name, "child");
-  EXPECT_EQ(c.events[4].type, Event::Type::End);   EXPECT_EQ(c.events[4].name, "root");
+  EXPECT_EQ(c.events[0].type, Event::Type::Start);
+  EXPECT_EQ(c.events[0].name, "root");
+  EXPECT_EQ(c.events[1].type, Event::Type::Start);
+  EXPECT_EQ(c.events[1].name, "child");
+  EXPECT_EQ(c.events[2].type, Event::Type::Char);
+  EXPECT_EQ(c.events[2].text, "hello");
+  EXPECT_EQ(c.events[3].type, Event::Type::End);
+  EXPECT_EQ(c.events[3].name, "child");
+  EXPECT_EQ(c.events[4].type, Event::Type::End);
+  EXPECT_EQ(c.events[4].name, "root");
 }
 
 TEST(SaxParser, ParseChunked) {
@@ -75,13 +79,16 @@ TEST(SaxParser, ParseChunked) {
 
   int starts = 0, ends = 0, chars = 0;
   for (const auto& e : c.events) {
-    if (e.type == Event::Type::Start) starts++;
-    else if (e.type == Event::Type::End) ends++;
-    else if (e.type == Event::Type::Char) chars++;
+    if (e.type == Event::Type::Start)
+      starts++;
+    else if (e.type == Event::Type::End)
+      ends++;
+    else if (e.type == Event::Type::Char)
+      chars++;
   }
   EXPECT_EQ(starts, 3);  // root, a, b
   EXPECT_EQ(ends, 3);
-  EXPECT_EQ(chars, 2);   // "foo", "bar"
+  EXPECT_EQ(chars, 2);  // "foo", "bar"
 }
 
 TEST(SaxParser, EarlyStop) {
@@ -98,9 +105,7 @@ TEST(SaxParser, EarlyStop) {
         s->parser->stop();
       }
     }
-    static void onEnd(void* ud, const char*) {
-      static_cast<StopAfterFirst*>(ud)->startCount;
-    }
+    static void onEnd(void* ud, const char*) { static_cast<StopAfterFirst*>(ud)->startCount; }
   };
 
   StopAfterFirst state;
