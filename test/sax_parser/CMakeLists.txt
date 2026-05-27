@@ -4,7 +4,6 @@ add_executable(SaxParserTest
 
 target_include_directories(SaxParserTest PRIVATE
   ${REPO_ROOT}/test/shims
-  ${REPO_ROOT}/lib
 )
 
 target_link_libraries(SaxParserTest PRIVATE
