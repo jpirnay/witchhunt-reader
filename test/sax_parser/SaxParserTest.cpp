@@ -105,7 +105,7 @@ TEST(SaxParser, EarlyStop) {
         s->parser->stop();
       }
     }
-    static void onEnd(void* ud, const char*) { static_cast<StopAfterFirst*>(ud)->startCount; }
+    static void onEnd(void*, const char*) {}
   };
 
   StopAfterFirst state;
@@ -150,7 +150,7 @@ TEST(SaxParser, ByteOffsetAdvances) {
         s->offsetAtChild = s->parser->byteOffset();
       }
     }
-    static void onEnd(void* ud, const char*) {}
+    static void onEnd(void*, const char*) {}
   };
 
   OffsetCapture state;

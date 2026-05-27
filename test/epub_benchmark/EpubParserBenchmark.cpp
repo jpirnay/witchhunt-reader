@@ -123,7 +123,7 @@ TEST(ExpatBaseline, RawLifecycleHeap) {
   }
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
-  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=");
+  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=", ms);
   printHeapKb(peak);
   printf(" reps=%d\n", REPS);
   SUCCEED();
@@ -144,7 +144,7 @@ TEST(ExpatBaseline, ContainerParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=");
+  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=", ms);
   printHeapKb(peak);
   printf(" fullPath=%s\n", parser.fullPath.c_str());
   EXPECT_FALSE(parser.fullPath.empty());
@@ -166,7 +166,7 @@ TEST(ExpatBaseline, TocNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=");
+  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=", ms);
   printHeapKb(peak);
   printf(" input=%zuKB\n", data.size() / 1024);
   SUCCEED();
@@ -191,7 +191,7 @@ TEST(ExpatBaseline, LargeXhtmlThroughNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=");
+  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=", ms);
   printHeapKb(peak);
   printf(" input=%zuKB\n", data.size() / 1024);
   SUCCEED();
