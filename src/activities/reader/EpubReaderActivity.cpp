@@ -166,7 +166,6 @@ bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, 
       renderer.beginStripTarget(scratch, y, rows);
       renderer.clearScreen(0x00);
       page.renderTextOnly(renderer, fontId, marginLeft, contentTop);
-      page.renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
       renderer.endStripTarget();
       renderer.writeGrayscalePlaneStrip(lsbPlane, scratch, y, rows);
     }
@@ -2169,9 +2168,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
 
-  // imageMonochrome drives both the warm cache variant and the real BW render:
-  // false = 4-level grayscale cache (AA on), true = 1-bit BW cache (AA off).
-  const bool imageMonochrome = !aaEnabledForThisRender;
+  // Always use 4-level Bayer dither for images — the spatial dither pattern
+  // gives perceptual gray levels in the BW pass without needing a grayscale
+  // plane refresh.
+  const bool imageMonochrome = false;
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~60 KB the PNG/JPG decoder needs. The decode
@@ -2205,13 +2205,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
-  // Force special handling for pages with at least one real (decoded) image when anti-aliasing is on.
-  // Mixed pages (some decoded, some placeholder) still need the AA codepath.
-  bool imagePageWithAA = page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
-                         aaEnabledForThisRender;
   bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
-  lastRenderStats.imagePageWithAA = imagePageWithAA;
+  lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   logReaderMemSnapshot("before_bw_render");
@@ -2239,30 +2235,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tBwRender = millis();
   logReaderMemSnapshot("after_bw_render");
 
-  if (imagePageWithAA) {
-    // Double FAST_REFRESH with selective image blanking (pablohc's technique):
-    // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
-    // Instead, blank only the image area and do two fast refreshes.
-    // Step 1: Display page with image area blanked (text appears, image area white)
-    // Step 2: Re-render with images and display again (images appear clean)
-    int16_t imgX, imgY, imgW, imgH;
-    if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
-      renderer.fillRect(imgX + orientedMarginLeft, imgY + contentTop, imgW, imgH, false);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-      // Re-render page content to restore images into the blanked area
-      // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
-                   imageMonochrome);
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    } else {
-      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    }
-    // Double FAST_REFRESH handles ghosting for image pages; don't count toward full refresh cadence
-    if (forceHalfRefreshThisPage) {
-      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-    }
-  } else if (forceHalfRefreshThisPage) {
+  if (forceHalfRefreshThisPage) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
@@ -2270,8 +2243,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
-  // Only schedule the half-refresh if at least one real image was decoded on this page.
-  // Placeholder-only pages don't deposit grayscale data that needs settling.
+  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
+  // Skip placeholder-only pages since no real image pixels were drawn.
   if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
       getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
     pendingHalfRefreshAfterImagePage = true;
@@ -2352,7 +2325,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-      page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
       logReaderMemSnapshot("gray_lsb_end");
@@ -2362,7 +2334,6 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-      page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
       logReaderMemSnapshot("gray_msb_end");
