@@ -1879,14 +1879,10 @@ size_t ChapterHtmlSlimParser::write(const uint8_t* buffer, const size_t size) {
 }
 
 bool ChapterHtmlSlimParser::finalize() {
-  if (!saxParser_.isActive()) {
-    return false;
-  }
-
   bool success = !streamFailed;
-  if (success) {
+  if (saxParser_.isActive()) {
     // Emit terminating empty parse so the parser finalizes any pending tokens.
-    if (!saxParser_.finalize()) {
+    if (success && !saxParser_.finalize()) {
       LOG_ERR("EHP", "Parse error at line %d (finalize):\n%s", saxParser_.errorLine(), saxParser_.errorString());
       success = false;
       streamFailed = true;

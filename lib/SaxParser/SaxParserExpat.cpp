@@ -1,5 +1,7 @@
 #include <expat.h>
 
+#include <cstring>
+
 #include "SaxParser.h"
 
 // Internal state held in the opaque impl_ pointer.
@@ -34,7 +36,7 @@ struct SaxParserImpl {
 
 // ---------------------------------------------------------------------------
 
-SaxParser::~SaxParser() {
+void SaxParser::reset() {
   if (!impl_) return;
   auto* impl = static_cast<SaxParserImpl*>(impl_);
   if (impl->parser) {
@@ -49,9 +51,14 @@ SaxParser::~SaxParser() {
   impl_ = nullptr;
 }
 
+SaxParser::~SaxParser() { reset(); }
+
 bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxCharCb charCb, SaxDefaultCb defaultCb) {
-  // Destroy any previous state.
-  this->~SaxParser();
+  // Release any previous parser and reset all state before re-initialising.
+  reset();
+  stopped_ = false;
+  errorLine_ = 0;
+  errorString_ = nullptr;
 
   XML_Parser parser = XML_ParserCreate(nullptr);
   if (!parser) return false;
@@ -75,6 +82,7 @@ bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxChar
 
 bool SaxParser::feed(const uint8_t* buf, size_t len) {
   if (!impl_) return false;
+  if (!buf && len > 0) return false;
   auto* impl = static_cast<SaxParserImpl*>(impl_);
   if (!impl->parser) return false;
 

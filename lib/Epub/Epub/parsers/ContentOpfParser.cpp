@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include <algorithm>
 #include <cctype>
 
 #include "../BookMetadataCache.h"
@@ -139,13 +140,16 @@ size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
   stats.writeCalls++;
   stats.bytesParsed += size;
 
-  remainingSize -= size;
+  remainingSize -= std::min(size, remainingSize);
   if (!saxParser_.feed(buffer, size)) {
     LOG_DBG("COF", "Parse error at line %d: %s", saxParser_.errorLine(), saxParser_.errorString());
     return 0;
   }
   if (remainingSize == 0) {
-    saxParser_.finalize();
+    if (!saxParser_.finalize()) {
+      LOG_DBG("COF", "Parse error (finalize): %s", saxParser_.errorString());
+      return 0;
+    }
   }
   return size;
 }

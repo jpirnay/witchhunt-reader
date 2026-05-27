@@ -15,33 +15,30 @@
 #include <string>
 #include <vector>
 
-// Heap tracking via malloc/free wrappers.
-// We wrap malloc/free on Linux/Mac; on Windows use _malloc_dbg or a simple
-// atomic counter via operator new override.
+// Heap tracking via operator new/delete overrides (Windows only).
+// On non-Windows the counters are always zero; heapStopTracking returns
+// SIZE_MAX as a sentinel so callers can print "n/a" instead of a bogus 0.
 #include <atomic>
+#include <climits>
 #include <new>
 
+#if defined(_WIN32)
 static std::atomic<size_t> g_currentHeap{0};
 static std::atomic<size_t> g_peakHeap{0};
 static std::atomic<bool> g_trackingEnabled{false};
 
-// Reset peak counters before a benchmark run.
-static void heapResetPeak() { g_peakHeap.store(g_currentHeap.load()); }
-
 static void heapStartTracking() {
+  g_peakHeap.store(g_currentHeap.load());
   g_trackingEnabled = true;
-  heapResetPeak();
 }
 
+// Returns peak bytes allocated since heapStartTracking(), or SIZE_MAX on
+// platforms where tracking is not implemented.
 static size_t heapStopTracking() {
   g_trackingEnabled = false;
   return g_peakHeap.load();
 }
 
-#if defined(_WIN32)
-// On Windows, override operator new/delete for tracking.
-// This is coarse (catches all allocations in the process) but sufficient for
-// relative comparison between expat and yxml runs.
 void* operator new(size_t sz) {
   void* p = malloc(sz);
   if (!p) throw std::bad_alloc{};
@@ -58,7 +55,19 @@ void operator delete(void* p, size_t sz) noexcept {
   if (g_trackingEnabled && sz > 0) g_currentHeap.fetch_sub(sz);
   free(p);
 }
+#else
+static void heapStartTracking() {}
+static size_t heapStopTracking() { return SIZE_MAX; }
 #endif
+
+// Format peak bytes for output: KB value on Windows, "n/a" elsewhere.
+static void printHeapKb(size_t peak) {
+  if (peak == SIZE_MAX) {
+    printf("n/a");
+  } else {
+    printf("%zuKB", peak / 1024);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -114,7 +123,9 @@ TEST(ExpatBaseline, RawLifecycleHeap) {
   }
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
-  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=%zuKB reps=%d\n", ms, peak / 1024, REPS);
+  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=");
+  printHeapKb(peak);
+  printf(" reps=%d\n", REPS);
   SUCCEED();
 }
 
@@ -133,8 +144,9 @@ TEST(ExpatBaseline, ContainerParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=%zuKB fullPath=%s\n", ms, peak / 1024,
-         parser.fullPath.c_str());
+  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=");
+  printHeapKb(peak);
+  printf(" fullPath=%s\n", parser.fullPath.c_str());
   EXPECT_FALSE(parser.fullPath.empty());
 }
 
@@ -154,8 +166,9 @@ TEST(ExpatBaseline, TocNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=%zuKB input=%zuKB\n", ms, peak / 1024,
-         data.size() / 1024);
+  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=");
+  printHeapKb(peak);
+  printf(" input=%zuKB\n", data.size() / 1024);
   SUCCEED();
 }
 
@@ -178,8 +191,9 @@ TEST(ExpatBaseline, LargeXhtmlThroughNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=%zuKB input=%zuKB\n", ms, peak / 1024,
-         data.size() / 1024);
+  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=");
+  printHeapKb(peak);
+  printf(" input=%zuKB\n", data.size() / 1024);
   SUCCEED();
 }
 
