@@ -249,9 +249,10 @@ bool BmpViewerActivity::renderDecodedImage(const bool showControls) {
     return true;
   }
 
-  // Grayscale path: three decode passes (BW + LSB + MSB), 4-level dither in all of them.
+  // Grayscale path: three decode passes (BW + LSB + MSB), 4-level Bayer in all of them.
   // Mirrors SleepActivity::renderCustomSleepScreen so the BW plane carries the same
-  // 4-level quantization as the gray planes layered on top.
+  // 4-level quantization as the gray planes layered on top — the differential gray LUT
+  // drives transitions from this base state.
   config.monochromeOutput = false;
 
   renderer.setRenderMode(GfxRenderer::BW);
