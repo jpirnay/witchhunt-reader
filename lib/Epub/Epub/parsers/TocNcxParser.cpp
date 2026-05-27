@@ -3,6 +3,8 @@
 #include <FsHelpers.h>
 #include <Logging.h>
 
+#include <algorithm>
+
 #include "../BookMetadataCache.h"
 #include "PageListSink.h"
 
@@ -21,13 +23,16 @@ size_t TocNcxParser::write(const uint8_t data) { return write(&data, 1); }
 size_t TocNcxParser::write(const uint8_t* buffer, const size_t size) {
   if (!saxParser_.isActive()) return 0;
 
-  remainingSize -= size;
+  remainingSize -= std::min(size, remainingSize);
   if (!saxParser_.feed(buffer, size)) {
     LOG_DBG("TOC", "Parse error at line %d: %s", saxParser_.errorLine(), saxParser_.errorString());
     return 0;
   }
   if (remainingSize == 0) {
-    saxParser_.finalize();
+    if (!saxParser_.finalize()) {
+      LOG_DBG("TOC", "Parse error (finalize): %s", saxParser_.errorString());
+      return 0;
+    }
   }
   return size;
 }

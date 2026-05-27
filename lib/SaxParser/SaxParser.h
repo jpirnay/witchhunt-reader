@@ -51,6 +51,8 @@ class SaxParser {
   bool isStopped() const { return stopped_; }
 
  private:
+  void reset();  // releases impl_ and zeros all state; safe to call any number of times
+
   void* impl_ = nullptr;
   bool stopped_ = false;
   int errorLine_ = 0;
