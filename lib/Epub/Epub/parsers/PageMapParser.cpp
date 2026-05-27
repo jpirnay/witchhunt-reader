@@ -6,66 +6,32 @@
 #include "PageListSink.h"
 
 bool PageMapParser::setup() {
-  parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  if (!saxParser_.init(this, startElement, nullptr)) {
     LOG_DBG("PMP", "Couldn't allocate memory for parser");
     return false;
   }
-
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, nullptr);
   return true;
 }
 
-PageMapParser::~PageMapParser() {
-  if (parser) {
-    XML_StopParser(parser, XML_FALSE);
-    XML_SetElementHandler(parser, nullptr, nullptr);
-    XML_ParserFree(parser);
-    parser = nullptr;
-  }
-}
+PageMapParser::~PageMapParser() = default;
 
 size_t PageMapParser::write(const uint8_t data) { return write(&data, 1); }
 
 size_t PageMapParser::write(const uint8_t* buffer, const size_t size) {
-  if (!parser) return 0;
+  if (!saxParser_.isActive()) return 0;
 
-  const uint8_t* currentBufferPos = buffer;
-  auto remainingInBuffer = size;
-
-  while (remainingInBuffer > 0) {
-    void* const buf = XML_GetBuffer(parser, 1024);
-    if (!buf) {
-      LOG_DBG("PMP", "Couldn't allocate memory for buffer");
-      XML_StopParser(parser, XML_FALSE);
-      XML_SetElementHandler(parser, nullptr, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return 0;
-    }
-
-    const auto toRead = remainingInBuffer < 1024 ? remainingInBuffer : 1024;
-    memcpy(buf, currentBufferPos, toRead);
-
-    if (XML_ParseBuffer(parser, static_cast<int>(toRead), remainingSize == toRead) == XML_STATUS_ERROR) {
-      LOG_DBG("PMP", "Parse error at line %lu: %s", XML_GetCurrentLineNumber(parser),
-              XML_ErrorString(XML_GetErrorCode(parser)));
-      XML_StopParser(parser, XML_FALSE);
-      XML_SetElementHandler(parser, nullptr, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return 0;
-    }
-
-    currentBufferPos += toRead;
-    remainingInBuffer -= toRead;
-    remainingSize -= toRead;
+  remainingSize -= size;
+  if (!saxParser_.feed(buffer, size)) {
+    LOG_DBG("PMP", "Parse error at line %d: %s", saxParser_.errorLine(), saxParser_.errorString());
+    return 0;
+  }
+  if (remainingSize == 0) {
+    saxParser_.finalize();
   }
   return size;
 }
 
-void XMLCALL PageMapParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
+void PageMapParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<PageMapParser*>(userData);
 
   // We only care about <page name="..." href="..."/> elements. The wrapping <page-map>

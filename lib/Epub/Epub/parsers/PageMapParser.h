@@ -1,8 +1,9 @@
 #pragma once
 #include <Print.h>
-#include <expat.h>
 
 #include <string>
+
+#include <SaxParser/SaxParser.h>
 
 class PageListSink;
 
@@ -13,12 +14,12 @@ class PageMapParser final : public Print {
  private:
   const std::string& baseContentPath;
   size_t remainingSize;
-  XML_Parser parser = nullptr;
+  SaxParser saxParser_;
   // Page-list entries are streamed straight to disk via this sink. Owned by
   // the caller (Epub.cpp); may be null when no page-list output is wanted.
   PageListSink* pageListSink;
 
-  static void startElement(void* userData, const XML_Char* name, const XML_Char** atts);
+  static void startElement(void* userData, const char* name, const char** atts);
 
  public:
   explicit PageMapParser(const std::string& baseContentPath, const size_t xmlSize, PageListSink* pageListSink)
