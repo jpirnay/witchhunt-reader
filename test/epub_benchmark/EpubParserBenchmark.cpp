@@ -26,9 +26,7 @@ static std::atomic<size_t> g_peakHeap{0};
 static std::atomic<bool> g_trackingEnabled{false};
 
 // Reset peak counters before a benchmark run.
-static void heapResetPeak() {
-  g_peakHeap.store(g_currentHeap.load());
-}
+static void heapResetPeak() { g_peakHeap.store(g_currentHeap.load()); }
 
 static void heapStartTracking() {
   g_trackingEnabled = true;
@@ -50,13 +48,12 @@ void* operator new(size_t sz) {
   if (g_trackingEnabled) {
     size_t cur = g_currentHeap.fetch_add(sz) + sz;
     size_t peak = g_peakHeap.load();
-    while (cur > peak && !g_peakHeap.compare_exchange_weak(peak, cur)) {}
+    while (cur > peak && !g_peakHeap.compare_exchange_weak(peak, cur)) {
+    }
   }
   return p;
 }
-void operator delete(void* p) noexcept {
-  free(p);
-}
+void operator delete(void* p) noexcept { free(p); }
 void operator delete(void* p, size_t sz) noexcept {
   if (g_trackingEnabled && sz > 0) g_currentHeap.fetch_sub(sz);
   free(p);
@@ -92,6 +89,8 @@ static long long elapsedMs(Clock::time_point start) {
 // Parser includes
 // ---------------------------------------------------------------------------
 
+#include <SaxParser/SaxParser.h>
+
 #include "ContainerParser.h"
 #include "FsHelpers.h"
 #include "TocNcxParser.h"
@@ -100,21 +99,22 @@ static long long elapsedMs(Clock::time_point start) {
 // Benchmarks
 // ---------------------------------------------------------------------------
 
-// Raw expat lifecycle: measures how much heap expat uses just to create and
-// free a parser, with no parsing — isolates the parser overhead itself.
+// Raw SaxParser lifecycle: measures heap used to create and destroy a SaxParser
+// (with a no-op start/end handler), isolating the parser engine overhead.
 TEST(ExpatBaseline, RawLifecycleHeap) {
   constexpr int REPS = 10;
+  static void (*noop)(void*, const char*, const char**) = [](void*, const char*, const char**) {};
+  static void (*noopEnd)(void*, const char*) = [](void*, const char*) {};
   heapStartTracking();
   auto t0 = Clock::now();
   for (int i = 0; i < REPS; ++i) {
-    XML_Parser p = XML_ParserCreate(nullptr);
-    // do nothing, just measure the allocation
-    XML_ParserFree(p);
+    SaxParser p;
+    p.init(nullptr, noop, noopEnd);
+    // destructor frees the parser
   }
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
-  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=%zuKB reps=%d\n",
-         ms, peak / 1024, REPS);
+  printf("BENCHMARK expat_raw_lifecycle time=%lldms heap_peak=%zuKB reps=%d\n", ms, peak / 1024, REPS);
   SUCCEED();
 }
 
@@ -133,8 +133,8 @@ TEST(ExpatBaseline, ContainerParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=%zuKB fullPath=%s\n",
-         ms, peak / 1024, parser.fullPath.c_str());
+  printf("BENCHMARK expat_container_parser time=%lldms heap_peak=%zuKB fullPath=%s\n", ms, peak / 1024,
+         parser.fullPath.c_str());
   EXPECT_FALSE(parser.fullPath.empty());
 }
 
@@ -154,8 +154,8 @@ TEST(ExpatBaseline, TocNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=%zuKB input=%zuKB\n",
-         ms, peak / 1024, data.size() / 1024);
+  printf("BENCHMARK expat_toc_ncx_parser time=%lldms heap_peak=%zuKB input=%zuKB\n", ms, peak / 1024,
+         data.size() / 1024);
   SUCCEED();
 }
 
@@ -178,8 +178,8 @@ TEST(ExpatBaseline, LargeXhtmlThroughNcxParser) {
   long long ms = elapsedMs(t0);
   size_t peak = heapStopTracking();
 
-  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=%zuKB input=%zuKB\n",
-         ms, peak / 1024, data.size() / 1024);
+  printf("BENCHMARK expat_large_xhtml_parse time=%lldms heap_peak=%zuKB input=%zuKB\n", ms, peak / 1024,
+         data.size() / 1024);
   SUCCEED();
 }
 
