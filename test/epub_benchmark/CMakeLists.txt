@@ -1,5 +1,6 @@
 add_executable(EpubParserBenchmark
   EpubParserBenchmark.cpp
+  stubs.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContainerParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/TocNcxParser.cpp
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp

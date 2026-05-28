@@ -3,8 +3,10 @@ if(PkgConfig_FOUND)
   pkg_check_modules(EXPAT libexpat)
 endif()
 if(NOT EXPAT_FOUND)
-  find_library(EXPAT_LIBRARIES NAMES expat)
-  find_path(EXPAT_INCLUDE_DIRS expat.h)
+  find_library(EXPAT_LIBRARIES NAMES expat
+    HINTS "$ENV{MSYSTEM_PREFIX}/lib" /usr/lib /usr/local/lib)
+  find_path(EXPAT_INCLUDE_DIRS expat.h
+    HINTS "$ENV{MSYSTEM_PREFIX}/include" /usr/include /usr/local/include)
 endif()
 
 add_library(SaxParser STATIC
