@@ -13,6 +13,7 @@ target_include_directories(OpdsFormatLabelTest PRIVATE
 target_link_libraries(OpdsFormatLabelTest PRIVATE
   crosspoint_test_common
   GTest::gtest_main
+  SaxParser
 )
 
 gtest_discover_tests(OpdsFormatLabelTest)

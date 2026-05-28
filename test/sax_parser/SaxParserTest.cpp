@@ -88,7 +88,7 @@ TEST(SaxParser, ParseChunked) {
   }
   EXPECT_EQ(starts, 3);  // root, a, b
   EXPECT_EQ(ends, 3);
-  EXPECT_EQ(chars, 2);  // "foo", "bar"
+  EXPECT_GE(chars, 2);  // at least one Char event per text node; expat may split across chunk boundaries
 }
 
 TEST(SaxParser, EarlyStop) {
