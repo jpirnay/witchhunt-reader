@@ -3,6 +3,7 @@
 #include <Epub/htmlEntities.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <SaxParser/SaxParser.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -20,7 +21,7 @@ std::string toLowerStr(std::string value) {
 
 bool isSkippableTag(const std::string& tag) { return tag == "head" || tag == "script" || tag == "style"; }
 
-bool isWhitespaceOnly(const XML_Char* text, const int len) {
+bool isWhitespaceOnly(const char* text, const int len) {
   for (int i = 0; i < len; i++) {
     if (!std::isspace(static_cast<unsigned char>(text[i]))) {
       return false;
@@ -39,7 +40,7 @@ static size_t countVisibleBytesInUtf8String(const char* str) {
   return count;
 }
 
-size_t countVisibleBytes(const XML_Char* text, const int len) {
+size_t countVisibleBytes(const char* text, const int len) {
   if (isEntityRef(text, len)) {
     const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
     if (resolved) {
@@ -56,7 +57,7 @@ size_t countVisibleBytes(const XML_Char* text, const int len) {
   return count;
 }
 
-size_t countUtf8Codepoints(const XML_Char* text, const int len) {
+size_t countUtf8Codepoints(const char* text, const int len) {
   if (isEntityRef(text, len)) {
     const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
     if (resolved) {
@@ -79,7 +80,7 @@ size_t countUtf8Codepoints(const XML_Char* text, const int len) {
   return count;
 }
 
-size_t codepointAtVisibleByte(const XML_Char* text, const int len, const size_t targetVisibleByte) {
+size_t codepointAtVisibleByte(const char* text, const int len, const size_t targetVisibleByte) {
   if (isEntityRef(text, len)) {
     const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
     if (resolved) {
@@ -121,7 +122,7 @@ size_t codepointAtVisibleByte(const XML_Char* text, const int len, const size_t 
   return codepoints;
 }
 
-size_t visibleBytesBeforeCodepoint(const XML_Char* text, const int len, const size_t targetCodepointOffset) {
+size_t visibleBytesBeforeCodepoint(const char* text, const int len, const size_t targetCodepointOffset) {
   if (isEntityRef(text, len)) {
     const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
     if (resolved) {
@@ -335,45 +336,43 @@ std::string decompressToTempFile(const std::shared_ptr<Epub>& epub, const int sp
 }
 
 namespace {
-// Pump the open `file` through `parser` in fixed-size chunks. Returns true on clean EOF or
-// XML_ERROR_ABORTED (caller used XML_StopParser to signal an early success). Returns false on
-// XML_GetBuffer failure or any other parse error. The file is left open — caller closes it.
-bool pumpExpatFromFile(XML_Parser parser, FsFile& file) {
+// Pump the open `file` through `saxParser` in fixed-size chunks. Returns true on clean EOF or
+// intentional early stop (stop() called from a callback). Returns false on allocation failure
+// or any other parse error. The file is left open — caller closes it.
+bool pumpSaxParserFromFile(SaxParser& saxParser, FsFile& file) {
   constexpr size_t kBufSize = 1024;
-  int done;
-  do {
-    void* const buf = XML_GetBuffer(parser, kBufSize);
-    if (!buf) {
-      return false;
-    }
+  uint8_t buf[kBufSize];
+  while (file.available()) {
     const size_t len = file.read(buf, kBufSize);
-    done = file.available() == 0;
-    if (XML_ParseBuffer(parser, static_cast<int>(len), done) == XML_STATUS_ERROR) {
-      return XML_GetErrorCode(parser) == XML_ERROR_ABORTED;
+    if (!saxParser.feed(buf, len)) {
+      return saxParser.isStopped();
     }
-  } while (!done);
-  return true;
+    if (saxParser.isStopped()) {
+      return true;
+    }
+  }
+  return saxParser.finalize() || saxParser.isStopped();
 }
 }  // namespace
 
-bool runParse(XML_Parser parser, const std::string& path) {
+bool runParse(SaxParser& saxParser, const std::string& path) {
   FsFile file;
   if (!Storage.openFileForRead("KOX", path, file)) {
     return false;
   }
-  const bool ok = pumpExpatFromFile(parser, file);
+  const bool ok = pumpSaxParserFromFile(saxParser, file);
   file.close();
   return ok;
 }
 
-// Starts Expat mid-document. Since the parser has no ancestor context (html/body stack is
+// Starts the parser mid-document. Since the parser has no ancestor context (html/body stack is
 // missing), unmatched closing tags may appear, and callbacks emitted before the first start
 // tag can look structurally odd — an empty result is normal here. Callers
 // (ChapterXPathForwardMapper.cpp) recognise the empty result and fall back to runParse from
 // byte 0 with full document context.
-bool runParseFromOffset(XML_Parser parser, const std::string& path, const uint32_t seekBytes) {
+bool runParseFromOffset(SaxParser& saxParser, const std::string& path, const uint32_t seekBytes) {
   if (seekBytes == 0) {
-    return runParse(parser, path);
+    return runParse(saxParser, path);
   }
 
   FsFile file;
@@ -383,15 +382,15 @@ bool runParseFromOffset(XML_Parser parser, const std::string& path, const uint32
 
   if (!file.seek(seekBytes)) {
     file.close();
-    return runParse(parser, path);  // fall back to full scan if seek fails
+    return runParse(saxParser, path);  // fall back to full scan if seek fails
   }
 
-  const bool ok = pumpExpatFromFile(parser, file);
+  const bool ok = pumpSaxParserFromFile(saxParser, file);
   file.close();
   return ok;
 }
 
-bool isEntityRef(const XML_Char* text, const int len) {
+bool isEntityRef(const char* text, const int len) {
   if (len < 3 || text[0] != '&' || text[len - 1] != ';') {
     return false;
   }
@@ -412,7 +411,7 @@ struct ByteCounter {
   size_t totalTextBytes = 0;
 };
 
-void XMLCALL bcStart(void* ud, const XML_Char* name, const XML_Char**) {
+void bcStart(void* ud, const char* name, const char**) {
   auto* s = static_cast<ByteCounter*>(ud);
   const std::string tag = toLowerStr(name ? name : "");
   if (tag == "body" && s->bodyStartDepth < 0) {
@@ -424,7 +423,7 @@ void XMLCALL bcStart(void* ud, const XML_Char* name, const XML_Char**) {
   s->depth++;
 }
 
-void XMLCALL bcEnd(void* ud, const XML_Char*) {
+void bcEnd(void* ud, const char*) {
   auto* s = static_cast<ByteCounter*>(ud);
   s->depth--;
   if (s->depth == s->skipDepth) {
@@ -435,7 +434,7 @@ void XMLCALL bcEnd(void* ud, const XML_Char*) {
   }
 }
 
-void XMLCALL bcChar(void* ud, const XML_Char* text, const int len) {
+void bcChar(void* ud, const char* text, const int len) {
   auto* s = static_cast<ByteCounter*>(ud);
   if (s->skipDepth >= 0 || s->bodyStartDepth < 0 || len <= 0 || isWhitespaceOnly(text, len)) {
     return;
@@ -443,7 +442,7 @@ void XMLCALL bcChar(void* ud, const XML_Char* text, const int len) {
   s->totalTextBytes += countVisibleBytes(text, len);
 }
 
-void XMLCALL bcDefault(void* ud, const XML_Char* text, const int len) {
+void bcDefault(void* ud, const char* text, const int len) {
   if (isEntityRef(text, len)) {
     bcChar(ud, text, len);
   }
@@ -453,16 +452,11 @@ void XMLCALL bcDefault(void* ud, const XML_Char* text, const int len) {
 
 size_t countTotalTextBytes(const std::string& tmpPath) {
   ByteCounter state;
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  SaxParser saxParser;
+  if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault)) {
     return 0;
   }
-  XML_SetUserData(parser, &state);
-  XML_SetElementHandler(parser, bcStart, bcEnd);
-  XML_SetCharacterDataHandler(parser, bcChar);
-  XML_SetDefaultHandlerExpand(parser, bcDefault);
-  const bool ok = runParse(parser, tmpPath);
-  XML_ParserFree(parser);
+  const bool ok = runParse(saxParser, tmpPath);
   return ok ? state.totalTextBytes : 0;
 }
 

@@ -3,74 +3,41 @@
 #include <FsHelpers.h>
 #include <Logging.h>
 
+#include <algorithm>
+
 #include "../BookMetadataCache.h"
 #include "PageListSink.h"
 
 bool TocNcxParser::setup() {
-  parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  if (!saxParser_.init(this, startElement, endElement, characterData)) {
     LOG_DBG("TOC", "Couldn't allocate memory for parser");
     return false;
   }
-
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
   return true;
 }
 
-TocNcxParser::~TocNcxParser() {
-  if (parser) {
-    XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-    XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-    XML_SetCharacterDataHandler(parser, nullptr);
-    XML_ParserFree(parser);
-    parser = nullptr;
-  }
-}
+TocNcxParser::~TocNcxParser() = default;
 
 size_t TocNcxParser::write(const uint8_t data) { return write(&data, 1); }
 
 size_t TocNcxParser::write(const uint8_t* buffer, const size_t size) {
-  if (!parser) return 0;
+  if (!saxParser_.isActive()) return 0;
 
-  const uint8_t* currentBufferPos = buffer;
-  auto remainingInBuffer = size;
-
-  while (remainingInBuffer > 0) {
-    void* const buf = XML_GetBuffer(parser, 1024);
-    if (!buf) {
-      LOG_DBG("TOC", "Couldn't allocate memory for buffer");
-      XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-      XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-      XML_SetCharacterDataHandler(parser, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
+  remainingSize -= std::min(size, remainingSize);
+  if (!saxParser_.feed(buffer, size)) {
+    LOG_DBG("TOC", "Parse error at line %d: %s", saxParser_.errorLine(), saxParser_.errorString());
+    return 0;
+  }
+  if (remainingSize == 0) {
+    if (!saxParser_.finalize()) {
+      LOG_DBG("TOC", "Parse error (finalize): %s", saxParser_.errorString());
       return 0;
     }
-
-    const auto toRead = remainingInBuffer < 1024 ? remainingInBuffer : 1024;
-    memcpy(buf, currentBufferPos, toRead);
-
-    if (XML_ParseBuffer(parser, static_cast<int>(toRead), remainingSize == toRead) == XML_STATUS_ERROR) {
-      LOG_DBG("TOC", "Parse error at line %lu: %s", XML_GetCurrentLineNumber(parser),
-              XML_ErrorString(XML_GetErrorCode(parser)));
-      XML_StopParser(parser, XML_FALSE);                // Stop any pending processing
-      XML_SetElementHandler(parser, nullptr, nullptr);  // Clear callbacks
-      XML_SetCharacterDataHandler(parser, nullptr);
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return 0;
-    }
-
-    currentBufferPos += toRead;
-    remainingInBuffer -= toRead;
-    remainingSize -= toRead;
   }
   return size;
 }
 
-void XMLCALL TocNcxParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
+void TocNcxParser::startElement(void* userData, const char* name, const char** atts) {
   // NOTE: We rely on navPoint label and content coming before any nested navPoints, this will be fine:
   // <navPoint>
   //   <navLabel><text>Chapter 1</text></navLabel>
@@ -162,7 +129,7 @@ void XMLCALL TocNcxParser::startElement(void* userData, const XML_Char* name, co
   }
 }
 
-void XMLCALL TocNcxParser::characterData(void* userData, const XML_Char* s, const int len) {
+void TocNcxParser::characterData(void* userData, const char* s, const int len) {
   auto* self = static_cast<TocNcxParser*>(userData);
   if (self->state == IN_NAV_LABEL_TEXT) {
     self->currentLabel.append(s, len);
@@ -171,7 +138,7 @@ void XMLCALL TocNcxParser::characterData(void* userData, const XML_Char* s, cons
   }
 }
 
-void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
+void TocNcxParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<TocNcxParser*>(userData);
 
   if (self->state == IN_NAV_LABEL_TEXT && strcmp(name, "text") == 0) {

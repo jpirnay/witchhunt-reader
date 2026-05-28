@@ -290,9 +290,6 @@ void XtcReaderActivity::renderPage() {
       return (bit1 << 1) | bit2;
     };
 
-    // Optimized grayscale rendering without storeBwBuffer (saves 48KB peak memory)
-    // Flow: BW display → LSB/MSB passes → grayscale display → re-render BW for next frame
-
     // Count pixel distribution for debugging
     uint32_t pixelCounts[4] = {0, 0, 0, 0};
     for (uint16_t y = 0; y < maxSrcY; y++) {
@@ -314,6 +311,9 @@ void XtcReaderActivity::renderPage() {
 
     // Display BW with conditional refresh based on pagesUntilFullRefresh
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+
+    // Snapshot BW framebuffer before overwriting it with grayscale planes
+    renderer.storeBwBuffer();
 
     // Pass 2: LSB buffer - mark DARK gray only (XTH value 1)
     // In LUT: 0 bit = apply gray effect, 1 bit = untouched
@@ -343,18 +343,8 @@ void XtcReaderActivity::renderPage() {
     // Display grayscale overlay
     renderer.displayGrayBuffer();
 
-    // Pass 4: Re-render BW to framebuffer (restore for next frame, instead of restoreBwBuffer)
-    renderer.clearScreen();
-    for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (getPixelValue(x, y) >= 1) {
-          renderer.drawPixel(x, y, true);
-        }
-      }
-    }
-
-    // Cleanup grayscale buffers with current frame buffer
-    renderer.cleanupGrayscaleWithFrameBuffer();
+    // Restore BW framebuffer for the next page turn
+    renderer.restoreBwBuffer();
 
     free(pageBuffer);
 
