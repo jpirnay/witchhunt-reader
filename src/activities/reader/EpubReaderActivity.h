@@ -123,9 +123,6 @@ class EpubReaderActivity final : public Activity {
   bool forceLoadLargeImages = false;
   // Set after each render: true if the current page contains at least one placeholder image.
   bool pageHasPlaceholders = false;
-  // Temporary AA suspension when BW snapshot allocation fails under memory pressure.
-  // Automatically lifted once heap recovers above hysteresis thresholds.
-  bool antiAliasingSuspendedLowMemory = false;
   bool showTruncatedSectionHintThisRender = false;
   uint8_t truncatedSectionHintRendersRemaining = 0;
   int lastWarnedTruncatedSpineIndex = -1;

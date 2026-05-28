@@ -968,19 +968,8 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     return;
   }
 
-  // Tiled grayscale: redirect writes to the strip scratch and clip to the
-  // current band. Single predictable branch on the hot per-pixel path.
   uint8_t* target = frameBuffer;
-  uint32_t rowY = static_cast<uint32_t>(phyY);
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  if (stripActive_) {
-    if (phyY < stripY0_ || phyY >= stripY0_ + stripRows_) {
-      return;  // pixel outside the band currently being rendered
-    }
-    target = stripBuf_;
-    rowY = static_cast<uint32_t>(phyY - stripY0_);
-  }
-#endif
+  const uint32_t rowY = static_cast<uint32_t>(phyY);
 
   // Calculate byte position and bit position
   const uint32_t byteIndex = rowY * getDisplayWidthBytes() + (phyX / 8);
@@ -1298,17 +1287,8 @@ void GfxRenderer::fillPhysicalHSpanByte(const int phyY, const int phyX_start, co
   const int cX1 = std::min(phyX_end, (int)getDisplayWidth() - 1);
   if (cX0 > cX1 || phyY < 0 || phyY >= (int)getDisplayHeight()) return;
 
-  // Tiled grayscale: redirect to the strip scratch and drop rows outside the
-  // active band. Off-band rows return cheaply before any bit-fiddling.
   uint8_t* target = frameBuffer;
-  int rowY = phyY;
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  if (stripActive_) {
-    if (phyY < stripY0_ || phyY >= stripY0_ + stripRows_) return;
-    target = stripBuf_;
-    rowY = phyY - stripY0_;
-  }
-#endif
+  const int rowY = phyY;
 
   uint8_t* const row = target + rowY * getDisplayWidthBytes();
   const int startByte = cX0 >> 3;
@@ -1935,111 +1915,8 @@ static bool start_ms_valid = false;
 void GfxRenderer::clearScreen(const uint8_t color) const {
   start_ms = millis();
   start_ms_valid = true;
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  if (stripActive_) {
-    // Clear only the active band's scratch, not the shared framebuffer.
-    memset(stripBuf_, color, static_cast<size_t>(panelWidthBytes) * stripRows_);
-    return;
-  }
-#endif
   display.clearScreen(color);
 }
-
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-void GfxRenderer::beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const {
-  // Band is caller-guaranteed in-bounds (the reader's grayscale loop computes
-  // it); assert catches future misuse in debug before it mis-renders.
-  assert(scratch != nullptr && stripRows > 0 && stripY0 >= 0 && stripY0 <= static_cast<int>(panelHeight) - stripRows);
-  stripBuf_ = scratch;
-  stripY0_ = stripY0;
-  stripRows_ = stripRows;
-  stripActive_ = true;
-
-  // Latch the orientation→phyY linear coefficients used by glyphIntersectsStrip()
-  // so the cull is one multiply-add per bbox corner instead of a switch.
-  // Derived from rotateCoordinates() with only the y-output retained.
-  switch (getOrientation()) {
-    case Portrait:
-      stripPhyYStepX_ = -1;
-      stripPhyYStepY_ = 0;
-      stripPhyYBase_ = panelHeight - 1;
-      break;
-    case LandscapeClockwise:
-      stripPhyYStepX_ = 0;
-      stripPhyYStepY_ = -1;
-      stripPhyYBase_ = panelHeight - 1;
-      break;
-    case PortraitInverted:
-      stripPhyYStepX_ = 1;
-      stripPhyYStepY_ = 0;
-      stripPhyYBase_ = 0;
-      break;
-    case LandscapeCounterClockwise:
-      stripPhyYStepX_ = 0;
-      stripPhyYStepY_ = 1;
-      stripPhyYBase_ = 0;
-      break;
-  }
-}
-
-void GfxRenderer::endStripTarget() const {
-  stripActive_ = false;
-  stripBuf_ = nullptr;
-  stripY0_ = 0;
-  stripRows_ = 0;
-}
-
-bool GfxRenderer::acquireStripScratch() {
-  if (stripScratch_) return true;
-  if (panelWidthBytes == 0 || panelHeight == 0) {
-    LOG_ERR("GFX", "acquireStripScratch called before begin()");
-    return false;
-  }
-  int rows = STRIP_SCRATCH_TARGET_BYTES / panelWidthBytes;
-  if (rows < 1) rows = 1;
-  if (rows > static_cast<int>(panelHeight)) rows = panelHeight;
-  const size_t bytes = static_cast<size_t>(panelWidthBytes) * rows;
-  stripScratch_ = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
-  if (!stripScratch_) {
-    LOG_INF("GFX", "Strip scratch alloc failed (%zu bytes)", bytes);
-    return false;
-  }
-  stripScratchRows_ = rows;
-  return true;
-}
-
-void GfxRenderer::releaseStripScratch() {
-  if (!stripScratch_) return;
-  heap_caps_free(stripScratch_);
-  stripScratch_ = nullptr;
-  stripScratchRows_ = 0;
-}
-
-bool GfxRenderer::glyphIntersectsStrip(int x0, int y0, int x1, int y1) const {
-  if (!stripActive_) {
-    return true;
-  }
-  // Use the precomputed (stepX, stepY, base) latched in beginStripTarget() so
-  // each call is two multiply-adds + a range check, no rotateCoordinates
-  // switch. The four 90-degree orientations all reduce to "phyY depends on
-  // exactly one of (x, y)" — exactly one of stepX/stepY is non-zero — so phyY
-  // is monotonic across the bbox and the two opposite-corner phyY values
-  // bracket the full physical y-extent.
-  const int ay = stripPhyYStepX_ * x0 + stripPhyYStepY_ * y0 + stripPhyYBase_;
-  const int by = stripPhyYStepX_ * x1 + stripPhyYStepY_ * y1 + stripPhyYBase_;
-  const int minY = ay < by ? ay : by;
-  const int maxY = ay > by ? ay : by;
-  return !(maxY < stripY0_ || minY >= stripY0_ + stripRows_);
-}
-
-void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const {
-  // Guard the uint16_t casts below: a negative would wrap to a huge length.
-  assert(yStart >= 0 && numRows > 0 && yStart <= static_cast<int>(panelHeight) - numRows);
-  display.writeGrayscalePlaneStrip(lsbPlane, scratch, static_cast<uint16_t>(yStart), static_cast<uint16_t>(numRows));
-}
-
-bool GfxRenderer::supportsStripGrayscale() const { return display.supportsStripGrayscale(); }
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
 void GfxRenderer::invertScreen() const {
   for (uint32_t i = 0; i < frameBufferSize; i++) {

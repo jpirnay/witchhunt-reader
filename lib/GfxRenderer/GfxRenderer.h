@@ -72,41 +72,6 @@ class GfxRenderer {
   mutable FontCacheManager* fontCacheManager_ = nullptr;
   mutable std::atomic<unsigned int> refreshOverride = REFRESH_OVERRIDE_NONE;
 
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  // Tiled grayscale strip target. When active, drawPixel(), clearScreen(),
-  // fillPhysicalHSpanByte() and renderGlyphFast2Bit() write into a caller-owned
-  // scratch holding one horizontal band of physical rows
-  // [_stripY0, _stripY0 + _stripRows) (panelWidthBytes wide) instead of the
-  // shared framebuffer; pixels outside the band are clipped. Lets grayscale
-  // planes render band-by-band straight to the controller without destroying
-  // the BW framebuffer (no storeBwBuffer). Mutable because the render path is
-  // const. See beginStripTarget()/endStripTarget().
-  mutable uint8_t* stripBuf_ = nullptr;
-  mutable int stripY0_ = 0;
-  mutable int stripRows_ = 0;
-  mutable bool stripActive_ = false;
-
-  // Precomputed orientation→physicalY linear coefficients for the band-cull
-  // fast path. Latched once in beginStripTarget() and used by every
-  // glyphIntersectsStrip() call to avoid the 4-case rotateCoordinates switch
-  // per glyph. phyY = stripPhyYStepX_ * x + stripPhyYStepY_ * y + stripPhyYBase_,
-  // with steps in {-1, 0, 1}. Orientation can't change mid-pass; the strip
-  // session is the natural latch point.
-  mutable int8_t stripPhyYStepX_ = 0;
-  mutable int8_t stripPhyYStepY_ = 0;
-  mutable int stripPhyYBase_ = 0;
-
-  // Session-owned strip scratch. acquireStripScratch() allocates once (sized
-  // STRIP_SCRATCH_TARGET_BYTES, rounded to a whole number of rows of
-  // panelWidthBytes) and the buffer persists until releaseStripScratch().
-  // Allocating per page turn fragments the tight ESP32-C3 heap badly enough
-  // to cause AA to suspend after a few pages; hold one buffer for the reader
-  // session instead. The strip height we pick at acquire time is exposed via
-  // getStripScratchRows() so the caller plans its band loop around it.
-  uint8_t* stripScratch_ = nullptr;
-  int stripScratchRows_ = 0;
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
-
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
   void freeBwBufferChunks();
@@ -130,10 +95,7 @@ class GfxRenderer {
         orientation(static_cast<int>(Portrait)),
         fadingFix(false),
         textDarkness(1) {}
-  ~GfxRenderer() {
-    freeBwBufferChunks();
-    releaseStripScratch();
-  }
+  ~GfxRenderer() { freeBwBufferChunks(); }
 
   static constexpr int VIEWABLE_MARGIN_TOP = 9;
   static constexpr int VIEWABLE_MARGIN_RIGHT = 3;
@@ -248,73 +210,45 @@ class GfxRenderer {
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;
 
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  // Tiled grayscale (X4 + X3): stream one band of a plane straight to
-  // controller RAM from `scratch` (panelWidthBytes * numRows, physical rows
-  // [yStart, yStart+numRows)), bypassing the framebuffer.
-  // supportsStripGrayscale() gates use.
-  void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch, int yStart, int numRows) const;
-  bool supportsStripGrayscale() const;
+  // Render both grayscale planes sequentially into the BW framebuffer, streaming
+  // each plane to the controller immediately after rendering it. No extra allocation
+  // is needed — the BW framebuffer is repurposed as a scratch pad for the duration
+  // of the pass. `renderFn` is called four times (LSB clear, LSB render, MSB clear,
+  // MSB render) via two (clear + render) pairs; it receives the current RenderMode.
+  // After displayGrayBuffer() the BW framebuffer is restored as the controller
+  // baseline via cleanupGrayscaleWithFrameBuffer(). The caller is responsible for
+  // setting setFastGrayscaleLut() before calling if needed.
+  //
+  // Signature: void renderFn(RenderMode mode)
+  template <typename RenderFn>
+  void renderGrayscalePlanesSequential(RenderFn renderFn) const {
+    clearScreen(0x00);
+    setRenderMode(GRAYSCALE_LSB);
+    renderFn(GRAYSCALE_LSB);
+    copyGrayscaleLsbBuffers();
+
+    clearScreen(0x00);
+    setRenderMode(GRAYSCALE_MSB);
+    renderFn(GRAYSCALE_MSB);
+    copyGrayscaleMsbBuffers();
+
+    setRenderMode(BW);
+    displayGrayBuffer();
+    cleanupGrayscaleWithFrameBuffer();
+  }
 
   // X3-only: trade AA visual fidelity for ~2.2 s faster page-flip wall clock.
   // No effect on X4 (its single grayscale LUT already runs at ~500 ms).
   void setFastGrayscaleLut(bool fast) const { display.setFastGrayscaleLut(fast); }
   bool getFastGrayscaleLut() const { return display.getFastGrayscaleLut(); }
 
-  // Tiled grayscale strip target. While active, drawPixel(), clearScreen(),
-  // fillPhysicalHSpanByte() and renderGlyphFast2Bit() operate on `scratch`
-  // (panelWidthBytes * stripRows bytes, holding physical rows
-  // [stripY0, stripY0 + stripRows)) instead of the framebuffer; pixels whose
-  // physical row falls outside the band are clipped. The clip is applied after
-  // the orientation rotate, so it is orientation-agnostic. Used to render
-  // grayscale planes band-by-band without a full second buffer.
-  void beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const;
-  void endStripTarget() const;
-
-  // Session-owned strip scratch lifecycle. Reader activities call acquire on
-  // onEnter() and release on onExit(); the buffer is then reused across all
-  // page-turn AA passes for that session. Acquire is idempotent and returns
-  // true on success or when the buffer is already held. Sizing uses the
-  // current panel geometry, so begin() must have run first.
-  bool acquireStripScratch();
-  void releaseStripScratch();
-  uint8_t* getStripScratch() const { return stripScratch_; }
-  int getStripScratchRows() const { return stripScratchRows_; }
-
-  // Target byte budget for the session-owned strip scratch. ~24 KB lands at
-  // 240 rows on both X4 (100 B/row, panel 480) → 2 bands/plane and X3
-  // (99 B/row, panel 528) → 3 bands/plane. acquire clamps to panelHeight so
-  // a smaller panel never over-allocates.
-  static constexpr int STRIP_SCRATCH_TARGET_BYTES = 24000;
-
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
-  // When a strip target is active these return the band scratch plus its
-  // physical-row origin and extent; otherwise the full framebuffer ([0,
-  // panelHeight)). Writers subtract the origin and clip to the extent, so they
-  // honor tiled-grayscale banding without per-pixel method calls.
-  uint8_t* getWriteTarget() const { return stripActive_ ? stripBuf_ : frameBuffer; }
-  int getWriteOriginY() const { return stripActive_ ? stripY0_ : 0; }
-  int getWriteRows() const { return stripActive_ ? stripRows_ : static_cast<int>(panelHeight); }
-  bool isStripActive() const { return stripActive_; }
-
-  // Band culling. Takes a glyph bounding box in logical screen coords and
-  // returns false only when a strip is active AND the box's physical y-extent
-  // lies entirely outside the active band, letting callers skip expensive
-  // bitmap decode. Returns true when no strip is active.
-  bool glyphIntersectsStrip(int x0, int y0, int x1, int y1) const;
-#else
-  // Single-buffer mode stubs so call sites compile unchanged.
-  bool supportsStripGrayscale() const { return false; }
-  void setFastGrayscaleLut(bool fast) const { display.setFastGrayscaleLut(fast); }
-  bool getFastGrayscaleLut() const { return display.getFastGrayscaleLut(); }
-  bool acquireStripScratch() { return false; }
-  void releaseStripScratch() {}
+  // Returns the full framebuffer and its extent ([0, panelHeight)).
   uint8_t* getWriteTarget() const { return frameBuffer; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return static_cast<int>(panelHeight); }
   bool isStripActive() const { return false; }
   bool glyphIntersectsStrip(int, int, int, int) const { return true; }
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   bool storeBwBuffer();                                         // Returns true if buffer was stored successfully
   bool storeBwBufferRect(int x, int y, int width, int height);  // Store only rows intersecting logical rect
