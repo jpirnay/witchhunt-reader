@@ -2168,10 +2168,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
 
-  // Always use 4-level Bayer dither for images — the spatial dither pattern
-  // gives perceptual gray levels in the BW pass without needing a grayscale
-  // plane refresh.
-  const bool imageMonochrome = false;
+  // Always use 1-bit Atkinson dither for images in the epub reader.
+  const bool imageMonochrome = true;
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~60 KB the PNG/JPG decoder needs. The decode
