@@ -221,7 +221,7 @@ class GfxRenderer {
   //
   // Signature: void renderFn(RenderMode mode)
   template <typename RenderFn>
-  void renderGrayscalePlanesSequential(RenderFn renderFn) const {
+  void renderGrayscalePlanesSequential(RenderFn renderFn) {
     clearScreen(0x00);
     setRenderMode(GRAYSCALE_LSB);
     renderFn(GRAYSCALE_LSB);
