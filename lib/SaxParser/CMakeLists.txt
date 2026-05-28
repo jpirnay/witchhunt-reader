@@ -1,28 +1,12 @@
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-  pkg_check_modules(EXPAT libexpat)
-endif()
-if(NOT EXPAT_FOUND)
-  find_library(EXPAT_LIBRARIES NAMES expat
-    HINTS "$ENV{MSYSTEM_PREFIX}/lib" /usr/lib /usr/local/lib)
-  find_path(EXPAT_INCLUDE_DIRS expat.h
-    HINTS "$ENV{MSYSTEM_PREFIX}/include" /usr/include /usr/local/include)
-endif()
-
 add_library(SaxParser STATIC
-  SaxParserExpat.cpp
+  SaxParserYxml.cpp
+  yxml.c
 )
+
+# yxml.c is plain C; force it to compile as C++ so the parent project
+# only needs to enable CXX (the test suite declares project(... CXX)).
+set_source_files_properties(yxml.c PROPERTIES LANGUAGE CXX)
 
 target_include_directories(SaxParser PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
-  ${EXPAT_INCLUDE_DIRS}
-)
-
-target_compile_definitions(SaxParser PRIVATE
-  XML_GE=0
-  XML_CONTEXT_BYTES=1024
-)
-
-target_link_libraries(SaxParser PUBLIC
-  ${EXPAT_LIBRARIES}
 )
