@@ -51,7 +51,9 @@ class HalDisplay {
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
+#ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
   void cleanupGrayscaleBuffers(const uint8_t* bwBuffer);
+#endif
 
   void displayGrayBuffer(bool turnOffScreen = false);
 

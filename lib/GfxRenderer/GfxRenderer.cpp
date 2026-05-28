@@ -2455,7 +2455,9 @@ bool GfxRenderer::storeBwBufferRect(const int x, const int y, const int width, c
  */
 void GfxRenderer::restoreBwBuffer() {
   if (bwSnapshotSizeBytes == 0) {
+#ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
     display.cleanupGrayscaleBuffers(frameBuffer);
+#endif
     freeBwBufferChunks();
     LOG_ERR("GFX", "BW restore skipped: no stored snapshot metadata; cleaned grayscale buffers only");
     return;
@@ -2474,7 +2476,9 @@ void GfxRenderer::restoreBwBuffer() {
     // Store failed part-way (or was skipped), so we cannot restore BW bytes safely.
     // Still cleanup grayscale staging buffers to avoid retaining large temporary
     // allocations that can later starve TLS handshakes.
+#ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
     display.cleanupGrayscaleBuffers(frameBuffer);
+#endif
     freeBwBufferChunks();
     bwSnapshotSizeBytes = 0;
     bwSnapshotRowStart = 0;
@@ -2490,7 +2494,9 @@ void GfxRenderer::restoreBwBuffer() {
     memcpy(frameBuffer + snapshotBaseOffset + offset, bwBufferChunks[i], chunkSize);
   }
 
+#ifdef EINK_DISPLAY_SINGLE_BUFFER_MODE
   display.cleanupGrayscaleBuffers(frameBuffer);
+#endif
 
   freeBwBufferChunks();
   LOG_DBG("GFX", "Restored BW buffer rows [%u..%u] (%zu bytes) and freed BW chunks", bwSnapshotRowStart,
