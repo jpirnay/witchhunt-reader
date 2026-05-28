@@ -430,8 +430,6 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  // Progressive JPEGs (SOF2) must use JPEG_SCALE_EIGHTH — the only mode safe with the MCU_SKIP patch.
-  // The 1/8-scale output is then passed through the custom scaler to reach the target dimensions.
   const bool progressive = isProgressiveJpeg(jpegFile);
 
   s_jpegFile = &jpegFile;
@@ -464,16 +462,13 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  // Progressive JPEGs must stay at 1/8 (DC-only mode, only safe scale with MCU_SKIP patch).
-  // For baseline JPEGs with a target size, pick the largest built-in DCT scale that still
-  // keeps the decoded image >= the target — the custom scaler handles the fine remainder.
-  // This avoids decoding millions of pixels that are immediately thrown away.
+  // Pick the largest DCT pre-scale that keeps both decoded axes >= the target so
+  // the fine scaler always downscales. Progressive JPEGs use the same logic;
+  // the MCU_SKIP patches make all three built-in scales safe for them too.
+  // No-target or already-small images fall back to full decode (denom=1).
   int jpegDecodeFlags = 0;
   int jpegScaleDenom = 1;
-  if (progressive) {
-    jpegDecodeFlags = JPEG_SCALE_EIGHTH;
-    jpegScaleDenom = 8;
-  } else if (targetWidth > 0 && targetHeight > 0) {
+  if (targetWidth > 0 && targetHeight > 0) {
     // Use max(scaleX, scaleY) as the constraint: the DCT pre-scale must keep BOTH axes
     // >= target so the fine scaler always downscales (never upscales) on either axis.
     // This is safe for both crop=true (which uses max scale) and crop=false (uses min scale).
