@@ -462,13 +462,17 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  // Pick the largest DCT pre-scale that keeps both decoded axes >= the target so
-  // the fine scaler always downscales. Progressive JPEGs use the same logic;
-  // the MCU_SKIP patches make all three built-in scales safe for them too.
-  // No-target or already-small images fall back to full decode (denom=1).
+  // Progressive JPEGs (SOF2): JPEGDEC forces JPEG_SCALE_EIGHTH internally regardless
+  // of what we pass — it only decodes the first (DC) scan at 1/8. We explicitly set it
+  // here too so jpegScaleDenom is correct for the effectiveSrcW/H calculation below.
+  // Baseline JPEGs: pick the largest DCT pre-scale that keeps both axes >= target
+  // so the fine scaler always downscales (never upscales) on either axis.
   int jpegDecodeFlags = 0;
   int jpegScaleDenom = 1;
-  if (targetWidth > 0 && targetHeight > 0) {
+  if (progressive) {
+    jpegDecodeFlags = JPEG_SCALE_EIGHTH;
+    jpegScaleDenom = 8;
+  } else if (targetWidth > 0 && targetHeight > 0) {
     // Use max(scaleX, scaleY) as the constraint: the DCT pre-scale must keep BOTH axes
     // >= target so the fine scaler always downscales (never upscales) on either axis.
     // This is safe for both crop=true (which uses max scale) and crop=false (uses min scale).
