@@ -2,7 +2,7 @@
   "name": "SaxParser",
   "version": "1.0.0",
   "build": {
-    "srcFilter": ["+<SaxParserExpat.cpp>"],
+    "srcFilter": ["+<SaxParserYxml.cpp>", "+<yxml.c>"],
     "includeDir": "."
   }
 }
