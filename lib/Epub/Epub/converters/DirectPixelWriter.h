@@ -5,23 +5,17 @@
 #include <stdint.h>
 
 // Direct framebuffer writer that eliminates per-pixel overhead from the image
-// rendering hot path.  Pre-computes orientation transform as linear coefficients
+// rendering hot path. Pre-computes orientation transform as linear coefficients
 // and caches render-mode state so the inner loop is: one multiply, one add,
 // one shift, and one AND per pixel — no branches, no method calls.
-//
-// Caller is responsible for ensuring (outX, outY) are within screen bounds.
-// ImageBlock::render() already validates this before entering the pixel loop,
-// and the JPEG/PNG callbacks pre-clamp destination ranges to screen bounds.
+// Caller is responsible for ensuring (outX, outY) are within screen bounds;
+// ImageBlock::render() and the JPEG/PNG callbacks pre-clamp to screen bounds.
 struct DirectPixelWriter {
   uint8_t* fb;
   GfxRenderer::RenderMode mode;
   uint16_t displayWidthBytes;  // Runtime framebuffer stride (X4: 100, X3: 99)
-  // Active write target: for tiled grayscale, fb is the band scratch, originY is
-  // the band's top physical row, and clipRows is the band height. Off-band
-  // pixels are dropped. With no strip active these collapse to the full frame
-  // (originY 0, clipRows panelHeight) so the clip doubles as a bounds guard.
-  int originY;
-  int clipRows;
+  int originY;                 // always 0
+  int clipRows;                // always panelHeight; doubles as an out-of-frame bounds guard
 
   // Orientation is collapsed into a linear transform:
   //   phyX = phyXBase + x * phyXStepX + y * phyXStepY
@@ -128,8 +122,6 @@ struct DirectPixelWriter {
     const int phyX = rowPhyXBase + logicalX * phyXStepX;
     const int phyY = rowPhyYBase + logicalX * phyYStepX;
 
-    // Band-local row. The unsigned compare drops both off-band pixels (strip
-    // mode) and any out-of-frame row (full-frame mode) in one branch.
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
 
