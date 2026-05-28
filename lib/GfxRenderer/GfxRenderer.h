@@ -72,6 +72,7 @@ class GfxRenderer {
   mutable FontCacheManager* fontCacheManager_ = nullptr;
   mutable std::atomic<unsigned int> refreshOverride = REFRESH_OVERRIDE_NONE;
 
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   // Tiled grayscale strip target. When active, drawPixel(), clearScreen(),
   // fillPhysicalHSpanByte() and renderGlyphFast2Bit() write into a caller-owned
   // scratch holding one horizontal band of physical rows
@@ -104,6 +105,7 @@ class GfxRenderer {
   // getStripScratchRows() so the caller plans its band loop around it.
   uint8_t* stripScratch_ = nullptr;
   int stripScratchRows_ = 0;
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
@@ -246,6 +248,7 @@ class GfxRenderer {
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;
 
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   // Tiled grayscale (X4 + X3): stream one band of a plane straight to
   // controller RAM from `scratch` (panelWidthBytes * numRows, physical rows
   // [yStart, yStart+numRows)), bypassing the framebuffer.
@@ -299,6 +302,19 @@ class GfxRenderer {
   // lies entirely outside the active band, letting callers skip expensive
   // bitmap decode. Returns true when no strip is active.
   bool glyphIntersectsStrip(int x0, int y0, int x1, int y1) const;
+#else
+  // Single-buffer mode stubs so call sites compile unchanged.
+  bool supportsStripGrayscale() const { return false; }
+  void setFastGrayscaleLut(bool fast) const { display.setFastGrayscaleLut(fast); }
+  bool getFastGrayscaleLut() const { return display.getFastGrayscaleLut(); }
+  bool acquireStripScratch() { return false; }
+  void releaseStripScratch() {}
+  uint8_t* getWriteTarget() const { return frameBuffer; }
+  int getWriteOriginY() const { return 0; }
+  int getWriteRows() const { return static_cast<int>(panelHeight); }
+  bool isStripActive() const { return false; }
+  bool glyphIntersectsStrip(int, int, int, int) const { return true; }
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   bool storeBwBuffer();                                         // Returns true if buffer was stored successfully
   bool storeBwBufferRect(int x, int y, int width, int height);  // Store only rows intersecting logical rect

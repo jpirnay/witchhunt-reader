@@ -972,6 +972,7 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   // current band. Single predictable branch on the hot per-pixel path.
   uint8_t* target = frameBuffer;
   uint32_t rowY = static_cast<uint32_t>(phyY);
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   if (stripActive_) {
     if (phyY < stripY0_ || phyY >= stripY0_ + stripRows_) {
       return;  // pixel outside the band currently being rendered
@@ -979,6 +980,7 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
     target = stripBuf_;
     rowY = static_cast<uint32_t>(phyY - stripY0_);
   }
+#endif
 
   // Calculate byte position and bit position
   const uint32_t byteIndex = rowY * getDisplayWidthBytes() + (phyX / 8);
@@ -1300,11 +1302,13 @@ void GfxRenderer::fillPhysicalHSpanByte(const int phyY, const int phyX_start, co
   // active band. Off-band rows return cheaply before any bit-fiddling.
   uint8_t* target = frameBuffer;
   int rowY = phyY;
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   if (stripActive_) {
     if (phyY < stripY0_ || phyY >= stripY0_ + stripRows_) return;
     target = stripBuf_;
     rowY = phyY - stripY0_;
   }
+#endif
 
   uint8_t* const row = target + rowY * getDisplayWidthBytes();
   const int startByte = cX0 >> 3;
@@ -1931,14 +1935,17 @@ static bool start_ms_valid = false;
 void GfxRenderer::clearScreen(const uint8_t color) const {
   start_ms = millis();
   start_ms_valid = true;
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   if (stripActive_) {
     // Clear only the active band's scratch, not the shared framebuffer.
     memset(stripBuf_, color, static_cast<size_t>(panelWidthBytes) * stripRows_);
     return;
   }
+#endif
   display.clearScreen(color);
 }
 
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
 void GfxRenderer::beginStripTarget(uint8_t* scratch, int stripY0, int stripRows) const {
   // Band is caller-guaranteed in-bounds (the reader's grayscale loop computes
   // it); assert catches future misuse in debug before it mis-renders.
@@ -2032,6 +2039,7 @@ void GfxRenderer::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* scratch
 }
 
 bool GfxRenderer::supportsStripGrayscale() const { return display.supportsStripGrayscale(); }
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
 void GfxRenderer::invertScreen() const {
   for (uint32_t i = 0; i < frameBufferSize; i++) {

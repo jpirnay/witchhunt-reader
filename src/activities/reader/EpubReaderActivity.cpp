@@ -122,6 +122,7 @@ void logReaderMemSnapshot(const char* stage) {
 inline void logReaderMemSnapshot(const char*) {}
 #endif
 
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
 // Tiled grayscale: render each plane band-by-band into a small scratch and
 // stream straight to the controller, leaving the BW framebuffer intact so no
 // storeBwBuffer / restoreBwBuffer is needed. Controller RAM is re-synced from
@@ -182,6 +183,7 @@ bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, 
   renderer.cleanupGrayscaleWithFrameBuffer();
   return true;
 }
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
 // Computes the [0..100] EPUB progress percent. Returns 0 when pageCount is unknown (sync/bookmark
 // pre-render writes), in which case the next saveProgress() will overwrite progress.bin with the
@@ -285,6 +287,7 @@ void EpubReaderActivity::onEnter() {
   }
   logReaderMemSnapshot("onEnter_after_orientation");
 
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   // Allocate the strip scratch once per reader session so tiled grayscale
   // (runTiledGrayscalePass) doesn't have to malloc ~24 KB on every page turn.
   // Failure is non-fatal: the AA pass falls back to the legacy snapshot path.
@@ -292,6 +295,7 @@ void EpubReaderActivity::onEnter() {
     LOG_INF("ERS", "Strip scratch unavailable; tiled grayscale will fall back to legacy snapshot");
   }
   logReaderMemSnapshot("onEnter_after_strip_scratch");
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
@@ -407,8 +411,10 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
   renderer.releaseStripScratch();
   logReaderMemSnapshot("onExit_after_release");
+#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 }
 
 void EpubReaderActivity::loop() {
@@ -2258,8 +2264,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   if (aaEnabledForThisRender) {
     logReaderMemSnapshot("tiled_gray_begin");
     const auto tTiledBegin = millis();
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
     grayscaleDone = runTiledGrayscalePass(renderer, *page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                                           SETTINGS.fastAntiAliasing);
+#endif
     if (grayscaleDone) {
       tiledGrayMs = millis() - tTiledBegin;
       fcm->logStats("tiled_gray");
@@ -2440,10 +2448,12 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // support strip grayscale or when the strip scratch can't be allocated.
   const bool aaConfigured = getEffectiveTextAntiAliasing() && !antiAliasingSuspendedLowMemory;
   if (aaConfigured) {
+#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
     if (runTiledGrayscalePass(renderer, page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                               SETTINGS.fastAntiAliasing)) {
       return;
     }
+#endif
 
     const uint32_t freeHeap = esp_get_free_heap_size();
     const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
