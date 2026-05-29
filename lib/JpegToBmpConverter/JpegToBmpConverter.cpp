@@ -430,8 +430,6 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  // Progressive JPEGs (SOF2) must use JPEG_SCALE_EIGHTH — the only mode safe with the MCU_SKIP patch.
-  // The 1/8-scale output is then passed through the custom scaler to reach the target dimensions.
   const bool progressive = isProgressiveJpeg(jpegFile);
 
   s_jpegFile = &jpegFile;
@@ -464,10 +462,11 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  // Progressive JPEGs must stay at 1/8 (DC-only mode, only safe scale with MCU_SKIP patch).
-  // For baseline JPEGs with a target size, pick the largest built-in DCT scale that still
-  // keeps the decoded image >= the target — the custom scaler handles the fine remainder.
-  // This avoids decoding millions of pixels that are immediately thrown away.
+  // Progressive JPEGs (SOF2): JPEGDEC forces JPEG_SCALE_EIGHTH internally regardless
+  // of what we pass — it only decodes the first (DC) scan at 1/8. We explicitly set it
+  // here too so jpegScaleDenom is correct for the effectiveSrcW/H calculation below.
+  // Baseline JPEGs: pick the largest DCT pre-scale that keeps both axes >= target
+  // so the fine scaler always downscales (never upscales) on either axis.
   int jpegDecodeFlags = 0;
   int jpegScaleDenom = 1;
   if (progressive) {

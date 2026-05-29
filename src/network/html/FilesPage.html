@@ -4475,6 +4475,36 @@
       ctx.putImageData(imageData, 0, 0);
     }
 
+    // Normalize a JPEG or PNG File to a baseline JPEG File via a canvas round-trip.
+    // The browser decodes any JPEG encoding (progressive, multi-scan, etc.) and
+    // canvas.toBlob always produces a standard baseline JPEG that JPEGDEC can decode.
+    // PNG files are also converted to JPEG for the same reason (JPEGDEC only handles JPEG).
+    // Falls back to the original file if decode or encode fails.
+    async function normalizeImageToBaseline(file) {
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (!blob) { resolve(file); return; }
+            // Keep original filename but ensure .jpg extension
+            const baseName = file.name.replace(/\.(jpe?g|png)$/i, '');
+            resolve(new File([blob], baseName + '.jpg', { type: 'image/jpeg' }));
+          }, 'image/jpeg', 0.92);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+        img.src = url;
+      });
+    }
+
     // Process single image - returns array of {data, suffix} objects
     const IMAGE_LOAD_TIMEOUT_MS = 30000; // 30 second timeout for image loading
     async function processImage(data, imageState = 0, imagePath = '') {
@@ -5444,6 +5474,9 @@
         // Check if file is an EPUB and conversion is enabled
         const isEpub = file.name.toLowerCase().endsWith('.epub');
         const needsConversion = isEpub && convertEnabled;
+        const lowerName = file.name.toLowerCase();
+        const isJpeg = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg');
+        const isPng  = lowerName.endsWith('.png');
         let conversionSucceeded = false;
         let conversionFailed = false;  // Track if conversion actually failed
         let convOriginalSize = 0;      // Picked-file size; 0 unless conversion succeeded
@@ -5575,6 +5608,17 @@
               progressFill.style.backgroundColor = '#e67e22'; // Orange for fallback
               // Reset progress bar to 0% for original file upload
               progressFill.style.width = '0%';
+            }
+          }
+
+          // Normalize JPEG/PNG to baseline JPEG via a canvas round-trip.
+          // The browser decodes any JPEG variant (including multi-scan progressive)
+          // and canvas.toBlob always emits baseline JPEG — which JPEGDEC can handle.
+          if ((isJpeg || isPng) && !needsConversion) {
+            try {
+              file = await normalizeImageToBaseline(file);
+            } catch (e) {
+              console.warn('[Upload] Image normalize failed, uploading original:', e);
             }
           }
 
