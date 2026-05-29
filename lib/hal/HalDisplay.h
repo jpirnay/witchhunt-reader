@@ -51,17 +51,11 @@ class HalDisplay {
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
+  void syncRedRamFromFrameBuffer();
   void cleanupGrayscaleBuffers(const uint8_t* bwBuffer);
+  void cleanupGrayscaleWithPreviousBuffer();
 
   void displayGrayBuffer(bool turnOffScreen = false);
-
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
-  // straight to the controller; supportsStripGrayscale() gates the path. See
-  // EInkDisplay::writeGrayscalePlaneStrip.
-  void writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, uint16_t yStart, uint16_t numRows);
-  bool supportsStripGrayscale() const;
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   // X3-only knob: pick between the OEM 53-frame grayscale LUT (default, slow
   // and accurate) and the 7-frame community LUT (fast, slightly darker

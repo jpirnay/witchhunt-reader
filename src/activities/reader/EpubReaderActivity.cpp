@@ -81,33 +81,6 @@ constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 constexpr uint32_t SILENT_INDEX_MIN_FREE_HEAP_BYTES = CP_SILENT_INDEX_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t SILENT_INDEX_MIN_CONTIG_HEAP_BYTES = CP_SILENT_INDEX_MIN_CONTIG_HEAP_BYTES;
 
-// Hysteresis for auto AA recovery after low-memory BW snapshot failures.
-// Override at build time via -D flags, for example:
-//   -DCP_AA_RECOVERY_FREE_HEAP_BYTES=30720
-//   -DCP_AA_RECOVERY_CONTIG_HEAP_BYTES=12288
-#ifndef CP_AA_RECOVERY_FREE_HEAP_BYTES
-#define CP_AA_RECOVERY_FREE_HEAP_BYTES (28 * 1024)
-#endif
-
-#ifndef CP_AA_RECOVERY_CONTIG_HEAP_BYTES
-#define CP_AA_RECOVERY_CONTIG_HEAP_BYTES (12 * 1024)
-#endif
-
-constexpr uint32_t AA_RECOVERY_FREE_HEAP_BYTES = CP_AA_RECOVERY_FREE_HEAP_BYTES;
-constexpr uint32_t AA_RECOVERY_CONTIG_HEAP_BYTES = CP_AA_RECOVERY_CONTIG_HEAP_BYTES;
-
-// Snapshotting BW buffer for grayscale restore can fragment heap heavily on tight
-// pages. Skip attempting snapshot altogether below this safety window.
-#ifndef CP_BW_SNAPSHOT_MIN_FREE_HEAP_BYTES
-#define CP_BW_SNAPSHOT_MIN_FREE_HEAP_BYTES (64 * 1024)
-#endif
-
-#ifndef CP_BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES
-#define CP_BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES (24 * 1024)
-#endif
-
-constexpr uint32_t BW_SNAPSHOT_MIN_FREE_HEAP_BYTES = CP_BW_SNAPSHOT_MIN_FREE_HEAP_BYTES;
-constexpr uint32_t BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES = CP_BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES;
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
@@ -122,68 +95,6 @@ void logReaderMemSnapshot(const char* stage) {
 inline void logReaderMemSnapshot(const char*) {}
 #endif
 
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-// Tiled grayscale: render each plane band-by-band into a small scratch and
-// stream straight to the controller, leaving the BW framebuffer intact so no
-// storeBwBuffer / restoreBwBuffer is needed. Controller RAM is re-synced from
-// the live framebuffer afterward via cleanupGrayscaleWithFrameBuffer().
-//
-// Returns true when the strip path ran end-to-end (controller now holds the AA
-// planes and the live BW frame is clean). Returns false when the controller
-// doesn't support strip grayscale OR the session strip scratch isn't held
-// (acquireStripScratch in onEnter failed, e.g. heap was already too tight at
-// reader open). Caller should fall back to the legacy storeBwBufferRect path.
-//
-// The page is re-rendered ceil(panelHeight/stripRows) times per plane, but
-// renderCharImpl culls out-of-band glyphs before bitmap decode so the cost
-// stays close to one render. Only renderTextOnly() is called here, matching the
-// legacy AA pass — images and HRs do not participate in grayscale.
-bool runTiledGrayscalePass(GfxRenderer& renderer, const Page& page, int fontId, int marginLeft, int contentTop,
-                           bool fastAA) {
-  if (!renderer.supportsStripGrayscale()) return false;
-
-  // Push the SETTINGS toggle into the SDK before the AA refresh. No-op on X4;
-  // on X3 picks between OEM _gc (slow/accurate) and community _grayscale
-  // (fast/darker mid-tones). Re-applied per render so a settings change takes
-  // effect on the next page flip without rebooting.
-  renderer.setFastGrayscaleLut(fastAA);
-
-  // Strip scratch is owned by GfxRenderer for the reader session
-  // (acquireStripScratch in onEnter, releaseStripScratch in onExit). Allocating
-  // per page turn fragmented the ESP32-C3 heap badly enough to flip AA into the
-  // "suspended low memory" state after a few pages, so this path now refuses
-  // and falls back to the legacy snapshot if no session scratch is held.
-  uint8_t* const scratch = renderer.getStripScratch();
-  const int stripRows = renderer.getStripScratchRows();
-  if (!scratch || stripRows <= 0) {
-    return false;
-  }
-  const int gh = renderer.getDisplayHeight();
-
-  auto renderPlane = [&](GfxRenderer::RenderMode mode, bool lsbPlane) {
-    renderer.setRenderMode(mode);
-    for (int y = 0; y < gh; y += stripRows) {
-      const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
-      renderer.beginStripTarget(scratch, y, rows);
-      renderer.clearScreen(0x00);
-      page.renderTextOnly(renderer, fontId, marginLeft, contentTop);
-      renderer.endStripTarget();
-      renderer.writeGrayscalePlaneStrip(lsbPlane, scratch, y, rows);
-    }
-  };
-
-  renderPlane(GfxRenderer::GRAYSCALE_LSB, true);
-  renderPlane(GfxRenderer::GRAYSCALE_MSB, false);
-
-  renderer.setRenderMode(GfxRenderer::BW);
-  renderer.displayGrayBuffer();
-
-  // BW framebuffer is intact; re-sync controller RAM for the next differential
-  // page turn directly from it.
-  renderer.cleanupGrayscaleWithFrameBuffer();
-  return true;
-}
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
 // Computes the [0..100] EPUB progress percent. Returns 0 when pageCount is unknown (sync/bookmark
 // pre-render writes), in which case the next saveProgress() will overwrite progress.bin with the
@@ -287,15 +198,6 @@ void EpubReaderActivity::onEnter() {
   }
   logReaderMemSnapshot("onEnter_after_orientation");
 
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  // Allocate the strip scratch once per reader session so tiled grayscale
-  // (runTiledGrayscalePass) doesn't have to malloc ~24 KB on every page turn.
-  // Failure is non-fatal: the AA pass falls back to the legacy snapshot path.
-  if (!renderer.acquireStripScratch()) {
-    LOG_INF("ERS", "Strip scratch unavailable; tiled grayscale will fall back to legacy snapshot");
-  }
-  logReaderMemSnapshot("onEnter_after_strip_scratch");
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
@@ -411,10 +313,6 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-  renderer.releaseStripScratch();
-  logReaderMemSnapshot("onExit_after_release");
-#endif  // EINK_DISPLAY_SINGLE_BUFFER_MODE
 }
 
 void EpubReaderActivity::loop() {
@@ -1119,9 +1017,10 @@ std::string EpubReaderActivity::buildRenderBenchmarkReport(const LastRenderStats
                std::to_string(aggregate.maxFootnotes));
     appendLine("Aggregate phases: prewarm " + std::to_string(aggregate.totalPhases.prewarmMs) + ", bw " +
                std::to_string(aggregate.totalPhases.bwRenderMs) + ", display " +
-               std::to_string(aggregate.totalPhases.displayMs) + ", gray total " +
-               std::to_string(aggregate.totalPhases.grayLsbMs + aggregate.totalPhases.grayMsbMs +
-                              aggregate.totalPhases.grayDisplayMs));
+               std::to_string(aggregate.totalPhases.displayMs) + ", planes " +
+               std::to_string(aggregate.totalPhases.grayLsbMs) + ", gray display " +
+               std::to_string(aggregate.totalPhases.grayDisplayMs) + ", restore " +
+               std::to_string(aggregate.totalPhases.bwRestoreMs));
     appendLine("Aggregate font: hits " + std::to_string(aggregate.totalFontCacheHits) + ", misses " +
                std::to_string(aggregate.totalFontCacheMisses) + ", decompress " +
                std::to_string(aggregate.totalFontDecompressMs) + " ms");
@@ -1135,9 +1034,8 @@ std::string EpubReaderActivity::buildRenderBenchmarkReport(const LastRenderStats
              " ms, render total " + std::to_string(endSnapshot.phases.totalMs) + " ms");
   appendLine("Phases: prewarm " + std::to_string(endSnapshot.phases.prewarmMs) + ", bw " +
              std::to_string(endSnapshot.phases.bwRenderMs) + ", display " +
-             std::to_string(endSnapshot.phases.displayMs) + ", store " + std::to_string(endSnapshot.phases.bwStoreMs) +
-             ", gray lsb " + std::to_string(endSnapshot.phases.grayLsbMs) + ", gray msb " +
-             std::to_string(endSnapshot.phases.grayMsbMs) + ", gray display " +
+             std::to_string(endSnapshot.phases.displayMs) + ", planes " +
+             std::to_string(endSnapshot.phases.grayLsbMs) + ", gray display " +
              std::to_string(endSnapshot.phases.grayDisplayMs) + ", restore " +
              std::to_string(endSnapshot.phases.bwRestoreMs));
   appendLine("Font cache: hits " + std::to_string(endSnapshot.fontCacheHits) + ", misses " +
@@ -2156,22 +2054,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(*page, viewportHeight);
 
-  // Resolve the effective AA flag once — used for both the warm pass and the real render.
-  // antiAliasingSuspendedLowMemory can suppress AA even when it's configured on; we check
-  // for recovery here (before font prewarm) so the warm cache variant matches the render variant.
-  const bool aaConfigured = getEffectiveTextAntiAliasing();
-  bool aaEnabledForThisRender = aaConfigured;
-  if (aaConfigured && antiAliasingSuspendedLowMemory) {
-    const uint32_t freeHeapNow = esp_get_free_heap_size();
-    const uint32_t contigHeapNow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    if (freeHeapNow >= AA_RECOVERY_FREE_HEAP_BYTES && contigHeapNow >= AA_RECOVERY_CONTIG_HEAP_BYTES) {
-      antiAliasingSuspendedLowMemory = false;
-      LOG_INF("ERS", "Re-enabling text anti-aliasing after heap recovery (free=%lu contig=%lu)", freeHeapNow,
-              contigHeapNow);
-    } else {
-      aaEnabledForThisRender = false;
-    }
-  }
+  const bool aaEnabledForThisRender = getEffectiveTextAntiAliasing();
   lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
 
   // Always use 1-bit Atkinson dither for images in the epub reader.
@@ -2254,140 +2137,24 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     pendingHalfRefreshAfterImagePage = true;
   }
 
-  // Tiled grayscale: try the strip path first when AA is on and the controller
-  // supports it. It allocates an ~8 KB scratch instead of saving a partial BW
-  // frame, leaving the live BW framebuffer intact (no storeBwBuffer needed).
-  // Falls through to the legacy snapshot path if strip is unsupported or the
-  // scratch can't be allocated.
-  bool grayscaleDone = false;
-  uint32_t tiledGrayMs = 0;
   if (aaEnabledForThisRender) {
-    logReaderMemSnapshot("tiled_gray_begin");
-    const auto tTiledBegin = millis();
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-    grayscaleDone = runTiledGrayscalePass(renderer, *page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
-                                          SETTINGS.fastAntiAliasing);
-#endif
-    if (grayscaleDone) {
-      tiledGrayMs = millis() - tTiledBegin;
-      fcm->logStats("tiled_gray");
-      logReaderMemSnapshot("tiled_gray_end");
-    }
-  }
+    logReaderMemSnapshot("gray_begin");
+    // Push fast-AA toggle into the SDK before the AA refresh (X3 only; no-op on X4).
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    const int fontId = getEffectiveReaderFontId();
+    const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
+      page->renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
+    });
+    fcm->logStats("gray");
+    logReaderMemSnapshot("gray_end");
 
-  if (grayscaleDone) {
     const auto tEnd = millis();
     lastRenderStats.usedGrayscale = true;
-    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, tiledGrayMs, 0, 0, 0,
-                              tEnd - t0};
-    LOG_DBG("ERS", "Page render (tiled): prewarm=%lums bw_render=%lums display=%lums tiled_gray=%lums total=%lums",
-            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tiledGrayMs, tEnd - t0);
-  } else {
-    // Legacy fallback: save (partial) BW frame, render LSB+MSB planes into the
-    // live framebuffer, display, then restore. Pre-check heap to avoid entering
-    // the chunk-retry path when success is unlikely. Skip the snapshot entirely
-    // when AA is off — there is nothing to restore from since no grayscale pass
-    // will run.
-    const uint32_t bwStoreFreeHeap = esp_get_free_heap_size();
-    const uint32_t bwStoreContigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    const bool shouldAttemptBwSnapshot = aaEnabledForThisRender && bwStoreFreeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES &&
-                                         bwStoreContigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES;
-
-    logReaderMemSnapshot("bw_store_begin");
-    bool bwBufferStored = false;
-    if (shouldAttemptBwSnapshot) {
-      // Snapshot the full framebuffer. The AA pass calls clearScreen(0x00) which
-      // touches every panel row, and restoreBwBuffer() ends with
-      // cleanupGrayscaleBuffers(frameBuffer) that syncs the controller's belief
-      // from the framebuffer — so any row not in the snapshot ends up zero in the
-      // FB and the controller drifts out of sync with what's physically on the
-      // panel, producing ghosting on the next page turn (issue #256).
-      bwBufferStored = renderer.storeBwBuffer();
-    } else if (aaEnabledForThisRender) {
-      LOG_INF("ERS", "Skipping BW snapshot precheck (free=%lu contig=%lu, need free>=%lu contig>=%lu)", bwStoreFreeHeap,
-              bwStoreContigHeap, static_cast<uint32_t>(BW_SNAPSHOT_MIN_FREE_HEAP_BYTES),
-              static_cast<uint32_t>(BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES));
-    }
-    const auto tBwStore = millis();
-    logReaderMemSnapshot("bw_store_end");
-    if (aaEnabledForThisRender && !bwBufferStored) {
-      if (!antiAliasingSuspendedLowMemory) {
-        antiAliasingSuspendedLowMemory = true;
-        const uint32_t freeHeapNow = esp_get_free_heap_size();
-        const uint32_t contigHeapNow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-        LOG_INF("ERS", "Suspending text anti-aliasing due to low heap (free=%lu contig=%lu)", freeHeapNow,
-                contigHeapNow);
-      }
-      LOG_INF("ERS", "Skipping grayscale/BW-restore for this page (insufficient heap for BW snapshot)");
-    }
-
-    // grayscale rendering
-    // TODO: Only do this if font supports it
-    if (aaEnabledForThisRender && bwBufferStored) {
-      // Push fast-AA toggle into the SDK before the AA refresh (X3 only; no-op
-      // on X4). Mirrors what runTiledGrayscalePass() does.
-      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-      logReaderMemSnapshot("gray_lsb_begin");
-      renderer.clearScreen(0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-      renderer.copyGrayscaleLsbBuffers();
-      const auto tGrayLsb = millis();
-      logReaderMemSnapshot("gray_lsb_end");
-
-      // Render and copy to MSB buffer
-      logReaderMemSnapshot("gray_msb_begin");
-      renderer.clearScreen(0x00);
-      renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-      renderer.copyGrayscaleMsbBuffers();
-      const auto tGrayMsb = millis();
-      logReaderMemSnapshot("gray_msb_end");
-
-      // display grayscale part
-      logReaderMemSnapshot("gray_display_begin");
-      renderer.displayGrayBuffer();
-      const auto tGrayDisplay = millis();
-      renderer.setRenderMode(GfxRenderer::BW);
-      fcm->logStats("gray");
-      logReaderMemSnapshot("gray_display_end");
-
-      // restore the bw data
-      logReaderMemSnapshot("bw_restore_begin");
-      renderer.restoreBwBuffer();
-      const auto tBwRestore = millis();
-      logReaderMemSnapshot("bw_restore_end");
-
-      const auto tEnd = millis();
-      lastRenderStats.usedGrayscale = true;
-      lastRenderStats.phases = {tPrewarm - t0,           tBwRender - tPrewarm,      tDisplay - tBwRender,
-                                tBwStore - tDisplay,     tGrayLsb - tBwStore,       tGrayMsb - tGrayLsb,
-                                tGrayDisplay - tGrayMsb, tBwRestore - tGrayDisplay, tEnd - t0};
-      LOG_DBG("ERS",
-              "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums "
-              "gray_lsb=%lums gray_msb=%lums gray_display=%lums bw_restore=%lums total=%lums",
-              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, tGrayLsb - tBwStore,
-              tGrayMsb - tGrayLsb, tGrayDisplay - tGrayMsb, tBwRestore - tGrayDisplay, tEnd - t0);
-    } else {
-      uint32_t bwRestoreMs = 0;
-      if (bwBufferStored) {
-        // restore the bw data
-        logReaderMemSnapshot("bw_restore_begin");
-        renderer.restoreBwBuffer();
-        const auto tBwRestore = millis();
-        logReaderMemSnapshot("bw_restore_end");
-        bwRestoreMs = tBwRestore - tBwStore;
-      }
-
-      const auto tEnd = millis();
-      lastRenderStats.usedGrayscale = false;
-      lastRenderStats.phases = {
-          tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, 0, 0, 0, bwRestoreMs,
-          tEnd - t0};
-      LOG_DBG("ERS",
-              "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums bw_restore=%lums total=%lums",
-              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, bwRestoreMs, tEnd - t0);
-    }
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0,
+                              gt.planesMs, 0, gt.displayMs, gt.restoreMs, tEnd - t0};
+    LOG_DBG("ERS", "Page render: prewarm=%lums bw=%lums display=%lums planes=%lums gray=%lums restore=%lums total=%lums",
+            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender,
+            gt.planesMs, gt.displayMs, gt.restoreMs, tEnd - t0);
   }
 
   if (const auto* cacheManager = renderer.getFontCacheManager()) {
@@ -2443,39 +2210,13 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
 
-  // Grayscale AA pass. Prefer the tiled strip path (no BW snapshot needed);
-  // fall back to the legacy storeBwBufferRect path on controllers that don't
-  // support strip grayscale or when the strip scratch can't be allocated.
-  const bool aaConfigured = getEffectiveTextAntiAliasing() && !antiAliasingSuspendedLowMemory;
-  if (aaConfigured) {
-#ifndef EINK_DISPLAY_SINGLE_BUFFER_MODE
-    if (runTiledGrayscalePass(renderer, page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
-                              SETTINGS.fastAntiAliasing)) {
-      return;
-    }
-#endif
-
-    const uint32_t freeHeap = esp_get_free_heap_size();
-    const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    if (freeHeap >= BW_SNAPSHOT_MIN_FREE_HEAP_BYTES && contigHeap >= BW_SNAPSHOT_MIN_CONTIG_HEAP_BYTES) {
-      // Full-framebuffer snapshot — see the matching site above for the rationale (issue #256).
-      if (renderer.storeBwBuffer()) {
-        renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-        renderer.clearScreen(0x00);
-        renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-        page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-        renderer.copyGrayscaleLsbBuffers();
-
-        renderer.clearScreen(0x00);
-        renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-        page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-        renderer.copyGrayscaleMsbBuffers();
-
-        renderer.displayGrayBuffer();
-        renderer.setRenderMode(GfxRenderer::BW);
-        renderer.restoreBwBuffer();
-      }
-    }
+  if (getEffectiveTextAntiAliasing()) {
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    const int fontId = getEffectiveReaderFontId();
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
+      page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
+    });
+    // timings not recorded for the pre-rendered path
   }
 }
 
