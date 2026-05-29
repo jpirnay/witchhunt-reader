@@ -57,6 +57,16 @@ The snapshot is allocated and freed on every page turn. On the ESP32-C3 heap fra
 
 The implementation used chunked allocation (8 KB chunks) to tolerate a fragmented heap, trading the one large contiguous allocation for several smaller ones — but this added complexity and the failure mode remained.
 
+### Timing (approximate, X3 OEM LUT)
+
+| Phase | Duration |
+|-------|----------|
+| BW render + display | ~560 ms |
+| LSB + MSB render + copy | ~180 ms |
+| Grayscale waveform (OEM GC) | ~2400 ms |
+| Snapshot restore + re-sync | ~120 ms |
+| **Total** | **~3260 ms** |
+
 ### Pros
 
 - Conceptually simple: render → snapshot → restore.
@@ -104,6 +114,18 @@ ESP32 RAM during pass:
 
 `writeGrayscalePlaneStrip` relies on a windowed RAM write API (`setRamArea` on X4, PTL partial-transfer on X3) that was part of the open-x4-sdk under a licensing arrangement that was later found to be incompatible with the project. The entire strip path — `writeGrayscalePlaneStrip`, `supportsStripGrayscale`, `beginStripTarget`, `endStripTarget`, `glyphIntersectsStrip`, and the session scratch lifecycle — was removed.
 
+### Timing (approximate, X3 OEM LUT)
+
+| Phase | Duration |
+|-------|----------|
+| BW render + display | ~560 ms |
+| LSB + MSB render + copy (2–3 bands each) | ~250 ms |
+| Grayscale waveform (OEM GC) | ~2400 ms |
+| Re-sync (`cleanupGrayscaleWithFrameBuffer`) | ~20 ms |
+| **Total** | **~3230 ms** |
+
+The extra render passes per band add ~70 ms vs the snapshot path, offset slightly by skipping snapshot save/restore.
+
 ### Pros
 
 - No per-page heap allocation; the scratch is fixed at session open.
@@ -123,7 +145,9 @@ ESP32 RAM during pass:
 
 ### Motivation
 
-The key observation is that `copyGrayscaleLsbBuffers(buf)` and `copyGrayscaleMsbBuffers(buf)` each accept any pointer to a full-size buffer. The BW framebuffer is already permanently resident and is exactly the right size. After the BW page content has been committed to the display controller via `displayBuffer()`, the BW framebuffer's *in-RAM* copy is no longer needed until the next page turn — the controller has the authoritative copy. This window can be exploited: repurpose the BW framebuffer as a render target for the grayscale planes, streaming each plane to the controller immediately after rendering, then use `cleanupGrayscaleWithFrameBuffer()` to restore both controller planes from the (now-restored) BW buffer before the next page turn.
+The key observation is that `copyGrayscaleLsbBuffers(buf)` and `copyGrayscaleMsbBuffers(buf)` each accept any pointer to a full-size buffer. The BW framebuffer is already permanently resident and is exactly the right size. After the BW page content has been committed to the display controller via `displayBuffer()`, the BW framebuffer's *in-RAM* copy is no longer needed until the next page turn — the controller has the authoritative copy. This window can be exploited: repurpose the BW framebuffer as a render target for the grayscale planes, streaming each plane to the controller immediately after rendering.
+
+After the grayscale waveform, `cleanupGrayscaleWithPreviousBuffer()` reseeds both controller planes (DTM1 and DTM2) from `frameBufferActive` — the internal EInkDisplay buffer that holds the full BW page exactly as `displayBuffer()` committed it, including images. This gives a correct differential baseline for the next FAST refresh without re-rendering or snapshotting.
 
 ### How it works
 
@@ -133,21 +157,21 @@ The key observation is that `copyGrayscaleLsbBuffers(buf)` and `copyGrayscaleMsb
 1.  clearScreen(0x00)           — wipe the BW framebuffer (repurposed as scratch)
 2.  setRenderMode(GRAYSCALE_LSB)
 3.  renderFn(GRAYSCALE_LSB)     — render AA text into the BW framebuffer
-4.  copyGrayscaleLsbBuffers()   — stream BW framebuffer → controller BW RAM
+4.  copyGrayscaleLsbBuffers()   — stream BW framebuffer → controller DTM1
 5.  clearScreen(0x00)
 6.  setRenderMode(GRAYSCALE_MSB)
 7.  renderFn(GRAYSCALE_MSB)     — render AA text into the BW framebuffer
-8.  copyGrayscaleMsbBuffers()   — stream BW framebuffer → controller RED RAM
+8.  copyGrayscaleMsbBuffers()   — stream BW framebuffer → controller DTM2
 9.  setRenderMode(BW)
 10. displayGrayBuffer()         — trigger grayscale waveform
-11. cleanupGrayscaleWithFrameBuffer()
-    — re-sync controller BW RAM and RED RAM from the BW framebuffer
-    — on X3: Y-flips in place, sends, Y-flips back
-    — on X4: writes BW framebuffer to RED RAM (sets differential baseline)
+11. cleanupGrayscaleWithPreviousBuffer()
+    — reseeds DTM1 and DTM2 from frameBufferActive (the just-displayed BW page)
+    — on X3: Y-flips in place, sends to both planes, Y-flips back
+    — on X4: writes frameBufferActive to RED RAM (differential baseline)
     — clears inGrayscaleMode flag
 ```
 
-At step 11 the BW framebuffer is restored as the controller baseline. Because `renderFn` renders text-only (same content both times, since text layout is deterministic), and the BW content was already on screen before the grayscale pass began, step 11 produces exactly the same result as the old `restoreBwBuffer` + `cleanupGrayscaleBuffers` path — the controller RED RAM ends up holding the BW page content, ready for the next differential fast refresh.
+`frameBufferActive` holds the just-displayed BW frame because `displayBuffer()` calls `swapBuffers()` on both X4 and X3 at the end of every refresh — the buffer that was just sent to the panel becomes `frameBufferActive`, and the other (now empty) slot becomes the active `frameBuffer` for the next render.
 
 ```
 ESP32 RAM during pass:
@@ -156,28 +180,41 @@ ESP32 RAM during pass:
   Peak extra:       0 KB
 ```
 
+### Timing (measured, X3 OEM LUT)
+
+| Phase | Duration |
+|-------|----------|
+| BW render + display | ~560 ms (190 ms render, 127 ms PON, 382 ms DRF, 52 ms POF) |
+| LSB + MSB render + copy (`planes`) | ~176 ms |
+| Grayscale waveform (OEM GC, `gray`) | ~2368 ms |
+| Re-sync (`restore`) | ~66 ms |
+| **Total** | **~3170 ms** |
+
+With the community fast LUT (`fastAntiAliasing=true`) the grayscale waveform drops to ~130 ms, giving a total of approximately **930 ms**.
+
 ### Invariant that makes this safe
 
 The BW framebuffer is trashed between steps 1 and 11. This is safe because:
 
-- The BW page content is already committed to the controller's BW RAM via `displayBuffer()` before the grayscale pass begins.
-- `renderTextOnly()` is deterministic for a given page — it produces the same output on every call for the same page object and layout parameters. Re-rendering for `cleanupGrayscaleWithFrameBuffer()` is not needed; the method uses the BW framebuffer as it is at step 11, which holds the MSB plane data. On X4 this is used only to write RED RAM (differential baseline); on X3 the same content is written to both DTM1 and DTM2. Neither path requires the original BW content to be present in the BW framebuffer — `cleanupGrayscaleWithFrameBuffer()` only needs *a* full-size buffer that the controller can use as the new baseline for both planes, and the MSB render at step 7–8 has already left the framebuffer in a coherent state.
+- The BW page content is already committed to the controller and preserved in `frameBufferActive` before the grayscale pass begins.
+- `cleanupGrayscaleWithPreviousBuffer()` uses `frameBufferActive` — not the current (trashed) framebuffer — to reseed both controller planes. This includes images and all BW content, not just text.
 
-> **Note for future maintainers:** If `renderFn` is ever changed to render something other than pure text (e.g., includes images or HRs), the MSB framebuffer content at step 11 will no longer match the intended BW baseline. In that case, either restore the BW framebuffer from a snapshot before calling `cleanupGrayscaleWithFrameBuffer()`, or change `renderGrayscalePlanesSequential` to re-render the BW content explicitly after step 10.
+> **Note for future maintainers:** `cleanupGrayscaleWithPreviousBuffer()` depends on `frameBufferActive` holding the full BW page that was displayed immediately before the grayscale pass. This is guaranteed as long as no other `displayBuffer()` call intervenes between the BW refresh and the grayscale pass. If the render flow is restructured such that another display call happens in between, `frameBufferActive` will no longer hold the right content and the next FAST differential will ghost.
 
 ### Pros
 
 - **Zero extra allocation.** No heap pressure, no fragmentation risk, no AA suspension under memory pressure.
-- No strip-path SDK dependency — uses only `copyGrayscaleLsbBuffers`, `copyGrayscaleMsbBuffers`, `displayGrayBuffer`, and `cleanupGrayscaleWithFrameBuffer`, all of which are standard unconditional API calls.
+- No strip-path SDK dependency — uses only `copyGrayscaleLsbBuffers`, `copyGrayscaleMsbBuffers`, `displayGrayBuffer`, and `cleanupGrayscaleWithPreviousBuffer`, all standard unconditional API calls.
 - Exactly two render passes (one per plane), the same as the legacy snapshot approach.
+- `cleanupGrayscaleWithPreviousBuffer` uses the full BW content including images, giving a correct differential baseline even on image pages.
 - ~470 lines net removed from the codebase (strip infrastructure, snapshot management, `antiAliasingSuspendedLowMemory` state machine).
 - Works identically on X4 and X3.
 
 ### Cons
 
 - The BW framebuffer is transiently corrupt between steps 1 and 11. A crash, power loss, or early return during this window leaves the in-RAM BW buffer in an undefined state. The next page render will call `clearScreen` before rendering anyway, so in practice this is benign — but it is a wider "dangerous window" than the snapshot approach (where the snapshot holds the ground truth throughout).
-- `cleanupGrayscaleWithFrameBuffer()` on X3 performs an in-place Y-flip of the framebuffer contents, sends the data, then Y-flips back. The logical contents are unchanged before and after, but callers must not race a framebuffer reader against this call (same constraint as before — unchanged from prior approaches).
-- AA cannot be suspended gracefully under memory pressure because there is no longer a heap guard. In practice this is a non-issue since the approach uses no heap at all, but it does mean the old "suspend and recover" safety valve is gone. If the device is somehow too memory-constrained to render (e.g., decoder allocations fail), the failure will surface in the rendering layer rather than in the AA path.
+- `cleanupGrayscaleWithPreviousBuffer()` on X3 performs an in-place Y-flip of the framebuffer contents, sends the data, then Y-flips back. The logical contents are unchanged before and after, but callers must not race a framebuffer reader against this call.
+- AA cannot be suspended gracefully under memory pressure because there is no longer a heap guard. In practice this is a non-issue since the approach uses no heap at all, but it does mean the old "suspend and recover" safety valve is gone.
 
 ---
 
@@ -191,10 +228,12 @@ The BW framebuffer is trashed between steps 1 and 11. This is safe because:
 | Render passes per plane | 1 | 2–3 (bands) | 1 |
 | SDK dependency | Standard | `writeGrayscalePlaneStrip` (licensed) | Standard |
 | BW framebuffer intact during pass | No | Yes | No |
-| Controller re-sync after pass | `restoreBwBuffer` + `cleanupGrayscale` | `cleanupGrayscaleWithFrameBuffer` | `cleanupGrayscaleWithFrameBuffer` |
+| Controller re-sync source | `restoreBwBuffer` snapshot | live BW framebuffer | `frameBufferActive` (full BW incl. images) |
 | AA suspension under pressure | Yes (graceful) | No | No |
 | Code complexity | Medium | High (+200 lines) | Low (−470 lines net) |
 | X4 artifact risk | None observed | Observed in early versions | None observed |
+| **Total time (X3, OEM LUT)** | **~3260 ms** | **~3230 ms** | **~3170 ms** |
+| **Total time (X3, fast LUT)** | **~1020 ms** | **~990 ms** | **~930 ms** |
 
 ---
 
@@ -203,8 +242,8 @@ The BW framebuffer is trashed between steps 1 and 11. This is safe because:
 | Method | Layer | Purpose |
 |--------|-------|---------|
 | `renderGrayscalePlanesSequential(fn)` | `GfxRenderer` | Runs the current algorithm end-to-end |
-| `copyGrayscaleLsbBuffers()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Stream BW framebuffer to controller BW RAM |
-| `copyGrayscaleMsbBuffers()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Stream BW framebuffer to controller RED RAM |
+| `copyGrayscaleLsbBuffers()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Stream BW framebuffer to controller DTM1 |
+| `copyGrayscaleMsbBuffers()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Stream BW framebuffer to controller DTM2 |
 | `displayGrayBuffer()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Trigger grayscale waveform refresh |
-| `cleanupGrayscaleWithFrameBuffer()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Re-sync controller planes from BW framebuffer; clear `inGrayscaleMode` |
+| `cleanupGrayscaleWithPreviousBuffer()` | `GfxRenderer` → `EInkDisplay` | Reseed controller planes from `frameBufferActive` (just-displayed BW page); clear `inGrayscaleMode` |
 | `setFastGrayscaleLut(bool)` | `GfxRenderer` | X3-only: switch between OEM (slow/accurate) and community (fast/darker) LUT |
