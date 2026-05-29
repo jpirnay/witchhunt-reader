@@ -2551,6 +2551,11 @@ void GfxRenderer::restoreBwBuffer() {
 void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
   if (frameBuffer) {
     display.cleanupGrayscaleBuffers(frameBuffer);
+    // Sync the in-RAM active buffer to match so the next displayBuffer() fast
+    // refresh differential is against the BW page, not a stale prior frame.
+    // copyGrayscaleLsb/MsbBuffers + displayGrayBuffer bypass displayBuffer()
+    // entirely, so swapBuffers() never ran during the grayscale pass.
+    display.syncActiveBuffer();
   }
 }
 
