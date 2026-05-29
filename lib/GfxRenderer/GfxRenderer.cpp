@@ -2548,14 +2548,13 @@ void GfxRenderer::restoreBwBuffer() {
 // On X3 the display call transiently Y-flips frameBuffer in place and flips
 // it back before returning; the logical contents are unchanged but callers
 // must not race a framebuffer reader against this call. See the header.
+void GfxRenderer::cleanupGrayscaleWithPreviousBuffer() const {
+  display.cleanupGrayscaleWithPreviousBuffer();
+}
+
 void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
   if (frameBuffer) {
     display.cleanupGrayscaleBuffers(frameBuffer);
-    // Sync the in-RAM active buffer to match so the next displayBuffer() fast
-    // refresh differential is against the BW page, not a stale prior frame.
-    // copyGrayscaleLsb/MsbBuffers + displayGrayBuffer bypass displayBuffer()
-    // entirely, so swapBuffers() never ran during the grayscale pass.
-    display.syncActiveBuffer();
   }
 }
 

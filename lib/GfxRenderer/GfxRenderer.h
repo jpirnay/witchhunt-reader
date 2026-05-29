@@ -214,18 +214,21 @@ class GfxRenderer {
   struct GrayscaleTimings {
     unsigned long planesMs = 0;   // LSB render+copy + MSB render+copy
     unsigned long displayMs = 0;  // displayGrayBuffer() waveform
-    unsigned long restoreMs = 0;  // BW re-render + cleanupGrayscaleWithFrameBuffer()
+    unsigned long restoreMs = 0;  // cleanupGrayscaleWithPreviousBuffer() SPI write
   };
 
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
-  // each plane to the controller immediately after rendering it. Then re-renders
-  // BW content into the framebuffer so cleanupGrayscaleWithFrameBuffer() can
-  // re-sync controller RED RAM from the true BW page — not the MSB plane — giving
-  // the next fast-refresh differential a clean baseline and eliminating ghosting.
+  // each plane to the controller immediately after rendering it. No extra allocation
+  // needed — the BW framebuffer is the scratch pad for both passes.
   //
-  // No extra allocation needed: the BW framebuffer is the scratch pad throughout.
-  // renderFn is called three times (LSB, MSB, BW); the RenderMode argument tells
-  // it which pass is running. The caller sets setFastGrayscaleLut() before calling.
+  // After displayGrayBuffer(), cleanupGrayscaleWithPreviousBuffer() reseeds the
+  // controller's RED RAM and the in-RAM active buffer from frameBufferActive —
+  // which holds the exact full BW page (including images) that displayBuffer()
+  // left there before the grayscale pass began. This is the correct differential
+  // baseline for the next fast refresh.
+  //
+  // renderFn is called twice (LSB, MSB). The RenderMode argument tells it which
+  // pass is running. The caller sets setFastGrayscaleLut() before calling.
   //
   // Returns wall-clock timings for each of the three phases.
   //
@@ -254,13 +257,11 @@ class GfxRenderer {
     const unsigned long t2 = millis();
     t.displayMs = t2 - t1;
 
-    // Re-render BW content into the framebuffer before cleanupGrayscaleWithFrameBuffer()
-    // so RED RAM is synced from the true BW page, not the MSB plane left by the AA pass.
-    // Without this, the controller's differential baseline is wrong and the next fast
-    // refresh produces ghosting (visible when returning to the home screen carousel).
-    clearScreen(0xFF);
-    renderFn(BW);
-    cleanupGrayscaleWithFrameBuffer();
+    // Reseed RED RAM and frameBufferActive from the previous-frame slot, which
+    // holds the full BW page exactly as displayBuffer() left it. Using this
+    // instead of re-rendering gives the correct baseline (images + text) and
+    // costs only one SPI write.
+    cleanupGrayscaleWithPreviousBuffer();
 
     t.restoreMs = millis() - t2;
     return t;
@@ -295,6 +296,12 @@ class GfxRenderer {
   // observable state doesn't change; callers must not race a framebuffer
   // reader against this call.
   void cleanupGrayscaleWithFrameBuffer() const;
+  // Reseed controller RED RAM and frameBufferActive from the display's internal
+  // previous-frame buffer (frameBufferActive in EInkDisplay). This holds the
+  // exact full BW page that displayBuffer() committed before the grayscale pass
+  // — including images — giving a correct differential baseline for the next
+  // fast refresh without any re-render.
+  void cleanupGrayscaleWithPreviousBuffer() const;
 
   // Font helpers
   const uint8_t* getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const;
