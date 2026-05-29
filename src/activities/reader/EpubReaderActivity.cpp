@@ -1017,9 +1017,10 @@ std::string EpubReaderActivity::buildRenderBenchmarkReport(const LastRenderStats
                std::to_string(aggregate.maxFootnotes));
     appendLine("Aggregate phases: prewarm " + std::to_string(aggregate.totalPhases.prewarmMs) + ", bw " +
                std::to_string(aggregate.totalPhases.bwRenderMs) + ", display " +
-               std::to_string(aggregate.totalPhases.displayMs) + ", gray total " +
-               std::to_string(aggregate.totalPhases.grayLsbMs + aggregate.totalPhases.grayMsbMs +
-                              aggregate.totalPhases.grayDisplayMs));
+               std::to_string(aggregate.totalPhases.displayMs) + ", planes " +
+               std::to_string(aggregate.totalPhases.grayLsbMs) + ", gray display " +
+               std::to_string(aggregate.totalPhases.grayDisplayMs) + ", restore " +
+               std::to_string(aggregate.totalPhases.bwRestoreMs));
     appendLine("Aggregate font: hits " + std::to_string(aggregate.totalFontCacheHits) + ", misses " +
                std::to_string(aggregate.totalFontCacheMisses) + ", decompress " +
                std::to_string(aggregate.totalFontDecompressMs) + " ms");
@@ -1033,9 +1034,8 @@ std::string EpubReaderActivity::buildRenderBenchmarkReport(const LastRenderStats
              " ms, render total " + std::to_string(endSnapshot.phases.totalMs) + " ms");
   appendLine("Phases: prewarm " + std::to_string(endSnapshot.phases.prewarmMs) + ", bw " +
              std::to_string(endSnapshot.phases.bwRenderMs) + ", display " +
-             std::to_string(endSnapshot.phases.displayMs) + ", store " + std::to_string(endSnapshot.phases.bwStoreMs) +
-             ", gray lsb " + std::to_string(endSnapshot.phases.grayLsbMs) + ", gray msb " +
-             std::to_string(endSnapshot.phases.grayMsbMs) + ", gray display " +
+             std::to_string(endSnapshot.phases.displayMs) + ", planes " +
+             std::to_string(endSnapshot.phases.grayLsbMs) + ", gray display " +
              std::to_string(endSnapshot.phases.grayDisplayMs) + ", restore " +
              std::to_string(endSnapshot.phases.bwRestoreMs));
   appendLine("Font cache: hits " + std::to_string(endSnapshot.fontCacheHits) + ", misses " +
@@ -2139,23 +2139,22 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
   if (aaEnabledForThisRender) {
     logReaderMemSnapshot("gray_begin");
-    const auto tGrayBegin = millis();
     // Push fast-AA toggle into the SDK before the AA refresh (X3 only; no-op on X4).
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int fontId = getEffectiveReaderFontId();
-    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
+    const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
       page->renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
     });
-    const auto tGrayEnd = millis();
     fcm->logStats("gray");
     logReaderMemSnapshot("gray_end");
 
     const auto tEnd = millis();
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0,
-                              tGrayEnd - tGrayBegin, 0, 0, 0, tEnd - t0};
-    LOG_DBG("ERS", "Page render: prewarm=%lums bw_render=%lums display=%lums gray=%lums total=%lums",
-            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tGrayEnd - tGrayBegin, tEnd - t0);
+                              gt.planesMs, 0, gt.displayMs, gt.restoreMs, tEnd - t0};
+    LOG_DBG("ERS", "Page render: prewarm=%lums bw=%lums display=%lums planes=%lums gray=%lums restore=%lums total=%lums",
+            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender,
+            gt.planesMs, gt.displayMs, gt.restoreMs, tEnd - t0);
   }
 
   if (const auto* cacheManager = renderer.getFontCacheManager()) {
@@ -2217,6 +2216,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
       page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
     });
+    // timings not recorded for the pre-rendered path
   }
 }
 

@@ -210,18 +210,31 @@ class GfxRenderer {
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;
 
+  // Timing breakdown returned by renderGrayscalePlanesSequential().
+  struct GrayscaleTimings {
+    unsigned long planesMs = 0;   // LSB render+copy + MSB render+copy
+    unsigned long displayMs = 0;  // displayGrayBuffer() waveform
+    unsigned long restoreMs = 0;  // BW re-render + cleanupGrayscaleWithFrameBuffer()
+  };
+
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
-  // each plane to the controller immediately after rendering it. No extra allocation
-  // is needed — the BW framebuffer is repurposed as a scratch pad for the duration
-  // of the pass. `renderFn` is called four times (LSB clear, LSB render, MSB clear,
-  // MSB render) via two (clear + render) pairs; it receives the current RenderMode.
-  // After displayGrayBuffer() the BW framebuffer is restored as the controller
-  // baseline via cleanupGrayscaleWithFrameBuffer(). The caller is responsible for
-  // setting setFastGrayscaleLut() before calling if needed.
+  // each plane to the controller immediately after rendering it. Then re-renders
+  // BW content into the framebuffer so cleanupGrayscaleWithFrameBuffer() can
+  // re-sync controller RED RAM from the true BW page — not the MSB plane — giving
+  // the next fast-refresh differential a clean baseline and eliminating ghosting.
+  //
+  // No extra allocation needed: the BW framebuffer is the scratch pad throughout.
+  // renderFn is called three times (LSB, MSB, BW); the RenderMode argument tells
+  // it which pass is running. The caller sets setFastGrayscaleLut() before calling.
+  //
+  // Returns wall-clock timings for each of the three phases.
   //
   // Signature: void renderFn(RenderMode mode)
   template <typename RenderFn>
-  void renderGrayscalePlanesSequential(RenderFn renderFn) {
+  GrayscaleTimings renderGrayscalePlanesSequential(RenderFn renderFn) {
+    GrayscaleTimings t;
+    const unsigned long t0 = millis();
+
     clearScreen(0x00);
     setRenderMode(GRAYSCALE_LSB);
     renderFn(GRAYSCALE_LSB);
@@ -232,9 +245,25 @@ class GfxRenderer {
     renderFn(GRAYSCALE_MSB);
     copyGrayscaleMsbBuffers();
 
+    const unsigned long t1 = millis();
+    t.planesMs = t1 - t0;
+
     setRenderMode(BW);
     displayGrayBuffer();
+
+    const unsigned long t2 = millis();
+    t.displayMs = t2 - t1;
+
+    // Re-render BW content into the framebuffer before cleanupGrayscaleWithFrameBuffer()
+    // so RED RAM is synced from the true BW page, not the MSB plane left by the AA pass.
+    // Without this, the controller's differential baseline is wrong and the next fast
+    // refresh produces ghosting (visible when returning to the home screen carousel).
+    clearScreen(0xFF);
+    renderFn(BW);
     cleanupGrayscaleWithFrameBuffer();
+
+    t.restoreMs = millis() - t2;
+    return t;
   }
 
   // X3-only: trade AA visual fidelity for ~2.2 s faster page-flip wall clock.
