@@ -11,6 +11,7 @@
 
 #include "MappedInputManager.h"
 #include "NetworkModeSelectionActivity.h"
+#include "SdCardFontGlobals.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
@@ -231,6 +232,15 @@ void CrossPointWebServerActivity::startAccessPoint() {
 void CrossPointWebServerActivity::startWebServer() {
   LOG_DBG("WEBACT", "Starting web server...");
 
+  // Free SD font heap before starting the web server. A loaded SD font
+  // (Literata etc.) holds ~24-60KB of kern/ligature/glyph data that is
+  // completely unused during the web server session. The device restarts
+  // after the web server exits (silentRestart in onExit), so the font
+  // will be reloaded fresh on the next boot anyway.
+  LOG_DBG("WEBACT", "Free heap before SD font unload: %d bytes", ESP.getFreeHeap());
+  sdFontSystem.unload(renderer);
+  LOG_DBG("WEBACT", "Free heap after SD font unload: %d bytes", ESP.getFreeHeap());
+
   // Create the web server instance
   webServer.reset(new CrossPointWebServer());
   webServer->begin();
@@ -283,11 +293,10 @@ void CrossPointWebServerActivity::loop() {
         }
       }
 
-      if (millis() - lastRssiUpdateTime > 5000) {  // Refresh signal indicator every 5 seconds
-        lastRssiUpdateTime = millis();
-        currentRssi = WiFi.RSSI();
-        requestUpdate();
-      }
+      // RSSI indicator update intentionally removed: the 640ms e-ink refresh
+      // every 5 seconds blocked handleClient, fragmented heap, and gave no
+      // meaningful benefit since the user is interacting with the browser, not
+      // watching the device screen.
     }
 
     // Handle web server requests - maximize throughput with watchdog safety

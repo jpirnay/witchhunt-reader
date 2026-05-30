@@ -3,3 +3,14 @@ CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048
 CONFIG_MBEDTLS_DYNAMIC_BUFFER_ALLOCATION=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+
+# Disable IPv6 — saves ~2KB heap; we use IPv4 only
+CONFIG_LWIP_IPV6=n
+
+# Reduce TCP send buffer from default 5760 bytes to 2440 (minimum, 2×MSS).
+# Saves ~3.3KB per TCP connection. Trade-off: slightly lower peak throughput
+# for large transfers — acceptable on a local WiFi LAN where we have one client.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=2440
+
+# Reduce TCPIP task mailbox from default 32 to 16 — saves queue memory.
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=16

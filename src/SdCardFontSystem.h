@@ -27,6 +27,11 @@ class SdCardFontSystem {
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().
   int resolveFontId(const char* familyName, uint8_t fontSizeEnum) const;
 
+  /// Unload any currently loaded SD font family, freeing its heap (intervals,
+  /// kern/ligature tables, glyph cache — typically 24-60KB). The registry is
+  /// preserved so the font can be reloaded on next ensureLoaded() call.
+  void unload(GfxRenderer& renderer) { manager_.unloadAll(renderer); }
+
   /// Access the registry (e.g. for settings UI to enumerate available fonts).
   SdCardFontRegistry& registry() { return registry_; }
   const SdCardFontRegistry& registry() const { return registry_; }
