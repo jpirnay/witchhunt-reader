@@ -33,6 +33,26 @@
 #include "html/js/jszip_minJs.generated.h"
 #include "network/HttpDownloader.h"
 
+// Log free heap + max contiguous block at a named point.
+#define LOG_WEB_MEM(tag)                                                                             \
+  LOG_DBG("WEB", "[MEM] %s — free=%lu maxAlloc=%lu", (tag), (unsigned long)esp_get_free_heap_size(), \
+          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT))
+
+// Minimum free heap to attempt serving a response. Below this threshold the
+// WebServer library's internal malloc(11) for chunked chunk-size headers fails
+// silently, producing malformed HTTP that the browser rejects.
+static constexpr uint32_t MIN_HEAP_FOR_RESPONSE = 8192;
+
+static bool rejectIfLowMemory(WebServer* server) {
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >= MIN_HEAP_FOR_RESPONSE) {
+    return false;
+  }
+  LOG_DBG("WEB", "Low memory — rejecting request (maxAlloc=%lu)",
+          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  server->send(503, "application/json", "{\"error\":\"low memory\"}");
+  return true;
+}
+
 namespace {
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
@@ -339,6 +359,7 @@ void CrossPointWebServer::stop() {
 
 void CrossPointWebServer::handleClient() {
   static unsigned long lastDebugPrint = 0;
+  static unsigned long lastSlowPoll = 0;
 
   // Check running flag FIRST before accessing server
   if (!running) {
@@ -359,7 +380,16 @@ void CrossPointWebServer::handleClient() {
 
   server->handleClient();
 
-  // Handle WebSocket events
+  // WebSocket loop and UDP discovery are polled once per ~10ms, not on every
+  // handleClient() call. The activity loop calls handleClient() up to 500 times
+  // per outer iteration; calling wsServer->loop() every time causes excessive
+  // heap churn from String allocations in the WebSocket library.
+  const unsigned long now = millis();
+  if (now - lastSlowPoll < 10) {
+    return;
+  }
+  lastSlowPoll = now;
+
   if (wsServer) {
     wsServer->loop();
   }
@@ -400,14 +430,39 @@ CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() con
 }
 
 static void sendHtmlContent(WebServer* server, const char* data, size_t len) {
+  if (rejectIfLowMemory(server)) return;
   server->sendHeader("Content-Encoding", "gzip");
+  server->sendHeader("Cache-Control", "max-age=3600");
   server->send_P(200, "text/html", data, len);
 }
 
+// Serialize a JsonDocument to the wire with no String allocation.
+// Uses measureJson to get exact payload size, then malloc+serializeJson+sendContent+free.
+// WDT is reset before and after sendContent so the write can't outlast the watchdog.
+// On malloc failure, sends a 500.
+static void sendJson(WebServer* server, int code, const JsonDocument& doc) {
+  const size_t payloadSize = measureJson(doc);
+  char* buf = static_cast<char*>(malloc(payloadSize + 1));
+  if (!buf) {
+    LOG_DBG("WEB", "sendJson: malloc(%zu) failed", payloadSize + 1);
+    server->send(500, "application/json", "{\"error\":\"OOM\"}");
+    return;
+  }
+  serializeJson(doc, buf, payloadSize + 1);
+  server->setContentLength(payloadSize);
+  server->send(code, "application/json", "");
+  esp_task_wdt_reset();
+  server->sendContent(buf, payloadSize);
+  free(buf);
+  esp_task_wdt_reset();
+}
+
 void CrossPointWebServer::handleRoot() const {
+  LOG_WEB_MEM("root_enter");
   int32_t t0 = millis();
   sendHtmlContent(server.get(), FilesPageHtml, sizeof(FilesPageHtml));
   int32_t t1 = millis();
+  LOG_WEB_MEM("root_exit");
   LOG_DBG("WEB", "Served file manager page in %d ms", t1 - t0);
 }
 
@@ -433,6 +488,8 @@ void CrossPointWebServer::handleStatsPage() const {
 }
 
 void CrossPointWebServer::handleStatsApi() const {
+  if (rejectIfLowMemory(server.get())) return;
+  LOG_WEB_MEM("stats_api_enter");
   // Wire the same data the on-device screens use into a JSON payload the
   // browser dashboard can consume. We pre-compute streaks and todayDayIndex
   // here so the browser doesn't have to recreate the day-index math; the day
@@ -495,9 +552,8 @@ void CrossPointWebServer::handleStatsApi() const {
     }
   }
 
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  LOG_WEB_MEM("stats_api_exit");
+  sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::handleStatsExport() const {
@@ -515,7 +571,9 @@ void CrossPointWebServer::handleStatsExport() const {
 }
 
 void CrossPointWebServer::handleJszip() const {
+  if (rejectIfLowMemory(server.get())) return;
   server->sendHeader("Content-Encoding", "gzip");
+  server->sendHeader("Cache-Control", "max-age=3600");
   server->send_P(200, "application/javascript", jszip_minJs, jszip_minJsCompressedSize);
   LOG_DBG("WEB", "Served jszip.min.js");
 }
@@ -528,14 +586,18 @@ void CrossPointWebServer::handleNotFound() const {
 
 void CrossPointWebServer::handleStatus() const {
   const bool fastOnly = server->hasArg("phase") && server->arg("phase").equalsIgnoreCase("fast");
+  if (rejectIfLowMemory(server.get())) return;
+  LOG_WEB_MEM("status_enter");
   LOG_DBG("SYSINFO", "handleStatus request received (fastOnly=%d)", fastOnly);
   int32_t t0 = millis();
   SystemStatus status = SystemStatus::collectFast();
   int32_t t1 = millis();
+  LOG_WEB_MEM("status_after_collectFast");
   LOG_DBG("SYSINFO", "Collected fast status in %d ms (fastOnly=%d)", t1 - t0, fastOnly);
   if (!fastOnly) {
     LOG_DBG("SYSINFO", "handleStatus will collect SD stats");
     SystemStatus::fillSdStatus(status);
+    LOG_WEB_MEM("status_after_fillSd");
   }
 
   JsonDocument doc;
@@ -562,12 +624,12 @@ void CrossPointWebServer::handleStatus() const {
   doc["sdUsed"] = status.sdUsedBytes;
   doc["sdFree"] = status.sdFreeBytes;
 
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  LOG_WEB_MEM("status_exit");
+  sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::handleStatusFast() const {
+  if (rejectIfLowMemory(server.get())) return;
   LOG_DBG("SYSINFO", "handleStatusFast request received");
   int32_t t0 = millis();
   SystemStatus status = SystemStatus::collectFast();
@@ -599,9 +661,7 @@ void CrossPointWebServer::handleStatusFast() const {
   doc["sdUsed"] = status.sdUsedBytes;
   doc["sdFree"] = status.sdFreeBytes;
 
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
@@ -669,6 +729,7 @@ void CrossPointWebServer::handleFileList() const {
 }
 
 void CrossPointWebServer::handleFileListData() const {
+  if (rejectIfLowMemory(server.get())) return;
   // Get current path from query string (default to root)
   String currentPath = "/";
   if (server->hasArg("path")) {
@@ -682,39 +743,48 @@ void CrossPointWebServer::handleFileListData() const {
       currentPath = currentPath.substring(0, currentPath.length() - 1);
     }
   }
+  LOG_DBG("WEB", "File list request for path: %s", currentPath.c_str());
 
+  LOG_WEB_MEM("files_enter");
+  esp_task_wdt_reset();
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
+  esp_task_wdt_reset();
   server->sendContent("[");
-  char output[512];
-  constexpr size_t outputSize = sizeof(output);
+  char output[513];
+  constexpr size_t jsonOffset = 1;
+  constexpr size_t jsonSize = sizeof(output) - jsonOffset;
   bool seenFirst = false;
   JsonDocument doc;
 
   scanFiles(currentPath.c_str(), [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
+    esp_task_wdt_reset();
     doc.clear();
     doc["name"] = info.name;
     doc["size"] = info.size;
     doc["isDirectory"] = info.isDirectory;
     doc["isEpub"] = info.isEpub;
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
-      // JSON output truncated; skip this entry to avoid sending malformed JSON
+    const size_t written = serializeJson(doc, output + jsonOffset, jsonSize);
+    if (written >= jsonSize) {
       LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
       return;
     }
 
     if (seenFirst) {
-      server->sendContent(",");
+      output[0] = ',';
+      server->sendContent(output, jsonOffset + written);
     } else {
       seenFirst = true;
+      server->sendContent(output + jsonOffset, written);
     }
-    server->sendContent(output);
+    esp_task_wdt_reset();
   });
+
+  esp_task_wdt_reset();
   server->sendContent("]");
-  // End of streamed response, empty chunk to signal client
   server->sendContent("");
+  LOG_WEB_MEM("files_exit");
   LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
 }
 
@@ -1324,16 +1394,36 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  const auto settings = getSettingsList();
+  if (rejectIfLowMemory(server.get())) return;
+  LOG_WEB_MEM("settings_enter");
 
-  String result;
-  result.reserve(4096);
-  result += "[";
+  // Iterate the static list by const reference — no copy, no ~14KB heap spike.
+  const auto& settings = SettingsListDetail::list;
 
-  char output[512];
-  constexpr size_t outputSize = sizeof(output);
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  server->sendContent("[");
+
+  char output[1025];
+  constexpr size_t jsonOffset = 1;
+  constexpr size_t jsonSize = sizeof(output) - jsonOffset;
   bool seenFirst = false;
   JsonDocument doc;
+
+  auto sendEntry = [&]() {
+    const size_t written = serializeJson(doc, output + jsonOffset, jsonSize);
+    if (written >= jsonSize) {
+      LOG_DBG("WEB", "Settings entry JSON truncated (key=%s)", doc["key"].as<const char*>());
+      return;
+    }
+    if (seenFirst) {
+      output[0] = ',';
+      server->sendContent(output, jsonOffset + written);
+    } else {
+      seenFirst = true;
+      server->sendContent(output + jsonOffset, written);
+    }
+  };
 
   for (const auto& sBase : settings) {
     if (!sBase.key) continue;  // Skip ACTION-only entries
@@ -1408,20 +1498,7 @@ void CrossPointWebServer::handleGetSettings() const {
         continue;
     }
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    const char* jsonEntry = output;
-    String dynBuffer;
-    if (written >= outputSize) {
-      serializeJson(doc, dynBuffer);
-      jsonEntry = dynBuffer.c_str();
-    }
-
-    if (seenFirst) {
-      result += ",";
-    } else {
-      seenFirst = true;
-    }
-    result += jsonEntry;
+    sendEntry();
   }
 
   // Expose sleepTimeoutMinutes and refreshFrequencyPages as VALUE entries.
@@ -1438,19 +1515,16 @@ void CrossPointWebServer::handleGetSettings() const {
     doc["min"] = min;
     doc["max"] = max;
     doc["step"] = step;
-    String entry;
-    serializeJson(doc, entry);
-    if (seenFirst) result += ",";
-    seenFirst = true;
-    result += entry;
+    sendEntry();
   };
   appendValueSetting("sleepTimeoutMinutes", I18N.get(StrId::STR_TIME_TO_SLEEP), I18N.get(StrId::STR_CAT_DISPLAY), "",
                      SETTINGS.sleepTimeoutMinutes, 0, 60, 1);
   appendValueSetting("refreshFrequencyPages", I18N.get(StrId::STR_REFRESH_FREQ), I18N.get(StrId::STR_CAT_DISPLAY),
                      I18N.get(StrId::STR_MENU_DISP_REFRESH), SETTINGS.refreshFrequencyPages, 0, 60, 1);
 
-  result += "]";
-  server->send(200, "application/json", result);
+  server->sendContent("]");
+  server->sendContent("");
+  LOG_WEB_MEM("settings_exit");
   LOG_DBG("WEB", "Served settings API");
 }
 
@@ -1468,10 +1542,10 @@ void CrossPointWebServer::handlePostSettings() {
     return;
   }
 
-  const auto settings = getSettingsList();
+  // Iterate the static list by reference — no copy, no 14KB heap spike.
   int applied = 0;
 
-  for (const auto& s : settings) {
+  for (const auto& s : SettingsListDetail::list) {
     if (!s.key) continue;
     if (!doc[s.key].is<JsonVariant>()) continue;
 
@@ -1839,6 +1913,8 @@ void CrossPointWebServer::handleFontsPage() const {
 }
 
 void CrossPointWebServer::handleFontList() {
+  if (rejectIfLowMemory(server.get())) return;
+  LOG_WEB_MEM("font_list_enter");
   FontInstaller installer(sdFontSystem.registry());
   installer.refreshRegistry();
   const auto& families = sdFontSystem.registry().getFamilies();
@@ -1872,12 +1948,13 @@ void CrossPointWebServer::handleFontList() {
     }
   }
 
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  LOG_WEB_MEM("font_list_exit");
+  sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::handleFontManifest() {
+  if (rejectIfLowMemory(server.get())) return;
+  LOG_WEB_MEM("font_manifest_enter");
   FontInstaller installer(sdFontSystem.registry());
   installer.refreshRegistry();
 
@@ -1890,9 +1967,7 @@ void CrossPointWebServer::handleFontManifest() {
       JsonDocument errDoc;
       errDoc["ok"] = false;
       errDoc["error"] = error;
-      String out;
-      serializeJson(errDoc, out);
-      server->send(500, "application/json", out);
+      sendJson(server.get(), 500, errDoc);
       return;
     }
   }  // close TLS before the response JSON document is built
@@ -1910,9 +1985,8 @@ void CrossPointWebServer::handleFontManifest() {
     obj["totalSize"] = static_cast<unsigned long>(family.totalSize);
     obj["fileCount"] = static_cast<unsigned>(family.files.size());
   }
-  String out;
-  serializeJson(doc, out);
-  server->send(200, "application/json", out);
+  LOG_WEB_MEM("font_manifest_exit");
+  sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::handleFontDownload() {
@@ -1946,9 +2020,7 @@ void CrossPointWebServer::handleFontDownload() {
       JsonDocument errDoc;
       errDoc["ok"] = false;
       errDoc["error"] = error;
-      String out;
-      serializeJson(errDoc, out);
-      server->send(500, "application/json", out);
+      sendJson(server.get(), 500, errDoc);
       return;
     }
   }  // manifestSession destructor closes the TLS connection here
@@ -1998,9 +2070,7 @@ void CrossPointWebServer::handleFontDownload() {
       errDoc["error"] = error;
       errDoc["family"] = family.name;
       errDoc["installedCount"] = static_cast<unsigned>(installedCount);
-      String out;
-      serializeJson(errDoc, out);
-      server->send(500, "application/json", out);
+      sendJson(server.get(), 500, errDoc);
       return;
     }
     installedCount++;
@@ -2010,9 +2080,7 @@ void CrossPointWebServer::handleFontDownload() {
   JsonDocument res;
   res["ok"] = true;
   res["installedCount"] = static_cast<unsigned>(installedCount);
-  String out;
-  serializeJson(res, out);
-  server->send(200, "application/json", out);
+  sendJson(server.get(), 200, res);
 }
 
 void CrossPointWebServer::handleFontUploadData() {
