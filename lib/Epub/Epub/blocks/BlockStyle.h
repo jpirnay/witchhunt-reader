@@ -33,6 +33,7 @@ struct BlockStyle {
   // a full line-height gap when the <br> block stays empty (section-break use case).
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
+  float fontSizeMultiplier = 1.0f;  // font-size multiplier for headings (h1=1.6, h2=1.4, h3=1.2)
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
@@ -72,6 +73,9 @@ struct BlockStyle {
     // fromBrElement is never propagated — it is consumed by startNewTextBlock
     // when the empty <br> block is merged with the following paragraph.
     combinedBlockStyle.fromBrElement = false;
+    // fontSizeMultiplier: use child's if != 1.0, else parent's
+    combinedBlockStyle.fontSizeMultiplier =
+        (child.fontSizeMultiplier != 1.0f) ? child.fontSizeMultiplier : fontSizeMultiplier;
     return combinedBlockStyle;
   }
 
@@ -106,6 +110,9 @@ struct BlockStyle {
       blockStyle.alignment = blockStyle.textAlignDefined ? cssStyle.textAlign : CssTextAlign::Justify;
     } else {
       blockStyle.alignment = paragraphAlignment;
+    }
+    if (cssStyle.hasFontSizeMultiplier()) {
+      blockStyle.fontSizeMultiplier = cssStyle.fontSizeMultiplier;
     }
     return blockStyle;
   }

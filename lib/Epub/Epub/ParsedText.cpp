@@ -86,23 +86,23 @@ void stripSoftHyphensInPlace(std::string& word) {
 // Uses advance width (sum of glyph advances + kerning) rather than bounding box width so that italic glyph overhangs
 // don't inflate inter-word spacing.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                          const EpdFontFamily::Style style, const bool appendHyphen = false) {
+                          const EpdFontFamily::Style style, const bool appendHyphen = false, const float scale = 1.0f) {
+  int raw = 0;
   if (word.size() == 1 && word[0] == ' ' && !appendHyphen) {
-    return renderer.getSpaceWidth(fontId, style);
+    raw = renderer.getSpaceWidth(fontId, style);
+  } else {
+    const bool hasSoftHyphen = containsSoftHyphen(word);
+    if (!hasSoftHyphen && !appendHyphen) {
+      raw = renderer.getTextAdvanceX(fontId, word.c_str(), style);
+    } else {
+      std::string sanitized = word;
+      if (hasSoftHyphen) stripSoftHyphensInPlace(sanitized);
+      if (appendHyphen) sanitized.push_back('-');
+      raw = renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
+    }
   }
-  const bool hasSoftHyphen = containsSoftHyphen(word);
-  if (!hasSoftHyphen && !appendHyphen) {
-    return renderer.getTextAdvanceX(fontId, word.c_str(), style);
-  }
-
-  std::string sanitized = word;
-  if (hasSoftHyphen) {
-    stripSoftHyphensInPlace(sanitized);
-  }
-  if (appendHyphen) {
-    sanitized.push_back('-');
-  }
-  return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
+  if (scale == 1.0f) return static_cast<uint16_t>(raw);
+  return static_cast<uint16_t>(raw * scale + 0.5f);
 }
 
 std::string buildLinePreview(const std::vector<std::string>& words, const std::vector<bool>& continuesVec,
@@ -393,9 +393,10 @@ void ParsedText::layoutAndExtractLines(
 std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
   std::vector<uint16_t> wordWidths;
   wordWidths.reserve(words.size());
+  const float scale = blockStyle.fontSizeMultiplier;
 
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i], false, scale));
   }
 
   return wordWidths;
@@ -980,8 +981,11 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     if (wordIdx > 0 && !continuesVec[lastBreakAt + wordIdx]) {
       const bool beforeClosing = isClosingPunctuation(firstCp);
       if (!beforeClosing) actualGapCount++;
-      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]), firstCp,
-                                                   wordStyles[lastBreakAt + wordIdx - 1]);
+      totalNaturalGaps +=
+          static_cast<int>(renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]), firstCp,
+                                                    wordStyles[lastBreakAt + wordIdx - 1]) *
+                               blockStyle.fontSizeMultiplier +
+                           0.5f);
     } else if (wordIdx > 0 && continuesVec[lastBreakAt + wordIdx]) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
       // count them as justifiable gaps so justifyExtra is distributed to them too.
@@ -989,8 +993,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         actualGapCount++;
       }
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      totalNaturalGaps += renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]), firstCp,
-                                              wordStyles[lastBreakAt + wordIdx - 1]);
+      totalNaturalGaps += static_cast<int>(renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]),
+                                                               firstCp, wordStyles[lastBreakAt + wordIdx - 1]) *
+                                               blockStyle.fontSizeMultiplier +
+                                           0.5f);
     }
   }
 
@@ -1001,10 +1007,11 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   // so relying only on breakIndex would incorrectly disable justification.
   const bool isLastLine = lineBreak == words.size();
 
-  // For justified text, compute per-gap extra to distribute remaining space evenly
+  // For justified text, compute per-gap extra to distribute remaining space evenly.
+  // Cap stretch to effectivePageWidth/8 per gap to prevent rivers in sparse lines.
   const int spareSpace = effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
   const int justifyExtra = (blockStyle.alignment == CssTextAlign::Justify && !isLastLine && actualGapCount >= 1)
-                               ? spareSpace / static_cast<int>(actualGapCount)
+                               ? std::min(spareSpace / static_cast<int>(actualGapCount), effectivePageWidth / 8)
                                : 0;
 
   // Calculate initial x position (first line starts at indent for left/justified text;
@@ -1028,9 +1035,11 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     if (nextIsContinuation) {
       int advance = wordWidths[lastBreakAt + wordIdx];
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      advance +=
-          renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                              firstCodepoint(words[lastBreakAt + wordIdx + 1]), wordStyles[lastBreakAt + wordIdx]);
+      advance += static_cast<int>(renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                                      firstCodepoint(words[lastBreakAt + wordIdx + 1]),
+                                                      wordStyles[lastBreakAt + wordIdx]) *
+                                      blockStyle.fontSizeMultiplier +
+                                  0.5f);
       // Non-breaking space tokens are stretchable — expand them during justification like normal spaces.
       if (words[lastBreakAt + wordIdx] == " " && continuesVec[lastBreakAt + wordIdx] &&
           blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
@@ -1041,8 +1050,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       int gap = 0;
       if (wordIdx + 1 < lineWordCount) {
         const uint32_t nextFirstCp = firstCodepoint(words[lastBreakAt + wordIdx + 1]);
-        gap = renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx]), nextFirstCp,
-                                       wordStyles[lastBreakAt + wordIdx]);
+        gap = static_cast<int>(renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
+                                                        nextFirstCp, wordStyles[lastBreakAt + wordIdx]) *
+                                   blockStyle.fontSizeMultiplier +
+                               0.5f);
         // Don't stretch the gap before closing punctuation — it looks wrong with
         // extra space before ".", ")", "»" etc.
         const bool nextIsClosing = isClosingPunctuation(nextFirstCp);

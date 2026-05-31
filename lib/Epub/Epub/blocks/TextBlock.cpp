@@ -12,7 +12,9 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     return;
   }
 
-  const int ascender = renderer.getFontAscenderSize(fontId);
+  const float scale = blockStyle.fontSizeMultiplier;
+  const int ascender =
+      (scale == 1.0f) ? renderer.getFontAscenderSize(fontId) : renderer.getFontAscenderSizeScaled(fontId, scale);
   for (size_t i = 0; i < words.size(); i++) {
     const int wordX = wordXpos[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyles[i];
@@ -26,7 +28,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
       wordY += ascender / 4;
     }
-    renderer.drawText(fontId, wordX, wordY, words[i].c_str(), true, currentStyle);
+    if (scale == 1.0f) {
+      renderer.drawText(fontId, wordX, wordY, words[i].c_str(), true, currentStyle);
+    } else {
+      renderer.drawTextScaled(fontId, wordX, wordY, words[i].c_str(), true, currentStyle, scale);
+    }
 
     const std::string& w = words[i];
     const bool hasEmSpacePrefix = w.size() >= 3 && static_cast<uint8_t>(w[0]) == 0xE2 &&
@@ -36,26 +42,29 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     int lineWidth = 0;
 
     if (hasEmSpacePrefix || hasDecoration) {
-      const int fullWordWidth = renderer.getTextWidth(fontId, w.c_str(), currentStyle);
+      const int fullWordWidth = (scale == 1.0f) ? renderer.getTextWidth(fontId, w.c_str(), currentStyle)
+                                                : renderer.getTextWidthScaled(fontId, w.c_str(), currentStyle, scale);
       lineWidth = fullWordWidth;
       if (hasEmSpacePrefix) {
         const char* visiblePtr = w.c_str() + 3;
-        const int prefixWidth = renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", currentStyle);
-        const int visibleWidth = renderer.getTextWidth(fontId, visiblePtr, currentStyle);
+        const int prefixWidth =
+            (scale == 1.0f)
+                ? renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", currentStyle)
+                : static_cast<int>(renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", currentStyle) * scale + 0.5f);
+        const int visibleWidth = (scale == 1.0f) ? renderer.getTextWidth(fontId, visiblePtr, currentStyle)
+                                                 : renderer.getTextWidthScaled(fontId, visiblePtr, currentStyle, scale);
         startX = wordX + prefixWidth;
         lineWidth = visibleWidth;
       }
     }
 
     if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-      const int underlineY = y + renderer.getFontAscenderSize(fontId) + 3;
+      const int underlineY = y + ascender + 3;
       renderer.drawLine(startX, underlineY, startX + lineWidth, underlineY, 2, true);
     }
 
     if ((currentStyle & EpdFontFamily::STRIKETHROUGH) != 0) {
-      // Arbitrary vertical offset of 4px from the font midline to avoid colliding with typical diacritics; adjust as
-      // needed
-      const int strikeY = y + renderer.getFontAscenderSize(fontId) / 2 + 4;
+      const int strikeY = y + ascender / 2 + 4;
       renderer.drawLine(startX, strikeY, startX + lineWidth, strikeY, 2, true);
     }
   }
@@ -87,6 +96,7 @@ bool TextBlock::serialize(FsFile& file) const {
   serialization::writePod(file, blockStyle.paddingRight);
   serialization::writePod(file, blockStyle.textIndent);
   serialization::writePod(file, blockStyle.textIndentDefined);
+  serialization::writePod(file, blockStyle.fontSizeMultiplier);
 
   return true;
 }
@@ -128,6 +138,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
   serialization::readPod(file, blockStyle.paddingRight);
   serialization::readPod(file, blockStyle.textIndent);
   serialization::readPod(file, blockStyle.textIndentDefined);
+  serialization::readPod(file, blockStyle.fontSizeMultiplier);
 
   return std::unique_ptr<TextBlock>(
       new TextBlock(std::move(words), std::move(wordXpos), std::move(wordStyles), blockStyle));

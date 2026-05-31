@@ -166,6 +166,11 @@ class GfxRenderer {
 
   // Text
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const;
+  int getLineHeightScaled(int fontId, float scale) const;
+  int getFontAscenderSizeScaled(int fontId, float scale) const;
+  void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                      float scale) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,

@@ -45,6 +45,7 @@ class ChapterHtmlSlimParser final : public Print {
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
+  int16_t lastBlockMarginBottom = 0;  // tracks previous block's marginBottom for CSS margin collapsing
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;

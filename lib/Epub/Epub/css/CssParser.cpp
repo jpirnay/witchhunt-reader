@@ -437,6 +437,97 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
       style.verticalAlign = CssVerticalAlign::Baseline;
       style.defined.verticalAlign = 1;
     }
+  } else if (propNameBuf == "list-style-type" || propNameBuf == "list-style") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "none") {
+      style.listStyleNone = true;
+      style.defined.listStyleNone = 1;
+    }
+  } else if (propNameBuf == "page-break-before" || propNameBuf == "break-before") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "always" || val == "page" || val == "left" || val == "right") {
+      style.pageBreakBefore = true;
+      style.defined.pageBreakBefore = 1;
+    }
+  } else if (propNameBuf == "page-break-after" || propNameBuf == "break-after") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "always" || val == "page" || val == "left" || val == "right") {
+      style.pageBreakAfter = true;
+      style.defined.pageBreakAfter = 1;
+    }
+  } else if (propNameBuf == "line-height") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val != "normal" && val != "inherit" && val != "initial" && val != "unset") {
+      // Parse unitless, %, or em. Normalise to a multiplier relative to default y_advance.
+      // Base = 1.5 (typical body line-height). Result range clamped to [0.7, 2.0].
+      static constexpr float kBase = 1.5f;
+      float parsed = 0.0f;
+      bool ok = false;
+      if (!val.empty() && val.back() == '%') {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / 100.0f / kBase;
+          ok = true;
+        }
+      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / kBase;
+          ok = true;
+        }
+      } else {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p && *end == '\0') {
+          parsed = v / kBase;
+          ok = true;
+        }
+      }
+      if (ok && parsed > 0.0f) {
+        style.lineHeightMultiplier = std::max(0.7f, std::min(2.0f, parsed));
+        style.defined.lineHeight = 1;
+      }
+    }
+  } else if (propNameBuf == "font-size") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val != "inherit" && val != "initial" && val != "unset") {
+      float parsed = 0.0f;
+      bool ok = false;
+      if (!val.empty() && val.back() == '%') {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / 100.0f;
+          ok = true;
+        }
+      } else if (val.size() > 3 && val.substr(val.size() - 3) == "rem") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v;
+          ok = true;
+        }
+      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v;
+          ok = true;
+        }
+      }
+      if (ok && parsed > 0.0f) {
+        style.fontSizeMultiplier = parsed;
+        style.defined.fontSizeMultiplier = 1;
+      }
+    }
   }
 }
 

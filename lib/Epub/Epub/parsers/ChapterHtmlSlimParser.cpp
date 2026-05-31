@@ -336,6 +336,7 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   completedPageCount++;
   currentPage.reset(new Page());
   currentPageNextY = 0;
+  lastBlockMarginBottom = 0;
 }
 
 void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
@@ -1102,6 +1103,18 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     if (self->embeddedStyle && cssStyle.hasTextAlign() &&
         self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
       headerBlockStyle.alignment = cssStyle.textAlign;
+    }
+    // Apply default heading font-size multipliers when no explicit CSS font-size is set.
+    // Concept inspired by CidVonHighwind/microreader.
+    if (!cssStyle.hasFontSizeMultiplier()) {
+      const int level = name[1] - '0';  // 'h1'->1, 'h2'->2, …
+      if (level == 1)
+        headerBlockStyle.fontSizeMultiplier = 1.6f;
+      else if (level == 2)
+        headerBlockStyle.fontSizeMultiplier = 1.4f;
+      else if (level == 3)
+        headerBlockStyle.fontSizeMultiplier = 1.2f;
+      // h4-h6 stay at 1.0f
     }
     self->startNewTextBlock(headerBlockStyle);
     self->boldUntilDepth = std::min(self->boldUntilDepth, self->depth);
@@ -2012,20 +2025,25 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY = 0;
   }
 
-  const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
+  const int lineHeight =
+      static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f);
 
   // Apply top spacing before the paragraph — skip for continuation fragments
   // (words left over after an intermediate flush): the top margin was already
   // applied before the first set of lines from this logical paragraph.
-  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
   if (!currentTextBlock->isContinuation()) {
     if (blockStyle.marginTop > 0) {
-      currentPageNextY += blockStyle.marginTop;
+      // CSS margin collapsing: gap between adjacent blocks = max(prevMarginBottom, thisMarginTop).
+      // lastBlockMarginBottom was already added after the previous block; subtract the overlap.
+      const int16_t collapse = std::min(lastBlockMarginBottom, blockStyle.marginTop);
+      currentPageNextY += static_cast<int16_t>(blockStyle.marginTop - collapse);
     }
     if (blockStyle.paddingTop > 0) {
       currentPageNextY += blockStyle.paddingTop;
     }
   }
+  lastBlockMarginBottom = 0;
 
   // Calculate effective width accounting for horizontal margins/padding
   const int horizontalInset = blockStyle.totalHorizontalInset();
@@ -2058,6 +2076,9 @@ void ChapterHtmlSlimParser::makePages() {
   // Apply bottom spacing after the paragraph (stored in pixels)
   if (blockStyle.marginBottom > 0) {
     currentPageNextY += blockStyle.marginBottom;
+    lastBlockMarginBottom = blockStyle.marginBottom;
+  } else {
+    lastBlockMarginBottom = 0;
   }
   if (blockStyle.paddingBottom > 0) {
     currentPageNextY += blockStyle.paddingBottom;
