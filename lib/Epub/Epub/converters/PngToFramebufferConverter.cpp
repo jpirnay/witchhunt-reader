@@ -180,9 +180,9 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
 // or other PNGdec buffers are resized.
 constexpr size_t PNG_DECODER_APPROX_SIZE = sizeof(PNG);
 // Headroom covers heap fragmentation: free heap is the *sum* of all free
-// blocks but `new` needs a single contiguous block. 32 KB headroom on a
-// ~60 KB allocation has historically been enough on this device.
-constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 32 * 1024;
+// blocks but `new` needs a single contiguous block. 16 KB headroom on a
+// ~60 KB allocation is conservative enough on this device.
+constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 16 * 1024;
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
