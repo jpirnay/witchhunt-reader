@@ -34,6 +34,7 @@ enum class SettingAction {
   ReadingStats,
   SleepTimeoutPicker,
   RefreshFrequencyPicker,
+  SwitchToUsbDrive,
   Submenu,
 };
 
