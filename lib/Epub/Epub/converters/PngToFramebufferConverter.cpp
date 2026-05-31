@@ -178,11 +178,11 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
 // PNG images. This is critical on the ESP32-C3 where total RAM is ~320 KB.
 // Use sizeof(PNG) so the precheck stays accurate if PNG_MAX_BUFFERED_PIXELS
 // or other PNGdec buffers are resized.
+// The pre-check uses getMaxAllocHeap() (largest contiguous free block) rather
+// than getFreeHeap() (sum of all free blocks) because `new` needs one contiguous
+// block — fragmentation can leave getFreeHeap() >> sizeof(PNG) while the
+// allocation still fails.
 constexpr size_t PNG_DECODER_APPROX_SIZE = sizeof(PNG);
-// Headroom covers heap fragmentation: free heap is the *sum* of all free
-// blocks but `new` needs a single contiguous block. 16 KB headroom on a
-// ~60 KB allocation is conservative enough on this device.
-constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 16 * 1024;
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
@@ -456,9 +456,10 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
                                                     const RenderConfig& config) {
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
-  size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < MIN_FREE_HEAP_FOR_PNG) {
-    LOG_ERR("PNG", "Not enough heap for PNG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_PNG);
+  size_t maxAlloc = ESP.getMaxAllocHeap();
+  if (maxAlloc < PNG_DECODER_APPROX_SIZE) {
+    LOG_ERR("PNG", "Not enough contiguous heap for PNG decoder (%u largest block, need %u)", maxAlloc,
+            PNG_DECODER_APPROX_SIZE);
     return false;
   }
 
