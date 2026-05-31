@@ -310,6 +310,16 @@ class GfxRenderer {
   // Low level functions
   uint8_t* getFrameBuffer() const;
   size_t getBufferSize() const;
+
+  // Release both display frame buffers back to the heap (~96-104KB total).
+  // Nulls the local frameBuffer pointer too so any accidental render attempt
+  // fails visibly rather than corrupting freed memory.
+  // Only valid after the final displayBuffer(); the device must reboot before
+  // any display operation is attempted again.
+  void releaseFrameBuffers() {
+    display.releaseBuffers();
+    frameBuffer = nullptr;
+  }
   uint16_t getDisplayWidth() const { return panelWidth; }
   uint16_t getDisplayHeight() const { return panelHeight; }
   uint16_t getDisplayWidthBytes() const { return panelWidthBytes; }

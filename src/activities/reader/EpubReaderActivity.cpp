@@ -95,7 +95,6 @@ void logReaderMemSnapshot(const char* stage) {
 inline void logReaderMemSnapshot(const char*) {}
 #endif
 
-
 // Computes the [0..100] EPUB progress percent. Returns 0 when pageCount is unknown (sync/bookmark
 // pre-render writes), in which case the next saveProgress() will overwrite progress.bin with the
 // real value before the user can leave the reader.
@@ -197,7 +196,6 @@ void EpubReaderActivity::onEnter() {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
   }
   logReaderMemSnapshot("onEnter_after_orientation");
-
 
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
@@ -1034,9 +1032,8 @@ std::string EpubReaderActivity::buildRenderBenchmarkReport(const LastRenderStats
              " ms, render total " + std::to_string(endSnapshot.phases.totalMs) + " ms");
   appendLine("Phases: prewarm " + std::to_string(endSnapshot.phases.prewarmMs) + ", bw " +
              std::to_string(endSnapshot.phases.bwRenderMs) + ", display " +
-             std::to_string(endSnapshot.phases.displayMs) + ", planes " +
-             std::to_string(endSnapshot.phases.grayLsbMs) + ", gray display " +
-             std::to_string(endSnapshot.phases.grayDisplayMs) + ", restore " +
+             std::to_string(endSnapshot.phases.displayMs) + ", planes " + std::to_string(endSnapshot.phases.grayLsbMs) +
+             ", gray display " + std::to_string(endSnapshot.phases.grayDisplayMs) + ", restore " +
              std::to_string(endSnapshot.phases.bwRestoreMs));
   appendLine("Font cache: hits " + std::to_string(endSnapshot.fontCacheHits) + ", misses " +
              std::to_string(endSnapshot.fontCacheMisses) + ", decompress " +
@@ -2142,19 +2139,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // Push fast-AA toggle into the SDK before the AA refresh (X3 only; no-op on X4).
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int fontId = getEffectiveReaderFontId();
-    const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
-      page->renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
-    });
+    const auto gt = renderer.renderGrayscalePlanesSequential(
+        [&](GfxRenderer::RenderMode) { page->renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     fcm->logStats("gray");
     logReaderMemSnapshot("gray_end");
 
     const auto tEnd = millis();
     lastRenderStats.usedGrayscale = true;
-    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0,
-                              gt.planesMs, 0, gt.displayMs, gt.restoreMs, tEnd - t0};
-    LOG_DBG("ERS", "Page render: prewarm=%lums bw=%lums display=%lums planes=%lums gray=%lums restore=%lums total=%lums",
-            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender,
-            gt.planesMs, gt.displayMs, gt.restoreMs, tEnd - t0);
+    lastRenderStats.phases = {
+        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, gt.planesMs, 0, gt.displayMs, gt.restoreMs,
+        tEnd - t0};
+    LOG_DBG(
+        "ERS", "Page render: prewarm=%lums bw=%lums display=%lums planes=%lums gray=%lums restore=%lums total=%lums",
+        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, gt.planesMs, gt.displayMs, gt.restoreMs, tEnd - t0);
   }
 
   if (const auto* cacheManager = renderer.getFontCacheManager()) {
@@ -2213,9 +2210,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   if (getEffectiveTextAntiAliasing()) {
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int fontId = getEffectiveReaderFontId();
-    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
-      page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);
-    });
+    renderer.renderGrayscalePlanesSequential(
+        [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
   }
 }

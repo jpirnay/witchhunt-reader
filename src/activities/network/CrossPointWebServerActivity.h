@@ -49,6 +49,11 @@ class CrossPointWebServerActivity final : public Activity {
   // Performance monitoring
   unsigned long lastHandleClientTime = 0;
 
+  // Set after the first render completes and frame buffers are released.
+  // Subsequent render() calls return immediately — no display operations
+  // are possible after releaseFrameBuffers().
+  bool buffersReleased = false;
+
   void renderServerRunning() const;
 
   void onNetworkModeSelected(NetworkMode mode);
@@ -65,4 +70,7 @@ class CrossPointWebServerActivity final : public Activity {
   void render(RenderLock&&) override;
   bool skipLoopDelay() override { return webServer && webServer->isRunning(); }
   bool preventAutoSleep() override { return webServer && webServer->isRunning(); }
+  // Suppress the minute-tick e-ink refresh while the web server is running.
+  // That 640ms display cycle holds the render mutex and blocks handleClient.
+  bool shouldSkipPeriodicUpdate() const override { return webServer && webServer->isRunning(); }
 };

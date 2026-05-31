@@ -54,6 +54,7 @@ void CrossPointWebServerActivity::onEnter() {
   networkMode = NetworkMode::JOIN_NETWORK;
   isApMode = false;
   webServerStarted = false;
+  buffersReleased = false;
   connectedIP.clear();
   connectedSSID.clear();
   lastHandleClientTime = 0;
@@ -254,8 +255,10 @@ void CrossPointWebServerActivity::startWebServer() {
     }
     LOG_DBG("WEBACT", "Web server started successfully");
 
-    // Force an immediate render since we're transitioning from a subactivity
-    // that had its own rendering task. We need to make sure our display is shown.
+    // Trigger the initial render (QR code screen). The frame buffers will be
+    // released inside render() itself after the first paint completes — that
+    // way the render task owns the release and there is no race with a second
+    // render being scheduled before releaseFrameBuffers() returns.
     requestUpdate();
   } else {
     LOG_ERR("WEBACT", "ERROR: Failed to start web server!");
@@ -345,8 +348,12 @@ void CrossPointWebServerActivity::loop() {
 }
 
 void CrossPointWebServerActivity::render(RenderLock&&) {
-  // Only render our own UI when server is running
-  // Subactivities handle their own rendering
+  // After the first render the frame buffers are released — any subsequent
+  // render attempt would write to nullptr and crash. Return immediately.
+  if (buffersReleased) return;
+
+  // Only render our own UI when server is running.
+  // Subactivities handle their own rendering.
   if (state == WebServerActivityState::SERVER_RUNNING || state == WebServerActivityState::AP_STARTING) {
     renderer.clearScreen();
     const auto& metrics = UITheme::getInstance().getMetrics();
@@ -367,6 +374,18 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_STARTING_HOTSPOT));
     }
     renderer.displayBuffer();
+
+    // Release frame buffers immediately after the first SERVER_RUNNING paint.
+    // The e-ink controller retains the image in its own RAM. The render task
+    // owns this release so there is no race with the main task scheduling a
+    // second render between our displayBuffer() and the free. The device
+    // reboots on web server exit so the buffers are never needed again.
+    if (state == WebServerActivityState::SERVER_RUNNING && !buffersReleased) {
+      buffersReleased = true;
+      LOG_DBG("WEBACT", "Free heap before buffer release: %d bytes", ESP.getFreeHeap());
+      renderer.releaseFrameBuffers();
+      LOG_DBG("WEBACT", "Free heap after buffer release: %d bytes", ESP.getFreeHeap());
+    }
   }
 }
 

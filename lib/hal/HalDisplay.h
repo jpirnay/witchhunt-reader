@@ -48,6 +48,12 @@ class HalDisplay {
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
+  // Release both frame buffers back to the heap (~52KB on X3, ~48KB on X4 each,
+  // so ~104KB / ~96KB total). Call only after the final displayBuffer(); the
+  // e-ink controller retains the image in its own RAM. No display operations
+  // may be performed after this. The device must reboot before display resumes.
+  void releaseBuffers();
+
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);

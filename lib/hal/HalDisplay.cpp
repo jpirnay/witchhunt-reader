@@ -85,6 +85,8 @@ void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
+void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

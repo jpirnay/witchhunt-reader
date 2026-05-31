@@ -2558,9 +2558,7 @@ void GfxRenderer::restoreBwBuffer() {
 // On X3 the display call transiently Y-flips frameBuffer in place and flips
 // it back before returning; the logical contents are unchanged but callers
 // must not race a framebuffer reader against this call. See the header.
-void GfxRenderer::cleanupGrayscaleWithPreviousBuffer() const {
-  display.cleanupGrayscaleWithPreviousBuffer();
-}
+void GfxRenderer::cleanupGrayscaleWithPreviousBuffer() const { display.cleanupGrayscaleWithPreviousBuffer(); }
 
 void GfxRenderer::syncRedRamFromFrameBuffer() const { display.syncRedRamFromFrameBuffer(); }
 

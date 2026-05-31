@@ -41,14 +41,24 @@
 // Minimum free heap to attempt serving a response. Below this threshold the
 // WebServer library's internal malloc(11) for chunked chunk-size headers fails
 // silently, producing malformed HTTP that the browser rejects.
-static constexpr uint32_t MIN_HEAP_FOR_RESPONSE = 8192;
+// Minimum maxAlloc to serve a JSON response (sendJson malloc + _prepareHeader String).
+static constexpr uint32_t MIN_HEAP_FOR_JSON = 8192;
+// Minimum maxAlloc to serve a large gzip'd HTML page via send_P.
+// send_P itself needs no payload heap, but _prepareHeader's String + the two
+// sendHeader RequestArgument nodes + the chunk-size malloc(11) add ~1KB of
+// small allocs that fragment badly on an already-tight heap. The log shows
+// root_enter at maxAlloc=9716 causing catastrophic fragmentation (exit=2036),
+// so we require 12KB headroom before attempting a large static file.
+static constexpr uint32_t MIN_HEAP_FOR_HTML = 12288;
 
-static bool rejectIfLowMemory(WebServer* server) {
-  if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >= MIN_HEAP_FOR_RESPONSE) {
+static bool rejectIfLowMemory(WebServer* server, uint32_t minAlloc = MIN_HEAP_FOR_JSON) {
+  const uint32_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  if (avail >= minAlloc) {
     return false;
   }
-  LOG_DBG("WEB", "Low memory — rejecting request (maxAlloc=%lu)",
-          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  LOG_DBG("WEB", "Low memory — rejecting request (maxAlloc=%lu, need=%lu)", (unsigned long)avail,
+          (unsigned long)minAlloc);
+  server->sendHeader("Retry-After", "5");
   server->send(503, "application/json", "{\"error\":\"low memory\"}");
   return true;
 }
@@ -430,7 +440,7 @@ CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() con
 }
 
 static void sendHtmlContent(WebServer* server, const char* data, size_t len) {
-  if (rejectIfLowMemory(server)) return;
+  if (rejectIfLowMemory(server, MIN_HEAP_FOR_HTML)) return;
   server->sendHeader("Content-Encoding", "gzip");
   server->sendHeader("Cache-Control", "max-age=3600");
   server->send_P(200, "text/html", data, len);
@@ -571,7 +581,7 @@ void CrossPointWebServer::handleStatsExport() const {
 }
 
 void CrossPointWebServer::handleJszip() const {
-  if (rejectIfLowMemory(server.get())) return;
+  if (rejectIfLowMemory(server.get(), MIN_HEAP_FOR_HTML)) return;
   server->sendHeader("Content-Encoding", "gzip");
   server->sendHeader("Cache-Control", "max-age=3600");
   server->send_P(200, "application/javascript", jszip_minJs, jszip_minJsCompressedSize);

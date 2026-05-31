@@ -130,11 +130,11 @@ class EpubReaderActivity final : public Activity {
     unsigned long prewarmMs = 0UL;
     unsigned long bwRenderMs = 0UL;
     unsigned long displayMs = 0UL;
-    unsigned long bwStoreMs = 0UL;    // unused (sequential path)
-    unsigned long grayLsbMs = 0UL;    // LSB+MSB render+copy (planes phase)
-    unsigned long grayMsbMs = 0UL;    // unused (sequential path)
-    unsigned long grayDisplayMs = 0UL; // displayGrayBuffer() waveform
-    unsigned long bwRestoreMs = 0UL;  // BW re-render + cleanupGrayscaleWithFrameBuffer()
+    unsigned long bwStoreMs = 0UL;      // unused (sequential path)
+    unsigned long grayLsbMs = 0UL;      // LSB+MSB render+copy (planes phase)
+    unsigned long grayMsbMs = 0UL;      // unused (sequential path)
+    unsigned long grayDisplayMs = 0UL;  // displayGrayBuffer() waveform
+    unsigned long bwRestoreMs = 0UL;    // BW re-render + cleanupGrayscaleWithFrameBuffer()
     unsigned long totalMs = 0UL;
   };
   struct LastRenderStats {
