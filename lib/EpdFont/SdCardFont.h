@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <new>
 
@@ -24,6 +25,16 @@ class SdCardFont {
   // Supports v4 (multi-style) format.
   // Returns true on success.
   bool load(const char* path);
+
+  // Load from a flash partition mmap pointer (e.g. from FlashFontPartition::mmap()).
+  // fullIntervals and kern/lig tables are read directly from the mmap region — no
+  // heap allocation for metadata.  The mmap pointer must remain valid for the
+  // lifetime of this SdCardFont.  unloadMetadata() and reloadMetadata() are no-ops
+  // for mmap-loaded fonts (metadata is always present in the flash mapping).
+  // sdPath must be the SD path of the same .cpfont — it is used by the bitmap
+  // overflow handler to load glyph bitmaps from SD at draw time.
+  // Returns true on success.
+  bool loadFromMmap(const uint8_t* base, size_t size, const char* sdPath);
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -212,6 +223,11 @@ class SdCardFont {
   Stats stats_;
   uint32_t contentHash_ = 0;
   bool loaded_ = false;
+
+  // When loaded via loadFromMmap(), points to the flash partition mmap base.
+  // fullIntervals and kern/lig pointers in PerStyle alias into this region —
+  // they must NOT be delete[]'d.  nullptr when loaded from SD.
+  const uint8_t* mmapBase_ = nullptr;
 
   // Per-style helpers
   static bool allCpsCovered(const PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);

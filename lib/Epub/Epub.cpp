@@ -297,6 +297,9 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
         LOG_DBG("EBP", "Common cover fallback checked %d cached candidates in %lu ms with no match", checkedCandidates,
                 millis() - coverBatchStart);
       }
+
+      // The stat cache is live here — build the image manifest while we have it.
+      buildImageManifest(zip);
     }
   }
 
@@ -510,6 +513,32 @@ bool Epub::parsePageMapFile() const {
   pageMapPageListSink.finalize();
   LOG_DBG("EBP", "Parsed page-map entries");
   return true;
+}
+
+void Epub::buildImageManifest(ZipFile& zf) {
+  imageManifest.reset(new EpubImageManifest());
+  if (!imageManifest->build(cachePath, filepath, zf)) {
+    LOG_ERR("EBP", "Failed to build image manifest");
+    imageManifest.reset();
+  }
+}
+
+void Epub::loadImageManifest() {
+  // Return immediately if already loaded (e.g. built during this same load()).
+  if (imageManifest && imageManifest->isLoaded()) return;
+
+  imageManifest.reset(new EpubImageManifest());
+  if (imageManifest->load(cachePath)) return;
+
+  // Cache miss — build it now. Requires a fresh ZipFile with full stat index.
+  LOG_DBG("EBP", "Image manifest cache miss, building now");
+  ZipFile zf(filepath);
+  if (!zf.loadAllFileStatSlims()) {
+    LOG_ERR("EBP", "Failed to index ZIP for image manifest");
+    imageManifest.reset();
+    return;
+  }
+  buildImageManifest(zf);
 }
 
 void Epub::discoverCssFilesFromZip() {

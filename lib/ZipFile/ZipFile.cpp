@@ -107,20 +107,64 @@ bool ZipFile::loadAllFileStatSlims() {
   return true;
 }
 
+static std::string normalizeZipPath(const char* filename) {
+  std::string normalized;
+  normalized.reserve(strlen(filename));
+  for (const char* p = filename; *p; ++p) {
+    if (*p == '\\') {
+      normalized.push_back('/');
+    } else {
+      normalized.push_back(*p);
+    }
+  }
+  while (!normalized.empty() && normalized.front() == '/') {
+    normalized.erase(normalized.begin());
+  }
+  return normalized;
+}
+
+static std::string normalizeZipPathLower(const char* filename) {
+  std::string normalized = normalizeZipPath(filename);
+  for (char& ch : normalized) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return normalized;
+}
+
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
+  const std::string normalizedFilename = normalizeZipPath(filename);
+  const std::string normalizedFilenameLower = normalizeZipPathLower(filename);
+
   if (!fileStatSlimCache.empty()) {
-    const auto it = fileStatSlimCache.find(filename);
+    const auto it = fileStatSlimCache.find(normalizedFilename);
     if (it != fileStatSlimCache.end()) {
       *fileStat = it->second;
       return true;
+    }
+    LOG_DBG("ZIP", "loadFileStatSlim: cached entry not found: %s (normalized=%s)", filename,
+            normalizedFilename.c_str());
+
+    for (const auto& entry : fileStatSlimCache) {
+      std::string keyLower = normalizeZipPathLower(entry.first.c_str());
+      if (keyLower == normalizedFilenameLower) {
+        LOG_DBG("ZIP", "loadFileStatSlim: case-insensitive match for %s => %s", filename, entry.first.c_str());
+        *fileStat = entry.second;
+        return true;
+      }
     }
     return false;
   }
 
   const ScopedOpenClose zip{*this};
-  if (!zip) return false;
+  if (!zip) {
+    LOG_ERR("ZIP", "loadFileStatSlim: failed to open zip for %s", filename);
+    return false;
+  }
 
-  if (!loadZipDetails()) return false;
+  if (!loadZipDetails()) {
+    LOG_ERR("ZIP", "loadFileStatSlim: loadZipDetails failed for %s", filename);
+    return false;
+  }
 
   // Phase 1: Try scanning from cursor position first
   uint32_t startPos = lastCentralDirPosValid ? lastCentralDirPos : zipDetails.centralDirOffset;
@@ -167,11 +211,24 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
       file.read(itemName, nameLen);
       itemName[nameLen] = '\0';
 
-      if (strcmp(itemName, filename) == 0) {
+      std::string normalizedItemName = normalizeZipPath(itemName);
+      if (normalizedItemName == normalizedFilename) {
         // Found it! Update cursor to next entry
         file.seekCur(m + k);
         lastCentralDirPos = file.position();
         lastCentralDirPosValid = true;
+        fileStatSlimCache.emplace(std::move(normalizedItemName), *fileStat);
+        found = true;
+        break;
+      }
+
+      const std::string normalizedItemNameLower = normalizeZipPathLower(itemName);
+      if (normalizedItemNameLower == normalizedFilenameLower) {
+        LOG_DBG("ZIP", "loadFileStatSlim: case-insensitive match for %s => %s", filename, itemName);
+        file.seekCur(m + k);
+        lastCentralDirPos = file.position();
+        lastCentralDirPosValid = true;
+        fileStatSlimCache.emplace(normalizedItemName, *fileStat);
         found = true;
         break;
       }
@@ -182,6 +239,11 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
 
     // Skip extra field + comment
     file.seekCur(m + k);
+  }
+
+  if (!found) {
+    LOG_DBG("ZIP", "loadFileStatSlim: entry not found after scan: %s (normalized=%s)", filename,
+            normalizedFilename.c_str());
   }
 
   return found;
@@ -580,8 +642,11 @@ size_t ZipFile::readBytesFromEntry(const char* filename, uint8_t* outBuf, const 
   }
 
   if (fileStat.method == ZIP_METHOD_DEFLATED) {
-    // Use a small read buffer — we stop as soon as we have maxBytes, so no
-    // need for a full-size output buffer.
+    // Streaming inflate (32KB ring buffer) is the preferred path.  It can fail
+    // if a 32KB ring buffer can't be allocated while another inflate is live
+    // (e.g. reading image headers mid-XHTML stream).  In that case fall back to
+    // one-shot inflate: read a bounded compressed chunk and decompress it all at
+    // once without a ring buffer.
     constexpr size_t READ_BUF = 512;
     auto* readBuf = static_cast<uint8_t*>(malloc(READ_BUF));
     if (!readBuf) return 0;
@@ -592,23 +657,47 @@ size_t ZipFile::readBytesFromEntry(const char* filename, uint8_t* outBuf, const 
     ctx.readBuf = readBuf;
     ctx.readBufSize = READ_BUF;
 
-    if (!ctx.reader.init(true)) {
+    if (ctx.reader.init(true)) {
+      ctx.reader.setReadCallback(zipReadCallback);
+
+      size_t totalOut = 0;
+      while (totalOut < wantBytes) {
+        size_t produced;
+        const size_t remaining = wantBytes - totalOut;
+        const InflateStatus status = ctx.reader.readAtMost(outBuf + totalOut, remaining, &produced);
+        totalOut += produced;
+        if (status == InflateStatus::Done || status == InflateStatus::Error) break;
+      }
+
       free(readBuf);
+      return totalOut;
+    }
+
+    // Streaming ring buffer unavailable — fall back to one-shot inflate.
+    // Read a bounded compressed chunk (4× the desired output as a rough overhead
+    // estimate, capped at the actual compressed size) and decompress in one shot.
+    free(readBuf);
+    const size_t compChunkSize = std::min(static_cast<size_t>(fileStat.compressedSize), wantBytes * 4);
+    auto* compBuf = static_cast<uint8_t*>(malloc(compChunkSize));
+    if (!compBuf) return 0;
+
+    const size_t compRead = file.read(compBuf, compChunkSize);
+    if (compRead == 0) {
+      free(compBuf);
       return 0;
     }
-    ctx.reader.setReadCallback(zipReadCallback);
 
-    size_t totalOut = 0;
-    while (totalOut < wantBytes) {
-      size_t produced;
-      const size_t remaining = wantBytes - totalOut;
-      const InflateStatus status = ctx.reader.readAtMost(outBuf + totalOut, remaining, &produced);
-      totalOut += produced;
-      if (status == InflateStatus::Done || status == InflateStatus::Error) break;
-    }
+    InflateReader oneShot;
+    oneShot.init(false);
+    oneShot.setSource(compBuf, compRead);
 
-    free(readBuf);
-    return totalOut;
+    // One-shot read: decompress up to wantBytes; partial output is still useful
+    // (e.g. a JPEG SOF marker within the first kHeaderBufSize bytes).
+    size_t produced = 0;
+    const InflateStatus status = oneShot.readAtMost(outBuf, wantBytes, &produced);
+    free(compBuf);
+    if (status == InflateStatus::Error && produced == 0) return 0;
+    return produced;
   }
 
   return 0;

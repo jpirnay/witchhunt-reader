@@ -1,6 +1,7 @@
 #include "SdCardFontManager.h"
 
 #include <EpdFontFamily.h>
+#include <FlashFontPartition.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <SdCardFont.h>
@@ -59,10 +60,41 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     return false;
   }
 
-  if (!font->load(selected->path.c_str())) {
-    LOG_ERR("SDMGR", "Failed to load %s", selected->path.c_str());
-    delete font;
-    return false;
+  // Attempt to use the flash partition font cache (zero SRAM for metadata).
+  // On success, fullIntervals + kern/lig tables are mmap'd from flash — the
+  // phase lifecycle unload/reload cycle becomes a no-op for this font.
+  // Fall back to SD load on any failure.
+  bool loadedFromMmap = false;
+  {
+    // Unmap any previous mapping before writing a new font to flash.
+    if (FlashFontPartition::isMapped()) {
+      FlashFontPartition::unmap();
+    }
+    if (FlashFontPartition::write(selected->path.c_str())) {
+      const uint8_t* mmapPtr = nullptr;
+      size_t mmapSize = 0;
+      if (FlashFontPartition::mmap(&mmapPtr, &mmapSize)) {
+        if (font->loadFromMmap(mmapPtr, mmapSize, selected->path.c_str())) {
+          loadedFromMmap = true;
+          LOG_INF("SDMGR", "Font loaded from flash partition mmap: %s", selected->path.c_str());
+        } else {
+          LOG_ERR("SDMGR", "loadFromMmap failed, falling back to SD load");
+          FlashFontPartition::unmap();
+        }
+      } else {
+        LOG_ERR("SDMGR", "mmap failed, falling back to SD load");
+      }
+    } else {
+      LOG_ERR("SDMGR", "Flash partition write failed, falling back to SD load");
+    }
+  }
+
+  if (!loadedFromMmap) {
+    if (!font->load(selected->path.c_str())) {
+      LOG_ERR("SDMGR", "Failed to load %s", selected->path.c_str());
+      delete font;
+      return false;
+    }
   }
 
   int fontId = computeFontId(font->contentHash(), family.name.c_str(), selected->pointSize);
@@ -99,6 +131,11 @@ void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
   loaded_.clear();
   loadedFamilyName_.clear();
   loadedPointSize_ = 0;
+  // Release the flash partition mmap now that the font objects are destroyed.
+  // The next loadFamily() call will re-map (or write + map) as needed.
+  if (FlashFontPartition::isMapped()) {
+    FlashFontPartition::unmap();
+  }
 }
 
 int SdCardFontManager::getFontId(const std::string& familyName) const {

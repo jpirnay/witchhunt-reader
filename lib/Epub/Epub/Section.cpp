@@ -487,7 +487,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
       epub, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth, viewportHeight,
       hyphenationEnabled, bionicReadingEnabled,
       [this, &lut](std::unique_ptr<Page> page) { lut.emplace_back(this->onPageComplete(std::move(page))); },
-      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), progressFn, cssParser);
+      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), progressFn, cssParser,
+      epub->getImageManifest());
   visitor.setExternalPageBreakAnchors(std::move(externalPageBreakAnchors));
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 

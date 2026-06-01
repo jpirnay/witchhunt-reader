@@ -45,29 +45,41 @@ bool ImageDecoderFactory::isFormatSupported(const std::string& imagePath) { retu
 
 bool ImageDecoderFactory::getDimensionsFromZipEntry(const std::string& epubFilePath, const std::string& entryPath,
                                                     ImageDimensions& out) {
-  // JPEG: SOF marker is typically within the first 4 KB.
-  // PNG: IHDR is always in the first 24 bytes.
-  // We read up to 4 KB to cover both formats; for PNG this wastes a few bytes but is harmless.
+  // PNG needs only 24 bytes; JPEG SOF is typically within 4 KB.
+  // Heap-allocate to avoid blowing the ~8 KB ActivityManager task stack during createSectionFile.
   constexpr size_t kHeaderBufSize = 4 * 1024;
-  uint8_t buf[kHeaderBufSize];
-
-  const std::string normalised = FsHelpers::normalisePath(entryPath);
-  const size_t bytesRead = ZipFile(epubFilePath).readBytesFromEntry(normalised.c_str(), buf, kHeaderBufSize);
-  if (bytesRead == 0) {
-    LOG_ERR("DEC", "getDimensionsFromZipEntry: failed to read header from %s:%s", epubFilePath.c_str(),
-            entryPath.c_str());
+  auto* buf = static_cast<uint8_t*>(malloc(kHeaderBufSize));
+  if (!buf) {
+    LOG_ERR("DEC", "getDimensionsFromZipEntry: failed to alloc %u bytes", static_cast<unsigned>(kHeaderBufSize));
     return false;
   }
 
-  // Try JPEG first (most common for EPUBs)
-  if (bytesRead >= 2 && buf[0] == 0xFF && buf[1] == 0xD8) {
-    return JpegToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
-  }
-  // Try PNG
-  if (bytesRead >= 8 && buf[0] == 0x89 && buf[1] == 0x50) {
-    return PngToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
+  const std::string normalised = FsHelpers::normalisePath(entryPath);
+  LOG_DBG("DEC", "getDimensionsFromZipEntry: epub=%s request=%s normalized=%s", epubFilePath.c_str(), entryPath.c_str(),
+          normalised.c_str());
+  const size_t bytesRead = ZipFile(epubFilePath).readBytesFromEntry(normalised.c_str(), buf, kHeaderBufSize);
+  if (bytesRead == 0) {
+    free(buf);
+    LOG_ERR("DEC", "getDimensionsFromZipEntry: failed to read header from %s:%s (normalized=%s)", epubFilePath.c_str(),
+            entryPath.c_str(), normalised.c_str());
+    return false;
   }
 
-  LOG_ERR("DEC", "getDimensionsFromZipEntry: unrecognised format for %s", entryPath.c_str());
-  return false;
+  bool ok = false;
+  if (bytesRead >= 2 && buf[0] == 0xFF && buf[1] == 0xD8) {
+    ok = JpegToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
+  } else if (bytesRead >= 8 && buf[0] == 0x89 && buf[1] == 0x50) {
+    ok = PngToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
+  } else {
+    uint32_t sig = 0;
+    if (bytesRead >= 4) {
+      sig = (static_cast<uint32_t>(buf[0]) << 24) | (static_cast<uint32_t>(buf[1]) << 16) |
+            (static_cast<uint32_t>(buf[2]) << 8) | static_cast<uint32_t>(buf[3]);
+    }
+    LOG_ERR("DEC", "getDimensionsFromZipEntry: unrecognised format for %s (bytes=%u, sig=0x%08X)", entryPath.c_str(),
+            static_cast<unsigned>(bytesRead), sig);
+  }
+
+  free(buf);
+  return ok;
 }

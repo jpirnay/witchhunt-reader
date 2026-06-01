@@ -79,12 +79,16 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
 }
 
 void SdCardFont::freeStyleKernLigatureData(PerStyle& s) {
-  delete[] s.kernLeftClasses;
+  // Only delete heap-owned pointers. When loaded from mmap, kern/lig tables
+  // point into the flash region and must not be freed.
+  if (!mmapBase_) {
+    delete[] s.kernLeftClasses;
+    delete[] s.kernRightClasses;
+    delete[] s.ligaturePairs;
+  }
   s.kernLeftClasses = nullptr;
   s.kernClassesLoaded = false;
-  delete[] s.kernRightClasses;
   s.kernRightClasses = nullptr;
-  delete[] s.ligaturePairs;
   s.ligaturePairs = nullptr;
   s.ligLoaded = false;
   // Clear dangling pointers in EpdFontData structs
@@ -110,7 +114,10 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
   s.reportedMissCount = 0;
-  delete[] s.fullIntervals;
+  // Only delete heap-owned fullIntervals. Mmap-loaded fonts alias flash.
+  if (!mmapBase_) {
+    delete[] s.fullIntervals;
+  }
   s.fullIntervals = nullptr;
   freeStyleKernLigatureData(s);
   s.present = false;
@@ -126,10 +133,18 @@ void SdCardFont::freeAll() {
   styleCount_ = 0;
   contentHash_ = 0;
   loaded_ = false;
+  mmapBase_ = nullptr;
 }
 
 void SdCardFont::unloadMetadata() {
   if (!loaded_) return;
+  // Mmap-loaded fonts alias flash — metadata is always accessible via the
+  // mapped pointer and must not be freed. The phase lifecycle unload/reload
+  // cycle is a no-op for these fonts.
+  if (mmapBase_) {
+    LOG_DBG("SDCF", "unloadMetadata: mmap font — no-op (%s)", filePath_);
+    return;
+  }
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
     auto& s = styles_[i];
     if (!s.present) continue;
@@ -145,6 +160,11 @@ void SdCardFont::unloadMetadata() {
 
 bool SdCardFont::reloadMetadata() {
   if (!loaded_) return false;
+  // Mmap-loaded fonts never unload metadata, so reload is always a no-op.
+  if (mmapBase_) {
+    LOG_DBG("SDCF", "reloadMetadata: mmap font — no-op (%s)", filePath_);
+    return true;
+  }
 
   FsFile file;
   if (!Storage.openFileForRead("SDCF", filePath_, file)) {
@@ -727,6 +747,164 @@ bool SdCardFont::load(const char* path) {
     LOG_DBG("SDCF", "  style[%u]: %u intervals, %u glyphs, advY=%u, asc=%d, desc=%d, kernL=%u, kernR=%u, ligs=%u", i,
             h.intervalCount, h.glyphCount, h.advanceY, h.ascender, h.descender, h.kernLeftEntryCount,
             h.kernRightEntryCount, h.ligaturePairCount);
+  }
+  return true;
+}
+
+// --- Load from mmap ---
+
+// Helper: inline read of a little-endian uint16_t / int16_t / uint32_t from a byte pointer
+// (same helpers as the file-based loader above)
+static inline uint16_t mmapU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
+static inline int16_t mmapI16(const uint8_t* p) { return static_cast<int16_t>(p[0] | (p[1] << 8)); }
+static inline uint32_t mmapU32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
+
+bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPath) {
+  freeAll();
+
+  if (!base || size < HEADER_SIZE) {
+    LOG_ERR("SDCF", "loadFromMmap: invalid pointer or size %u", static_cast<unsigned>(size));
+    return false;
+  }
+
+  // Validate magic and version
+  if (memcmp(base, CPFONT_MAGIC, 8) != 0) {
+    LOG_ERR("SDCF", "loadFromMmap: invalid magic bytes");
+    return false;
+  }
+  const uint16_t fileVersion = mmapU16(base + 8);
+  if (fileVersion != CPFONT_VERSION) {
+    LOG_ERR("SDCF", "loadFromMmap: unsupported version %u (expected %u)", fileVersion, CPFONT_VERSION);
+    return false;
+  }
+
+  // Content hash: accumulate global header
+  uint32_t hash = fnv1a(base, HEADER_SIZE);
+
+  const bool is2Bit = (mmapU16(base + 10) & 1) != 0;
+  const uint8_t numStyles = base[12];
+  if (numStyles == 0 || numStyles > MAX_STYLES) {
+    LOG_ERR("SDCF", "loadFromMmap: invalid style count %u", numStyles);
+    return false;
+  }
+
+  // Parse style TOC
+  for (uint8_t i = 0; i < numStyles; i++) {
+    const uint8_t* tocEntry = base + HEADER_SIZE + i * STYLE_TOC_ENTRY_SIZE;
+    if (tocEntry + STYLE_TOC_ENTRY_SIZE > base + size) {
+      LOG_ERR("SDCF", "loadFromMmap: TOC entry %u out of bounds", i);
+      freeAll();
+      return false;
+    }
+    hash = fnv1a(tocEntry, STYLE_TOC_ENTRY_SIZE, hash);
+
+    const uint8_t styleId = tocEntry[0];
+    if (styleId >= MAX_STYLES) {
+      LOG_ERR("SDCF", "loadFromMmap: invalid styleId %u in TOC", styleId);
+      continue;
+    }
+
+    auto& s = styles_[styleId];
+    s.present = true;
+    s.header.intervalCount = mmapU32(tocEntry + 4);
+    s.header.glyphCount = mmapU32(tocEntry + 8);
+    s.header.advanceY = tocEntry[12];
+    s.header.ascender = mmapI16(tocEntry + 13);
+    s.header.descender = mmapI16(tocEntry + 15);
+    s.header.kernLeftEntryCount = mmapU16(tocEntry + 17);
+    s.header.kernRightEntryCount = mmapU16(tocEntry + 19);
+    s.header.kernLeftClassCount = tocEntry[21];
+    s.header.kernRightClassCount = tocEntry[22];
+    s.header.ligaturePairCount = tocEntry[23];
+    s.header.is2Bit = is2Bit;
+
+    static constexpr uint32_t MAX_INTERVALS = 4096;
+    static constexpr uint32_t MAX_GLYPHS = 65536;
+    if (s.header.intervalCount > MAX_INTERVALS || s.header.glyphCount > MAX_GLYPHS) {
+      LOG_ERR("SDCF", "loadFromMmap: style %u unreasonable counts", styleId);
+      s.present = false;
+      continue;
+    }
+
+    const uint32_t dataOffset = mmapU32(tocEntry + 24);
+    computeStyleFileOffsets(s, dataOffset);
+  }
+
+  styleCount_ = numStyles;
+  contentHash_ = hash;
+
+  // Point fullIntervals directly into the mmap region — no heap alloc.
+  // Kern/lig tables also alias the mmap region and are wired in immediately
+  // (no lazy-load needed: the data is always accessible in flash).
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    auto& s = styles_[i];
+    if (!s.present) continue;
+
+    // Validate intervals are within the mapped region
+    const size_t intervalsSz = s.header.intervalCount * sizeof(EpdUnicodeInterval);
+    if (s.intervalsFileOffset + intervalsSz > size) {
+      LOG_ERR("SDCF", "loadFromMmap: intervals for style %u out of bounds", i);
+      freeAll();
+      return false;
+    }
+    s.fullIntervals = reinterpret_cast<EpdUnicodeInterval*>(const_cast<uint8_t*>(base + s.intervalsFileOffset));
+
+    // Wire kern class tables from mmap if present
+    if (s.header.kernLeftEntryCount > 0) {
+      const size_t leftSz = s.header.kernLeftEntryCount * sizeof(EpdKernClassEntry);
+      const size_t rightSz = s.header.kernRightEntryCount * sizeof(EpdKernClassEntry);
+      if (s.kernLeftFileOffset + leftSz + rightSz > size) {
+        LOG_ERR("SDCF", "loadFromMmap: kern tables for style %u out of bounds", i);
+        freeAll();
+        return false;
+      }
+      s.kernLeftClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernLeftFileOffset));
+      s.kernRightClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernRightFileOffset));
+      s.kernClassesLoaded = true;
+    }
+
+    // Wire ligature pairs from mmap if present
+    if (s.header.ligaturePairCount > 0) {
+      const size_t ligSz = s.header.ligaturePairCount * sizeof(EpdLigaturePair);
+      if (s.ligatureFileOffset + ligSz > size) {
+        LOG_ERR("SDCF", "loadFromMmap: ligature table for style %u out of bounds", i);
+        freeAll();
+        return false;
+      }
+      s.ligaturePairs = reinterpret_cast<EpdLigaturePair*>(const_cast<uint8_t*>(base + s.ligatureFileOffset));
+      s.ligLoaded = true;
+    }
+
+    // Initialize stub data
+    memset(&s.stubData, 0, sizeof(s.stubData));
+    s.stubData.advanceY = s.header.advanceY;
+    s.stubData.ascender = s.header.ascender;
+    s.stubData.descender = s.header.descender;
+    s.stubData.is2Bit = s.header.is2Bit;
+    s.stubData.ligaturePairs = s.ligaturePairs;
+    s.stubData.ligaturePairCount = s.header.ligaturePairCount;
+
+    s.epdFont.data = &s.stubData;
+    applyGlyphMissCallback(i);
+  }
+
+  // Store the SD path so the bitmap overflow handler can open the .cpfont from SD
+  // for glyph bitmap data at draw time (metadata comes from flash, bitmaps from SD).
+  if (sdPath && strlen(sdPath) < sizeof(filePath_)) {
+    strncpy(filePath_, sdPath, sizeof(filePath_) - 1);
+    filePath_[sizeof(filePath_) - 1] = '\0';
+  }
+  // Store the mmap base so unloadMetadata / freeStyleAll / freeStyleKernLigatureData
+  // know not to delete[] these aliased pointers.
+  mmapBase_ = base;
+  loaded_ = true;
+
+  LOG_DBG("SDCF", "Loaded from mmap: %u styles, size=%u", styleCount_, static_cast<unsigned>(size));
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    if (!styles_[i].present) continue;
+    const auto& h = styles_[i].header;
+    LOG_DBG("SDCF", "  style[%u]: %u intervals, %u glyphs, advY=%u, asc=%d, desc=%d", i, h.intervalCount, h.glyphCount,
+            h.advanceY, h.ascender, h.descender);
   }
   return true;
 }

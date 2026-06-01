@@ -731,11 +731,23 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
             std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
 
-            // Read dimensions directly from the ZIP entry header — no SD write, no heap spike.
-            // Extraction is deferred to ImageBlock::render() via lazy extraction.
+            // Get dimensions from the pre-built manifest (fast, heap-safe) or fall back to
+            // reading the ZIP entry header directly (safe outside a streaming inflate context).
             ImageDimensions dims = {0, 0};
-            if (ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims)) {
-              LOG_DBG("EHP", "Image dimensions from ZIP header: %dx%d", dims.width, dims.height);
+            bool dimsOk = false;
+            if (self->imageManifest) {
+              const ImageManifestEntry* entry = self->imageManifest->find(resolvedPath);
+              if (entry) {
+                dims.width = entry->width;
+                dims.height = entry->height;
+                dimsOk = true;
+              }
+            }
+            if (!dimsOk) {
+              dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
+            }
+            if (dimsOk) {
+              LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
               {
                 int displayWidth = 0;
                 int displayHeight = 0;

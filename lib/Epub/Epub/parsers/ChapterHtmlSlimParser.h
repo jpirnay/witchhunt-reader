@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../EpubImageManifest.h"
 #include "../FootnoteEntry.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
@@ -70,6 +71,7 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t viewportHeight;
   bool hyphenationEnabled;
   const CssParser* cssParser;
+  const EpubImageManifest* imageManifest;
   bool embeddedStyle;
   uint8_t imageRendering;
   std::string contentBase;
@@ -220,7 +222,7 @@ class ChapterHtmlSlimParser final : public Print {
       const std::function<void(std::unique_ptr<Page>)>& completePageFn, const bool embeddedStyle,
       const std::string& contentBase, const std::string& imageBasePath, const uint8_t imageRendering = 0,
       std::vector<std::string> tocAnchors = {}, const std::function<void(int)>& progressFn = nullptr,
-      const CssParser* cssParser = nullptr)
+      const CssParser* cssParser = nullptr, const EpubImageManifest* imageManifest = nullptr)
 
       : epub(epub),
         renderer(renderer),
@@ -235,6 +237,7 @@ class ChapterHtmlSlimParser final : public Print {
         completePageFn(completePageFn),
         progressFn(progressFn),
         cssParser(cssParser),
+        imageManifest(imageManifest),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),
         contentBase(contentBase),

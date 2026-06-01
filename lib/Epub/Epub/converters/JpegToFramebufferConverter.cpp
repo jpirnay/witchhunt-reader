@@ -235,40 +235,6 @@ bool shouldForceBayerDither(const RenderConfig& config) {
   return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP || maxAlloc < JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC;
 }
 
-bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
-  if (!buf || len < 4) return false;
-  if (buf[0] != 0xFF || buf[1] != 0xD8) return false;  // not JPEG
-
-  size_t pos = 2;
-  while (pos + 3 < len) {
-    if (buf[pos] != 0xFF) {
-      pos++;
-      continue;
-    }
-    pos++;
-    uint8_t marker = buf[pos++];
-    while (marker == 0xFF && pos < len) marker = buf[pos++];
-    if (marker == 0x00 || marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) continue;
-    if (pos + 1 >= len) break;
-    const uint16_t segLen = (static_cast<uint16_t>(buf[pos]) << 8) | buf[pos + 1];
-    if (segLen < 2) break;
-    const bool isSof = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
-                       (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
-    if (isSof) {
-      // SOF segment: 2 bytes length + 1 byte precision + 2 bytes height + 2 bytes width
-      if (pos + 6 >= len) return false;
-      const uint16_t h = (static_cast<uint16_t>(buf[pos + 3]) << 8) | buf[pos + 4];
-      const uint16_t w = (static_cast<uint16_t>(buf[pos + 5]) << 8) | buf[pos + 6];
-      if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
-      out.width = static_cast<int16_t>(w);
-      out.height = static_cast<int16_t>(h);
-      return true;
-    }
-    pos += segLen;  // skip segment body
-  }
-  return false;
-}
-
 bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions& out) {
   FsFile f;
   if (!Storage.openFileForRead("JPG", imagePath, f)) {
@@ -582,6 +548,39 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 }
 
 }  // namespace
+
+bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 4) return false;
+  if (buf[0] != 0xFF || buf[1] != 0xD8) return false;
+
+  size_t pos = 2;
+  while (pos + 3 < len) {
+    if (buf[pos] != 0xFF) {
+      pos++;
+      continue;
+    }
+    pos++;
+    uint8_t marker = buf[pos++];
+    while (marker == 0xFF && pos < len) marker = buf[pos++];
+    if (marker == 0x00 || marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) continue;
+    if (pos + 1 >= len) break;
+    const uint16_t segLen = (static_cast<uint16_t>(buf[pos]) << 8) | buf[pos + 1];
+    if (segLen < 2) break;
+    const bool isSof = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
+                       (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
+    if (isSof) {
+      if (pos + 6 >= len) return false;
+      const uint16_t h = (static_cast<uint16_t>(buf[pos + 3]) << 8) | buf[pos + 4];
+      const uint16_t w = (static_cast<uint16_t>(buf[pos + 5]) << 8) | buf[pos + 6];
+      if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+      out.width = static_cast<int16_t>(w);
+      out.height = static_cast<int16_t>(h);
+      return true;
+    }
+    pos += segLen;
+  }
+  return false;
+}
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   if (!readJpegDimensionsFromHeader(imagePath, out)) {

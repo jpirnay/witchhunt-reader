@@ -75,6 +75,16 @@ class ZipFile {
   // entry is smaller). Useful for header-only reads to get image dimensions.
   size_t readBytesFromEntry(const char* filename, uint8_t* outBuf, size_t maxBytes);
 
+  // Retrieve a FileStatSlim from the in-memory cache (requires loadAllFileStatSlims()).
+  // Returns false when the cache is empty or the entry is not present.
+  bool getFileStat(const char* filename, FileStatSlim* out) const {
+    if (fileStatSlimCache.empty()) return false;
+    const auto it = fileStatSlimCache.find(filename);
+    if (it == fileStatSlimCache.end()) return false;
+    *out = it->second;
+    return true;
+  }
+
   template <typename F>
   void enumerateFilePaths(F&& callback) const {
     for (const auto& entry : fileStatSlimCache) {
