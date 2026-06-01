@@ -61,7 +61,7 @@ class GfxRenderer {
   size_t bwBufferChunkSize = BW_BUFFER_CHUNK_SIZE;
   std::vector<uint8_t*> bwBufferChunks;
   std::map<int, EpdFontFamily> fontMap;
-  // Mutable because ensureSdCardFontReady() is const (called from layout code that
+  // Mutable because ensureFontReady() is const (called from layout code that
   // holds a const GfxRenderer&) but triggers SD card reads and heap allocation
   // inside the SdCardFont objects. Same pragmatic compromise as fontCacheManager_.
   mutable std::map<int, SdCardFont*> sdCardFonts_;
@@ -114,23 +114,23 @@ class GfxRenderer {
   void clearSdCardFonts() { sdCardFonts_.clear(); }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
-  // Ensure SD card font glyph data is loaded for the given text. Called from layout code
-  // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on
-  // non-SD fonts (no-op).
-  void ensureSdCardFontReady(int fontId, const char* utf8Text) const;
-  // Clear the cumulative SD card font metadata cache built up by repeated
-  // ensureSdCardFontReady() calls. Call between sections to bound the cumulative
-  // codepoint set growth across pagination. Safe to call when no SD font is active.
-  void clearSdCardFontAccumulation() const;
 
-  // Phase lifecycle: drop fullIntervals + kern/lig from all registered SD fonts
-  // to free ~40–50 KB before createSectionFile(). Safe if no SD font is active.
-  void dropSdCardFontMetadata() const;
+  // Ensure glyph metrics are loaded for the given text before layout measurement.
+  // No-op for built-in fonts (map lookup finds nothing and returns immediately).
+  // For SD/flash fonts: reads glyph metrics (no bitmaps) for all codepoints in text.
+  void ensureFontReady(int fontId, const char* utf8Text) const;
 
-  // Restore fullIntervals for all registered SD fonts after createSectionFile().
-  // Kern/lig tables are reloaded lazily on the next prewarm call.
-  // Returns true if all fonts reloaded successfully.
-  bool restoreSdCardFontMetadata() const;
+  // Clear the cumulative font metadata cache built up across paragraphs.
+  // No-op when no SD font is active.
+  void clearFontAccumulation() const;
+
+  // Phase lifecycle: drop layout-phase metadata to free heap before createSectionFile().
+  // No-op when no SD font is active or font is mmap'd (metadata is always accessible).
+  void dropFontMetadata() const;
+
+  // Restore layout-phase metadata after createSectionFile().
+  // Returns true if all fonts reloaded successfully (always true for mmap fonts).
+  bool restoreFontMetadata() const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }

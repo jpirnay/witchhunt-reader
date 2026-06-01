@@ -217,6 +217,19 @@ class EpubReaderActivity final : public Activity {
   PreRenderedPage preRenderedPage;
   // Set by render() after a normal page render to request a pre-render of the next page.
   bool pendingPreRender = false;
+  // Deferred grayscale (Phase 8): after the BW display pass, defer the AA render until the
+  // next idle loop tick (no navigation input pending). This makes rapid page turns feel faster
+  // — only the BW pass runs while flipping; AA runs once when the user pauses.
+  // Cleared by loop() after running the deferred pass, and on every page turn.
+  struct PendingGrayscale {
+    bool active = false;
+    std::shared_ptr<Page> page;  // page whose text needs the AA pass
+    int fontId = 0;
+    int marginLeft = 0;
+    int contentTop = 0;
+    bool fastLut = false;
+  };
+  PendingGrayscale pendingGrayscale_;
   // Set by pageTurn() fast path to tell render() the frame buffer already holds the next page
   // content and only the status bar + display flush are needed.
   bool usePreRenderedBuffer = false;

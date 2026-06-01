@@ -50,7 +50,7 @@ class SdCardFont {
   void clearCache();
 
   // Soft cache reset: drop the cumulative metadata-only prewarm cache built
-  // up by repeated layout-time ensureSdCardFontReady() calls. Bitmap-mode
+  // up by repeated layout-time ensureFontReady() calls. Bitmap-mode
   // (FULL) caches are also dropped. Call this between sections to bound the
   // cumulative cp set growth across pagination.
   void clearAccumulation();
@@ -160,7 +160,7 @@ class SdCardFont {
     // Cache mode for the current mini buffers:
     //   NONE     = empty / freshly cleared, no glyphs loaded
     //   METADATA = miniGlyphs has glyph metrics only (no bitmap data); built
-    //              up incrementally across paragraph-level ensureSdCardFontReady
+    //              up incrementally across paragraph-level ensureFontReady
     //              calls during pagination. Safe to merge new cps into.
     //   FULL     = miniGlyphs + miniBitmap loaded, page-scoped (built once per
     //              page render). Layout-only prewarm calls are no-ops in this
@@ -224,10 +224,16 @@ class SdCardFont {
   uint32_t contentHash_ = 0;
   bool loaded_ = false;
 
-  // When loaded via loadFromMmap(), points to the flash partition mmap base.
-  // fullIntervals and kern/lig pointers in PerStyle alias into this region —
-  // they must NOT be delete[]'d.  nullptr when loaded from SD.
-  const uint8_t* mmapBase_ = nullptr;
+  // True when persistent metadata (fullIntervals, kernLeft/RightClasses,
+  // ligaturePairs) is heap-allocated and must be delete[]'d on free.
+  // False when loaded via loadFromMmap() — those pointers alias the flash
+  // partition mmap region and must never be freed.
+  bool metadataOwned_ = true;
+
+  // Base pointer of the mmap'd .cpfont data (the value passed to loadFromMmap).
+  // Non-null only when metadataOwned_ == false. Used to read sections (e.g. the
+  // kern matrix) directly from flash without SD I/O.
+  const uint8_t* mmapDataBase_ = nullptr;
 
   // Per-style helpers
   static bool allCpsCovered(const PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);

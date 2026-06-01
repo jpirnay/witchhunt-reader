@@ -200,6 +200,11 @@ void EpubReaderActivity::onEnter() {
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
 
+  if (getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+    epub->loadImageManifest();
+    logReaderMemSnapshot("onEnter_after_image_manifest");
+  }
+
   // Load the persistent baseline (progress.bin) first. Pending session state
   // (sync result, bookmark jump) is then overlaid on top — this is the only order
   // that lets a Kind::Paragraph / Kind::ListItem navTarget set by applyPendingSyncSession
@@ -306,6 +311,8 @@ void EpubReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  // Release any deferred AA page before tearing down the section/epub.
+  pendingGrayscale_ = {};
   section.reset();
   UITheme::getInstance().getMutableTheme().onBookWillClose(epub ? epub->getPath() : "", epub.get(), nullptr, nullptr);
   epub.reset();
@@ -420,6 +427,19 @@ void EpubReaderActivity::loop() {
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     if (!delayedPrevTurn && !delayedNextTurn) {
+      // Input-idle: run the deferred AA pass if one is pending.
+      if (pendingGrayscale_.active && pendingGrayscale_.page) {
+        pendingGrayscale_.active = false;
+        renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
+        const int fontId = pendingGrayscale_.fontId;
+        const int marginLeft = pendingGrayscale_.marginLeft;
+        const int contentTop = pendingGrayscale_.contentTop;
+        const Page* pagePtr = pendingGrayscale_.page.get();
+        const auto gt = renderer.renderGrayscalePlanesSequential(
+            [&](GfxRenderer::RenderMode) { pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop); });
+        pendingGrayscale_.page.reset();
+        LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+      }
       return;
     }
     prevTriggered = delayedPrevTurn;
@@ -1641,6 +1661,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
+  pendingGrayscale_ = {};
+
   if (isForwardTurn && section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
       preRenderedPage.pageIndex == section->currentPage + 1) {
     // Fast path: the frame buffer already holds the next page content. Advance state here on the
@@ -1864,15 +1887,15 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // Reset cumulative SD font metadata cache so this section starts fresh.
       // Pagination will rebuild only the cps it actually encounters, bounded
       // by MAX_PAGE_GLYPHS per style.
-      renderer.clearSdCardFontAccumulation();
+      renderer.clearFontAccumulation();
       // Drop SD font layout-phase metadata to free ~40-50 KB before createSectionFile.
       readerPhase_ = ReaderPhase::PRECOMPILING;
-      renderer.dropSdCardFontMetadata();
+      renderer.dropFontMetadata();
       const bool createOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
-      renderer.restoreSdCardFontMetadata();
+      renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!createOk) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
@@ -1892,14 +1915,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         GUI.fillPopupProgress(renderer, popupRect, progress);
       };
 
-      renderer.clearSdCardFontAccumulation();
+      renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
-      renderer.dropSdCardFontMetadata();
+      renderer.dropFontMetadata();
       const bool rebuildOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
-      renderer.restoreSdCardFontMetadata();
+      renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!rebuildOk) {
         LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
@@ -2033,15 +2056,15 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
   // Reset cumulative SD font metadata cache for the new section.
-  renderer.clearSdCardFontAccumulation();
+  renderer.clearFontAccumulation();
   // Drop SD font layout-phase metadata before createSectionFile to free ~40-50 KB.
   readerPhase_ = ReaderPhase::PRECOMPILING;
-  renderer.dropSdCardFontMetadata();
+  renderer.dropFontMetadata();
   const bool silentOk = nextSection.createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment,
                                                       viewportWidth, viewportHeight, getEffectiveHyphenation(),
                                                       embeddedStyle, getEffectiveBionicReading(), imageRendering);
-  renderer.restoreSdCardFontMetadata();
+  renderer.restoreFontMetadata();
   readerPhase_ = ReaderPhase::READING;
   if (!silentOk) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
@@ -2152,23 +2175,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
 
   if (aaEnabledForThisRender) {
-    logReaderMemSnapshot("gray_begin");
-    // Push fast-AA toggle into the SDK before the AA refresh (X3 only; no-op on X4).
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-    const int fontId = getEffectiveReaderFontId();
-    const auto gt = renderer.renderGrayscalePlanesSequential(
-        [&](GfxRenderer::RenderMode) { page->renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
-    fcm->logStats("gray");
-    logReaderMemSnapshot("gray_end");
-
-    const auto tEnd = millis();
+    // Defer the AA pass to the next idle loop tick so rapid page turns only pay
+    // the BW cost. The page is kept alive via shared_ptr until loop() runs the pass.
+    pendingGrayscale_.active = true;
+    pendingGrayscale_.page = std::move(page);
+    pendingGrayscale_.fontId = getEffectiveReaderFontId();
+    pendingGrayscale_.marginLeft = orientedMarginLeft;
+    pendingGrayscale_.contentTop = contentTop;
+    pendingGrayscale_.fastLut = SETTINGS.fastAntiAliasing;
     lastRenderStats.usedGrayscale = true;
-    lastRenderStats.phases = {
-        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, gt.planesMs, 0, gt.displayMs, gt.restoreMs,
-        tEnd - t0};
-    LOG_DBG(
-        "ERS", "Page render: prewarm=%lums bw=%lums display=%lums planes=%lums gray=%lums restore=%lums total=%lums",
-        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, gt.planesMs, gt.displayMs, gt.restoreMs, tEnd - t0);
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, tDisplay - t0};
   }
 
   if (const auto* cacheManager = renderer.getFontCacheManager()) {

@@ -227,12 +227,11 @@ void ParsedText::layoutAndExtractLines(
     applyBionicReadingTransform();
   }
 
-  // Ensure SD card font glyph metrics are loaded before measuring word widths.
-  // For flash-based fonts isSdCardFont() returns false and this block is skipped
-  // entirely — no heap allocation. For SD card fonts this reads glyph metadata
-  // (advanceX only, no bitmaps) for all unique codepoints in this paragraph so
-  // that calculateWordWidths() can measure text without on-demand SD I/O.
-  if (renderer.isSdCardFont(fontId)) {
+  // Ensure font glyph metrics are loaded before measuring word widths.
+  // For built-in fonts this is a no-op (the map lookup finds nothing and returns
+  // immediately). For SD card fonts it reads glyph metadata (advanceX, no bitmaps)
+  // for all codepoints in this paragraph so calculateWordWidths() needs no SD I/O.
+  {
     size_t totalSize = 1;  // reserve room for a possible hyphen fallback
     for (size_t i = 0; i < words.size(); i++) {
       if (i > 0 && !wordContinues[i]) totalSize += 1;
@@ -245,7 +244,7 @@ void ParsedText::layoutAndExtractLines(
       allText += words[i];
     }
     allText += '-';
-    renderer.ensureSdCardFontReady(fontId, allText.c_str());
+    renderer.ensureFontReady(fontId, allText.c_str());
   }
 
   const int pageWidth = viewportWidth;

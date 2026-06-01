@@ -628,10 +628,10 @@ bool MdReaderActivity::loadPageAtOffset(size_t offset, bool startInCodeBlock, st
         }
       }
 
-      if (renderer.isSdCardFont(cachedFontId)) {
+      {
         std::string flatText;
         for (const auto& span : flatLine.spans) flatText += span.text;
-        if (!flatText.empty()) renderer.ensureSdCardFontReady(cachedFontId, flatText.c_str());
+        if (!flatText.empty()) renderer.ensureFontReady(cachedFontId, flatText.c_str());
       }
 
       size_t linesBefore = outLines.size();
@@ -676,17 +676,11 @@ bool MdReaderActivity::loadPageAtOffset(size_t offset, bool startInCodeBlock, st
 
     // Word-wrap and add to output (skip fence lines)
     if (!wasFence) {
-      if (renderer.isSdCardFont(cachedFontId)) {
+      {
         std::string lineText;
-        if (!parsed.listPrefix.empty()) {
-          lineText += parsed.listPrefix;
-        }
-        for (const auto& span : parsed.spans) {
-          lineText += span.text;
-        }
-        if (!lineText.empty()) {
-          renderer.ensureSdCardFontReady(cachedFontId, lineText.c_str());
-        }
+        if (!parsed.listPrefix.empty()) lineText += parsed.listPrefix;
+        for (const auto& span : parsed.spans) lineText += span.text;
+        if (!lineText.empty()) renderer.ensureFontReady(cachedFontId, lineText.c_str());
       }
 
       size_t linesBefore = outLines.size();

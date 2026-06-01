@@ -9,36 +9,102 @@
 
 namespace FlashFontPartition {
 
-// .cpfont header constants (must match SdCardFont.cpp)
-static constexpr char CPFONT_MAGIC[8] = {'C', 'P', 'F', 'O', 'N', 'T', '\0', '\0'};
-static constexpr uint16_t CPFONT_VERSION = 4;
-static constexpr size_t CPFONT_HEADER_SIZE = 32;
+// Partition magic
+static constexpr char MAGIC[4] = {'C', 'P', 'F', 'C'};
 
-static constexpr size_t SEC = 4096;   // SPI flash sector size
-static constexpr size_t CHUNK = 4096; // SD read / flash write chunk
+// Sector / chunk sizes
+static constexpr size_t SEC = 4096;    // flash erase granularity
+static constexpr size_t CHUNK = 4096;  // SD read / flash write chunk
 
-// Partition layout: the first 4 bytes store the .cpfont file size as a
-// little-endian uint32_t (the "size prefix"). The .cpfont data begins at
-// offset 4. This lets mmap() read the exact font size on any boot without
-// parsing the full header or relying on a runtime-only variable.
-static constexpr size_t SIZE_PREFIX = 4;
+// --- Module state ---
 
 static esp_partition_mmap_handle_t s_mmapHandle = 0;
-static const uint8_t* s_mmapPtr = nullptr;  // points to the size prefix
-static size_t s_mapBytes = 0;               // total mapped bytes (prefix + font)
+static const uint8_t* s_mmapPtr = nullptr;  // base of mapped partition
+
+// Write-session state (valid between beginWrite and finaliseWrite)
+struct WriteSession {
+  bool active = false;
+  uint32_t nextDataOff = 0;  // next free byte offset for font data
+  uint8_t entryCount = 0;
+  Entry entries[MAX_ENTRIES] = {};
+  size_t partitionSize = 0;
+};
+static WriteSession s_ws;
+
+// --- Internal helpers ---
 
 static const esp_partition_t* findPartition() {
   const esp_partition_t* part =
       esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-  if (!part) {
-    LOG_ERR("FFP", "spiffs partition not found");
-  }
+  if (!part) LOG_ERR("FFP", "spiffs partition not found");
   return part;
 }
 
-bool write(const char* sdPath) {
+// Read the raw index from flash into a caller-supplied buffer.
+// Returns true and fills `count` with the number of valid entries.
+static bool readIndex(const esp_partition_t* part, Entry* entries, uint8_t& count) {
+  uint8_t hdr[8];
+  if (esp_partition_read(part, 0, hdr, 8) != ESP_OK) return false;
+  if (memcmp(hdr, MAGIC, 4) != 0) return false;
+  count = hdr[4];
+  if (count == 0 || count > MAX_ENTRIES) return false;
+
+  if (esp_partition_read(part, 8, entries, count * ENTRY_SIZE) != ESP_OK) return false;
+  return true;
+}
+
+// Find a matching entry by family + size. Returns -1 if not found.
+static int findEntry(const Entry* entries, uint8_t count, const char* familyName, uint8_t pointSize) {
+  for (uint8_t i = 0; i < count; i++) {
+    if (entries[i].pointSize == pointSize && strncmp(entries[i].familyName, familyName, 31) == 0) return i;
+  }
+  return -1;
+}
+
+// Erase the partition up to `bytes` (rounded up to sector boundary).
+static bool eraseRange(const esp_partition_t* part, size_t bytes) {
+  const size_t eraseLen = (bytes + SEC - 1) & ~(SEC - 1);
+  const size_t capped = std::min(eraseLen, static_cast<size_t>(part->size));
+  return esp_partition_erase_range(part, 0, capped) == ESP_OK;
+}
+
+// --- Write API ---
+
+bool beginWrite(const char* familyName) {
+  (void)familyName;  // stored per-entry; not needed at begin time
+
   if (s_mmapPtr) {
-    LOG_ERR("FFP", "write: partition is currently mmap'd — call unmap() first");
+    LOG_ERR("FFP", "beginWrite: partition is mmap'd — call unmap() first");
+    return false;
+  }
+
+  const esp_partition_t* part = findPartition();
+  if (!part) return false;
+
+  // Erase the full partition upfront so appendFile can write sequentially.
+  LOG_INF("FFP", "Erasing flash font partition (%u B)...", static_cast<unsigned>(part->size));
+  if (esp_partition_erase_range(part, 0, part->size) != ESP_OK) {
+    LOG_ERR("FFP", "beginWrite: erase failed");
+    return false;
+  }
+
+  s_ws.active = true;
+  s_ws.entryCount = 0;
+  s_ws.nextDataOff = static_cast<uint32_t>(HEADER_BYTES);
+  s_ws.partitionSize = part->size;
+  memset(s_ws.entries, 0, sizeof(s_ws.entries));
+
+  LOG_DBG("FFP", "beginWrite: partition ready, data starts at offset %u", static_cast<unsigned>(s_ws.nextDataOff));
+  return true;
+}
+
+bool appendFile(const char* sdPath, const char* familyName, uint8_t pointSize) {
+  if (!s_ws.active) {
+    LOG_ERR("FFP", "appendFile: no active write session");
+    return false;
+  }
+  if (s_ws.entryCount >= MAX_ENTRIES) {
+    LOG_ERR("FFP", "appendFile: entry table full (%u entries)", MAX_ENTRIES);
     return false;
   }
 
@@ -47,123 +113,158 @@ bool write(const char* sdPath) {
 
   HalFile file;
   if (!Storage.openFileForRead("FFP", sdPath, file) || !file) {
-    LOG_ERR("FFP", "write: failed to open %s", sdPath);
+    LOG_ERR("FFP", "appendFile: failed to open %s", sdPath);
     return false;
   }
 
   const size_t fileSize = file.fileSize();
   if (fileSize == 0) {
-    LOG_ERR("FFP", "write: empty file %s", sdPath);
-    file.close();
-    return false;
-  }
-  // Partition must fit the 4-byte size prefix + the font data.
-  if (fileSize + SIZE_PREFIX > part->size) {
-    LOG_ERR("FFP", "write: file %u B + prefix exceeds partition %u B",
-            static_cast<unsigned>(fileSize), static_cast<unsigned>(part->size));
+    LOG_ERR("FFP", "appendFile: empty file %s", sdPath);
     file.close();
     return false;
   }
 
-  LOG_INF("FFP", "Writing %s (%u B) to flash partition spiffs @0x%x", sdPath,
-          static_cast<unsigned>(fileSize), static_cast<unsigned>(part->address));
+  // 4-byte align the data offset
+  const uint32_t dataOff = (s_ws.nextDataOff + 3u) & ~static_cast<uint32_t>(3u);
 
-  // Erase enough flash: SIZE_PREFIX + fileSize, rounded up to sector boundary.
-  const size_t totalBytes = SIZE_PREFIX + fileSize;
-  const size_t eraseTotal = (totalBytes + SEC - 1) & ~(SEC - 1);
-  if (esp_partition_erase_range(part, 0, eraseTotal) != ESP_OK) {
-    LOG_ERR("FFP", "initial erase failed");
+  if (dataOff + fileSize > s_ws.partitionSize) {
+    LOG_ERR("FFP", "appendFile: %s (%u B) would overflow partition at offset %u", sdPath,
+            static_cast<unsigned>(fileSize), static_cast<unsigned>(dataOff));
     file.close();
     return false;
   }
 
-  // Write the 4-byte little-endian font file size at partition offset 0.
-  const uint32_t fs32 = static_cast<uint32_t>(fileSize);
-  const uint8_t prefix[SIZE_PREFIX] = {
-      static_cast<uint8_t>(fs32 & 0xFF),
-      static_cast<uint8_t>((fs32 >> 8) & 0xFF),
-      static_cast<uint8_t>((fs32 >> 16) & 0xFF),
-      static_cast<uint8_t>((fs32 >> 24) & 0xFF),
-  };
-  if (esp_partition_write(part, 0, prefix, SIZE_PREFIX) != ESP_OK) {
-    LOG_ERR("FFP", "prefix write failed");
-    file.close();
-    return false;
-  }
+  LOG_INF("FFP", "appendFile: %s (%u B) → offset %u", sdPath, static_cast<unsigned>(fileSize),
+          static_cast<unsigned>(dataOff));
 
-  // Write the .cpfont data starting at partition offset SIZE_PREFIX.
+  // Write the font data in CHUNK-sized pieces
   uint8_t buf[CHUNK];
   size_t pos = 0;
   while (pos < fileSize) {
     const size_t want = std::min<size_t>(CHUNK, fileSize - pos);
     const int got = file.read(buf, want);
     if (got <= 0 || static_cast<size_t>(got) != want) {
-      LOG_ERR("FFP", "SD read @%u: got=%d want=%u", static_cast<unsigned>(pos), got,
-              static_cast<unsigned>(want));
+      LOG_ERR("FFP", "appendFile: SD read error @%u", static_cast<unsigned>(pos));
       file.close();
       return false;
     }
-    if (esp_partition_write(part, SIZE_PREFIX + pos, buf, want) != ESP_OK) {
-      LOG_ERR("FFP", "flash write @%u failed", static_cast<unsigned>(SIZE_PREFIX + pos));
+    if (esp_partition_write(part, dataOff + pos, buf, want) != ESP_OK) {
+      LOG_ERR("FFP", "appendFile: flash write error @%u", static_cast<unsigned>(dataOff + pos));
       file.close();
       return false;
     }
     pos += want;
   }
-
   file.close();
-  LOG_INF("FFP", "Write complete (%u B + %u B prefix)", static_cast<unsigned>(pos),
-          static_cast<unsigned>(SIZE_PREFIX));
+
+  // Record the index entry
+  Entry& e = s_ws.entries[s_ws.entryCount++];
+  memset(&e, 0, sizeof(e));
+  strncpy(e.familyName, familyName, sizeof(e.familyName) - 1);
+  e.pointSize = pointSize;
+  e.dataOffset = dataOff;
+  e.dataSize = static_cast<uint32_t>(fileSize);
+
+  s_ws.nextDataOff = dataOff + static_cast<uint32_t>(fileSize);
+  LOG_DBG("FFP", "appendFile: entry[%u] %s@%u = %u B", s_ws.entryCount - 1, familyName, pointSize,
+          static_cast<unsigned>(fileSize));
   return true;
 }
 
-bool mmap(const uint8_t** outPtr, size_t* outSize) {
+bool finaliseWrite() {
+  if (!s_ws.active) {
+    LOG_ERR("FFP", "finaliseWrite: no active write session");
+    return false;
+  }
+  if (s_ws.entryCount == 0) {
+    LOG_ERR("FFP", "finaliseWrite: no entries appended");
+    s_ws.active = false;
+    return false;
+  }
+
+  const esp_partition_t* part = findPartition();
+  if (!part) {
+    s_ws.active = false;
+    return false;
+  }
+
+  // Build the 8-byte header + packed entry table in one buffer.
+  // HEADER_BYTES = 8 + MAX_ENTRIES * ENTRY_SIZE. Write the whole header
+  // region in one shot; unused entry slots remain 0xFF from the erase.
+  // We only serialise the actual entryCount entries; the rest are
+  // flash-erased (0xFF) and will be ignored (count field limits iteration).
+  uint8_t hdr[8] = {};
+  memcpy(hdr, MAGIC, 4);
+  hdr[4] = s_ws.entryCount;
+  // hdr[5..7] = 0 (reserved)
+
+  if (esp_partition_write(part, 0, hdr, 8) != ESP_OK) {
+    LOG_ERR("FFP", "finaliseWrite: header write failed");
+    s_ws.active = false;
+    return false;
+  }
+  if (esp_partition_write(part, 8, s_ws.entries, s_ws.entryCount * ENTRY_SIZE) != ESP_OK) {
+    LOG_ERR("FFP", "finaliseWrite: entry table write failed");
+    s_ws.active = false;
+    return false;
+  }
+
+  s_ws.active = false;
+  LOG_INF("FFP", "finaliseWrite: %u entries committed, %u B used", s_ws.entryCount,
+          static_cast<unsigned>(s_ws.nextDataOff));
+  return true;
+}
+
+// --- Read API ---
+
+bool mmap(const char* familyName, uint8_t pointSize, const uint8_t** outPtr, size_t* outSize) {
   if (s_mmapPtr) {
     LOG_ERR("FFP", "mmap: already mapped — call unmap() first");
+    return false;
+  }
+  if (s_ws.active) {
+    LOG_ERR("FFP", "mmap: write session still active");
     return false;
   }
 
   const esp_partition_t* part = findPartition();
   if (!part) return false;
 
-  // Read the 4-byte size prefix written by write() to get the exact font size.
-  // This is reliable on any boot — no estimation, no header parsing.
-  uint8_t prefix[SIZE_PREFIX];
-  if (esp_partition_read(part, 0, prefix, SIZE_PREFIX) != ESP_OK) {
-    LOG_ERR("FFP", "mmap: failed to read size prefix");
-    return false;
-  }
-  const uint32_t fontSize = static_cast<uint32_t>(prefix[0]) |
-                            (static_cast<uint32_t>(prefix[1]) << 8) |
-                            (static_cast<uint32_t>(prefix[2]) << 16) |
-                            (static_cast<uint32_t>(prefix[3]) << 24);
-  if (fontSize == 0 || fontSize > part->size - SIZE_PREFIX) {
-    LOG_ERR("FFP", "mmap: invalid size prefix %u (partition size %u)", fontSize,
-            static_cast<unsigned>(part->size));
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  if (!readIndex(part, entries, count)) {
+    LOG_ERR("FFP", "mmap: no valid index in partition");
     return false;
   }
 
-  // Map SIZE_PREFIX + fontSize bytes, rounded up to 64 KB (mmap alignment).
-  size_t mapBytes = SIZE_PREFIX + fontSize;
+  const int idx = findEntry(entries, count, familyName, pointSize);
+  if (idx < 0) {
+    LOG_DBG("FFP", "mmap: %s@%u not found in partition index", familyName, pointSize);
+    return false;
+  }
+
+  const uint32_t dataOff = entries[idx].dataOffset;
+  const uint32_t dataSize = entries[idx].dataSize;
+
+  // Map from the start of the partition up to the end of this entry's data,
+  // rounded up to 64 KB (mmap alignment). This keeps the mapped region small.
+  size_t mapBytes = static_cast<size_t>(dataOff) + dataSize;
   mapBytes = (mapBytes + 0xFFFF) & ~static_cast<size_t>(0xFFFF);
   if (mapBytes > part->size) mapBytes = part->size;
 
   const void* rawPtr = nullptr;
   if (esp_partition_mmap(part, 0, mapBytes, ESP_PARTITION_MMAP_DATA, &rawPtr, &s_mmapHandle) != ESP_OK) {
-    LOG_ERR("FFP", "mmap failed (mapBytes=%u)", static_cast<unsigned>(mapBytes));
+    LOG_ERR("FFP", "mmap: esp_partition_mmap failed (size=%u)", static_cast<unsigned>(mapBytes));
     return false;
   }
 
   s_mmapPtr = static_cast<const uint8_t*>(rawPtr);
-  s_mapBytes = mapBytes;
 
-  // Return a pointer to the .cpfont data (past the 4-byte prefix) and the
-  // exact font file size. Callers (SdCardFont::loadFromMmap) see clean data.
-  *outPtr = s_mmapPtr + SIZE_PREFIX;
-  *outSize = fontSize;
+  *outPtr = s_mmapPtr + dataOff;
+  *outSize = dataSize;
 
-  LOG_DBG("FFP", "mmap OK: font ptr=%p size=%u (map=%u)", *outPtr,
-          static_cast<unsigned>(fontSize), static_cast<unsigned>(mapBytes));
+  LOG_DBG("FFP", "mmap: %s@%u → ptr=%p size=%u (map=%u B)", familyName, pointSize, *outPtr,
+          static_cast<unsigned>(dataSize), static_cast<unsigned>(mapBytes));
   return true;
 }
 
@@ -172,28 +273,38 @@ void unmap() {
   esp_partition_munmap(s_mmapHandle);
   s_mmapHandle = 0;
   s_mmapPtr = nullptr;
-  s_mapBytes = 0;
   LOG_DBG("FFP", "unmap OK");
 }
 
-bool hasValidFont() {
+// --- Query API ---
+
+bool hasValidIndex() {
   const esp_partition_t* part = findPartition();
   if (!part) return false;
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  return readIndex(part, entries, count);
+}
 
-  // Read size prefix + .cpfont global header together (SIZE_PREFIX + CPFONT_HEADER_SIZE bytes).
-  uint8_t buf[SIZE_PREFIX + CPFONT_HEADER_SIZE];
-  if (esp_partition_read(part, 0, buf, sizeof(buf)) != ESP_OK) return false;
+bool hasEntry(const char* familyName, uint8_t pointSize) {
+  const esp_partition_t* part = findPartition();
+  if (!part) return false;
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  if (!readIndex(part, entries, count)) return false;
+  return findEntry(entries, count, familyName, pointSize) >= 0;
+}
 
-  // Validate the size prefix is plausible.
-  const uint32_t storedSize = static_cast<uint32_t>(buf[0]) | (static_cast<uint32_t>(buf[1]) << 8) |
-                              (static_cast<uint32_t>(buf[2]) << 16) | (static_cast<uint32_t>(buf[3]) << 24);
-  if (storedSize == 0 || storedSize > part->size - SIZE_PREFIX) return false;
-
-  // Validate .cpfont magic and version at offset SIZE_PREFIX.
-  const uint8_t* hdr = buf + SIZE_PREFIX;
-  if (memcmp(hdr, CPFONT_MAGIC, 8) != 0) return false;
-  const uint16_t ver = static_cast<uint16_t>(hdr[8] | (hdr[9] << 8));
-  return ver == CPFONT_VERSION;
+bool hasFamilyComplete(const char* familyName, const uint8_t* sizes, uint8_t sizeCount) {
+  const esp_partition_t* part = findPartition();
+  if (!part) return false;
+  Entry entries[MAX_ENTRIES];
+  uint8_t count = 0;
+  if (!readIndex(part, entries, count)) return false;
+  for (uint8_t i = 0; i < sizeCount; i++) {
+    if (findEntry(entries, count, familyName, sizes[i]) < 0) return false;
+  }
+  return true;
 }
 
 bool isMapped() { return s_mmapPtr != nullptr; }

@@ -79,9 +79,7 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
 }
 
 void SdCardFont::freeStyleKernLigatureData(PerStyle& s) {
-  // Only delete heap-owned pointers. When loaded from mmap, kern/lig tables
-  // point into the flash region and must not be freed.
-  if (!mmapBase_) {
+  if (metadataOwned_) {
     delete[] s.kernLeftClasses;
     delete[] s.kernRightClasses;
     delete[] s.ligaturePairs;
@@ -114,8 +112,7 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
   s.reportedMissCount = 0;
-  // Only delete heap-owned fullIntervals. Mmap-loaded fonts alias flash.
-  if (!mmapBase_) {
+  if (metadataOwned_) {
     delete[] s.fullIntervals;
   }
   s.fullIntervals = nullptr;
@@ -133,15 +130,15 @@ void SdCardFont::freeAll() {
   styleCount_ = 0;
   contentHash_ = 0;
   loaded_ = false;
-  mmapBase_ = nullptr;
+  metadataOwned_ = true;
+  mmapDataBase_ = nullptr;
 }
 
 void SdCardFont::unloadMetadata() {
   if (!loaded_) return;
-  // Mmap-loaded fonts alias flash — metadata is always accessible via the
-  // mapped pointer and must not be freed. The phase lifecycle unload/reload
-  // cycle is a no-op for these fonts.
-  if (mmapBase_) {
+  // Flash-aliased fonts never need to unload: metadata is always accessible
+  // in the mmap region. The phase lifecycle cycle is a no-op for them.
+  if (!metadataOwned_) {
     LOG_DBG("SDCF", "unloadMetadata: mmap font — no-op (%s)", filePath_);
     return;
   }
@@ -160,8 +157,7 @@ void SdCardFont::unloadMetadata() {
 
 bool SdCardFont::reloadMetadata() {
   if (!loaded_) return false;
-  // Mmap-loaded fonts never unload metadata, so reload is always a no-op.
-  if (mmapBase_) {
+  if (!metadataOwned_) {
     LOG_DBG("SDCF", "reloadMetadata: mmap font — no-op (%s)", filePath_);
     return true;
   }
@@ -446,33 +442,24 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
     }
   }
 
-  // Step 6: read the full matrix's rows for each used left class, keeping only
-  // columns for used right classes.
+  // Step 6: populate the mini matrix rows.
   //
-  // Strategy: read the matrix in fixed-size chunks (KERN_CHUNK_BYTES), sweeping
-  // forward through the file. Each chunk covers a contiguous run of full rows;
-  // we extract the needed columns inline as each chunk is read. This costs at
-  // most ceil(fullMatrixBytes / KERN_CHUNK_BYTES) seeks + reads regardless of
-  // how many left classes are used, and caps the heap spike at KERN_CHUNK_BYTES
-  // instead of the full matrix size (~28 KB for Literata).
+  // Mmap path: the full kern matrix is directly pointer-accessible in flash.
+  // Read each needed row via pointer arithmetic — no heap buffer, no seeks.
   //
-  // Fallback: if even the chunk buffer can't be allocated, fall back to one
-  // seek + one row read per used left class (original behavior).
-  static constexpr uint32_t KERN_CHUNK_BYTES = 4096;
+  // SD path: read the matrix in fixed-size 4 KB chunks sweeping forward through
+  // the file. This bounds the heap spike at KERN_CHUNK_BYTES instead of the full
+  // matrix size (~28 KB for Literata). Falls back to per-row reads if the chunk
+  // buffer allocation fails.
   const uint32_t rowBytes = s.header.kernRightClassCount;
 
-  // Build a sorted-by-oldL mapping so we sweep the file forward.
-  // Each entry: (oldL, newL) — oldL is the file row index (1-based).
-  // We reuse the usedLeft and usedRight scratch slots (slots 0 and 1), which
-  // are fully consumed after step 1 and not read again. newToOldLeft/Right
-  // (slots 4 and 5) must stay intact — they are still read during column
-  // extraction in the inner loop below.
-  uint8_t* sortedOldL = base + 0 * 256;  // reuse usedLeft slot
-  uint8_t* sortedNewL = base + 1 * 256;  // reuse usedRight slot
+  // Build a sorted-by-oldL mapping so we sweep the source forward.
+  // Reuse the usedLeft/usedRight scratch slots — both are fully consumed after
+  // step 1 and not read again. newToOldLeft/Right (slots 4 & 5) must stay intact.
+  uint8_t* sortedOldL = base + 0 * 256;
+  uint8_t* sortedNewL = base + 1 * 256;
   {
     uint8_t k = 0;
-    // Sweep oldL in ascending order — newToOldLeft maps newL→oldL, so we
-    // scan all 255 possible oldL values and emit matches in order. O(255×numLeft).
     for (int oldL = 1; oldL < 256; oldL++) {
       for (uint8_t newL = 1; newL <= numLeft; newL++) {
         if (newToOldLeft[newL] == static_cast<uint8_t>(oldL)) {
@@ -483,78 +470,90 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
         }
       }
     }
-    // k == numLeft at this point
   }
 
-  std::unique_ptr<int8_t[]> chunkBuf(new (std::nothrow) int8_t[KERN_CHUNK_BYTES]);
-  if (chunkBuf) {
-    // Chunked sweep: one seek per chunk boundary, rows processed in oldL order.
-    uint32_t chunkStart = UINT32_MAX;  // file offset of first byte in chunkBuf
-    uint32_t chunkEnd = 0;             // one-past-last valid byte in chunkBuf
-    uint32_t chunkSeeks = 0;
-
+  if (mmapDataBase_) {
+    // Mmap fast-path: kern matrix is at a fixed offset in the flash mapping.
+    // Each row is a contiguous array of kernRightClassCount int8_t values.
+    // Direct pointer read — no heap allocation, no SD I/O.
+    const int8_t* matrixBase = reinterpret_cast<const int8_t*>(mmapDataBase_ + s.kernMatrixFileOffset);
     for (uint8_t k = 0; k < numLeft; k++) {
       const uint8_t oldL = sortedOldL[k];
       const uint8_t newL = sortedNewL[k];
-      const uint32_t rowFileOff = s.kernMatrixFileOffset + (oldL - 1u) * rowBytes;
-      const uint32_t rowFileEnd = rowFileOff + rowBytes;
-
-      // If this row is not fully inside the current chunk, load the next chunk.
-      if (rowFileOff < chunkStart || rowFileEnd > chunkEnd) {
-        chunkStart = rowFileOff;
-        uint32_t toRead = KERN_CHUNK_BYTES;
-        const uint32_t matrixEnd =
-            s.kernMatrixFileOffset + static_cast<uint32_t>(s.header.kernLeftClassCount) * rowBytes;
-        if (chunkStart + toRead > matrixEnd) toRead = matrixEnd - chunkStart;
-        if (!file.seekSet(chunkStart)) {
-          LOG_ERR("SDCF", "Failed to seek to kern chunk at %u", chunkStart);
-          freeStyleMiniKern(s);
-          return false;
-        }
-        if (file.read(reinterpret_cast<uint8_t*>(chunkBuf.get()), toRead) != static_cast<int>(toRead)) {
-          LOG_ERR("SDCF", "Failed to read kern chunk (%u bytes)", toRead);
-          freeStyleMiniKern(s);
-          return false;
-        }
-        chunkEnd = chunkStart + toRead;
-        chunkSeeks++;
-      }
-
-      const int8_t* srcRow = chunkBuf.get() + (rowFileOff - chunkStart);
+      const int8_t* srcRow = matrixBase + (oldL - 1u) * rowBytes;
       int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
       for (uint8_t newR = 1; newR <= numRight; newR++) {
         miniRow[newR - 1] = srcRow[newToOldRight[newR] - 1u];
       }
     }
-    LOG_DBG("SDCF", "Built mini kern (chunked %uB): %u×%u=%u bytes, %u seeks (full was %u×%u=%u bytes)",
-            KERN_CHUNK_BYTES, numLeft, numRight, matrixBytes, chunkSeeks, s.header.kernLeftClassCount,
-            s.header.kernRightClassCount, static_cast<uint32_t>(s.header.kernLeftClassCount) * rowBytes);
+    LOG_DBG("SDCF", "Built mini kern (mmap): %u×%u=%u bytes", numLeft, numRight, matrixBytes);
   } else {
-    // Fallback: one seek + one row read per used left class.
-    LOG_DBG("SDCF", "Built mini kern (per-row fallback): %u rows", numLeft);
-    std::unique_ptr<int8_t[]> rowBuf(new (std::nothrow) int8_t[rowBytes]);
-    if (!rowBuf) {
-      LOG_ERR("SDCF", "Failed to allocate row buffer (%u bytes)", rowBytes);
-      freeStyleMiniKern(s);
-      return false;
-    }
-    for (uint8_t k = 0; k < numLeft; k++) {
-      const uint8_t oldL = sortedOldL[k];
-      const uint8_t newL = sortedNewL[k];
-      const uint32_t rowFileOff = s.kernMatrixFileOffset + (oldL - 1u) * rowBytes;
-      if (!file.seekSet(rowFileOff)) {
-        LOG_ERR("SDCF", "Failed to seek to kern row %u", oldL);
+    // SD path: chunked sweep.
+    static constexpr uint32_t KERN_CHUNK_BYTES = 4096;
+    std::unique_ptr<int8_t[]> chunkBuf(new (std::nothrow) int8_t[KERN_CHUNK_BYTES]);
+    if (chunkBuf) {
+      uint32_t chunkStart = UINT32_MAX;
+      uint32_t chunkEnd = 0;
+      uint32_t chunkSeeks = 0;
+      for (uint8_t k = 0; k < numLeft; k++) {
+        const uint8_t oldL = sortedOldL[k];
+        const uint8_t newL = sortedNewL[k];
+        const uint32_t rowFileOff = s.kernMatrixFileOffset + (oldL - 1u) * rowBytes;
+        const uint32_t rowFileEnd = rowFileOff + rowBytes;
+        if (rowFileOff < chunkStart || rowFileEnd > chunkEnd) {
+          chunkStart = rowFileOff;
+          uint32_t toRead = KERN_CHUNK_BYTES;
+          const uint32_t matrixEnd =
+              s.kernMatrixFileOffset + static_cast<uint32_t>(s.header.kernLeftClassCount) * rowBytes;
+          if (chunkStart + toRead > matrixEnd) toRead = matrixEnd - chunkStart;
+          if (!file.seekSet(chunkStart)) {
+            LOG_ERR("SDCF", "Failed to seek to kern chunk at %u", chunkStart);
+            freeStyleMiniKern(s);
+            return false;
+          }
+          if (file.read(reinterpret_cast<uint8_t*>(chunkBuf.get()), toRead) != static_cast<int>(toRead)) {
+            LOG_ERR("SDCF", "Failed to read kern chunk (%u bytes)", toRead);
+            freeStyleMiniKern(s);
+            return false;
+          }
+          chunkEnd = chunkStart + toRead;
+          chunkSeeks++;
+        }
+        const int8_t* srcRow = chunkBuf.get() + (rowFileOff - chunkStart);
+        int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
+        for (uint8_t newR = 1; newR <= numRight; newR++) {
+          miniRow[newR - 1] = srcRow[newToOldRight[newR] - 1u];
+        }
+      }
+      LOG_DBG("SDCF", "Built mini kern (chunked %uB): %u×%u=%u bytes, %u seeks", KERN_CHUNK_BYTES, numLeft, numRight,
+              matrixBytes, chunkSeeks);
+    } else {
+      // Fallback: one seek + one row read per used left class.
+      LOG_DBG("SDCF", "Built mini kern (per-row fallback): %u rows", numLeft);
+      std::unique_ptr<int8_t[]> rowBuf(new (std::nothrow) int8_t[rowBytes]);
+      if (!rowBuf) {
+        LOG_ERR("SDCF", "Failed to allocate row buffer (%u bytes)", rowBytes);
         freeStyleMiniKern(s);
         return false;
       }
-      if (file.read(reinterpret_cast<uint8_t*>(rowBuf.get()), rowBytes) != static_cast<int>(rowBytes)) {
-        LOG_ERR("SDCF", "Failed to read kern row %u", oldL);
-        freeStyleMiniKern(s);
-        return false;
-      }
-      int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
-      for (uint8_t newR = 1; newR <= numRight; newR++) {
-        miniRow[newR - 1] = rowBuf[newToOldRight[newR] - 1u];
+      for (uint8_t k = 0; k < numLeft; k++) {
+        const uint8_t oldL = sortedOldL[k];
+        const uint8_t newL = sortedNewL[k];
+        const uint32_t rowFileOff = s.kernMatrixFileOffset + (oldL - 1u) * rowBytes;
+        if (!file.seekSet(rowFileOff)) {
+          LOG_ERR("SDCF", "Failed to seek to kern row %u", oldL);
+          freeStyleMiniKern(s);
+          return false;
+        }
+        if (file.read(reinterpret_cast<uint8_t*>(rowBuf.get()), rowBytes) != static_cast<int>(rowBytes)) {
+          LOG_ERR("SDCF", "Failed to read kern row %u", oldL);
+          freeStyleMiniKern(s);
+          return false;
+        }
+        int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
+        for (uint8_t newR = 1; newR <= numRight; newR++) {
+          miniRow[newR - 1] = rowBuf[newToOldRight[newR] - 1u];
+        }
       }
     }
   }
@@ -894,9 +893,9 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     strncpy(filePath_, sdPath, sizeof(filePath_) - 1);
     filePath_[sizeof(filePath_) - 1] = '\0';
   }
-  // Store the mmap base so unloadMetadata / freeStyleAll / freeStyleKernLigatureData
-  // know not to delete[] these aliased pointers.
-  mmapBase_ = base;
+  // Mark metadata as flash-aliased: free sites must not delete[] these pointers.
+  metadataOwned_ = false;
+  mmapDataBase_ = base;
   loaded_ = true;
 
   LOG_DBG("SDCF", "Loaded from mmap: %u styles, size=%u", styleCount_, static_cast<unsigned>(size));
@@ -1062,7 +1061,40 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
                              bool loadKernLigatureData) {
   auto& s = styles_[styleIdx];
 
-  // ---- Fast-path coverage check ----
+  // ---- Mmap metadata fast-path ----
+  // For mmap fonts, fullIntervals and the glyph array are directly pointer-
+  // accessible in flash. A metadata-only prewarm needs no heap copy and no SD
+  // reads — wire miniData to the flash-resident tables once and return. The full
+  // interval table covers every codepoint in the font, so allCpsCovered is
+  // trivially always true for metadata queries.
+  //
+  // Full (bitmap) prewarms still go through the normal path: bitmaps are not in
+  // the mmap region and must be read from SD.
+  if (mmapDataBase_ && metadataOnly) {
+    if (s.miniMode == PerStyle::MiniMode::NONE) {
+      // First call: wire miniData directly to flash-resident data.
+      // miniGlyphs/miniIntervals stay null — miniData.glyph and .intervals
+      // point into flash and must not be freed via freeStyleMiniData.
+      memset(&s.miniData, 0, sizeof(s.miniData));
+      s.miniData.intervals = s.fullIntervals;
+      s.miniData.intervalCount = s.header.intervalCount;
+      s.miniData.glyph = reinterpret_cast<const EpdGlyph*>(mmapDataBase_ + s.glyphsFileOffset);
+      s.miniData.advanceY = s.header.advanceY;
+      s.miniData.ascender = s.header.ascender;
+      s.miniData.descender = s.header.descender;
+      s.miniData.is2Bit = s.header.is2Bit;
+      s.miniData.ligaturePairs = s.ligaturePairs;
+      s.miniData.ligaturePairCount = s.header.ligaturePairCount;
+      s.miniData.glyphMissHandler = &SdCardFont::onGlyphMiss;
+      s.miniData.glyphMissCtx = &overflowCtx_[styleIdx];
+      s.epdFont.data = &s.miniData;
+      s.miniMode = PerStyle::MiniMode::METADATA;
+    }
+    // Subsequent calls: miniData is already wired; nothing to do.
+    return 0;
+  }
+
+  // ---- Fast-path coverage check (SD fonts) ----
   // If the existing cache already covers all requested cps in a compatible mode,
   // there's nothing to do. This is the dominant case during pagination after the
   // first paragraph has populated the metadata cache.

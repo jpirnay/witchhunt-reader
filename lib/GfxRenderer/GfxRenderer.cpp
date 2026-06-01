@@ -41,33 +41,31 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
   return &fontData->bitmap[glyph->dataOffset];
 }
 
-void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text) const {
+void GfxRenderer::ensureFontReady(int fontId, const char* utf8Text) const {
   auto it = sdCardFonts_.find(fontId);
-  if (it != sdCardFonts_.end()) {
-    // Metadata-only: loads glyph metrics (advanceX) without bitmap data.
-    // Saves ~50-100KB heap vs full prewarm — layout only needs advance widths.
-    // Prewarm all present styles (0x0F) for layout measurement.
-    int missed = it->second->prewarm(utf8Text, 0x0F, /*metadataOnly=*/true,
-                                     /*loadKernLigatureData=*/true);
-    if (missed > 0) {
-      LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
-    }
+  if (it == sdCardFonts_.end()) return;  // no-op for built-in fonts
+  // Metadata-only: loads glyph metrics (advanceX) without bitmap data.
+  // Saves ~50-100 KB heap vs full prewarm — layout only needs advance widths.
+  int missed = it->second->prewarm(utf8Text, 0x0F, /*metadataOnly=*/true,
+                                   /*loadKernLigatureData=*/true);
+  if (missed > 0) {
+    LOG_DBG("GFX", "ensureFontReady: %d glyph(s) not found", missed);
   }
 }
 
-void GfxRenderer::clearSdCardFontAccumulation() const {
+void GfxRenderer::clearFontAccumulation() const {
   for (auto& [id, font] : sdCardFonts_) {
     font->clearAccumulation();
   }
 }
 
-void GfxRenderer::dropSdCardFontMetadata() const {
+void GfxRenderer::dropFontMetadata() const {
   for (auto& [id, font] : sdCardFonts_) {
     font->unloadMetadata();
   }
 }
 
-bool GfxRenderer::restoreSdCardFontMetadata() const {
+bool GfxRenderer::restoreFontMetadata() const {
   bool ok = true;
   for (auto& [id, font] : sdCardFonts_) {
     if (!font->reloadMetadata()) {
