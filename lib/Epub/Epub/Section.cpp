@@ -14,7 +14,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 30;  // bumped: TextBlock serialisation adds fontSizeMultiplier
+constexpr uint8_t SECTION_FILE_VERSION = 31;  // bumped: ImageBlock serialisation adds epubFilePath+epubEntryPath
 
 namespace header {
 constexpr uint32_t kVersion = 0;

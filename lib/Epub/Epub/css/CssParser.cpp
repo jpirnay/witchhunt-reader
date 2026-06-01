@@ -437,6 +437,18 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
       style.verticalAlign = CssVerticalAlign::Baseline;
       style.defined.verticalAlign = 1;
     }
+  } else if (propNameBuf == "float") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "left") {
+      style.cssFloat = CssFloat::Left;
+      style.defined.cssFloat = 1;
+    } else if (val == "right") {
+      style.cssFloat = CssFloat::Right;
+      style.defined.cssFloat = 1;
+    } else if (val == "none") {
+      style.cssFloat = CssFloat::None;
+      style.defined.cssFloat = 1;
+    }
   } else if (propNameBuf == "list-style-type" || propNameBuf == "list-style") {
     const std::string_view val = stripTrailingImportant(propValueBuf);
     if (val == "none") {

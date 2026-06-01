@@ -123,6 +123,15 @@ class GfxRenderer {
   // codepoint set growth across pagination. Safe to call when no SD font is active.
   void clearSdCardFontAccumulation() const;
 
+  // Phase lifecycle: drop fullIntervals + kern/lig from all registered SD fonts
+  // to free ~40–50 KB before createSectionFile(). Safe if no SD font is active.
+  void dropSdCardFontMetadata() const;
+
+  // Restore fullIntervals for all registered SD fonts after createSectionFile().
+  // Kern/lig tables are reloaded lazily on the next prewarm call.
+  // Returns true if all fonts reloaded successfully.
+  bool restoreSdCardFontMetadata() const;
+
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
   Orientation getOrientation() const { return static_cast<Orientation>(orientation.load(std::memory_order_relaxed)); }

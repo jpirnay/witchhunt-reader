@@ -128,6 +128,64 @@ void SdCardFont::freeAll() {
   loaded_ = false;
 }
 
+void SdCardFont::unloadMetadata() {
+  if (!loaded_) return;
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    auto& s = styles_[i];
+    if (!s.present) continue;
+    // Free fullIntervals and kern/lig tables — keeps file offsets and header counts intact.
+    delete[] s.fullIntervals;
+    s.fullIntervals = nullptr;
+    freeStyleKernLigatureData(s);
+    // Mini data is NOT freed — it is managed per-section and is already empty at the
+    // chapter boundary where this is called.
+  }
+  LOG_DBG("SDCF", "Metadata unloaded: %s", filePath_);
+}
+
+bool SdCardFont::reloadMetadata() {
+  if (!loaded_) return false;
+
+  FsFile file;
+  if (!Storage.openFileForRead("SDCF", filePath_, file)) {
+    LOG_ERR("SDCF", "reloadMetadata: failed to open %s", filePath_);
+    return false;
+  }
+
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    auto& s = styles_[i];
+    if (!s.present) continue;
+
+    // Re-read fullIntervals using stored file offset
+    if (!s.fullIntervals) {
+      s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
+      if (!s.fullIntervals) {
+        LOG_ERR("SDCF", "reloadMetadata: failed to alloc intervals for style %u", i);
+        file.close();
+        return false;
+      }
+      if (!file.seekSet(s.intervalsFileOffset)) {
+        LOG_ERR("SDCF", "reloadMetadata: failed to seek intervals for style %u", i);
+        file.close();
+        return false;
+      }
+      const size_t sz = s.header.intervalCount * sizeof(EpdUnicodeInterval);
+      if (file.read(reinterpret_cast<uint8_t*>(s.fullIntervals), sz) != static_cast<int>(sz)) {
+        LOG_ERR("SDCF", "reloadMetadata: failed to read intervals for style %u", i);
+        file.close();
+        return false;
+      }
+    }
+  }
+
+  file.close();
+
+  // Kern/lig tables are lazy-loaded on the next prewarm call — no need to reload eagerly.
+  // The existing loadStyleKernLigatureData() path handles this transparently.
+  LOG_DBG("SDCF", "Metadata reloaded: %s", filePath_);
+  return true;
+}
+
 void SdCardFont::clearOverflow() {
   for (uint32_t i = 0; i < overflowCount_; i++) {
     delete[] overflow_[i].bitmap;

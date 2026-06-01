@@ -74,6 +74,10 @@ class Epub {
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
+  // Read up to maxBytes decompressed bytes from a ZIP entry — no SD write, header-only use.
+  size_t readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, size_t maxBytes) const;
+  // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
+  bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;

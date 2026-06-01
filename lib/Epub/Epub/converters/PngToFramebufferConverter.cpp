@@ -405,6 +405,21 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
 }  // namespace
 
+bool PngToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 24) return false;
+  static constexpr uint8_t kPngSig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  if (memcmp(buf, kPngSig, 8) != 0) return false;
+  if (buf[12] != 'I' || buf[13] != 'H' || buf[14] != 'D' || buf[15] != 'R') return false;
+  const uint32_t w =
+      ((uint32_t)buf[16] << 24) | ((uint32_t)buf[17] << 16) | ((uint32_t)buf[18] << 8) | (uint32_t)buf[19];
+  const uint32_t h =
+      ((uint32_t)buf[20] << 24) | ((uint32_t)buf[21] << 16) | ((uint32_t)buf[22] << 8) | (uint32_t)buf[23];
+  if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+  out.width = static_cast<int16_t>(w);
+  out.height = static_cast<int16_t>(h);
+  return true;
+}
+
 bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   // PNG file layout: 8-byte signature, then chunks. The IHDR chunk is mandatory and
   // must be the first chunk: 4 bytes length + "IHDR" + 13 bytes IHDR data + 4 bytes CRC.

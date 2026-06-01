@@ -252,11 +252,13 @@ void ParsedText::layoutAndExtractLines(
 
   // Compute firstLineIndent once here so all layout helpers use the same value.
   // On a continuation flush the remaining words are mid-paragraph, so no indent.
-  const int firstLineIndent =
+  // firstLineExtraIndent reserves horizontal space for an inline image beside the first line.
+  const int cssTextIndent =
       !isContinuation_ && blockStyle.textIndentDefined &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
           ? std::min(std::max<int>(static_cast<int>(blockStyle.textIndent), -(pageWidth - 1)), pageWidth - 1)
           : 0;
+  const int firstLineIndent = cssTextIndent + (isContinuation_ ? 0 : static_cast<int>(blockStyle.firstLineExtraIndent));
 
   auto wordWidths = calculateWordWidths(renderer, fontId);
 

@@ -110,6 +110,12 @@ class EpubReaderActivity final : public Activity {
     void resolveInto(Section& section, int spineIndex) const;
   };
 
+  // Phase lifecycle for memory management at chapter boundaries.
+  // READING:      normal state — section loaded, SD font metadata resident
+  // PRECOMPILING: createSectionFile running — SD font metadata temporarily dropped
+  enum class ReaderPhase : uint8_t { READING, PRECOMPILING };
+  ReaderPhase readerPhase_ = ReaderPhase::READING;
+
   std::shared_ptr<Epub> epub;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;

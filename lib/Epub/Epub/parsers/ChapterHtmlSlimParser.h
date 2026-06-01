@@ -18,6 +18,7 @@
 #include "../css/CssStyle.h"
 
 class Page;
+class PageImage;  // forward declaration — Page.h included in .cpp
 class GfxRenderer;
 class Epub;
 
@@ -46,6 +47,21 @@ class ChapterHtmlSlimParser final : public Print {
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
   int16_t lastBlockMarginBottom = 0;  // tracks previous block's marginBottom for CSS margin collapsing
+
+  // Inline image beside paragraph text (CSS float context)
+  // Fixed-size arrays — no heap allocation. Float nesting > 4 is pathological in practice.
+  static constexpr int kMaxFloatDepth = 4;
+  int floatDepth_ = 0;
+  int floatOpenDepths_[kMaxFloatDepth] = {};  // parser depth at which each float was opened
+  struct PendingInlineImage {
+    std::string cachedPath;
+    int16_t width = 0;
+    int16_t height = 0;
+    std::string alt;
+    bool active = false;
+  };
+  PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
+  std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;
@@ -100,6 +116,7 @@ class ChapterHtmlSlimParser final : public Print {
     int depth;
     bool isOrdered;
     int counter;
+    bool suppressMarker = false;  // true when list-style-type: none
   };
   std::vector<ListEntry> listStack;
 

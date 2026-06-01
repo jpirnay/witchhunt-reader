@@ -70,6 +70,10 @@ class ZipFile {
   // These functions will open and close the zip as needed
   uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
   bool readFileToStream(const char* filename, Print& out, size_t chunkSize);
+  // Read up to maxBytes decompressed bytes from a ZIP entry without extracting the full file.
+  // Returns the number of bytes actually written to outBuf (may be less than maxBytes if the
+  // entry is smaller). Useful for header-only reads to get image dimensions.
+  size_t readBytesFromEntry(const char* filename, uint8_t* outBuf, size_t maxBytes);
 
   template <typename F>
   void enumerateFilePaths(F&& callback) const {

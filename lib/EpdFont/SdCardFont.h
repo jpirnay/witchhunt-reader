@@ -44,6 +44,18 @@ class SdCardFont {
   // cumulative cp set growth across pagination.
   void clearAccumulation();
 
+  // Phase lifecycle: drop all layout-phase metadata (fullIntervals + kern/lig tables)
+  // to free ~40–50 KB before createSectionFile(). File offsets are preserved so
+  // reloadMetadata() can restore everything without re-reading the file header.
+  // Mini buffers are NOT affected — those are already managed per-section.
+  // No-op if not loaded.
+  void unloadMetadata();
+
+  // Restore layout-phase metadata after createSectionFile() completes.
+  // Re-reads fullIntervals and kern/lig tables from SD using stored file offsets.
+  // Returns true on success; false leaves the font in a degraded (stub-only) state.
+  bool reloadMetadata();
+
   // Returns pointer to the managed EpdFont for a given style.
   // Returns nullptr if the style is not present.
   EpdFont* getEpdFont(uint8_t style = 0);

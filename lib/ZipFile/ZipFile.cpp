@@ -558,3 +558,58 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
   LOG_ERR("ZIP", "Unsupported compression method");
   return false;
 }
+
+size_t ZipFile::readBytesFromEntry(const char* filename, uint8_t* outBuf, const size_t maxBytes) {
+  if (!outBuf || maxBytes == 0) return 0;
+
+  const ScopedOpenClose zip{*this};
+  if (!zip) return 0;
+
+  FileStatSlim fileStat = {};
+  if (!loadFileStatSlim(filename, &fileStat)) return 0;
+
+  const long fileOffset = getDataOffset(fileStat);
+  if (fileOffset < 0) return 0;
+
+  file.seek(fileOffset);
+  const size_t wantBytes = std::min(maxBytes, static_cast<size_t>(fileStat.uncompressedSize));
+
+  if (fileStat.method == ZIP_METHOD_STORED) {
+    const int n = file.read(outBuf, wantBytes);
+    return n > 0 ? static_cast<size_t>(n) : 0;
+  }
+
+  if (fileStat.method == ZIP_METHOD_DEFLATED) {
+    // Use a small read buffer — we stop as soon as we have maxBytes, so no
+    // need for a full-size output buffer.
+    constexpr size_t READ_BUF = 512;
+    auto* readBuf = static_cast<uint8_t*>(malloc(READ_BUF));
+    if (!readBuf) return 0;
+
+    ZipInflateCtx ctx;
+    ctx.file = &file;
+    ctx.fileRemaining = fileStat.compressedSize;
+    ctx.readBuf = readBuf;
+    ctx.readBufSize = READ_BUF;
+
+    if (!ctx.reader.init(true)) {
+      free(readBuf);
+      return 0;
+    }
+    ctx.reader.setReadCallback(zipReadCallback);
+
+    size_t totalOut = 0;
+    while (totalOut < wantBytes) {
+      size_t produced;
+      const size_t remaining = wantBytes - totalOut;
+      const InflateStatus status = ctx.reader.readAtMost(outBuf + totalOut, remaining, &produced);
+      totalOut += produced;
+      if (status == InflateStatus::Done || status == InflateStatus::Error) break;
+    }
+
+    free(readBuf);
+    return totalOut;
+  }
+
+  return 0;
+}

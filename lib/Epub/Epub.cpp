@@ -1137,6 +1137,26 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize);
 }
 
+size_t Epub::readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, const size_t maxBytes) const {
+  if (itemHref.empty() || !outBuf || maxBytes == 0) return 0;
+  const std::string path = FsHelpers::normalisePath(itemHref);
+  return ZipFile(filepath).readBytesFromEntry(path.c_str(), outBuf, maxBytes);
+}
+
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
+  if (itemHref.empty() || destPath.empty()) return false;
+  FsFile destFile;
+  if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
+    LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
+    return false;
+  }
+  const bool ok = readItemContentsToStream(itemHref, destFile, 1024);
+  destFile.flush();
+  destFile.close();
+  if (!ok) Storage.remove(destPath.c_str());
+  return ok;
+}
+
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
   const std::string path = FsHelpers::normalisePath(itemHref);
   return ZipFile(filepath).getInflatedFileSize(path.c_str(), size);

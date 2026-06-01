@@ -1865,10 +1865,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // Pagination will rebuild only the cps it actually encounters, bounded
       // by MAX_PAGE_GLYPHS per style.
       renderer.clearSdCardFontAccumulation();
-      if (!section->createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
-                                      SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                      viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-                                      getEffectiveBionicReading(), imageRendering, progressFn)) {
+      // Drop SD font layout-phase metadata to free ~40-50 KB before createSectionFile.
+      readerPhase_ = ReaderPhase::PRECOMPILING;
+      renderer.dropSdCardFontMetadata();
+      const bool createOk = section->createSectionFile(
+          getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+          getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
+          getEffectiveBionicReading(), imageRendering, progressFn);
+      renderer.restoreSdCardFontMetadata();
+      readerPhase_ = ReaderPhase::READING;
+      if (!createOk) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         return;
@@ -1887,10 +1893,15 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       };
 
       renderer.clearSdCardFontAccumulation();
-      if (!section->createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
-                                      SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                      viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-                                      getEffectiveBionicReading(), imageRendering, progressFn)) {
+      readerPhase_ = ReaderPhase::PRECOMPILING;
+      renderer.dropSdCardFontMetadata();
+      const bool rebuildOk = section->createSectionFile(
+          getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+          getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
+          getEffectiveBionicReading(), imageRendering, progressFn);
+      renderer.restoreSdCardFontMetadata();
+      readerPhase_ = ReaderPhase::READING;
+      if (!rebuildOk) {
         LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
         section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                  SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
@@ -2023,10 +2034,16 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
   // Reset cumulative SD font metadata cache for the new section.
   renderer.clearSdCardFontAccumulation();
-  if (!nextSection.createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
-                                     SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                     viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-                                     getEffectiveBionicReading(), imageRendering)) {
+  // Drop SD font layout-phase metadata before createSectionFile to free ~40-50 KB.
+  readerPhase_ = ReaderPhase::PRECOMPILING;
+  renderer.dropSdCardFontMetadata();
+  const bool silentOk = nextSection.createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
+                                                      SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment,
+                                                      viewportWidth, viewportHeight, getEffectiveHyphenation(),
+                                                      embeddedStyle, getEffectiveBionicReading(), imageRendering);
+  renderer.restoreSdCardFontMetadata();
+  readerPhase_ = ReaderPhase::READING;
+  if (!silentOk) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }

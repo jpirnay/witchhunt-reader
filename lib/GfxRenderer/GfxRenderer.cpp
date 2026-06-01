@@ -61,6 +61,23 @@ void GfxRenderer::clearSdCardFontAccumulation() const {
   }
 }
 
+void GfxRenderer::dropSdCardFontMetadata() const {
+  for (auto& [id, font] : sdCardFonts_) {
+    font->unloadMetadata();
+  }
+}
+
+bool GfxRenderer::restoreSdCardFontMetadata() const {
+  bool ok = true;
+  for (auto& [id, font] : sdCardFonts_) {
+    if (!font->reloadMetadata()) {
+      LOG_ERR("GFX", "Failed to reload metadata for font %d", id);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
 void GfxRenderer::begin() {
   frameBuffer = display.getFrameBuffer();
   if (!frameBuffer) {
