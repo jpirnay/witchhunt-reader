@@ -434,16 +434,21 @@ void EpubReaderActivity::loop() {
       // completeDisplay() clears it; when it returns false the render task has
       // finished all post-waveform SPI work and it is safe to issue new SPI writes.
       if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
-        pendingGrayscale_.active = false;
-        renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
-        const int fontId = pendingGrayscale_.fontId;
-        const int marginLeft = pendingGrayscale_.marginLeft;
-        const int contentTop = pendingGrayscale_.contentTop;
-        const Page* pagePtr = pendingGrayscale_.page.get();
-        const auto gt = renderer.renderGrayscalePlanesSequential(
-            [&](GfxRenderer::RenderMode) { pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop); });
-        pendingGrayscale_.page.reset();
-        LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+        // Serialize deferred AA with the render task. This prevents loop-side
+        // grayscale SPI/framebuffer work from racing with render() updates.
+        RenderLock lock;
+        if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
+          pendingGrayscale_.active = false;
+          renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
+          const int fontId = pendingGrayscale_.fontId;
+          const int marginLeft = pendingGrayscale_.marginLeft;
+          const int contentTop = pendingGrayscale_.contentTop;
+          const Page* pagePtr = pendingGrayscale_.page.get();
+          const auto gt = renderer.renderGrayscalePlanesSequential(
+              [&](GfxRenderer::RenderMode) { pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop); });
+          pendingGrayscale_.page.reset();
+          LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+        }
       }
       return;
     }
@@ -1807,7 +1812,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Fast-display pass: frame buffer holds pre-rendered content; superimpose live status bar,
   // flush to display, and run the AA pass — all on the render task with no SD font re-read.
-  if (isBufferDisplayPass) {
+  // Guard: if the previous render's waveform + post-waveform SPI work (completeDisplay) is
+  // still in progress, do not start a new display operation — fall through to a full render
+  // which will wait for the waveform to settle naturally.
+  if (isBufferDisplayPass && !renderer.isRefreshPending()) {
     if (section) {
       auto p = section->loadPageFromSectionFile();
       if (p && !p->hasImages()) {
@@ -1878,20 +1886,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       LOG_DBG("ERS", "Cache not found, building...");
       lastRenderStats.cacheRebuilt = true;
 
-      Rect popupRect{};
-      const auto progressFn = [this, &popupRect](int progress) {
-        if (popupRect.width == 0) {
-          // Drawing the popup already does a full refresh, which serves as the
-          // 0% indication; no need to follow it with a redundant fillPopupProgress.
-          popupRect = GUI.drawPopup(renderer, tr(STR_INDEXING));
-          return;
-        }
-        GUI.fillPopupProgress(renderer, popupRect, progress);
-      };
+      // Draw the popup BEFORE releasing the secondary buffer: drawPopup calls
+      // displayBuffer() → swapBuffers(). With the secondary buffer released,
+      // frameBufferActive is null and swapBuffers() would set frameBuffer = null,
+      // crashing any subsequent rendering.
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
 
       // Reset cumulative SD font metadata cache so this section starts fresh.
-      // Pagination will rebuild only the cps it actually encounters, bounded
-      // by MAX_PAGE_GLYPHS per style.
       renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
       renderer.dropFontMetadata();
@@ -1899,7 +1900,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       const bool createOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-          getEffectiveBionicReading(), imageRendering, progressFn);
+          getEffectiveBionicReading(), imageRendering, nullptr);
       {
         const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
         if (contig < 52 * 1024) {
@@ -1922,14 +1923,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       LOG_INF("ERS", "No-CSS fallback loaded; rebuilding with embedded CSS...");
       lastRenderStats.cacheRebuilt = true;
 
-      Rect popupRect{};
-      const auto progressFn = [this, &popupRect](int progress) {
-        if (popupRect.width == 0) {
-          popupRect = GUI.drawPopup(renderer, tr(STR_INDEXING));
-          return;
-        }
-        GUI.fillPopupProgress(renderer, popupRect, progress);
-      };
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
 
       renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
@@ -1938,7 +1932,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       const bool rebuildOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-          getEffectiveBionicReading(), imageRendering, progressFn);
+          getEffectiveBionicReading(), imageRendering, nullptr);
       {
         const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
         if (contig < 52 * 1024) {
@@ -2029,31 +2023,38 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   }
   // Re-acquire the render lock before any further state mutation.
   // renderContents() released it early (after triggerDisplay) to free the loop
-  // task during the waveform. silentIndexNextChapterIfNeeded() modifies shared
-  // state (readerPhase_, font metadata, secondary buffer) and must be serialised
-  // against any new render() call that the loop task may have requested.
+  // task during the waveform. Everything below touches shared reader state and
+  // must be serialised against loop()-side mutations.
   {
     RenderLock relock;
     silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
-  }
-  pendingProgressSave.spineIndex = currentSpineIndex;
-  pendingProgressSave.page = section->currentPage;
-  pendingProgressSave.pageCount = section->pageCount;
-  pendingProgressSave.pending.store(true, std::memory_order_release);
-  lastRenderStats.freeHeapAfter = esp_get_free_heap_size();
-  lastRenderStats.largestFreeBlockAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  lastRenderStats.valid = true;
 
-  if (pendingScreenshot) {
-    pendingScreenshot = false;
-    ScreenshotUtil::takeScreenshot(renderer);
-  }
+    // Defensive guard: section can be invalidated by loop-side flows while the
+    // render lock was released during display waveform wait.
+    if (!section) {
+      LOG_ERR("ERS", "render: section became null after display completion");
+      return;
+    }
 
-  // Schedule a pre-render of the next page into the frame buffer so the next forward
-  // page turn can skip the render pass and go straight to displayBuffer().
-  if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount) {
-    pendingPreRender = true;
-    requestUpdate();
+    pendingProgressSave.spineIndex = currentSpineIndex;
+    pendingProgressSave.page = section->currentPage;
+    pendingProgressSave.pageCount = section->pageCount;
+    pendingProgressSave.pending.store(true, std::memory_order_release);
+    lastRenderStats.freeHeapAfter = esp_get_free_heap_size();
+    lastRenderStats.largestFreeBlockAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    lastRenderStats.valid = true;
+
+    if (pendingScreenshot) {
+      pendingScreenshot = false;
+      ScreenshotUtil::takeScreenshot(renderer);
+    }
+
+    // Schedule a pre-render of the next page into the frame buffer so the next forward
+    // page turn can skip the render pass and go straight to displayBuffer().
+    if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount) {
+      pendingPreRender = true;
+      requestUpdate();
+    }
   }
 }
 

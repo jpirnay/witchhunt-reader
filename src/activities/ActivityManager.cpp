@@ -129,6 +129,7 @@ void ActivityManager::loop() {
         continue;
       }
 
+      const bool exitingReader = currentActivity->isReaderActivity();
       ActivityResult pendingResult = std::move(currentActivity->result);
 
       // Destroy the current activity
@@ -137,6 +138,9 @@ void ActivityManager::loop() {
 
       if (stackActivities.empty()) {
         LOG_DBG("ACT", "No more activities on stack, returning from child");
+        if (exitingReader) {
+          unloadSdFontIfLoaded();
+        }
         lock.unlock();  // returnFromChild may acquire its own lock via replaceActivity
         returnFromChild();
         continue;  // Will launch the target activity immediately
@@ -144,6 +148,9 @@ void ActivityManager::loop() {
       } else {
         currentActivity = std::move(stackActivities.back());
         stackActivities.pop_back();
+        if (exitingReader && !currentActivity->isReaderActivity()) {
+          unloadSdFontIfLoaded();
+        }
         LOG_DBG("ACT", "Popped from activity stack, new size = %zu", stackActivities.size());
         // Handle result if necessary
         if (currentActivity->resultHandler) {
@@ -174,6 +181,10 @@ void ActivityManager::loop() {
       // Current activity has requested a new activity to be launched
       RenderLock lock;
 
+      const bool enteringReader = pendingActivity->isReaderActivity();
+      const bool exitingReader = currentActivity && currentActivity->isReaderActivity();
+      const bool shouldUnloadSdFont = exitingReader && !enteringReader;
+
       if (pendingAction == PendingAction::Replace) {
 #if DEBUG_MEMORY_CONSUMPTION
         logActivityStackState("replace_before", currentActivity.get(), stackActivities.size());
@@ -184,6 +195,9 @@ void ActivityManager::loop() {
         while (!stackActivities.empty()) {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
+        }
+        if (shouldUnloadSdFont) {
+          unloadSdFontIfLoaded();
         }
 #if DEBUG_MEMORY_CONSUMPTION
         logActivityStackState("replace_after_clear", nullptr, stackActivities.size());

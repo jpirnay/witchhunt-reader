@@ -80,8 +80,14 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
 
 void SdCardFont::freeStyleKernLigatureData(PerStyle& s) {
   if (metadataOwned_) {
-    delete[] s.kernLeftClasses;
-    delete[] s.kernRightClasses;
+    // Kern class tables: heap-owned only for pure SD fonts (mmapDataBase_ == nullptr).
+    // For mmap fonts they alias flash (EpdKernClassEntry is fully packed — safe).
+    if (!mmapDataBase_) {
+      delete[] s.kernLeftClasses;
+      delete[] s.kernRightClasses;
+    }
+    // Ligature pairs are always heap-owned when metadataOwned_ is true
+    // (EpdLigaturePair contains uint32_t, copied to heap in loadFromMmap).
     delete[] s.ligaturePairs;
   }
   s.kernLeftClasses = nullptr;
@@ -867,7 +873,10 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     }
     memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
 
-    // Copy kern class tables (EpdKernClassEntry is 3-byte packed — safe to memcpy).
+    // Kern class tables: EpdKernClassEntry is __attribute__((packed)) with only
+    // uint16_t + uint8_t members. GCC emits byte-load sequences for all member
+    // accesses on packed structs, so aliasing flash directly is safe on RISC-V.
+    // No heap copy needed — saves ~6 KB for a typical 4-style Latin font.
     if (s.header.kernLeftEntryCount > 0) {
       const size_t leftSz = s.header.kernLeftEntryCount * sizeof(EpdKernClassEntry);
       const size_t rightSz = s.header.kernRightEntryCount * sizeof(EpdKernClassEntry);
@@ -876,15 +885,8 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
         freeAll();
         return false;
       }
-      s.kernLeftClasses = new (std::nothrow) EpdKernClassEntry[s.header.kernLeftEntryCount];
-      s.kernRightClasses = new (std::nothrow) EpdKernClassEntry[s.header.kernRightEntryCount];
-      if (!s.kernLeftClasses || !s.kernRightClasses) {
-        LOG_ERR("SDCF", "loadFromMmap: OOM for kern classes style %u", i);
-        freeAll();
-        return false;
-      }
-      memcpy(s.kernLeftClasses, base + s.kernLeftFileOffset, leftSz);
-      memcpy(s.kernRightClasses, base + s.kernRightFileOffset, rightSz);
+      s.kernLeftClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernLeftFileOffset));
+      s.kernRightClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernRightFileOffset));
       s.kernClassesLoaded = true;
     }
 
