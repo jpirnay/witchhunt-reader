@@ -136,9 +136,11 @@ void SdCardFont::freeAll() {
 
 void SdCardFont::unloadMetadata() {
   if (!loaded_) return;
-  // Flash-aliased fonts never need to unload: metadata is always accessible
-  // in the mmap region. The phase lifecycle cycle is a no-op for them.
-  if (!metadataOwned_) {
+  // For mmap-sourced fonts the heap copies can be dropped (they will be re-copied
+  // from flash by reloadMetadata) — but since the mmap data is always accessible
+  // and re-copying is cheap, keep the no-op behaviour: the heap copies stay live
+  // and there is nothing to reload. Phase lifecycle overhead is zero.
+  if (mmapDataBase_) {
     LOG_DBG("SDCF", "unloadMetadata: mmap font — no-op (%s)", filePath_);
     return;
   }
@@ -157,7 +159,7 @@ void SdCardFont::unloadMetadata() {
 
 bool SdCardFont::reloadMetadata() {
   if (!loaded_) return false;
-  if (!metadataOwned_) {
+  if (mmapDataBase_) {
     LOG_DBG("SDCF", "reloadMetadata: mmap font — no-op (%s)", filePath_);
     return true;
   }
@@ -832,23 +834,40 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
   styleCount_ = numStyles;
   contentHash_ = hash;
 
-  // Point fullIntervals directly into the mmap region — no heap alloc.
-  // Kern/lig tables also alias the mmap region and are wired in immediately
-  // (no lazy-load needed: the data is always accessible in flash).
+  // Copy metadata from the mmap region into heap-allocated, naturally-aligned
+  // buffers. A direct reinterpret_cast into flash would be faster but is unsafe
+  // on ESP32-C3 (RISC-V): section offsets are not guaranteed 4-byte aligned for
+  // styles ≥1 (kern-class entries are 3 bytes each, kern matrix is byte-granularity),
+  // so casting to EpdUnicodeInterval* / EpdLigaturePair* (both contain uint32_t
+  // fields) would cause LoadAccessFault. We copy once at load time; subsequent
+  // accesses are safe via naturally-aligned heap pointers.
+  // metadataOwned_ = true so freeStyleAll() will delete[] these arrays.
+  // mmapDataBase_ is kept for the kern MATRIX (buildMiniKernMatrix reads it as
+  // raw bytes — no alignment requirement) and for glyph metrics (glyphsFileOffset
+  // follows intervalCount*12 bytes which keeps 4-byte alignment for style 0; for
+  // styles ≥1 the glyph section alignment is also guaranteed because EpdGlyph is
+  // 16 bytes and intervals are 12 bytes — both multiples of 4 — so the combined
+  // section size is always 4-byte aligned).
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
     auto& s = styles_[i];
     if (!s.present) continue;
 
-    // Validate intervals are within the mapped region
+    // Copy fullIntervals into a heap buffer (alignment-safe on RISC-V).
     const size_t intervalsSz = s.header.intervalCount * sizeof(EpdUnicodeInterval);
     if (s.intervalsFileOffset + intervalsSz > size) {
       LOG_ERR("SDCF", "loadFromMmap: intervals for style %u out of bounds", i);
       freeAll();
       return false;
     }
-    s.fullIntervals = reinterpret_cast<EpdUnicodeInterval*>(const_cast<uint8_t*>(base + s.intervalsFileOffset));
+    s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
+    if (!s.fullIntervals) {
+      LOG_ERR("SDCF", "loadFromMmap: OOM for intervals style %u", i);
+      freeAll();
+      return false;
+    }
+    memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
 
-    // Wire kern class tables from mmap if present
+    // Copy kern class tables (EpdKernClassEntry is 3-byte packed — safe to memcpy).
     if (s.header.kernLeftEntryCount > 0) {
       const size_t leftSz = s.header.kernLeftEntryCount * sizeof(EpdKernClassEntry);
       const size_t rightSz = s.header.kernRightEntryCount * sizeof(EpdKernClassEntry);
@@ -857,12 +876,19 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
         freeAll();
         return false;
       }
-      s.kernLeftClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernLeftFileOffset));
-      s.kernRightClasses = reinterpret_cast<EpdKernClassEntry*>(const_cast<uint8_t*>(base + s.kernRightFileOffset));
+      s.kernLeftClasses = new (std::nothrow) EpdKernClassEntry[s.header.kernLeftEntryCount];
+      s.kernRightClasses = new (std::nothrow) EpdKernClassEntry[s.header.kernRightEntryCount];
+      if (!s.kernLeftClasses || !s.kernRightClasses) {
+        LOG_ERR("SDCF", "loadFromMmap: OOM for kern classes style %u", i);
+        freeAll();
+        return false;
+      }
+      memcpy(s.kernLeftClasses, base + s.kernLeftFileOffset, leftSz);
+      memcpy(s.kernRightClasses, base + s.kernRightFileOffset, rightSz);
       s.kernClassesLoaded = true;
     }
 
-    // Wire ligature pairs from mmap if present
+    // Copy ligature pairs (EpdLigaturePair contains uint32_t — needs heap alignment).
     if (s.header.ligaturePairCount > 0) {
       const size_t ligSz = s.header.ligaturePairCount * sizeof(EpdLigaturePair);
       if (s.ligatureFileOffset + ligSz > size) {
@@ -870,7 +896,13 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
         freeAll();
         return false;
       }
-      s.ligaturePairs = reinterpret_cast<EpdLigaturePair*>(const_cast<uint8_t*>(base + s.ligatureFileOffset));
+      s.ligaturePairs = new (std::nothrow) EpdLigaturePair[s.header.ligaturePairCount];
+      if (!s.ligaturePairs) {
+        LOG_ERR("SDCF", "loadFromMmap: OOM for ligature pairs style %u", i);
+        freeAll();
+        return false;
+      }
+      memcpy(s.ligaturePairs, base + s.ligatureFileOffset, ligSz);
       s.ligLoaded = true;
     }
 
@@ -893,8 +925,9 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     strncpy(filePath_, sdPath, sizeof(filePath_) - 1);
     filePath_[sizeof(filePath_) - 1] = '\0';
   }
-  // Mark metadata as flash-aliased: free sites must not delete[] these pointers.
-  metadataOwned_ = false;
+  // Metadata was copied into heap arrays above — owned, must be delete[]'d on free.
+  // mmapDataBase_ is kept for the kern MATRIX and glyph array (byte-safe mmap reads).
+  metadataOwned_ = true;
   mmapDataBase_ = base;
   loaded_ = true;
 

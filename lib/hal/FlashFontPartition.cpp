@@ -85,6 +85,7 @@ bool beginWrite(const char* familyName) {
   LOG_INF("FFP", "Erasing flash font partition (%u B)...", static_cast<unsigned>(part->size));
   if (esp_partition_erase_range(part, 0, part->size) != ESP_OK) {
     LOG_ERR("FFP", "beginWrite: erase failed");
+    s_ws.active = false;  // ensure no stale session survives a failed erase
     return false;
   }
 

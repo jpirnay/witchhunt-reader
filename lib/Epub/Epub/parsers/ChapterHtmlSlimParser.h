@@ -56,6 +56,8 @@ class ChapterHtmlSlimParser final : public Print {
   int floatOpenDepths_[kMaxFloatDepth] = {};  // parser depth at which each float was opened
   struct PendingInlineImage {
     std::string cachedPath;
+    std::string epubFilePath;   // source EPUB archive path (for cold-cache re-extraction)
+    std::string epubEntryPath;  // entry path within the EPUB zip
     int16_t width = 0;
     int16_t height = 0;
     std::string alt;

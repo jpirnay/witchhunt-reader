@@ -428,7 +428,12 @@ void EpubReaderActivity::loop() {
   if (!prevTriggered && !nextTriggered) {
     if (!delayedPrevTurn && !delayedNextTurn) {
       // Input-idle: run the deferred AA pass if one is pending.
-      if (pendingGrayscale_.active && pendingGrayscale_.page) {
+      // Guard: do not start the AA pass while the render task is still inside
+      // completeDisplay() — both paths touch the SPI display bus and must not
+      // run concurrently. isRefreshPending() is true from triggerDisplay() until
+      // completeDisplay() clears it; when it returns false the render task has
+      // finished all post-waveform SPI work and it is safe to issue new SPI writes.
+      if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
         pendingGrayscale_.active = false;
         renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
         const int fontId = pendingGrayscale_.fontId;
@@ -2022,7 +2027,15 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     }
     LOG_DBG("ERS", "Rendered page in %dms", lastRenderStats.requestRenderMs);
   }
-  silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
+  // Re-acquire the render lock before any further state mutation.
+  // renderContents() released it early (after triggerDisplay) to free the loop
+  // task during the waveform. silentIndexNextChapterIfNeeded() modifies shared
+  // state (readerPhase_, font metadata, secondary buffer) and must be serialised
+  // against any new render() call that the loop task may have requested.
+  {
+    RenderLock relock;
+    silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
+  }
   pendingProgressSave.spineIndex = currentSpineIndex;
   pendingProgressSave.page = section->currentPage;
   pendingProgressSave.pageCount = section->pageCount;
@@ -2202,6 +2215,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   const auto tDisplay = millis();
 
+  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
+  // Must be checked BEFORE page is moved into pendingGrayscale_ below.
+  if (page && page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
+      getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+    pendingHalfRefreshAfterImagePage = true;
+  }
+
   // Deferred grayscale: store context before releasing the lock, so loop() can
   // run the AA pass. The page is kept alive via shared_ptr.
   if (aaEnabledForThisRender) {
@@ -2213,12 +2233,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingGrayscale_.fastLut = SETTINGS.fastAntiAliasing;
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, tDisplay - t0};
-  }
-
-  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
-  if (page && page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
-      getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
-    pendingHalfRefreshAfterImagePage = true;
   }
 
   // Collect font stats before releasing the lock (these read renderer state).

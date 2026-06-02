@@ -429,11 +429,14 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     // Use left margin as xPos so it sits at the left edge of the text area.
     if (!currentPage) currentPage.reset(new Page());
     auto imageBlock = std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, pendingInlineImage_.width,
-                                                   pendingInlineImage_.height, pendingInlineImage_.alt);
+                                                   pendingInlineImage_.height, pendingInlineImage_.alt,
+                                                   pendingInlineImage_.epubFilePath, pendingInlineImage_.epubEntryPath);
     deferredPageImage_ = std::make_shared<PageImage>(imageBlock, 0, currentPageNextY);
     currentPage->elements.push_back(deferredPageImage_);
     pendingInlineImage_.active = false;
     pendingInlineImage_.cachedPath.clear();
+    pendingInlineImage_.epubFilePath.clear();
+    pendingInlineImage_.epubEntryPath.clear();
     pendingInlineImage_.alt.clear();
   }
   currentTextBlock.reset(
@@ -860,6 +863,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     self->floatDepth_ > 0 && displayWidth <= self->viewportWidth / 3 && displayHeight <= 120;
                 if (isInlineCandidate) {
                   self->pendingInlineImage_.cachedPath = std::move(cachedImagePath);
+                  self->pendingInlineImage_.epubFilePath = self->epub->getPath();
+                  self->pendingInlineImage_.epubEntryPath = resolvedPath;
                   self->pendingInlineImage_.width = static_cast<int16_t>(displayWidth);
                   self->pendingInlineImage_.height = static_cast<int16_t>(displayHeight);
                   self->pendingInlineImage_.alt = alt;
