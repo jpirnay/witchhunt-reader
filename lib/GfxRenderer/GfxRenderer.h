@@ -151,6 +151,19 @@ class GfxRenderer {
   // unavailable until reallocSecondaryBuffer() is called.
   bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
+
+  // Non-blocking display split.
+  // triggerDisplay() sends pixels, issues the refresh command and returns
+  // immediately — the waveform runs in hardware. frameBuffer is safe to
+  // overwrite after this returns. completeDisplay() genuinely sleeps (via
+  // FreeRTOS semaphore) until BUSY deasserts, then does post-waveform work.
+  // Both must be called from the render task; no other task may call SPI
+  // display methods between triggerDisplay() and completeDisplay().
+  void triggerDisplay(HalDisplay::RefreshMode mode = HalDisplay::FAST_REFRESH, bool turnOffScreen = false) const {
+    display.triggerDisplay(mode, turnOffScreen);
+  }
+  void completeDisplay() const { display.completeDisplay(); }
+  bool isRefreshPending() const { return display.isRefreshPending(); }
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;

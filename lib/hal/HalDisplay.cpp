@@ -91,6 +91,14 @@ bool HalDisplay::releaseSecondaryBuffer() { return einkDisplay.releaseSecondaryB
 
 bool HalDisplay::reallocSecondaryBuffer() { return einkDisplay.reallocSecondaryBuffer(); }
 
+void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
+  einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
+}
+
+void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
+
+bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

@@ -38,6 +38,14 @@ class HalDisplay {
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
 
+  // Non-blocking display split — see EInkDisplay.h for full contract.
+  // triggerDisplay() sends pixels + triggers waveform, swaps buffers, returns.
+  // completeDisplay() sleeps (via FreeRTOS semaphore) until BUSY deasserts,
+  // then does post-waveform SPI work. Both must be called from the render task.
+  void triggerDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  void completeDisplay();
+  bool isRefreshPending() const;
+
   // Request extra X3 ghost-clearing on the next display refresh.
   // No-op on non-X3 panels. Consumed by the next displayBuffer/refreshDisplay call.
   void requestResync(uint8_t settlePasses = 0);

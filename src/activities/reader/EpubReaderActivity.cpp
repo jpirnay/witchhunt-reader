@@ -1895,7 +1895,17 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
-      renderer.reallocSecondaryBuffer();
+      {
+        const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+        if (contig < 52 * 1024) {
+          LOG_ERR("ERS",
+                  "Heap fragmented after createSectionFile: largest free block %lu B (need 52KB for secondary buffer)",
+                  static_cast<unsigned long>(contig));
+        }
+        if (!renderer.reallocSecondaryBuffer()) {
+          LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+        }
+      }
       renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!createOk) {
@@ -1924,7 +1934,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
-      renderer.reallocSecondaryBuffer();
+      {
+        const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+        if (contig < 52 * 1024) {
+          LOG_ERR("ERS", "Heap fragmented after createSectionFile: largest free block %lu B",
+                  static_cast<unsigned long>(contig));
+        }
+        if (!renderer.reallocSecondaryBuffer()) {
+          LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+        }
+      }
       renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!rebuildOk) {
@@ -1995,7 +2014,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     showTruncatedSectionHintThisRender = truncatedSectionHintRendersRemaining > 0;
 
     const auto start = millis();
-    renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+    renderContents(lock, std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom,
+                   orientedMarginLeft);
     lastRenderStats.requestRenderMs = millis() - start;
     if (truncatedSectionHintRendersRemaining > 0) {
       truncatedSectionHintRendersRemaining--;
@@ -2067,7 +2087,16 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
                                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment,
                                                       viewportWidth, viewportHeight, getEffectiveHyphenation(),
                                                       embeddedStyle, getEffectiveBionicReading(), imageRendering);
-  renderer.reallocSecondaryBuffer();
+  {
+    const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    if (contig < 52 * 1024) {
+      LOG_ERR("ERS", "Heap fragmented after createSectionFile: largest free block %lu B",
+              static_cast<unsigned long>(contig));
+    }
+    if (!renderer.reallocSecondaryBuffer()) {
+      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+    }
+  }
   renderer.restoreFontMetadata();
   readerPhase_ = ReaderPhase::READING;
   if (!silentOk) {
@@ -2084,7 +2113,7 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   globalReadingSessionTracker().updateProgress(percent);
   LOG_DBG("ERS", "Progress saved: Chapter %d, Page %d (%d%%)", spineIndex, currentPage, percent);
 }
-void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
+void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
@@ -2163,24 +2192,19 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const auto tBwRender = millis();
   logReaderMemSnapshot("after_bw_render");
 
+  // Trigger the display refresh — sends pixel data, issues CMD_DISPLAY_REFRESH,
+  // swaps buffers, and returns immediately without waiting for the waveform.
   if (forceHalfRefreshThisPage) {
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+    renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
   const auto tDisplay = millis();
 
-  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
-  // Skip placeholder-only pages since no real image pixels were drawn.
-  if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
-      getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
-    pendingHalfRefreshAfterImagePage = true;
-  }
-
+  // Deferred grayscale: store context before releasing the lock, so loop() can
+  // run the AA pass. The page is kept alive via shared_ptr.
   if (aaEnabledForThisRender) {
-    // Defer the AA pass to the next idle loop tick so rapid page turns only pay
-    // the BW cost. The page is kept alive via shared_ptr until loop() runs the pass.
     pendingGrayscale_.active = true;
     pendingGrayscale_.page = std::move(page);
     pendingGrayscale_.fontId = getEffectiveReaderFontId();
@@ -2191,6 +2215,13 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, tDisplay - t0};
   }
 
+  // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
+  if (page && page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
+      getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+    pendingHalfRefreshAfterImagePage = true;
+  }
+
+  // Collect font stats before releasing the lock (these read renderer state).
   if (const auto* cacheManager = renderer.getFontCacheManager()) {
     if (const auto* decompressor = cacheManager->getDecompressor()) {
       const auto& stats = decompressor->getStats();
@@ -2205,6 +2236,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       lastRenderStats.fontGetBitmapCalls = stats.getBitmapCalls;
     }
   }
+
+  // Release the render lock NOW — the waveform is running in hardware and
+  // frameBuffer is already swapped. The loop task gets full CPU during the
+  // waveform for input handling and pre-render scheduling.
+  lock.unlock();
+
+  // Sleep until BUSY deasserts, then do post-waveform SPI work (DTM1 resync
+  // on X3, conditioning passes, flag updates). SPI ownership transfers back
+  // to this task only after completeDisplay() returns.
+  renderer.completeDisplay();
 }
 
 void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orientedMarginTop,
