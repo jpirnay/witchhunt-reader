@@ -1888,13 +1888,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       // Pagination will rebuild only the cps it actually encounters, bounded
       // by MAX_PAGE_GLYPHS per style.
       renderer.clearFontAccumulation();
-      // Drop SD font layout-phase metadata to free ~40-50 KB before createSectionFile.
       readerPhase_ = ReaderPhase::PRECOMPILING;
       renderer.dropFontMetadata();
+      renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
       const bool createOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
+      renderer.reallocSecondaryBuffer();
       renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!createOk) {
@@ -1918,10 +1919,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
       renderer.dropFontMetadata();
+      renderer.releaseSecondaryBuffer();
       const bool rebuildOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, progressFn);
+      renderer.reallocSecondaryBuffer();
       renderer.restoreFontMetadata();
       readerPhase_ = ReaderPhase::READING;
       if (!rebuildOk) {
@@ -2057,13 +2060,14 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
   // Reset cumulative SD font metadata cache for the new section.
   renderer.clearFontAccumulation();
-  // Drop SD font layout-phase metadata before createSectionFile to free ~40-50 KB.
   readerPhase_ = ReaderPhase::PRECOMPILING;
   renderer.dropFontMetadata();
+  renderer.releaseSecondaryBuffer();
   const bool silentOk = nextSection.createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment,
                                                       viewportWidth, viewportHeight, getEffectiveHyphenation(),
                                                       embeddedStyle, getEffectiveBionicReading(), imageRendering);
+  renderer.reallocSecondaryBuffer();
   renderer.restoreFontMetadata();
   readerPhase_ = ReaderPhase::READING;
   if (!silentOk) {

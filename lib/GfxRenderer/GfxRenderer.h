@@ -144,6 +144,13 @@ class GfxRenderer {
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
+
+  // Temporarily free the secondary (previous-frame) buffer (~52 KB) during
+  // operations that don't need it (e.g. chapter compilation). BW rendering
+  // continues normally. Grayscale AA and (on X4) fast differential are
+  // unavailable until reallocSecondaryBuffer() is called.
+  bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
+  bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;

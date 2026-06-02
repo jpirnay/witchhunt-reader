@@ -54,6 +54,18 @@ class HalDisplay {
   // may be performed after this. The device must reboot before display resumes.
   void releaseBuffers();
 
+  // Release only the secondary (previous-frame) buffer to free ~52 KB of heap
+  // temporarily — e.g. during chapter compilation. BW rendering continues;
+  // on X4 fast differential degrades to half/full until restored; on X3
+  // fast differential is unaffected. Grayscale AA is unavailable until restored.
+  // Returns true if the buffer was freed (false if already released).
+  bool releaseSecondaryBuffer();
+
+  // Restore the secondary buffer freed by releaseSecondaryBuffer().
+  // Must be called before any grayscale AA pass or (on X4) fast differential.
+  // Returns true on success, false on OOM.
+  bool reallocSecondaryBuffer();
+
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
