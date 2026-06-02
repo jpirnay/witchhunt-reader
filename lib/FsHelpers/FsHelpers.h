@@ -6,6 +6,8 @@
 
 namespace FsHelpers {
 
+std::string decodeUriEscapes(const std::string& path);
+
 std::string normalisePath(const std::string& path);
 // Out-parameter overload that reuses `out`'s capacity and performs the
 // normalisation in-place without allocating a temporary components vector.
