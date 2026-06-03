@@ -173,17 +173,21 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
 }
 
 // The PNG decoder (PNGdec) is large due to internal zlib decompression buffers
-// (~40 KB ucZLIB + 16 KB ucPixels at PNG_MAX_BUFFERED_PIXELS=16416 + smaller
-// fields ≈ 60 KB). We heap-allocate it on demand rather than using a static
+// (~40 KB ucZLIB + 6.5 KB ucPixels at PNG_MAX_BUFFERED_PIXELS=6466 + smaller
+// fields ≈ 49 KB). We heap-allocate it on demand rather than using a static
 // instance, so this memory is only consumed while actually decoding/querying
 // PNG images. This is critical on the ESP32-C3 where total RAM is ~320 KB.
 // Use sizeof(PNG) so the precheck stays accurate if PNG_MAX_BUFFERED_PIXELS
 // or other PNGdec buffers are resized.
-// The pre-check uses getMaxAllocHeap() (largest contiguous free block) rather
-// than getFreeHeap() (sum of all free blocks) because `new` needs one contiguous
-// block — fragmentation can leave getFreeHeap() >> sizeof(PNG) while the
-// allocation still fails.
+// The pre-check uses getFreeHeap() rather than getMaxAllocHeap() because
+// getMaxAllocHeap() walks the TLSF free-block chain and crashes if any block
+// header is corrupt (which can happen under extreme heap pressure). getFreeHeap()
+// is a simple counter read that is safe even on a partially-corrupt heap. We add
+// headroom above sizeof(PNG) to account for fragmentation: even if total free
+// heap exceeds the threshold, new() may still fail if no single contiguous block
+// is large enough — in that case new(std::nothrow) returns null and we handle it.
 constexpr size_t PNG_DECODER_APPROX_SIZE = sizeof(PNG);
+constexpr size_t PNG_HEAP_HEADROOM = 20 * 1024;
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
@@ -477,10 +481,10 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
                                                     const RenderConfig& config) {
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
-  size_t maxAlloc = ESP.getMaxAllocHeap();
-  if (maxAlloc < PNG_DECODER_APPROX_SIZE) {
-    LOG_ERR("PNG", "Not enough contiguous heap for PNG decoder (%u largest block, need %u)", maxAlloc,
-            PNG_DECODER_APPROX_SIZE);
+  size_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < PNG_DECODER_APPROX_SIZE + PNG_HEAP_HEADROOM) {
+    LOG_ERR("PNG", "Not enough heap for PNG decoder (%u free, need %u)", freeHeap,
+            PNG_DECODER_APPROX_SIZE + PNG_HEAP_HEADROOM);
     return false;
   }
 

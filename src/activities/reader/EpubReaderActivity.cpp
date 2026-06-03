@@ -2233,13 +2233,32 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const bool imageMonochrome = true;
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
-  // reduce heap contig below the ~60 KB the PNG/JPG decoder needs. The decode
+  // reduce heap contig below the ~49 KB the PNG decoder needs. The decode
   // writes pixels into the framebuffer as a side effect, so we reclear before
   // the real BW render begins. Skips when no decode is needed (all images cached
   // or the page is text-only). Mirrors the effectiveForceLoad rule used by the
   // BW render below so placeholder logic is identical.
+  //
+  // If the secondary frame buffer is allocated (~52 KB on X3, ~48 KB on X4) and
+  // the page has images that still need decoding, release it before the warm pass
+  // so the PNG/JPEG decoder can use that contiguous block. The secondary buffer
+  // is safe to release here because no waveform is pending: displayBuffer() has
+  // not been called yet this render cycle. We reallocate after warm completes.
+  // This mirrors the same technique used during section indexing (createSectionFile).
   const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+  bool releasedSecondaryForWarm = false;
+  if (page->hasUncachedImages(warmForceLoad, imageMonochrome) && renderer.hasSecondaryBuffer()) {
+    renderer.releaseSecondaryBuffer();
+    releasedSecondaryForWarm = true;
+    LOG_DBG("ERS", "Released secondary buffer for image warm pass");
+  }
   page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome);
+  if (releasedSecondaryForWarm) {
+    if (!renderer.reallocSecondaryBuffer()) {
+      LOG_ERR("ERS", "Failed to reallocate secondary buffer after image warm — display quality degraded");
+      secondaryBufferDegraded_ = true;
+    }
+  }
   renderer.clearScreen();
 
   logReaderMemSnapshot("prewarm_begin");

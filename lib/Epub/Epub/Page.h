@@ -157,6 +157,20 @@ class Page {
                        [](const std::shared_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
   }
 
+  // Returns true if any image on this page would require a decoder allocation —
+  // i.e. is not a placeholder AND does not already have a pixel cache on disk.
+  // Used to decide whether to release the secondary frame buffer before warm.
+  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput) const {
+    for (const auto& el : elements) {
+      if (el->getTag() != TAG_PageImage) continue;
+      const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
+      if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
+      if (monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache()) continue;
+      return true;
+    }
+    return false;
+  }
+
   // Get bounding box of all images on the page (union of image rects)
   // Returns false if no images. Coordinates are relative to page origin.
   bool getImageBoundingBox(int16_t& outX, int16_t& outY, int16_t& outW, int16_t& outH) const {
