@@ -18,28 +18,6 @@ namespace {
 constexpr uint16_t ZIP_METHOD_STORED = 0;
 constexpr uint16_t ZIP_METHOD_DEFLATED = 8;
 
-// RAII zip: opens the zip if not already open, closes on destruction only if
-// it performed the open.  Removes the wasOpen/close boilerplate from every method.
-class ScopedOpenClose final {
- public:
-  [[nodiscard]] explicit ScopedOpenClose(ZipFile& zf) : zf(zf), needsClose(!zf.isOpen()) {
-    if (needsClose) ok = zf.open();
-  }
-  ~ScopedOpenClose() {
-    if (needsClose && ok) zf.close();
-  }
-  ScopedOpenClose(const ScopedOpenClose&) = delete;
-  ScopedOpenClose& operator=(const ScopedOpenClose&) = delete;
-  ScopedOpenClose(ScopedOpenClose&&) = delete;
-  ScopedOpenClose& operator=(ScopedOpenClose&&) = delete;
-  explicit operator bool() const { return ok || !needsClose; }
-
- private:
-  ZipFile& zf;
-  bool needsClose = false;
-  bool ok = true;  // true when zip was already open (no open() call needed)
-};
-
 int zipReadCallback(uzlib_uncomp* uncomp) {
   auto* ctx = reinterpret_cast<ZipInflateCtx*>(uncomp);
   if (ctx->fileRemaining == 0) return -1;
@@ -55,57 +33,6 @@ int zipReadCallback(uzlib_uncomp* uncomp) {
   return ctx->readBuf[0];
 }
 }  // namespace
-
-bool ZipFile::loadAllFileStatSlims() {
-  const ScopedOpenClose zip{*this};
-  if (!zip) return false;
-
-  if (!loadZipDetails()) return false;
-
-  file.seek(zipDetails.centralDirOffset);
-
-  uint32_t sig;
-  char itemName[256];
-  fileStatSlimCache.clear();
-  fileStatSlimCache.reserve(zipDetails.totalEntries);
-
-  while (file.available()) {
-    file.read(&sig, 4);
-    if (sig != 0x02014b50) break;  // End of list
-
-    FileStatSlim fileStat = {};
-
-    file.seekCur(6);
-    file.read(&fileStat.method, 2);
-    file.seekCur(8);
-    file.read(&fileStat.compressedSize, 4);
-    file.read(&fileStat.uncompressedSize, 4);
-    uint16_t nameLen, m, k;
-    file.read(&nameLen, 2);
-    file.read(&m, 2);
-    file.read(&k, 2);
-    file.seekCur(8);
-    file.read(&fileStat.localHeaderOffset, 4);
-
-    if (nameLen < sizeof(itemName)) {
-      file.read(itemName, nameLen);
-      itemName[nameLen] = '\0';
-      fileStatSlimCache.emplace(itemName, fileStat);
-    } else {
-      // Skip over oversized entry names to avoid writing past fixed buffer.
-      file.seekCur(nameLen);
-    }
-
-    // Skip the rest of this entry (extra field + comment)
-    file.seekCur(m + k);
-  }
-
-  // Set cursor to start of central directory for sequential access
-  lastCentralDirPos = zipDetails.centralDirOffset;
-  lastCentralDirPosValid = true;
-
-  return true;
-}
 
 static std::string normalizeZipPath(const char* filename) {
   std::string normalized;
@@ -134,26 +61,6 @@ static std::string normalizeZipPathLower(const char* filename) {
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   const std::string normalizedFilename = normalizeZipPath(filename);
   const std::string normalizedFilenameLower = normalizeZipPathLower(filename);
-
-  if (!fileStatSlimCache.empty()) {
-    const auto it = fileStatSlimCache.find(normalizedFilename);
-    if (it != fileStatSlimCache.end()) {
-      *fileStat = it->second;
-      return true;
-    }
-    LOG_DBG("ZIP", "loadFileStatSlim: cached entry not found: %s (normalized=%s)", filename,
-            normalizedFilename.c_str());
-
-    for (const auto& entry : fileStatSlimCache) {
-      std::string keyLower = normalizeZipPathLower(entry.first.c_str());
-      if (keyLower == normalizedFilenameLower) {
-        LOG_DBG("ZIP", "loadFileStatSlim: case-insensitive match for %s => %s", filename, entry.first.c_str());
-        *fileStat = entry.second;
-        return true;
-      }
-    }
-    return false;
-  }
 
   const ScopedOpenClose zip{*this};
   if (!zip) {
@@ -211,24 +118,23 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
       file.read(itemName, nameLen);
       itemName[nameLen] = '\0';
 
+      // Normalize once, then build lowercase via in-place transform — one alloc, not two.
       std::string normalizedItemName = normalizeZipPath(itemName);
       if (normalizedItemName == normalizedFilename) {
-        // Found it! Update cursor to next entry
         file.seekCur(m + k);
         lastCentralDirPos = file.position();
         lastCentralDirPosValid = true;
-        fileStatSlimCache.emplace(std::move(normalizedItemName), *fileStat);
         found = true;
         break;
       }
 
-      const std::string normalizedItemNameLower = normalizeZipPathLower(itemName);
+      std::string normalizedItemNameLower = normalizedItemName;
+      for (char& ch : normalizedItemNameLower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
       if (normalizedItemNameLower == normalizedFilenameLower) {
         LOG_DBG("ZIP", "loadFileStatSlim: case-insensitive match for %s => %s", filename, itemName);
         file.seekCur(m + k);
         lastCentralDirPos = file.position();
         lastCentralDirPosValid = true;
-        fileStatSlimCache.emplace(normalizedItemName, *fileStat);
         found = true;
         break;
       }

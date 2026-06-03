@@ -1081,6 +1081,8 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style) const {
   const int yPos = y + getFontAscenderSize(fontId);
+  const int screenWidth = getScreenWidth();
+  const int screenHeight = getScreenHeight();
   int lastBaseX = x;
   int lastBaseLeft = 0;
   int lastBaseWidth = 0;
@@ -1153,6 +1155,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       lastBaseAdvanceFP = (lastBaseAdvanceFP + 1) / 2;
     }
     prevAdvanceFP = lastBaseAdvanceFP;
+
+    // Skip rasterization for glyphs fully outside the logical viewport.
+    // This avoids expensive per-pixel bounds checks and noisy OOB logs when
+    // long lines overflow past the right edge.
+    const int glyphX = lastBaseX + glyph->left;
+    const int glyphY = yPos - glyph->top;
+    const bool glyphOffscreen = (glyph->width <= 0 || glyph->height <= 0 || glyphX >= screenWidth ||
+                                 glyphY >= screenHeight || glyphX + glyph->width <= 0 || glyphY + glyph->height <= 0);
+    if (glyphOffscreen) {
+      prevCp = cp;
+      continue;
+    }
 
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().

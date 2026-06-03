@@ -176,6 +176,11 @@ class SdCardFont {
     uint32_t reportedMisses[MAX_REPORTED_MISSES] = {};
     uint8_t reportedMissCount = 0;
 
+    // Debug counters for on-demand glyph misses (glyphMissHandler). Used to
+    // throttle log volume while still preserving visibility into overflow churn.
+    uint32_t onDemandMissCount = 0;
+    uint16_t onDemandMissLogged = 0;
+
     // Per-page mini kern matrix (built by buildMiniKernMatrix on each full
     // prewarm). miniKernLeftClasses/miniKernRightClasses map ONLY the codepoints
     // used on the current page to renumbered class IDs (1..miniKern*ClassCount).
@@ -215,6 +220,7 @@ class SdCardFont {
     uint8_t* bitmap = nullptr;
     uint32_t codepoint = 0;
     uint8_t styleIdx = 0;
+    bool occupied = false;
   };
   OverflowEntry overflow_[OVERFLOW_CAPACITY] = {};
   uint32_t overflowCount_ = 0;

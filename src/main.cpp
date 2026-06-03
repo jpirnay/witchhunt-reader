@@ -133,9 +133,11 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 // SilentRestart.h definitions. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
+RTC_NOINIT_ATTR uint32_t heapRecoveryRestartLatch;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
+constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -174,6 +176,22 @@ void silentRestartToReader() {
   LOG_DBG("MAIN", "Silent restart (target=reader)");
   delay(50);
   ESP.restart();
+}
+
+bool trySilentRestartToReaderForHeapRecovery() {
+  if (deepSleepInProgress) return false;  // sleeping supersedes the heap-defrag reboot
+  if (heapRecoveryRestartLatch == HEAP_RECOVERY_RESTART_LATCH_MAGIC) {
+    LOG_ERR("MAIN", "Heap-recovery restart suppressed by safety latch");
+    return false;
+  }
+  heapRecoveryRestartLatch = HEAP_RECOVERY_RESTART_LATCH_MAGIC;
+  globalReadingSessionTracker().end();
+  silentRebootTarget = SILENT_REBOOT_TARGET_READER;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_ERR("MAIN", "Silent restart (target=reader, heap recovery)");
+  delay(50);
+  ESP.restart();
+  return true;
 }
 
 // ---- Quick Resume framebuffer persistence ----
@@ -379,6 +397,9 @@ void setup() {
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
+  if (!isSilentReboot) {
+    heapRecoveryRestartLatch = 0;
+  }
 
   HalSystem::begin();
   gpio.begin();

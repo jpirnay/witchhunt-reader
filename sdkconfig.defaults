@@ -1,3 +1,10 @@
+# Raise the interrupt watchdog to 10 s. The default 800 ms fires during
+# legitimate long operations: e-ink waveform waits, PNG/JPEG decoding,
+# section indexing. The task WDT (5 s default) catches actual hangs; the
+# interrupt WDT only needs to catch cases where interrupts are masked for
+# an unreasonably long time — 10 s is still protective on this device.
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=10000
+
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048
 CONFIG_MBEDTLS_DYNAMIC_BUFFER_ALLOCATION=y

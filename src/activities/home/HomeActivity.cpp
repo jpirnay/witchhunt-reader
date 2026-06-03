@@ -199,10 +199,19 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   const auto thumbSizes = GUI.getCoverThumbSizes(coverHeight);
 
+  // HomeActivity::loop runs on the main task while rendering runs on the render task.
+  // Invalidate the Lyra frame cache under the render lock to avoid freeing cached
+  // frames while tryFastHomeRender is copying from them.
+  const auto invalidateFrameCacheSafely = []() {
+    RenderLock lock;
+    UITheme::getInstance().getMutableTheme().invalidateFrameCache();
+  };
+
   // Called at every early-return point where a cover was just written to disk.
   // Invalidates the carousel frame cache so tryFastHomeRender re-renders the tile
   // with the new BMP rather than compositing the stale placeholder frame.
   const auto onCoverGenerated = [this]() {
+    RenderLock lock;
     UITheme::getInstance().getMutableTheme().invalidateFrameCache();
     coverRendered = false;
     nextRecentCoverIndex++;
@@ -270,7 +279,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           // Free the carousel frame cache before converting — PNG/JPEG decode needs ~42 KB
           // contiguous heap, which won't be available while the 48 KB frame buffer is held.
           // The cache will be rebuilt on the next render.
-          UITheme::getInstance().getMutableTheme().invalidateFrameCache();
+          invalidateFrameCacheSafely();
 
           const std::string cacheBase = ReaderActivity::bookCacheDir(book.path);
           const std::string placeholder = cacheBase + "/[HEIGHT].bmp";

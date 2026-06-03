@@ -3,7 +3,6 @@
 
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 class ZipFile {
@@ -42,17 +41,39 @@ class ZipFile {
   const std::string& filePath;
   FsFile file;
   ZipDetails zipDetails = {0, 0, false};
-  std::unordered_map<std::string, FileStatSlim> fileStatSlimCache;
 
   // Cursor for sequential central-dir scanning optimization
   uint32_t lastCentralDirPos = 0;
   bool lastCentralDirPosValid = false;
 
-  bool loadFileStatSlim(const char* filename, FileStatSlim* fileStat);
   long getDataOffset(const FileStatSlim& fileStat);
   bool loadZipDetails();
 
+  // RAII helper: opens the zip if not already open, closes on destruction only if
+  // it performed the open. Defined here so template methods in the header can use it.
+  class ScopedOpenClose final {
+   public:
+    [[nodiscard]] explicit ScopedOpenClose(ZipFile& zf) : zf_(zf), needsClose_(!zf.isOpen()) {
+      if (needsClose_) ok_ = zf_.open();
+    }
+    ~ScopedOpenClose() {
+      if (needsClose_ && ok_) zf_.close();
+    }
+    ScopedOpenClose(const ScopedOpenClose&) = delete;
+    ScopedOpenClose& operator=(const ScopedOpenClose&) = delete;
+    ScopedOpenClose(ScopedOpenClose&&) = delete;
+    ScopedOpenClose& operator=(ScopedOpenClose&&) = delete;
+    explicit operator bool() const { return ok_ || !needsClose_; }
+
+   private:
+    ZipFile& zf_;
+    bool needsClose_ = false;
+    bool ok_ = true;
+  };
+
  public:
+  // Look up a single entry's stat by scanning the central directory sequentially.
+  bool loadFileStatSlim(const char* filename, FileStatSlim* fileStat);
   explicit ZipFile(const std::string& filePath) : filePath(filePath) {}
   ~ZipFile() = default;
   // Zip file can be opened and closed by hand in order to allow for quick calculation of inflated file size
@@ -60,7 +81,6 @@ class ZipFile {
   bool isOpen() const { return !!file; }
   bool open();
   bool close();
-  bool loadAllFileStatSlims();
   bool getInflatedFileSize(const char* filename, size_t* size);
   // Batch lookup: scan ZIP central dir once and fill sizes for matching targets.
   // targets must be sorted by (hash, len). sizes[target.index] receives uncompressedSize.
@@ -75,20 +95,42 @@ class ZipFile {
   // entry is smaller). Useful for header-only reads to get image dimensions.
   size_t readBytesFromEntry(const char* filename, uint8_t* outBuf, size_t maxBytes);
 
-  // Retrieve a FileStatSlim from the in-memory cache (requires loadAllFileStatSlims()).
-  // Returns false when the cache is empty or the entry is not present.
-  bool getFileStat(const char* filename, FileStatSlim* out) const {
-    if (fileStatSlimCache.empty()) return false;
-    const auto it = fileStatSlimCache.find(filename);
-    if (it == fileStatSlimCache.end()) return false;
-    *out = it->second;
-    return true;
-  }
-
+  // Stream every filename in the central directory to a callback without building
+  // the in-memory stat cache. Uses a fixed 256-byte stack buffer — O(1) heap.
+  // Safe for large EPUBs (3000+ entries) where loadAllFileStatSlims() would OOM.
+  // Callback signature: void(std::string_view filename).
   template <typename F>
-  void enumerateFilePaths(F&& callback) const {
-    for (const auto& entry : fileStatSlimCache) {
-      callback(std::string_view{entry.first});
+  bool streamCentralDirectoryNames(F&& callback) {
+    if (!loadZipDetails()) return false;
+    const ScopedOpenClose zip{*this};
+    if (!zip) return false;
+    file.seek(zipDetails.centralDirOffset);
+    char nameBuf[256];
+    uint32_t sig;
+    while (file.available()) {
+      if (file.read(&sig, 4) != 4 || sig != 0x02014b50) break;
+      file.seekCur(6);
+      uint16_t method;
+      file.read(&method, 2);
+      file.seekCur(8);
+      uint32_t compSz, uncompSz, localOff;
+      file.read(&compSz, 4);
+      file.read(&uncompSz, 4);
+      uint16_t nameLen, extraLen, commentLen;
+      file.read(&nameLen, 2);
+      file.read(&extraLen, 2);
+      file.read(&commentLen, 2);
+      file.seekCur(8);
+      file.read(&localOff, 4);
+      if (nameLen < sizeof(nameBuf)) {
+        file.read(nameBuf, nameLen);
+        nameBuf[nameLen] = '\0';
+        callback(std::string_view{nameBuf, nameLen});
+      } else {
+        file.seekCur(nameLen);
+      }
+      file.seekCur(extraLen + commentLen);
     }
+    return true;
   }
 };

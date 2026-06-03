@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <PNGdec.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <memory>
@@ -332,6 +333,10 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
 
+  // Feed the interrupt WDT every scanline — a large PNG can take many seconds to
+  // decode and the default 8-second timeout fires without periodic resets.
+  esp_task_wdt_reset();
+
   int srcY = pDraw->y;
   int srcWidth = ctx->srcWidth;
 
@@ -365,8 +370,9 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
-    cw.beginRow(outY, ctx->config->y);
+    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->cache.originY, ctx->cache.width,
+            ctx->cache.height);
+    cw.beginRow(outY);
   }
 
   prepareOneBitDitherRow(*ctx, dstY);

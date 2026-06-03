@@ -67,6 +67,8 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
   s.stubData.kernRightEntryCount = 0;
   s.stubData.kernLeftClassCount = 0;
   s.stubData.kernRightClassCount = 0;
+  s.onDemandMissCount = 0;
+  s.onDemandMissLogged = 0;
   // NOTE: reportedMissCount is intentionally NOT reset here. The merge path
   // calls freeStyleMiniData() to swap mini buffers, and resetting the miss
   // tracker every paragraph would re-spam the log for the same 4 missing cps.
@@ -211,10 +213,15 @@ bool SdCardFont::reloadMetadata() {
 }
 
 void SdCardFont::clearOverflow() {
-  for (uint32_t i = 0; i < overflowCount_; i++) {
+  for (uint32_t i = 0; i < OVERFLOW_CAPACITY; i++) {
+    if (!overflow_[i].occupied) {
+      continue;
+    }
     delete[] overflow_[i].bitmap;
     overflow_[i].bitmap = nullptr;
     overflow_[i].codepoint = 0;
+    overflow_[i].styleIdx = 0;
+    overflow_[i].occupied = false;
   }
   overflowCount_ = 0;
   overflowNext_ = 0;
@@ -1663,15 +1670,27 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   uint8_t styleIdx = oc->styleIdx;
 
   if (!self->loaded_ || styleIdx >= MAX_STYLES || !self->styles_[styleIdx].present) return nullptr;
-  const auto& s = self->styles_[styleIdx];
+  auto& s = self->styles_[styleIdx];
   if (!s.fullIntervals) return nullptr;
 
-  // Diagnostic: log first miss per codepoint+style to show why it bypassed prewarm
-  LOG_DBG("SDCF", "onGlyphMiss: U+%04X style %u miniMode=%u miniIntervals=%u bitmap=%p", codepoint, styleIdx,
-          (uint8_t)s.miniMode, s.miniIntervalCount, s.miniBitmap);
+  // Diagnostic (throttled): first few misses are logged verbosely, then every 64th miss.
+  s.onDemandMissCount++;
+  const bool logDetailedMiss = s.onDemandMissLogged < 12 || (s.onDemandMissCount % 64u) == 0u;
+  if (logDetailedMiss) {
+    LOG_DBG("SDCF", "onGlyphMiss: U+%04X style %u miniMode=%u miniIntervals=%u bitmap=%p miss#=%lu", codepoint,
+            styleIdx, static_cast<uint8_t>(s.miniMode), s.miniIntervalCount, s.miniBitmap, s.onDemandMissCount);
+    if (s.onDemandMissLogged == 12) {
+      LOG_DBG("SDCF", "onGlyphMiss: suppressing verbose logs for style %u; logging every 64th miss", styleIdx);
+    }
+    s.onDemandMissLogged++;
+  }
 
-  // Check overflow cache first (matching both codepoint and style)
-  for (uint32_t i = 0; i < self->overflowCount_; i++) {
+  // Check overflow cache first (matching both codepoint and style).
+  // Probe all slots: the ring may be sparse after failed insertions.
+  for (uint32_t i = 0; i < OVERFLOW_CAPACITY; i++) {
+    if (!self->overflow_[i].occupied) {
+      continue;
+    }
     if (self->overflow_[i].codepoint == codepoint && self->overflow_[i].styleIdx == styleIdx) {
       return &self->overflow_[i].glyph;
     }
@@ -1684,17 +1703,13 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   // Pick overflow slot (ring buffer). Read into temporaries first so the
   // existing slot stays valid if SD I/O fails.
   uint32_t slot = self->overflowNext_;
-  bool wasAtCapacity = (self->overflowCount_ == OVERFLOW_CAPACITY);
-  if (!wasAtCapacity) {
-    self->overflowCount_++;
-  }
+  const bool overwriteOccupied = self->overflow_[slot].occupied;
   self->overflowNext_ = (slot + 1) % OVERFLOW_CAPACITY;
 
   // Read glyph metadata into temporary
   FsFile file;
   if (!Storage.openFileForRead("SDCF", self->filePath_, file)) {
     LOG_ERR("SDCF", "Overflow: failed to open .cpfont");
-    if (!wasAtCapacity) self->overflowCount_--;
     return nullptr;
   }
 
@@ -1703,13 +1718,11 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   if (!file.seekSet(glyphFileOff)) {
     LOG_ERR("SDCF", "Overflow: seek failed for glyph metadata U+%04X style %u", codepoint, styleIdx);
     file.close();
-    if (!wasAtCapacity) self->overflowCount_--;
     return nullptr;
   }
   if (file.read(reinterpret_cast<uint8_t*>(&tempGlyph), sizeof(EpdGlyph)) != sizeof(EpdGlyph)) {
     LOG_ERR("SDCF", "Overflow: failed to read glyph metadata for U+%04X style %u", codepoint, styleIdx);
     file.close();
-    if (!wasAtCapacity) self->overflowCount_--;
     return nullptr;
   }
 
@@ -1720,37 +1733,37 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
     if (!tempBitmap) {
       LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
       file.close();
-      if (!wasAtCapacity) self->overflowCount_--;
       return nullptr;
     }
     if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
       LOG_ERR("SDCF", "Overflow: seek failed for bitmap U+%04X style %u", codepoint, styleIdx);
       delete[] tempBitmap;
       file.close();
-      if (!wasAtCapacity) self->overflowCount_--;
       return nullptr;
     }
     if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
       LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
       delete[] tempBitmap;
       file.close();
-      if (!wasAtCapacity) self->overflowCount_--;
       return nullptr;
     }
   }
 
   file.close();
 
-  // All reads succeeded — commit to slot (evict old entry if at capacity)
-  if (wasAtCapacity) {
+  // All reads succeeded — commit to slot (evict old entry when overwriting an occupied slot).
+  if (overwriteOccupied) {
     LOG_DBG("SDCF", "Overflow: evicting U+%04X style %u from slot %u", self->overflow_[slot].codepoint,
             self->overflow_[slot].styleIdx, slot);
     delete[] self->overflow_[slot].bitmap;
+  } else if (self->overflowCount_ < OVERFLOW_CAPACITY) {
+    self->overflowCount_++;
   }
   self->overflow_[slot].glyph = tempGlyph;
   self->overflow_[slot].bitmap = tempBitmap;
   self->overflow_[slot].codepoint = codepoint;
   self->overflow_[slot].styleIdx = styleIdx;
+  self->overflow_[slot].occupied = true;
 
   LOG_DBG("SDCF", "Overflow: loaded U+%04X style %u on demand (slot %u/%u)", codepoint, styleIdx, slot,
           OVERFLOW_CAPACITY);
@@ -1759,14 +1772,20 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
 }
 
 bool SdCardFont::isOverflowGlyph(const EpdGlyph* glyph) const {
-  for (uint32_t i = 0; i < overflowCount_; i++) {
+  for (uint32_t i = 0; i < OVERFLOW_CAPACITY; i++) {
+    if (!overflow_[i].occupied) {
+      continue;
+    }
     if (&overflow_[i].glyph == glyph) return true;
   }
   return false;
 }
 
 const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph* glyph) const {
-  for (uint32_t i = 0; i < overflowCount_; i++) {
+  for (uint32_t i = 0; i < OVERFLOW_CAPACITY; i++) {
+    if (!overflow_[i].occupied) {
+      continue;
+    }
     if (&overflow_[i].glyph == glyph) {
       return overflow_[i].bitmap;
     }

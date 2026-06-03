@@ -156,6 +156,16 @@ std::string_view stripTrailingImportant(std::string_view value) {
 
 }  // anonymous namespace
 
+// FNV-1a 64-bit hash — no heap, good distribution over short selector strings.
+uint64_t CssParser::selectorHash(const std::string& s) {
+  uint64_t h = 14695981039346656037ULL;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
 // String utilities implementation
 
 std::string CssParser::normalized(const std::string& s) {
@@ -1144,8 +1154,10 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  const auto offsetIt = cacheRuleOffsets_.find(selector);
-  if (offsetIt == cacheRuleOffsets_.end()) {
+  const uint64_t h = selectorHash(selector);
+  auto it = std::lower_bound(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(), h,
+                             [](const SelectorEntry& e, uint64_t key) { return e.hash < key; });
+  if (it == cacheRuleOffsets_.end() || it->hash != h) {
     if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
       negativeRuleCache_.clear();
     }
@@ -1153,7 +1165,7 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  if (!readRuleFromDiskAtOffset(offsetIt->second, outStyle)) {
+  if (!readRuleFromDiskAtOffset(it->offset, outStyle)) {
     return false;
   }
 
@@ -1199,6 +1211,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
   hotRuleLru_.clear();
   negativeRuleCache_.clear();
 
+  // Stack buffer avoids a heap string allocation per selector during index load.
+  char selectorBuf[MAX_SELECTOR_LENGTH + 1];
+
   for (uint16_t i = 0; i < ruleCount; ++i) {
     uint16_t selectorLen = 0;
     if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen == 0 ||
@@ -1208,22 +1223,32 @@ bool CssParser::ensureCacheIndexLoaded() const {
       return false;
     }
 
-    std::string selector;
-    selector.resize(selectorLen);
-    if (file.read(&selector[0], selectorLen) != selectorLen) {
+    if (file.read(selectorBuf, selectorLen) != selectorLen) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
     }
+    selectorBuf[selectorLen] = '\0';
 
     const uint32_t styleOffset = file.position();
-    cacheRuleOffsets_[std::move(selector)] = styleOffset;
+    // Hash the selector in-place — no heap allocation.
+    uint64_t h = 14695981039346656037ULL;
+    for (uint16_t j = 0; j < selectorLen; ++j) {
+      h ^= static_cast<uint8_t>(selectorBuf[j]);
+      h *= 1099511628211ULL;
+    }
+    cacheRuleOffsets_.push_back({h, styleOffset});
+
     if (!file.seek(styleOffset + CSS_FIXED_STYLE_BYTES)) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
     }
   }
+
+  // Sort by hash for binary search in lookupRule.
+  std::sort(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
 
   cachedRuleCount_ = cacheRuleOffsets_.size();
   totalSelectorCandidates_ = totalCandidates;

@@ -217,7 +217,7 @@ void ParsedText::layoutAndExtractLines(
   // Apply fixed transforms before any per-line layout work.
   // Paragraph indent only applies to the first layout pass; skip on continuations.
   if (!isContinuation_) {
-    applyParagraphIndent();
+    applyParagraphIndent(renderer, fontId);
   }
   // Bionic transform is incremental: applyBionicReadingTransform() is a no-op
   // for already-transformed words (bionicTransformedUpTo_ == words.size()) and
@@ -575,19 +575,23 @@ size_t ParsedText::computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, c
   return currentIndex;
 }
 
-void ParsedText::applyParagraphIndent() {
+void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fontId) {
   if (words.empty()) {
     return;
   }
 
   if (blockStyle.textIndentDefined) {
-    // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace.
-    // The actual indent positioning is handled in extractLine().
+    // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
   } else if (!extraParagraphSpacing &&
              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
-    // No CSS text-indent defined - use EmSpace fallback only when extra paragraph spacing is off,
-    // so paragraphs remain visually distinguishable.
-    words.front().insert(0, "\xe2\x80\x83");
+    // No CSS text-indent defined — apply a font-size-relative pixel indent so paragraph
+    // boundaries are visually clear. Using getFontAscenderSize() gives one em in pixels,
+    // matching the typographic convention for a paragraph indent. This avoids injecting
+    // U+2003 (em-space) as a character, which caused glyph-miss overhead on every page
+    // when the active font doesn't contain that codepoint.
+    const int oneEm = static_cast<int>(renderer.getFontAscenderSize(fontId) * blockStyle.fontSizeMultiplier + 0.5f);
+    blockStyle.textIndent = oneEm;
+    blockStyle.textIndentDefined = true;
   }
 }
 

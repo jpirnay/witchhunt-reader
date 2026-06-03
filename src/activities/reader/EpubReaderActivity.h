@@ -124,6 +124,11 @@ class EpubReaderActivity final : public Activity {
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   bool pendingHalfRefreshAfterImagePage = false;
+  // True when secondary display buffer allocation failed; while set we prefer
+  // conservative refresh policy and skip grayscale AA to reduce ghosting.
+  bool secondaryBufferDegraded_ = false;
+  // Guard against repeated reboot attempts in a single reader session.
+  bool fragmentationRecoveryRestartAttempted_ = false;
   // When true, large images on the current page are decoded instead of shown as placeholders.
   // Reset to false on every page turn so the next image page starts with a placeholder again.
   bool forceLoadLargeImages = false;
@@ -213,8 +218,19 @@ class EpubReaderActivity final : public Activity {
     bool ready = false;
     int spineIndex = -1;
     int pageIndex = -1;
+    unsigned long renderDurationMs = 0UL;
+    unsigned long completedAtMs = 0UL;
   };
   PreRenderedPage preRenderedPage;
+  struct PageTurnStatsWindow {
+    uint16_t turns = 0;
+    uint16_t preRenderHits = 0;
+    uint16_t preRenderMisses = 0;
+    unsigned long totalPreRenderMs = 0UL;
+    unsigned long totalIdleSlackMs = 0UL;
+  };
+  static constexpr uint16_t PAGE_TURN_STATS_WINDOW_SIZE = 10;
+  PageTurnStatsWindow pageTurnStatsWindow;
   // Set by render() after a normal page render to request a pre-render of the next page.
   bool pendingPreRender = false;
   // Deferred grayscale (Phase 8): after the BW display pass, defer the AA render until the
@@ -299,7 +315,7 @@ class EpubReaderActivity final : public Activity {
   mutable int lastStatusBarPage = -1;
   mutable int lastStatusBarBattery = -1;
   mutable int lastStatusBarClockMinute = -1;
-  void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
+  bool maybeRestartForFragmentedHeap(uint32_t freeHeap, uint32_t contigHeap);
   void saveProgress(int spineIndex, int currentPage, int pageCount);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);

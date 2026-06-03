@@ -56,12 +56,13 @@ class ChapterHtmlSlimParser final : public Print {
   int floatOpenDepths_[kMaxFloatDepth] = {};  // parser depth at which each float was opened
   struct PendingInlineImage {
     std::string cachedPath;
-    std::string epubFilePath;   // source EPUB archive path (for cold-cache re-extraction)
     std::string epubEntryPath;  // entry path within the EPUB zip
     int16_t width = 0;
     int16_t height = 0;
     std::string alt;
     bool active = false;
+    // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
+    // to avoid a redundant heap copy of a constant string.
   };
   PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
   std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating

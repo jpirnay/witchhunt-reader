@@ -334,7 +334,7 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   paragraphLutPerPage.push_back({xhtmlByteOffset, xpathParagraphIndex, xpathListItemIndex});
   completePageFn(std::move(currentPage));
   completedPageCount++;
-  currentPage.reset(new Page());
+  currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
   deferredPageImage_.reset();  // deferred inline image can't span a page boundary
@@ -427,20 +427,19 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     blockStyleWithIndent.firstLineExtraIndent = static_cast<int16_t>(pendingInlineImage_.width + 4);
     // Place image on the page now at a provisional yPos (will be updated in addLineToPage).
     // Use left margin as xPos so it sits at the left edge of the text area.
-    if (!currentPage) currentPage.reset(new Page());
+    if (!currentPage) currentPage.reset(new (std::nothrow) Page());
     auto imageBlock = std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, pendingInlineImage_.width,
-                                                   pendingInlineImage_.height, pendingInlineImage_.alt,
-                                                   pendingInlineImage_.epubFilePath, pendingInlineImage_.epubEntryPath);
+                                                   pendingInlineImage_.height, pendingInlineImage_.alt, epub->getPath(),
+                                                   pendingInlineImage_.epubEntryPath);
     deferredPageImage_ = std::make_shared<PageImage>(imageBlock, 0, currentPageNextY);
     currentPage->elements.push_back(deferredPageImage_);
     pendingInlineImage_.active = false;
     pendingInlineImage_.cachedPath.clear();
-    pendingInlineImage_.epubFilePath.clear();
     pendingInlineImage_.epubEntryPath.clear();
     pendingInlineImage_.alt.clear();
   }
-  currentTextBlock.reset(
-      new ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent, bionicReadingEnabled));
+  currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent,
+                                                       bionicReadingEnabled));
   wordsExtractedInBlock = 0;
 }
 
@@ -863,7 +862,6 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     self->floatDepth_ > 0 && displayWidth <= self->viewportWidth / 3 && displayHeight <= 120;
                 if (isInlineCandidate) {
                   self->pendingInlineImage_.cachedPath = std::move(cachedImagePath);
-                  self->pendingInlineImage_.epubFilePath = self->epub->getPath();
                   self->pendingInlineImage_.epubEntryPath = resolvedPath;
                   self->pendingInlineImage_.width = static_cast<int16_t>(displayWidth);
                   self->pendingInlineImage_.height = static_cast<int16_t>(displayHeight);
@@ -1981,11 +1979,20 @@ bool ChapterHtmlSlimParser::finalize() {
   if (currentTextBlock) {
     makePages();
     if (!layoutFailed) {
+      const bool hasFinalPageContent = currentPage && !currentPage->elements.empty();
       if (!pendingAnchorId.empty()) {
-        anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+        uint16_t anchorPage = static_cast<uint16_t>(completedPageCount);
+        // Avoid mapping trailing anchors to a non-existent blank page when the
+        // chapter ended exactly on a page boundary.
+        if (!hasFinalPageContent && completedPageCount > 0) {
+          anchorPage = static_cast<uint16_t>(completedPageCount - 1);
+        }
+        anchorData.push_back({std::move(pendingAnchorId), anchorPage});
         pendingAnchorId.clear();
       }
-      emitPage(0u);  // post-parse: no byte offset available
+      if (hasFinalPageContent) {
+        emitPage(0u);  // post-parse: no byte offset available
+      }
     }
     currentPage.reset();
     currentTextBlock.reset();

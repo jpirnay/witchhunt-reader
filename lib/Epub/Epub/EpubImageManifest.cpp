@@ -5,6 +5,8 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include <algorithm>
+
 #include "converters/JpegToFramebufferConverter.h"
 #include "converters/PngToFramebufferConverter.h"
 
@@ -13,15 +15,12 @@ constexpr const char* kImagesBinFile = "/images.bin";
 // Enough to find any JPEG SOF marker or PNG IHDR chunk.
 constexpr size_t kHeaderBufSize = 4 * 1024;
 
-bool isImagePath(std::string_view path) {
-  return FsHelpers::hasJpgExtension(path) || FsHelpers::hasPngExtension(path);
-}
+bool isImagePath(std::string_view path) { return FsHelpers::hasJpgExtension(path) || FsHelpers::hasPngExtension(path); }
 
 std::string extractedPathFor(const std::string& cachePath, const std::string& epubEntryPath) {
   // Use only the basename so the path stays short and is spine-agnostic.
   const size_t slash = epubEntryPath.rfind('/');
-  const std::string basename =
-      (slash != std::string::npos) ? epubEntryPath.substr(slash + 1) : epubEntryPath;
+  const std::string basename = (slash != std::string::npos) ? epubEntryPath.substr(slash + 1) : epubEntryPath;
   return cachePath + "/img/" + basename;
 }
 }  // namespace
@@ -68,17 +67,26 @@ bool EpubImageManifest::build(const std::string& cachePath, const std::string& e
   loaded_ = false;
   entries_.clear();
 
-  // Collect image paths from the already-indexed stat cache.
-  std::vector<std::string> imagePaths;
-  zf.enumerateFilePaths([&](std::string_view p) {
-    if (isImagePath(p)) imagePaths.emplace_back(p);
+  // First pass: count images via streaming scan (O(1) heap — no stat cache required).
+  // Safe for large EPUBs (3000+ entries) that would OOM with loadAllFileStatSlims.
+  uint16_t imageCount = 0;
+  zf.streamCentralDirectoryNames([&](std::string_view p) {
+    if (isImagePath(p)) ++imageCount;
   });
 
-  if (imagePaths.empty()) {
-    LOG_DBG("IMF", "No images found in ZIP stat cache");
+  if (imageCount == 0) {
+    LOG_DBG("IMF", "No images found in ZIP");
     loaded_ = true;  // valid empty manifest
     return true;
   }
+
+  std::vector<std::string> imagePaths;
+  imagePaths.reserve(imageCount);
+  entries_.reserve(imageCount);
+  // Second pass: collect image paths (still streaming, no heap growth per entry).
+  zf.streamCentralDirectoryNames([&](std::string_view p) {
+    if (isImagePath(p)) imagePaths.emplace_back(p);
+  });
 
   // Ensure img/ subdir exists for future extracted images.
   const std::string imgDir = cachePath + "/img";
@@ -113,7 +121,7 @@ bool EpubImageManifest::build(const std::string& cachePath, const std::string& e
     }
 
     ZipFile::FileStatSlim stat = {};
-    if (!zf.getFileStat(entryPath.c_str(), &stat)) {
+    if (!zf.loadFileStatSlim(entryPath.c_str(), &stat)) {
       LOG_ERR("IMF", "Missing stat for %s", entryPath.c_str());
       continue;
     }
@@ -131,6 +139,9 @@ bool EpubImageManifest::build(const std::string& cachePath, const std::string& e
   }
 
   free(headerBuf);
+
+  std::sort(entries_.begin(), entries_.end(),
+            [](const ImageManifestEntry& a, const ImageManifestEntry& b) { return a.epubEntryPath < b.epubEntryPath; });
 
   // Write images.bin
   const std::string binPath = cachePath + kImagesBinFile;
@@ -157,14 +168,14 @@ bool EpubImageManifest::build(const std::string& cachePath, const std::string& e
   f.close();
 
   loaded_ = true;
-  LOG_DBG("IMF", "Built image manifest: %u images in %s", static_cast<unsigned>(entries_.size()),
-          binPath.c_str());
+  LOG_DBG("IMF", "Built image manifest: %u images in %s", static_cast<unsigned>(entries_.size()), binPath.c_str());
   return true;
 }
 
 const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {
-  for (const auto& e : entries_) {
-    if (e.epubEntryPath == epubEntryPath) return &e;
-  }
+  // entries_ is sorted by epubEntryPath (guaranteed by build() and load() order).
+  auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
+                             [](const ImageManifestEntry& e, const std::string& key) { return e.epubEntryPath < key; });
+  if (it != entries_.end() && it->epubEntryPath == epubEntryPath) return &*it;
   return nullptr;
 }

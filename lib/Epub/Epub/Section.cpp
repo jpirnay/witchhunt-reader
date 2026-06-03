@@ -5,6 +5,7 @@
 #include <Serialization.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <esp_task_wdt.h>
 
 #include <algorithm>
 
@@ -14,7 +15,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 31;  // bumped: ImageBlock serialisation adds epubFilePath+epubEntryPath
+constexpr uint8_t SECTION_FILE_VERSION =
+    32;  // bumped: paragraph indent uses pixel textIndent instead of em-space prefix in words[0]
 
 namespace header {
 constexpr uint32_t kVersion = 0;
@@ -687,6 +689,27 @@ std::unique_ptr<Page> Section::loadPageFromSectionFile() {
   }
   return Page::deserialize(file);
   // File is intentionally NOT closed; stays open for the next page load
+}
+
+void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
+                                 const bool monochromeOutput) {
+  if (pageCount == 0) return;
+  const int savedPage = currentPage;
+  int warmed = 0;
+  for (int p = 0; p < static_cast<int>(pageCount); ++p) {
+    currentPage = p;
+    auto page = loadPageFromSectionFile();
+    if (!page || !page->hasImages()) continue;
+    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput);
+    ++warmed;
+    // Each image decode can take hundreds of ms; reset the WDT between pages
+    // to avoid an interrupt watchdog timeout on image-heavy chapters.
+    esp_task_wdt_reset();
+  }
+  currentPage = savedPage;
+  if (warmed > 0) {
+    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images", warmed);
+  }
 }
 
 // Resolve TOC anchor-to-page mappings from the parser's in-memory anchor vector.

@@ -151,6 +151,7 @@ class GfxRenderer {
   // unavailable until reallocSecondaryBuffer() is called.
   bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
+  bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
 
   // Non-blocking display split.
   // triggerDisplay() sends pixels, issues the refresh command and returns
@@ -161,8 +162,17 @@ class GfxRenderer {
   // display methods between triggerDisplay() and completeDisplay().
   void triggerDisplay(HalDisplay::RefreshMode mode = HalDisplay::FAST_REFRESH, bool turnOffScreen = false) const {
     display.triggerDisplay(mode, turnOffScreen);
+    // triggerDisplay swaps display buffers; keep renderer's cached pointer in
+    // sync so subsequent draws/grayscale passes target the active write buffer.
+    frameBuffer = display.getFrameBuffer();
   }
-  void completeDisplay() const { display.completeDisplay(); }
+  void completeDisplay() const {
+    display.completeDisplay();
+    // Match displayBuffer(): reseed RED RAM from the current BW frame after the
+    // refresh pipeline settles. On X3 this is a no-op; on X4 it restores the
+    // expected differential baseline for the next fast update.
+    display.syncRedRamFromFrameBuffer();
+  }
   bool isRefreshPending() const { return display.isRefreshPending(); }
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
@@ -353,6 +363,19 @@ class GfxRenderer {
   void releaseFrameBuffers() {
     display.releaseBuffers();
     frameBuffer = nullptr;
+  }
+
+  // Release both display buffers and install a caller-owned scratch buffer as
+  // the active framebuffer. Pixel writes during the warm pass land in scratch
+  // (discarded on reboot) while the decoder can use the freed ~96 KB for its
+  // own allocation. scratchSize must be >= panelWidthBytes * panelHeight.
+  // The device must reboot before any display operation is attempted again.
+  bool releaseFrameBuffersWithScratch(uint8_t* scratch, size_t scratchSize) {
+    if (!scratch || scratchSize < static_cast<size_t>(panelWidthBytes) * panelHeight) return false;
+    display.releaseBuffers();
+    memset(scratch, 0, scratchSize);
+    frameBuffer = scratch;
+    return true;
   }
   uint16_t getDisplayWidth() const { return panelWidth; }
   uint16_t getDisplayHeight() const { return panelHeight; }

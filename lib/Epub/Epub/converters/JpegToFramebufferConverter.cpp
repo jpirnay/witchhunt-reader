@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <limits>
@@ -348,6 +349,9 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
 
+  // Feed the interrupt WDT every MCU row — large JPEGs can take many seconds.
+  esp_task_wdt_reset();
+
   // In EIGHT_BIT_GRAYSCALE mode, pPixels contains 8-bit grayscale values
   // Buffer is densely packed: stride = pDraw->iWidth, valid columns = pDraw->iWidthUsed
   uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
@@ -396,7 +400,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
+    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->cache.originY, ctx->cache.width,
+            ctx->cache.height);
   }
 
   // === 1:1 fast path: no scaling math ===
@@ -408,7 +413,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const uint8_t* row = &pixels[(dstY - blockY) * stride];
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
@@ -440,7 +445,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
@@ -523,7 +528,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     prepareDitherRow(*ctx, dstY);
 #endif
     pw.beginRow(outY);
-    if (caching) cw.beginRow(outY, ctx->config->y);
+    if (caching) cw.beginRow(outY);
     const int32_t srcFyFP = dstY * invScaleFPY;
     int ly = (srcFyFP >> FP_SHIFT) - blockY;
     if (ly < 0) ly = 0;

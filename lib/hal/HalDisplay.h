@@ -74,6 +74,9 @@ class HalDisplay {
   // Returns true on success, false on OOM.
   bool reallocSecondaryBuffer();
 
+  // Returns true when the secondary (previous-frame) buffer is allocated.
+  bool hasSecondaryBuffer() const;
+
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
