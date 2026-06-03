@@ -21,8 +21,8 @@ namespace {
 
 // Compute justification extra per gap, as the current implementation does.
 // Returns 0 for the last line (no stretch) or when there are no gaps.
-int computeJustifyExtra(int pageWidth, int lineWordWidthSum, int totalNaturalGaps,
-                        int actualGapCount, bool isLastLine) {
+int computeJustifyExtra(int pageWidth, int lineWordWidthSum, int totalNaturalGaps, int actualGapCount,
+                        bool isLastLine) {
   const int spareSpace = pageWidth - lineWordWidthSum - totalNaturalGaps;
   if (isLastLine || actualGapCount < 1) return 0;
   return spareSpace / actualGapCount;
@@ -30,8 +30,8 @@ int computeJustifyExtra(int pageWidth, int lineWordWidthSum, int totalNaturalGap
 
 // Compute justification extra WITH the stretch cap (to be implemented in Phase 1).
 // Cap: per-gap stretch must not exceed lineWidth / 8.
-int computeJustifyExtraCapped(int pageWidth, int lineWordWidthSum, int totalNaturalGaps,
-                               int actualGapCount, bool isLastLine) {
+int computeJustifyExtraCapped(int pageWidth, int lineWordWidthSum, int totalNaturalGaps, int actualGapCount,
+                              bool isLastLine) {
   const int spareSpace = pageWidth - lineWordWidthSum - totalNaturalGaps;
   if (isLastLine || actualGapCount < 1) return 0;
   const int raw = spareSpace / actualGapCount;
@@ -91,10 +91,8 @@ TEST(LayoutQualityTest, JustificationStretchCap) {
 
   // This test documents the DESIRED behaviour after Phase 1.
   // It will FAIL until the stretch cap is implemented in ParsedText.cpp.
-  EXPECT_LE(capped, pageWidth / 8)
-      << "Justified gap stretch must not exceed lineWidth/8 per gap";
-  EXPECT_LT(capped, uncapped)
-      << "Capped value must be less than uncapped for this extreme case";
+  EXPECT_LE(capped, pageWidth / 8) << "Justified gap stretch must not exceed lineWidth/8 per gap";
+  EXPECT_LT(capped, uncapped) << "Capped value must be less than uncapped for this extreme case";
 }
 
 TEST(LayoutQualityTest, JustificationStretchCap_ModerateCase) {
@@ -110,8 +108,7 @@ TEST(LayoutQualityTest, JustificationStretchCap_ModerateCase) {
   const int capped = computeJustifyExtraCapped(pageWidth, wordWidthSum, naturalGaps, gapCount, isLastLine);
   const int uncapped = computeJustifyExtra(pageWidth, wordWidthSum, naturalGaps, gapCount, isLastLine);
 
-  EXPECT_EQ(capped, uncapped)
-      << "Cap should not fire when stretch is within lineWidth/8";
+  EXPECT_EQ(capped, uncapped) << "Cap should not fire when stretch is within lineWidth/8";
   EXPECT_EQ(capped, 20);
 }
 
@@ -123,14 +120,10 @@ TEST(LayoutQualityTest, JustificationStretchCap_ModerateCase) {
 namespace {
 
 // Current behaviour: additive (sum of both margins)
-int paragraphGapAdditive(int prevMarginBottom, int nextMarginTop) {
-  return prevMarginBottom + nextMarginTop;
-}
+int paragraphGapAdditive(int prevMarginBottom, int nextMarginTop) { return prevMarginBottom + nextMarginTop; }
 
 // Desired behaviour: CSS spec max collapsing
-int paragraphGapCollapsed(int prevMarginBottom, int nextMarginTop) {
-  return std::max(prevMarginBottom, nextMarginTop);
-}
+int paragraphGapCollapsed(int prevMarginBottom, int nextMarginTop) { return std::max(prevMarginBottom, nextMarginTop); }
 
 }  // namespace
 
@@ -216,26 +209,24 @@ namespace {
 
 float headingMultiplier(int level) {
   switch (level) {
-    case 1: return 1.6f;
-    case 2: return 1.4f;
-    case 3: return 1.2f;
-    default: return 1.0f;
+    case 1:
+      return 1.6f;
+    case 2:
+      return 1.4f;
+    case 3:
+      return 1.2f;
+    default:
+      return 1.0f;
   }
 }
 
 }  // namespace
 
-TEST(LayoutQualityTest, HeadingMultiplierH1) {
-  EXPECT_FLOAT_EQ(headingMultiplier(1), 1.6f);
-}
+TEST(LayoutQualityTest, HeadingMultiplierH1) { EXPECT_FLOAT_EQ(headingMultiplier(1), 1.6f); }
 
-TEST(LayoutQualityTest, HeadingMultiplierH2) {
-  EXPECT_FLOAT_EQ(headingMultiplier(2), 1.4f);
-}
+TEST(LayoutQualityTest, HeadingMultiplierH2) { EXPECT_FLOAT_EQ(headingMultiplier(2), 1.4f); }
 
-TEST(LayoutQualityTest, HeadingMultiplierH3) {
-  EXPECT_FLOAT_EQ(headingMultiplier(3), 1.2f);
-}
+TEST(LayoutQualityTest, HeadingMultiplierH3) { EXPECT_FLOAT_EQ(headingMultiplier(3), 1.2f); }
 
 TEST(LayoutQualityTest, HeadingMultiplierH4to6) {
   EXPECT_FLOAT_EQ(headingMultiplier(4), 1.0f);

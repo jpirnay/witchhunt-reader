@@ -65,8 +65,6 @@ class ImageBlock final : public Block {
   std::string epubFilePath_;   // source EPUB on SD (empty if already extracted)
   std::string epubEntryPath_;  // internal EPUB entry path (e.g. "OEBPS/images/foo.jpg")
 
-  mutable int8_t largeImageCached = 0;  // 0=unchecked, 1=large, -1=not large
-
   // Ensure the SD cache file exists, extracting from the EPUB if necessary.
   // Returns true if the file is ready for decoding.
   bool ensureExtracted() const;

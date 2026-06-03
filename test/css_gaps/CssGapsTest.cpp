@@ -7,42 +7,46 @@
 static int testsPassed = 0;
 static int testsFailed = 0;
 
-#define ASSERT_EQ(a, b)                                                              \
-  do {                                                                               \
-    if ((a) != (b)) {                                                                \
-      fprintf(stderr, "  FAIL: %s:%d  %s == %s  (got %d, expected %d)\n",           \
-              __FILE__, __LINE__, #a, #b, (int)(a), (int)(b));                      \
-      testsFailed++;                                                                 \
-      return;                                                                        \
-    }                                                                                \
+#define ASSERT_EQ(a, b)                                                                                         \
+  do {                                                                                                          \
+    if ((a) != (b)) {                                                                                           \
+      fprintf(stderr, "  FAIL: %s:%d  %s == %s  (got %d, expected %d)\n", __FILE__, __LINE__, #a, #b, (int)(a), \
+              (int)(b));                                                                                        \
+      testsFailed++;                                                                                            \
+      return;                                                                                                   \
+    }                                                                                                           \
   } while (0)
 
-#define ASSERT_TRUE(cond)                                                             \
-  do {                                                                                \
-    if (!(cond)) {                                                                    \
-      fprintf(stderr, "  FAIL: %s:%d  %s is false\n", __FILE__, __LINE__, #cond);   \
-      testsFailed++;                                                                  \
-      return;                                                                         \
-    }                                                                                 \
+#define ASSERT_TRUE(cond)                                                         \
+  do {                                                                            \
+    if (!(cond)) {                                                                \
+      fprintf(stderr, "  FAIL: %s:%d  %s is false\n", __FILE__, __LINE__, #cond); \
+      testsFailed++;                                                              \
+      return;                                                                     \
+    }                                                                             \
   } while (0)
 
-#define ASSERT_FALSE(cond)  ASSERT_TRUE(!(cond))
+#define ASSERT_FALSE(cond) ASSERT_TRUE(!(cond))
 
-static bool assertFloatNear(float got, float expected, float tol,
-                             const char* expr, const char* expStr,
-                             const char* file, int line) {
+static bool assertFloatNear(float got, float expected, float tol, const char* expr, const char* expStr,
+                            const char* file, int line) {
   if (got < expected - tol || got > expected + tol) {
-    fprintf(stderr, "  FAIL: %s:%d  %s ≈ %s  (got %.4f, expected %.4f ±%.4f)\n",
-            file, line, expr, expStr, got, expected, tol);
+    fprintf(stderr, "  FAIL: %s:%d  %s ≈ %s  (got %.4f, expected %.4f ±%.4f)\n", file, line, expr, expStr, got,
+            expected, tol);
     testsFailed++;
     return false;
   }
   return true;
 }
-#define ASSERT_FLOAT_NEAR(a, b, tol) \
-  do { if (!assertFloatNear((float)(a), (float)(b), (float)(tol), #a, #b, __FILE__, __LINE__)) return; } while(0)
+#define ASSERT_FLOAT_NEAR(a, b, tol)                                                                \
+  do {                                                                                              \
+    if (!assertFloatNear((float)(a), (float)(b), (float)(tol), #a, #b, __FILE__, __LINE__)) return; \
+  } while (0)
 
-#define PASS() do { testsPassed++; } while (0)
+#define PASS()     \
+  do {             \
+    testsPassed++; \
+  } while (0)
 
 // ============================================================================
 // Gap 3: list-style-type / list-style: none

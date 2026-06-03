@@ -8,7 +8,7 @@
 // Per-image entry cached at epub-open time so the parser can look up dimensions
 // and ZIP location without a nested inflate during XHTML streaming.
 struct ImageManifestEntry {
-  std::string epubEntryPath;     // e.g. "OEBPS/images/foo.jpg"
+  std::string epubEntryPath;  // e.g. "OEBPS/images/foo.jpg"
   int16_t width = 0;
   int16_t height = 0;
   // ZipFile stat — avoids re-scanning the central directory at render time

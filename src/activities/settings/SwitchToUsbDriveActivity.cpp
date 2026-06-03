@@ -19,19 +19,18 @@ void SwitchToUsbDriveActivity::onEnter() {
     return;
   }
 
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_SWITCH_TO_USB_DRIVE),
-                                            tr(STR_USB_DRIVE_CONFIRM_BODY)),
-      [this, app1](const ActivityResult& result) {
-        if (result.isCancelled) {
-          finish();
-          return;
-        }
-        if (!ota_boot::switchTo(app1)) {
-          LOG_ERR("USB", "Failed to switch boot partition to app1");
-          finish();
-          return;
-        }
-        ESP.restart();
-      });
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_SWITCH_TO_USB_DRIVE),
+                                                                tr(STR_USB_DRIVE_CONFIRM_BODY)),
+                         [this, app1](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             finish();
+                             return;
+                           }
+                           if (!ota_boot::switchTo(app1)) {
+                             LOG_ERR("USB", "Failed to switch boot partition to app1");
+                             finish();
+                             return;
+                           }
+                           ESP.restart();
+                         });
 }

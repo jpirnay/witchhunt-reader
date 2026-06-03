@@ -178,8 +178,7 @@ TEST(MemoryModelTest, LayoutAndDrawPeaksNonOverlapping) {
   ctrl.enterPrecompiling();
   ctrl.renderPage();
 
-  EXPECT_FALSE(alloc.overlapDetected)
-      << "Layout and draw allocations overlapped — phase model not enforced";
+  EXPECT_FALSE(alloc.overlapDetected) << "Layout and draw allocations overlapped — phase model not enforced";
 }
 
 TEST(MemoryModelTest, MetadataNotUnloadedForBuiltinFont) {
@@ -222,6 +221,5 @@ TEST(MemoryModelTest, MultipleChapterTransitionsNeverOverlap) {
     ctrl.enterPrecompiling();
   }
 
-  EXPECT_FALSE(alloc.overlapDetected)
-      << "Layout/draw overlap detected over multiple chapter transitions";
+  EXPECT_FALSE(alloc.overlapDetected) << "Layout/draw overlap detected over multiple chapter transitions";
 }

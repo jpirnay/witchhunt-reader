@@ -2,11 +2,11 @@
 // Minimal Arduino.h stub for host/test builds.
 // Provides only what the Epub/CSS library code references.
 
-#include "HardwareSerial.h"
-#include "WString.h"
-
 #include <cstdint>
 #include <cstdlib>
+
+#include "HardwareSerial.h"
+#include "WString.h"
 
 // ESP stub — only getFreeHeap() is referenced by CssParser
 class EspClass {

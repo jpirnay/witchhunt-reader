@@ -133,17 +133,10 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 }  // namespace
 
 bool ImageBlock::isLargeImage() const {
-  if (largeImageCached != 0) return largeImageCached == 1;
-  ImageDimensions dims{0, 0};
-  const bool ok = FsHelpers::hasJpgExtension(imagePath)
-                      ? JpegToFramebufferConverter::getDimensionsStatic(imagePath, dims)
-                      : PngToFramebufferConverter::getDimensionsStatic(imagePath, dims);
-  if (ok && dims.width > 0 && dims.height > 0) {
-    largeImageCached = (int32_t(dims.width) * dims.height > LARGE_IMAGE_PIXEL_THRESHOLD) ? 1 : -1;
-  } else {
-    largeImageCached = -1;  // unreadable header → assume not large, render normally
-  }
-  return largeImageCached == 1;
+  // width and height are always set at construction from the ZIP manifest or
+  // image header — no file read needed. The SD cache file may not exist yet
+  // (lazy extraction), so reading it here would produce spurious error logs.
+  return int32_t(width) * int32_t(height) > LARGE_IMAGE_PIXEL_THRESHOLD;
 }
 
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }

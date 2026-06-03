@@ -2,13 +2,13 @@
 // Minimal stub for host/test builds — only the types needed to compile
 // CssParser.h and CssStyle.h without ESP32/SdFat dependencies.
 
-#include "Print.h"
-#include "WString.h"
-
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
+
+#include "Print.h"
+#include "WString.h"
 
 // Minimal FsFile stub — only the methods CssParser calls at runtime are needed.
 // Since tests only exercise parseInlineStyle / parseDeclarations (static, no I/O),
@@ -79,7 +79,10 @@ class HalStorage {
   uint64_t sdTotalBytes() const { return 0; }
   uint64_t sdUsedBytes() { return 0; }
   uint64_t sdFreeBytes() { return 0; }
-  static HalStorage& getInstance() { static HalStorage inst; return inst; }
+  static HalStorage& getInstance() {
+    static HalStorage inst;
+    return inst;
+  }
 };
 
 #define Storage HalStorage::getInstance()
