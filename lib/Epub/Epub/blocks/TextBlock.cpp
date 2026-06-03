@@ -12,6 +12,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     return;
   }
 
+  const bool scanning = renderer.isFontCacheScanning();
   const float scale = blockStyle.fontSizeMultiplier;
   const int ascender =
       (scale == 1.0f) ? renderer.getFontAscenderSize(fontId) : renderer.getFontAscenderSizeScaled(fontId, scale);
@@ -34,24 +35,22 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       renderer.drawTextScaled(fontId, wordX, wordY, words[i].c_str(), true, currentStyle, scale);
     }
 
-    const std::string& w = words[i];
-    const bool hasDecoration = (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
-    int startX = wordX;
-    int lineWidth = 0;
-
+    const bool hasDecoration =
+        !scanning && (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
     if (hasDecoration) {
-      lineWidth = (scale == 1.0f) ? renderer.getTextWidth(fontId, w.c_str(), currentStyle)
-                                  : renderer.getTextWidthScaled(fontId, w.c_str(), currentStyle, scale);
-    }
+      const std::string& w = words[i];
+      const int lineWidth = (scale == 1.0f) ? renderer.getTextWidth(fontId, w.c_str(), currentStyle)
+                                            : renderer.getTextWidthScaled(fontId, w.c_str(), currentStyle, scale);
 
-    if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-      const int underlineY = y + ascender + 3;
-      renderer.drawLine(startX, underlineY, startX + lineWidth, underlineY, 2, true);
-    }
+      if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
+        const int underlineY = y + ascender + 3;
+        renderer.drawLine(wordX, underlineY, wordX + lineWidth, underlineY, 2, true);
+      }
 
-    if ((currentStyle & EpdFontFamily::STRIKETHROUGH) != 0) {
-      const int strikeY = y + ascender / 2 + 4;
-      renderer.drawLine(startX, strikeY, startX + lineWidth, strikeY, 2, true);
+      if ((currentStyle & EpdFontFamily::STRIKETHROUGH) != 0) {
+        const int strikeY = y + ascender / 2 + 4;
+        renderer.drawLine(wordX, strikeY, wordX + lineWidth, strikeY, 2, true);
+      }
     }
   }
 }
