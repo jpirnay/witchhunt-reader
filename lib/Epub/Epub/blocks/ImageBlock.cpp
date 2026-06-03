@@ -7,6 +7,7 @@
 #include <Serialization.h>
 
 #include "../../../../src/fontIds.h"
+#include "../../Epub.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/JpegToFramebufferConverter.h"
@@ -19,6 +20,31 @@
 
 ImageBlock::ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText)
     : imagePath(imagePath), altText(altText), width(width), height(height) {}
+
+ImageBlock::ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText,
+                       const std::string& epubFilePath, const std::string& epubEntryPath)
+    : imagePath(imagePath),
+      altText(altText),
+      width(width),
+      height(height),
+      epubFilePath_(epubFilePath),
+      epubEntryPath_(epubEntryPath) {}
+
+bool ImageBlock::ensureExtracted() const {
+  if (Storage.exists(imagePath.c_str())) return true;
+  if (epubFilePath_.empty() || epubEntryPath_.empty()) {
+    LOG_ERR("IMG", "Image missing and no EPUB source: %s", imagePath.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
+  Epub epub(epubFilePath_, "/.crosspoint");
+  if (!epub.extractItemToFile(epubEntryPath_, imagePath)) {
+    LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Lazy extraction done: %s", imagePath.c_str());
+  return true;
+}
 
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
 
@@ -107,17 +133,10 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 }  // namespace
 
 bool ImageBlock::isLargeImage() const {
-  if (largeImageCached != 0) return largeImageCached == 1;
-  ImageDimensions dims{0, 0};
-  const bool ok = FsHelpers::hasJpgExtension(imagePath)
-                      ? JpegToFramebufferConverter::getDimensionsStatic(imagePath, dims)
-                      : PngToFramebufferConverter::getDimensionsStatic(imagePath, dims);
-  if (ok && dims.width > 0 && dims.height > 0) {
-    largeImageCached = (int32_t(dims.width) * dims.height > LARGE_IMAGE_PIXEL_THRESHOLD) ? 1 : -1;
-  } else {
-    largeImageCached = -1;  // unreadable header → assume not large, render normally
-  }
-  return largeImageCached == 1;
+  // width and height are always set at construction from the ZIP manifest or
+  // image header — no file read needed. The SD cache file may not exist yet
+  // (lazy extraction), so reading it here would produce spurious error logs.
+  return int32_t(width) * int32_t(height) > LARGE_IMAGE_PIXEL_THRESHOLD;
 }
 
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
@@ -188,10 +207,16 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
+  // Ensure the image is extracted to SD (lazy extraction if not already present).
+  if (!ensureExtracted()) {
+    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
+    return;
+  }
+
   // Proceed with full decode
   FsFile file;
   if (!Storage.openFileForRead("IMG", imagePath, file)) {
-    LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
+    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
     return;
   }
   size_t fileSize = file.size();
@@ -235,6 +260,8 @@ bool ImageBlock::serialize(FsFile& file) {
   serialization::writePod(file, width);
   serialization::writePod(file, height);
   serialization::writeString(file, altText);
+  serialization::writeString(file, epubFilePath_);
+  serialization::writeString(file, epubEntryPath_);
   return true;
 }
 
@@ -244,7 +271,9 @@ std::unique_ptr<ImageBlock> ImageBlock::deserialize(FsFile& file) {
   int16_t w, h;
   serialization::readPod(file, w);
   serialization::readPod(file, h);
-  std::string alt;
+  std::string alt, epubFile, epubEntry;
   serialization::readString(file, alt);
-  return std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt));
+  serialization::readString(file, epubFile);
+  serialization::readString(file, epubEntry);
+  return std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt, epubFile, epubEntry));
 }

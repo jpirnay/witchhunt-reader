@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <limits>
@@ -348,6 +349,9 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
 
+  // Feed the interrupt WDT every MCU row — large JPEGs can take many seconds.
+  esp_task_wdt_reset();
+
   // In EIGHT_BIT_GRAYSCALE mode, pPixels contains 8-bit grayscale values
   // Buffer is densely packed: stride = pDraw->iWidth, valid columns = pDraw->iWidthUsed
   uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
@@ -396,7 +400,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
+    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->cache.originY, ctx->cache.width,
+            ctx->cache.height);
   }
 
   // === 1:1 fast path: no scaling math ===
@@ -408,7 +413,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const uint8_t* row = &pixels[(dstY - blockY) * stride];
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
@@ -440,7 +445,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
@@ -523,7 +528,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     prepareDitherRow(*ctx, dstY);
 #endif
     pw.beginRow(outY);
-    if (caching) cw.beginRow(outY, ctx->config->y);
+    if (caching) cw.beginRow(outY);
     const int32_t srcFyFP = dstY * invScaleFPY;
     int ly = (srcFyFP >> FP_SHIFT) - blockY;
     if (ly < 0) ly = 0;
@@ -548,6 +553,39 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 }
 
 }  // namespace
+
+bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 4) return false;
+  if (buf[0] != 0xFF || buf[1] != 0xD8) return false;
+
+  size_t pos = 2;
+  while (pos + 3 < len) {
+    if (buf[pos] != 0xFF) {
+      pos++;
+      continue;
+    }
+    pos++;
+    uint8_t marker = buf[pos++];
+    while (marker == 0xFF && pos < len) marker = buf[pos++];
+    if (marker == 0x00 || marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) continue;
+    if (pos + 1 >= len) break;
+    const uint16_t segLen = (static_cast<uint16_t>(buf[pos]) << 8) | buf[pos + 1];
+    if (segLen < 2) break;
+    const bool isSof = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
+                       (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
+    if (isSof) {
+      if (pos + 6 >= len) return false;
+      const uint16_t h = (static_cast<uint16_t>(buf[pos + 3]) << 8) | buf[pos + 4];
+      const uint16_t w = (static_cast<uint16_t>(buf[pos + 5]) << 8) | buf[pos + 6];
+      if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+      out.width = static_cast<int16_t>(w);
+      out.height = static_cast<int16_t>(h);
+      return true;
+    }
+    pos += segLen;
+  }
+  return false;
+}
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   if (!readJpegDimensionsFromHeader(imagePath, out)) {

@@ -152,6 +152,12 @@ void SystemInformationActivity::render(RenderLock&&) {
   drawSection(tr(STR_SEC_FLASH));
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
+  if (status.fontCacheTotalBytes > 0) {
+    const std::string fontCacheValue = status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) + " / " +
+                                                                           formatBytes(status.fontCacheTotalBytes)
+                                                                     : "- / " + formatBytes(status.fontCacheTotalBytes);
+    drawRow(tr(STR_FONT_CACHE), fontCacheValue);
+  }
 
   drawSection(tr(STR_SEC_RUNTIME));
   const uint32_t h = status.uptimeSeconds / 3600;

@@ -41,24 +41,39 @@ const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const Ep
   return &fontData->bitmap[glyph->dataOffset];
 }
 
-void GfxRenderer::ensureSdCardFontReady(int fontId, const char* utf8Text) const {
+void GfxRenderer::ensureFontReady(int fontId, const char* utf8Text) const {
   auto it = sdCardFonts_.find(fontId);
-  if (it != sdCardFonts_.end()) {
-    // Metadata-only: loads glyph metrics (advanceX) without bitmap data.
-    // Saves ~50-100KB heap vs full prewarm — layout only needs advance widths.
-    // Prewarm all present styles (0x0F) for layout measurement.
-    int missed = it->second->prewarm(utf8Text, 0x0F, /*metadataOnly=*/true,
-                                     /*loadKernLigatureData=*/true);
-    if (missed > 0) {
-      LOG_DBG("GFX", "ensureSdCardFontReady: %d glyph(s) not found", missed);
-    }
+  if (it == sdCardFonts_.end()) return;  // no-op for built-in fonts
+  // Metadata-only: loads glyph metrics (advanceX) without bitmap data.
+  // Saves ~50-100 KB heap vs full prewarm — layout only needs advance widths.
+  int missed = it->second->prewarm(utf8Text, 0x0F, /*metadataOnly=*/true,
+                                   /*loadKernLigatureData=*/true);
+  if (missed > 0) {
+    LOG_DBG("GFX", "ensureFontReady: %d glyph(s) not found", missed);
   }
 }
 
-void GfxRenderer::clearSdCardFontAccumulation() const {
+void GfxRenderer::clearFontAccumulation() const {
   for (auto& [id, font] : sdCardFonts_) {
     font->clearAccumulation();
   }
+}
+
+void GfxRenderer::dropFontMetadata() const {
+  for (auto& [id, font] : sdCardFonts_) {
+    font->unloadMetadata();
+  }
+}
+
+bool GfxRenderer::restoreFontMetadata() const {
+  bool ok = true;
+  for (auto& [id, font] : sdCardFonts_) {
+    if (!font->reloadMetadata()) {
+      LOG_ERR("GFX", "Failed to reload metadata for font %d", id);
+      ok = false;
+    }
+  }
+  return ok;
 }
 
 void GfxRenderer::begin() {
@@ -951,6 +966,64 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   }
 }
 
+// Render a glyph at an arbitrary scale factor via nearest-neighbor sampling.
+// Used for heading font-size scaling (e.g. h1=1.6×, h2=1.4×, h3=1.2×).
+// scale > 1.0 enlarges; scale < 1.0 shrinks. For scale == 0.5 the existing
+// renderCharScaled() above is used for SUP/SUB (kept separate for clarity).
+static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
+                              const bool pixelState, const EpdFontFamily::Style style, const float scale) {
+  const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
+  if (!glyph) return;
+
+  const EpdFontData* fontData = fontFamily.getData(style);
+  const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
+  if (!bitmap) return;
+
+  const int srcW = glyph->width;
+  const int srcH = glyph->height;
+  if (srcW <= 0 || srcH <= 0) return;
+
+  const int dstW = static_cast<int>(srcW * scale + 0.5f);
+  const int dstH = static_cast<int>(srcH * scale + 0.5f);
+  if (dstW <= 0 || dstH <= 0) return;
+
+  const int baseX = cursorX + static_cast<int>(glyph->left * scale + 0.5f);
+  const int baseY = cursorY - static_cast<int>(glyph->top * scale + 0.5f);
+
+  if (fontData->is2Bit) {
+    for (int dstY = 0; dstY < dstH; dstY++) {
+      const int srcY = static_cast<int>(dstY / scale);
+      if (srcY >= srcH) break;
+      for (int dstX = 0; dstX < dstW; dstX++) {
+        const int srcX = static_cast<int>(dstX / scale);
+        if (srcX >= srcW) break;
+        const int pos = srcY * srcW + srcX;
+        const uint8_t byte = bitmap[pos >> 2];
+        const uint8_t raw = (byte >> ((3 - (pos & 3)) * 2)) & 0x3;
+        if (raw >= 2) {
+          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+        }
+      }
+    }
+  } else {
+    for (int dstY = 0; dstY < dstH; dstY++) {
+      const int srcY = static_cast<int>(dstY / scale);
+      if (srcY >= srcH) break;
+      for (int dstX = 0; dstX < dstW; dstX++) {
+        const int srcX = static_cast<int>(dstX / scale);
+        if (srcX >= srcW) break;
+        const int pos = srcY * srcW + srcX;
+        const uint8_t byte = bitmap[pos >> 3];
+        const uint8_t bit = 7 - (pos & 7);
+        if ((byte >> bit) & 1) {
+          renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
+        }
+      }
+    }
+  }
+}
+
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
@@ -1008,6 +1081,8 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style) const {
   const int yPos = y + getFontAscenderSize(fontId);
+  const int screenWidth = getScreenWidth();
+  const int screenHeight = getScreenHeight();
   int lastBaseX = x;
   int lastBaseLeft = 0;
   int lastBaseWidth = 0;
@@ -1081,6 +1156,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     }
     prevAdvanceFP = lastBaseAdvanceFP;
 
+    // Skip rasterization for glyphs fully outside the logical viewport.
+    // This avoids expensive per-pixel bounds checks and noisy OOB logs when
+    // long lines overflow past the right edge.
+    const int glyphX = lastBaseX + glyph->left;
+    const int glyphY = yPos - glyph->top;
+    const bool glyphOffscreen = (glyph->width <= 0 || glyph->height <= 0 || glyphX >= screenWidth ||
+                                 glyphY >= screenHeight || glyphX + glyph->width <= 0 || glyphY + glyph->height <= 0);
+    if (glyphOffscreen) {
+      prevCp = cp;
+      continue;
+    }
+
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
       renderCharScaled(*this, renderModeSnapshot, font, cp, lastBaseX, yPos, black, style);
@@ -1089,6 +1176,66 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     }
     prevCp = cp;
   }
+}
+
+void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
+                                 const EpdFontFamily::Style style, const float scale) const {
+  if (scale <= 0.0f || (scale > 0.99f && scale < 1.01f)) {
+    drawText(fontId, x, y, text, black, style);
+    return;
+  }
+
+  if (text == nullptr || *text == '\0') return;
+
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) {
+    fontCacheManager_->recordText(text, fontId, style);
+    return;
+  }
+
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return;
+  const auto& font = fontIt->second;
+  const auto renderModeSnapshot = getRenderMode();
+
+  const int yPos = y + static_cast<int>(getFontAscenderSize(fontId) * scale + 0.5f);
+  int32_t cursorFP = x << 4;  // 12.4 fixed-point
+
+  uint32_t cp;
+  uint32_t prevCp = 0;
+  const char* p = text;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&p)))) {
+    const EpdGlyph* glyph = font.getGlyph(cp, style);
+    if (!glyph) {
+      prevCp = cp;
+      continue;
+    }
+
+    // Apply kerning scaled
+    if (prevCp) {
+      int kern = font.getKerning(prevCp, cp, style);
+      cursorFP += static_cast<int>(kern * scale + 0.5f);
+    }
+
+    const int cursorX = (cursorFP + 8) >> 4;
+    renderCharAtScale(*this, renderModeSnapshot, font, cp, cursorX, yPos, black, style, scale);
+
+    const int scaledAdvanceFP = static_cast<int>(glyph->advanceX * scale + 0.5f);
+    cursorFP += scaledAdvanceFP;
+    prevCp = cp;
+  }
+}
+
+int GfxRenderer::getTextWidthScaled(const int fontId, const char* text, const EpdFontFamily::Style style,
+                                    const float scale) const {
+  return static_cast<int>(getTextWidth(fontId, text, style) * scale + 0.5f);
+}
+
+int GfxRenderer::getLineHeightScaled(const int fontId, const float scale) const {
+  return static_cast<int>(getLineHeight(fontId) * scale + 0.5f);
+}
+
+int GfxRenderer::getFontAscenderSizeScaled(const int fontId, const float scale) const {
+  return static_cast<int>(getFontAscenderSize(fontId) * scale + 0.5f);
 }
 
 void GfxRenderer::drawLine(int x1, int y1, int x2, int y2, const bool state) const {

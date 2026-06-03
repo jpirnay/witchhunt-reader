@@ -156,6 +156,16 @@ std::string_view stripTrailingImportant(std::string_view value) {
 
 }  // anonymous namespace
 
+// FNV-1a 64-bit hash — no heap, good distribution over short selector strings.
+uint64_t CssParser::selectorHash(const std::string& s) {
+  uint64_t h = 14695981039346656037ULL;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
 // String utilities implementation
 
 std::string CssParser::normalized(const std::string& s) {
@@ -436,6 +446,109 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     } else if (va == "baseline") {
       style.verticalAlign = CssVerticalAlign::Baseline;
       style.defined.verticalAlign = 1;
+    }
+  } else if (propNameBuf == "float") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "left") {
+      style.cssFloat = CssFloat::Left;
+      style.defined.cssFloat = 1;
+    } else if (val == "right") {
+      style.cssFloat = CssFloat::Right;
+      style.defined.cssFloat = 1;
+    } else if (val == "none") {
+      style.cssFloat = CssFloat::None;
+      style.defined.cssFloat = 1;
+    }
+  } else if (propNameBuf == "list-style-type" || propNameBuf == "list-style") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "none") {
+      style.listStyleNone = true;
+      style.defined.listStyleNone = 1;
+    }
+  } else if (propNameBuf == "page-break-before" || propNameBuf == "break-before") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "always" || val == "page" || val == "left" || val == "right") {
+      style.pageBreakBefore = true;
+      style.defined.pageBreakBefore = 1;
+    }
+  } else if (propNameBuf == "page-break-after" || propNameBuf == "break-after") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "always" || val == "page" || val == "left" || val == "right") {
+      style.pageBreakAfter = true;
+      style.defined.pageBreakAfter = 1;
+    }
+  } else if (propNameBuf == "line-height") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val != "normal" && val != "inherit" && val != "initial" && val != "unset") {
+      // Parse unitless, %, or em. Normalise to a multiplier relative to default y_advance.
+      // Base = 1.5 (typical body line-height). Result range clamped to [0.7, 2.0].
+      static constexpr float kBase = 1.5f;
+      float parsed = 0.0f;
+      bool ok = false;
+      if (!val.empty() && val.back() == '%') {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / 100.0f / kBase;
+          ok = true;
+        }
+      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / kBase;
+          ok = true;
+        }
+      } else {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p && *end == '\0') {
+          parsed = v / kBase;
+          ok = true;
+        }
+      }
+      if (ok && parsed > 0.0f) {
+        style.lineHeightMultiplier = std::max(0.7f, std::min(2.0f, parsed));
+        style.defined.lineHeight = 1;
+      }
+    }
+  } else if (propNameBuf == "font-size") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val != "inherit" && val != "initial" && val != "unset") {
+      float parsed = 0.0f;
+      bool ok = false;
+      if (!val.empty() && val.back() == '%') {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v / 100.0f;
+          ok = true;
+        }
+      } else if (val.size() > 3 && val.substr(val.size() - 3) == "rem") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v;
+          ok = true;
+        }
+      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
+        const char* p = val.data();
+        char* end = nullptr;
+        float v = std::strtof(p, &end);
+        if (end != p) {
+          parsed = v;
+          ok = true;
+        }
+      }
+      if (ok && parsed > 0.0f) {
+        style.fontSizeMultiplier = parsed;
+        style.defined.fontSizeMultiplier = 1;
+      }
     }
   }
 }
@@ -1041,8 +1154,10 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  const auto offsetIt = cacheRuleOffsets_.find(selector);
-  if (offsetIt == cacheRuleOffsets_.end()) {
+  const uint64_t h = selectorHash(selector);
+  auto it = std::lower_bound(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(), h,
+                             [](const SelectorEntry& e, uint64_t key) { return e.hash < key; });
+  if (it == cacheRuleOffsets_.end() || it->hash != h) {
     if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
       negativeRuleCache_.clear();
     }
@@ -1050,7 +1165,7 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  if (!readRuleFromDiskAtOffset(offsetIt->second, outStyle)) {
+  if (!readRuleFromDiskAtOffset(it->offset, outStyle)) {
     return false;
   }
 
@@ -1096,6 +1211,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
   hotRuleLru_.clear();
   negativeRuleCache_.clear();
 
+  // Stack buffer avoids a heap string allocation per selector during index load.
+  char selectorBuf[MAX_SELECTOR_LENGTH + 1];
+
   for (uint16_t i = 0; i < ruleCount; ++i) {
     uint16_t selectorLen = 0;
     if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen == 0 ||
@@ -1105,22 +1223,32 @@ bool CssParser::ensureCacheIndexLoaded() const {
       return false;
     }
 
-    std::string selector;
-    selector.resize(selectorLen);
-    if (file.read(&selector[0], selectorLen) != selectorLen) {
+    if (file.read(selectorBuf, selectorLen) != selectorLen) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
     }
+    selectorBuf[selectorLen] = '\0';
 
     const uint32_t styleOffset = file.position();
-    cacheRuleOffsets_[std::move(selector)] = styleOffset;
+    // Hash the selector in-place — no heap allocation.
+    uint64_t h = 14695981039346656037ULL;
+    for (uint16_t j = 0; j < selectorLen; ++j) {
+      h ^= static_cast<uint8_t>(selectorBuf[j]);
+      h *= 1099511628211ULL;
+    }
+    cacheRuleOffsets_.push_back({h, styleOffset});
+
     if (!file.seek(styleOffset + CSS_FIXED_STYLE_BYTES)) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
     }
   }
+
+  // Sort by hash for binary search in lookupRule.
+  std::sort(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
 
   cachedRuleCount_ = cacheRuleOffsets_.size();
   totalSelectorCandidates_ = totalCandidates;

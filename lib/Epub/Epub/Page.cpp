@@ -272,9 +272,12 @@ bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages, const bool 
 
 void Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) const {
   for (auto& element : elements) {
-    if (element->getTag() == TAG_PageLine) {
-      element->render(renderer, fontId, xOffset, yOffset);
+    // Scan every non-image element so prewarm covers text from table fragments
+    // and other composite text containers, not only plain PageLine entries.
+    if (element->getTag() == TAG_PageImage) {
+      continue;
     }
+    element->render(renderer, fontId, xOffset, yOffset);
   }
 }
 

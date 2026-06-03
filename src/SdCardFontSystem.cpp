@@ -105,25 +105,12 @@ static uint8_t targetPtSizeFromSettings() {
 }
 
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
+  (void)renderer;
   registry_.discover();
 
-  // If user has a saved SD font selection, load it
-  if (SETTINGS.sdFontFamilyName[0] != '\0') {
-    const auto* family = registry_.findFamily(SETTINGS.sdFontFamilyName);
-    if (family) {
-      if (manager_.loadFamily(*family, renderer, targetPtSizeFromSettings())) {
-        LOG_DBG("SDFS", "Loaded SD card font family: %s", SETTINGS.sdFontFamilyName);
-      } else {
-        LOG_ERR("SDFS", "Failed to load SD font family: %s (clearing)", SETTINGS.sdFontFamilyName);
-        SETTINGS.sdFontFamilyName[0] = '\0';
-      }
-    } else {
-      LOG_DBG("SDFS", "SD font family not found on card: %s (clearing)", SETTINGS.sdFontFamilyName);
-      SETTINGS.sdFontFamilyName[0] = '\0';
-    }
-  }
-
-  LOG_DBG("SDFS", "SD font system ready (%d families discovered)", registry_.getFamilyCount());
+  // Startup is discovery-only. SD font payloads are loaded lazily on reader
+  // entry via ensureLoaded/ensureLoadedForPath and unloaded on reader exit.
+  LOG_DBG("SDFS", "SD font system ready (discovery-only, %d families)", registry_.getFamilyCount());
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {

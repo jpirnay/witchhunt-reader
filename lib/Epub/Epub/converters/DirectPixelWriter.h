@@ -152,21 +152,37 @@ struct DirectCacheWriter {
   uint8_t* buffer;
   int bytesPerRow;
   int originX;
+  int originY;
+  int width;
+  int height;
   uint8_t* rowPtr;  // Pre-computed for current row
 
-  void init(uint8_t* cacheBuffer, int cacheBytesPerRow, int cacheOriginX) {
+  void init(uint8_t* cacheBuffer, int cacheBytesPerRow, int cacheOriginX, int cacheOriginY, int cacheWidth,
+            int cacheHeight) {
     buffer = cacheBuffer;
     bytesPerRow = cacheBytesPerRow;
     originX = cacheOriginX;
+    originY = cacheOriginY;
+    width = cacheWidth;
+    height = cacheHeight;
     rowPtr = nullptr;
   }
 
   // Call once per row before the column loop.
-  inline void beginRow(int screenY, int cacheOriginY) { rowPtr = buffer + (screenY - cacheOriginY) * bytesPerRow; }
+  inline void beginRow(int screenY) {
+    const int localY = screenY - originY;
+    if (localY < 0 || localY >= height) {
+      rowPtr = nullptr;
+      return;
+    }
+    rowPtr = buffer + localY * bytesPerRow;
+  }
 
   // Write a 2-bit pixel value. No bounds checking.
   inline void writePixel(int screenX, uint8_t value) const {
+    if (!rowPtr) return;
     const int localX = screenX - originX;
+    if (localX < 0 || localX >= width) return;
     const int byteIdx = localX >> 2;            // localX / 4
     const int bitShift = 6 - (localX & 3) * 2;  // MSB first: pixel 0 at bits 6-7
     rowPtr[byteIdx] = (rowPtr[byteIdx] & ~(0x03 << bitShift)) | ((value & 0x03) << bitShift);

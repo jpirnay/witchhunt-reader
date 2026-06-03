@@ -8,7 +8,10 @@
 #include <vector>
 
 #include "Epub/BookMetadataCache.h"
+#include "Epub/EpubImageManifest.h"
 #include "Epub/css/CssParser.h"
+
+class ZipFile;
 
 enum class OpfCacheMode { Disabled, Enabled };
 
@@ -29,6 +32,8 @@ class Epub {
   std::unique_ptr<BookMetadataCache> bookMetadataCache;
   // CSS parser for styling
   std::unique_ptr<CssParser> cssParser;
+  // Image manifest (dimensions + ZIP stat for every image in the epub)
+  std::unique_ptr<EpubImageManifest> imageManifest;
   // CSS files
   std::vector<std::string> cssFiles;
   // -1 unknown, 0 unreliable, 1 reliable
@@ -43,6 +48,7 @@ class Epub {
   bool parsePageMapFile() const;
   void parseCssFiles() const;
   void discoverCssFilesFromZip();
+  void buildImageManifest(ZipFile& zf);
 
  public:
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
@@ -74,6 +80,10 @@ class Epub {
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
+  // Read up to maxBytes decompressed bytes from a ZIP entry — no SD write, header-only use.
+  size_t readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, size_t maxBytes) const;
+  // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
+  bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
@@ -89,6 +99,10 @@ class Epub {
   size_t getBookSize() const;
   float calculateProgress(int currentSpineIndex, float currentSpineRead) const;
   CssParser* getCssParser() const { return cssParser.get(); }
+  // Load (or build) the image manifest. Call after load() when images will be rendered.
+  // Skipping this is valid for text-only or placeholder rendering modes.
+  void loadImageManifest();
+  const EpubImageManifest* getImageManifest() const { return imageManifest.get(); }
   int resolveHrefToSpineIndex(const std::string& href) const;
 
   // Printed-page list (from NCX <pageList> / EPUB 3 nav page-list / EPUB 2.01 page-map.xml).

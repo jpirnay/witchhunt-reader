@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <PNGdec.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <memory>
@@ -332,6 +333,10 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
 
+  // Feed the interrupt WDT every scanline — a large PNG can take many seconds to
+  // decode and the default 8-second timeout fires without periodic resets.
+  esp_task_wdt_reset();
+
   int srcY = pDraw->y;
   int srcWidth = ctx->srcWidth;
 
@@ -365,8 +370,9 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
-    cw.beginRow(outY, ctx->config->y);
+    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->cache.originY, ctx->cache.width,
+            ctx->cache.height);
+    cw.beginRow(outY);
   }
 
   prepareOneBitDitherRow(*ctx, dstY);
@@ -404,6 +410,21 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 }
 
 }  // namespace
+
+bool PngToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 24) return false;
+  static constexpr uint8_t kPngSig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  if (memcmp(buf, kPngSig, 8) != 0) return false;
+  if (buf[12] != 'I' || buf[13] != 'H' || buf[14] != 'D' || buf[15] != 'R') return false;
+  const uint32_t w =
+      ((uint32_t)buf[16] << 24) | ((uint32_t)buf[17] << 16) | ((uint32_t)buf[18] << 8) | (uint32_t)buf[19];
+  const uint32_t h =
+      ((uint32_t)buf[20] << 24) | ((uint32_t)buf[21] << 16) | ((uint32_t)buf[22] << 8) | (uint32_t)buf[23];
+  if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+  out.width = static_cast<int16_t>(w);
+  out.height = static_cast<int16_t>(h);
+  return true;
+}
 
 bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   // PNG file layout: 8-byte signature, then chunks. The IHDR chunk is mandatory and

@@ -16,6 +16,10 @@ extern void ensureSdFontLoaded();
 // Defined in main.cpp.
 extern void ensureSdFontLoadedForPath(const char* path);
 
+// Unload any loaded SD font payload (heap reclamation). Safe no-op when none
+// is loaded. Defined in main.cpp.
+extern void unloadSdFontIfLoaded();
+
 // Resolve the SD card font ID for the given family name and font size enum.
 // Returns 0 if no SD font with that family name and size is currently loaded.
 // Free function (not stored as a callback in CrossPointSettings) so the linker

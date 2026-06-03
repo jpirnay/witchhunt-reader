@@ -30,7 +30,7 @@ class ParsedText {
   bool isContinuation_ = false;       ///< true after an intermediate flush; suppresses re-applying paragraph indent
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
-  void applyParagraphIndent();
+  void applyParagraphIndent(const GfxRenderer& renderer, int fontId);
   void applyBionicReadingTransform();
   std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
@@ -62,7 +62,8 @@ class ParsedText {
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
       int firstLineIndent);
-  std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
+  std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer,
+                                            int fontId);  // uses blockStyle.fontSizeMultiplier internally
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,

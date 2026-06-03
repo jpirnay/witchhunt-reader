@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../EpubImageManifest.h"
 #include "../FootnoteEntry.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
@@ -18,6 +19,7 @@
 #include "../css/CssStyle.h"
 
 class Page;
+class PageImage;  // forward declaration — Page.h included in .cpp
 class GfxRenderer;
 class Epub;
 
@@ -45,6 +47,25 @@ class ChapterHtmlSlimParser final : public Print {
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
+  int16_t lastBlockMarginBottom = 0;  // tracks previous block's marginBottom for CSS margin collapsing
+
+  // Inline image beside paragraph text (CSS float context)
+  // Fixed-size arrays — no heap allocation. Float nesting > 4 is pathological in practice.
+  static constexpr int kMaxFloatDepth = 4;
+  int floatDepth_ = 0;
+  int floatOpenDepths_[kMaxFloatDepth] = {};  // parser depth at which each float was opened
+  struct PendingInlineImage {
+    std::string cachedPath;
+    std::string epubEntryPath;  // entry path within the EPUB zip
+    int16_t width = 0;
+    int16_t height = 0;
+    std::string alt;
+    bool active = false;
+    // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
+    // to avoid a redundant heap copy of a constant string.
+  };
+  PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
+  std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;
@@ -53,6 +74,7 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t viewportHeight;
   bool hyphenationEnabled;
   const CssParser* cssParser;
+  const EpubImageManifest* imageManifest;
   bool embeddedStyle;
   uint8_t imageRendering;
   std::string contentBase;
@@ -99,6 +121,7 @@ class ChapterHtmlSlimParser final : public Print {
     int depth;
     bool isOrdered;
     int counter;
+    bool suppressMarker = false;  // true when list-style-type: none
   };
   std::vector<ListEntry> listStack;
 
@@ -202,7 +225,7 @@ class ChapterHtmlSlimParser final : public Print {
       const std::function<void(std::unique_ptr<Page>)>& completePageFn, const bool embeddedStyle,
       const std::string& contentBase, const std::string& imageBasePath, const uint8_t imageRendering = 0,
       std::vector<std::string> tocAnchors = {}, const std::function<void(int)>& progressFn = nullptr,
-      const CssParser* cssParser = nullptr)
+      const CssParser* cssParser = nullptr, const EpubImageManifest* imageManifest = nullptr)
 
       : epub(epub),
         renderer(renderer),
@@ -217,6 +240,7 @@ class ChapterHtmlSlimParser final : public Print {
         completePageFn(completePageFn),
         progressFn(progressFn),
         cssParser(cssParser),
+        imageManifest(imageManifest),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),
         contentBase(contentBase),

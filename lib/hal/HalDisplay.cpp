@@ -87,6 +87,20 @@ uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(
 
 void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
 
+bool HalDisplay::releaseSecondaryBuffer() { return einkDisplay.releaseSecondaryBuffer(); }
+
+bool HalDisplay::reallocSecondaryBuffer() { return einkDisplay.reallocSecondaryBuffer(); }
+
+bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
+
+void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
+  einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
+}
+
+void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
+
+bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

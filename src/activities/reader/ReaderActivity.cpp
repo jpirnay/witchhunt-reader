@@ -61,7 +61,7 @@ std::string ReaderActivity::sidecarCoverPath(const std::string& bookPath) {
   const auto dot = bookPath.rfind('.');
   if (dot == std::string::npos || (sep != std::string::npos && dot < sep)) return "";
   const std::string base = bookPath.substr(0, dot);
-  for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp"}) {
+  for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG", ".BMP"}) {
     const std::string candidate = base + ext;
     if (Storage.exists(candidate.c_str())) {
       LOG_DBG("SIDECAR", "Found sidecar cover: %s", candidate.c_str());
@@ -87,6 +87,10 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   epub->setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
   if (epub->load(true, SETTINGS.embeddedStyle == 0)) {
     return epub;
+  }
+
+  if (const std::string sidecar = sidecarCoverPath(path); !sidecar.empty()) {
+    LOG_INF("READER", "EPUB load failed but sidecar cover exists: %s", sidecar.c_str());
   }
 
   LOG_ERR("READER", "Failed to load epub");
