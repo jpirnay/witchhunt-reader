@@ -2285,9 +2285,10 @@ void GfxRenderer::clearScreen(const uint8_t color) const {
 }
 
 void GfxRenderer::invertScreen() const {
-  for (uint32_t i = 0; i < frameBufferSize; i++) {
-    frameBuffer[i] = ~frameBuffer[i];
-  }
+  auto* p = reinterpret_cast<uint32_t*>(frameBuffer);
+  const uint32_t words = frameBufferSize / 4;
+  for (uint32_t i = 0; i < words; i++) p[i] = ~p[i];
+  for (uint32_t i = words * 4; i < frameBufferSize; i++) frameBuffer[i] = ~frameBuffer[i];
 }
 
 static constexpr unsigned int encodeRefreshMode(const HalDisplay::RefreshMode mode) {
