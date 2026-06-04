@@ -370,6 +370,10 @@ void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<st
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
+  // Base style for the new block — normally the incoming blockStyle, but when falling
+  // through from the empty-block merge path (see below) we use the merged style so that
+  // accumulated parent-element margins are preserved for the inline-image paragraph.
+  const BlockStyle* effectiveBase = &blockStyle;
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
     if (currentTextBlock->isEmpty()) {
@@ -402,10 +406,16 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
         pendingAnchorId.clear();
       }
       wordsExtractedInBlock = 0;
-      return;
+      // If an inline image is waiting, fall through to place it now rather than
+      // returning early — otherwise the image skips empty wrapper blocks and
+      // attaches to the *second* paragraph instead of the first.
+      if (!pendingInlineImage_.active) return;
+      // Fall through: use the merged style as the base so parent-element margins
+      // (accumulated into this empty block) are carried into the new paragraph.
+      effectiveBase = &currentTextBlock->getBlockStyle();
     }
 
-    makePages();
+    if (!currentTextBlock->isEmpty()) makePages();
   }
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
@@ -424,10 +434,16 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // Using marginLeft (not firstLineExtraIndent) indents all lines in the block, which is
   // correct for drop-cap / floated initials that are as tall as the paragraph they introduce.
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
-  BlockStyle blockStyleWithIndent = blockStyle;
+  BlockStyle blockStyleWithIndent = *effectiveBase;
   if (pendingInlineImage_.active) {
-    blockStyleWithIndent.marginLeft =
-        static_cast<int16_t>(blockStyleWithIndent.marginLeft + pendingInlineImage_.width + 4);
+    // Attach a float zone so only the lines that geometrically overlap the image
+    // are narrowed — lines below the image resume full width automatically.
+    if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
+      auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
+      z.top = static_cast<int16_t>(currentPageNextY);  // provisional; corrected in addLineToPage
+      z.bottom = static_cast<int16_t>(currentPageNextY + pendingInlineImage_.height);
+      z.width = static_cast<int16_t>(pendingInlineImage_.width + 4);
+    }
     // Place image on the page now at a provisional yPos (will be updated in addLineToPage).
     // xPos=0: rendered at left edge of content area (orientedMarginLeft is added at render time).
     if (!currentPage) currentPage.reset(new (std::nothrow) Page());
@@ -2028,6 +2044,9 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
 
+  // Capture first-line flag before incrementing wordsExtractedInBlock.
+  const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
+
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += line->wordCount();
   auto footnoteIt = pendingFootnotes.begin();
@@ -2037,23 +2056,27 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
 
-  // Apply horizontal left inset (margin + padding) as x position offset
-  const int16_t xOffset = line->getBlockStyle().leftInset();
-  const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
+  // Apply horizontal left inset (margin + padding) as x position offset.
+  // For lines that overlap an active float zone, also shift right by the zone
+  // width so text starts after the image rather than overlapping it.
+  int16_t xOffset = line->getBlockStyle().leftInset();
+  {
+    const auto& bs = line->getBlockStyle();
+    for (int zi = 0; zi < bs.floatZoneCount; ++zi) {
+      const auto& z = bs.floatZones[zi];
+      if (currentPageNextY < z.bottom && currentPageNextY + lineHeight > z.top) {
+        xOffset = static_cast<int16_t>(xOffset + z.width);
+      }
+    }
+  }
   currentPage->elements.push_back(std::make_shared<PageLine>(line, xOffset, currentPageNextY));
 
-  // Anchor deferred inline image to this line's baseline.
-  // img_y = lineY + ascender - imageHeight  →  image bottom aligns with text baseline.
-  // Applied on the first line of the block; extra height beyond the ascender pushes
-  // subsequent lines down so text never overlaps the image vertically.
+  // On the first line of a block with a deferred inline image, fix the image's
+  // yPos so its top aligns with the glyph top of the first text line.
+  // PageLine y and image y both use the same coordinate: the line's top edge.
+  // Float zones were already pre-corrected in makePages() to the same value.
   if (isFirstLineOfBlock && deferredPageImage_) {
-    const int ascender = renderer.getFontAscenderSize(fontId);
-    const int imgH = deferredPageImage_->getImageBlock().getHeight();
-    const int imgY = std::max(0, currentPageNextY + ascender - imgH);
-    deferredPageImage_->yPos = static_cast<int16_t>(imgY);
-    // Expand line height if image is taller than ascender
-    const int extra = imgH - ascender;
-    if (extra > 0) currentPageNextY += extra;
+    deferredPageImage_->yPos = static_cast<int16_t>(currentPageNextY);
     deferredPageImage_.reset();
   }
 
@@ -2108,12 +2131,28 @@ void ChapterHtmlSlimParser::makePages() {
     return;
   }
 
+  // Pre-correct float zone coordinates before line-breaking so widthForLine
+  // and the xOffset check in addLineToPage use the same y values.
+  // Image top aligns with the line top (currentPageNextY after margin-top).
+  const int lineHeightForFloat =
+      (blockStyle.floatZoneCount > 0)
+          ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f)
+          : 0;
+  if (blockStyle.floatZoneCount > 0) {
+    auto& mbs = currentTextBlock->getBlockStyle();
+    for (int zi = 0; zi < mbs.floatZoneCount; ++zi) {
+      const int imgH = mbs.floatZones[zi].bottom - mbs.floatZones[zi].top;
+      mbs.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
+      mbs.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
+    }
+  }
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
       [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
              const bool suppressHyphenationRetry) {
         return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
-      });
+      },
+      /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches

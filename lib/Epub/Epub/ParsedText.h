@@ -32,27 +32,33 @@ class ParsedText {
 
   void applyParagraphIndent(const GfxRenderer& renderer, int fontId);
   void applyBionicReadingTransform();
+  // Returns the available line width at a given 0-based line index, accounting
+  // for any active float zones in blockStyle.  lineHeight==0 is a fast path
+  // (no float zones active) that returns pageWidth unchanged.
+  int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY, int pageWidth) const;
+
   std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                        int firstLineIndent);
+                                        int firstLineIndent, int16_t blockStartY, int lineHeight);
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
                                                   std::vector<bool>& lineEndsWithHyphenatedWord,
                                                   std::vector<int>& splitPrefixWordIndexes,
-                                                  std::vector<bool>& splitInsertedHyphen, int firstLineIndent);
+                                                  std::vector<bool>& splitInsertedHyphen, int firstLineIndent,
+                                                  int16_t blockStartY, int lineHeight);
   // Recompute hyphenated breaks for a suffix that starts at startIndex.
   // Used after a single-line retry so later lines keep normal hyphenation.
-  std::vector<size_t> computeHyphenatedLineBreaksFromIndex(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                                           std::vector<uint16_t>& wordWidths,
-                                                           std::vector<bool>& continuesVec, size_t startIndex,
-                                                           std::vector<bool>& lineEndsWithHyphenatedWord,
-                                                           std::vector<int>& splitPrefixWordIndexes,
-                                                           std::vector<bool>& splitInsertedHyphen);
+  std::vector<size_t> computeHyphenatedLineBreaksFromIndex(
+      const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
+      std::vector<bool>& continuesVec, size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
+      std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen, int16_t blockStartY = 0,
+      int lineHeight = 0, int startLineIdx = 0);
   // Compute exactly one line break without hyphenating words.
   // Used only for the page-boundary retry line.
   size_t computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         const std::vector<uint16_t>& wordWidths, const std::vector<bool>& continuesVec,
-                                        size_t lineStartIndex, int firstLineIndent) const;
+                                        size_t lineStartIndex, int firstLineIndent, int16_t blockStartY = 0,
+                                        int lineHeight = 0) const;
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks,
                             bool* outInsertedHyphen = nullptr);
@@ -61,7 +67,7 @@ class ParsedText {
       const std::vector<size_t>& lineBreakIndices,
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
-      int firstLineIndent);
+      int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer,
                                             int fontId);  // uses blockStyle.fontSizeMultiplier internally
 
@@ -83,5 +89,7 @@ class ParsedText {
   void layoutAndExtractLines(
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
-      bool includeLastLine = true);
+      bool includeLastLine = true,
+      int16_t blockStartY = 0,  // currentPageNextY at call site — needed for float zone geometry
+      int lineHeight = 0);      // 0 = no float zones (fast path, existing callers unchanged)
 };

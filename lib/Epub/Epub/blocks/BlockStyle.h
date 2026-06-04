@@ -5,10 +5,26 @@
 
 #include "Epub/css/CssStyle.h"
 
+// Vertical exclusion zone created by a left-floated inline image.
+// Lines whose vertical extent overlaps [top, bottom) have their available
+// width reduced by `width` pixels so text wraps correctly beside the image.
+// Coordinates are relative to the page top (set provisionally at parse time,
+// then corrected to the true baseline in addLineToPage).
+// NOT serialised — computed at parse time, discarded after layout.
+// NOT propagated through getCombinedBlockStyle — consumed by the single
+// paragraph it was attached to.
+struct FloatZone {
+  int16_t top;     // y of image top relative to page top
+  int16_t bottom;  // top + imageHeight
+  int16_t width;   // imageWidth + 4 px gap
+};
+
 /**
  * BlockStyle - Block-level styling properties
  */
 struct BlockStyle {
+  static constexpr int kMaxFloatZones = 2;
+
   // Upper bound (in em) for any single side's horizontal margin or padding.
   // Some EPUBs apply huge em-based insets to chapter-opener classes; without a
   // cap, effectiveWidth collapses to 1-2 words per line and justification dumps
@@ -35,6 +51,10 @@ struct BlockStyle {
   bool fromBrElement = false;
   float fontSizeMultiplier = 1.0f;   // font-size multiplier for headings (h1=1.6, h2=1.4, h3=1.2)
   int16_t firstLineExtraIndent = 0;  // extra indent on the first line only (combined with CSS text-indent)
+
+  // Float zones: left-floated images that narrow text width on overlapping lines.
+  FloatZone floatZones[kMaxFloatZones] = {};
+  int8_t floatZoneCount = 0;
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }

@@ -15,8 +15,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION =
-    35;  // bumped: CSS cache v7 adds cssFloat — rebuild sections with correct float layout
+constexpr uint8_t SECTION_FILE_VERSION = 40;  // bumped: image top aligned with line top (no ascender offset)
 
 namespace header {
 constexpr uint32_t kVersion = 0;
