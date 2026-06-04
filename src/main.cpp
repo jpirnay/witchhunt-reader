@@ -134,6 +134,9 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 RTC_NOINIT_ATTR uint32_t heapRecoveryRestartLatch;
+// Single-shot latch for the boot-time heap integrity recovery restart.
+// Prevents an infinite reset loop if the heap is still corrupt after one clean restart.
+RTC_NOINIT_ATTR uint32_t heapCorruptionBootLatch;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
@@ -390,6 +393,33 @@ void setup() {
     }
   }
 
+  // Heap integrity check — must run before any allocation.
+  //
+  // The ESP32-C3 does not zero DRAM on a soft/WDT reset, so the heap metadata
+  // from the previous boot is still in place. If that boot ended with a watchdog
+  // timeout while malloc/free was mid-flight, the TLSF free-block sentinel
+  // (0xabba1234) will have been partially overwritten. Any subsequent heap walk
+  // (malloc, free, getMaxAllocHeap, heap_caps_check_integrity) will then read
+  // the corrupted sentinel and either crash or loop until the interrupt WDT fires,
+  // producing another WDT reset — a self-perpetuating crash loop.
+  //
+  // Mitigation: detect corruption here and reset immediately via esp_restart().
+  // esp_restart() triggers a SW_CPU_RESET which goes through the ROM bootloader,
+  // re-initialises DRAM fully, and produces a clean heap on the following boot.
+  // A RTC_NOINIT latch prevents infinite loops if the corruption re-appears.
+  //
+  // print_errors=true writes details to UART0 before Arduino Serial is open.
+  {
+    static constexpr uint32_t HEAP_CORRUPTION_BOOT_MAGIC = 0xBEEF4321;
+    const bool alreadyAttempted = (heapCorruptionBootLatch == HEAP_CORRUPTION_BOOT_MAGIC);
+    if (!alreadyAttempted && !heap_caps_check_integrity_all(/*print_errors=*/true)) {
+      heapCorruptionBootLatch = HEAP_CORRUPTION_BOOT_MAGIC;
+      esp_restart();  // clean DRAM reset — heap will be intact on next boot
+    }
+    heapCorruptionBootLatch = 0;  // clear latch on a clean-heap boot
+  }
+  const bool heapIntactAtBoot = heap_caps_check_integrity_all(/*print_errors=*/false);
+
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
@@ -430,6 +460,10 @@ void setup() {
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+  // Re-log the boot-time heap integrity result now that serial is open.
+  // If false, the heap was already corrupt before any application code ran —
+  // look for SDK/Arduino static-init corruption rather than our own code.
+  LOG_INF("MEM", "Heap integrity at boot: %s", heapIntactAtBoot ? "OK" : "CORRUPT");
   logStartupMemory("after_hw_init");
 
   // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
