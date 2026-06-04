@@ -15,14 +15,18 @@
 
 HalStorage HalStorage::instance;
 
-HalStorage::HalStorage() {
-  storageMutex = xSemaphoreCreateMutex();
-  assert(storageMutex != nullptr);
-}
+HalStorage::HalStorage() {}
 
 // begin() and ready() are only called from setup, no need to acquire mutex for them
 
 bool HalStorage::begin() {
+  // Create the mutex here rather than in the constructor: HalStorage::instance
+  // is a global, and its constructor runs before the FreeRTOS scheduler starts.
+  // Calling xSemaphoreCreateMutex() that early corrupts the TLSF heap metadata.
+  if (!storageMutex) {
+    storageMutex = xSemaphoreCreateMutex();
+    assert(storageMutex != nullptr);
+  }
   if (!SDCard.begin()) return false;
   FsDateTime::setCallback([](uint16_t* date, uint16_t* time) {
     if (!HalClock::isSynced()) {

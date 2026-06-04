@@ -32,6 +32,12 @@
 #endif
 
 void ActivityManager::begin() {
+  // Create FreeRTOS objects here rather than in the constructor: ActivityManager
+  // is a global, and its constructor runs before the scheduler starts. Calling
+  // xSemaphoreCreateMutex() that early corrupts the TLSF heap metadata.
+  renderingMutex = xSemaphoreCreateMutex();
+  assert(renderingMutex != nullptr && "Failed to create rendering mutex");
+
   xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
               8192,              // Stack size
               this,              // Parameters
