@@ -15,7 +15,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 43;  // bumped: PageTableFragment gains hasBorder field
+constexpr uint8_t SECTION_FILE_VERSION = 44;  // bumped: PageTableFragment drops colWidths[], gains colspan support
 
 namespace header {
 constexpr uint32_t kVersion = 0;

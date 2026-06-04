@@ -719,14 +719,41 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->currentTable->rows.emplace_back();
     }
     BufferedTableRow& row = self->currentTable->rows.back();
-    if (row.cells.size() >= MAX_TABLE_COLS) {
-      self->currentTable->unsupported = true;
+
+    // Parse colspan attribute (inspired by uxjulia/CrossInk; rewritten for our codebase).
+    // Any rowspan != 1 is unsupported; we ignore it and let the fallback handle those tables.
+    uint8_t colSpan = 1;
+    if (atts != nullptr) {
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "colspan") == 0) {
+          char* end;
+          const long v = std::strtol(atts[i + 1], &end, 10);
+          if (end != atts[i + 1] && v >= 1 && v <= MAX_TABLE_COLS) {
+            colSpan = static_cast<uint8_t>(v);
+          }
+        } else if (strcmp(atts[i], "rowspan") == 0) {
+          char* end;
+          const long v = std::strtol(atts[i + 1], &end, 10);
+          if (end != atts[i + 1] && v != 1) {
+            self->currentTable->unsupported = true;
+          }
+        }
+      }
     }
+
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
     row.cells.back().isHeader = isHeader;
+    row.cells.back().colSpan = colSpan;
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
+    row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
+    if (row.effectiveCols > self->currentTable->maxCols) {
+      self->currentTable->maxCols = row.effectiveCols;
+    }
+    if (row.cells.size() > MAX_TABLE_COLS || row.effectiveCols > MAX_TABLE_COLS) {
+      self->currentTable->unsupported = true;
+    }
     self->currentTableCell = &row.cells.back();
     self->depth += 1;
     return;
@@ -2307,13 +2334,13 @@ void ChapterHtmlSlimParser::emitBufferedTable() {
 }
 
 void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
-  // Determine column count (max cells in any row)
-  uint8_t columnCount = 0;
-  for (const auto& row : table.rows) {
-    if (row.cells.size() > columnCount) {
-      columnCount = static_cast<uint8_t>(row.cells.size());
-    }
-  }
+  // Use the pre-computed maxCols which accounts for colspan values (inspired by uxjulia/CrossInk).
+  const uint8_t columnCount = table.maxCols > 0 ? table.maxCols : [&]() {
+    uint8_t n = 0;
+    for (const auto& row : table.rows) n = std::max(n, static_cast<uint8_t>(row.cells.size()));
+    return n;
+  }();
+
   if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
     emitTableAsParagraphs(table);
     return;
@@ -2329,26 +2356,46 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     return;
   }
 
-  std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
-  for (uint8_t c = 0; c < columnCount; c++) {
-    colWidths[c] = colWidth;
-  }
-
   const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+  const bool hasBorder = table.hasBorder;
 
-  // Pre-wrap all cells and compute row heights
+  // Pre-wrap all cells and compute row heights.
+  // A row whose single cell spans the full table width (colspan == maxCols) is treated as a
+  // 1-column fragment so it renders full-width inline with the surrounding grid rather than
+  // falling back to paragraph mode. Idea from uxjulia/CrossInk; rewritten for our layout model.
   struct LayoutRow {
     std::vector<TableCell> cells;
     uint16_t height = 0;
     bool isHeaderRow = false;
+    uint8_t renderCols = 0;  // 1 for full-width single-cell rows, else columnCount
   };
   std::vector<LayoutRow> layoutRows;
   layoutRows.reserve(table.rows.size());
 
   for (auto& bufRow : table.rows) {
+    // Detect a full-width spanning row: exactly one cell whose colSpan equals the table's column count.
+    const bool isFullWidthSpan =
+        bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
+
+    const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
+    const uint16_t renderColWidth = totalWidth / renderCols;
+    const uint16_t renderInnerWidth = (renderColWidth > 2 * TABLE_CELL_PADDING)
+                                          ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING)
+                                          : 0;
+
+    // Any other colspan structure falls back; we only handle full-span or plain cells.
+    const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
+                                           [](const BufferedTableCell& c) { return c.colSpan != 1; });
+    if (hasMergedCell && !isFullWidthSpan) {
+      LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
+      emitTableAsParagraphs(table);
+      return;
+    }
+
     LayoutRow lr;
     lr.isHeaderRow = bufRow.isHeaderRow;
-    lr.cells.reserve(bufRow.cells.size());
+    lr.renderCols = renderCols;
+    lr.cells.reserve(renderCols);
     uint16_t maxLines = 0;
 
     for (auto& bufCell : bufRow.cells) {
@@ -2356,8 +2403,7 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       cell.isHeader = bufCell.isHeader;
 
       if (bufCell.text && !bufCell.text->isEmpty()) {
-        // Wrap cell text to inner column width, collecting resulting TextBlock lines
-        bufCell.text->layoutAndExtractLines(renderer, fontId, innerColWidth,
+        bufCell.text->layoutAndExtractLines(renderer, fontId, renderInnerWidth,
                                             [&cell](const std::shared_ptr<TextBlock>& tb, bool, bool) {
                                               if (cell.lines.size() < MAX_CELL_LINES) {
                                                 cell.lines.push_back(tb);
@@ -2372,9 +2418,11 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       lr.cells.push_back(std::move(cell));
     }
 
-    // Pad rows that have fewer cells than columnCount with empty cells
-    while (lr.cells.size() < columnCount) {
-      lr.cells.emplace_back();
+    // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
+    if (!isFullWidthSpan) {
+      while (lr.cells.size() < columnCount) {
+        lr.cells.emplace_back();
+      }
     }
 
     lr.height = static_cast<uint16_t>(maxLines * lineHeight + 2 * TABLE_CELL_PADDING);
@@ -2382,55 +2430,49 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     layoutRows.push_back(std::move(lr));
   }
 
-  // Ensure page is initialised
+  // Ensure page is initialised.
   if (!currentPage) {
     currentPage.reset(new Page());
     currentPageNextY = 0;
   }
 
-  // Greedily pack rows into fragments, page-breaking between fragments
+  // Greedily pack rows into fragments, page-breaking between fragments.
+  // Rows with a different renderCols than the pending fragment flush it first, since each
+  // PageTableFragment has a single fixed column count.
   std::vector<TableRow> fragmentRows;
   uint16_t fragmentHeight = 0;
-
-  const bool hasBorder = table.hasBorder;
+  uint8_t fragmentCols = 0;
 
   auto emitFragment = [&]() {
     if (fragmentRows.empty()) return;
 
-    // When bordered: drawRect provides top+bottom borders (1px each); inter-row separators are already
-    // counted in fragmentHeight (+1 per row). We add 1 for the bottom border of the outer rect.
-    // When borderless: no rect, no separators; fragmentHeight is already the exact pixel height.
+    // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
+    // in fragmentHeight; add 1 for the bottom border. When borderless: fragmentHeight is exact.
     const uint16_t fragTotalHeight =
         hasBorder ? static_cast<uint16_t>(fragmentHeight + 1) : static_cast<uint16_t>(fragmentHeight);
 
-    // If this fragment won't fit on the current page, page-break first
     if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
       emitPage(lastBodyChildByteOffset);
     }
 
-    auto fragment = std::make_shared<PageTableFragment>(
-        columnCount, totalWidth, fragTotalHeight, colWidths, std::move(fragmentRows),
-        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder);
-    currentPage->elements.push_back(fragment);
+    currentPage->elements.push_back(std::make_shared<PageTableFragment>(
+        fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
+        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
     currentPageNextY += fragTotalHeight;
     fragmentRows.clear();
     fragmentHeight = 0;
+    fragmentCols = 0;
   };
 
   for (auto& lr : layoutRows) {
-    // If a single row is taller than the full viewport, fall back for this row
     if (lr.height > viewportHeight) {
-      // Emit whatever we have so far
       emitFragment();
-      // Emit this oversized row as a paragraph fallback
       BufferedTable singleRowFallback;
       BufferedTableRow fbRow;
       fbRow.isHeaderRow = lr.isHeaderRow;
       for (auto& cell : lr.cells) {
         BufferedTableCell fbc;
         fbc.isHeader = cell.isHeader;
-        // Re-create a minimal ParsedText from the already-wrapped lines
-        // by emitting each line's words as a new ParsedText paragraph
         fbc.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
         for (const auto& line : cell.lines) {
           for (const auto& word : line->getWords()) {
@@ -2444,10 +2486,18 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       continue;
     }
 
+    // A change in column count requires a new fragment.
+    if (!fragmentRows.empty() && lr.renderCols != fragmentCols) {
+      emitFragment();
+    }
+
+    if (fragmentCols == 0) fragmentCols = lr.renderCols;
+
     const uint16_t rowContrib = hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
 
     if (!fragmentRows.empty() && currentPageNextY + fragmentHeight + rowContrib > viewportHeight) {
       emitFragment();
+      fragmentCols = lr.renderCols;
     }
 
     TableRow tr;
