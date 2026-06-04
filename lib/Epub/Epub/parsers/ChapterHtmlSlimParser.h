@@ -126,6 +126,7 @@ class ChapterHtmlSlimParser final : public Print {
     std::vector<BufferedTableRow> rows;
     int depth = 0;             // nesting depth; > 1 means we're inside a nested table
     bool unsupported = false;  // true → emit as paragraphs instead of grid
+    bool hasBorder = true;     // false when border="0" on the <table> element
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>

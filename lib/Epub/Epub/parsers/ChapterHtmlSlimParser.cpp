@@ -691,6 +691,13 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     }
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
+    if (atts != nullptr) {
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "border") == 0 && strcmp(atts[i + 1], "0") == 0) {
+          self->currentTable->hasBorder = false;
+        }
+      }
+    }
     self->depth += 1;
     return;
   }
@@ -2385,20 +2392,25 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
   std::vector<TableRow> fragmentRows;
   uint16_t fragmentHeight = 0;
 
+  const bool hasBorder = table.hasBorder;
+
   auto emitFragment = [&]() {
     if (fragmentRows.empty()) return;
 
-    // Total height = sum of row heights + top border (1px) + bottom border included in outer rect
-    const uint16_t fragTotalHeight = static_cast<uint16_t>(fragmentHeight + 1);  // +1 for top border pixel
+    // When bordered: drawRect provides top+bottom borders (1px each); inter-row separators are already
+    // counted in fragmentHeight (+1 per row). We add 1 for the bottom border of the outer rect.
+    // When borderless: no rect, no separators; fragmentHeight is already the exact pixel height.
+    const uint16_t fragTotalHeight =
+        hasBorder ? static_cast<uint16_t>(fragmentHeight + 1) : static_cast<uint16_t>(fragmentHeight);
 
     // If this fragment won't fit on the current page, page-break first
     if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
       emitPage(lastBodyChildByteOffset);
     }
 
-    auto fragment = std::make_shared<PageTableFragment>(columnCount, totalWidth, fragTotalHeight, colWidths,
-                                                        std::move(fragmentRows),
-                                                        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY));
+    auto fragment = std::make_shared<PageTableFragment>(
+        columnCount, totalWidth, fragTotalHeight, colWidths, std::move(fragmentRows),
+        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder);
     currentPage->elements.push_back(fragment);
     currentPageNextY += fragTotalHeight;
     fragmentRows.clear();
@@ -2432,7 +2444,7 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       continue;
     }
 
-    const uint16_t rowContrib = static_cast<uint16_t>(lr.height + 1);  // +1 for separator line
+    const uint16_t rowContrib = hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
 
     if (!fragmentRows.empty() && currentPageNextY + fragmentHeight + rowContrib > viewportHeight) {
       emitFragment();

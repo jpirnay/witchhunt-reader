@@ -76,14 +76,17 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
   const int drawX = xPos + xOffset;
   const int drawY = yPos + yOffset;
 
-  // Outer border
-  renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
+  if (hasBorder) {
+    renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
+  }
 
   // Vertical column separators
-  int colX = drawX;
-  for (uint8_t c = 0; c < columnCount - 1; c++) {
-    colX += colWidths[c];
-    renderer.drawLine(colX, drawY, colX, drawY + totalHeight - 1, true);
+  if (hasBorder) {
+    int colX = drawX;
+    for (uint8_t c = 0; c < columnCount - 1; c++) {
+      colX += colWidths[c];
+      renderer.drawLine(colX, drawY, colX, drawY + totalHeight - 1, true);
+    }
   }
 
   // Rows: text content + horizontal separators
@@ -101,8 +104,8 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
       cellX += colWidths[c];
     }
     rowY += row.height;
-    // Draw horizontal separator (skip after last row — outer border covers it)
-    if (r + 1 < rows.size()) {
+    // Draw horizontal separator between rows (skip after last row)
+    if (hasBorder && r + 1 < rows.size()) {
       const int sepLineWidth = row.isHeaderRow ? 2 : 1;
       renderer.drawLine(drawX, rowY, drawX + totalWidth - 1, rowY, sepLineWidth, true);
     }
@@ -115,6 +118,7 @@ bool PageTableFragment::serialize(FsFile& file) {
   serialization::writePod(file, columnCount);
   serialization::writePod(file, totalWidth);
   serialization::writePod(file, totalHeight);
+  serialization::writePod(file, hasBorder);
   for (uint8_t c = 0; c < MAX_TABLE_COLS; c++) {
     serialization::writePod(file, colWidths[c]);
   }
@@ -152,6 +156,9 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
     LOG_ERR("PGE", "TableFragment: invalid columnCount %u", columnCount);
     return nullptr;
   }
+
+  bool hasBorder;
+  serialization::readPod(file, hasBorder);
 
   std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
   for (uint8_t c = 0; c < MAX_TABLE_COLS; c++) {
@@ -202,7 +209,7 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
   }
 
   return std::unique_ptr<PageTableFragment>(
-      new PageTableFragment(columnCount, totalWidth, totalHeight, colWidths, std::move(rows), xPos, yPos));
+      new PageTableFragment(columnCount, totalWidth, totalHeight, colWidths, std::move(rows), xPos, yPos, hasBorder));
 }
 
 void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,

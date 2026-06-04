@@ -94,17 +94,19 @@ class PageTableFragment final : public PageElement {
   uint16_t totalHeight = 0;
   std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
   std::vector<TableRow> rows;
+  bool hasBorder = true;
 
  public:
   PageTableFragment(uint8_t colCount, uint16_t totalWidth, uint16_t totalHeight,
                     std::array<uint16_t, MAX_TABLE_COLS> colWidths, std::vector<TableRow> rows, int16_t xPos,
-                    int16_t yPos)
+                    int16_t yPos, bool hasBorder = true)
       : PageElement(xPos, yPos),
         columnCount(colCount),
         totalWidth(totalWidth),
         totalHeight(totalHeight),
         colWidths(colWidths),
-        rows(std::move(rows)) {}
+        rows(std::move(rows)),
+        hasBorder(hasBorder) {}
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;

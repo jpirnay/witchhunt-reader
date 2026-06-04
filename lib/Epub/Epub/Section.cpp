@@ -15,7 +15,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 42;  // bumped: float-zone layout changes (no indent beside float image)
+constexpr uint8_t SECTION_FILE_VERSION = 43;  // bumped: PageTableFragment gains hasBorder field
 
 namespace header {
 constexpr uint32_t kVersion = 0;
