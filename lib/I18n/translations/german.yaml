@@ -1,7 +1,7 @@
 _language_name: "Deutsch"
 _language_code: "DE"
 _order: "3"
-STR_CROSSPOINT: "CrossPoint"
+STR_CROSSPOINT: "Witch Reader"
 STR_BOOTING: "STARTEN"
 STR_SLEEPING: "STANDBY"
 STR_ENTERING_SLEEP: "Schalte Gerät in Standby..."
