@@ -194,10 +194,6 @@ constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
 #define JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP (MIN_FREE_HEAP_FOR_JPEG + 8 * 1024)
 #endif
 
-#ifndef JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC
-#define JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC (48 * 1024)
-#endif
-
 size_t jpegCacheBytes(int width, int height) {
   return static_cast<size_t>((width + 3) / 4) * static_cast<size_t>(height);
 }
@@ -231,9 +227,11 @@ bool shouldForceBayerDither(const RenderConfig& config) {
   if (!config.useDithering) return false;
   if (config.ditherMode == ImageDitherMode::Bayer) return false;
 
+  // Use getFreeHeap() only — getMaxAllocHeap() walks the TLSF free-block chain
+  // and crashes if the heap is corrupt (possible after failed image decodes under
+  // pressure). The free-heap threshold is conservative enough as a sole guard here.
   const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxAlloc = ESP.getMaxAllocHeap();
-  return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP || maxAlloc < JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC;
+  return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP;
 }
 
 bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions& out) {
@@ -707,8 +705,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   if (shouldForceBayerDither(config)) {
-    LOG_DBG("JPG", "Low-memory mode: forcing Bayer dithering (%u free, %u max alloc)",
-            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    LOG_DBG("JPG", "Low-memory mode: forcing Bayer dithering (%u free)", static_cast<unsigned>(ESP.getFreeHeap()));
     ctx.effectiveDitherMode = ImageDitherMode::Bayer;
   }
 

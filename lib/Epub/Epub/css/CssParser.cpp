@@ -68,10 +68,11 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
+// Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t);
+                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t);
 static_assert(CSS_FIXED_STYLE_BYTES == 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t),
+                                           sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t),
               "CSS_FIXED_STYLE_BYTES must match the compiled style payload layout");
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
@@ -1034,6 +1035,12 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
   style.verticalAlign = static_cast<CssVerticalAlign>(vertAlignVal);
   style.defined.verticalAlign = vertAlignDefined != 0 ? 1 : 0;
+  uint8_t cssFloatVal = 0;
+  if (file.read(&cssFloatVal, 1) != 1) {
+    return false;
+  }
+  style.cssFloat = static_cast<CssFloat>(cssFloatVal);
+  style.defined.cssFloat = (cssFloatVal != static_cast<uint8_t>(CssFloat::None)) ? 1 : 0;
   return true;
 }
 
@@ -1081,6 +1088,7 @@ void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
   file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
   file.write(static_cast<uint8_t>(style.verticalAlign));
   file.write(static_cast<uint8_t>(style.defined.verticalAlign));
+  file.write(static_cast<uint8_t>(style.cssFloat));
 }
 
 void CssParser::touchHotRule(const std::string& selector) const {

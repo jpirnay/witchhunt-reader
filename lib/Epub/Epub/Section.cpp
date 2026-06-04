@@ -16,7 +16,7 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    32;  // bumped: paragraph indent uses pixel textIndent instead of em-space prefix in words[0]
+    35;  // bumped: CSS cache v7 adds cssFloat — rebuild sections with correct float layout
 
 namespace header {
 constexpr uint32_t kVersion = 0;

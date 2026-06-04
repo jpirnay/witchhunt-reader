@@ -43,8 +43,7 @@ struct BlockStyleFloatFields {
 // Mirrors the planned ParsedText::widthForLine helper.
 // pageWidth is the full content column width (excludes screen margins).
 // blockStartY is currentPageNextY at the time layoutAndExtractLines is called.
-int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY,
-                 int pageWidth, const BlockStyleFloatFields& bs) {
+int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY, int pageWidth, const BlockStyleFloatFields& bs) {
   const int lineTop = blockStartY + lineIndex * lineHeight;
   int indent = 0;
   for (int i = 0; i < bs.floatZoneCount; ++i) {
@@ -59,8 +58,7 @@ int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY,
 // Greedy line-break simulation (no Knuth-Plass, sufficient for width tests).
 // wordWidths: pixel width of each word.  gap: fixed inter-word space.
 // Returns a vector of line widths (sum of words on each line).
-std::vector<int> simulateLineBreaks(const std::vector<int>& wordWidths, int gap,
-                                    int16_t blockStartY, int lineHeight,
+std::vector<int> simulateLineBreaks(const std::vector<int>& wordWidths, int gap, int16_t blockStartY, int lineHeight,
                                     int pageWidth, const BlockStyleFloatFields& bs) {
   std::vector<int> lineWidths;
   int lineIndex = 0;
@@ -86,8 +84,10 @@ std::vector<int> simulateLineBreaks(const std::vector<int>& wordWidths, int gap,
 int countIndentedLines(const std::vector<int>& lineWidths, int pageWidth) {
   int count = 0;
   for (int w : lineWidths) {
-    if (w < pageWidth) ++count;
-    else break;
+    if (w < pageWidth)
+      ++count;
+    else
+      break;
   }
   return count;
 }
@@ -106,9 +106,9 @@ TEST(FloatZoneTest, AddOneZone) {
   ASSERT_LT(bs.floatZoneCount, kMaxFloatZones);
   bs.floatZones[bs.floatZoneCount++] = {10, 70, 64};  // top=10, bottom=70, width=64
   EXPECT_EQ(bs.floatZoneCount, 1);
-  EXPECT_EQ(bs.floatZones[0].top,    10);
+  EXPECT_EQ(bs.floatZones[0].top, 10);
   EXPECT_EQ(bs.floatZones[0].bottom, 70);
-  EXPECT_EQ(bs.floatZones[0].width,  64);
+  EXPECT_EQ(bs.floatZones[0].width, 64);
 }
 
 TEST(FloatZoneTest, MaxZonesIsTwo) {
@@ -176,10 +176,8 @@ TEST(WidthForLineTest, SingleZone_LineAboveZoneIsFullWidth) {
   // Line 0 top=0, bottom=22 — entirely above zone top=50 → full width.
   BlockStyleFloatFields bs;
   bs.floatZones[bs.floatZoneCount++] = {50, 110, 64};
-  EXPECT_EQ(widthForLine(0, 22, 0, 400, bs), 400)
-      << "Line entirely above zone must not be narrowed";
-  EXPECT_EQ(widthForLine(2, 22, 0, 400, bs), 400 - 64)
-      << "Line 2 top=44, bottom=66 overlaps zone top=50";
+  EXPECT_EQ(widthForLine(0, 22, 0, 400, bs), 400) << "Line entirely above zone must not be narrowed";
+  EXPECT_EQ(widthForLine(2, 22, 0, 400, bs), 400 - 64) << "Line 2 top=44, bottom=66 overlaps zone top=50";
 }
 
 // ============================================================================
@@ -200,10 +198,9 @@ TEST(WidthForLineTest, TwoZones_OnlyOneActiveOnLaterLine) {
   // Zone A: top=0, bottom=60 (expires after line 2 at 22px/line).
   // Zone B: top=0, bottom=120 (still active on line 3).
   BlockStyleFloatFields bs;
-  bs.floatZones[bs.floatZoneCount++] = {0,  60, 64};
+  bs.floatZones[bs.floatZoneCount++] = {0, 60, 64};
   bs.floatZones[bs.floatZoneCount++] = {0, 120, 44};
-  EXPECT_EQ(widthForLine(3, 22, 0, 400, bs), 400 - 44)
-      << "Line 3 top=66 beyond zone A bottom=60; only zone B active";
+  EXPECT_EQ(widthForLine(3, 22, 0, 400, bs), 400 - 44) << "Line 3 top=66 beyond zone A bottom=60; only zone B active";
 }
 
 // ============================================================================
@@ -244,8 +241,7 @@ TEST(FloatScenario, Case1_ShortFloat_LongParagraph) {
       break;
     }
   }
-  EXPECT_TRUE(hasWiderLine)
-      << "At least one line after float height must pack more than the narrowed width";
+  EXPECT_TRUE(hasWiderLine) << "At least one line after float height must pack more than the narrowed width";
 }
 
 // Case 2: 60x120 left float, short paragraph (fewer lines than image height).
@@ -262,8 +258,8 @@ TEST(FloatScenario, Case2_TallFloat_ShortParagraph) {
   auto lineWidths = simulateLineBreaks(words, gap, 0, lineHeight, pageWidth, bs);
 
   for (size_t i = 0; i < lineWidths.size(); ++i) {
-    EXPECT_LT(lineWidths[i], pageWidth)
-        << "Line " << i << " must be indented (short paragraph entirely within float height)";
+    EXPECT_LT(lineWidths[i], pageWidth) << "Line " << i
+                                        << " must be indented (short paragraph entirely within float height)";
   }
 }
 
@@ -313,7 +309,7 @@ TEST(FloatScenario, Case4_NoFloat_WiderThanWithFloat) {
   bsFloat.floatZones[bsFloat.floatZoneCount++] = {0, 60, 64};
 
   auto noFloatLines = simulateLineBreaks(words, gap, 0, lineHeight, pageWidth, bsNoFloat);
-  auto floatLines   = simulateLineBreaks(words, gap, 0, lineHeight, pageWidth, bsFloat);
+  auto floatLines = simulateLineBreaks(words, gap, 0, lineHeight, pageWidth, bsFloat);
 
   // The no-float layout should produce fewer lines (more words per line).
   EXPECT_LE(noFloatLines.size(), floatLines.size())
@@ -336,8 +332,7 @@ TEST(FloatZoneTest, ZeroHeightImage_NeverNarrows) {
   BlockStyleFloatFields bs;
   bs.floatZones[bs.floatZoneCount++] = {0, 0, 64};
   for (int i = 0; i < 5; ++i) {
-    EXPECT_EQ(widthForLine(i, 22, 0, 400, bs), 400)
-        << "Zero-height float zone must not narrow any line";
+    EXPECT_EQ(widthForLine(i, 22, 0, 400, bs), 400) << "Zero-height float zone must not narrow any line";
   }
 }
 
@@ -348,8 +343,7 @@ TEST(FloatZoneTest, FloatAtPageBottom_DoesNotAffectNextBlock) {
   bs.floatZones[bs.floatZoneCount++] = {0, 60, 64};
   const int16_t blockStartY = 200;
   for (int i = 0; i < 5; ++i) {
-    EXPECT_EQ(widthForLine(i, 22, blockStartY, 400, bs), 400)
-        << "Block starting below float zone must not be narrowed";
+    EXPECT_EQ(widthForLine(i, 22, blockStartY, 400, bs), 400) << "Block starting below float zone must not be narrowed";
   }
 }
 
@@ -360,8 +354,7 @@ TEST(FloatZoneTest, ExactBoundary_LineJustBelowZone) {
   bs.floatZones[bs.floatZoneCount++] = {0, 66, 64};
   EXPECT_EQ(widthForLine(2, 22, 0, 400, bs), 400 - 64)
       << "Line 2 top=44 < 66, bottom=66: borderline overlap, should be narrowed";
-  EXPECT_EQ(widthForLine(3, 22, 0, 400, bs), 400)
-      << "Line 3 top=66 == zone bottom=66: no overlap, must be full width";
+  EXPECT_EQ(widthForLine(3, 22, 0, 400, bs), 400) << "Line 3 top=66 == zone bottom=66: no overlap, must be full width";
 }
 
 // ============================================================================
@@ -378,13 +371,12 @@ TEST(FloatZonePropagation, ZoneNotPropagatedToContinuationBlock) {
 
 TEST(FloatZonePropagation, MaxTwoZones) {
   BlockStyleFloatFields bs;
-  bs.floatZones[bs.floatZoneCount++] = {0,  60, 64};
+  bs.floatZones[bs.floatZoneCount++] = {0, 60, 64};
   bs.floatZones[bs.floatZoneCount++] = {0, 120, 44};
   EXPECT_EQ(bs.floatZoneCount, 2);
   // Adding a third would exceed kMaxFloatZones; callers must guard with:
   //   if (bs.floatZoneCount < kMaxFloatZones) { ... }
-  EXPECT_GE(kMaxFloatZones, bs.floatZoneCount)
-      << "floatZoneCount must never exceed kMaxFloatZones";
+  EXPECT_GE(kMaxFloatZones, bs.floatZoneCount) << "floatZoneCount must never exceed kMaxFloatZones";
 }
 
 // ============================================================================
@@ -404,8 +396,7 @@ enum class CssClear { None, Left, Right, Both };
 // zones / count are modified in-place (expired zones removed).
 // Returns the y to advance currentPageNextY to (max of all relevant bottoms,
 // or currentY if nothing to clear).
-int16_t applyClear(CssClear clear, int16_t currentY,
-                   FloatZone zones[], int8_t& count) {
+int16_t applyClear(CssClear clear, int16_t currentY, FloatZone zones[], int8_t& count) {
   if (clear == CssClear::None || count == 0) return currentY;
   int16_t newY = currentY;
   for (int i = 0; i < count; ++i) {
@@ -436,7 +427,7 @@ TEST(CssClearTest, ClearNone_DoesNothing) {
   FloatZone zones[kMaxFloatZones] = {{0, 60, 64}};
   int8_t count = 1;
   int16_t y = applyClear(CssClear::None, 10, zones, count);
-  EXPECT_EQ(y, 10)  << "clear:none must not change y";
+  EXPECT_EQ(y, 10) << "clear:none must not change y";
   EXPECT_EQ(count, 1) << "clear:none must not remove zones";
 }
 
@@ -476,25 +467,25 @@ struct ImageCssBox {
 // width is clamped to a minimum of 4 (the gap) so a pathological negative
 // margin never produces a zone that widens the available text area.
 FloatZone makeFloatZone(int16_t placedY, const ImageCssBox& b) {
-  const int16_t top    = static_cast<int16_t>(placedY + b.marginTop);
+  const int16_t top = static_cast<int16_t>(placedY + b.marginTop);
   const int16_t bottom = static_cast<int16_t>(top + b.imageHeight + b.marginBottom);
-  const int rawWidth   = b.imageWidth + b.marginLeft + b.marginRight + 4;
-  const int16_t width  = static_cast<int16_t>(std::max(rawWidth, 4));
+  const int rawWidth = b.imageWidth + b.marginLeft + b.marginRight + 4;
+  const int16_t width = static_cast<int16_t>(std::max(rawWidth, 4));
   return {top, bottom, width};
 }
 
 TEST(FloatZoneMargin, NoMargin_BaselineZone) {
   ImageCssBox box = {60, 60, 0, 0, 0, 0};
   auto z = makeFloatZone(0, box);
-  EXPECT_EQ(z.top,    0);
+  EXPECT_EQ(z.top, 0);
   EXPECT_EQ(z.bottom, 60);
-  EXPECT_EQ(z.width,  64);  // 60 + 0 + 0 + 4 gap
+  EXPECT_EQ(z.width, 64);  // 60 + 0 + 0 + 4 gap
 }
 
 TEST(FloatZoneMargin, MarginTopPushesZoneDown) {
   ImageCssBox box = {60, 60, 10, 0, 0, 0};  // marginTop=10
   auto z = makeFloatZone(0, box);
-  EXPECT_EQ(z.top,    10) << "marginTop must shift zone top down";
+  EXPECT_EQ(z.top, 10) << "marginTop must shift zone top down";
   EXPECT_EQ(z.bottom, 70) << "zone bottom = top + imageHeight";
 }
 
@@ -522,9 +513,9 @@ TEST(FloatZoneMargin, AllMarginsInflateZone) {
   // top    = 10 + 4 = 14
   // bottom = 14 + 60 + 8 = 82
   // width  = 60 + 6 + 2 + 4 = 72
-  EXPECT_EQ(z.top,    14);
+  EXPECT_EQ(z.top, 14);
   EXPECT_EQ(z.bottom, 82);
-  EXPECT_EQ(z.width,  72);
+  EXPECT_EQ(z.width, 72);
 }
 
 TEST(FloatZoneMargin, NegativeMarginClamped) {

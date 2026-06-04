@@ -1978,11 +1978,15 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (!renderer.reallocSecondaryBuffer()) {
         LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
         secondaryBufferDegraded_ = true;
-        // Heap walk only on failure — needed for the fragmentation-reboot decision.
         const uint32_t freeAfterIndex = esp_get_free_heap_size();
-        const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-        LOG_ERR("ERS", "Heap after index: free=%lu contig=%lu", freeAfterIndex, contig);
-        if (maybeRestartForFragmentedHeap(freeAfterIndex, contig)) {
+        // Do NOT call heap_caps_get_largest_free_block here: the heap may be
+        // corrupt after image decode failures under pressure, and walking the
+        // TLSF free-block list on a corrupt heap causes an interrupt WDT crash.
+        // Pass 0 for contigHeap — the restart heuristic treats 0 as "contiguous
+        // block definitely too small", which is correct: malloc for ~52 KB just
+        // failed, so the largest free block is by definition < 52 KB.
+        LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+        if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
           return;
         }
       } else {
@@ -2026,9 +2030,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
         secondaryBufferDegraded_ = true;
         const uint32_t freeAfterIndex = esp_get_free_heap_size();
-        const uint32_t contig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-        LOG_ERR("ERS", "Heap after index: free=%lu contig=%lu", freeAfterIndex, contig);
-        if (maybeRestartForFragmentedHeap(freeAfterIndex, contig)) {
+        // Same reasoning as the first indexing path: do not call
+        // heap_caps_get_largest_free_block on a potentially corrupt heap.
+        // Pass 0 — malloc for ~52 KB just failed so contig is by definition < 52 KB.
+        LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+        if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
           return;
         }
       } else {
