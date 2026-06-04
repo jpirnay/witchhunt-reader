@@ -208,11 +208,13 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   };
 
   // Called at every early-return point where a cover was just written to disk.
-  // Invalidates the carousel frame cache so tryFastHomeRender re-renders the tile
-  // with the new BMP rather than compositing the stale placeholder frame.
+  // Marks the carousel frame cache dirty so the next tryFastHomeRender rebuilds
+  // with the new BMP.  Uses markFrameCacheDirty() rather than invalidateFrameCache()
+  // so multiple covers arriving between renders coalesce into one SD re-read
+  // instead of triggering a full cache rebuild (3 BMP file opens) for each book.
   const auto onCoverGenerated = [this]() {
     RenderLock lock;
-    UITheme::getInstance().getMutableTheme().invalidateFrameCache();
+    UITheme::getInstance().getMutableTheme().markFrameCacheDirty();
     coverRendered = false;
     nextRecentCoverIndex++;
     recentsLoading = false;
@@ -313,11 +315,18 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
       if (!book.coverBmpPath.empty()) {
         if (!thumbSizes.empty()) {
-          // Theme uses WxH thumbnails — check which are missing and generate
+          // Theme uses WxH thumbnails — check which are missing or empty and generate.
+          // Size check guards against empty sentinel files written by generateThumbBmp()
+          // when cover extraction fails: Storage.exists() returns true for a 0-byte sentinel
+          // but drawCover() can't render it, so we must treat it as missing and retry.
           bool anyMissing = false;
           for (const auto& sz : thumbSizes) {
             const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, sz.first, sz.second);
-            if (!Storage.exists(path.c_str())) {
+            FsFile thumbFile;
+            const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
+            thumbFile.close();
+            if (!validThumb) {
+              if (Storage.exists(path.c_str())) Storage.remove(path.c_str());  // clear sentinel so regeneration works
               anyMissing = true;
               break;
             }
@@ -356,7 +365,11 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           }
         } else {
           std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
-          if (!Storage.exists(coverPath.c_str())) {
+          FsFile legacyThumb;
+          const bool legacyValid = Storage.openFileForRead("HOME", coverPath, legacyThumb) && legacyThumb.size() > 0;
+          legacyThumb.close();
+          if (!legacyValid) {
+            if (Storage.exists(coverPath.c_str())) Storage.remove(coverPath.c_str());  // clear sentinel
             if (FsHelpers::hasEpubExtension(book.path)) {
               Epub epub(book.path, "/.crosspoint");
               epub.load(true, true);
@@ -596,6 +609,10 @@ void HomeActivity::render(RenderLock&&) {
       }
       return;
     }
+    // Fast path failed (e.g. frame cache malloc failed). Force cover re-render
+    // so the fallback drawRecentBookCover below doesn't skip based on stale state.
+    coverRendered = false;
+    coverBufferStored = false;
   }
 
   renderer.clearScreen();

@@ -198,6 +198,12 @@ class BaseTheme {
   // should free them here so the memory is available to child activities.
   virtual void invalidateFrameCache() {}
 
+  // Mark the frame cache stale without freeing it. tryFastHomeRender will
+  // rebuild on the next render pass. Multiple dirty marks coalesce into one
+  // rebuild — use this instead of invalidateFrameCache() when a cover BMP was
+  // just written so back-to-back cover arrivals don't each trigger an SD re-read.
+  virtual void markFrameCacheDirty() {}
+
   // ---- Shared constants and helpers for battery drawing (used by all themes) ----
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
