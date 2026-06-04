@@ -133,7 +133,11 @@ struct DirectPixelWriter {
     const int sy = phyY - originY;
     if (static_cast<unsigned>(sy) >= static_cast<unsigned>(clipRows)) return;
 
-    const uint16_t byteIndex = static_cast<uint16_t>(sy * displayWidthBytes + (phyX >> 3));
+    // Guard against negative or out-of-range phyX (e.g. from an image placed
+    // at a negative x offset or wider than the panel).
+    if (phyX < 0 || phyX >= static_cast<int>(displayWidthBytes) * 8) return;
+
+    const uint32_t byteIndex = static_cast<uint32_t>(sy) * displayWidthBytes + static_cast<uint32_t>(phyX >> 3);
     const uint8_t bitMask = 1 << (7 - (phyX & 7));
 
     if (state) {

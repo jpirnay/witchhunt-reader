@@ -30,7 +30,7 @@ inline uint8_t applyBayerDither4Level(uint8_t gray, int x, int y) {
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION
 class DiffusedBayerDitherer {
  public:
-  explicit DiffusedBayerDitherer(int width) : width(width) {
+  explicit DiffusedBayerDitherer(int width) : width(width), errorCurRow(nullptr), errorNextRow(nullptr) {
     errorCurRow = new int16_t[width + 2]();
     errorNextRow = new int16_t[width + 2]();
   }
