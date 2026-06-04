@@ -34,7 +34,7 @@ struct BlockStyle {
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
   float fontSizeMultiplier = 1.0f;   // font-size multiplier for headings (h1=1.6, h2=1.4, h3=1.2)
-  int16_t firstLineExtraIndent = 0;  // extra indent on the first line only — used for inline image beside text
+  int16_t firstLineExtraIndent = 0;  // extra indent on the first line only (combined with CSS text-indent)
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }

@@ -251,7 +251,7 @@ void ParsedText::layoutAndExtractLines(
 
   // Compute firstLineIndent once here so all layout helpers use the same value.
   // On a continuation flush the remaining words are mid-paragraph, so no indent.
-  // firstLineExtraIndent reserves horizontal space for an inline image beside the first line.
+  // firstLineExtraIndent adds extra indent on the first line (on top of CSS text-indent).
   const int cssTextIndent =
       !isContinuation_ && blockStyle.textIndentDefined &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)

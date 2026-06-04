@@ -420,13 +420,16 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
-  // Apply pending inline image: indent the first line to leave space for the image.
+  // Apply pending inline image: indent the entire paragraph to leave space for the image.
+  // Using marginLeft (not firstLineExtraIndent) indents all lines in the block, which is
+  // correct for drop-cap / floated initials that are as tall as the paragraph they introduce.
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
   BlockStyle blockStyleWithIndent = blockStyle;
   if (pendingInlineImage_.active) {
-    blockStyleWithIndent.firstLineExtraIndent = static_cast<int16_t>(pendingInlineImage_.width + 4);
+    blockStyleWithIndent.marginLeft =
+        static_cast<int16_t>(blockStyleWithIndent.marginLeft + pendingInlineImage_.width + 4);
     // Place image on the page now at a provisional yPos (will be updated in addLineToPage).
-    // Use left margin as xPos so it sits at the left edge of the text area.
+    // xPos=0: rendered at left edge of content area (orientedMarginLeft is added at render time).
     if (!currentPage) currentPage.reset(new (std::nothrow) Page());
     auto imageBlock = std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, pendingInlineImage_.width,
                                                    pendingInlineImage_.height, pendingInlineImage_.alt, epub->getPath(),
@@ -2041,7 +2044,8 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
 
   // Anchor deferred inline image to this line's baseline.
   // img_y = lineY + ascender - imageHeight  →  image bottom aligns with text baseline.
-  // Only applied on the first line of the block (where the indent was reserved).
+  // Applied on the first line of the block; extra height beyond the ascender pushes
+  // subsequent lines down so text never overlaps the image vertically.
   if (isFirstLineOfBlock && deferredPageImage_) {
     const int ascender = renderer.getFontAscenderSize(fontId);
     const int imgH = deferredPageImage_->getImageBlock().getHeight();
