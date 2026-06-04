@@ -301,6 +301,51 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (currentTableCell) {
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
   } else if (currentTextBlock) {
+    // If a float image is pending and the block is still empty, attach the float zone now
+    // so the first word (and all subsequent words) are laid out beside the image.
+    // This handles <p><img style="float:left"/>text...</p> where the image and text share
+    // the same paragraph: pendingInlineImage_ is set while the block is empty, but no
+    // startNewTextBlock() fires between the image and the first word.
+    if (pendingInlineImage_.active && currentTextBlock->isEmpty()) {
+      LOG_DBG("EHP", "flushPartWordBuffer: attaching pending float image to current empty block");
+      if (!currentPage) currentPage.reset(new (std::nothrow) Page());
+      const int16_t imgH = pendingInlineImage_.height;
+      const int16_t imgW = pendingInlineImage_.width;
+      auto& mbs = currentTextBlock->getBlockStyle();
+      const bool zoneAdded = mbs.floatZoneCount < BlockStyle::kMaxFloatZones;
+      if (zoneAdded) {
+        auto& z = mbs.floatZones[mbs.floatZoneCount++];
+        z.top = static_cast<int16_t>(currentPageNextY);
+        z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
+        z.width = static_cast<int16_t>(imgW + 4);
+      }
+      auto fullImageBlock =
+          std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
+                                       epub->getPath(), pendingInlineImage_.epubEntryPath);
+      const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+      if (remainingOnPage >= imgH) {
+        deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
+        currentPage->elements.push_back(deferredPageImage_);
+        continuationImage_.active = false;
+      } else {
+        const int16_t tileAHeight = remainingOnPage;
+        const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
+        if (zoneAdded) {
+          mbs.floatZones[mbs.floatZoneCount - 1].bottom = static_cast<int16_t>(viewportHeight);
+        }
+        auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
+        deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
+        currentPage->elements.push_back(deferredPageImage_);
+        continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
+        continuationImage_.width = imgW;
+        continuationImage_.renderedHeight = tileBHeight;
+        continuationImage_.active = true;
+      }
+      pendingInlineImage_.active = false;
+      pendingInlineImage_.cachedPath.clear();
+      pendingInlineImage_.epubEntryPath.clear();
+      pendingInlineImage_.alt.clear();
+    }
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
 
     if (currentTextBlock->size() > 96) {
@@ -310,16 +355,32 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
         return false;
       }
       LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
-      const int horizontalInset = currentTextBlock->getBlockStyle().totalHorizontalInset();
+      auto& splitBlockStyle = currentTextBlock->getBlockStyle();
+      const int horizontalInset = splitBlockStyle.totalHorizontalInset();
       const uint16_t effectiveWidth =
           (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
+      const int splitLineHeight =
+          (splitBlockStyle.floatZoneCount > 0)
+              ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * splitBlockStyle.fontSizeMultiplier +
+                                 0.5f)
+              : 0;
+      if (splitBlockStyle.floatZoneCount > 0) {
+        for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
+          const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
+          splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
+          splitBlockStyle.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
+        }
+      }
       currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
           [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
                  const bool suppressHyphenationRetry) {
             return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
           },
-          false);
+          false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
+      // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
+      // intentional: lines on the continuation page should not be narrowed for an
+      // image that lives on the previous page.
     }
   }
   partWordBufferIndex = 0;
@@ -360,8 +421,8 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
       z.width = static_cast<int16_t>(contW + 4);
     }
   } else {
-    // No continuation: clear any stale float zones so lines on the new page
-    // are not indented for an image that no longer exists there.
+    // No continuation image: clear float zones so text on the new page is not
+    // indented for an image that lives on the previous page.
     if (currentTextBlock) {
       currentTextBlock->getBlockStyle().floatZoneCount = 0;
     }
@@ -2198,6 +2259,8 @@ void ChapterHtmlSlimParser::makePages() {
       (blockStyle.floatZoneCount > 0)
           ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f)
           : 0;
+  LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
+          (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
   if (blockStyle.floatZoneCount > 0) {
     auto& mbs = currentTextBlock->getBlockStyle();
     for (int zi = 0; zi < mbs.floatZoneCount; ++zi) {

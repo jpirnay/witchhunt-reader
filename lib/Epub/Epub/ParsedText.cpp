@@ -629,13 +629,14 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
-  } else if (!extraParagraphSpacing &&
+  } else if (!extraParagraphSpacing && blockStyle.floatZoneCount == 0 &&
              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
     // No CSS text-indent defined — apply a font-size-relative pixel indent so paragraph
     // boundaries are visually clear. Using getFontAscenderSize() gives one em in pixels,
     // matching the typographic convention for a paragraph indent. This avoids injecting
     // U+2003 (em-space) as a character, which caused glyph-miss overhead on every page
     // when the active font doesn't contain that codepoint.
+    // Skip when a float zone is active: the image already provides visual separation.
     const int oneEm = static_cast<int>(renderer.getFontAscenderSize(fontId) * blockStyle.fontSizeMultiplier + 0.5f);
     blockStyle.textIndent = oneEm;
     blockStyle.textIndentDefined = true;

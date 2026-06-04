@@ -2066,7 +2066,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       LOG_INF("ERS", "Section %d is truncated; showing mitigation hint", currentSpineIndex);
     }
 
+    LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
     navTarget.resolveInto(*section, currentSpineIndex);
+    LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
     navTarget = NavigationTarget::makePage(section->currentPage);
     forceLoadLargeImages = false;
     pageHasPlaceholders = false;
