@@ -337,7 +337,35 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
-  deferredPageImage_.reset();  // deferred inline image can't span a page boundary
+  deferredPageImage_.reset();  // tile A's deferred yPos update is no longer needed
+
+  if (continuationImage_.active) {
+    // Capture dimensions before moving the imageBlock out.
+    const int16_t contH = continuationImage_.renderedHeight;
+    const int16_t contW = continuationImage_.width;
+
+    // Place tile B (bottom crop of split image) at the top of the new page.
+    auto pageImg = std::make_shared<PageImage>(std::move(continuationImage_.imageBlock), 0, 0);
+    currentPage->elements.push_back(pageImg);
+    continuationImage_.active = false;
+
+    // Set a float zone on the continuing text block so lines on the new page
+    // are indented for the duration of tile B's height.
+    if (currentTextBlock) {
+      auto& bs = currentTextBlock->getBlockStyle();
+      bs.floatZoneCount = 0;  // clear stale zones from old page first
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = 0;
+      z.bottom = contH;
+      z.width = static_cast<int16_t>(contW + 4);
+    }
+  } else {
+    // No continuation: clear any stale float zones so lines on the new page
+    // are not indented for an image that no longer exists there.
+    if (currentTextBlock) {
+      currentTextBlock->getBlockStyle().floatZoneCount = 0;
+    }
+  }
 }
 
 void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
@@ -436,22 +464,54 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
   BlockStyle blockStyleWithIndent = *effectiveBase;
   if (pendingInlineImage_.active) {
-    // Attach a float zone so only the lines that geometrically overlap the image
-    // are narrowed — lines below the image resume full width automatically.
-    if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
-      auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
-      z.top = static_cast<int16_t>(currentPageNextY);  // provisional; corrected in addLineToPage
-      z.bottom = static_cast<int16_t>(currentPageNextY + pendingInlineImage_.height);
-      z.width = static_cast<int16_t>(pendingInlineImage_.width + 4);
-    }
-    // Place image on the page now at a provisional yPos (will be updated in addLineToPage).
-    // xPos=0: rendered at left edge of content area (orientedMarginLeft is added at render time).
     if (!currentPage) currentPage.reset(new (std::nothrow) Page());
-    auto imageBlock = std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, pendingInlineImage_.width,
-                                                   pendingInlineImage_.height, pendingInlineImage_.alt, epub->getPath(),
-                                                   pendingInlineImage_.epubEntryPath);
-    deferredPageImage_ = std::make_shared<PageImage>(imageBlock, 0, currentPageNextY);
-    currentPage->elements.push_back(deferredPageImage_);
+
+    // Determine how much vertical space remains on the current page (provisional — the
+    // actual first-line y is not known yet; addLineToPage corrects the image yPos later).
+    const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+    const int16_t imgH = pendingInlineImage_.height;
+    const int16_t imgW = pendingInlineImage_.width;
+
+    // Build the full ImageBlock (shared source for both tiles if a split is needed).
+    auto fullImageBlock =
+        std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
+                                     epub->getPath(), pendingInlineImage_.epubEntryPath);
+
+    if (remainingOnPage >= imgH) {
+      // Image fits entirely on this page — existing single-tile path.
+      if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
+        auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
+        z.top = static_cast<int16_t>(currentPageNextY);  // provisional; corrected in addLineToPage
+        z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
+        z.width = static_cast<int16_t>(imgW + 4);
+      }
+      deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
+      currentPage->elements.push_back(deferredPageImage_);
+      continuationImage_.active = false;
+    } else {
+      // Image crosses the page boundary — split into two cropped tiles.
+      // Tile A: top remainingOnPage rows, placed on the current page.
+      // Tile B: remaining rows, placed on the next page by emitPage().
+      const int16_t tileAHeight = remainingOnPage;
+      const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
+
+      auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
+      if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
+        auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
+        z.top = static_cast<int16_t>(currentPageNextY);   // provisional; corrected in addLineToPage
+        z.bottom = static_cast<int16_t>(viewportHeight);  // fills rest of page
+        z.width = static_cast<int16_t>(imgW + 4);
+      }
+      deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
+      currentPage->elements.push_back(deferredPageImage_);
+
+      // Prepare tile B for placement by emitPage() on the new page.
+      continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
+      continuationImage_.width = imgW;
+      continuationImage_.renderedHeight = tileBHeight;
+      continuationImage_.active = true;
+    }
+
     pendingInlineImage_.active = false;
     pendingInlineImage_.cachedPath.clear();
     pendingInlineImage_.epubEntryPath.clear();

@@ -1960,19 +1960,24 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
       renderer.dropFontMetadata();
-      LOG_DBG("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+      LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
       renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
-      LOG_DBG("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+      LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+      const uint32_t createStart = millis();
       const bool createOk = section->createSectionFile(
           getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
           getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
           getEffectiveBionicReading(), imageRendering, nullptr);
+      LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
+              esp_get_free_heap_size());
       // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
       // warmAllImageCaches writes pixels to the framebuffer as a side effect; clearScreen()
       // follows after reallocSecondaryBuffer so the framebuffer state doesn't matter here.
       if (createOk) {
         const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+        const uint32_t warmStart = millis();
         section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
+        LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
         renderer.clearScreen();
       }
       if (!renderer.reallocSecondaryBuffer()) {

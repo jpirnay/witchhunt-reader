@@ -66,6 +66,16 @@ class ChapterHtmlSlimParser final : public Print {
   };
   PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
   std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
+
+  // When an inline float image crosses a page boundary, the bottom crop is carried here
+  // so emitPage() can place it at the top of the new page.
+  struct ContinuationImage {
+    std::shared_ptr<ImageBlock> imageBlock;  // cropped tile (srcYOffset set)
+    int16_t width = 0;
+    int16_t renderedHeight = 0;  // height of this tile on the new page
+    bool active = false;
+  };
+  ContinuationImage continuationImage_;
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;

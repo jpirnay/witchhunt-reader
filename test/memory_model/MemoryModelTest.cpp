@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "lib/Epub/Epub/converters/ImageDimensionsGuard.h"
+
 // ============================================================================
 // Mock SdCardFont
 //
@@ -119,6 +121,18 @@ struct MockReaderController {
     alloc.freeDraw();
   }
 };
+
+// ============================================================================
+// Image validation regression coverage
+// ============================================================================
+
+TEST(MemoryModelTest, ImageDimensionGuardRejectsOverflowingProduct) {
+  EXPECT_TRUE(imageDimensionsWouldOverflow(65535, 65535, 3145728));
+}
+
+TEST(MemoryModelTest, ImageDimensionGuardAcceptsReasonableSource) {
+  EXPECT_FALSE(imageDimensionsWouldOverflow(2048, 1536, 3145728));
+}
 
 // ============================================================================
 // Tests

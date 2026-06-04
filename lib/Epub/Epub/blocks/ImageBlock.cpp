@@ -64,8 +64,10 @@ std::string getGrayscaleCachePath(const std::string& imagePath) {
   return imagePath + ".bayer.pxc";
 }
 
+// srcYOffset: first source row to render (0 = top of image).
+// srcHeight:  number of rows to render (0 = full image from srcYOffset).
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
-                     int expectedHeight) {
+                     int expectedHeight, int srcYOffset = 0, int srcHeight = 0) {
   FsFile cacheFile;
   if (!Storage.openFileForRead("IMG", cachePath, cacheFile)) {
     return false;
@@ -77,24 +79,41 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     return false;
   }
 
-  // Verify dimensions are close (allow 1 pixel tolerance for rounding differences)
-  int widthDiff = abs(cachedWidth - expectedWidth);
-  int heightDiff = abs(cachedHeight - expectedHeight);
-  if (widthDiff > 1 || heightDiff > 1) {
-    LOG_ERR("IMG", "Cache dimension mismatch: %dx%d vs %dx%d", cachedWidth, cachedHeight, expectedWidth,
-            expectedHeight);
+  // Verify width is close (allow 1 pixel tolerance for rounding differences).
+  // Height tolerance is widened to allow cropped renders (srcHeight < cachedHeight).
+  if (abs(cachedWidth - expectedWidth) > 1) {
+    LOG_ERR("IMG", "Cache width mismatch: %d vs %d", cachedWidth, expectedWidth);
     cacheFile.close();
     return false;
   }
 
-  // Use cached dimensions for rendering (they're the actual decoded size)
-  expectedWidth = cachedWidth;
-  expectedHeight = cachedHeight;
+  // Resolve crop window against actual cached dimensions
+  if (srcYOffset < 0) srcYOffset = 0;
+  if (srcYOffset >= static_cast<int>(cachedHeight)) {
+    cacheFile.close();
+    return false;
+  }
+  // Cap rows by both the cache height and the caller's expected height to prevent
+  // overrunning the framebuffer when a 1-pixel cache rounding difference occurs.
+  const int maxRows = std::min(static_cast<int>(cachedHeight) - srcYOffset, expectedHeight - srcYOffset);
+  const int rowsToRender = (srcHeight > 0) ? std::min(srcHeight, maxRows) : maxRows;
 
-  LOG_DBG("IMG", "Loading from cache: %s (%dx%d)", cachePath.c_str(), cachedWidth, cachedHeight);
+  LOG_DBG("IMG", "Loading from cache: %s (%dx%d) srcY=%d rows=%d", cachePath.c_str(), cachedWidth, cachedHeight,
+          srcYOffset, rowsToRender);
 
-  // Read and render row by row to minimize memory usage
   const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
+
+  // Seek directly to the first row of interest — no need to iterate skipped rows.
+  // Cache layout: 4-byte header (width + height) followed by rows in order.
+  if (srcYOffset > 0) {
+    const uint32_t seekPos = 4u + static_cast<uint32_t>(srcYOffset) * static_cast<uint32_t>(bytesPerRow);
+    if (!cacheFile.seekSet(seekPos)) {
+      LOG_ERR("IMG", "Cache seek failed to row %d", srcYOffset);
+      cacheFile.close();
+      return false;
+    }
+  }
+
   uint8_t* rowBuffer = (uint8_t*)malloc(bytesPerRow);
   if (!rowBuffer) {
     LOG_ERR("IMG", "Failed to allocate row buffer");
@@ -105,9 +124,9 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   DirectPixelWriter pw;
   pw.init(renderer);
 
-  for (int row = 0; row < cachedHeight; row++) {
+  for (int row = 0; row < rowsToRender; row++) {
     if (cacheFile.read(rowBuffer, bytesPerRow) != bytesPerRow) {
-      LOG_ERR("IMG", "Cache read error at row %d", row);
+      LOG_ERR("IMG", "Cache read error at row %d", srcYOffset + row);
       free(rowBuffer);
       cacheFile.close();
       return false;
@@ -152,7 +171,15 @@ bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) con
 }
 
 void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, const int y) const {
-  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height);
+  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
+}
+
+std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const int16_t srcHeight) const {
+  auto crop =
+      std::unique_ptr<ImageBlock>(new ImageBlock(imagePath, width, height, altText, epubFilePath_, epubEntryPath_));
+  crop->srcYOffset_ = srcYOffset;
+  crop->srcHeight_ = srcHeight;
+  return crop;
 }
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
@@ -179,16 +206,17 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
                         const bool monochromeOutput) {
-  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) mono=%d", x, y, imagePath.c_str(), width, height,
-          monochromeOutput ? 1 : 0);
+  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
+  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) srcY=%d rendH=%d mono=%d", x, y, imagePath.c_str(), width,
+          height, srcYOffset_, renderedHeight, monochromeOutput ? 1 : 0);
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
 
-  // Bounds check render position using logical screen dimensions
-  if (x < 0 || y < 0 || x + width > screenWidth || y + height > screenHeight) {
-    LOG_ERR("IMG", "Render bounds rejected: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, height, screenWidth,
-            screenHeight);
+  // Bounds check against the rendered (cropped) height, not the full image height.
+  if (x < 0 || y < 0 || x + width > screenWidth || y + renderedHeight > screenHeight) {
+    LOG_ERR("IMG", "Render bounds rejected: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, renderedHeight,
+            screenWidth, screenHeight);
     return;
   }
 
@@ -196,7 +224,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
 
   // Try to render from pixel cache first (always, regardless of forceLoad)
-  if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+  if (renderFromCache(renderer, cachePath, x, y, width, renderedHeight, srcYOffset_, srcHeight_)) {
     return;
   }
 
@@ -262,6 +290,8 @@ bool ImageBlock::serialize(FsFile& file) {
   serialization::writeString(file, altText);
   serialization::writeString(file, epubFilePath_);
   serialization::writeString(file, epubEntryPath_);
+  serialization::writePod(file, srcYOffset_);
+  serialization::writePod(file, srcHeight_);
   return true;
 }
 
@@ -275,5 +305,11 @@ std::unique_ptr<ImageBlock> ImageBlock::deserialize(FsFile& file) {
   serialization::readString(file, alt);
   serialization::readString(file, epubFile);
   serialization::readString(file, epubEntry);
-  return std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt, epubFile, epubEntry));
+  int16_t srcYOffset = 0, srcHeight = 0;
+  serialization::readPod(file, srcYOffset);
+  serialization::readPod(file, srcHeight);
+  auto block = std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt, epubFile, epubEntry));
+  block->srcYOffset_ = srcYOffset;
+  block->srcHeight_ = srcHeight;
+  return block;
 }

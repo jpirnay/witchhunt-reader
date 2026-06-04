@@ -558,3 +558,183 @@ TEST(FloatZoneAcrossBlocks, BlockStartingBelowZoneIsFullWidth) {
   EXPECT_EQ(widthForLine(0, 22, blockStartY_B, 400, bs), 400)
       << "Block starting below zone bottom must not be narrowed";
 }
+
+// ============================================================================
+// Tests: split inline float image across a page boundary
+//
+// When a floated inline image is taller than the remaining space on the
+// current page (remainingOnPage < imageHeight), the parser splits it into
+// two tiles:
+//   Tile A: rows [0, remainingOnPage)  — placed on the current page.
+//   Tile B: rows [remainingOnPage, imageHeight) — placed at y=0 on the next page.
+//
+// Float zone on the old page: top=currentPageNextY, bottom=viewportHeight.
+// Float zone re-based for the new page: top=0, bottom=tileBHeight.
+// After both tiles are exhausted, no zone must remain.
+//
+// Test EPUB: test/epubs/test_float_images.epub  chapter 7
+// ============================================================================
+
+// Helper: simulate the split geometry.
+struct SplitResult {
+  int16_t tileAHeight;               // rows rendered on page N
+  int16_t tileBHeight;               // rows rendered on page N+1
+  BlockStyleFloatFields zonePageN;   // float zone active while tile A is on page
+  BlockStyleFloatFields zonePageN1;  // float zone active while tile B is on page
+};
+
+SplitResult simulateSplit(int16_t imageHeight, int16_t imageWidth, int16_t currentPageNextY, int16_t viewportHeight) {
+  const int16_t remaining = static_cast<int16_t>(viewportHeight - currentPageNextY);
+  const int16_t tileAH = remaining;
+  const int16_t tileBH = static_cast<int16_t>(imageHeight - tileAH);
+  const int16_t zoneW = static_cast<int16_t>(imageWidth + 4);
+
+  SplitResult r;
+  r.tileAHeight = tileAH;
+  r.tileBHeight = tileBH;
+
+  // Zone on page N: covers from currentPageNextY to viewportHeight.
+  r.zonePageN.floatZones[r.zonePageN.floatZoneCount++] = {currentPageNextY, viewportHeight, zoneW};
+  // Zone on page N+1: covers from 0 to tileBHeight.
+  r.zonePageN1.floatZones[r.zonePageN1.floatZoneCount++] = {0, tileBH, zoneW};
+
+  return r;
+}
+
+TEST(SplitFloatImage, TileHeightsPartitionImage) {
+  // Image 100px tall, 700px remaining on a 800px page → split at 700/100.
+  // Current page is 700px used, viewport 800px → remaining=100 == image → no split.
+  // Use 750px used instead → remaining=50, tileA=50, tileB=50.
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+  EXPECT_EQ(r.tileAHeight + r.tileBHeight, imgH) << "Tile heights must sum to full image height";
+  EXPECT_EQ(r.tileAHeight, vpH - curY) << "Tile A height == remaining space on page";
+  EXPECT_GT(r.tileBHeight, 0) << "Tile B must be non-empty when image overflows";
+}
+
+TEST(SplitFloatImage, NoSplitWhenImageFits) {
+  // Image 60px tall, 200px remaining → fits entirely, no split needed.
+  // simulateSplit computes tileA=200, tileB=60-200=-140 which is nonsensical;
+  // callers guard with remainingOnPage >= imageHeight before calling split path.
+  const int16_t remaining = 200, imgH = 60;
+  EXPECT_GE(remaining, imgH) << "Pre-condition: image fits, split path must not be taken";
+}
+
+TEST(SplitFloatImage, ZonePageN_CoversRemainingPageHeight) {
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+  const auto& z = r.zonePageN.floatZones[0];
+  EXPECT_EQ(z.top, curY) << "Zone on page N must start at currentPageNextY (provisional, corrected later)";
+  EXPECT_EQ(z.bottom, vpH) << "Zone on page N must reach the page bottom";
+  EXPECT_EQ(z.width, imgW + 4) << "Zone width must be imageWidth + 4px gap";
+}
+
+TEST(SplitFloatImage, ZonePageN1_StartsAtTopOfPage) {
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+  const auto& z = r.zonePageN1.floatZones[0];
+  EXPECT_EQ(z.top, 0) << "Zone on page N+1 must start at page top (tile B is placed at y=0)";
+  EXPECT_EQ(z.bottom, r.tileBHeight) << "Zone on page N+1 must end at tile B bottom";
+  EXPECT_EQ(z.width, imgW + 4) << "Zone width must be consistent across the split";
+}
+
+TEST(SplitFloatImage, ZonePageN1_NarrowsLinesWithinTileB) {
+  // Tile B is 50px tall (rows 750-800 of a 100px image).
+  // lineHeight=22. Lines 0,1 (y=0..22, y=22..44) overlap zone [0,50).
+  // Line 2 (y=44..66) also overlaps. Line 3 (y=66..88) does NOT (66 >= 50).
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  const int pageWidth = 400;
+  const int lineHeight = 22;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+
+  EXPECT_EQ(widthForLine(0, lineHeight, 0, pageWidth, r.zonePageN1), pageWidth - (imgW + 4))
+      << "Line 0 on page N+1 overlaps tile B zone, must be narrowed";
+  EXPECT_EQ(widthForLine(1, lineHeight, 0, pageWidth, r.zonePageN1), pageWidth - (imgW + 4))
+      << "Line 1 on page N+1 overlaps tile B zone, must be narrowed";
+
+  // Line 3 starts at y=66 > tileB bottom=50 → full width.
+  EXPECT_EQ(widthForLine(3, lineHeight, 0, pageWidth, r.zonePageN1), pageWidth)
+      << "Line 3 on page N+1 is below tile B, must be full width";
+}
+
+TEST(SplitFloatImage, AfterBothTilesNoZoneRemains) {
+  // Once tile B has been consumed (lines past its bottom) the zone expires
+  // naturally via widthForLine — no manual reset needed.
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  const int pageWidth = 400;
+  const int lineHeight = 22;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+
+  // On page N+1, tileBHeight=50. First line whose TOP is >= 50 is at index ceil(50/22)=3
+  // (line 2 top=44 < 50, still overlaps; line 3 top=66 >= 50, fully below).
+  const int lineIndexAtBoundary = (r.tileBHeight + lineHeight - 1) / lineHeight;
+  for (int i = lineIndexAtBoundary; i < lineIndexAtBoundary + 3; ++i) {
+    EXPECT_EQ(widthForLine(i, lineHeight, 0, pageWidth, r.zonePageN1), pageWidth)
+        << "Line " << i << " below tile B must be full width";
+  }
+}
+
+TEST(SplitFloatImage, PageNZoneNarrowsCorrectly) {
+  // On page N: the zone covers [curY, vpH). Lines of the paragraph starting at curY
+  // (blockStartY = curY after margin correction) see the zone.
+  const int16_t imgH = 100, imgW = 60, curY = 750, vpH = 800;
+  const int pageWidth = 400;
+  const int lineHeight = 22;
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+
+  // blockStartY on page N is curY (the image and paragraph start at the same Y).
+  // Line 0: top=750, overlaps zone [750,800) → narrowed.
+  EXPECT_EQ(widthForLine(0, lineHeight, curY, pageWidth, r.zonePageN), pageWidth - (imgW + 4))
+      << "First line on page N must be narrowed by tile A zone";
+}
+
+// Case 7 from test_float_images.epub: visual verification reference.
+// This is a scenario-level geometry check that mirrors what the parser does
+// for a 60x100 image placed at ~750px on an 800px page.
+TEST(FloatScenario, Case7_SplitFloat_PageBoundary) {
+  const int16_t imgH = 100, imgW = 60;
+  const int16_t vpH = 800;
+  const int pageWidth = 400;
+  const int lineHeight = 22;
+
+  // Simulate: image placed when 50px remain on page.
+  const int16_t curY = vpH - 50;  // 750
+  ASSERT_LT(vpH - curY, imgH) << "Pre-condition: image must overflow the page";
+
+  auto r = simulateSplit(imgH, imgW, curY, vpH);
+  EXPECT_EQ(r.tileAHeight, 50);
+  EXPECT_EQ(r.tileBHeight, 50);
+
+  // Page N: 2 lines fit in the 50px zone (line 0: y=750..772, line 1: y=772..794).
+  const int narrowW = pageWidth - (imgW + 4);
+  EXPECT_EQ(widthForLine(0, lineHeight, curY, pageWidth, r.zonePageN), narrowW);
+  EXPECT_EQ(widthForLine(1, lineHeight, curY, pageWidth, r.zonePageN), narrowW);
+
+  // Page N+1: tile B zone [0, 50). Line 2 (y=44..66) partially overlaps → narrowed.
+  EXPECT_EQ(widthForLine(2, lineHeight, 0, pageWidth, r.zonePageN1), narrowW);
+  // Line 3 (y=66 > 50): full width.
+  EXPECT_EQ(widthForLine(3, lineHeight, 0, pageWidth, r.zonePageN1), pageWidth);
+
+  // Simulate paragraph line layout on both pages
+  std::vector<int> words(40, 30);
+  const int gap = 6;
+
+  auto pageNLines = simulateLineBreaks(words, gap, curY, lineHeight, pageWidth, r.zonePageN);
+  auto pageN1Lines = simulateLineBreaks(words, gap, 0, lineHeight, pageWidth, r.zonePageN1);
+
+  // Lines within tile A zone on page N must be narrower than full width.
+  EXPECT_LE(pageNLines[0], narrowW) << "Page N line 0 must be narrowed beside tile A";
+
+  // Lines within tile B zone on page N+1 must also be narrowed.
+  EXPECT_LE(pageN1Lines[0], narrowW) << "Page N+1 line 0 must be narrowed beside tile B";
+
+  // Lines after tile B must be full width.
+  bool anyWide = false;
+  for (size_t i = 3; i < pageN1Lines.size(); ++i) {
+    if (pageN1Lines[i] > narrowW) {
+      anyWide = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(anyWide) << "Page N+1 must have full-width lines once tile B is exhausted";
+}

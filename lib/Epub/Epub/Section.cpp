@@ -15,7 +15,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 40;  // bumped: image top aligned with line top (no ascender offset)
+constexpr uint8_t SECTION_FILE_VERSION =
+    41;  // bumped: ImageBlock serializes srcYOffset/srcHeight for split float images
 
 namespace header {
 constexpr uint32_t kVersion = 0;
@@ -403,6 +404,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   const uint32_t phaseTotalStart = millis();
   const auto localPath = epub->getSpineItem(spineIndex).href;
+  LOG_INF("SCT", "createSectionFile spine=%d start: %s (free=%lu)", spineIndex, localPath.c_str(),
+          esp_get_free_heap_size());
 
   // Create cache directory if it doesn't exist
   {
@@ -503,6 +506,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     return false;
   }
   const uint32_t setupMs = millis() - phaseSetupStart;
+  LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, setupMs,
+          static_cast<uint32_t>(inflatedSize), esp_get_free_heap_size());
 
   // Stream EPUB item content directly into the parser — no temp file, no second SD pass.
   const uint32_t phaseParseStart = millis();
@@ -516,6 +521,9 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   bool success = parseComplete;
   const bool hasParsedPages = pageCount > 0;
   const uint32_t parseMs = millis() - phaseParseStart;
+  LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
+          spineIndex, parseMs, pageCount, streamOk ? 1 : 0, finalizeOk ? 1 : 0, parserStreamOk ? 1 : 0,
+          esp_get_free_heap_size());
   // streamMs is no longer a separate phase (SD-write of temp file is gone); keep the
   // log breakdown stable by reporting it as 0.
   constexpr uint32_t streamMs = 0;
@@ -662,7 +670,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   this->lut = std::move(lut);
   const uint32_t finalizeMs = millis() - phaseFinalizeStart;
   const uint32_t totalMs = millis() - phaseTotalStart;
-  LOG_DBG("SCT", "createSectionFile spine=%d total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
+  LOG_INF("SCT",
+          "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
           spineIndex, totalMs, streamMs, setupMs, parseMs, finalizeMs, pageCount, fileSize);
   return true;
 }

@@ -182,7 +182,7 @@ class Page {
         int16_t x = img.xPos;
         int16_t y = img.yPos;
         int16_t right = x + img.getImageBlock().getWidth();
-        int16_t bottom = y + img.getImageBlock().getHeight();
+        int16_t bottom = y + img.getImageBlock().getRenderedHeight();
         minX = std::min(minX, x);
         minY = std::min(minY, y);
         maxX = std::max(maxX, right);
