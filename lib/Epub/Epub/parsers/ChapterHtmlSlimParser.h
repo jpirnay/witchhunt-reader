@@ -101,6 +101,8 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasStrikethrough = false, strikethrough = false;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
+    bool hasMarginLeft = false;
+    int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
   };
   std::vector<StyleStackEntry> inlineStyleStack;
   CssStyle currentCssStyle;
@@ -110,6 +112,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveStrikethrough = false;
   bool effectiveSup = false;
   bool effectiveSub = false;
+  int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Buffered table model — populated while inside <table>, emitted on </table>
   struct BufferedTableCell {
     std::unique_ptr<ParsedText> text;
@@ -221,6 +224,9 @@ class ChapterHtmlSlimParser final : public Print {
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
   void emitPage(uint32_t xhtmlByteOffset);
   void recordPageBreakLabel(const std::string& label);
+  // Attach the pending inline float image to `bs` and place it on the current page.
+  // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
+  void attachPendingFloatImage(BlockStyle& bs);
   // XML callbacks
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void XMLCALL characterData(void* userData, const XML_Char* s, int len);

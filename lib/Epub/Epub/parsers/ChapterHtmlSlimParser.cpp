@@ -207,6 +207,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
                                               static_cast<uint8_t>(CssTextDecoration::LineThrough)) != 0;
   effectiveSup = false;
   effectiveSub = false;
+  effectiveInlineMarginLeft = 0;
 
   // Apply inline style stack in order
   for (const auto& entry : inlineStyleStack) {
@@ -229,6 +230,9 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     if (entry.hasSub) {
       effectiveSub = entry.sub;
       if (entry.sub) effectiveSup = false;
+    }
+    if (entry.hasMarginLeft) {
+      effectiveInlineMarginLeft = entry.marginLeftPx;
     }
   }
 }
@@ -301,50 +305,12 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (currentTableCell) {
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
   } else if (currentTextBlock) {
-    // If a float image is pending and the block is still empty, attach the float zone now
-    // so the first word (and all subsequent words) are laid out beside the image.
-    // This handles <p><img style="float:left"/>text...</p> where the image and text share
-    // the same paragraph: pendingInlineImage_ is set while the block is empty, but no
-    // startNewTextBlock() fires between the image and the first word.
+    // If a float image is pending and the block is still empty, attach it now so the
+    // first word (and all subsequent words) are laid out beside the image.
+    // This handles <p><img style="float:left"/>text...</p>: pendingInlineImage_ is set
+    // while the block is empty, but no startNewTextBlock() fires before the first word.
     if (pendingInlineImage_.active && currentTextBlock->isEmpty()) {
-      LOG_DBG("EHP", "flushPartWordBuffer: attaching pending float image to current empty block");
-      if (!currentPage) currentPage.reset(new (std::nothrow) Page());
-      const int16_t imgH = pendingInlineImage_.height;
-      const int16_t imgW = pendingInlineImage_.width;
-      auto& mbs = currentTextBlock->getBlockStyle();
-      const bool zoneAdded = mbs.floatZoneCount < BlockStyle::kMaxFloatZones;
-      if (zoneAdded) {
-        auto& z = mbs.floatZones[mbs.floatZoneCount++];
-        z.top = static_cast<int16_t>(currentPageNextY);
-        z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
-        z.width = static_cast<int16_t>(imgW + 4);
-      }
-      auto fullImageBlock =
-          std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
-                                       epub->getPath(), pendingInlineImage_.epubEntryPath);
-      const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
-      if (remainingOnPage >= imgH) {
-        deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
-        currentPage->elements.push_back(deferredPageImage_);
-        continuationImage_.active = false;
-      } else {
-        const int16_t tileAHeight = remainingOnPage;
-        const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
-        if (zoneAdded) {
-          mbs.floatZones[mbs.floatZoneCount - 1].bottom = static_cast<int16_t>(viewportHeight);
-        }
-        auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
-        deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
-        currentPage->elements.push_back(deferredPageImage_);
-        continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
-        continuationImage_.width = imgW;
-        continuationImage_.renderedHeight = tileBHeight;
-        continuationImage_.active = true;
-      }
-      pendingInlineImage_.active = false;
-      pendingInlineImage_.cachedPath.clear();
-      pendingInlineImage_.epubEntryPath.clear();
-      pendingInlineImage_.alt.clear();
+      attachPendingFloatImage(currentTextBlock->getBlockStyle());
     }
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
 
@@ -456,6 +422,52 @@ void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<st
   }
 }
 
+void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
+  if (!pendingInlineImage_.active) return;
+  if (!currentPage) currentPage.reset(new (std::nothrow) Page());
+
+  const int16_t imgH = pendingInlineImage_.height;
+  const int16_t imgW = pendingInlineImage_.width;
+  const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+
+  auto fullImageBlock =
+      std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt, epub->getPath(),
+                                   pendingInlineImage_.epubEntryPath);
+
+  if (remainingOnPage >= imgH) {
+    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = static_cast<int16_t>(currentPageNextY);
+      z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
+      z.width = static_cast<int16_t>(imgW + 4);
+    }
+    deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
+    currentPage->elements.push_back(deferredPageImage_);
+    continuationImage_.active = false;
+  } else {
+    const int16_t tileAHeight = remainingOnPage;
+    const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
+    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = static_cast<int16_t>(currentPageNextY);
+      z.bottom = static_cast<int16_t>(viewportHeight);
+      z.width = static_cast<int16_t>(imgW + 4);
+    }
+    auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
+    deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
+    currentPage->elements.push_back(deferredPageImage_);
+    continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
+    continuationImage_.width = imgW;
+    continuationImage_.renderedHeight = tileBHeight;
+    continuationImage_.active = true;
+  }
+
+  pendingInlineImage_.active = false;
+  pendingInlineImage_.cachedPath.clear();
+  pendingInlineImage_.epubEntryPath.clear();
+  pendingInlineImage_.alt.clear();
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
@@ -519,65 +531,10 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
-  // Apply pending inline image: indent the entire paragraph to leave space for the image.
-  // Using marginLeft (not firstLineExtraIndent) indents all lines in the block, which is
-  // correct for drop-cap / floated initials that are as tall as the paragraph they introduce.
+  // Apply pending inline image: attach float zone and place image on current page.
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
   BlockStyle blockStyleWithIndent = *effectiveBase;
-  if (pendingInlineImage_.active) {
-    if (!currentPage) currentPage.reset(new (std::nothrow) Page());
-
-    // Determine how much vertical space remains on the current page (provisional — the
-    // actual first-line y is not known yet; addLineToPage corrects the image yPos later).
-    const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
-    const int16_t imgH = pendingInlineImage_.height;
-    const int16_t imgW = pendingInlineImage_.width;
-
-    // Build the full ImageBlock (shared source for both tiles if a split is needed).
-    auto fullImageBlock =
-        std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
-                                     epub->getPath(), pendingInlineImage_.epubEntryPath);
-
-    if (remainingOnPage >= imgH) {
-      // Image fits entirely on this page — existing single-tile path.
-      if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
-        auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
-        z.top = static_cast<int16_t>(currentPageNextY);  // provisional; corrected in addLineToPage
-        z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
-        z.width = static_cast<int16_t>(imgW + 4);
-      }
-      deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
-      currentPage->elements.push_back(deferredPageImage_);
-      continuationImage_.active = false;
-    } else {
-      // Image crosses the page boundary — split into two cropped tiles.
-      // Tile A: top remainingOnPage rows, placed on the current page.
-      // Tile B: remaining rows, placed on the next page by emitPage().
-      const int16_t tileAHeight = remainingOnPage;
-      const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
-
-      auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
-      if (blockStyleWithIndent.floatZoneCount < BlockStyle::kMaxFloatZones) {
-        auto& z = blockStyleWithIndent.floatZones[blockStyleWithIndent.floatZoneCount++];
-        z.top = static_cast<int16_t>(currentPageNextY);   // provisional; corrected in addLineToPage
-        z.bottom = static_cast<int16_t>(viewportHeight);  // fills rest of page
-        z.width = static_cast<int16_t>(imgW + 4);
-      }
-      deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
-      currentPage->elements.push_back(deferredPageImage_);
-
-      // Prepare tile B for placement by emitPage() on the new page.
-      continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
-      continuationImage_.width = imgW;
-      continuationImage_.renderedHeight = tileBHeight;
-      continuationImage_.active = true;
-    }
-
-    pendingInlineImage_.active = false;
-    pendingInlineImage_.cachedPath.clear();
-    pendingInlineImage_.epubEntryPath.clear();
-    pendingInlineImage_.alt.clear();
-  }
+  attachPendingFloatImage(blockStyleWithIndent);
   currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent,
                                                        bionicReadingEnabled));
   wordsExtractedInBlock = 0;
@@ -1305,8 +1262,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
-      brStyle.textIndent = currentStyle.textIndent;
-      brStyle.textIndentDefined = currentStyle.textIndentDefined;
+      // text-indent is not inherited across <br>: it applies to the first line of a block only.
+      // Span-based indents (poem stanza pattern) are applied directly to each block at span-open time.
       brStyle.fromBrElement = true;
       self->startNewTextBlock(brStyle);
     } else {
@@ -1507,7 +1464,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Handle span and other inline elements for CSS styling
     if (cssStyle.hasFontWeight() || cssStyle.hasFontStyle() || cssStyle.hasTextDecoration() ||
-        cssStyle.hasVerticalAlign()) {
+        cssStyle.hasVerticalAlign() || cssStyle.hasMarginLeft()) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordBufferIndex > 0) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
@@ -1557,6 +1514,20 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
           entry.sup = false;
           entry.hasSub = true;
           entry.sub = false;
+        }
+      }
+      if (cssStyle.hasMarginLeft()) {
+        // margin-left on an inline span acts as a per-line indent (poem stanza pattern).
+        // Applied immediately to the current block because the span closes before the
+        // trailing <br>, so the indent must be on the block that receives the text.
+        const int16_t marginPx = cssStyle.marginLeft.toPixelsInt16(emSize, static_cast<float>(self->viewportWidth));
+        entry.hasMarginLeft = true;
+        entry.marginLeftPx = marginPx;
+        if (marginPx > 0 && self->currentTextBlock) {
+          BlockStyle updatedStyle = self->currentTextBlock->getBlockStyle();
+          updatedStyle.textIndent = marginPx;
+          updatedStyle.textIndentDefined = true;
+          self->currentTextBlock->setBlockStyle(updatedStyle);
         }
       }
       self->inlineStyleStack.push_back(entry);

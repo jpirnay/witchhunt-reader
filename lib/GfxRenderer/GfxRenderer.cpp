@@ -2035,12 +2035,19 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const bool pixelState = (renderModeSnapshot == BW);
 
   // Image raw values: 0=black, 1=dark-gray, 2=light-gray, 3=white  (opposite of glyph convention).
-  // BW draws raw {0,1,2} = mask 0x07.  Grayscale passes reuse glyph masks (same AA shade set).
+  // BW draws raw {0,1,2} = mask 0x07.
+  // Grayscale: image raws 1 and 2 are swapped vs glyphs, so the LSB mask must draw raw 1
+  // (image dark-gray) not raw 2 (image light-gray).  MSB draws both grays in both conventions.
+  //   GRAYSCALE_MSB: draw raw {1,2} → 0x06
+  //   GRAYSCALE_LSB: draw raw {1}   → 0x02  (dark-gray sets LSB → panel dark gray)
+  // This matches the slow path (val==1||val==2 for MSB; val==1 for LSB).
   uint8_t drawMask;
   if (renderModeSnapshot == BW) {
     drawMask = 0x07;
+  } else if (renderModeSnapshot == GRAYSCALE_MSB) {
+    drawMask = 0x06;
   } else {
-    drawMask = drawMaskFor2BitMode(renderModeSnapshot, 1);
+    drawMask = 0x02;  // GRAYSCALE_LSB: image raw 1 = dark-gray
   }
 
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {

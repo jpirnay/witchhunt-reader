@@ -15,8 +15,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION =
-    41;  // bumped: ImageBlock serializes srcYOffset/srcHeight for split float images
+constexpr uint8_t SECTION_FILE_VERSION = 42;  // bumped: float-zone layout changes (no indent beside float image)
 
 namespace header {
 constexpr uint32_t kVersion = 0;
