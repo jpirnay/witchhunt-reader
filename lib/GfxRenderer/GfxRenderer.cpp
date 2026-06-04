@@ -589,9 +589,12 @@ static inline uint8_t build2BitRowMaskFromTwoBytes(const uint8_t b0, const uint8
   const uint8_t lsb1 = (b1 & 0x55) << 1;
 
   uint8_t draw0, draw1;
-  if constexpr (drawMask == 0x0E) {  // BW: raw ∈ {1,2,3}
+  if constexpr (drawMask == 0x0E) {  // glyph BW: raw ∈ {1,2,3}
     draw0 = msb0 | lsb0;
     draw1 = msb1 | lsb1;
+  } else if constexpr (drawMask == 0x07) {  // image BW: raw ∈ {0,1,2} (not white)
+    draw0 = ~(msb0 & lsb0) & 0xAA;
+    draw1 = ~(msb1 & lsb1) & 0xAA;
   } else if constexpr (drawMask == 0x06) {  // raw ∈ {1,2}
     draw0 = msb0 ^ lsb0;
     draw1 = msb1 ^ lsb1;
@@ -1816,6 +1819,160 @@ void GfxRenderer::drawIconInverted(const uint8_t bitmap[], const int x, const in
   }
 }
 
+// =============================================================================
+// Fast-path bitmap rendering helpers
+// =============================================================================
+//
+// These mirror the glyph fast-path strategy (renderGlyphFastBW / renderGlyphFast2Bit*):
+// instead of calling drawPixel() once per pixel (rotate + bounds-check + 1-bit RMW),
+// we write up to 8 pixels at a time directly to the framebuffer using writeRowBits.
+//
+// Source data: readNextRow always produces a 2-bit packed row (4px/byte, MSB-first,
+// raw values 0=white 1=light-gray 2=dark-gray 3=black).  The same
+// build2BitRowMaskFromTwoBytes / build2BitRowMask / build2BitColMask helpers used
+// for 2-bit glyphs apply here with no changes.
+//
+// Fast path is taken only when !isScaled.  Scaled images fall through to the
+// per-pixel drawPixel loop unchanged.
+//
+// LANDSCAPE orientations
+//   phyY = f(screenY)  — constant per bitmap row
+//   phyX = g(screenX)  — linear in bmpX
+// → each bitmap row maps to a contiguous slice of one physical framebuffer row.
+//   Outer loop: bmpY (one row ptr per iteration).
+//   Inner loop: 8-pixel chunks via build2BitRowMaskFromTwoBytes (aligned) or
+//               build2BitRowMask (partial edges) → writeRowBits.
+//
+// PORTRAIT orientations
+//   phyX = f(screenY)  — constant per bitmap row
+//   phyY = g(screenX)  — linear in bmpX
+// → each bitmap row maps to a single physical column (one phyX bit across multiple rows).
+//   Outer loop: bmpY (computes phyX and the framebuffer bit-mask once).
+//   Inner loop: bmpX — reads one 2-bit pixel, writes one bit to the correct physical row.
+//   This eliminates rotateCoordinates(), the bounds-check log, and redundant byte/bit
+//   recomputation from drawPixel(), giving ~2× on the inner loop.
+//   (The 8×8 transpose used for glyphs would give ~8× but requires all rows in RAM
+//   simultaneously; bitmap rows are read sequentially from the BMP file, so they
+//   cannot be buffered for transposition without a separate heap allocation.
+//   The column loop is the practical optimum for the streaming-read model.)
+//
+// =============================================================================
+
+// Dispatch helper: write one row's worth of 2-bit pixels from 'outputRow' into the
+// framebuffer row at physical Y 'phyY'.  'pixelStartX' is the logical source X offset
+// (non-zero when cropPixX > 0).  'count' is the number of pixels to write.
+// 'screenXOrigin' is the physical X of source pixel pixelStartX.
+// For LandscapeCounterClockwise: physical X increases with bmpX.
+// For LandscapeClockwise:        physical X decreases with bmpX (reversed).
+template <uint8_t drawMask>
+static void bitmapWriteLandscapeRow(uint8_t* const frameBuffer, const uint8_t* const outputRow, const int pixelStartX,
+                                    const int count, const int phyY, const int screenXOrigin, const bool reverseX,
+                                    const bool pixelState, const int displayWidth, const int displayHeight,
+                                    const int widthBytes) {
+  if (phyY < 0 || phyY >= displayHeight) return;
+  uint8_t* const row = frameBuffer + phyY * widthBytes;
+  // Walk in 8-pixel chunks.  For reverseX (LandscapeClockwise) we iterate
+  // right-to-left through source pixels, mirroring renderGlyphFastBW.
+  if (!reverseX) {
+    for (int dx = 0; dx < count; dx += 8) {
+      const int chunkCount = std::min(8, count - dx);
+      const int srcPixel = pixelStartX + dx;  // index into the 2-bit packed row
+      uint8_t mask;
+      // Fast path: aligned 8-pixel chunk uses the two-byte SIMD helper
+      if (chunkCount == 8 && (srcPixel & 3) == 0) {
+        mask = build2BitRowMaskFromTwoBytes<drawMask>(outputRow[srcPixel >> 2], outputRow[(srcPixel >> 2) + 1]);
+      } else {
+        mask = build2BitRowMask<drawMask>(outputRow, 0, srcPixel, chunkCount, false);
+      }
+      if (mask == 0) continue;
+      const int phyBitPos = screenXOrigin + dx;
+      if (phyBitPos + chunkCount <= 0 || phyBitPos >= displayWidth) continue;
+      writeRowBits(row, phyBitPos, mask, pixelState, widthBytes);
+    }
+  } else {
+    // LandscapeClockwise: source pixel 0 maps to the rightmost physical X.
+    // Iterate source chunks right-to-left, reverse bits, write to correct phyBitPos.
+    for (int chunkEnd = count - 1; chunkEnd >= 0; chunkEnd -= 8) {
+      const int chunkStart = std::max(0, chunkEnd - 7);
+      const int chunkCount = chunkEnd - chunkStart + 1;
+      const int srcPixel = pixelStartX + chunkStart;
+      uint8_t mask_fwd;
+      if (chunkCount == 8 && (srcPixel & 3) == 0) {
+        mask_fwd = build2BitRowMaskFromTwoBytes<drawMask>(outputRow[srcPixel >> 2], outputRow[(srcPixel >> 2) + 1]);
+      } else {
+        mask_fwd = build2BitRowMask<drawMask>(outputRow, 0, srcPixel, chunkCount, false);
+      }
+      if (mask_fwd == 0) continue;
+      const uint8_t mask = reverseBits8(mask_fwd >> (8 - chunkCount));
+      // screenXOrigin is the physical X of source pixel (count-1); chunkEnd counts from that end
+      const int phyBitPos = screenXOrigin - chunkEnd;
+      if (phyBitPos + chunkCount <= 0 || phyBitPos >= displayWidth) continue;
+      writeRowBits(row, phyBitPos, mask, pixelState, widthBytes);
+    }
+  }
+}
+
+// Portrait fast path: one bitmap row (bmpY) maps to one physical column (phyX = const).
+// Writes one bit per bmpX pixel into its physical row.  Saves rotateCoordinates() and
+// bounds-check log overhead compared to drawPixel(), with no extra heap allocation.
+template <uint8_t drawMask>
+static void bitmapWritePortraitColumn(uint8_t* const frameBuffer, const uint8_t* const outputRow, const int pixelStartX,
+                                      const int count, const int phyX, const int phyYOrigin, const int phyYStride,
+                                      const bool pixelState, const int displayHeight, const int widthBytes) {
+  if (phyX < 0 || phyX >= widthBytes * 8) return;
+  const int byteCol = phyX >> 3;
+  const uint8_t bitMask = static_cast<uint8_t>(0x80u >> (phyX & 7));
+  for (int dx = 0; dx < count; dx++) {
+    const int srcPixel = pixelStartX + dx;
+    const uint8_t raw = (outputRow[srcPixel >> 2] >> ((3 - (srcPixel & 3)) * 2)) & 0x3;
+    if (!((drawMask >> raw) & 0x01)) continue;
+    const int phyY = phyYOrigin + dx * phyYStride;
+    if (phyY < 0 || phyY >= displayHeight) continue;
+    uint8_t* const bytePtr = frameBuffer + phyY * widthBytes + byteCol;
+    if (pixelState) {
+      *bytePtr &= ~bitMask;  // black
+    } else {
+      *bytePtr |= bitMask;  // white
+    }
+  }
+}
+
+// Core bitmap fast-path dispatcher: called once per bitmap row.
+// orientation, drawMask and pixelState are resolved before the row loop.
+template <uint8_t drawMask>
+static void bitmapFastRow(uint8_t* const frameBuffer, const uint8_t* const outputRow, const int cropPixX,
+                          const int renderWidth, const int screenX, const int screenY,
+                          const GfxRenderer::Orientation orientation, const bool pixelState, const int displayWidth,
+                          const int displayHeight, const int widthBytes) {
+  switch (orientation) {
+    case GfxRenderer::LandscapeCounterClockwise:
+      // phyX = screenX + (bmpX - cropPixX),  phyY = screenY
+      bitmapWriteLandscapeRow<drawMask>(frameBuffer, outputRow, cropPixX, renderWidth, screenY, screenX, false,
+                                        pixelState, displayWidth, displayHeight, widthBytes);
+      break;
+
+    case GfxRenderer::LandscapeClockwise:
+      // phyX = displayWidth-1 - screenX - (bmpX-cropPixX),  phyY = displayHeight-1-screenY
+      // screenXOrigin for reversed walk = physical X of source pixel (renderWidth-1)
+      bitmapWriteLandscapeRow<drawMask>(frameBuffer, outputRow, cropPixX, renderWidth, displayHeight - 1 - screenY,
+                                        displayWidth - 1 - screenX, true, pixelState, displayWidth, displayHeight,
+                                        widthBytes);
+      break;
+
+    case GfxRenderer::Portrait:
+      // phyX = screenY,  phyY = displayHeight-1 - screenX - (bmpX-cropPixX),  phyYStride = -1
+      bitmapWritePortraitColumn<drawMask>(frameBuffer, outputRow, cropPixX, renderWidth, screenY,
+                                          displayHeight - 1 - screenX, -1, pixelState, displayHeight, widthBytes);
+      break;
+
+    case GfxRenderer::PortraitInverted:
+      // phyX = displayWidth-1-screenY,  phyY = screenX + (bmpX-cropPixX),  phyYStride = +1
+      bitmapWritePortraitColumn<drawMask>(frameBuffer, outputRow, cropPixX, renderWidth, displayWidth - 1 - screenY,
+                                          screenX, 1, pixelState, displayHeight, widthBytes);
+      break;
+  }
+}
+
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
                              const float cropX, const float cropY) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
@@ -1865,6 +2022,27 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   }
 
   const auto renderModeSnapshot = getRenderMode();
+  const auto orientation = getOrientation();
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  const int widthBytes = getDisplayWidthBytes();
+  // Width of the rendered (post-crop) region in source pixels
+  const int renderWidth = bitmap.getWidth() - 2 * cropPixX;
+
+  // Pixel write state for each render mode:
+  //   BW: black pixels (state=true clears the bit)
+  //   GRAYSCALE_*: white=false sets the bit in the AA plane
+  const bool pixelState = (renderModeSnapshot == BW);
+
+  // Image raw values: 0=black, 1=dark-gray, 2=light-gray, 3=white  (opposite of glyph convention).
+  // BW draws raw {0,1,2} = mask 0x07.  Grayscale passes reuse glyph masks (same AA shade set).
+  uint8_t drawMask;
+  if (renderModeSnapshot == BW) {
+    drawMask = 0x07;
+  } else {
+    drawMask = drawMaskFor2BitMode(renderModeSnapshot, 1);
+  }
+
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
     // Screen's (0, 0) is the top-left corner.
@@ -1890,6 +2068,33 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
     if (bmpY < cropPixY) {
       // Skip the row if it's outside the crop area
+      continue;
+    }
+
+    if (!isScaled && drawMask != 0x00) {
+      // Fast path: write up to 8 pixels per call directly to the framebuffer.
+      switch (drawMask) {
+        case 0x07:
+          bitmapFastRow<0x07>(frameBuffer, outputRow, cropPixX, renderWidth, x, screenY, orientation, pixelState,
+                              displayWidth, displayHeight, widthBytes);
+          break;
+        case 0x06:
+          bitmapFastRow<0x06>(frameBuffer, outputRow, cropPixX, renderWidth, x, screenY, orientation, pixelState,
+                              displayWidth, displayHeight, widthBytes);
+          break;
+        case 0x04:
+          bitmapFastRow<0x04>(frameBuffer, outputRow, cropPixX, renderWidth, x, screenY, orientation, pixelState,
+                              displayWidth, displayHeight, widthBytes);
+          break;
+        case 0x02:
+          bitmapFastRow<0x02>(frameBuffer, outputRow, cropPixX, renderWidth, x, screenY, orientation, pixelState,
+                              displayWidth, displayHeight, widthBytes);
+          break;
+        default:
+          bitmapFastRow<0x07>(frameBuffer, outputRow, cropPixX, renderWidth, x, screenY, orientation, pixelState,
+                              displayWidth, displayHeight, widthBytes);
+          break;
+      }
       continue;
     }
 
@@ -1953,6 +2158,11 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
     return;
   }
 
+  const auto orientation = getOrientation();
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  const int widthBytes = getDisplayWidthBytes();
+
   for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
     // Read rows sequentially using readNextRow
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
@@ -1969,6 +2179,13 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
       continue;  // Continue reading to keep row counter in sync
     }
     if (screenY < 0) {
+      continue;
+    }
+
+    if (!isScaled) {
+      // Fast path: BW only (1-bit images are never rendered in grayscale passes)
+      bitmapFastRow<0x07>(frameBuffer, outputRow, 0, bitmap.getWidth(), x, screenY, orientation, true, displayWidth,
+                          displayHeight, widthBytes);
       continue;
     }
 
