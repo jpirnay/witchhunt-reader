@@ -603,6 +603,34 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     return false;
   }
 
+  // Validate JPEG markers before handing off to JPEGDEC. A truncated file left
+  // by a prior crashed extraction session will have valid SOF headers but no EOI,
+  // causing JPEGDEC to hard-fault on the garbage entropy data. Delete and bail so
+  // the next ensureExtracted() re-extracts the file cleanly.
+  {
+    FsFile f;
+    if (Storage.openFileForRead("JPG", imagePath, f)) {
+      const size_t fileSize = f.size();
+      uint8_t magic[2] = {0, 0};
+      bool valid = false;
+      if (fileSize >= 4 && f.read(magic, 2) == 2 && magic[0] == 0xFF && magic[1] == 0xD8) {
+        if (f.seek(fileSize - 2)) {
+          uint8_t tail[2] = {0, 0};
+          if (f.read(tail, 2) == 2 && tail[0] == 0xFF && tail[1] == 0xD9) {
+            valid = true;
+          }
+        }
+      }
+      f.close();
+      if (!valid) {
+        LOG_ERR("JPG", "JPEG integrity check failed (truncated/corrupt): %s — deleting for re-extraction",
+                imagePath.c_str());
+        Storage.remove(imagePath.c_str());
+        return false;
+      }
+    }
+  }
+
   std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
