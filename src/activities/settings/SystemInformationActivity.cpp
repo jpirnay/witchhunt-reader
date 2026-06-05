@@ -137,11 +137,6 @@ void SystemInformationActivity::render(RenderLock&&) {
 
   const auto& status = *status_;
 
-  constexpr int kLogoSize = 120;
-  renderer.drawImage(Logo120, contentRect.x + contentRect.width - kLogoSize,
-                     contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing, kLogoSize,
-                     kLogoSize);
-
   drawSection(tr(STR_SEC_VERSION));
   drawRow(tr(STR_FW_VERSION), status.version);
   drawRow(tr(STR_DEVICE), std::string(status.deviceType) + " (" + std::to_string(status.displayWidth) + " x " +
@@ -188,6 +183,17 @@ void SystemInformationActivity::render(RenderLock&&) {
     drawRow(tr(STR_SD_CARD), formatBytes(status.sdUsedBytes) + " / " + formatBytes(status.sdTotalBytes));
   } else {
     drawRow(tr(STR_SD_CARD), tr(STR_NOT_SET));
+  }
+
+  // Draw logo centered horizontally, vertically centered in the space between
+  // the last data row and the button hints. drawImage handles coordinate
+  // transformation internally so plain content-rect coordinates are used here.
+  constexpr int kLogoSize = 120;
+  const int hintsTop = contentRect.y + contentRect.height - metrics.buttonHintsHeight;
+  const int logoY = y + (hintsTop - y - kLogoSize) / 2;
+  const int logoX = contentRect.x + (contentRect.width - kLogoSize) / 2;
+  if (logoY >= 0 && logoY + kLogoSize <= hintsTop) {
+    renderer.drawImage(Logo120, logoX, logoY, kLogoSize, kLogoSize);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), sdStatusReady_ ? "" : tr(STR_UPDATE), "", "");
