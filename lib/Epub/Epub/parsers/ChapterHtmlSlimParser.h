@@ -124,8 +124,13 @@ class ChapterHtmlSlimParser final : public Print {
     bool isHeaderRow = false;   // true when all cells in this row are <th>
     uint8_t effectiveCols = 0;  // sum of colSpan values; tracks actual column footprint
   };
+  struct DeferredTableImage {
+    std::string src;
+    std::string alt;
+  };
   struct BufferedTable {
     std::vector<BufferedTableRow> rows;
+    std::vector<DeferredTableImage> deferredImages;  // images found in cells, emitted after the table
     int depth = 0;             // nesting depth; > 1 means we're inside a nested table
     bool unsupported = false;  // true → emit as paragraphs instead of grid
     bool hasBorder = true;     // false when border="0" on the <table> element
@@ -223,6 +228,7 @@ class ChapterHtmlSlimParser final : public Print {
   void emitBufferedTable();
   void emitTableAsFragments(BufferedTable& table);
   void emitTableAsParagraphs(BufferedTable& table);
+  void emitDeferredTableImages(BufferedTable& table);
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
