@@ -28,7 +28,7 @@ If in doubt consider all the work being done here based on the work of others - 
 * The most memory efficient reader might still be [MicroReader](https://github.com/CidVonHighwind/microreader) by CidVonHighwind
 
 # Why this name
-Originally this fork was called CrossPoint++ - it had a small userbase and then - I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorsphip but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
+Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
 
 Another crosspoint developer approached me pointing this flaw out and I agreed to change the future integration work. What I did not care for was that persons attitude and way of communicating, and I told him so.
 
