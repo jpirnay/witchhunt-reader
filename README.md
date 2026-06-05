@@ -1,49 +1,45 @@
-# CrossPoint Reader ++
+# Witch(hunt) Reader
 
-This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) for the XTEINK X4, a great piece of software by Dave Allie and others
+This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) for the XTEINK X4, a great piece of software by Dave Allie and others.
 
-# Why this fork
+# Attributions
+If in doubt consider all the work being done here based on the work of others - especially crosspoint reader (as the ancestor of this version) and microreader have been a great source of inspiration.
 
-Unfortunately the official repository suffers from too many good ideas floating around and a lack of clear governance how to deal 
-with these contributions, so it's lacking fundamental fixes for a proper reading experience (rendering issues, sub-par sync 
-capabilities with KOReader, a popular multi-platform open-source epub reader). 
-
-Trying to contribute enhancements / fixes became increasingly difficult as the lack of progress effectively prevented further development.
-
-Therefore this branch focuses on real fixes and real improvements while trying to keep up to pace with developments in the main branch.
-
-# What's different
-
-- Proper KOReader Snychronisation (including https TLS OOM fix)
-- Fixes for a lot of css rendering issues
+# What this reader does differently
+- Speed - rendering should be *fast*
+- CSS layout - a lot of effort have gone into rendering 
+- Memory - where others fail Witch Reader still works
+- Proper KOReader Snychronisation
 - Additional sleep screens support (information overlay, transparent pictures over current reader screen)
-- Clock-Support 
+- Clock-Support for X4 and X3
 - Weather information panel
 - Multiple under-the-hood performance improvements
 - Book information screen
 - Markdown-support
 - WiFi captive portal support
-- Supporting ~~strikethrough~~, superscript / subscript (*) and tables
-- Support for used defined actions on double-click / long-click per button (*)
-- User defined fonts
-- ...
+- Supporting ~~strikethrough~~, superscript / subscript and tables
+- Support for used defined actions on double-click / long-click per button 
+- A lot of smaller quality of life improvements 
 
+# What this reader doesn't
+* Great UI design is not necessarily/obviously not a forte of mine, so if you look for a polished look and feel, I would recommend going e.g. to CrossInk, a great piece of work by uxJulia
+* Support for CJK (Chinese Japanese Korean) - look at https://github.com/aBER0724/crosspoint-reader-cjk
+* Right-to-left rendering support (Hebrew, Arabic) - choose the original Crosspoint firmware
+* The most memory efficient reader might still be [MicroReader](https://github.com/CidVonHighwind/microreader) by CidVonHighwind
 
-# Choosing the _right_ reader...
+# Why this name
+Originally this fork was called CrossPoint++ - it had a small userbase and then - I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorsphip but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
 
-Your usecase might be completely different from mine, so I try to give an overview of the different reader flavors to my best knowledge. If you know of more variants / have more information, then let me know
+Another crosspoint developer approached me pointing this flaw out and I agreed to change the future integration work. What I did not care for was that persons attitude and way of communicating, and I told him so.
 
-Last update: May, 15th, 2026
+Then all hell broke lose, ending up in insults, harassment and plain lies in other forums without even caring for feedback (a good cause for any lawsuit for slander). So I took the repo down and just continued the development for my own benefit.
 
-| Reader                               | Visual appeal | Functionality | Formats | Pros | Cons | Custom fonts | CJK | Bluetooth |
-| ------------------------------------ | ------------- | ------------- | ------- | ---- | ---- | ------------ | --- | --- |
-| [Stock](https://www.xteink.com)       | Okay          | Reader        | XTC, EPUB, TXT | Frequent official updates | Lot of rendering issues | Yes | Yes | Yes |
-| [THIS FORK: CrossPoint ++](https://github.com/jpirnay/crosspoint-reader) | Okay | Calibre Wireless support; Proper KOReader progress sync; Wi-Fi transfer; Book Info; Clock, Weather Info | EPUB, XTC, TXT, MD | Faster integration of functionality | Small team | Yes | Limited | No |
-| [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) | Okay | Calibre Wireless support; KOReader progress sync; Wi-Fi transfer | EPUB, XTC, TXT | Biggest community | Least common denominator approach | Yes | No | No |
-| [CrossPet](https://github.com/trilwu/crosspet) | Excellent, Playful | Virtual pet motivator; mini-games | EPUB, TXT | A lot of additional apps | Higher battery drain, Small team, bloaty | Yes | Yes | Yes |
-| [Papyrix](https://github.com/bigbag/papyrix-reader) | Minimalist | Calibre Wireless support; exFAT support | EPUB, FB2, MD, TXT | A lot of good ideas | Small team | Yes | Yes | No |
-| [Inx](https://github.com/obijuankenobiii/inx) | Nice | mainly crosspoint functionality plus reading statistics | EPUB, XTC, TXT | Good reading stats | Small team | No | No | No |
-| [vCodex](https://github.com/franssjz/cpr-vcodex) | Nice | mainly crosspoint functionality plus reading statistics | EPUB, XTC, TXT | Good reading stats | Small team | No | No | No |
-| [PlusPoint](https://github.com/ngxson/pluspoint-reader) | Okay | Experimental | EPUB, TXT, JS Apps | Support for custom JS apps; better RTC | Based on older code, small team | Yes | Yes | No |
-| [SUMI](https://github.com/psychoplath9450/SUMI) | Nice | Lua custom apps; Bluetooth keyboard support for notes; Game Boy emulator; Bluetooth Transfer | EPUB, TXT, XTC, MD | Many apps, customizable, Papyrix fork | Single Contributor, **No Wi-Fi** | Yes | Yes | Yes |
-| [CrossInk](https://github.com/uxjulia/CrossInk) | Okay | Calibre Wireless support; KOReader progress sync; Wi-Fi transfer | EPUB, XTC, TXT | One of the best alternatives | Small team | Yes | No | No |
+Still I wanted others to benefit from my progress, so here we are again:
+
+Witch(hunt) Reader (name for obvious reasons) 
+
+- So if you are one of those who felt poorly appreciated: please accept my apologies, that was never my intent, and I have taken a lot of effort to replace code / to properly attribute the origin of code or ideas
+- If you are one of those who felt the need to raise a witchhunt, to lie, to libel: just go away - trolls aren't welcome here or more clearly: F*** OFF
+
+# Rendering comparisons
+Rendering examples from [Alice in Wonderland](https://www.gutenberg.org/ebooks/28885)

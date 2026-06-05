@@ -9,6 +9,7 @@
 #include "SystemStatus.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "images/Logo120.h"
 
 static const char* pickUnit(uint64_t maxBytes, double& outDivisor) {
   if (maxBytes >= 1024ULL * 1024 * 1024) {
@@ -135,6 +136,11 @@ void SystemInformationActivity::render(RenderLock&&) {
   }
 
   const auto& status = *status_;
+
+  constexpr int kLogoSize = 120;
+  renderer.drawImage(Logo120, contentRect.x + contentRect.width - kLogoSize,
+                     contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing, kLogoSize,
+                     kLogoSize);
 
   drawSection(tr(STR_SEC_VERSION));
   drawRow(tr(STR_FW_VERSION), status.version);
