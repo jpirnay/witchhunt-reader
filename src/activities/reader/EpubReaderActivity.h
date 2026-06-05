@@ -124,6 +124,14 @@ class EpubReaderActivity final : public Activity {
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   bool pendingHalfRefreshAfterImagePage = false;
+  // X4 only: set after a grayscale AA pass completes so the next BW page turn
+  // uses HALF_REFRESH (BYPASS_RED) instead of a fast differential.
+  // The X4 controller has no internal "previous pixel state" register — after
+  // the grayscale waveform the panel is in a gray state but RED RAM holds the
+  // BW page. A fast differential would leave gray pixels undriven where
+  // old==new, causing overlay ghosting. HALF_REFRESH ignores RED RAM and
+  // drives every pixel cleanly from the new BW frame.
+  bool pendingHalfRefreshAfterGrayscale_ = false;
   // True when secondary display buffer allocation failed; while set we prefer
   // conservative refresh policy and skip grayscale AA to reduce ghosting.
   bool secondaryBufferDegraded_ = false;

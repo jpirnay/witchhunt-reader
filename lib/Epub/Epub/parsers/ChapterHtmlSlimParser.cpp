@@ -370,9 +370,11 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
     // Capture dimensions before moving the imageBlock out.
     const int16_t contH = continuationImage_.renderedHeight;
     const int16_t contW = continuationImage_.width;
+    const bool contIsRight = continuationImage_.isRight;
+    const int16_t contX = contIsRight ? static_cast<int16_t>(viewportWidth - contW) : 0;
 
     // Place tile B (bottom crop of split image) at the top of the new page.
-    auto pageImg = std::make_shared<PageImage>(std::move(continuationImage_.imageBlock), 0, 0);
+    auto pageImg = std::make_shared<PageImage>(std::move(continuationImage_.imageBlock), contX, 0);
     currentPage->elements.push_back(pageImg);
     continuationImage_.active = false;
 
@@ -385,6 +387,7 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
       z.top = 0;
       z.bottom = contH;
       z.width = static_cast<int16_t>(contW + 4);
+      z.isRight = contIsRight;
     }
   } else {
     // No continuation image: clear float zones so text on the new page is not
@@ -428,7 +431,9 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
 
   const int16_t imgH = pendingInlineImage_.height;
   const int16_t imgW = pendingInlineImage_.width;
+  const bool imgIsRight = pendingInlineImage_.isRight;
   const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+  const int16_t imgX = imgIsRight ? static_cast<int16_t>(viewportWidth - imgW) : 0;
 
   auto fullImageBlock =
       std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt, epub->getPath(),
@@ -440,8 +445,9 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
       z.top = static_cast<int16_t>(currentPageNextY);
       z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
       z.width = static_cast<int16_t>(imgW + 4);
+      z.isRight = imgIsRight;
     }
-    deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, 0, currentPageNextY);
+    deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, currentPageNextY);
     currentPage->elements.push_back(deferredPageImage_);
     continuationImage_.active = false;
   } else {
@@ -452,13 +458,15 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
       z.top = static_cast<int16_t>(currentPageNextY);
       z.bottom = static_cast<int16_t>(viewportHeight);
       z.width = static_cast<int16_t>(imgW + 4);
+      z.isRight = imgIsRight;
     }
     auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
-    deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), 0, currentPageNextY);
+    deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), imgX, currentPageNextY);
     currentPage->elements.push_back(deferredPageImage_);
     continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
     continuationImage_.width = imgW;
     continuationImage_.renderedHeight = tileBHeight;
+    continuationImage_.isRight = imgIsRight;
     continuationImage_.active = true;
   }
 
@@ -1005,6 +1013,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   self->pendingInlineImage_.width = static_cast<int16_t>(displayWidth);
                   self->pendingInlineImage_.height = static_cast<int16_t>(displayHeight);
                   self->pendingInlineImage_.alt = alt;
+                  self->pendingInlineImage_.isRight =
+                      (self->floatDepth_ > 0) && self->floatOpenSides_[self->floatDepth_ - 1];
                   self->pendingInlineImage_.active = true;
                   LOG_DBG("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
                   // Don't flush the current text block — let it continue into the next paragraph.
@@ -1215,6 +1225,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   if (cssStyle.hasCssFloat() && cssStyle.cssFloat != CssFloat::None &&
       self->floatDepth_ < ChapterHtmlSlimParser::kMaxFloatDepth) {
     self->floatOpenDepths_[self->floatDepth_] = self->depth;
+    self->floatOpenSides_[self->floatDepth_] = (cssStyle.cssFloat == CssFloat::Right);
     self->floatDepth_++;
   }
 
@@ -2191,14 +2202,15 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
 
   // Apply horizontal left inset (margin + padding) as x position offset.
-  // For lines that overlap an active float zone, also shift right by the zone
+  // For lines that overlap an active left float zone, also shift right by the zone
   // width so text starts after the image rather than overlapping it.
+  // Right-floated zones narrow the line width (handled in widthForLine) but don't shift text left.
   int16_t xOffset = line->getBlockStyle().leftInset();
   {
     const auto& bs = line->getBlockStyle();
     for (int zi = 0; zi < bs.floatZoneCount; ++zi) {
       const auto& z = bs.floatZones[zi];
-      if (currentPageNextY < z.bottom && currentPageNextY + lineHeight > z.top) {
+      if (!z.isRight && currentPageNextY < z.bottom && currentPageNextY + lineHeight > z.top) {
         xOffset = static_cast<int16_t>(xOffset + z.width);
       }
     }
@@ -2354,7 +2366,11 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
     bool dimsOk = false;
     if (imageManifest) {
       const ImageManifestEntry* entry = imageManifest->find(resolvedPath);
-      if (entry) { dims.width = entry->width; dims.height = entry->height; dimsOk = true; }
+      if (entry) {
+        dims.width = entry->width;
+        dims.height = entry->height;
+        dimsOk = true;
+      }
     }
     if (!dimsOk) {
       dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(epub->getPath(), resolvedPath, dims);
@@ -2366,9 +2382,11 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
 
     // Scale to fit viewport, preserving aspect ratio.
     float scale = 1.0f;
-    if (static_cast<int>(dims.width)  > static_cast<int>(viewportWidth))  scale = static_cast<float>(viewportWidth)  / dims.width;
-    if (static_cast<int>(dims.height) * scale > static_cast<int>(viewportHeight)) scale = static_cast<float>(viewportHeight) / dims.height;
-    const int displayWidth  = std::max(1, static_cast<int>(dims.width  * scale));
+    if (static_cast<int>(dims.width) > static_cast<int>(viewportWidth))
+      scale = static_cast<float>(viewportWidth) / dims.width;
+    if (static_cast<int>(dims.height) * scale > static_cast<int>(viewportHeight))
+      scale = static_cast<float>(viewportHeight) / dims.height;
+    const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
     const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
 
     std::string ext;
@@ -2376,16 +2394,22 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
     if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
     const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
 
-    if (!currentPage) { currentPage.reset(new Page()); currentPageNextY = 0; }
+    if (!currentPage) {
+      currentPage.reset(new Page());
+      currentPageNextY = 0;
+    }
 
     if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
       emitPage(lastBodyChildByteOffset);
-      if (!currentPage) { currentPage.reset(new Page()); currentPageNextY = 0; }
+      if (!currentPage) {
+        currentPage.reset(new Page());
+        currentPageNextY = 0;
+      }
     }
 
     const int xPos = (viewportWidth - displayWidth) / 2;
-    auto imageBlock = std::make_shared<ImageBlock>(cachedPath, displayWidth, displayHeight,
-                                                   img.alt, epub->getPath(), resolvedPath);
+    auto imageBlock =
+        std::make_shared<ImageBlock>(cachedPath, displayWidth, displayHeight, img.alt, epub->getPath(), resolvedPath);
     currentPage->elements.push_back(std::make_shared<PageImage>(imageBlock, xPos, currentPageNextY));
     currentPageNextY += displayHeight;
     LOG_DBG("EHP", "Deferred table image placed: %s %dx%d", resolvedPath.c_str(), displayWidth, displayHeight);
@@ -2433,14 +2457,12 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
 
   for (auto& bufRow : table.rows) {
     // Detect a full-width spanning row: exactly one cell whose colSpan equals the table's column count.
-    const bool isFullWidthSpan =
-        bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
+    const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
 
     const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
     const uint16_t renderColWidth = totalWidth / renderCols;
-    const uint16_t renderInnerWidth = (renderColWidth > 2 * TABLE_CELL_PADDING)
-                                          ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING)
-                                          : 0;
+    const uint16_t renderInnerWidth =
+        (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
 
     // Any other colspan structure falls back; we only handle full-span or plain cells.
     const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
@@ -2514,9 +2536,9 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       emitPage(lastBodyChildByteOffset);
     }
 
-    currentPage->elements.push_back(std::make_shared<PageTableFragment>(
-        fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
-        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
+    currentPage->elements.push_back(
+        std::make_shared<PageTableFragment>(fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
+                                            /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
     currentPageNextY += fragTotalHeight;
     fragmentRows.clear();
     fragmentHeight = 0;

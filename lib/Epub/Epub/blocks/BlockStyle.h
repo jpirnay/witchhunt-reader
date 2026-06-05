@@ -17,6 +17,7 @@ struct FloatZone {
   int16_t top;     // y of image top relative to page top
   int16_t bottom;  // top + imageHeight
   int16_t width;   // imageWidth + 4 px gap
+  bool isRight;    // true = image floated right (text narrows from right, no left xOffset shift)
 };
 
 /**

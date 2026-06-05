@@ -1667,6 +1667,7 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
+  pendingHalfRefreshAfterGrayscale_ = false;
 
   auto logPageTurnWindowIfReady = [this]() {
     if (pageTurnStatsWindow.turns < PAGE_TURN_STATS_WINDOW_SIZE) {
@@ -1752,6 +1753,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
     if (renderer.reallocSecondaryBuffer()) {
       secondaryBufferDegraded_ = false;
+      if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
       LOG_INF("ERS", "Secondary display buffer restored; re-enabling normal refresh/AA paths");
     }
   } else if (secondaryBufferDegraded_ && renderer.hasSecondaryBuffer()) {
@@ -1996,6 +1998,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         }
       } else {
         secondaryBufferDegraded_ = false;
+        if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
         LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
       }
       renderer.restoreFontMetadata();
@@ -2044,6 +2047,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         }
       } else {
         secondaryBufferDegraded_ = false;
+        if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
         LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
       }
       renderer.restoreFontMetadata();
@@ -2292,8 +2296,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
-  bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
+  bool forceHalfRefreshThisPage =
+      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
   pendingHalfRefreshAfterImagePage = false;
+  pendingHalfRefreshAfterGrayscale_ = false;
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 

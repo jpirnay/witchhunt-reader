@@ -153,6 +153,7 @@ class GfxRenderer {
   bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
   bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
+  bool isX3() const { return display.deviceIsX3(); }
 
   // Non-blocking display split.
   // triggerDisplay() sends pixels, issues the refresh command and returns

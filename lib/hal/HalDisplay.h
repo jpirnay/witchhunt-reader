@@ -86,6 +86,9 @@ class HalDisplay {
 
   void displayGrayBuffer(bool turnOffScreen = false);
 
+  // Returns true when the device is an X3 (X4 returns false).
+  bool deviceIsX3() const;
+
   // X3-only knob: pick between the OEM 53-frame grayscale LUT (default, slow
   // and accurate) and the 7-frame community LUT (fast, slightly darker
   // mid-tones). No effect on X4. See EInkDisplay::setFastGrayscaleLut.
