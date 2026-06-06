@@ -2091,6 +2091,17 @@ bool ChapterHtmlSlimParser::finalize() {
   const uint32_t totalTimeMs = millis() - streamStartTimeMs;
   LOG_DBG("EHP", "Time to parse and build pages: %lu ms", totalTimeMs);
 
+  // The yxml SaxParser backend uses fixed-capacity buffers sized from measured
+  // real-world maxima; if this chapter exceeded any of them the parser silently
+  // truncated (dropped) the excess. Surface it so out-of-bounds documents are
+  // diagnosable rather than failing invisibly (e.g. XPath/anchor drift).
+  if (const uint32_t trunc = saxParser_.truncationFlags()) {
+    LOG_DBG("EHP", "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d maxDepth=%d",
+            static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
+            (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
+            (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0);
+  }
+
   // Process last page if there is still text. Done unconditionally so that a partial
   // success scenario still flushes whatever pages were produced.
   if (currentTextBlock) {

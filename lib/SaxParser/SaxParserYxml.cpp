@@ -70,6 +70,10 @@ struct SaxParserImpl {
 
   // Running byte offset (updated once per yxml_parse call).
   uint32_t byteOffset = 0;
+
+  // Bitmask of SaxParser::TruncationFlag values — records which fixed-capacity
+  // limits were hit (and silently truncated) over the lifetime of the parse.
+  uint32_t truncFlags = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +102,8 @@ static void fireStart(SaxParserImpl* impl) {
     strncpy(impl->elemStack[impl->elemDepth], impl->pendingElem, kElemNameLen - 1);
     impl->elemStack[impl->elemDepth][kElemNameLen - 1] = '\0';
     ++impl->elemDepth;
+  } else {
+    impl->truncFlags |= SaxParser::kTruncMaxDepth;
   }
 
   if (impl->startCb) {
@@ -193,6 +199,7 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       case YXML_ELEMSTART:
         if (impl->inOpeningTag) fireStart(impl);
         flushChar(impl);
+        if (strlen(impl->x.elem) > kElemNameLen - 1) impl->truncFlags |= SaxParser::kTruncElemName;
         strncpy(impl->pendingElem, impl->x.elem, kElemNameLen - 1);
         impl->pendingElem[kElemNameLen - 1] = '\0';
         impl->attrCount    = 0;
@@ -202,10 +209,13 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       case YXML_ATTRSTART:
         if (impl->attrCount < kMaxAttrs) {
           AttrPair& a = impl->attrs[impl->attrCount];
+          if (strlen(impl->x.attr) > kElemNameLen - 1) impl->truncFlags |= SaxParser::kTruncAttrName;
           strncpy(a.name, impl->x.attr, kElemNameLen - 1);
           a.name[kElemNameLen - 1] = '\0';
           a.value[0] = '\0';
           a.valueLen = 0;
+        } else {
+          impl->truncFlags |= SaxParser::kTruncMaxAttrs;
         }
         break;
 
@@ -214,9 +224,11 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
           AttrPair& a = impl->attrs[impl->attrCount];
           // Append x.data (usually 1 byte, occasionally 2-3 for multi-byte
           // char refs) using the stored cursor — no strlen() needed.
-          for (const char* p = impl->x.data; *p && a.valueLen < kAttrValueLen - 1; ++p) {
+          const char* p = impl->x.data;
+          for (; *p && a.valueLen < kAttrValueLen - 1; ++p) {
             a.value[a.valueLen++] = *p;
           }
+          if (*p) impl->truncFlags |= SaxParser::kTruncAttrValue;  // value didn't fit
           a.value[a.valueLen] = '\0';
         }
         break;
@@ -272,4 +284,9 @@ void SaxParser::stop() {
 uint32_t SaxParser::byteOffset() const {
   if (!impl_) return 0;
   return static_cast<SaxParserImpl*>(impl_)->byteOffset;
+}
+
+uint32_t SaxParser::truncationFlags() const {
+  if (!impl_) return 0;
+  return static_cast<SaxParserImpl*>(impl_)->truncFlags;
 }

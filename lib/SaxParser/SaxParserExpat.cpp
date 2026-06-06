@@ -151,3 +151,6 @@ uint32_t SaxParser::byteOffset() const {
   if (!impl->parser) return 0;
   return static_cast<uint32_t>(XML_GetCurrentByteIndex(impl->parser));
 }
+
+// expat uses dynamically grown buffers, so no fixed-capacity truncation occurs.
+uint32_t SaxParser::truncationFlags() const { return 0; }

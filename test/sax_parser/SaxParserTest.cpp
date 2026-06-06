@@ -183,3 +183,37 @@ TEST(SaxParser, DefaultHandler) {
   // What matters is that the document parsed successfully and no crash occurred.
   SUCCEED();
 }
+
+TEST(SaxParser, TruncationFlagsClearForWellSizedDoc) {
+  const char* xml = "<root><child a=\"1\" b=\"2\">text</child></root>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  // A small, well-formed document stays within every fixed capacity.
+  EXPECT_EQ(p.truncationFlags(), 0u);
+}
+
+TEST(SaxParser, TruncationFlagsReportMaxAttrs) {
+  // 9 attributes — one more than kMaxAttrs (8). The 9th is dropped and the
+  // overflow is recorded so callers can log it (the yxml backend only).
+  const char* xml = "<e a1='1' a2='2' a3='3' a4='4' a5='5' a6='6' a7='7' a8='8' a9='9'/>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  // The active backend (yxml) has fixed caps and records the overflow. expat,
+  // if ever re-enabled, has no fixed caps and returns 0 — so only assert the
+  // flag when the parser actually reports truncation support.
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTruncMaxAttrs);
+}
