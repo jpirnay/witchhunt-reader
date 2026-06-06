@@ -2298,6 +2298,46 @@ void GfxRenderer::invertScreen() const {
   for (uint32_t i = words * 4; i < frameBufferSize; i++) frameBuffer[i] = ~frameBuffer[i];
 }
 
+void GfxRenderer::displayWindow(int logX, int logY, int logW, int logH, bool turnOffScreen) const {
+  // Translate logical rectangle to physical panel coordinates using the same
+  // rotation rules as rotateCoordinates(). Physical (x=source, y=gate row).
+  uint16_t physX, physY, physW, physH;
+  switch (getOrientation()) {
+    case Portrait:
+      // phyX = logY, phyY = panelHeight-1-logX (top-left corner)
+      physX = static_cast<uint16_t>(logY);
+      physY = static_cast<uint16_t>(panelHeight - logX - logW);
+      physW = static_cast<uint16_t>(logH);
+      physH = static_cast<uint16_t>(logW);
+      break;
+    case PortraitInverted:
+      // phyX = panelWidth-1-logY, phyY = logX (top-left corner, x goes right→left)
+      physX = static_cast<uint16_t>(panelWidth - logY - logH);
+      physY = static_cast<uint16_t>(logX);
+      physW = static_cast<uint16_t>(logH);
+      physH = static_cast<uint16_t>(logW);
+      break;
+    case LandscapeClockwise:
+      // phyX = panelWidth-1-logX, phyY = panelHeight-1-logY (180° rotation)
+      physX = static_cast<uint16_t>(panelWidth - logX - logW);
+      physY = static_cast<uint16_t>(panelHeight - logY - logH);
+      physW = static_cast<uint16_t>(logW);
+      physH = static_cast<uint16_t>(logH);
+      break;
+    case LandscapeCounterClockwise:
+    default:
+      // Native panel orientation — no transform needed
+      physX = static_cast<uint16_t>(logX);
+      physY = static_cast<uint16_t>(logY);
+      physW = static_cast<uint16_t>(logW);
+      physH = static_cast<uint16_t>(logH);
+      break;
+  }
+  LOG_DBG("WIN", "displayWindow logical(%d,%d,%d,%d) orient=%d → physical(%d,%d,%d,%d)",
+          logX, logY, logW, logH, (int)getOrientation(), physX, physY, physW, physH);
+  display.displayWindow(physX, physY, physW, physH, turnOffScreen);
+}
+
 static constexpr unsigned int encodeRefreshMode(const HalDisplay::RefreshMode mode) {
   return static_cast<unsigned int>(mode) + 1u;
 }

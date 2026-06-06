@@ -581,6 +581,34 @@ void HomeActivity::loop() {
       }
     }
   }
+
+  // TEST: Back button triggers a displayWindow refresh on a 128x48 region.
+  // requestUpdateAndWait() lets the home screen render complete first so the
+  // framebuffer holds the real page content; then we paint a black bar on top
+  // and call displayWindow. The subsequent render (triggered by the Back press
+  // event) will overwrite the bar — that is expected and harmless for the test.
+  // Remove once displayWindow has been validated on hardware.
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    LOG_DBG("WIN", "displayWindow test: waiting for render");
+    requestUpdateAndWait();
+    LOG_DBG("WIN", "displayWindow test: painting bar and calling displayWindow");
+    // SHAPE-TEST: logical LEFT-EDGE vertical stripe (48 wide, full height) —
+    // this is physically a full-source-width / narrow-gate-range band (the
+    // OPPOSITE shape of the status-bar's narrow-source-column band). Testing
+    // whether PTL is clean for THIS shape would indicate the UC8179 has a
+    // source-driver segment-boundary issue with narrow HRST/HRED ranges.
+    const int logH = renderer.getScreenHeight();
+    renderer.fillRect(0, 0, 48, logH, true);
+    // Drain any render that was concurrently triggered (e.g. by the Back press
+    // being processed by the list/carousel branch above). Poll isRefreshPending
+    // without triggering a new render — unlike requestUpdateAndWait() which
+    // always fires a new render and would overwrite our bar.
+    while (display.isRefreshPending()) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    renderer.displayWindow(0, 0, 48, logH);
+    LOG_DBG("WIN", "displayWindow returned");
+  }
 }
 
 void HomeActivity::render(RenderLock&&) {

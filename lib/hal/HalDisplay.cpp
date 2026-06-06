@@ -117,6 +117,10 @@ void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrays
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) { einkDisplay.displayGrayBuffer(turnOffScreen); }
 
+void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
+  einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
+}
+
 bool HalDisplay::deviceIsX3() const { return einkDisplay.isX3Mode(); }
 
 void HalDisplay::setFastGrayscaleLut(bool fast) { einkDisplay.setFastGrayscaleLut(fast); }

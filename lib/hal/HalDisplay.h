@@ -37,6 +37,7 @@ class HalDisplay {
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen = false);
 
   // Non-blocking display split — see EInkDisplay.h for full contract.
   // triggerDisplay() sends pixels + triggers waveform, swaps buffers, returns.
