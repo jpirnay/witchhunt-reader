@@ -2359,7 +2359,7 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
   for (auto& img : table.deferredImages) {
     if (img.src.empty()) continue;
 
-    const std::string resolvedPath = FsHelpers::normalisePath(contentBase + img.src);
+    const std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(contentBase + img.src));
     if (!ImageDecoderFactory::isFormatSupported(resolvedPath)) continue;
 
     ImageDimensions dims = {0, 0};

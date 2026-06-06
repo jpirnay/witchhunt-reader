@@ -180,12 +180,13 @@ void XMLCALL TocNavParser::endElement(void* userData, const XML_Char* name) {
   // sort after IN_NAV_TOC, but we want exact-state matching either way).
   if (strcmp(name, "a") == 0 && self->state == IN_PL_ANCHOR) {
     if (self->pageListSink && !self->currentPageLabel.empty() && !self->currentPageHref.empty()) {
-      std::string href = FsHelpers::normalisePath(self->baseContentPath + self->currentPageHref);
+      const std::string rawTarget = self->baseContentPath + self->currentPageHref;
+      const size_t pos = rawTarget.find('#');
+      const std::string rawPath = pos == std::string::npos ? rawTarget : rawTarget.substr(0, pos);
+      std::string href = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawPath));
       std::string anchor;
-      const size_t pos = href.find('#');
       if (pos != std::string::npos) {
-        anchor = href.substr(pos + 1);
-        href = href.substr(0, pos);
+        anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
       }
       self->pageListSink->addEntry(href, anchor, self->currentPageLabel);
     }

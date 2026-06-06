@@ -231,12 +231,13 @@ void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
 
   if (self->state == IN_PAGE_TARGET && strcmp(name, "pageTarget") == 0) {
     if (self->pageListSink && !self->currentPageLabel.empty() && !self->currentPageSrc.empty()) {
-      std::string href = FsHelpers::normalisePath(self->baseContentPath + self->currentPageSrc);
+      const std::string rawTarget = self->baseContentPath + self->currentPageSrc;
+      const size_t pos = rawTarget.find('#');
+      const std::string rawPath = pos == std::string::npos ? rawTarget : rawTarget.substr(0, pos);
+      std::string href = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawPath));
       std::string anchor;
-      const size_t pos = href.find('#');
       if (pos != std::string::npos) {
-        anchor = href.substr(pos + 1);
-        href = href.substr(0, pos);
+        anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
       }
       self->pageListSink->addEntry(href, anchor, self->currentPageLabel);
     }
