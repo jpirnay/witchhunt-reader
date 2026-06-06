@@ -871,7 +871,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
         {
           // Resolve the image path relative to the HTML file
-          std::string resolvedPath = FsHelpers::normalisePath(self->contentBase + src);
+          std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->contentBase + src));
 
           if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
             // Determine SD cache path (image will be extracted here lazily at first render).
@@ -2359,7 +2359,7 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
   for (auto& img : table.deferredImages) {
     if (img.src.empty()) continue;
 
-    const std::string resolvedPath = FsHelpers::normalisePath(contentBase + img.src);
+    const std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(contentBase + img.src));
     if (!ImageDecoderFactory::isFormatSupported(resolvedPath)) continue;
 
     ImageDimensions dims = {0, 0};
