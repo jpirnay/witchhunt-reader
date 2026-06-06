@@ -170,7 +170,7 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
       }
 
       if (!imageRef.empty()) {
-        bookMetadata.coverItemHref = FsHelpers::normalisePath(coverPageBase + imageRef);
+        bookMetadata.coverItemHref = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(coverPageBase + imageRef));
         LOG_DBG("EBP", "Found cover image from guide: %s", bookMetadata.coverItemHref.c_str());
       }
     }
@@ -187,117 +187,48 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
       LOG_DBG("EBP", "Cover href unresolved, trying common cover candidates: %s", bookMetadata.coverItemHref.c_str());
     }
 
-    std::vector<std::string> baseDirs;
-    auto addBaseDir = [&](const std::string& dir) {
-      if (dir.empty()) {
-        for (const auto& existing : baseDirs) {
-          if (existing.empty()) return;
-        }
-        baseDirs.emplace_back();
-        return;
-      }
-
-      const std::string normalized = FsHelpers::normalisePath(dir);
-      const std::string withSlash = normalized.empty() ? std::string() : normalized + "/";
-      for (const auto& existing : baseDirs) {
-        if (existing == withSlash) return;
-      }
-      baseDirs.push_back(withSlash);
-    };
-
-    // 1) OPF directory first (most likely)
-    // 2) Parent dir of OPF directory
-    // 3) Common EPUB roots
-    // 4) Archive root
-    addBaseDir(contentBasePath);
-    if (!contentBasePath.empty()) {
-      const auto trimmed =
-          contentBasePath.back() == '/' ? contentBasePath.substr(0, contentBasePath.size() - 1) : contentBasePath;
-      const auto lastSlash = trimmed.rfind('/');
-      if (lastSlash != std::string::npos) {
-        addBaseDir(trimmed.substr(0, lastSlash + 1));
-      }
-    }
-    addBaseDir("OEBPS/");
-    addBaseDir("OPS/");
-    addBaseDir("EPUB/");
-    addBaseDir("");
-
-    static constexpr const char* kCoverSubdirs[] = {
-        "", "images/", "Images/", "image/", "img/", "graphics/",
-    };
-
-    static constexpr const char* kCoverBaseNames[] = {
+    // Single forward pass through the ZIP central directory.
+    // For each image entry, lowercase the basename and compare against known cover stems.
+    // One SD scan regardless of EPUB size — no candidate string construction, no map.
+    static constexpr const char* kCoverStems[] = {
         "cover", "frontcover", "titlepage", "title", "cover-image", "coverimage",
-    };
-
-    static constexpr const char* kCoverExtensions[] = {
-        "jpg",
-        "jpeg",
-        "png",
-    };
-
-    auto toUpper = [](std::string value) {
-      for (char& ch : value) {
-        ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-      }
-      return value;
     };
 
     const unsigned long coverBatchStart = millis();
     ZipFile zip(filepath);
-    const bool zipIndexLoaded = zip.loadAllFileStatSlims();
-    LOG_DBG("EBP", "Common cover fallback indexed ZIP in %lu ms (ok=%d)", millis() - coverBatchStart,
-            zipIndexLoaded ? 1 : 0);
+    zip.streamCentralDirectoryNames([&](std::string_view path) {
+      if (!bookMetadata.coverItemHref.empty()) return;  // already found
+      if (!FsHelpers::hasJpgExtension(path) && !FsHelpers::hasPngExtension(path)) return;
 
-    if (zipIndexLoaded) {
-      int checkedCandidates = 0;
-      const auto tryCandidate = [&](const std::string& candidate) {
-        checkedCandidates++;
-        size_t coverSize = 0;
-        if (zip.getInflatedFileSize(candidate.c_str(), &coverSize) && coverSize > 0) {
-          bookMetadata.coverItemHref = candidate;
-          LOG_DBG("EBP", "Found cover image via common candidate fallback after %d checks in %lu ms: %s",
-                  checkedCandidates, millis() - coverBatchStart, bookMetadata.coverItemHref.c_str());
-          return true;
+      // Extract and lowercase the basename (after last '/').
+      const size_t slash = path.rfind('/');
+      const std::string_view name = (slash != std::string_view::npos) ? path.substr(slash + 1) : path;
+      const size_t dot = name.rfind('.');
+      const std::string_view stem = (dot != std::string_view::npos) ? name.substr(0, dot) : name;
+
+      // Lowercase the stem into a small stack buffer — stems are short.
+      char lower[64];
+      if (stem.size() >= sizeof(lower)) return;
+      for (size_t i = 0; i < stem.size(); ++i)
+        lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(stem[i])));
+      lower[stem.size()] = '\0';
+
+      for (const char* s : kCoverStems) {
+        if (strcmp(lower, s) == 0) {
+          bookMetadata.coverItemHref = std::string{path};
+          LOG_DBG("EBP", "Found cover image via ZIP scan in %lu ms: %s", millis() - coverBatchStart,
+                  bookMetadata.coverItemHref.c_str());
+          return;
         }
-        return false;
-      };
-
-      bool foundCoverCandidate = false;
-      for (const auto& baseDir : baseDirs) {
-        for (const char* subDir : kCoverSubdirs) {
-          for (const char* baseName : kCoverBaseNames) {
-            const std::string lowerBase = baseName;
-            const std::string upperBase = toUpper(lowerBase);
-            for (const std::string* baseVariant : {&lowerBase, &upperBase}) {
-              for (const char* ext : kCoverExtensions) {
-                const std::string lowerExt = ext;
-                const std::string upperExt = toUpper(lowerExt);
-                for (const std::string* extVariant : {&lowerExt, &upperExt}) {
-                  const std::string candidate =
-                      FsHelpers::normalisePath(baseDir + subDir + *baseVariant + "." + *extVariant);
-                  if (tryCandidate(candidate)) {
-                    foundCoverCandidate = true;
-                    break;
-                  }
-                }
-                if (foundCoverCandidate) break;
-              }
-              if (foundCoverCandidate) break;
-            }
-            if (foundCoverCandidate) break;
-          }
-          if (foundCoverCandidate) break;
-        }
-        if (foundCoverCandidate) break;
       }
+    });
 
-      if (!foundCoverCandidate) {
-        LOG_DBG("EBP", "Common cover fallback checked %d cached candidates in %lu ms with no match", checkedCandidates,
-                millis() - coverBatchStart);
-      }
+    if (bookMetadata.coverItemHref.empty()) {
+      LOG_DBG("EBP", "Cover ZIP scan found no match (%lu ms)", millis() - coverBatchStart);
     }
+
+    // buildImageManifest uses streamCentralDirectoryNames — no stat cache needed.
+    buildImageManifest(zip);
   }
 
   bookMetadata.textReferenceHref = opfParser.textReferenceHref;
@@ -512,36 +443,60 @@ bool Epub::parsePageMapFile() const {
   return true;
 }
 
+void Epub::buildImageManifest(ZipFile& zf) {
+  imageManifest.reset(new (std::nothrow) EpubImageManifest());
+  if (!imageManifest) {
+    LOG_ERR("EBP", "Failed to alloc EpubImageManifest");
+    return;
+  }
+  if (!imageManifest->build(cachePath, filepath, zf)) {
+    LOG_ERR("EBP", "Failed to build image manifest");
+    imageManifest.reset();
+  }
+}
+
+void Epub::loadImageManifest() {
+  // Return immediately if already loaded (e.g. built during this same load()).
+  if (imageManifest && imageManifest->isLoaded()) return;
+
+  imageManifest.reset(new (std::nothrow) EpubImageManifest());
+  if (!imageManifest) {
+    LOG_ERR("EBP", "Failed to alloc EpubImageManifest");
+    return;
+  }
+  if (imageManifest->load(cachePath)) return;
+
+  // Cache miss — build it now. streamCentralDirectoryNames handles large EPUBs safely.
+  LOG_DBG("EBP", "Image manifest cache miss, building now");
+  ZipFile zf(filepath);
+  buildImageManifest(zf);
+}
+
 void Epub::discoverCssFilesFromZip() {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
     LOG_ERR("EBP", "Cannot discover CSS from ZIP because book metadata cache is not loaded");
     return;
   }
 
+  // Use streamCentralDirectoryNames (O(1) heap, fixed 256-byte stack buffer per entry)
+  // instead of loadAllFileStatSlims(). The old path built a full unordered_map of every
+  // ZIP entry — on EPUBs with 3000+ entries this consumed ~200 KB and crashed.
   ZipFile zf(filepath);
 
-  if (!zf.loadAllFileStatSlims()) {
-    LOG_ERR("EBP", "Failed to load ZIP file stat slims for CSS discovery");
-    return;
+  const size_t lastSlash = contentBasePath.find_last_of('/');
+  const std::string opfDir = (lastSlash != std::string::npos) ? contentBasePath.substr(0, lastSlash + 1) : "";
+
+  if (!zf.streamCentralDirectoryNames([&](std::string_view filePath) {
+        if (!opfDir.empty() && filePath.find(opfDir) != 0) return;
+        if (FsHelpers::hasCssExtension(filePath)) {
+          if (std::find(cssFiles.begin(), cssFiles.end(), filePath) == cssFiles.end()) {
+            LOG_DBG("EBP", "Discovered CSS file via ZIP enumeration: %.*s", (int)filePath.size(), filePath.data());
+            cssFiles.push_back(std::string{filePath});
+          }
+        }
+      })) {
+    LOG_ERR("EBP", "Failed to stream ZIP central directory for CSS discovery");
   }
-
-  size_t lastSlash = contentBasePath.find_last_of('/');
-
-  std::string opfDir = (lastSlash != std::string::npos) ? contentBasePath.substr(0, lastSlash + 1) : "";
-
-  zf.enumerateFilePaths([&](std::string_view filePath) {
-    if (!opfDir.empty() && filePath.find(opfDir) != 0) {
-      return;  // Skip files that are not in the same directory as OPF manifest, as CSS files are typically located
-               // there or in subfolders
-    }
-
-    if (FsHelpers::hasCssExtension(filePath)) {
-      if (std::find(cssFiles.begin(), cssFiles.end(), filePath) == cssFiles.end()) {
-        LOG_DBG("EBP", "Discovered CSS file via ZIP enumeration: %.*s", (int)filePath.size(), filePath.data());
-        cssFiles.push_back(std::string{filePath});
-      }
-    }
-  });
 }
 
 void Epub::parseCssFiles() const {
@@ -906,7 +861,7 @@ bool Epub::ensureCoverImageCached() const {
   const auto dot = filepath.rfind('.');
   if (dot != std::string::npos && (sep == std::string::npos || dot > sep)) {
     const std::string base = filepath.substr(0, dot);
-    for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp"}) {
+    for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG", ".BMP"}) {
       const std::string candidate = base + ext;
       if (Storage.exists(candidate.c_str())) {
         LOG_DBG("EBP", "Using sidecar cover: %s", candidate.c_str());
@@ -1137,6 +1092,26 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   return ZipFile(filepath).readFileToStream(path.c_str(), out, chunkSize);
 }
 
+size_t Epub::readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, const size_t maxBytes) const {
+  if (itemHref.empty() || !outBuf || maxBytes == 0) return 0;
+  const std::string path = FsHelpers::normalisePath(itemHref);
+  return ZipFile(filepath).readBytesFromEntry(path.c_str(), outBuf, maxBytes);
+}
+
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
+  if (itemHref.empty() || destPath.empty()) return false;
+  FsFile destFile;
+  if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
+    LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
+    return false;
+  }
+  const bool ok = readItemContentsToStream(itemHref, destFile, 1024);
+  destFile.flush();
+  destFile.close();
+  if (!ok) Storage.remove(destPath.c_str());
+  return ok;
+}
+
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
   const std::string path = FsHelpers::normalisePath(itemHref);
   return ZipFile(filepath).getInflatedFileSize(path.c_str(), size);
@@ -1343,10 +1318,10 @@ std::vector<Epub::PrintedPageEntry> Epub::loadPrintedPageList() const {
 int Epub::resolveHrefToSpineIndex(const std::string& href) const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return -1;
 
-  // Extract filename (remove #anchor)
-  std::string target = href;
-  size_t hashPos = target.find('#');
-  if (hashPos != std::string::npos) target = target.substr(0, hashPos);
+  // Split before decoding so escaped '#' characters in filenames stay part of the path.
+  const size_t hashPos = href.find('#');
+  const std::string rawTarget = hashPos != std::string::npos ? href.substr(0, hashPos) : href;
+  const std::string target = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawTarget));
 
   // Same-file reference (anchor-only)
   if (target.empty()) return -1;

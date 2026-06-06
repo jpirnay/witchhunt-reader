@@ -14,11 +14,23 @@ static constexpr int32_t LARGE_IMAGE_PIXEL_THRESHOLD = 800 * 600;
 class ImageBlock final : public Block {
  public:
   ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText = "");
+  // Extended constructor used when lazy extraction is desired:
+  // imagePath is the SD cache destination; epubFilePath + epubEntryPath are the source.
+  ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText,
+             const std::string& epubFilePath, const std::string& epubEntryPath);
   ~ImageBlock() override = default;
+
+  // Return a new ImageBlock that renders a vertical crop of this image.
+  // srcYOffset: first source row to render; srcHeight: number of rows (must be > 0).
+  // The new block shares the same imagePath (and thus the same decoded cache file);
+  // only the rendering window differs.
+  std::unique_ptr<ImageBlock> makeCrop(int16_t srcYOffset, int16_t srcHeight) const;
 
   const std::string& getImagePath() const { return imagePath; }
   int16_t getWidth() const { return width; }
   int16_t getHeight() const { return height; }
+  // Rendered height: equals srcHeight when a crop is active, otherwise height.
+  int16_t getRenderedHeight() const { return srcHeight_ > 0 ? srcHeight_ : height; }
   const std::string& getAltText() const { return altText; }
 
   bool imageExists() const;
@@ -54,12 +66,19 @@ class ImageBlock final : public Block {
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 
  private:
-  std::string imagePath;
+  std::string imagePath;  // SD card destination path (may not exist until first render)
   std::string altText;
   int16_t width;
   int16_t height;
+  // Vertical crop window into the decoded image. srcYOffset_==0 && srcHeight_==0 means full image.
+  int16_t srcYOffset_ = 0;
+  int16_t srcHeight_ = 0;
+  std::string epubFilePath_;   // source EPUB on SD (empty if already extracted)
+  std::string epubEntryPath_;  // internal EPUB entry path (e.g. "OEBPS/images/foo.jpg")
 
-  mutable int8_t largeImageCached = 0;  // 0=unchecked, 1=large, -1=not large
+  // Ensure the SD cache file exists, extracting from the EPUB if necessary.
+  // Returns true if the file is ready for decoding.
+  bool ensureExtracted() const;
 
   void renderPlaceholder(GfxRenderer& renderer, int x, int y) const;
 };

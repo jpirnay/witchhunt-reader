@@ -76,33 +76,39 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
   const int drawX = xPos + xOffset;
   const int drawY = yPos + yOffset;
 
-  // Outer border
-  renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
+  if (hasBorder) {
+    renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
+  }
 
-  // Vertical column separators
-  int colX = drawX;
-  for (uint8_t c = 0; c < columnCount - 1; c++) {
-    colX += colWidths[c];
-    renderer.drawLine(colX, drawY, colX, drawY + totalHeight - 1, true);
+  // Pre-compute column X positions using integer division to avoid rounding drift across columns.
+  // Idea from uxjulia/CrossInk; rewritten for our layout model.
+  std::array<int, MAX_TABLE_COLS + 1> colX = {};
+  colX[0] = drawX;
+  for (uint8_t c = 0; c < columnCount; c++) {
+    colX[c + 1] = drawX + static_cast<int>((static_cast<uint32_t>(totalWidth) * (c + 1)) / columnCount);
+  }
+
+  if (hasBorder) {
+    for (uint8_t c = 1; c < columnCount; c++) {
+      renderer.drawLine(colX[c], drawY, colX[c], drawY + totalHeight - 1, true);
+    }
   }
 
   // Rows: text content + horizontal separators
   int rowY = drawY;
   for (size_t r = 0; r < rows.size(); r++) {
     const TableRow& row = rows[r];
-    int cellX = drawX;
     for (uint8_t c = 0; c < columnCount && c < static_cast<uint8_t>(row.cells.size()); c++) {
       const TableCell& cell = row.cells[c];
       int lineY = rowY + TABLE_CELL_PADDING;
       for (const auto& line : cell.lines) {
-        line->render(renderer, fontId, cellX + TABLE_CELL_PADDING, lineY);
+        line->render(renderer, fontId, colX[c] + TABLE_CELL_PADDING, lineY);
         lineY += renderer.getLineHeight(fontId);
       }
-      cellX += colWidths[c];
     }
     rowY += row.height;
-    // Draw horizontal separator (skip after last row — outer border covers it)
-    if (r + 1 < rows.size()) {
+    // Draw horizontal separator between rows (skip after last row)
+    if (hasBorder && r + 1 < rows.size()) {
       const int sepLineWidth = row.isHeaderRow ? 2 : 1;
       renderer.drawLine(drawX, rowY, drawX + totalWidth - 1, rowY, sepLineWidth, true);
     }
@@ -115,9 +121,7 @@ bool PageTableFragment::serialize(FsFile& file) {
   serialization::writePod(file, columnCount);
   serialization::writePod(file, totalWidth);
   serialization::writePod(file, totalHeight);
-  for (uint8_t c = 0; c < MAX_TABLE_COLS; c++) {
-    serialization::writePod(file, colWidths[c]);
-  }
+  serialization::writePod(file, hasBorder);
   const uint16_t rowCount = static_cast<uint16_t>(rows.size());
   serialization::writePod(file, rowCount);
   for (const auto& row : rows) {
@@ -153,10 +157,8 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
     return nullptr;
   }
 
-  std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
-  for (uint8_t c = 0; c < MAX_TABLE_COLS; c++) {
-    serialization::readPod(file, colWidths[c]);
-  }
+  bool hasBorder;
+  serialization::readPod(file, hasBorder);
 
   uint16_t rowCount;
   serialization::readPod(file, rowCount);
@@ -202,7 +204,7 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
   }
 
   return std::unique_ptr<PageTableFragment>(
-      new PageTableFragment(columnCount, totalWidth, totalHeight, colWidths, std::move(rows), xPos, yPos));
+      new PageTableFragment(columnCount, totalWidth, totalHeight, std::move(rows), xPos, yPos, hasBorder));
 }
 
 void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
@@ -272,9 +274,12 @@ bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages, const bool 
 
 void Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) const {
   for (auto& element : elements) {
-    if (element->getTag() == TAG_PageLine) {
-      element->render(renderer, fontId, xOffset, yOffset);
+    // Scan every non-image element so prewarm covers text from table fragments
+    // and other composite text containers, not only plain PageLine entries.
+    if (element->getTag() == TAG_PageImage) {
+      continue;
     }
+    element->render(renderer, fontId, xOffset, yOffset);
   }
 }
 

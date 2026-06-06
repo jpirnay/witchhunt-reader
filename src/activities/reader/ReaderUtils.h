@@ -139,7 +139,6 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   const int freq = SETTINGS.getRefreshFrequency();
   if (freq == 0) {
-    // Never full-refresh: always use fast display.
     renderer.displayBuffer();
     return;
   }
@@ -148,6 +147,24 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
     pagesUntilFullRefresh = freq;
   } else {
     renderer.displayBuffer();
+    pagesUntilFullRefresh--;
+  }
+}
+
+// Non-blocking variant: trigger the display refresh and return immediately.
+// completeDisplay() must be called later (on the same task) to wait for the
+// waveform and do post-refresh SPI work.
+inline void triggerWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
+  const int freq = SETTINGS.getRefreshFrequency();
+  if (freq == 0) {
+    renderer.triggerDisplay();
+    return;
+  }
+  if (pagesUntilFullRefresh <= 1) {
+    renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
+    pagesUntilFullRefresh = freq;
+  } else {
+    renderer.triggerDisplay();
     pagesUntilFullRefresh--;
   }
 }

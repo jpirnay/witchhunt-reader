@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../EpubImageManifest.h"
 #include "../FootnoteEntry.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
@@ -18,6 +19,7 @@
 #include "../css/CssStyle.h"
 
 class Page;
+class PageImage;  // forward declaration — Page.h included in .cpp
 class GfxRenderer;
 class Epub;
 
@@ -45,6 +47,38 @@ class ChapterHtmlSlimParser final : public Print {
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
+  int16_t lastBlockMarginBottom = 0;  // tracks previous block's marginBottom for CSS margin collapsing
+
+  // Inline image beside paragraph text (CSS float context)
+  // Fixed-size arrays — no heap allocation. Float nesting > 4 is pathological in practice.
+  static constexpr int kMaxFloatDepth = 4;
+  int floatDepth_ = 0;
+  int floatOpenDepths_[kMaxFloatDepth] = {};  // parser depth at which each float was opened
+  bool floatOpenSides_[kMaxFloatDepth] = {};  // true = right float, false = left float
+  struct PendingInlineImage {
+    std::string cachedPath;
+    std::string epubEntryPath;  // entry path within the EPUB zip
+    int16_t width = 0;
+    int16_t height = 0;
+    std::string alt;
+    bool active = false;
+    bool isRight = false;  // true when float: right
+    // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
+    // to avoid a redundant heap copy of a constant string.
+  };
+  PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
+  std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
+
+  // When an inline float image crosses a page boundary, the bottom crop is carried here
+  // so emitPage() can place it at the top of the new page.
+  struct ContinuationImage {
+    std::shared_ptr<ImageBlock> imageBlock;  // cropped tile (srcYOffset set)
+    int16_t width = 0;
+    int16_t renderedHeight = 0;  // height of this tile on the new page
+    bool active = false;
+    bool isRight = false;  // true when float: right
+  };
+  ContinuationImage continuationImage_;
   int fontId;
   float lineCompression;
   bool extraParagraphSpacing;
@@ -53,6 +87,7 @@ class ChapterHtmlSlimParser final : public Print {
   uint16_t viewportHeight;
   bool hyphenationEnabled;
   const CssParser* cssParser;
+  const EpubImageManifest* imageManifest;
   bool embeddedStyle;
   uint8_t imageRendering;
   std::string contentBase;
@@ -69,6 +104,8 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasStrikethrough = false, strikethrough = false;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
+    bool hasMarginLeft = false;
+    int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
   };
   std::vector<StyleStackEntry> inlineStyleStack;
   CssStyle currentCssStyle;
@@ -78,19 +115,29 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveStrikethrough = false;
   bool effectiveSup = false;
   bool effectiveSub = false;
+  int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Buffered table model — populated while inside <table>, emitted on </table>
   struct BufferedTableCell {
     std::unique_ptr<ParsedText> text;
     bool isHeader = false;
+    uint8_t colSpan = 1;
   };
   struct BufferedTableRow {
     std::vector<BufferedTableCell> cells;
-    bool isHeaderRow = false;  // true when all cells in this row are <th>
+    bool isHeaderRow = false;   // true when all cells in this row are <th>
+    uint8_t effectiveCols = 0;  // sum of colSpan values; tracks actual column footprint
+  };
+  struct DeferredTableImage {
+    std::string src;
+    std::string alt;
   };
   struct BufferedTable {
     std::vector<BufferedTableRow> rows;
-    int depth = 0;             // nesting depth; > 1 means we're inside a nested table
-    bool unsupported = false;  // true → emit as paragraphs instead of grid
+    std::vector<DeferredTableImage> deferredImages;  // images found in cells, emitted after the table
+    int depth = 0;                                   // nesting depth; > 1 means we're inside a nested table
+    bool unsupported = false;                        // true → emit as paragraphs instead of grid
+    bool hasBorder = true;                           // false when border="0" on the <table> element
+    uint8_t maxCols = 0;                             // max effectiveCols across all rows
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -99,6 +146,7 @@ class ChapterHtmlSlimParser final : public Print {
     int depth;
     bool isOrdered;
     int counter;
+    bool suppressMarker = false;  // true when list-style-type: none
   };
   std::vector<ListEntry> listStack;
 
@@ -183,11 +231,15 @@ class ChapterHtmlSlimParser final : public Print {
   void emitBufferedTable();
   void emitTableAsFragments(BufferedTable& table);
   void emitTableAsParagraphs(BufferedTable& table);
+  void emitDeferredTableImages(BufferedTable& table);
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
   void emitPage(uint32_t xhtmlByteOffset);
   void recordPageBreakLabel(const std::string& label);
+  // Attach the pending inline float image to `bs` and place it on the current page.
+  // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
+  void attachPendingFloatImage(BlockStyle& bs);
   // XML callbacks
   static void startElement(void* userData, const char* name, const char** atts);
   static void characterData(void* userData, const char* s, int len);
@@ -202,7 +254,7 @@ class ChapterHtmlSlimParser final : public Print {
       const std::function<void(std::unique_ptr<Page>)>& completePageFn, const bool embeddedStyle,
       const std::string& contentBase, const std::string& imageBasePath, const uint8_t imageRendering = 0,
       std::vector<std::string> tocAnchors = {}, const std::function<void(int)>& progressFn = nullptr,
-      const CssParser* cssParser = nullptr)
+      const CssParser* cssParser = nullptr, const EpubImageManifest* imageManifest = nullptr)
 
       : epub(epub),
         renderer(renderer),
@@ -217,6 +269,7 @@ class ChapterHtmlSlimParser final : public Print {
         completePageFn(completePageFn),
         progressFn(progressFn),
         cssParser(cssParser),
+        imageManifest(imageManifest),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),
         contentBase(contentBase),

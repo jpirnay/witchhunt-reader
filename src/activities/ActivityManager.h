@@ -99,11 +99,7 @@ class ActivityManager {
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : renderer(renderer),
-        mappedInput(mappedInput),
-        buttonEvents(globalButtonEvents()),
-        renderingMutex(xSemaphoreCreateMutex()) {
-    assert(renderingMutex != nullptr && "Failed to create rendering mutex");
+      : renderer(renderer), mappedInput(mappedInput), buttonEvents(globalButtonEvents()) {
     stackActivities.reserve(10);
   }
   ~ActivityManager() { assert(false); /* should never be called */ };

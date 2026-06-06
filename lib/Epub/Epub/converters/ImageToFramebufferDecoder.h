@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 
+#include "ImageDimensionsGuard.h"
+
 class GfxRenderer;
 
 struct ImageDimensions {

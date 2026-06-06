@@ -110,6 +110,12 @@ class EpubReaderActivity final : public Activity {
     void resolveInto(Section& section, int spineIndex) const;
   };
 
+  // Phase lifecycle for memory management at chapter boundaries.
+  // READING:      normal state — section loaded, SD font metadata resident
+  // PRECOMPILING: createSectionFile running — SD font metadata temporarily dropped
+  enum class ReaderPhase : uint8_t { READING, PRECOMPILING };
+  ReaderPhase readerPhase_ = ReaderPhase::READING;
+
   std::shared_ptr<Epub> epub;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;
@@ -118,6 +124,19 @@ class EpubReaderActivity final : public Activity {
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   bool pendingHalfRefreshAfterImagePage = false;
+  // X4 only: set after a grayscale AA pass completes so the next BW page turn
+  // uses HALF_REFRESH (BYPASS_RED) instead of a fast differential.
+  // The X4 controller has no internal "previous pixel state" register — after
+  // the grayscale waveform the panel is in a gray state but RED RAM holds the
+  // BW page. A fast differential would leave gray pixels undriven where
+  // old==new, causing overlay ghosting. HALF_REFRESH ignores RED RAM and
+  // drives every pixel cleanly from the new BW frame.
+  bool pendingHalfRefreshAfterGrayscale_ = false;
+  // True when secondary display buffer allocation failed; while set we prefer
+  // conservative refresh policy and skip grayscale AA to reduce ghosting.
+  bool secondaryBufferDegraded_ = false;
+  // Guard against repeated reboot attempts in a single reader session.
+  bool fragmentationRecoveryRestartAttempted_ = false;
   // When true, large images on the current page are decoded instead of shown as placeholders.
   // Reset to false on every page turn so the next image page starts with a placeholder again.
   bool forceLoadLargeImages = false;
@@ -130,11 +149,11 @@ class EpubReaderActivity final : public Activity {
     unsigned long prewarmMs = 0UL;
     unsigned long bwRenderMs = 0UL;
     unsigned long displayMs = 0UL;
-    unsigned long bwStoreMs = 0UL;    // unused (sequential path)
-    unsigned long grayLsbMs = 0UL;    // LSB+MSB render+copy (planes phase)
-    unsigned long grayMsbMs = 0UL;    // unused (sequential path)
-    unsigned long grayDisplayMs = 0UL; // displayGrayBuffer() waveform
-    unsigned long bwRestoreMs = 0UL;  // BW re-render + cleanupGrayscaleWithFrameBuffer()
+    unsigned long bwStoreMs = 0UL;      // unused (sequential path)
+    unsigned long grayLsbMs = 0UL;      // LSB+MSB render+copy (planes phase)
+    unsigned long grayMsbMs = 0UL;      // unused (sequential path)
+    unsigned long grayDisplayMs = 0UL;  // displayGrayBuffer() waveform
+    unsigned long bwRestoreMs = 0UL;    // BW re-render + cleanupGrayscaleWithFrameBuffer()
     unsigned long totalMs = 0UL;
   };
   struct LastRenderStats {
@@ -207,10 +226,34 @@ class EpubReaderActivity final : public Activity {
     bool ready = false;
     int spineIndex = -1;
     int pageIndex = -1;
+    unsigned long renderDurationMs = 0UL;
+    unsigned long completedAtMs = 0UL;
   };
   PreRenderedPage preRenderedPage;
+  struct PageTurnStatsWindow {
+    uint16_t turns = 0;
+    uint16_t preRenderHits = 0;
+    uint16_t preRenderMisses = 0;
+    unsigned long totalPreRenderMs = 0UL;
+    unsigned long totalIdleSlackMs = 0UL;
+  };
+  static constexpr uint16_t PAGE_TURN_STATS_WINDOW_SIZE = 10;
+  PageTurnStatsWindow pageTurnStatsWindow;
   // Set by render() after a normal page render to request a pre-render of the next page.
   bool pendingPreRender = false;
+  // Deferred grayscale (Phase 8): after the BW display pass, defer the AA render until the
+  // next idle loop tick (no navigation input pending). This makes rapid page turns feel faster
+  // — only the BW pass runs while flipping; AA runs once when the user pauses.
+  // Cleared by loop() after running the deferred pass, and on every page turn.
+  struct PendingGrayscale {
+    bool active = false;
+    std::shared_ptr<Page> page;  // page whose text needs the AA pass
+    int fontId = 0;
+    int marginLeft = 0;
+    int contentTop = 0;
+    bool fastLut = false;
+  };
+  PendingGrayscale pendingGrayscale_;
   // Set by pageTurn() fast path to tell render() the frame buffer already holds the next page
   // content and only the status bar + display flush are needed.
   bool usePreRenderedBuffer = false;
@@ -257,7 +300,7 @@ class EpubReaderActivity final : public Activity {
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
 
-  void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
+  void renderContents(RenderLock& lock, std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   // Renders page content into the frame buffer (prewarm + BW pass) without drawing the status bar
   // or flushing to the display. Used by the pre-render pass so the status bar can be superimposed
@@ -280,7 +323,7 @@ class EpubReaderActivity final : public Activity {
   mutable int lastStatusBarPage = -1;
   mutable int lastStatusBarBattery = -1;
   mutable int lastStatusBarClockMinute = -1;
-  void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
+  bool maybeRestartForFragmentedHeap(uint32_t freeHeap, uint32_t contigHeap);
   void saveProgress(int spineIndex, int currentPage, int pageCount);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);

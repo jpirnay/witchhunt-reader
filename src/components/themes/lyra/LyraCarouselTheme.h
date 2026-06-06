@@ -73,6 +73,7 @@ class LyraCarouselTheme : public LyraTheme {
                          const char* hintBtn3, const char* hintBtn4) const override;
   void onBookWillClose(const std::string& path, Epub* epub, Xtc* xtc, Txt* txt) override;
   void invalidateFrameCache() override;
+  void markFrameCacheDirty() override;
 
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,

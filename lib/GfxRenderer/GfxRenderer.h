@@ -61,7 +61,7 @@ class GfxRenderer {
   size_t bwBufferChunkSize = BW_BUFFER_CHUNK_SIZE;
   std::vector<uint8_t*> bwBufferChunks;
   std::map<int, EpdFontFamily> fontMap;
-  // Mutable because ensureSdCardFontReady() is const (called from layout code that
+  // Mutable because ensureFontReady() is const (called from layout code that
   // holds a const GfxRenderer&) but triggers SD card reads and heap allocation
   // inside the SdCardFont objects. Same pragmatic compromise as fontCacheManager_.
   mutable std::map<int, SdCardFont*> sdCardFonts_;
@@ -108,20 +108,30 @@ class GfxRenderer {
   void removeFont(int fontId) { fontMap.erase(fontId); }
   void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
+  bool isFontCacheScanning() const;
   const std::map<int, EpdFontFamily>& getFontMap() const { return fontMap; }
   void registerSdCardFont(int fontId, SdCardFont* font) { sdCardFonts_[fontId] = font; }
   void unregisterSdCardFont(int fontId) { sdCardFonts_.erase(fontId); }
   void clearSdCardFonts() { sdCardFonts_.clear(); }
   const std::map<int, SdCardFont*>& getSdCardFonts() const { return sdCardFonts_; }
   bool isSdCardFont(int fontId) const { return sdCardFonts_.count(fontId) > 0; }
-  // Ensure SD card font glyph data is loaded for the given text. Called from layout code
-  // (which holds a const GfxRenderer&) before measuring word widths. Safe to call on
-  // non-SD fonts (no-op).
-  void ensureSdCardFontReady(int fontId, const char* utf8Text) const;
-  // Clear the cumulative SD card font metadata cache built up by repeated
-  // ensureSdCardFontReady() calls. Call between sections to bound the cumulative
-  // codepoint set growth across pagination. Safe to call when no SD font is active.
-  void clearSdCardFontAccumulation() const;
+
+  // Ensure glyph metrics are loaded for the given text before layout measurement.
+  // No-op for built-in fonts (map lookup finds nothing and returns immediately).
+  // For SD/flash fonts: reads glyph metrics (no bitmaps) for all codepoints in text.
+  void ensureFontReady(int fontId, const char* utf8Text) const;
+
+  // Clear the cumulative font metadata cache built up across paragraphs.
+  // No-op when no SD font is active.
+  void clearFontAccumulation() const;
+
+  // Phase lifecycle: drop layout-phase metadata to free heap before createSectionFile().
+  // No-op when no SD font is active or font is mmap'd (metadata is always accessible).
+  void dropFontMetadata() const;
+
+  // Restore layout-phase metadata after createSectionFile().
+  // Returns true if all fonts reloaded successfully (always true for mmap fonts).
+  bool restoreFontMetadata() const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
   void setOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
@@ -135,8 +145,38 @@ class GfxRenderer {
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
-  // EXPERIMENTAL: Windowed update - display only a rectangular region
-  // void displayWindow(int x, int y, int width, int height) const;
+
+  // Temporarily free the secondary (previous-frame) buffer (~52 KB) during
+  // operations that don't need it (e.g. chapter compilation). BW rendering
+  // continues normally. Grayscale AA and (on X4) fast differential are
+  // unavailable until reallocSecondaryBuffer() is called.
+  bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
+  bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
+  bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
+  bool isX3() const { return display.deviceIsX3(); }
+
+  // Non-blocking display split.
+  // triggerDisplay() sends pixels, issues the refresh command and returns
+  // immediately — the waveform runs in hardware. frameBuffer is safe to
+  // overwrite after this returns. completeDisplay() genuinely sleeps (via
+  // FreeRTOS semaphore) until BUSY deasserts, then does post-waveform work.
+  // Both must be called from the render task; no other task may call SPI
+  // display methods between triggerDisplay() and completeDisplay().
+  void triggerDisplay(HalDisplay::RefreshMode mode = HalDisplay::FAST_REFRESH, bool turnOffScreen = false) const {
+    display.triggerDisplay(mode, turnOffScreen);
+    // triggerDisplay swaps display buffers; keep renderer's cached pointer in
+    // sync so subsequent draws/grayscale passes target the active write buffer.
+    frameBuffer = display.getFrameBuffer();
+  }
+  void completeDisplay() const {
+    display.completeDisplay();
+    // Match displayBuffer(): reseed RED RAM from the current BW frame after the
+    // refresh pipeline settles. On X3 this is a no-op; on X4 it restores the
+    // expected differential baseline for the next fast update.
+    display.syncRedRamFromFrameBuffer();
+  }
+  bool isRefreshPending() const { return display.isRefreshPending(); }
+  void displayWindow(int x, int y, int width, int height, bool turnOffScreen = false) const;
   void invertScreen() const;
   void clearScreen(uint8_t color = 0xFF) const;
   void getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const;
@@ -166,6 +206,11 @@ class GfxRenderer {
 
   // Text
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const;
+  int getLineHeightScaled(int fontId, float scale) const;
+  int getFontAscenderSizeScaled(int fontId, float scale) const;
+  void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                      float scale) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
@@ -310,6 +355,29 @@ class GfxRenderer {
   // Low level functions
   uint8_t* getFrameBuffer() const;
   size_t getBufferSize() const;
+
+  // Release both display frame buffers back to the heap (~96-104KB total).
+  // Nulls the local frameBuffer pointer too so any accidental render attempt
+  // fails visibly rather than corrupting freed memory.
+  // Only valid after the final displayBuffer(); the device must reboot before
+  // any display operation is attempted again.
+  void releaseFrameBuffers() {
+    display.releaseBuffers();
+    frameBuffer = nullptr;
+  }
+
+  // Release both display buffers and install a caller-owned scratch buffer as
+  // the active framebuffer. Pixel writes during the warm pass land in scratch
+  // (discarded on reboot) while the decoder can use the freed ~96 KB for its
+  // own allocation. scratchSize must be >= panelWidthBytes * panelHeight.
+  // The device must reboot before any display operation is attempted again.
+  bool releaseFrameBuffersWithScratch(uint8_t* scratch, size_t scratchSize) {
+    if (!scratch || scratchSize < static_cast<size_t>(panelWidthBytes) * panelHeight) return false;
+    display.releaseBuffers();
+    memset(scratch, 0, scratchSize);
+    frameBuffer = scratch;
+    return true;
+  }
   uint16_t getDisplayWidth() const { return panelWidth; }
   uint16_t getDisplayHeight() const { return panelHeight; }
   uint16_t getDisplayWidthBytes() const { return panelWidthBytes; }

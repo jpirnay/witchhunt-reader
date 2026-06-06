@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <new>
 
@@ -25,6 +26,16 @@ class SdCardFont {
   // Returns true on success.
   bool load(const char* path);
 
+  // Load from a flash partition mmap pointer (e.g. from FlashFontPartition::mmap()).
+  // fullIntervals and kern/lig tables are read directly from the mmap region — no
+  // heap allocation for metadata.  The mmap pointer must remain valid for the
+  // lifetime of this SdCardFont.  unloadMetadata() and reloadMetadata() are no-ops
+  // for mmap-loaded fonts (metadata is always present in the flash mapping).
+  // sdPath must be the SD path of the same .cpfont — it is used by the bitmap
+  // overflow handler to load glyph bitmaps from SD at draw time.
+  // Returns true on success.
+  bool loadFromMmap(const uint8_t* base, size_t size, const char* sdPath);
+
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
   // Default 0x0F = all present styles.
@@ -39,10 +50,22 @@ class SdCardFont {
   void clearCache();
 
   // Soft cache reset: drop the cumulative metadata-only prewarm cache built
-  // up by repeated layout-time ensureSdCardFontReady() calls. Bitmap-mode
+  // up by repeated layout-time ensureFontReady() calls. Bitmap-mode
   // (FULL) caches are also dropped. Call this between sections to bound the
   // cumulative cp set growth across pagination.
   void clearAccumulation();
+
+  // Phase lifecycle: drop all layout-phase metadata (fullIntervals + kern/lig tables)
+  // to free ~40–50 KB before createSectionFile(). File offsets are preserved so
+  // reloadMetadata() can restore everything without re-reading the file header.
+  // Mini buffers are NOT affected — those are already managed per-section.
+  // No-op if not loaded.
+  void unloadMetadata();
+
+  // Restore layout-phase metadata after createSectionFile() completes.
+  // Re-reads fullIntervals and kern/lig tables from SD using stored file offsets.
+  // Returns true on success; false leaves the font in a degraded (stub-only) state.
+  bool reloadMetadata();
 
   // Returns pointer to the managed EpdFont for a given style.
   // Returns nullptr if the style is not present.
@@ -137,7 +160,7 @@ class SdCardFont {
     // Cache mode for the current mini buffers:
     //   NONE     = empty / freshly cleared, no glyphs loaded
     //   METADATA = miniGlyphs has glyph metrics only (no bitmap data); built
-    //              up incrementally across paragraph-level ensureSdCardFontReady
+    //              up incrementally across paragraph-level ensureFontReady
     //              calls during pagination. Safe to merge new cps into.
     //   FULL     = miniGlyphs + miniBitmap loaded, page-scoped (built once per
     //              page render). Layout-only prewarm calls are no-ops in this
@@ -152,6 +175,11 @@ class SdCardFont {
     static constexpr uint8_t MAX_REPORTED_MISSES = 32;
     uint32_t reportedMisses[MAX_REPORTED_MISSES] = {};
     uint8_t reportedMissCount = 0;
+
+    // Debug counters for on-demand glyph misses (glyphMissHandler). Used to
+    // throttle log volume while still preserving visibility into overflow churn.
+    uint32_t onDemandMissCount = 0;
+    uint16_t onDemandMissLogged = 0;
 
     // Per-page mini kern matrix (built by buildMiniKernMatrix on each full
     // prewarm). miniKernLeftClasses/miniKernRightClasses map ONLY the codepoints
@@ -192,6 +220,7 @@ class SdCardFont {
     uint8_t* bitmap = nullptr;
     uint32_t codepoint = 0;
     uint8_t styleIdx = 0;
+    bool occupied = false;
   };
   OverflowEntry overflow_[OVERFLOW_CAPACITY] = {};
   uint32_t overflowCount_ = 0;
@@ -200,6 +229,17 @@ class SdCardFont {
   Stats stats_;
   uint32_t contentHash_ = 0;
   bool loaded_ = false;
+
+  // True when persistent metadata (fullIntervals, kernLeft/RightClasses,
+  // ligaturePairs) is heap-allocated and must be delete[]'d on free.
+  // False when loaded via loadFromMmap() — those pointers alias the flash
+  // partition mmap region and must never be freed.
+  bool metadataOwned_ = true;
+
+  // Base pointer of the mmap'd .cpfont data (the value passed to loadFromMmap).
+  // Non-null only when metadataOwned_ == false. Used to read sections (e.g. the
+  // kern matrix) directly from flash without SD I/O.
+  const uint8_t* mmapDataBase_ = nullptr;
 
   // Per-style helpers
   static bool allCpsCovered(const PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);

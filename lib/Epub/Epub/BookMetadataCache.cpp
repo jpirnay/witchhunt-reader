@@ -11,7 +11,7 @@
 #include "FsHelpers.h"
 
 namespace {
-constexpr uint8_t BOOK_CACHE_VERSION = 10;
+constexpr uint8_t BOOK_CACHE_VERSION = 11;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -226,6 +226,8 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     spineFile.seek(0);
     for (int i = 0; i < spineCount; i++) {
       readSpineEntry(spineFile, spineScratch);
+      // Cached hrefs are already decoded (see ContentOpfParser); decoding again would corrupt
+      // filenames that legitimately contain '%' sequences.
       FsHelpers::normalisePath(spineScratch.href, pathScratch);
 
       ZipFile::SizeTarget t;

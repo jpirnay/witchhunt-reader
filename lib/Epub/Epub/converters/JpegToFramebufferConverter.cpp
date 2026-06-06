@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <JPEGDEC.h>
 #include <Logging.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <limits>
@@ -193,10 +194,6 @@ constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
 #define JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP (MIN_FREE_HEAP_FOR_JPEG + 8 * 1024)
 #endif
 
-#ifndef JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC
-#define JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC (48 * 1024)
-#endif
-
 size_t jpegCacheBytes(int width, int height) {
   return static_cast<size_t>((width + 3) / 4) * static_cast<size_t>(height);
 }
@@ -230,9 +227,11 @@ bool shouldForceBayerDither(const RenderConfig& config) {
   if (!config.useDithering) return false;
   if (config.ditherMode == ImageDitherMode::Bayer) return false;
 
+  // Use getFreeHeap() only — getMaxAllocHeap() walks the TLSF free-block chain
+  // and crashes if the heap is corrupt (possible after failed image decodes under
+  // pressure). The free-heap threshold is conservative enough as a sole guard here.
   const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxAlloc = ESP.getMaxAllocHeap();
-  return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP || maxAlloc < JPEG_DITHER_LOW_MEM_MIN_MAX_ALLOC;
+  return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP;
 }
 
 bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions& out) {
@@ -348,6 +347,9 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer) return 0;
 
+  // Feed the interrupt WDT every MCU row — large JPEGs can take many seconds.
+  esp_task_wdt_reset();
+
   // In EIGHT_BIT_GRAYSCALE mode, pPixels contains 8-bit grayscale values
   // Buffer is densely packed: stride = pDraw->iWidth, valid columns = pDraw->iWidthUsed
   uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
@@ -357,7 +359,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   if (stride <= 0 || blockH <= 0 || validW <= 0) return 1;
 
-  const bool caching = ctx->caching;
+  bool caching = ctx->caching;
   const int32_t fineScaleFPX = ctx->fineScaleFPX;
   const int32_t invScaleFPX = ctx->invScaleFPX;
   const int32_t fineScaleFPY = ctx->fineScaleFPY;
@@ -394,9 +396,23 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  // The cache streams to disk one MCU-row band at a time. Flushing rows below
+  // this block (raster order guarantees they are final) repositions the band;
+  // the band-relative origin/extent passed to init() then map screen rows to
+  // the small streaming buffer rather than a full-image one. If a flush write
+  // fails, stop caching for the rest of this decode (and let finalize() drop
+  // the partial file) rather than writing past the band buffer.
+  //
+  // Ported from upstream commit d9bcef7a (crosspoint-reader#2230).
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
+    if (!ctx->cache.advanceTo(dstYStart)) {
+      caching = false;
+      ctx->caching = false;
+    } else {
+      cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->config->y + ctx->cache.bandStart,
+              ctx->cache.width, ctx->cache.bandRows);
+    }
   }
 
   // === 1:1 fast path: no scaling math ===
@@ -408,7 +424,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const uint8_t* row = &pixels[(dstY - blockY) * stride];
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
@@ -440,7 +456,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       prepareDitherRow(*ctx, dstY);
 #endif
       pw.beginRow(outY);
-      if (caching) cw.beginRow(outY, ctx->config->y);
+      if (caching) cw.beginRow(outY);
       const int32_t srcFyFP = dstY * invScaleFPY;
       const int32_t fy = srcFyFP & FP_MASK;
       const int32_t fyInv = FP_ONE - fy;
@@ -523,7 +539,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     prepareDitherRow(*ctx, dstY);
 #endif
     pw.beginRow(outY);
-    if (caching) cw.beginRow(outY, ctx->config->y);
+    if (caching) cw.beginRow(outY);
     const int32_t srcFyFP = dstY * invScaleFPY;
     int ly = (srcFyFP >> FP_SHIFT) - blockY;
     if (ly < 0) ly = 0;
@@ -549,6 +565,39 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
 }  // namespace
 
+bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 4) return false;
+  if (buf[0] != 0xFF || buf[1] != 0xD8) return false;
+
+  size_t pos = 2;
+  while (pos + 3 < len) {
+    if (buf[pos] != 0xFF) {
+      pos++;
+      continue;
+    }
+    pos++;
+    uint8_t marker = buf[pos++];
+    while (marker == 0xFF && pos < len) marker = buf[pos++];
+    if (marker == 0x00 || marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) continue;
+    if (pos + 1 >= len) break;
+    const uint16_t segLen = (static_cast<uint16_t>(buf[pos]) << 8) | buf[pos + 1];
+    if (segLen < 2) break;
+    const bool isSof = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
+                       (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
+    if (isSof) {
+      if (pos + 6 >= len) return false;
+      const uint16_t h = (static_cast<uint16_t>(buf[pos + 3]) << 8) | buf[pos + 4];
+      const uint16_t w = (static_cast<uint16_t>(buf[pos + 5]) << 8) | buf[pos + 6];
+      if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+      out.width = static_cast<int16_t>(w);
+      out.height = static_cast<int16_t>(h);
+      return true;
+    }
+    pos += segLen;
+  }
+  return false;
+}
+
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   if (!readJpegDimensionsFromHeader(imagePath, out)) {
     return false;
@@ -565,6 +614,34 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
     LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_JPEG);
     return false;
+  }
+
+  // Validate JPEG markers before handing off to JPEGDEC. A truncated file left
+  // by a prior crashed extraction session will have valid SOF headers but no EOI,
+  // causing JPEGDEC to hard-fault on the garbage entropy data. Delete and bail so
+  // the next ensureExtracted() re-extracts the file cleanly.
+  {
+    FsFile f;
+    if (Storage.openFileForRead("JPG", imagePath, f)) {
+      const size_t fileSize = f.size();
+      uint8_t magic[2] = {0, 0};
+      bool valid = false;
+      if (fileSize >= 4 && f.read(magic, 2) == 2 && magic[0] == 0xFF && magic[1] == 0xD8) {
+        if (f.seek(fileSize - 2)) {
+          uint8_t tail[2] = {0, 0};
+          if (f.read(tail, 2) == 2 && tail[0] == 0xFF && tail[1] == 0xD9) {
+            valid = true;
+          }
+        }
+      }
+      f.close();
+      if (!valid) {
+        LOG_ERR("JPG", "JPEG integrity check failed (truncated/corrupt): %s — deleting for re-extraction",
+                imagePath.c_str());
+        Storage.remove(imagePath.c_str());
+        return false;
+      }
+    }
   }
 
   std::unique_ptr<JPEGDEC> jpeg(new (std::nothrow) JPEGDEC());
@@ -659,18 +736,22 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
   jpeg->setUserPointer(&ctx);
 
-  // Allocate cache buffer using final output dimensions
+  // Start streaming the pixel cache to disk. The band only needs to hold the
+  // tallest single decode block: a JPEGDEC MCU cell is at most 16 scaled-source
+  // rows tall, which our fine scale maps to this many output rows.
+  // (See PixelCache for why streaming replaced a full-image buffer; ported from
+  // upstream commit d9bcef7a, crosspoint-reader#2230.)
   ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight);
   if (ctx.caching) {
-    if (!ctx.cache.allocate(destWidth, destHeight, config.x, config.y)) {
-      LOG_ERR("JPG", "Failed to allocate cache buffer, continuing without caching");
+    const int maxBlockDstRows = (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
+    if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {
+      LOG_ERR("JPG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
     }
   }
 
   if (shouldForceBayerDither(config)) {
-    LOG_DBG("JPG", "Low-memory mode: forcing Bayer dithering (%u free, %u max alloc)",
-            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    LOG_DBG("JPG", "Low-memory mode: forcing Bayer dithering (%u free)", static_cast<unsigned>(ESP.getFreeHeap()));
     ctx.effectiveDitherMode = ImageDitherMode::Bayer;
   }
 
@@ -713,15 +794,17 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
     jpeg->close();
+    if (ctx.caching) ctx.cache.abort();
     return false;
   }
 
   jpeg->close();
   LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms", decodeTime);
 
-  // Write cache file if caching was enabled
+  // Finalize the streamed cache file. Note: a flush failure mid-decode clears
+  // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching) {
-    ctx.cache.writeToFile(config.cachePath);
+    ctx.cache.finalize();
   }
 
   return true;

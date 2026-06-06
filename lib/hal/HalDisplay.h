@@ -37,6 +37,15 @@ class HalDisplay {
 
   void displayBuffer(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   void refreshDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  void displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen = false);
+
+  // Non-blocking display split — see EInkDisplay.h for full contract.
+  // triggerDisplay() sends pixels + triggers waveform, swaps buffers, returns.
+  // completeDisplay() sleeps (via FreeRTOS semaphore) until BUSY deasserts,
+  // then does post-waveform SPI work. Both must be called from the render task.
+  void triggerDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+  void completeDisplay();
+  bool isRefreshPending() const;
 
   // Request extra X3 ghost-clearing on the next display refresh.
   // No-op on non-X3 panels. Consumed by the next displayBuffer/refreshDisplay call.
@@ -48,6 +57,27 @@ class HalDisplay {
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
+  // Release both frame buffers back to the heap (~52KB on X3, ~48KB on X4 each,
+  // so ~104KB / ~96KB total). Call only after the final displayBuffer(); the
+  // e-ink controller retains the image in its own RAM. No display operations
+  // may be performed after this. The device must reboot before display resumes.
+  void releaseBuffers();
+
+  // Release only the secondary (previous-frame) buffer to free ~52 KB of heap
+  // temporarily — e.g. during chapter compilation. BW rendering continues;
+  // on X4 fast differential degrades to half/full until restored; on X3
+  // fast differential is unaffected. Grayscale AA is unavailable until restored.
+  // Returns true if the buffer was freed (false if already released).
+  bool releaseSecondaryBuffer();
+
+  // Restore the secondary buffer freed by releaseSecondaryBuffer().
+  // Must be called before any grayscale AA pass or (on X4) fast differential.
+  // Returns true on success, false on OOM.
+  bool reallocSecondaryBuffer();
+
+  // Returns true when the secondary (previous-frame) buffer is allocated.
+  bool hasSecondaryBuffer() const;
+
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);
@@ -56,6 +86,9 @@ class HalDisplay {
   void cleanupGrayscaleWithPreviousBuffer();
 
   void displayGrayBuffer(bool turnOffScreen = false);
+
+  // Returns true when the device is an X3 (X4 returns false).
+  bool deviceIsX3() const;
 
   // X3-only knob: pick between the OEM 53-frame grayscale LUT (default, slow
   // and accurate) and the 7-frame community LUT (fast, slightly darker

@@ -89,10 +89,27 @@ const uint8_t* iconBitmapFor(UIIcon icon) {
 // Static frame cache — survives HomeActivity re-creation so that returning to
 // home after settings doesn't re-read covers from SD.
 // Freed explicitly via invalidateFrameCache() before entering the reader.
+//
+// Only the cover tile region is cached, not the full framebuffer.  The header,
+// menu, and button hints are always regenerated in tryFastHomeRender anyway, so
+// caching them wastes ~10 KB.  Restore path: clearScreen() (white) then
+// copyBufferToRegion() to paint the covers back.
+//
+// Cover region: x=0, y=(homeTopPadding - kCenterOutlineW), w=screenWidth,
+// h=homeCoverTileHeight + kCenterOutlineW + dots + title lines + margin.
+// The byte size is queried at runtime from the renderer so it adapts to X3/X4.
 // ---------------------------------------------------------------------------
 constexpr int kFrameCount = 1;
 uint8_t* gCachedFrames[kFrameCount] = {};
 int gCachedFrameBookIdx[kFrameCount] = {-1};
+size_t gCachedFrameBytes = 0;  // region byte size (set on first allocation)
+int gCachedFrameRegionY = 0;   // region top (logical)
+int gCachedFrameRegionH = 0;   // region height (logical)
+// Dirty flag: set when a new cover BMP was written to disk but the cached frame
+// still shows the old placeholder.  Checked at the top of tryFastHomeRender so
+// multiple covers arriving between renders coalesce into a single cache rebuild
+// instead of triggering one SD re-read per cover.
+bool gFrameCacheDirty = false;
 int gCachedFrameCount = 0;
 std::string gCacheKey;
 
@@ -111,7 +128,9 @@ void freeFrameCache() {
     }
     gCachedFrameBookIdx[i] = -1;
   }
+  gCachedFrameBytes = 0;
   gCachedFrameCount = 0;
+  gFrameCacheDirty = false;
   gCacheKey.clear();
 }
 }  // namespace
@@ -122,6 +141,7 @@ void freeFrameCache() {
 void LyraCarouselTheme::setPreRenderIndex(int idx) { lastCarouselSelectorIndex = idx; }
 
 void LyraCarouselTheme::invalidateFrameCache() { freeFrameCache(); }
+void LyraCarouselTheme::markFrameCacheDirty() { gFrameCacheDirty = true; }
 
 void LyraCarouselTheme::onBookWillClose(const std::string& /*path*/, Epub* epub, Xtc* xtc, Txt* /*txt*/) {
   if (epub) {
@@ -153,7 +173,8 @@ void renderOneCarouselFrame(GfxRenderer& renderer, const std::vector<RecentBook>
       renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight}, recentBooks, bookCount, d1, d2,
       d3, []() { return true; });
 
-  memcpy(gCachedFrames[slotIdx], renderer.getFrameBuffer(), renderer.getBufferSize());
+  renderer.copyRegionToBuffer(0, gCachedFrameRegionY, pageWidth, gCachedFrameRegionH, gCachedFrames[slotIdx],
+                              gCachedFrameBytes);
   gCachedFrameBookIdx[slotIdx] = bookIdx;
 }
 
@@ -196,9 +217,18 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
-  const size_t bufferSize = renderer.getBufferSize();
   uint8_t* frameBuffer = renderer.getFrameBuffer();
   if (!frameBuffer) return false;
+
+  // Cover tile region: full width, from just above the centre cover outline to
+  // just below the author/title text.  Everything outside this region is always
+  // white — clearScreen() provides the background; header/menu/hints are drawn
+  // fresh every call — so we only need to cache the cover tile itself.
+  // This saves ~10 KB vs caching the full framebuffer (~52 KB on X3, ~48 KB on X4).
+  const int regionY = metrics.homeTopPadding - kCenterOutlineW;
+  const int regionH = metrics.homeCoverTileHeight + kCenterOutlineW + 8 + kDotSize + 6 +
+                      renderer.getLineHeight(kTitleFontId) + 2 + renderer.getLineHeight(kTitleFontId) + 4;
+  const size_t regionBytes = renderer.getRegionByteSize(0, regionY, pageWidth, regionH);
 
   // Build cache key from book paths
   std::string newKey;
@@ -208,14 +238,26 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     newKey += '\0';
   }
 
+  // If covers were written to disk since the last render, free the stale cached
+  // frame so the rebuild path below picks up the new BMPs.  Multiple dirty marks
+  // between renders coalesce here into one single rebuild.
+  if (gFrameCacheDirty) {
+    freeFrameCache();  // sets gFrameCacheDirty = false
+  }
+
   if (newKey != gCacheKey || gCachedFrameCount == 0) {
-    // Free old cache and allocate fresh frames
+    // Free old cache and allocate fresh region buffers.
     freeFrameCache();
+    if (regionBytes == 0) return false;
+    gCachedFrameRegionY = regionY;
+    gCachedFrameRegionH = regionH;
+    gCachedFrameBytes = regionBytes;
     const int frameCount = std::min(bookCount, kFrameCount);
     for (int i = 0; i < frameCount; ++i) {
-      gCachedFrames[i] = static_cast<uint8_t*>(malloc(bufferSize));
+      gCachedFrames[i] = static_cast<uint8_t*>(malloc(regionBytes));
       if (!gCachedFrames[i]) {
-        LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for frame %d", i);
+        LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d (%u bytes)", i,
+                static_cast<unsigned>(regionBytes));
         freeFrameCache();
         return false;
       }
@@ -235,9 +277,9 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     slotIdx = 0;
   }
   if (!gCachedFrames[slotIdx]) {
-    gCachedFrames[slotIdx] = static_cast<uint8_t*>(malloc(bufferSize));
+    gCachedFrames[slotIdx] = static_cast<uint8_t*>(malloc(gCachedFrameBytes));
     if (!gCachedFrames[slotIdx]) {
-      LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for frame %d", slotIdx);
+      LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d", slotIdx);
       return false;
     }
   }
@@ -245,7 +287,10 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     renderOneCarouselFrame(renderer, recentBooks, centerIdx, slotIdx, metrics);
   }
 
-  memcpy(frameBuffer, gCachedFrames[slotIdx], bufferSize);
+  // Restore: clear screen to white, then paint the cached cover region back.
+  renderer.clearScreen();
+  renderer.copyBufferToRegion(0, gCachedFrameRegionY, pageWidth, gCachedFrameRegionH, gCachedFrames[slotIdx],
+                              gCachedFrameBytes);
   UITheme::getInstance().getTheme().drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding},
                                                nullptr);
 

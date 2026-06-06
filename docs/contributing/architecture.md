@@ -208,6 +208,14 @@ When editing related source assets, regenerate via normal build steps/scripts.
 - main loop responsiveness matters for input, power handling, and watchdog safety
 - background/network flows must cooperate with sleep and loop timing logic
 
+For deeper design documentation on the memory-critical subsystems:
+
+- [Heap and Data Structure Design](./heap-and-data-structures.md) — allocation rules, ZipFile streaming, CSS index flat array
+- [Temporary Memory Increase Logic](./temporary-memory-increase.md) — secondary buffer release/realloc, degraded mode, pre-reboot scratch path
+- [Section Indexing Workflow](./section-indexing.md) — property hash, cache file structure, warm image pass, silent next-chapter indexing
+- [Flash Font Partition](./flash-font-partition.md) — raw partition layout, write/mmap API, kern matrix fast path
+- [Font Cache Structures](./font-cache-structures.md) — PerStyle tiers, ownership flags, mini prewarm lifecycle
+
 ## Scope guardrails
 
 Before implementing larger ideas, check:

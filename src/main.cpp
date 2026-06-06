@@ -133,9 +133,14 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 // SilentRestart.h definitions. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
+RTC_NOINIT_ATTR uint32_t heapRecoveryRestartLatch;
+// Single-shot latch for the boot-time heap integrity recovery restart.
+// Prevents an infinite reset loop if the heap is still corrupt after one clean restart.
+RTC_NOINIT_ATTR uint32_t heapCorruptionBootLatch;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
+constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -174,6 +179,22 @@ void silentRestartToReader() {
   LOG_DBG("MAIN", "Silent restart (target=reader)");
   delay(50);
   ESP.restart();
+}
+
+bool trySilentRestartToReaderForHeapRecovery() {
+  if (deepSleepInProgress) return false;  // sleeping supersedes the heap-defrag reboot
+  if (heapRecoveryRestartLatch == HEAP_RECOVERY_RESTART_LATCH_MAGIC) {
+    LOG_ERR("MAIN", "Heap-recovery restart suppressed by safety latch");
+    return false;
+  }
+  heapRecoveryRestartLatch = HEAP_RECOVERY_RESTART_LATCH_MAGIC;
+  globalReadingSessionTracker().end();
+  silentRebootTarget = SILENT_REBOOT_TARGET_READER;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_ERR("MAIN", "Silent restart (target=reader, heap recovery)");
+  delay(50);
+  ESP.restart();
+  return true;
 }
 
 // ---- Quick Resume framebuffer persistence ----
@@ -223,6 +244,20 @@ static bool loadSleepFrameBuffer() {
 // Set near the end of setup() so a wake-press held a bit too long does not bounce straight
 // back into deep sleep before the user sees the page.
 static unsigned long allowSleepAt = 0;
+
+static void logStartupMemory(const char* stage) {
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  const uint32_t minFree = esp_get_minimum_free_heap_size();
+  const uint32_t free8bit = heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  const uint32_t largest8bit = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  const uint32_t freeInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  const uint32_t largestInternal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+
+  LOG_INF("MEM", "Startup[%s] free=%lu min=%lu 8bit=%lu largest8=%lu internal=%lu largestInternal=%lu", stage,
+          static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(minFree),
+          static_cast<unsigned long>(free8bit), static_cast<unsigned long>(largest8bit),
+          static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(largestInternal));
+}
 
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
 void enterDeepSleep(bool fromTimeout = false) {
@@ -314,6 +349,8 @@ void setupDisplayAndFonts(bool seamless = false) {
 // activity-side callers out of SdCardFontSystem internals.
 void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
+void unloadSdFontIfLoaded() { sdFontSystem.unload(renderer); }
+
 void ensureSdFontLoadedForPath(const char* path) {
   if (!path) {
     ensureSdFontLoaded();
@@ -356,6 +393,33 @@ void setup() {
     }
   }
 
+  // Heap integrity check — must run before any allocation.
+  //
+  // The ESP32-C3 does not zero DRAM on a soft/WDT reset, so the heap metadata
+  // from the previous boot is still in place. If that boot ended with a watchdog
+  // timeout while malloc/free was mid-flight, the TLSF free-block sentinel
+  // (0xabba1234) will have been partially overwritten. Any subsequent heap walk
+  // (malloc, free, getMaxAllocHeap, heap_caps_check_integrity) will then read
+  // the corrupted sentinel and either crash or loop until the interrupt WDT fires,
+  // producing another WDT reset — a self-perpetuating crash loop.
+  //
+  // Mitigation: detect corruption here and reset immediately via esp_restart().
+  // esp_restart() triggers a SW_CPU_RESET which goes through the ROM bootloader,
+  // re-initialises DRAM fully, and produces a clean heap on the following boot.
+  // A RTC_NOINIT latch prevents infinite loops if the corruption re-appears.
+  //
+  // print_errors=true writes details to UART0 before Arduino Serial is open.
+  {
+    static constexpr uint32_t HEAP_CORRUPTION_BOOT_MAGIC = 0xBEEF4321;
+    const bool alreadyAttempted = (heapCorruptionBootLatch == HEAP_CORRUPTION_BOOT_MAGIC);
+    if (!alreadyAttempted && !heap_caps_check_integrity_all(/*print_errors=*/true)) {
+      heapCorruptionBootLatch = HEAP_CORRUPTION_BOOT_MAGIC;
+      esp_restart();  // clean DRAM reset — heap will be intact on next boot
+    }
+    heapCorruptionBootLatch = 0;  // clear latch on a clean-heap boot
+  }
+  const bool heapIntactAtBoot = heap_caps_check_integrity_all(/*print_errors=*/false);
+
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
@@ -363,6 +427,9 @@ void setup() {
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
+  if (!isSilentReboot) {
+    heapRecoveryRestartLatch = 0;
+  }
 
   HalSystem::begin();
   gpio.begin();
@@ -393,6 +460,11 @@ void setup() {
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+  // Re-log the boot-time heap integrity result now that serial is open.
+  // If false, the heap was already corrupt before any application code ran —
+  // look for SDK/Arduino static-init corruption rather than our own code.
+  LOG_INF("MEM", "Heap integrity at boot: %s", heapIntactAtBoot ? "OK" : "CORRUPT");
+  logStartupMemory("after_hw_init");
 
   // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
   SETTINGS.loadStartupFromNvs();
@@ -443,6 +515,7 @@ void setup() {
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
     return;
   }
+  logStartupMemory("after_storage_begin");
 
   SETTINGS.loadFromFile();
   // APP_STATE is needed before display init so Quick Resume can skip the on-wake resync
@@ -461,6 +534,7 @@ void setup() {
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
+  logStartupMemory("before_display_fonts");
 
   // Resolve the single boot-presentation decision. Skipping the splash also
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see
@@ -471,6 +545,7 @@ void setup() {
                                                         : BootResume::Splash;
 
   setupDisplayAndFonts(resume != BootResume::Splash);
+  logStartupMemory("after_display_fonts");
 
   switch (resume) {
     case BootResume::Silent:
@@ -530,6 +605,8 @@ void setup() {
     activityManager.goToReader(path);
   }
 
+  logStartupMemory("after_activity_route");
+
   // Ensure we're not still holding the power button before leaving setup.
   // waitForStablePowerRelease protects against switch bounce that might register as a false double-press.
   // Skip on silent reboot: the firmware triggered the restart, so the button isn't held.
@@ -544,6 +621,7 @@ void setup() {
   // the wake-press a fraction late; without this guard the loop() power-hold check would
   // immediately fire enterDeepSleep().
   allowSleepAt = millis() + 2000;
+  logStartupMemory("setup_complete");
 }
 
 void loop() {
@@ -562,8 +640,10 @@ void loop() {
   renderer.setTextDarkness(SETTINGS.textDarkness);
 
   if (Serial && millis() - lastMemPrint >= 10000) {
-    LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
-            ESP.getHeapSize(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+    // Keep runtime log lightweight: ESP.getMaxAllocHeap() walks heap metadata
+    // and has triggered interrupt WDTs under heavy allocation churn.
+    LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes", ESP.getFreeHeap(), ESP.getHeapSize(),
+            ESP.getMinFreeHeap());
     lastMemPrint = millis();
   }
 

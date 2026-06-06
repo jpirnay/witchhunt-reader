@@ -35,9 +35,9 @@ constexpr size_t MIN_FREE_HEAP_FOR_INDEXING_POPUP = 32 * 1024;
 constexpr size_t MIN_CONTIG_HEAP_FOR_INDEXING_POPUP = 12 * 1024;
 
 constexpr size_t PARSE_BUFFER_SIZE = 1024;
-constexpr size_t IMAGE_EXTRACT_CHUNK_SIZE = 1024;
-constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_EXTRACT = 48 * 1024;
-constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_EXTRACT = 36 * 1024;
+// Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
+// No heap guard needed at parse time — only a ZIP header read (~4 KB buffer on stack in
+// getDimensionsFromZipEntry) happens during createSectionFile.
 
 #ifndef EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP
 #define EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP (18 * 1024)
@@ -207,6 +207,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
                                               static_cast<uint8_t>(CssTextDecoration::LineThrough)) != 0;
   effectiveSup = false;
   effectiveSub = false;
+  effectiveInlineMarginLeft = 0;
 
   // Apply inline style stack in order
   for (const auto& entry : inlineStyleStack) {
@@ -229,6 +230,9 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     if (entry.hasSub) {
       effectiveSub = entry.sub;
       if (entry.sub) effectiveSup = false;
+    }
+    if (entry.hasMarginLeft) {
+      effectiveInlineMarginLeft = entry.marginLeftPx;
     }
   }
 }
@@ -299,6 +303,13 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (currentTableCell) {
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
   } else if (currentTextBlock) {
+    // If a float image is pending and the block is still empty, attach it now so the
+    // first word (and all subsequent words) are laid out beside the image.
+    // This handles <p><img style="float:left"/>text...</p>: pendingInlineImage_ is set
+    // while the block is empty, but no startNewTextBlock() fires before the first word.
+    if (pendingInlineImage_.active && currentTextBlock->isEmpty()) {
+      attachPendingFloatImage(currentTextBlock->getBlockStyle());
+    }
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
 
     if (currentTextBlock->size() > 96) {
@@ -308,16 +319,32 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
         return false;
       }
       LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
-      const int horizontalInset = currentTextBlock->getBlockStyle().totalHorizontalInset();
+      auto& splitBlockStyle = currentTextBlock->getBlockStyle();
+      const int horizontalInset = splitBlockStyle.totalHorizontalInset();
       const uint16_t effectiveWidth =
           (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
+      const int splitLineHeight =
+          (splitBlockStyle.floatZoneCount > 0)
+              ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * splitBlockStyle.fontSizeMultiplier +
+                                 0.5f)
+              : 0;
+      if (splitBlockStyle.floatZoneCount > 0) {
+        for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
+          const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
+          splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
+          splitBlockStyle.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
+        }
+      }
       currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
           [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
                  const bool suppressHyphenationRetry) {
             return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
           },
-          false);
+          false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
+      // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
+      // intentional: lines on the continuation page should not be narrowed for an
+      // image that lives on the previous page.
     }
   }
   partWordBufferIndex = 0;
@@ -332,8 +359,41 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   paragraphLutPerPage.push_back({xhtmlByteOffset, xpathParagraphIndex, xpathListItemIndex});
   completePageFn(std::move(currentPage));
   completedPageCount++;
-  currentPage.reset(new Page());
+  currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
+  lastBlockMarginBottom = 0;
+  deferredPageImage_.reset();  // tile A's deferred yPos update is no longer needed
+
+  if (continuationImage_.active) {
+    // Capture dimensions before moving the imageBlock out.
+    const int16_t contH = continuationImage_.renderedHeight;
+    const int16_t contW = continuationImage_.width;
+    const bool contIsRight = continuationImage_.isRight;
+    const int16_t contX = contIsRight ? static_cast<int16_t>(viewportWidth - contW) : 0;
+
+    // Place tile B (bottom crop of split image) at the top of the new page.
+    auto pageImg = std::make_shared<PageImage>(std::move(continuationImage_.imageBlock), contX, 0);
+    currentPage->elements.push_back(pageImg);
+    continuationImage_.active = false;
+
+    // Set a float zone on the continuing text block so lines on the new page
+    // are indented for the duration of tile B's height.
+    if (currentTextBlock) {
+      auto& bs = currentTextBlock->getBlockStyle();
+      bs.floatZoneCount = 0;  // clear stale zones from old page first
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = 0;
+      z.bottom = contH;
+      z.width = static_cast<int16_t>(contW + 4);
+      z.isRight = contIsRight;
+    }
+  } else {
+    // No continuation image: clear float zones so text on the new page is not
+    // indented for an image that lives on the previous page.
+    if (currentTextBlock) {
+      currentTextBlock->getBlockStyle().floatZoneCount = 0;
+    }
+  }
 }
 
 void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
@@ -363,9 +423,64 @@ void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<st
   }
 }
 
+void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
+  if (!pendingInlineImage_.active) return;
+  if (!currentPage) currentPage.reset(new (std::nothrow) Page());
+
+  const int16_t imgH = pendingInlineImage_.height;
+  const int16_t imgW = pendingInlineImage_.width;
+  const bool imgIsRight = pendingInlineImage_.isRight;
+  const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+  const int16_t imgX = imgIsRight ? static_cast<int16_t>(viewportWidth - imgW) : 0;
+
+  auto fullImageBlock =
+      std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt, epub->getPath(),
+                                   pendingInlineImage_.epubEntryPath);
+
+  if (remainingOnPage >= imgH) {
+    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = static_cast<int16_t>(currentPageNextY);
+      z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
+      z.width = static_cast<int16_t>(imgW + 4);
+      z.isRight = imgIsRight;
+    }
+    deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, currentPageNextY);
+    currentPage->elements.push_back(deferredPageImage_);
+    continuationImage_.active = false;
+  } else {
+    const int16_t tileAHeight = remainingOnPage;
+    const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
+    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+      auto& z = bs.floatZones[bs.floatZoneCount++];
+      z.top = static_cast<int16_t>(currentPageNextY);
+      z.bottom = static_cast<int16_t>(viewportHeight);
+      z.width = static_cast<int16_t>(imgW + 4);
+      z.isRight = imgIsRight;
+    }
+    auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
+    deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), imgX, currentPageNextY);
+    currentPage->elements.push_back(deferredPageImage_);
+    continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
+    continuationImage_.width = imgW;
+    continuationImage_.renderedHeight = tileBHeight;
+    continuationImage_.isRight = imgIsRight;
+    continuationImage_.active = true;
+  }
+
+  pendingInlineImage_.active = false;
+  pendingInlineImage_.cachedPath.clear();
+  pendingInlineImage_.epubEntryPath.clear();
+  pendingInlineImage_.alt.clear();
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
+  // Base style for the new block — normally the incoming blockStyle, but when falling
+  // through from the empty-block merge path (see below) we use the merged style so that
+  // accumulated parent-element margins are preserved for the inline-image paragraph.
+  const BlockStyle* effectiveBase = &blockStyle;
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
     if (currentTextBlock->isEmpty()) {
@@ -398,10 +513,16 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
         pendingAnchorId.clear();
       }
       wordsExtractedInBlock = 0;
-      return;
+      // If an inline image is waiting, fall through to place it now rather than
+      // returning early — otherwise the image skips empty wrapper blocks and
+      // attaches to the *second* paragraph instead of the first.
+      if (!pendingInlineImage_.active) return;
+      // Fall through: use the merged style as the base so parent-element margins
+      // (accumulated into this empty block) are carried into the new paragraph.
+      effectiveBase = &currentTextBlock->getBlockStyle();
     }
 
-    makePages();
+    if (!currentTextBlock->isEmpty()) makePages();
   }
   // If the pending anchor is a TOC chapter boundary, force a page break after the previous
   // block is flushed so the chapter starts on a fresh page.
@@ -416,7 +537,12 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
-  currentTextBlock.reset(new ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyle, bionicReadingEnabled));
+  // Apply pending inline image: attach float zone and place image on current page.
+  // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
+  BlockStyle blockStyleWithIndent = *effectiveBase;
+  attachPendingFloatImage(blockStyleWithIndent);
+  currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent,
+                                                       bionicReadingEnabled));
   wordsExtractedInBlock = 0;
 }
 
@@ -571,6 +697,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
+    if (atts != nullptr) {
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "border") == 0 && strcmp(atts[i + 1], "0") == 0) {
+          self->currentTable->hasBorder = false;
+        }
+      }
+    }
     self->depth += 1;
     return;
   }
@@ -592,14 +725,41 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->currentTable->rows.emplace_back();
     }
     BufferedTableRow& row = self->currentTable->rows.back();
-    if (row.cells.size() >= MAX_TABLE_COLS) {
-      self->currentTable->unsupported = true;
+
+    // Parse colspan attribute (inspired by uxjulia/CrossInk; rewritten for our codebase).
+    // Any rowspan != 1 is unsupported; we ignore it and let the fallback handle those tables.
+    uint8_t colSpan = 1;
+    if (atts != nullptr) {
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "colspan") == 0) {
+          char* end;
+          const long v = std::strtol(atts[i + 1], &end, 10);
+          if (end != atts[i + 1] && v >= 1 && v <= MAX_TABLE_COLS) {
+            colSpan = static_cast<uint8_t>(v);
+          }
+        } else if (strcmp(atts[i], "rowspan") == 0) {
+          char* end;
+          const long v = std::strtol(atts[i + 1], &end, 10);
+          if (end != atts[i + 1] && v != 1) {
+            self->currentTable->unsupported = true;
+          }
+        }
+      }
     }
+
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
     row.cells.back().isHeader = isHeader;
+    row.cells.back().colSpan = colSpan;
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
+    row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
+    if (row.effectiveCols > self->currentTable->maxCols) {
+      self->currentTable->maxCols = row.effectiveCols;
+    }
+    if (row.cells.size() > MAX_TABLE_COLS || row.effectiveCols > MAX_TABLE_COLS) {
+      self->currentTable->unsupported = true;
+    }
     self->currentTableCell = &row.cells.back();
     self->depth += 1;
     return;
@@ -620,6 +780,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         } else if (strcmp(atts[i], "alt") == 0) {
           alt = atts[i + 1];
         }
+      }
+
+      // Images inside table cells cannot be placed inline in the cell (no layout space).
+      // Defer them so they are emitted as block images immediately after the table.
+      if (self->currentTableCell && self->currentTable && !src.empty() && self->imageRendering != 2) {
+        self->currentTable->deferredImages.push_back({src, alt});
+        self->depth += 1;
+        return;
       }
 
       // imageRendering: 0=display, 1=placeholder (alt text only), 2=suppress entirely
@@ -701,74 +869,33 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
         {
           // Resolve the image path relative to the HTML file
-          std::string resolvedPath = FsHelpers::normalisePath(self->contentBase + src);
-
-          const uint32_t freeHeap = ESP.getFreeHeap();
-          const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
-          if (!self->lowMemoryImageFallback &&
-              (freeHeap < MIN_FREE_HEAP_FOR_IMAGE_EXTRACT || maxAllocHeap < MIN_MAX_ALLOC_FOR_IMAGE_EXTRACT)) {
-            self->lowMemoryImageFallback = true;
-            LOG_ERR("EHP", "Low heap before image extraction (%u free, %u max alloc); suppressing inline images",
-                    freeHeap, maxAllocHeap);
-          }
-          if (self->lowMemoryImageFallback) {
-            handleImageFallback();
-            return;
-          }
+          std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->contentBase + src));
 
           if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
-            // Create a unique filename for the cached image
+            // Determine SD cache path (image will be extracted here lazily at first render).
             std::string ext;
             size_t extPos = resolvedPath.rfind('.');
-            if (extPos != std::string::npos) {
-              ext = resolvedPath.substr(extPos);
-            }
+            if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
             std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
 
-            // Extract image to cache file
-            FsFile cachedImageFile;
-            bool extractSuccess = false;
-            if (Storage.openFileForWrite("EHP", cachedImagePath, cachedImageFile)) {
-              extractSuccess =
-                  self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, IMAGE_EXTRACT_CHUNK_SIZE);
-              cachedImageFile.flush();
-              cachedImageFile.close();
-              if (!extractSuccess) {
-                Storage.remove(cachedImagePath.c_str());
+            // Get dimensions from the pre-built manifest (fast, heap-safe) or fall back to
+            // reading the ZIP entry header directly (safe outside a streaming inflate context).
+            ImageDimensions dims = {0, 0};
+            bool dimsOk = false;
+            if (self->imageManifest) {
+              const ImageManifestEntry* entry = self->imageManifest->find(resolvedPath);
+              if (entry) {
+                dims.width = entry->width;
+                dims.height = entry->height;
+                dimsOk = true;
               }
-              delay(50);  // Give SD card time to sync
             }
-
-            if (extractSuccess) {
-              const uint32_t postExtractFreeHeap = ESP.getFreeHeap();
-              const uint32_t postExtractMaxAllocHeap = ESP.getMaxAllocHeap();
-              if (postExtractFreeHeap < MIN_FREE_HEAP_FOR_IMAGE_EXTRACT ||
-                  postExtractMaxAllocHeap < MIN_MAX_ALLOC_FOR_IMAGE_EXTRACT) {
-                self->lowMemoryImageFallback = true;
-                LOG_ERR("EHP",
-                        "Low heap after image extraction (%u free, %u max alloc); suppressing remaining inline images",
-                        postExtractFreeHeap, postExtractMaxAllocHeap);
-                Storage.remove(cachedImagePath.c_str());
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  BlockStyle resetStyle;
-                  resetStyle.textAlignDefined = true;
-                  const auto align = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                         ? CssTextAlign::Justify
-                                         : static_cast<CssTextAlign>(self->paragraphAlignment);
-                  resetStyle.alignment = align;
-                  self->currentTextBlock->setBlockStyle(resetStyle);
-                }
-                self->skipUntilDepth = self->depth;
-                self->depth += 1;
-                return;
-              }
-              // Get image dimensions
-              // Get image dimensions
-              ImageDimensions dims = {0, 0};
-              ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
-              if (decoder && decoder->getDimensions(cachedImagePath, dims)) {
-                LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
-
+            if (!dimsOk) {
+              dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
+            }
+            if (dimsOk) {
+              LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
+              {
                 int displayWidth = 0;
                 int displayHeight = 0;
                 const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
@@ -873,6 +1000,27 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   LOG_DBG("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
                 }
 
+                // Inline image path: if inside a CSS float context and image is small enough,
+                // defer placement beside the next paragraph rather than emitting as a block.
+                // Concept inspired by CidVonHighwind/microreader and KOReader/CREngine research.
+                const bool isInlineCandidate =
+                    self->floatDepth_ > 0 && displayWidth <= self->viewportWidth / 3 && displayHeight <= 120;
+                if (isInlineCandidate) {
+                  self->pendingInlineImage_.cachedPath = std::move(cachedImagePath);
+                  self->pendingInlineImage_.epubEntryPath = resolvedPath;
+                  self->pendingInlineImage_.width = static_cast<int16_t>(displayWidth);
+                  self->pendingInlineImage_.height = static_cast<int16_t>(displayHeight);
+                  self->pendingInlineImage_.alt = alt;
+                  self->pendingInlineImage_.isRight =
+                      (self->floatDepth_ > 0) && self->floatOpenSides_[self->floatDepth_ - 1];
+                  self->pendingInlineImage_.active = true;
+                  LOG_DBG("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
+                  // Don't flush the current text block — let it continue into the next paragraph.
+                  self->depth += 1;
+                  return;
+                }
+
+                // Block image path (existing behaviour) — flush text before placing image
                 // Flush any pending text block so it appears before the image
                 if (self->partWordBufferIndex > 0) {
                   if (!self->flushPartWordBuffer()) return;
@@ -922,8 +1070,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
                 self->currentPageNextY += imageSpacingTop;
 
-                // Create ImageBlock and add to page
-                auto imageBlock = std::make_shared<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt);
+                // Create ImageBlock with lazy-extraction source info.
+                // The SD file at cachedImagePath does not exist yet — it will be extracted
+                // from the EPUB at first render time by ImageBlock::ensureExtracted().
+                auto imageBlock = std::make_shared<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt,
+                                                               self->epub->getPath(), resolvedPath);
                 if (!imageBlock) {
                   LOG_ERR("EHP", "Failed to create ImageBlock");
                   return;
@@ -957,12 +1108,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
                 self->depth += 1;
                 return;
-              } else {
-                LOG_ERR("EHP", "Failed to get image dimensions");
-                Storage.remove(cachedImagePath.c_str());
-              }
+              }  // layout geometry block
             } else {
-              LOG_ERR("EHP", "Failed to extract image");
+              LOG_ERR("EHP", "Failed to read image dimensions from ZIP: %s", resolvedPath.c_str());
             }
           }  // isFormatSupported
         }
@@ -1068,6 +1216,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
   }
 
+  // Track CSS float depth — used to detect inline images beside paragraph text.
+  // Fixed-size array, cap at kMaxFloatDepth — deeper nesting is pathological.
+  if (cssStyle.hasCssFloat() && cssStyle.cssFloat != CssFloat::None &&
+      self->floatDepth_ < ChapterHtmlSlimParser::kMaxFloatDepth) {
+    self->floatOpenDepths_[self->floatDepth_] = self->depth;
+    self->floatOpenSides_[self->floatDepth_] = (cssStyle.cssFloat == CssFloat::Right);
+    self->floatDepth_++;
+  }
+
   if (strcmp(name, "ul") == 0 || strcmp(name, "ol") == 0) {
     int startCounter = 0;
     if (name[0] == 'o') {
@@ -1077,7 +1234,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         if (v > 0) startCounter = v - 1;  // counter is pre-incremented on each <li>
       }
     }
-    self->listStack.push_back({self->depth, name[0] == 'o', startCounter});
+    self->listStack.push_back({self->depth, name[0] == 'o', startCounter, cssStyle.listStyleNone});
   }
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
@@ -1091,6 +1248,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (!self->flushPartWordBuffer()) return;
   }
 
+  // CSS page-break-before: always — emit the current page before this block starts.
+  if (cssStyle.pageBreakBefore &&
+      (matches(name, HEADER_TAGS, NUM_HEADER_TAGS) || matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS)) && self->currentPage &&
+      !self->currentPage->elements.empty()) {
+    self->emitPage(self->lastBodyChildByteOffset);
+  }
+
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth);
@@ -1098,6 +1262,18 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->embeddedStyle && cssStyle.hasTextAlign() &&
         self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
       headerBlockStyle.alignment = cssStyle.textAlign;
+    }
+    // Apply default heading font-size multipliers when no explicit CSS font-size is set.
+    // Concept inspired by CidVonHighwind/microreader.
+    if (!cssStyle.hasFontSizeMultiplier()) {
+      const int level = name[1] - '0';  // 'h1'->1, 'h2'->2, …
+      if (level == 1)
+        headerBlockStyle.fontSizeMultiplier = 1.6f;
+      else if (level == 2)
+        headerBlockStyle.fontSizeMultiplier = 1.4f;
+      else if (level == 3)
+        headerBlockStyle.fontSizeMultiplier = 1.2f;
+      // h4-h6 stay at 1.0f
     }
     self->startNewTextBlock(headerBlockStyle);
     self->boldUntilDepth = std::min(self->boldUntilDepth, self->depth);
@@ -1135,8 +1311,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
-      brStyle.textIndent = currentStyle.textIndent;
-      brStyle.textIndentDefined = currentStyle.textIndentDefined;
+      // text-indent is not inherited across <br>: it applies to the first line of a block only.
+      // Span-based indents (poem stanza pattern) are applied directly to each block at span-open time.
       brStyle.fromBrElement = true;
       self->startNewTextBlock(brStyle);
     } else {
@@ -1158,7 +1334,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
       if (strcmp(name, "li") == 0) {
         if (!self->listStack.empty()) {
-          char marker[12];
           if (self->listStack.back().isOrdered) {
             const char* valueAttr = getAttribute(atts, "value");
             if (valueAttr) {
@@ -1166,11 +1341,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               if (v > 0) self->listStack.back().counter = v - 1;
             }
             self->listStack.back().counter += 1;
-            snprintf(marker, sizeof(marker), "%d.", self->listStack.back().counter);
-          } else {
-            strcpy(marker, "\xe2\x80\xa2");
           }
-          self->currentTextBlock->addWord(marker, EpdFontFamily::REGULAR);
+          if (!self->listStack.back().suppressMarker) {
+            char marker[12];
+            if (self->listStack.back().isOrdered) {
+              snprintf(marker, sizeof(marker), "%d.", self->listStack.back().counter);
+            } else {
+              strcpy(marker, "\xe2\x80\xa2");
+            }
+            self->currentTextBlock->addWord(marker, EpdFontFamily::REGULAR);
+          }
         }
       } else if (strcmp(name, "pre") == 0) {
         // Record depth so characterData can treat \n as a hard line break inside <pre>.
@@ -1333,7 +1513,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Handle span and other inline elements for CSS styling
     if (cssStyle.hasFontWeight() || cssStyle.hasFontStyle() || cssStyle.hasTextDecoration() ||
-        cssStyle.hasVerticalAlign()) {
+        cssStyle.hasVerticalAlign() || cssStyle.hasMarginLeft()) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordBufferIndex > 0) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
@@ -1383,6 +1563,20 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           entry.sup = false;
           entry.hasSub = true;
           entry.sub = false;
+        }
+      }
+      if (cssStyle.hasMarginLeft()) {
+        // margin-left on an inline span acts as a per-line indent (poem stanza pattern).
+        // Applied immediately to the current block because the span closes before the
+        // trailing <br>, so the indent must be on the block that receives the text.
+        const int16_t marginPx = cssStyle.marginLeft.toPixelsInt16(emSize, static_cast<float>(self->viewportWidth));
+        entry.hasMarginLeft = true;
+        entry.marginLeftPx = marginPx;
+        if (marginPx > 0 && self->currentTextBlock) {
+          BlockStyle updatedStyle = self->currentTextBlock->getBlockStyle();
+          updatedStyle.textIndent = marginPx;
+          updatedStyle.textIndentDefined = true;
+          self->currentTextBlock->setBlockStyle(updatedStyle);
         }
       }
       self->inlineStyleStack.push_back(entry);
@@ -1669,6 +1863,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
 
   self->depth -= 1;
 
+  // Decrement float depth when the floated element's scope closes.
+  while (self->floatDepth_ > 0 && self->floatOpenDepths_[self->floatDepth_ - 1] >= self->depth) {
+    self->floatDepth_--;
+  }
+
   if (strcmp(name, "svg") == 0 && self->svgDepth > 0) {
     self->svgDepth -= 1;
   }
@@ -1897,11 +2096,20 @@ bool ChapterHtmlSlimParser::finalize() {
   if (currentTextBlock) {
     makePages();
     if (!layoutFailed) {
+      const bool hasFinalPageContent = currentPage && !currentPage->elements.empty();
       if (!pendingAnchorId.empty()) {
-        anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+        uint16_t anchorPage = static_cast<uint16_t>(completedPageCount);
+        // Avoid mapping trailing anchors to a non-existent blank page when the
+        // chapter ended exactly on a page boundary.
+        if (!hasFinalPageContent && completedPageCount > 0) {
+          anchorPage = static_cast<uint16_t>(completedPageCount - 1);
+        }
+        anchorData.push_back({std::move(pendingAnchorId), anchorPage});
         pendingAnchorId.clear();
       }
-      emitPage(0u);  // post-parse: no byte offset available
+      if (hasFinalPageContent) {
+        emitPage(0u);  // post-parse: no byte offset available
+      }
     }
     currentPage.reset();
     currentTextBlock.reset();
@@ -1913,7 +2121,8 @@ bool ChapterHtmlSlimParser::finalize() {
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
                                                                    const bool suppressHyphenationRetry) {
-  const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const float scale = line->getBlockStyle().fontSizeMultiplier;
+  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * scale + 0.5f);
 
   if (!currentPage) {
     currentPage.reset(new Page());
@@ -1933,6 +2142,9 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
 
+  // Capture first-line flag before incrementing wordsExtractedInBlock.
+  const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
+
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock += line->wordCount();
   auto footnoteIt = pendingFootnotes.begin();
@@ -1942,9 +2154,31 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
 
-  // Apply horizontal left inset (margin + padding) as x position offset
-  const int16_t xOffset = line->getBlockStyle().leftInset();
+  // Apply horizontal left inset (margin + padding) as x position offset.
+  // For lines that overlap an active left float zone, also shift right by the zone
+  // width so text starts after the image rather than overlapping it.
+  // Right-floated zones narrow the line width (handled in widthForLine) but don't shift text left.
+  int16_t xOffset = line->getBlockStyle().leftInset();
+  {
+    const auto& bs = line->getBlockStyle();
+    for (int zi = 0; zi < bs.floatZoneCount; ++zi) {
+      const auto& z = bs.floatZones[zi];
+      if (!z.isRight && currentPageNextY < z.bottom && currentPageNextY + lineHeight > z.top) {
+        xOffset = static_cast<int16_t>(xOffset + z.width);
+      }
+    }
+  }
   currentPage->elements.push_back(std::make_shared<PageLine>(line, xOffset, currentPageNextY));
+
+  // On the first line of a block with a deferred inline image, fix the image's
+  // yPos so its top aligns with the glyph top of the first text line.
+  // PageLine y and image y both use the same coordinate: the line's top edge.
+  // Float zones were already pre-corrected in makePages() to the same value.
+  if (isFirstLineOfBlock && deferredPageImage_) {
+    deferredPageImage_->yPos = static_cast<int16_t>(currentPageNextY);
+    deferredPageImage_.reset();
+  }
+
   currentPageNextY += lineHeight;
   return ParsedText::LineProcessResult::Accepted;
 }
@@ -1965,20 +2199,25 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY = 0;
   }
 
-  const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
+  const int lineHeight =
+      static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f);
 
   // Apply top spacing before the paragraph — skip for continuation fragments
   // (words left over after an intermediate flush): the top margin was already
   // applied before the first set of lines from this logical paragraph.
-  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
   if (!currentTextBlock->isContinuation()) {
     if (blockStyle.marginTop > 0) {
-      currentPageNextY += blockStyle.marginTop;
+      // CSS margin collapsing: gap between adjacent blocks = max(prevMarginBottom, thisMarginTop).
+      // lastBlockMarginBottom was already added after the previous block; subtract the overlap.
+      const int16_t collapse = std::min(lastBlockMarginBottom, blockStyle.marginTop);
+      currentPageNextY += static_cast<int16_t>(blockStyle.marginTop - collapse);
     }
     if (blockStyle.paddingTop > 0) {
       currentPageNextY += blockStyle.paddingTop;
     }
   }
+  lastBlockMarginBottom = 0;
 
   // Calculate effective width accounting for horizontal margins/padding
   const int horizontalInset = blockStyle.totalHorizontalInset();
@@ -1991,12 +2230,30 @@ void ChapterHtmlSlimParser::makePages() {
     return;
   }
 
+  // Pre-correct float zone coordinates before line-breaking so widthForLine
+  // and the xOffset check in addLineToPage use the same y values.
+  // Image top aligns with the line top (currentPageNextY after margin-top).
+  const int lineHeightForFloat =
+      (blockStyle.floatZoneCount > 0)
+          ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f)
+          : 0;
+  LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
+          (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
+  if (blockStyle.floatZoneCount > 0) {
+    auto& mbs = currentTextBlock->getBlockStyle();
+    for (int zi = 0; zi < mbs.floatZoneCount; ++zi) {
+      const int imgH = mbs.floatZones[zi].bottom - mbs.floatZones[zi].top;
+      mbs.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
+      mbs.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
+    }
+  }
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
       [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
              const bool suppressHyphenationRetry) {
         return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
-      });
+      },
+      /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches
@@ -2011,6 +2268,9 @@ void ChapterHtmlSlimParser::makePages() {
   // Apply bottom spacing after the paragraph (stored in pixels)
   if (blockStyle.marginBottom > 0) {
     currentPageNextY += blockStyle.marginBottom;
+    lastBlockMarginBottom = blockStyle.marginBottom;
+  } else {
+    lastBlockMarginBottom = 0;
   }
   if (blockStyle.paddingBottom > 0) {
     currentPageNextY += blockStyle.paddingBottom;
@@ -2034,26 +2294,89 @@ void ChapterHtmlSlimParser::emitBufferedTable() {
   if (currentTable->unsupported || currentTable->rows.empty()) {
     LOG_DBG("EHP", "Table unsupported or empty — falling back to paragraph mode");
     emitTableAsParagraphs(*currentTable);
-    return;
-  }
-
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
+  } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
     LOG_ERR("EHP", "Low heap (%u), falling back to paragraph mode for table", ESP.getFreeHeap());
     emitTableAsParagraphs(*currentTable);
-    return;
+  } else {
+    emitTableAsFragments(*currentTable);
   }
 
-  emitTableAsFragments(*currentTable);
+  emitDeferredTableImages(*currentTable);
+}
+
+void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
+  if (table.deferredImages.empty()) return;
+
+  // Images found inside table cells are emitted sequentially below the table, one per line,
+  // scaled to fit the full viewport width (same as any other block image).
+  for (auto& img : table.deferredImages) {
+    if (img.src.empty()) continue;
+
+    const std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(contentBase + img.src));
+    if (!ImageDecoderFactory::isFormatSupported(resolvedPath)) continue;
+
+    ImageDimensions dims = {0, 0};
+    bool dimsOk = false;
+    if (imageManifest) {
+      const ImageManifestEntry* entry = imageManifest->find(resolvedPath);
+      if (entry) {
+        dims.width = entry->width;
+        dims.height = entry->height;
+        dimsOk = true;
+      }
+    }
+    if (!dimsOk) {
+      dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(epub->getPath(), resolvedPath, dims);
+    }
+    if (!dimsOk || dims.width == 0 || dims.height == 0) {
+      LOG_DBG("EHP", "Deferred table image: no dims for %s", resolvedPath.c_str());
+      continue;
+    }
+
+    // Scale to fit viewport, preserving aspect ratio.
+    float scale = 1.0f;
+    if (static_cast<int>(dims.width) > static_cast<int>(viewportWidth))
+      scale = static_cast<float>(viewportWidth) / dims.width;
+    if (static_cast<int>(dims.height) * scale > static_cast<int>(viewportHeight))
+      scale = static_cast<float>(viewportHeight) / dims.height;
+    const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
+    const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
+
+    std::string ext;
+    const size_t extPos = resolvedPath.rfind('.');
+    if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
+    const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
+
+    if (!currentPage) {
+      currentPage.reset(new Page());
+      currentPageNextY = 0;
+    }
+
+    if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
+      emitPage(lastBodyChildByteOffset);
+      if (!currentPage) {
+        currentPage.reset(new Page());
+        currentPageNextY = 0;
+      }
+    }
+
+    const int xPos = (viewportWidth - displayWidth) / 2;
+    auto imageBlock =
+        std::make_shared<ImageBlock>(cachedPath, displayWidth, displayHeight, img.alt, epub->getPath(), resolvedPath);
+    currentPage->elements.push_back(std::make_shared<PageImage>(imageBlock, xPos, currentPageNextY));
+    currentPageNextY += displayHeight;
+    LOG_DBG("EHP", "Deferred table image placed: %s %dx%d", resolvedPath.c_str(), displayWidth, displayHeight);
+  }
 }
 
 void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
-  // Determine column count (max cells in any row)
-  uint8_t columnCount = 0;
-  for (const auto& row : table.rows) {
-    if (row.cells.size() > columnCount) {
-      columnCount = static_cast<uint8_t>(row.cells.size());
-    }
-  }
+  // Use the pre-computed maxCols which accounts for colspan values (inspired by uxjulia/CrossInk).
+  const uint8_t columnCount = table.maxCols > 0 ? table.maxCols : [&]() {
+    uint8_t n = 0;
+    for (const auto& row : table.rows) n = std::max(n, static_cast<uint8_t>(row.cells.size()));
+    return n;
+  }();
+
   if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
     emitTableAsParagraphs(table);
     return;
@@ -2069,26 +2392,44 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     return;
   }
 
-  std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
-  for (uint8_t c = 0; c < columnCount; c++) {
-    colWidths[c] = colWidth;
-  }
-
   const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+  const bool hasBorder = table.hasBorder;
 
-  // Pre-wrap all cells and compute row heights
+  // Pre-wrap all cells and compute row heights.
+  // A row whose single cell spans the full table width (colspan == maxCols) is treated as a
+  // 1-column fragment so it renders full-width inline with the surrounding grid rather than
+  // falling back to paragraph mode. Idea from uxjulia/CrossInk; rewritten for our layout model.
   struct LayoutRow {
     std::vector<TableCell> cells;
     uint16_t height = 0;
     bool isHeaderRow = false;
+    uint8_t renderCols = 0;  // 1 for full-width single-cell rows, else columnCount
   };
   std::vector<LayoutRow> layoutRows;
   layoutRows.reserve(table.rows.size());
 
   for (auto& bufRow : table.rows) {
+    // Detect a full-width spanning row: exactly one cell whose colSpan equals the table's column count.
+    const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
+
+    const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
+    const uint16_t renderColWidth = totalWidth / renderCols;
+    const uint16_t renderInnerWidth =
+        (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
+
+    // Any other colspan structure falls back; we only handle full-span or plain cells.
+    const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
+                                           [](const BufferedTableCell& c) { return c.colSpan != 1; });
+    if (hasMergedCell && !isFullWidthSpan) {
+      LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
+      emitTableAsParagraphs(table);
+      return;
+    }
+
     LayoutRow lr;
     lr.isHeaderRow = bufRow.isHeaderRow;
-    lr.cells.reserve(bufRow.cells.size());
+    lr.renderCols = renderCols;
+    lr.cells.reserve(renderCols);
     uint16_t maxLines = 0;
 
     for (auto& bufCell : bufRow.cells) {
@@ -2096,8 +2437,7 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       cell.isHeader = bufCell.isHeader;
 
       if (bufCell.text && !bufCell.text->isEmpty()) {
-        // Wrap cell text to inner column width, collecting resulting TextBlock lines
-        bufCell.text->layoutAndExtractLines(renderer, fontId, innerColWidth,
+        bufCell.text->layoutAndExtractLines(renderer, fontId, renderInnerWidth,
                                             [&cell](const std::shared_ptr<TextBlock>& tb, bool, bool) {
                                               if (cell.lines.size() < MAX_CELL_LINES) {
                                                 cell.lines.push_back(tb);
@@ -2112,9 +2452,11 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       lr.cells.push_back(std::move(cell));
     }
 
-    // Pad rows that have fewer cells than columnCount with empty cells
-    while (lr.cells.size() < columnCount) {
-      lr.cells.emplace_back();
+    // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
+    if (!isFullWidthSpan) {
+      while (lr.cells.size() < columnCount) {
+        lr.cells.emplace_back();
+      }
     }
 
     lr.height = static_cast<uint16_t>(maxLines * lineHeight + 2 * TABLE_CELL_PADDING);
@@ -2122,50 +2464,49 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     layoutRows.push_back(std::move(lr));
   }
 
-  // Ensure page is initialised
+  // Ensure page is initialised.
   if (!currentPage) {
     currentPage.reset(new Page());
     currentPageNextY = 0;
   }
 
-  // Greedily pack rows into fragments, page-breaking between fragments
+  // Greedily pack rows into fragments, page-breaking between fragments.
+  // Rows with a different renderCols than the pending fragment flush it first, since each
+  // PageTableFragment has a single fixed column count.
   std::vector<TableRow> fragmentRows;
   uint16_t fragmentHeight = 0;
+  uint8_t fragmentCols = 0;
 
   auto emitFragment = [&]() {
     if (fragmentRows.empty()) return;
 
-    // Total height = sum of row heights + top border (1px) + bottom border included in outer rect
-    const uint16_t fragTotalHeight = static_cast<uint16_t>(fragmentHeight + 1);  // +1 for top border pixel
+    // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
+    // in fragmentHeight; add 1 for the bottom border. When borderless: fragmentHeight is exact.
+    const uint16_t fragTotalHeight =
+        hasBorder ? static_cast<uint16_t>(fragmentHeight + 1) : static_cast<uint16_t>(fragmentHeight);
 
-    // If this fragment won't fit on the current page, page-break first
     if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
       emitPage(lastBodyChildByteOffset);
     }
 
-    auto fragment = std::make_shared<PageTableFragment>(columnCount, totalWidth, fragTotalHeight, colWidths,
-                                                        std::move(fragmentRows),
-                                                        /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY));
-    currentPage->elements.push_back(fragment);
+    currentPage->elements.push_back(
+        std::make_shared<PageTableFragment>(fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
+                                            /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
     currentPageNextY += fragTotalHeight;
     fragmentRows.clear();
     fragmentHeight = 0;
+    fragmentCols = 0;
   };
 
   for (auto& lr : layoutRows) {
-    // If a single row is taller than the full viewport, fall back for this row
     if (lr.height > viewportHeight) {
-      // Emit whatever we have so far
       emitFragment();
-      // Emit this oversized row as a paragraph fallback
       BufferedTable singleRowFallback;
       BufferedTableRow fbRow;
       fbRow.isHeaderRow = lr.isHeaderRow;
       for (auto& cell : lr.cells) {
         BufferedTableCell fbc;
         fbc.isHeader = cell.isHeader;
-        // Re-create a minimal ParsedText from the already-wrapped lines
-        // by emitting each line's words as a new ParsedText paragraph
         fbc.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
         for (const auto& line : cell.lines) {
           for (const auto& word : line->getWords()) {
@@ -2179,10 +2520,18 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       continue;
     }
 
-    const uint16_t rowContrib = static_cast<uint16_t>(lr.height + 1);  // +1 for separator line
+    // A change in column count requires a new fragment.
+    if (!fragmentRows.empty() && lr.renderCols != fragmentCols) {
+      emitFragment();
+    }
+
+    if (fragmentCols == 0) fragmentCols = lr.renderCols;
+
+    const uint16_t rowContrib = hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
 
     if (!fragmentRows.empty() && currentPageNextY + fragmentHeight + rowContrib > viewportHeight) {
       emitFragment();
+      fragmentCols = lr.renderCols;
     }
 
     TableRow tr;

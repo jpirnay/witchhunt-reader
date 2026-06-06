@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <PNGdec.h>
+#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <memory>
@@ -172,17 +173,21 @@ int32_t pngSeekWithHandle(PNGFILE* pFile, int32_t pos) {
 }
 
 // The PNG decoder (PNGdec) is large due to internal zlib decompression buffers
-// (~40 KB ucZLIB + 16 KB ucPixels at PNG_MAX_BUFFERED_PIXELS=16416 + smaller
-// fields ≈ 60 KB). We heap-allocate it on demand rather than using a static
+// (~40 KB ucZLIB + 6.5 KB ucPixels at PNG_MAX_BUFFERED_PIXELS=6466 + smaller
+// fields ≈ 49 KB). We heap-allocate it on demand rather than using a static
 // instance, so this memory is only consumed while actually decoding/querying
 // PNG images. This is critical on the ESP32-C3 where total RAM is ~320 KB.
 // Use sizeof(PNG) so the precheck stays accurate if PNG_MAX_BUFFERED_PIXELS
 // or other PNGdec buffers are resized.
+// The pre-check uses getFreeHeap() rather than getMaxAllocHeap() because
+// getMaxAllocHeap() walks the TLSF free-block chain and crashes if any block
+// header is corrupt (which can happen under extreme heap pressure). getFreeHeap()
+// is a simple counter read that is safe even on a partially-corrupt heap. We add
+// headroom above sizeof(PNG) to account for fragmentation: even if total free
+// heap exceeds the threshold, new() may still fail if no single contiguous block
+// is large enough — in that case new(std::nothrow) returns null and we handle it.
 constexpr size_t PNG_DECODER_APPROX_SIZE = sizeof(PNG);
-// Headroom covers heap fragmentation: free heap is the *sum* of all free
-// blocks but `new` needs a single contiguous block. 32 KB headroom on a
-// ~60 KB allocation has historically been enough on this device.
-constexpr size_t MIN_FREE_HEAP_FOR_PNG = PNG_DECODER_APPROX_SIZE + 32 * 1024;
+constexpr size_t PNG_HEAP_HEADROOM = 20 * 1024;
 
 // PNGdec keeps TWO scanlines in its internal ucPixels buffer (current + previous)
 // and each scanline includes a leading filter byte.
@@ -332,6 +337,10 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
 
+  // Feed the interrupt WDT every scanline — a large PNG can take many seconds to
+  // decode and the default 8-second timeout fires without periodic resets.
+  esp_task_wdt_reset();
+
   int srcY = pDraw->y;
   int srcWidth = ctx->srcWidth;
 
@@ -363,10 +372,24 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   pw.init(*ctx->renderer);
   pw.beginRow(outY);
 
+  // The cache streams to disk one row at a time. Flushing rows below this one
+  // (PNGdec delivers scanlines top to bottom) repositions the single-row band;
+  // the band-relative origin/extent passed to init() then map this screen row
+  // onto the small streaming buffer rather than a full-image one. A flush
+  // failure stops caching for the rest of the decode so we never write past the
+  // band buffer; finalize() then drops the partial file.
+  //
+  // Ported from upstream commit d9bcef7a (crosspoint-reader#2230).
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX);
-    cw.beginRow(outY, ctx->config->y);
+    if (!ctx->cache.advanceTo(dstY)) {
+      caching = false;
+      ctx->caching = false;
+    } else {
+      cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->config->y + ctx->cache.bandStart,
+              ctx->cache.width, ctx->cache.bandRows);
+      cw.beginRow(outY);
+    }
   }
 
   prepareOneBitDitherRow(*ctx, dstY);
@@ -404,6 +427,21 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 }
 
 }  // namespace
+
+bool PngToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+  if (!buf || len < 24) return false;
+  static constexpr uint8_t kPngSig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+  if (memcmp(buf, kPngSig, 8) != 0) return false;
+  if (buf[12] != 'I' || buf[13] != 'H' || buf[14] != 'D' || buf[15] != 'R') return false;
+  const uint32_t w =
+      ((uint32_t)buf[16] << 24) | ((uint32_t)buf[17] << 16) | ((uint32_t)buf[18] << 8) | (uint32_t)buf[19];
+  const uint32_t h =
+      ((uint32_t)buf[20] << 24) | ((uint32_t)buf[21] << 16) | ((uint32_t)buf[22] << 8) | (uint32_t)buf[23];
+  if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+  out.width = static_cast<int16_t>(w);
+  out.height = static_cast<int16_t>(h);
+  return true;
+}
 
 bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {
   // PNG file layout: 8-byte signature, then chunks. The IHDR chunk is mandatory and
@@ -457,8 +495,9 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
 
   size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < MIN_FREE_HEAP_FOR_PNG) {
-    LOG_ERR("PNG", "Not enough heap for PNG decoder (%u free, need %u)", freeHeap, MIN_FREE_HEAP_FOR_PNG);
+  if (freeHeap < PNG_DECODER_APPROX_SIZE + PNG_HEAP_HEADROOM) {
+    LOG_ERR("PNG", "Not enough heap for PNG decoder (%u free, need %u)", freeHeap,
+            PNG_DECODER_APPROX_SIZE + PNG_HEAP_HEADROOM);
     return false;
   }
 
@@ -562,19 +601,18 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     return false;
   }
 
-  // Allocate cache buffer using SCALED dimensions.
-  // PNG decode is fast enough (~135ms for 400x600) that caching provides minimal benefit
-  // for larger images, while the cache buffer competes with the 44KB PNG decoder for heap.
-  // Skip caching when the buffer would exceed the framebuffer size (48KB).
-  static constexpr size_t PNG_MAX_CACHE_BYTES = 48000;
+  // Stream the pixel cache to disk. PNGdec delivers source scanlines top to
+  // bottom and we emit at most one (downscaled) output row per callback, so the
+  // band only needs a single row. Streaming keeps the working set tiny, so
+  // unlike the old full-image buffer it neither competes with the ~44KB decoder
+  // nor forces larger images to skip caching — which previously meant a full
+  // re-decode on every one of an image page's ~14 render passes.
+  // (See PixelCache for the full rationale; ported from upstream commit
+  // d9bcef7a, crosspoint-reader#2230.)
   ctx.caching = !config.cachePath.empty();
   if (ctx.caching) {
-    size_t cacheSize = (size_t)((ctx.dstWidth + 3) / 4) * ctx.dstHeight;
-    if (cacheSize > PNG_MAX_CACHE_BYTES) {
-      LOG_DBG("PNG", "Skipping cache: %zu bytes exceeds PNG limit (%zu)", cacheSize, PNG_MAX_CACHE_BYTES);
-      ctx.caching = false;
-    } else if (!ctx.cache.allocate(ctx.dstWidth, ctx.dstHeight, config.x, config.y)) {
-      LOG_ERR("PNG", "Failed to allocate cache buffer, continuing without caching");
+    if (!ctx.cache.begin(config.cachePath, ctx.dstWidth, ctx.dstHeight, config.x, config.y, 1)) {
+      LOG_ERR("PNG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
     }
   }
@@ -625,15 +663,16 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   if (rc != PNG_SUCCESS) {
     LOG_ERR("PNG", "Decode failed: %d", rc);
     png->close();
+    if (ctx.caching) ctx.cache.abort();
     return false;
   }
 
   png->close();
   LOG_DBG("PNG", "PNG decoding complete - render time: %lu ms", decodeTime);
 
-  // Write cache file if caching was enabled and buffer was allocated
+  // Finalize the streamed cache (caching may have been cleared on a flush error).
   if (ctx.caching) {
-    ctx.cache.writeToFile(config.cachePath);
+    ctx.cache.finalize();
   }
 
   return true;

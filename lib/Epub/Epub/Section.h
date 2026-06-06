@@ -72,6 +72,12 @@ class Section {
                          bool bionicReadingEnabled, uint8_t imageRendering,
                          const std::function<void(int)>& progressFn = nullptr, bool skipEviction = false);
   std::unique_ptr<Page> loadPageFromSectionFile();
+  // Pre-decode every image in the section into its .pxc cache while heap is
+  // maximally contiguous (secondary display buffer still released). Skips images
+  // that are already cached or would show as a placeholder. The decode writes
+  // pixels into the framebuffer as a side effect; call renderer.clearScreen()
+  // afterward. forceLoad mirrors the effectiveForceLoad rule used at render time.
+  void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true);
   bool isTruncatedCache() const { return truncatedCache; }
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
 

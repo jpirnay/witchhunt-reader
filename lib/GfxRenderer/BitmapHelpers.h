@@ -23,7 +23,7 @@ void createBmpHeader(BmpHeader* bmpHeader, int width, int height, BmpRowOrder ro
 //     1/8
 class Atkinson1BitDitherer {
  public:
-  explicit Atkinson1BitDitherer(int width) : width(width) {
+  explicit Atkinson1BitDitherer(int width) : width(width), errorRow0(nullptr), errorRow1(nullptr), errorRow2(nullptr) {
     errorRow0 = new int16_t[width + 4]();  // Current row
     errorRow1 = new int16_t[width + 4]();  // Next row
     errorRow2 = new int16_t[width + 4]();  // Row after next
@@ -104,7 +104,7 @@ class Atkinson1BitDitherer {
 // Less error buildup = fewer artifacts than Floyd-Steinberg
 class AtkinsonDitherer {
  public:
-  explicit AtkinsonDitherer(int width) : width(width) {
+  explicit AtkinsonDitherer(int width) : width(width), errorRow0(nullptr), errorRow1(nullptr), errorRow2(nullptr) {
     errorRow0 = new int16_t[width + 4]();  // Current row
     errorRow1 = new int16_t[width + 4]();  // Next row
     errorRow2 = new int16_t[width + 4]();  // Row after next

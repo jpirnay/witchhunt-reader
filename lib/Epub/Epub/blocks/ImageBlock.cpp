@@ -7,6 +7,7 @@
 #include <Serialization.h>
 
 #include "../../../../src/fontIds.h"
+#include "../../Epub.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/JpegToFramebufferConverter.h"
@@ -19,6 +20,31 @@
 
 ImageBlock::ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText)
     : imagePath(imagePath), altText(altText), width(width), height(height) {}
+
+ImageBlock::ImageBlock(const std::string& imagePath, int16_t width, int16_t height, const std::string& altText,
+                       const std::string& epubFilePath, const std::string& epubEntryPath)
+    : imagePath(imagePath),
+      altText(altText),
+      width(width),
+      height(height),
+      epubFilePath_(epubFilePath),
+      epubEntryPath_(epubEntryPath) {}
+
+bool ImageBlock::ensureExtracted() const {
+  if (Storage.exists(imagePath.c_str())) return true;
+  if (epubFilePath_.empty() || epubEntryPath_.empty()) {
+    LOG_ERR("IMG", "Image missing and no EPUB source: %s", imagePath.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
+  Epub epub(epubFilePath_, "/.crosspoint");
+  if (!epub.extractItemToFile(epubEntryPath_, imagePath)) {
+    LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
+    return false;
+  }
+  LOG_DBG("IMG", "Lazy extraction done: %s", imagePath.c_str());
+  return true;
+}
 
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
 
@@ -38,8 +64,10 @@ std::string getGrayscaleCachePath(const std::string& imagePath) {
   return imagePath + ".bayer.pxc";
 }
 
+// srcYOffset: first source row to render (0 = top of image).
+// srcHeight:  number of rows to render (0 = full image from srcYOffset).
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
-                     int expectedHeight) {
+                     int expectedHeight, int srcYOffset = 0, int srcHeight = 0) {
   FsFile cacheFile;
   if (!Storage.openFileForRead("IMG", cachePath, cacheFile)) {
     return false;
@@ -51,26 +79,57 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     return false;
   }
 
-  // Verify dimensions are close (allow 1 pixel tolerance for rounding differences)
-  int widthDiff = abs(cachedWidth - expectedWidth);
-  int heightDiff = abs(cachedHeight - expectedHeight);
-  if (widthDiff > 1 || heightDiff > 1) {
-    LOG_ERR("IMG", "Cache dimension mismatch: %dx%d vs %dx%d", cachedWidth, cachedHeight, expectedWidth,
-            expectedHeight);
+  // Verify width is close (allow 1 pixel tolerance for rounding differences).
+  // Height tolerance is widened to allow cropped renders (srcHeight < cachedHeight).
+  if (abs(cachedWidth - expectedWidth) > 1) {
+    LOG_ERR("IMG", "Cache width mismatch: %d vs %d", cachedWidth, expectedWidth);
     cacheFile.close();
     return false;
   }
 
-  // Use cached dimensions for rendering (they're the actual decoded size)
-  expectedWidth = cachedWidth;
-  expectedHeight = cachedHeight;
+  // Resolve crop window against actual cached dimensions
+  if (srcYOffset < 0) srcYOffset = 0;
+  if (srcYOffset >= static_cast<int>(cachedHeight)) {
+    cacheFile.close();
+    return false;
+  }
+  // Cap rows by both the cache height and the caller's expected height to prevent
+  // overrunning the framebuffer when a 1-pixel cache rounding difference occurs.
+  const int maxRows = std::min(static_cast<int>(cachedHeight) - srcYOffset, expectedHeight - srcYOffset);
+  const int rowsToRender = (srcHeight > 0) ? std::min(srcHeight, maxRows) : maxRows;
 
-  LOG_DBG("IMG", "Loading from cache: %s (%dx%d)", cachePath.c_str(), cachedWidth, cachedHeight);
+  LOG_DBG("IMG", "Loading from cache: %s (%dx%d) srcY=%d rows=%d", cachePath.c_str(), cachedWidth, cachedHeight,
+          srcYOffset, rowsToRender);
 
-  // Read and render row by row to minimize memory usage
   const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
-  uint8_t* rowBuffer = (uint8_t*)malloc(bytesPerRow);
-  if (!rowBuffer) {
+
+  // Seek directly to the first row of interest — no need to iterate skipped rows.
+  // Cache layout: 4-byte header (width + height) followed by rows in order.
+  if (srcYOffset > 0) {
+    const uint32_t seekPos = 4u + static_cast<uint32_t>(srcYOffset) * static_cast<uint32_t>(bytesPerRow);
+    if (!cacheFile.seekSet(seekPos)) {
+      LOG_ERR("IMG", "Cache seek failed to row %d", srcYOffset);
+      cacheFile.close();
+      return false;
+    }
+  }
+
+  // Read several rows per SD access. A full-page image is re-rendered on every
+  // grayscale strip pass (~14x per page), and a one-row-per-read loop here means
+  // hundreds of tiny reads through the storage mutex + SdFat each time — the
+  // dominant cost of displaying an image page. Batching rows into a ~4KB buffer
+  // cuts that down dramatically without holding the whole image.
+  // (Ported from upstream commit d9bcef7a, crosspoint-reader#2230.)
+  int rowsPerRead = 4096 / bytesPerRow;
+  if (rowsPerRead < 1) rowsPerRead = 1;
+  if (rowsPerRead > rowsToRender) rowsPerRead = rowsToRender;
+  uint8_t* readBuffer = (uint8_t*)malloc((size_t)rowsPerRead * bytesPerRow);
+  if (!readBuffer) {
+    // Fall back to a single-row buffer under memory pressure.
+    rowsPerRead = 1;
+    readBuffer = (uint8_t*)malloc(bytesPerRow);
+  }
+  if (!readBuffer) {
     LOG_ERR("IMG", "Failed to allocate row buffer");
     cacheFile.close();
     return false;
@@ -79,17 +138,32 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   DirectPixelWriter pw;
   pw.init(renderer);
 
-  for (int row = 0; row < cachedHeight; row++) {
-    if (cacheFile.read(rowBuffer, bytesPerRow) != bytesPerRow) {
-      LOG_ERR("IMG", "Cache read error at row %d", row);
-      free(rowBuffer);
-      cacheFile.close();
-      return false;
+  int rowsInBuffer = 0;
+  int bufferRow = 0;
+  for (int row = 0; row < rowsToRender; row++) {
+    if (bufferRow >= rowsInBuffer) {
+      const int toRead = (rowsToRender - row < rowsPerRead) ? (rowsToRender - row) : rowsPerRead;
+      const size_t bytes = (size_t)toRead * bytesPerRow;
+      if (cacheFile.read(readBuffer, bytes) != bytes) {
+        LOG_ERR("IMG", "Cache read error at row %d", srcYOffset + row);
+        free(readBuffer);
+        cacheFile.close();
+        return false;
+      }
+      rowsInBuffer = toRead;
+      bufferRow = 0;
     }
+
+    const uint8_t* rowBuffer = readBuffer + (size_t)bufferRow * bytesPerRow;
+    bufferRow++;
 
     const int destY = y + row;
     pw.beginRow(destY);
-    for (int col = 0; col < cachedWidth; col++) {
+    // On a grayscale strip pass only a narrow column window of the image is in
+    // the active band; skip the rest instead of unpacking+clipping every pixel.
+    int colStart, colEnd;
+    pw.bandColRange(x, cachedWidth, colStart, colEnd);
+    for (int col = colStart; col < colEnd; col++) {
       const int byteIdx = col >> 2;            // col / 4
       const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
       uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
@@ -98,7 +172,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     }
   }
 
-  free(rowBuffer);
+  free(readBuffer);
   cacheFile.close();
   LOG_DBG("IMG", "Cache render complete");
   return true;
@@ -107,17 +181,10 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 }  // namespace
 
 bool ImageBlock::isLargeImage() const {
-  if (largeImageCached != 0) return largeImageCached == 1;
-  ImageDimensions dims{0, 0};
-  const bool ok = FsHelpers::hasJpgExtension(imagePath)
-                      ? JpegToFramebufferConverter::getDimensionsStatic(imagePath, dims)
-                      : PngToFramebufferConverter::getDimensionsStatic(imagePath, dims);
-  if (ok && dims.width > 0 && dims.height > 0) {
-    largeImageCached = (int32_t(dims.width) * dims.height > LARGE_IMAGE_PIXEL_THRESHOLD) ? 1 : -1;
-  } else {
-    largeImageCached = -1;  // unreadable header → assume not large, render normally
-  }
-  return largeImageCached == 1;
+  // width and height are always set at construction from the ZIP manifest or
+  // image header — no file read needed. The SD cache file may not exist yet
+  // (lazy extraction), so reading it here would produce spurious error logs.
+  return int32_t(width) * int32_t(height) > LARGE_IMAGE_PIXEL_THRESHOLD;
 }
 
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
@@ -133,7 +200,15 @@ bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) con
 }
 
 void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, const int y) const {
-  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height);
+  renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
+}
+
+std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const int16_t srcHeight) const {
+  auto crop =
+      std::unique_ptr<ImageBlock>(new ImageBlock(imagePath, width, height, altText, epubFilePath_, epubEntryPath_));
+  crop->srcYOffset_ = srcYOffset;
+  crop->srcHeight_ = srcHeight;
+  return crop;
 }
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
@@ -160,16 +235,25 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
                         const bool monochromeOutput) {
-  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) mono=%d", x, y, imagePath.c_str(), width, height,
-          monochromeOutput ? 1 : 0);
+  // The font-prewarm scan pass only accumulates glyphs; an image contributes
+  // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
+  // suppression, so it would otherwise do a full (discarded) cache render every
+  // page view. Skip it here. The image still draws in the real BW/grayscale
+  // passes; on first view this just moves the one-time decode to the BW pass.
+  // (Ported from upstream commit d9bcef7a, crosspoint-reader#2230.)
+  if (renderer.isFontCacheScanning()) return;
+
+  const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
+  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) srcY=%d rendH=%d mono=%d", x, y, imagePath.c_str(), width,
+          height, srcYOffset_, renderedHeight, monochromeOutput ? 1 : 0);
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
 
-  // Bounds check render position using logical screen dimensions
-  if (x < 0 || y < 0 || x + width > screenWidth || y + height > screenHeight) {
-    LOG_ERR("IMG", "Render bounds rejected: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, height, screenWidth,
-            screenHeight);
+  // Bounds check against the rendered (cropped) height, not the full image height.
+  if (x < 0 || y < 0 || x + width > screenWidth || y + renderedHeight > screenHeight) {
+    LOG_ERR("IMG", "Render bounds rejected: (%d,%d) size (%dx%d) screen (%dx%d)", x, y, width, renderedHeight,
+            screenWidth, screenHeight);
     return;
   }
 
@@ -177,7 +261,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   const std::string cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
 
   // Try to render from pixel cache first (always, regardless of forceLoad)
-  if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+  if (renderFromCache(renderer, cachePath, x, y, width, renderedHeight, srcYOffset_, srcHeight_)) {
     return;
   }
 
@@ -188,10 +272,16 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
+  // Ensure the image is extracted to SD (lazy extraction if not already present).
+  if (!ensureExtracted()) {
+    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
+    return;
+  }
+
   // Proceed with full decode
   FsFile file;
   if (!Storage.openFileForRead("IMG", imagePath, file)) {
-    LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
+    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
     return;
   }
   size_t fileSize = file.size();
@@ -235,6 +325,10 @@ bool ImageBlock::serialize(FsFile& file) {
   serialization::writePod(file, width);
   serialization::writePod(file, height);
   serialization::writeString(file, altText);
+  serialization::writeString(file, epubFilePath_);
+  serialization::writeString(file, epubEntryPath_);
+  serialization::writePod(file, srcYOffset_);
+  serialization::writePod(file, srcHeight_);
   return true;
 }
 
@@ -244,7 +338,15 @@ std::unique_ptr<ImageBlock> ImageBlock::deserialize(FsFile& file) {
   int16_t w, h;
   serialization::readPod(file, w);
   serialization::readPod(file, h);
-  std::string alt;
+  std::string alt, epubFile, epubEntry;
   serialization::readString(file, alt);
-  return std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt));
+  serialization::readString(file, epubFile);
+  serialization::readString(file, epubEntry);
+  int16_t srcYOffset = 0, srcHeight = 0;
+  serialization::readPod(file, srcYOffset);
+  serialization::readPod(file, srcHeight);
+  auto block = std::unique_ptr<ImageBlock>(new ImageBlock(path, w, h, alt, epubFile, epubEntry));
+  block->srcYOffset_ = srcYOffset;
+  block->srcHeight_ = srcHeight;
+  return block;
 }

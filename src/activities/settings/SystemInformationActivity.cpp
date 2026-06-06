@@ -9,6 +9,7 @@
 #include "SystemStatus.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "images/Logo120.h"
 
 static const char* pickUnit(uint64_t maxBytes, double& outDivisor) {
   if (maxBytes >= 1024ULL * 1024 * 1024) {
@@ -152,6 +153,12 @@ void SystemInformationActivity::render(RenderLock&&) {
   drawSection(tr(STR_SEC_FLASH));
   drawRow(tr(STR_APP_PARTITION), formatBytes(status.flashAppPartitionSize));
   drawRow(tr(STR_FLASH_TOTAL), formatBytes(status.flashBytes));
+  if (status.fontCacheTotalBytes > 0) {
+    const std::string fontCacheValue = status.fontCacheUsedBytes > 0 ? formatBytes(status.fontCacheUsedBytes) + " / " +
+                                                                           formatBytes(status.fontCacheTotalBytes)
+                                                                     : "- / " + formatBytes(status.fontCacheTotalBytes);
+    drawRow(tr(STR_FONT_CACHE), fontCacheValue);
+  }
 
   drawSection(tr(STR_SEC_RUNTIME));
   const uint32_t h = status.uptimeSeconds / 3600;
@@ -176,6 +183,17 @@ void SystemInformationActivity::render(RenderLock&&) {
     drawRow(tr(STR_SD_CARD), formatBytes(status.sdUsedBytes) + " / " + formatBytes(status.sdTotalBytes));
   } else {
     drawRow(tr(STR_SD_CARD), tr(STR_NOT_SET));
+  }
+
+  // Draw logo centered horizontally, vertically centered in the space between
+  // the last data row and the button hints. drawImage handles coordinate
+  // transformation internally so plain content-rect coordinates are used here.
+  constexpr int kLogoSize = 120;
+  const int hintsTop = contentRect.y + contentRect.height - metrics.buttonHintsHeight;
+  const int logoY = y + (hintsTop - y - kLogoSize) / 2;
+  const int logoX = contentRect.x + (contentRect.width - kLogoSize) / 2;
+  if (logoY >= 0 && logoY + kLogoSize <= hintsTop) {
+    renderer.drawImage(Logo120, logoX, logoY, kLogoSize, kLogoSize);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), sdStatusReady_ ? "" : tr(STR_UPDATE), "", "");

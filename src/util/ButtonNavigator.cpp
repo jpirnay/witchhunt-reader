@@ -273,30 +273,24 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
     return;
   }
 
-  const bool wasPressed = std::any_of(buttons.begin(), buttons.end(),
-                                      [](const MappedInputManager::Button b) { return mappedInput->wasPressed(b); });
-  const uint32_t now = millis();
-  if (wasPressed) {
-    // Detect double-click on press: measure gap since previous release.
-    pendingDouble = lastPressMs > 0 && (now - lastPressMs) < listDoubleClickMs;
-  }
-
   const bool wasReleased = std::any_of(buttons.begin(), buttons.end(),
                                        [](const MappedInputManager::Button b) { return mappedInput->wasReleased(b); });
   if (wasReleased) {
-    // Record release time so the next press can measure the gap.
-    lastPressMs = now;
-  }
-  if (!wasReleased) return;
-
-  // Long press already fired: reset the guard and skip navigation — the jump-to-end
-  // already happened on the down-hold, so release produces no additional move.
-  if (longPressFired) {
+    // Long press already fired: reset the guard on release — no navigation.
     longPressFired = false;
-    return;
   }
 
-  const bool isDouble = pendingDouble;
+  const bool wasPressed = std::any_of(buttons.begin(), buttons.end(),
+                                      [](const MappedInputManager::Button b) { return mappedInput->wasPressed(b); });
+  if (!wasPressed) return;
+
+  // Long press already fired: skip the press navigation — the jump-to-end already happened.
+  if (longPressFired) return;
+
+  const uint32_t now = millis();
+  // Detect double-click: measure gap since previous press.
+  const bool isDouble = lastPressMs > 0 && (now - lastPressMs) < listDoubleClickMs;
+  lastPressMs = now;
   pendingDouble = false;
 
   if (isDouble) {

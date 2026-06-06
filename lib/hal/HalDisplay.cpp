@@ -85,6 +85,22 @@ void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
+void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
+
+bool HalDisplay::releaseSecondaryBuffer() { return einkDisplay.releaseSecondaryBuffer(); }
+
+bool HalDisplay::reallocSecondaryBuffer() { return einkDisplay.reallocSecondaryBuffer(); }
+
+bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
+
+void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
+  einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
+}
+
+void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
+
+bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }
@@ -100,6 +116,12 @@ void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.
 void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) { einkDisplay.displayGrayBuffer(turnOffScreen); }
+
+void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
+  einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
+}
+
+bool HalDisplay::deviceIsX3() const { return einkDisplay.isX3Mode(); }
 
 void HalDisplay::setFastGrayscaleLut(bool fast) { einkDisplay.setFastGrayscaleLut(fast); }
 

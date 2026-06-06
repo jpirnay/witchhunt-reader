@@ -92,19 +92,18 @@ class PageTableFragment final : public PageElement {
   uint8_t columnCount = 0;
   uint16_t totalWidth = 0;
   uint16_t totalHeight = 0;
-  std::array<uint16_t, MAX_TABLE_COLS> colWidths = {};
   std::vector<TableRow> rows;
+  bool hasBorder = true;
 
  public:
-  PageTableFragment(uint8_t colCount, uint16_t totalWidth, uint16_t totalHeight,
-                    std::array<uint16_t, MAX_TABLE_COLS> colWidths, std::vector<TableRow> rows, int16_t xPos,
-                    int16_t yPos)
+  PageTableFragment(uint8_t colCount, uint16_t totalWidth, uint16_t totalHeight, std::vector<TableRow> rows,
+                    int16_t xPos, int16_t yPos, bool hasBorder = true)
       : PageElement(xPos, yPos),
         columnCount(colCount),
         totalWidth(totalWidth),
         totalHeight(totalHeight),
-        colWidths(colWidths),
-        rows(std::move(rows)) {}
+        rows(std::move(rows)),
+        hasBorder(hasBorder) {}
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
@@ -157,6 +156,20 @@ class Page {
                        [](const std::shared_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
   }
 
+  // Returns true if any image on this page would require a decoder allocation —
+  // i.e. is not a placeholder AND does not already have a pixel cache on disk.
+  // Used to decide whether to release the secondary frame buffer before warm.
+  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput) const {
+    for (const auto& el : elements) {
+      if (el->getTag() != TAG_PageImage) continue;
+      const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
+      if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
+      if (monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache()) continue;
+      return true;
+    }
+    return false;
+  }
+
   // Get bounding box of all images on the page (union of image rects)
   // Returns false if no images. Coordinates are relative to page origin.
   bool getImageBoundingBox(int16_t& outX, int16_t& outY, int16_t& outW, int16_t& outH) const {
@@ -168,7 +181,7 @@ class Page {
         int16_t x = img.xPos;
         int16_t y = img.yPos;
         int16_t right = x + img.getImageBlock().getWidth();
-        int16_t bottom = y + img.getImageBlock().getHeight();
+        int16_t bottom = y + img.getImageBlock().getRenderedHeight();
         minX = std::min(minX, x);
         minY = std::min(minY, y);
         maxX = std::max(maxX, right);

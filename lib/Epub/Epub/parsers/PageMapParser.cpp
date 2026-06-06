@@ -65,12 +65,13 @@ void PageMapParser::startElement(void* userData, const char* name, const char** 
     return;
   }
 
-  std::string href = FsHelpers::normalisePath(self->baseContentPath + rawHref);
+  const std::string rawTarget = self->baseContentPath + rawHref;
+  const size_t pos = rawTarget.find('#');
+  const std::string rawPath = pos == std::string::npos ? rawTarget : rawTarget.substr(0, pos);
+  std::string href = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawPath));
   std::string anchor;
-  const size_t pos = href.find('#');
   if (pos != std::string::npos) {
-    anchor = href.substr(pos + 1);
-    href = href.substr(0, pos);
+    anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
   }
   self->pageListSink->addEntry(href, anchor, label);
 }
