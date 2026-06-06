@@ -114,8 +114,22 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     }
   }
 
-  uint8_t* rowBuffer = (uint8_t*)malloc(bytesPerRow);
-  if (!rowBuffer) {
+  // Read several rows per SD access. A full-page image is re-rendered on every
+  // grayscale strip pass (~14x per page), and a one-row-per-read loop here means
+  // hundreds of tiny reads through the storage mutex + SdFat each time — the
+  // dominant cost of displaying an image page. Batching rows into a ~4KB buffer
+  // cuts that down dramatically without holding the whole image.
+  // (Ported from upstream commit d9bcef7a, crosspoint-reader#2230.)
+  int rowsPerRead = 4096 / bytesPerRow;
+  if (rowsPerRead < 1) rowsPerRead = 1;
+  if (rowsPerRead > rowsToRender) rowsPerRead = rowsToRender;
+  uint8_t* readBuffer = (uint8_t*)malloc((size_t)rowsPerRead * bytesPerRow);
+  if (!readBuffer) {
+    // Fall back to a single-row buffer under memory pressure.
+    rowsPerRead = 1;
+    readBuffer = (uint8_t*)malloc(bytesPerRow);
+  }
+  if (!readBuffer) {
     LOG_ERR("IMG", "Failed to allocate row buffer");
     cacheFile.close();
     return false;
@@ -124,17 +138,32 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  int rowsInBuffer = 0;
+  int bufferRow = 0;
   for (int row = 0; row < rowsToRender; row++) {
-    if (cacheFile.read(rowBuffer, bytesPerRow) != bytesPerRow) {
-      LOG_ERR("IMG", "Cache read error at row %d", srcYOffset + row);
-      free(rowBuffer);
-      cacheFile.close();
-      return false;
+    if (bufferRow >= rowsInBuffer) {
+      const int toRead = (rowsToRender - row < rowsPerRead) ? (rowsToRender - row) : rowsPerRead;
+      const size_t bytes = (size_t)toRead * bytesPerRow;
+      if (cacheFile.read(readBuffer, bytes) != bytes) {
+        LOG_ERR("IMG", "Cache read error at row %d", srcYOffset + row);
+        free(readBuffer);
+        cacheFile.close();
+        return false;
+      }
+      rowsInBuffer = toRead;
+      bufferRow = 0;
     }
+
+    const uint8_t* rowBuffer = readBuffer + (size_t)bufferRow * bytesPerRow;
+    bufferRow++;
 
     const int destY = y + row;
     pw.beginRow(destY);
-    for (int col = 0; col < cachedWidth; col++) {
+    // On a grayscale strip pass only a narrow column window of the image is in
+    // the active band; skip the rest instead of unpacking+clipping every pixel.
+    int colStart, colEnd;
+    pw.bandColRange(x, cachedWidth, colStart, colEnd);
+    for (int col = colStart; col < colEnd; col++) {
       const int byteIdx = col >> 2;            // col / 4
       const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
       uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
@@ -143,7 +172,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     }
   }
 
-  free(rowBuffer);
+  free(readBuffer);
   cacheFile.close();
   LOG_DBG("IMG", "Cache render complete");
   return true;
@@ -206,6 +235,14 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
                         const bool monochromeOutput) {
+  // The font-prewarm scan pass only accumulates glyphs; an image contributes
+  // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
+  // suppression, so it would otherwise do a full (discarded) cache render every
+  // page view. Skip it here. The image still draws in the real BW/grayscale
+  // passes; on first view this just moves the one-time decode to the BW pass.
+  // (Ported from upstream commit d9bcef7a, crosspoint-reader#2230.)
+  if (renderer.isFontCacheScanning()) return;
+
   const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) srcY=%d rendH=%d mono=%d", x, y, imagePath.c_str(), width,
           height, srcYOffset_, renderedHeight, monochromeOutput ? 1 : 0);

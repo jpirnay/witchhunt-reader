@@ -359,7 +359,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   if (stride <= 0 || blockH <= 0 || validW <= 0) return 1;
 
-  const bool caching = ctx->caching;
+  bool caching = ctx->caching;
   const int32_t fineScaleFPX = ctx->fineScaleFPX;
   const int32_t invScaleFPX = ctx->invScaleFPX;
   const int32_t fineScaleFPY = ctx->fineScaleFPY;
@@ -396,10 +396,23 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   DirectPixelWriter pw;
   pw.init(renderer);
 
+  // The cache streams to disk one MCU-row band at a time. Flushing rows below
+  // this block (raster order guarantees they are final) repositions the band;
+  // the band-relative origin/extent passed to init() then map screen rows to
+  // the small streaming buffer rather than a full-image one. If a flush write
+  // fails, stop caching for the rest of this decode (and let finalize() drop
+  // the partial file) rather than writing past the band buffer.
+  //
+  // Ported from upstream commit d9bcef7a (crosspoint-reader#2230).
   DirectCacheWriter cw;
   if (caching) {
-    cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->cache.originY, ctx->cache.width,
-            ctx->cache.height);
+    if (!ctx->cache.advanceTo(dstYStart)) {
+      caching = false;
+      ctx->caching = false;
+    } else {
+      cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.originX, ctx->config->y + ctx->cache.bandStart,
+              ctx->cache.width, ctx->cache.bandRows);
+    }
   }
 
   // === 1:1 fast path: no scaling math ===
@@ -723,11 +736,16 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
   jpeg->setUserPointer(&ctx);
 
-  // Allocate cache buffer using final output dimensions
+  // Start streaming the pixel cache to disk. The band only needs to hold the
+  // tallest single decode block: a JPEGDEC MCU cell is at most 16 scaled-source
+  // rows tall, which our fine scale maps to this many output rows.
+  // (See PixelCache for why streaming replaced a full-image buffer; ported from
+  // upstream commit d9bcef7a, crosspoint-reader#2230.)
   ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight);
   if (ctx.caching) {
-    if (!ctx.cache.allocate(destWidth, destHeight, config.x, config.y)) {
-      LOG_ERR("JPG", "Failed to allocate cache buffer, continuing without caching");
+    const int maxBlockDstRows = (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
+    if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {
+      LOG_ERR("JPG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
     }
   }
@@ -776,15 +794,17 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
     jpeg->close();
+    if (ctx.caching) ctx.cache.abort();
     return false;
   }
 
   jpeg->close();
   LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms", decodeTime);
 
-  // Write cache file if caching was enabled
+  // Finalize the streamed cache file. Note: a flush failure mid-decode clears
+  // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching) {
-    ctx.cache.writeToFile(config.cachePath);
+    ctx.cache.finalize();
   }
 
   return true;
