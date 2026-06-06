@@ -143,13 +143,21 @@ The X3's five-register layout means each LUT register encodes the waveform for o
 
 **Potential use:** Any time a full-plane white clear is needed (e.g. before a factory-mode grayscale refresh, or after a mode transition that leaves BW RAM in an unknown state), `0x46`/`0x47` would be faster and use zero SPI bandwidth compared to a manual `writeRamBuffer`.
 
-### 3. X3: Partial window update (`PTL`/`PTIN`/`PTOUT`) for normal fast refresh
+### 3. X3: Partial window update (`PTL`/`PTIN`/`PTOUT`) — implemented, with a hardware caveat
 
-**Available:** Commands `0x91` (PTIN), `0x90` (PTL, 9-byte window descriptor), `0x92` (PTOUT) allow the UC8179 to accept a DTM2 payload covering only a rectangular sub-region of the panel and refresh only that region. The LUT waveforms and BUSY protocol are identical to a full refresh.
+**Available:** Commands `0x91` (PTIN), `0x90` (PTL, 9-byte window descriptor), `0x92` (PTOUT) allow the UC8179 to accept a DTM2 payload and constrain the refresh waveform to a rectangular sub-region of the panel, defined by a source-column range (`HRST`/`HRED`) and a gate/row range (`VRST`/`VRED`). The LUT waveforms and BUSY protocol are otherwise identical to a full refresh.
 
-**Current use:** Used only for conditioning passes inside `completeDisplay()`. `displayWindow()` on X3 falls back to a full `displayBuffer()` because the X3 partial-window path requires a different RAM-write command sequence than the X4 `setRamArea` path.
+**Current use:** `EInkDisplay::displayWindow()` now implements this natively for X3 (previously it fell back to a full `displayBuffer()`), following the exact OEM conditioning-pass sequence: `PTIN → PTL → DTM2(full frame) → PTOUT → DRF` (no `DATA_STOP` between `DTM2` and `PTOUT` — the controller hangs if it's present there), using the `lut_x3_*_half` LUT bank (CDI `0xA9`) so the waveform selection is independent of DTM1's contents (a partial window cannot reliably carry a synced DTM1 baseline for its region).
 
-**Potential use:** Popup overlays, status indicators, and any other sub-full-screen update could use the native X3 partial window to avoid refreshing unchanged pixels — reducing waveform time in proportion to the window area. This would require a dedicated X3 windowed write helper analogous to the X4 `setRamArea` + windowed `writeRamBuffer` path.
+**Hardware constraint discovered during implementation — narrow source-column ranges are unreliable:** On this panel, the UC8179 source driver cannot cleanly drive a PTL window whose source-column range (`HRST`/`HRED`) is narrower than the full panel width. Doing so produces an intermittent "speckle" artifact (a faint line every few pixels, roughly 1 clean refresh in 10 attempts) that is **identical regardless of which LUT bank is loaded** — fast/differential (`0x29`), normal (`0xA9`), and half/scrub (`0xA9`) all speckle equally, which rules out DTM1/waveform-selection as the cause. A window with the *full* source range but a *narrow gate/row range* (`VRST`/`VRED`), by contrast, came out perfectly clean on every attempt (confirmed over two independent test rounds, 9/9 clean). The OEM firmware's only documented partial-mode usage (the conditioning pass in `completeDisplay()`) always uses a full-panel window — consistent with this being a real silicon/panel limitation rather than a sequencing bug.
+
+`displayWindow()` therefore **always widens the PTL source range to the full panel width** (`HRST=0`, `HRED=panelWidth-1`) and constrains only the gate/row range — the axis confirmed to work reliably. The caller's `(x, w)` are still used for framebuffer addressing/bounds; only the descriptor sent to the controller is widened (a `Serial` note is logged when this happens).
+
+**Practical consequence — this limits which UI regions actually benefit:** Because only the gate/row range can be constrained, a windowed refresh only saves waveform time when the *physical* rectangle is full-width and row-constrained. `GfxRenderer` exposes a logical-portrait screen on this panel (rotated 90° from the physical 792×528 landscape panel), so:
+- A **logical left/right-edge vertical strip spanning the full screen height** maps to a physical full-width/narrow-row band → genuinely faster partial refresh.
+- A **logical top/bottom horizontal bar** (e.g. a status bar) maps to a physical narrow-source-column/full-row band → `displayWindow()` produces a *correct* result (no speckle, thanks to the auto-widen) but costs the same as a full-panel refresh, since the controller ends up scanning the full source range regardless.
+
+This means the original motivating use case — a faster status-bar-only partial refresh in the default Portrait orientation — is **not achievable via native PTL windowing** on this controller/panel combination. `displayWindow()` remains correct and available for the left/right-edge-strip shape where it does help.
 
 ### 4. X3: LUT and CDI registers survive POF; only reload on mode change
 
