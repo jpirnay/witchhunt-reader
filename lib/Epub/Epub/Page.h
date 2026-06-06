@@ -96,8 +96,8 @@ class PageTableFragment final : public PageElement {
   bool hasBorder = true;
 
  public:
-  PageTableFragment(uint8_t colCount, uint16_t totalWidth, uint16_t totalHeight,
-                    std::vector<TableRow> rows, int16_t xPos, int16_t yPos, bool hasBorder = true)
+  PageTableFragment(uint8_t colCount, uint16_t totalWidth, uint16_t totalHeight, std::vector<TableRow> rows,
+                    int16_t xPos, int16_t yPos, bool hasBorder = true)
       : PageElement(xPos, yPos),
         columnCount(colCount),
         totalWidth(totalWidth),

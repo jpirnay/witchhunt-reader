@@ -440,6 +440,13 @@ void EpubReaderActivity::loop() {
             pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
             pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
           });
+          // The panel now shows the AA-dithered render, but cleanupGrayscaleWithPreviousBuffer()
+          // only resyncs RED RAM / frameBufferActive to the plain BW page (the correct content
+          // baseline, but not what's physically on screen). On X4 a fast differential would diff
+          // the next page against that BW bitmap while the panel shows dithered glyph edges,
+          // leaving ghosts where the two differ. Force HALF_REFRESH so the next page turn drives
+          // every pixel absolutely instead of trusting a stale physical-state assumption.
+          if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
           pendingGrayscale_.page.reset();
           LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
         }
@@ -1666,8 +1673,14 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
+  // Do NOT clear pendingHalfRefreshAfterGrayscale_ here: when an AA pass already
+  // completed for the outgoing page, the panel physically shows the AA-dithered
+  // render while RED RAM / frameBufferActive only track the plain BW bitmap. That
+  // flag is the only record that the next refresh must bypass the differential
+  // diff (HALF_REFRESH) instead of trusting a baseline that no longer matches the
+  // physical panel — clearing it here would silently reopen the ghosting window.
+  // It is consumed and reset at the top of renderContents() regardless.
   pendingGrayscale_ = {};
-  pendingHalfRefreshAfterGrayscale_ = false;
 
   auto logPageTurnWindowIfReady = [this]() {
     if (pageTurnStatsWindow.turns < PAGE_TURN_STATS_WINDOW_SIZE) {
@@ -2425,10 +2438,15 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
 
   renderStatusBar();
 
-  // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so we
-  // always go through the normal refresh cycle — no imagePageWithAA or forceHalfRefresh paths.
-  const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
+  // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
+  // imagePageWithAA never applies here — but a prior page's AA pass can still leave the
+  // panel showing AA-dithered pixels that don't match RED RAM / frameBufferActive (see
+  // pendingHalfRefreshAfterGrayscale_ doc comment), and this fast path is the only display
+  // call for pre-rendered pages — renderContents()'s forceHalfRefreshThisPage never runs.
+  const bool forceHalfRefreshThisPage =
+      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
   pendingHalfRefreshAfterImagePage = false;
+  pendingHalfRefreshAfterGrayscale_ = false;
   if (secondaryBufferDegraded_) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -2445,6 +2463,11 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
+    // See the deferred-AA completion above: the panel now shows the AA-dithered
+    // render while RED RAM / frameBufferActive only tracks the plain BW bitmap.
+    // Force the next page turn to HALF_REFRESH on X4 to avoid diffing against a
+    // baseline that no longer matches the physical panel state.
+    if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
   }
 }
 

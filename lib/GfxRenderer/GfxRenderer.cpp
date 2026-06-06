@@ -2333,8 +2333,8 @@ void GfxRenderer::displayWindow(int logX, int logY, int logW, int logH, bool tur
       physH = static_cast<uint16_t>(logH);
       break;
   }
-  LOG_DBG("WIN", "displayWindow logical(%d,%d,%d,%d) orient=%d → physical(%d,%d,%d,%d)",
-          logX, logY, logW, logH, (int)getOrientation(), physX, physY, physW, physH);
+  LOG_DBG("WIN", "displayWindow logical(%d,%d,%d,%d) orient=%d → physical(%d,%d,%d,%d)", logX, logY, logW, logH,
+          (int)getOrientation(), physX, physY, physW, physH);
   display.displayWindow(physX, physY, physW, physH, turnOffScreen);
 }
 
