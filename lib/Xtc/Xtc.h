@@ -7,10 +7,12 @@
 
 #pragma once
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "Xtc/XtcPageRowStream.h"
 #include "Xtc/XtcParser.h"
 #include "Xtc/XtcTypes.h"
 
@@ -25,6 +27,17 @@ class Xtc {
   std::string cachePath;
   std::unique_ptr<xtc::XtcParser> parser;
   bool loaded;
+
+  // LRU of page indices whose transposed cache files (bw_/gray_) are persisted,
+  // most-recent at the back. Bounds reader cache growth (a 640-page book would
+  // otherwise leave ~60MB of transposes behind).
+  mutable std::deque<uint32_t> pageCacheLru;
+  static constexpr size_t kPageCacheMax = 4;
+
+  std::string pageBwCachePath(uint32_t pageIndex) const;
+  std::string pageGrayCachePath(uint32_t pageIndex) const;
+  void touchPageCache(uint32_t pageIndex) const;  // record use + evict overflow
+  void clearPageCache() const;                    // drop all persisted page_* planes
 
  public:
   explicit Xtc(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)), loaded(false) {
@@ -84,6 +97,17 @@ class Xtc {
    * @return Number of bytes read
    */
   size_t loadPage(uint32_t pageIndex, uint8_t* buffer, size_t bufferSize) const;
+
+  /**
+   * Open a row-major streaming reader for a page. Avoids allocating the whole
+   * page (which fails for XTH on the fragmented heap).
+   *
+   * When persist is true (reader use) the transposed planes are kept on disk and
+   * tracked by an LRU so revisiting a page is a pure read. When false (one-shot
+   * previews) the planes are deleted when the stream closes. Returns true if the
+   * stream is ready.
+   */
+  bool openPageRowStream(xtc::XtcPageRowStream& stream, uint32_t pageIndex, bool persist = true) const;
 
   /**
    * Load page with streaming callback
