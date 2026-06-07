@@ -226,33 +226,15 @@ void XtcReaderActivity::renderPage() {
   const uint16_t pageHeight = xtc->getPageHeight();
   const uint8_t bitDepth = xtc->getBitDepth();
 
-  // Calculate buffer size for one page
-  // XTG (1-bit): Row-major, ((width+7)/8) * height bytes
-  // XTH (2-bit): Two bit planes, column-major, ((width * height + 7) / 8) * 2 bytes
-  size_t pageBufferSize;
-  if (bitDepth == 2) {
-    pageBufferSize = ((static_cast<size_t>(pageWidth) * pageHeight + 7) / 8) * 2;
-  } else {
-    pageBufferSize = ((pageWidth + 7) / 8) * pageHeight;
-  }
-
-  // Allocate page buffer
-  uint8_t* pageBuffer = static_cast<uint8_t*>(malloc(pageBufferSize));
-  if (!pageBuffer) {
-    LOG_ERR("XTR", "Failed to allocate page buffer (%lu bytes)", pageBufferSize);
+  // Stream the page row-major instead of allocating the whole page in heap. A
+  // full XTH page (e.g. 96000 bytes) does not fit the fragmented ESP32-C3 heap
+  // and previously failed to render; the stream keeps the working set to a few
+  // small bounded buffers (XTH is transposed once to a row-major temp file).
+  xtc::XtcPageRowStream pageStream;
+  if (!xtc->openPageRowStream(pageStream, currentPage)) {
+    LOG_ERR("XTR", "Failed to open page stream for page %lu", currentPage);
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_MEMORY_ERROR), true, EpdFontFamily::BOLD);
-    renderer.displayBuffer();
-    return;
-  }
-
-  // Load page data
-  size_t bytesRead = xtc->loadPage(currentPage, pageBuffer, pageBufferSize);
-  if (bytesRead == 0) {
-    LOG_ERR("XTR", "Failed to load page %lu", currentPage);
-    free(pageBuffer);
-    renderer.clearScreen();
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_PAGE_LOAD_ERROR), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
     return;
   }
@@ -267,46 +249,16 @@ void XtcReaderActivity::renderPage() {
   const uint16_t maxSrcY = std::min(pageHeight, static_cast<uint16_t>(renderer.getScreenHeight()));
 
   if (bitDepth == 2) {
-    // XTH 2-bit mode: Two bit planes, column-major order
-    // - Columns scanned right to left (x = width-1 down to 0)
-    // - 8 vertical pixels per byte (MSB = topmost pixel in group)
-    // - First plane: Bit1, Second plane: Bit2
-    // - Pixel value = (bit1 << 1) | bit2
-    // - Grayscale: 0=White, 1=Dark Grey, 2=Light Grey, 3=Black
+    // XTH 2-bit mode (grayscale: 0=White, 1=Dark Grey, 2=Light Grey, 3=Black).
+    // The stream splits the page into a cheap 1-bit ink plane (BW passes) and a
+    // 2-bit gray plane (LSB/MSB passes), so the two identical BW passes only
+    // touch the small plane. Right-to-left column order and bit-plane decoding
+    // are handled inside the stream.
 
-    const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
-    const uint8_t* plane1 = pageBuffer;              // Bit1 plane
-    const uint8_t* plane2 = pageBuffer + planeSize;  // Bit2 plane
-    const size_t colBytes = (pageHeight + 7) / 8;    // Bytes per column (100 for 800 height)
-
-    // Lambda to get pixel value at (x, y)
-    auto getPixelValue = [&](uint16_t x, uint16_t y) -> uint8_t {
-      const size_t colIndex = pageWidth - 1 - x;
-      const size_t byteInCol = y / 8;
-      const size_t bitInByte = 7 - (y % 8);
-      const size_t byteOffset = colIndex * colBytes + byteInCol;
-      const uint8_t bit1 = (plane1[byteOffset] >> bitInByte) & 1;
-      const uint8_t bit2 = (plane2[byteOffset] >> bitInByte) & 1;
-      return (bit1 << 1) | bit2;
-    };
-
-    // Optimized grayscale rendering without storeBwBuffer (saves 48KB peak memory)
-    // Flow: BW display → LSB/MSB passes → grayscale display → re-render BW for next frame
-
-    // Count pixel distribution for debugging
-    uint32_t pixelCounts[4] = {0, 0, 0, 0};
+    // Pass 1: BW buffer - draw all ink (non-white) pixels as black.
     for (uint16_t y = 0; y < maxSrcY; y++) {
       for (uint16_t x = 0; x < maxSrcX; x++) {
-        pixelCounts[getPixelValue(x, y)]++;
-      }
-    }
-    LOG_DBG("XTR", "Pixel distribution: White=%lu, DarkGrey=%lu, LightGrey=%lu, Black=%lu", pixelCounts[0],
-            pixelCounts[1], pixelCounts[2], pixelCounts[3]);
-
-    // Pass 1: BW buffer - draw all non-white pixels as black
-    for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (getPixelValue(x, y) >= 1) {
+        if (pageStream.isInk(x, y)) {
           renderer.drawPixel(x, y, true);
         }
       }
@@ -320,7 +272,7 @@ void XtcReaderActivity::renderPage() {
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
       for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (getPixelValue(x, y) == 1) {  // Dark grey only
+        if (pageStream.grayValue(x, y) == 1) {  // Dark grey only
           renderer.drawPixel(x, y, false);
         }
       }
@@ -332,7 +284,7 @@ void XtcReaderActivity::renderPage() {
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
       for (uint16_t x = 0; x < maxSrcX; x++) {
-        const uint8_t pv = getPixelValue(x, y);
+        const uint8_t pv = pageStream.grayValue(x, y);
         if (pv == 1 || pv == 2) {  // Dark grey or Light grey
           renderer.drawPixel(x, y, false);
         }
@@ -347,7 +299,7 @@ void XtcReaderActivity::renderPage() {
     renderer.clearScreen();
     for (uint16_t y = 0; y < maxSrcY; y++) {
       for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (getPixelValue(x, y) >= 1) {
+        if (pageStream.isInk(x, y)) {
           renderer.drawPixel(x, y, true);
         }
       }
@@ -356,32 +308,19 @@ void XtcReaderActivity::renderPage() {
     // Cleanup grayscale buffers with current frame buffer
     renderer.cleanupGrayscaleWithFrameBuffer();
 
-    free(pageBuffer);
-
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
     return;
   } else {
-    // 1-bit mode: 8 pixels per byte, MSB first
-    const size_t srcRowBytes = (pageWidth + 7) / 8;  // 60 bytes for 480 width
-
+    // 1-bit mode: ink (non-white) pixels drawn black.
     for (uint16_t srcY = 0; srcY < maxSrcY; srcY++) {
-      const size_t srcRowStart = srcY * srcRowBytes;
-
       for (uint16_t srcX = 0; srcX < maxSrcX; srcX++) {
-        // Read source pixel (MSB first, bit 7 = leftmost pixel)
-        const size_t srcByte = srcRowStart + srcX / 8;
-        const size_t srcBit = 7 - (srcX % 8);
-        const bool isBlack = !((pageBuffer[srcByte] >> srcBit) & 1);  // XTC: 0 = black, 1 = white
-
-        if (isBlack) {
+        if (pageStream.isInk(srcX, srcY)) {
           renderer.drawPixel(srcX, srcY, true);
         }
       }
     }
   }
   // White pixels are already cleared by clearScreen()
-
-  free(pageBuffer);
 
   // XTC pages already have status bar pre-rendered, no need to add our own
 
@@ -448,19 +387,12 @@ bool XtcReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   const uint16_t pageHeight = xtc.getPageHeight();
   const uint8_t bitDepth = xtc.getBitDepth();
 
-  // Only use the 1-bit BW path; grayscale is not needed as a background under the overlay
-  const size_t pageBufferSize = (bitDepth == 2) ? ((static_cast<size_t>(pageWidth) * pageHeight + 7) / 8) * 2
-                                                : ((pageWidth + 7) / 8) * pageHeight;
-
-  uint8_t* pageBuffer = static_cast<uint8_t*>(malloc(pageBufferSize));
-  if (!pageBuffer) {
-    LOG_ERR("SLP", "XTC: failed to allocate page buffer");
-    return false;
-  }
-
-  if (xtc.loadPage(savedPage, pageBuffer, pageBufferSize) == 0) {
-    LOG_ERR("SLP", "XTC: failed to load page %lu", savedPage);
-    free(pageBuffer);
+  // Stream the page (BW pass only; grayscale is not needed under the overlay)
+  // instead of allocating the whole page, which can fail on the fragmented heap.
+  (void)bitDepth;
+  xtc::XtcPageRowStream pageStream;
+  if (!xtc.openPageRowStream(pageStream, savedPage, /*persist=*/false)) {
+    LOG_ERR("SLP", "XTC: failed to open page stream for page %lu", savedPage);
     return false;
   }
 
@@ -469,37 +401,15 @@ bool XtcReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   const uint16_t maxX = std::min(pageWidth, static_cast<uint16_t>(renderer.getScreenWidth()));
   const uint16_t maxY = std::min(pageHeight, static_cast<uint16_t>(renderer.getScreenHeight()));
 
-  if (bitDepth == 2) {
-    // 2-bit XTH: draw all non-white pixels as black (BW pass only)
-    const size_t planeSize = (static_cast<size_t>(pageWidth) * pageHeight + 7) / 8;
-    const uint8_t* plane1 = pageBuffer;
-    const uint8_t* plane2 = pageBuffer + planeSize;
-    const size_t colBytes = (pageHeight + 7) / 8;
-    for (uint16_t y = 0; y < maxY; y++) {
-      for (uint16_t x = 0; x < maxX; x++) {
-        const size_t colIndex = pageWidth - 1 - x;
-        const size_t byteInCol = y / 8;
-        const size_t bitInByte = 7 - (y % 8);
-        const size_t byteOffset = colIndex * colBytes + byteInCol;
-        const uint8_t bit1 = (plane1[byteOffset] >> bitInByte) & 1;
-        const uint8_t bit2 = (plane2[byteOffset] >> bitInByte) & 1;
-        if ((bit1 << 1) | bit2) {
-          renderer.drawPixel(x, y, true);
-        }
-      }
-    }
-  } else {
-    // 1-bit XTG: draw black pixels
-    const size_t srcRowBytes = (pageWidth + 7) / 8;
-    for (uint16_t srcY = 0; srcY < maxY; srcY++) {
-      for (uint16_t srcX = 0; srcX < maxX; srcX++) {
-        const bool isBlack = !((pageBuffer[srcY * srcRowBytes + srcX / 8] >> (7 - srcX % 8)) & 1);
-        if (isBlack) renderer.drawPixel(srcX, srcY, true);
+  // Both formats: stream.value() >= 1 means a non-white pixel -> draw black.
+  for (uint16_t y = 0; y < maxY; y++) {
+    for (uint16_t x = 0; x < maxX; x++) {
+      if (pageStream.value(x, y) >= 1) {
+        renderer.drawPixel(x, y, true);
       }
     }
   }
 
-  free(pageBuffer);
   return true;
 }
 

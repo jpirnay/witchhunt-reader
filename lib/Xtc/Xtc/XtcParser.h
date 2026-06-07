@@ -58,6 +58,25 @@ class XtcParser {
   size_t loadPage(uint32_t pageIndex, uint8_t* buffer, size_t bufferSize);
 
   /**
+   * Read a contiguous byte range of a page's bitmap data (after the XTG/XTH
+   * page header). Lets a caller stream a page in small windows instead of
+   * holding the whole ~94KB page in heap.
+   *
+   * The file is left open across calls so repeated reads stay cheap; call
+   * endPageRange() when the streaming session is done to release the handle.
+   *
+   * @param pageIndex   Page index (0-based)
+   * @param byteOffset  Offset into the bitmap data (0 = first bitmap byte)
+   * @param buffer      Output buffer (caller allocated, >= length bytes)
+   * @param length      Number of bytes to read
+   * @return Number of bytes read, or 0 on failure
+   */
+  size_t loadPageRange(uint32_t pageIndex, size_t byteOffset, uint8_t* buffer, size_t length);
+
+  /** Release the file handle held open by loadPageRange(). */
+  void endPageRange();
+
+  /**
    * Streaming page load
    * Memory-efficient method that reads page data in chunks.
    *
@@ -97,6 +116,11 @@ class XtcParser {
   bool m_hasChapters;
   bool m_chaptersLoaded;
   XtcError m_lastError;
+
+  // Streaming range session state (loadPageRange/endPageRange).
+  // m_rangePage is the page whose bitmap base offset is cached; -1 = none open.
+  int32_t m_rangePage = -1;
+  uint64_t m_rangeBitmapOffset = 0;  // file offset of the page's first bitmap byte
 
   // Internal helper functions
   XtcError readHeader();

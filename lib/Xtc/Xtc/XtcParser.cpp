@@ -479,6 +479,69 @@ size_t XtcParser::loadPage(uint32_t pageIndex, uint8_t* buffer, size_t bufferSiz
   return bytesRead;
 }
 
+size_t XtcParser::loadPageRange(uint32_t pageIndex, size_t byteOffset, uint8_t* buffer, size_t length) {
+  if (!m_isOpen) {
+    m_lastError = XtcError::FILE_NOT_FOUND;
+    return 0;
+  }
+  if (pageIndex >= m_header.pageCount) {
+    m_lastError = XtcError::PAGE_OUT_OF_RANGE;
+    return 0;
+  }
+
+  // Resolve and cache the page's bitmap base offset on first access. The page
+  // header is read once per session, not once per range read.
+  if (m_rangePage != static_cast<int32_t>(pageIndex)) {
+    PageInfo page;
+    if (!readPageTableEntry(pageIndex, page)) {
+      m_lastError = XtcError::READ_ERROR;
+      return 0;
+    }
+    if (!ensureFileOpen()) {
+      m_lastError = XtcError::FILE_NOT_FOUND;
+      return 0;
+    }
+    if (!m_file.seek64(page.offset)) {
+      m_lastError = XtcError::READ_ERROR;
+      return 0;
+    }
+    XtgPageHeader pageHeader;
+    if (m_file.read(reinterpret_cast<uint8_t*>(&pageHeader), sizeof(XtgPageHeader)) != sizeof(XtgPageHeader)) {
+      m_lastError = XtcError::READ_ERROR;
+      return 0;
+    }
+    const uint32_t expectedMagic = (m_bitDepth == 2) ? XTH_MAGIC : XTG_MAGIC;
+    if (pageHeader.magic != expectedMagic) {
+      m_lastError = XtcError::INVALID_MAGIC;
+      return 0;
+    }
+    m_rangeBitmapOffset = page.offset + sizeof(XtgPageHeader);
+    m_rangePage = static_cast<int32_t>(pageIndex);
+  }
+
+  if (!ensureFileOpen()) {
+    m_lastError = XtcError::FILE_NOT_FOUND;
+    return 0;
+  }
+  if (!m_file.seek64(m_rangeBitmapOffset + byteOffset)) {
+    m_lastError = XtcError::READ_ERROR;
+    return 0;
+  }
+  const int bytesRead = m_file.read(buffer, length);
+  if (bytesRead < 0 || static_cast<size_t>(bytesRead) != length) {
+    m_lastError = XtcError::READ_ERROR;
+    return 0;
+  }
+  m_lastError = XtcError::OK;
+  return static_cast<size_t>(bytesRead);
+}
+
+void XtcParser::endPageRange() {
+  m_rangePage = -1;
+  m_rangeBitmapOffset = 0;
+  closeFile();
+}
+
 XtcError XtcParser::loadPageStreaming(uint32_t pageIndex,
                                       std::function<void(const uint8_t* data, size_t size, size_t offset)> callback,
                                       size_t chunkSize) {
