@@ -421,3 +421,52 @@ parse is already a chunked inflate→Expat push pipeline that serializes each pa
 to SD as it goes, the resumable Option A is less work than first assumed and is the
 better fit — Option B (one long idle slice) buys little once the inflate loop is
 already the slice boundary.
+
+### 2.7 Step 4 implementation plan — bisectable sub-commits
+
+Branch: `feat-section-background-build` (on top of the verified groundwork).
+
+**The driver-ownership complication.** The inflate `while(true)` loop lives *inside*
+`ZipFile::readFileToStream` ([ZipFile.cpp:485](../lib/ZipFile/ZipFile.cpp#L485)), not in
+`Section`. Today `Section` calls `epub->readItemContentsToStream(localPath, visitor, 1024)`
+and that call only returns when the whole entry is inflated. To yield mid-parse, `Section`
+must own the pull side of the loop instead of handing it to `ZipFile`. Two ways:
+
+- **(a) Inversion via a resumable ZipFile reader.** Add a `ZipFile` API that opens an entry
+  and exposes "inflate up to N bytes into this buffer, return produced + done-flag"
+  (essentially the body of the `while` loop as a steppable object). `Section::BuildState`
+  holds that reader + the visitor and pumps `reader.step()` → `visitor.feed()` until the
+  time budget is hit. This is the clean design and keeps inflate state encapsulated in
+  `ZipFile` where it belongs.
+- **(b) Budgeted callback.** Keep `readItemContentsToStream`, but give the inflate loop a
+  per-iteration callback that can signal "pause." Less code, but it leaks the yield concern
+  into `ZipFile` and still needs the loop's locals to persist — so it ends up needing (a)'s
+  state object anyway. Prefer (a).
+
+**Sub-commit sequence (each builds + is behavior-neutral until the last):**
+
+1. **Skeleton, no yield.** Add `enum class Section::BuildStep { Setup, Parse, Finalize,
+   Done, Failed }` and `BuildStep stepSectionBuild(const BuildParams&, uint32_t budgetMs)`.
+   `BuildParams` is a struct bundling the 10 render params + the two control flags (replaces
+   the long `createSectionFile` argument list at the call site). For this commit,
+   `stepSectionBuild` simply calls the existing `createSectionFile(...)` to completion and
+   returns `Done`/`Failed` — `budgetMs` ignored. No `BuildState`, no parser hoisting. Pure
+   API addition; `createSectionFile` untouched. Lets the call site migrate to the new entry
+   point first.
+2. **Introduce `BuildState`, run SETUP once.** Move the SETUP-phase locals
+   ([Section.cpp:404–509](../lib/Epub/Epub/Section.cpp#L404-L509)) into a heap-owned
+   `std::unique_ptr<BuildState>` member; `stepSectionBuild` runs SETUP on first call, stores
+   the state, then runs PARSE+FINALIZE in one shot (still no yield). Verifies the state
+   container holds the visitor/lut/cssParser correctly across the Setup→Parse boundary.
+3. **Resumable ZipFile reader (design (a)).** Add the steppable inflate reader to `ZipFile`,
+   unit-test it on a fixture against the one-shot `readFileToStream` (same bytes out). No
+   `Section` change yet.
+4. **Slice PARSE.** `stepSectionBuild` pumps the resumable reader → visitor under a
+   `budgetMs` clock, returning `Parse`/`More` when time runs out, `Finalize` when the stream
+   ends. FINALIZE still runs whole. This is the commit that actually yields.
+5. **Wire into `serviceBackgroundWork()`** behind the A-before-B gate + heap refusals, with
+   the foreground `buildSection()` blocking path as the fallback on refusal or navigation.
+
+The blocking `buildSection()` foreground path keeps calling `createSectionFile` (or the
+run-to-completion `stepSectionBuild`) throughout — Background B is purely additive until
+sub-commit 5.

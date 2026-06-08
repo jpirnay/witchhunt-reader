@@ -15,7 +15,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 45;  // bumped: yxml SaxParser byteOffset semantics differ from expat (seek hints in LUT)
+constexpr uint8_t SECTION_FILE_VERSION =
+    45;  // bumped: yxml SaxParser byteOffset semantics differ from expat (seek hints in LUT)
 
 namespace header {
 constexpr uint32_t kVersion = 0;
@@ -673,6 +674,18 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
           "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
           spineIndex, totalMs, streamMs, setupMs, parseMs, finalizeMs, pageCount, fileSize);
   return true;
+}
+
+Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const uint32_t budgetMs) {
+  // SKELETON (sub-commit 1): no slicing yet — run the whole build to completion by
+  // delegating to createSectionFile() and return a terminal step. budgetMs is accepted
+  // for signature stability but ignored until the PARSE phase is made resumable.
+  (void)budgetMs;
+  const bool ok =
+      createSectionFile(params.fontId, params.lineCompression, params.extraParagraphSpacing, params.paragraphAlignment,
+                        params.viewportWidth, params.viewportHeight, params.hyphenationEnabled, params.embeddedStyle,
+                        params.bionicReadingEnabled, params.imageRendering, nullptr, /*skipEviction=*/false);
+  return ok ? BuildStep::Done : BuildStep::Failed;
 }
 
 std::unique_ptr<Page> Section::loadPageFromSectionFile() {

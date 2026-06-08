@@ -60,6 +60,28 @@ class Section {
   uint16_t pageCount = 0;
   int currentPage = 0;
 
+  // Render parameters that determine a section-cache variant. Bundles the long argument
+  // list shared by loadSectionFile / createSectionFile / stepSectionBuild so a resumable
+  // build can carry them across slices without re-passing ten arguments each call.
+  struct BuildParams {
+    int fontId = 0;
+    float lineCompression = 1.0f;
+    bool extraParagraphSpacing = false;
+    uint8_t paragraphAlignment = 0;
+    uint16_t viewportWidth = 0;
+    uint16_t viewportHeight = 0;
+    bool hyphenationEnabled = false;
+    bool embeddedStyle = false;
+    bool bionicReadingEnabled = false;
+    uint8_t imageRendering = 0;
+  };
+
+  // Progress of an incremental (sliceable) section build. Setup/Parse/Finalize are the
+  // three temporal phases of createSectionFile; More means the current phase yielded
+  // mid-way after spending its time budget and should be resumed on the next call.
+  // Done/Failed are terminal. See docs/epubreader-control-flow-refactor.md §2.6–2.7.
+  enum class BuildStep : uint8_t { Setup, Parse, Finalize, More, Done, Failed };
+
   explicit Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRenderer& renderer)
       : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
   ~Section() = default;
@@ -71,6 +93,16 @@ class Section {
                          uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
                          bool bionicReadingEnabled, uint8_t imageRendering,
                          const std::function<void(int)>& progressFn = nullptr, bool skipEviction = false);
+
+  // Incremental section-cache build. Advances the build by at most ~budgetMs of work and
+  // returns its phase. The caller invokes it repeatedly (typically from idle time) until it
+  // returns Done or Failed; the build state is owned by this Section across calls.
+  //
+  // SKELETON (sub-commit 1): currently runs the whole build to completion in one call by
+  // delegating to createSectionFile() and ignoring budgetMs — it returns Done/Failed only,
+  // never More. The slicing is introduced in later sub-commits. The signature is stable so
+  // call sites can migrate now.
+  BuildStep stepSectionBuild(const BuildParams& params, uint32_t budgetMs);
   std::unique_ptr<Page> loadPageFromSectionFile();
   // Pre-decode every image in the section into its .pxc cache while heap is
   // maximally contiguous (secondary display buffer still released). Skips images
