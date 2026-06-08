@@ -1,6 +1,7 @@
 #include <expat.h>
 
 #include <cstring>
+#include <new>
 
 #include "SaxParser/SaxParser.h"
 
@@ -63,7 +64,15 @@ bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxChar
   XML_Parser parser = XML_ParserCreate(nullptr);
   if (!parser) return false;
 
-  auto* impl = new SaxParserImpl;
+  // nothrow + null-check to honour init()'s "returns false on allocation
+  // failure" contract under -fno-exceptions (a bare new would abort()). Free the
+  // just-created expat parser on failure so it doesn't leak.
+  auto* impl = new (std::nothrow) SaxParserImpl;
+  if (!impl) {
+    XML_ParserFree(parser);
+    errorString_ = "SaxParser: out of memory allocating parser state";
+    return false;
+  }
   impl->parser = parser;
   impl->userData = userData;
   impl->startCb = startCb;

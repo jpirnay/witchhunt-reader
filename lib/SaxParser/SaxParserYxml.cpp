@@ -1,4 +1,5 @@
 #include <cstring>
+#include <new>
 
 #include "SaxParser/SaxParser.h"
 #include "yxml.h"
@@ -13,10 +14,20 @@
 //                 kElemNameLen(32) = 2048 B worst case; 2048 is exact fit.
 //   kElemNameLen  longest seen: "enc:EncryptionMethod" = 20,
 //                 "preserveAspectRatio" = 19 → 32 (1.6× headroom)
-//   kAttrValueLen longest meaningful value (epub path / OPDS URL) fits in
-//                 256. A 517-char Calibre JSON blob was seen but is silently
-//                 truncated — we never use that value, so truncation is safe.
-//   kMaxAttrs     max seen: 8 (alice-illustrated content.opf). 8 is exact.
+//   kAttrValueLen meaningful values (epub path / OPDS URL) fit in 256, but
+//                 inline style="..." on content HTML and data: URIs in src can
+//                 exceed it. The corpus max for a *consumed* value was a 517-char
+//                 Calibre JSON blob we never read, so 384 is chosen as a safety
+//                 margin for real style/href values without budgeting the blob.
+//                 A value past the cap is truncated and flagged (kTruncAttrValue).
+//   kMaxAttrs     corpus max was 8 (alice-illustrated content.opf), but that
+//                 corpus under-samples attribute-heavy content HTML: a single
+//                 <td>/<a>/<span> can carry class+style+id+colspan+rowspan+
+//                 role+aria-*+epub:type, and ChapterHtmlSlimParser *consumes*
+//                 id/class/style/colspan/epub:type — dropping the 9th+ attr
+//                 silently drifts anchors, table layout and styling. 12 gives
+//                 1.5× headroom over the observed max for the realistic case.
+//                 Excess attrs are dropped and flagged (kTruncMaxAttrs).
 //   kMaxDepth     max seen: 48 (deeply nested HTML in Manticore ACTD_split).
 //                 ChapterHtmlSlimParser feeds content HTML through SaxParser,
 //                 so this bound applies. 64 gives 1.3× headroom.
@@ -24,11 +35,17 @@
 //                 description), but charCb flushes mid-node when full so
 //                 callers already handle fragmented delivery. 256 batches
 //                 most structural nodes in one call.
+//
+// RAM note: SaxParserImpl is heap-allocated once per parse and freed at reset().
+// The attr table dominates: attrs[kMaxAttrs] = kMaxAttrs*(kElemNameLen +
+// kAttrValueLen + 8). At 12*(32+384+8) ≈ 5.0 KB (was 8*(32+256+8) ≈ 2.3 KB),
+// a ~2.7 KB transient bump. For chapter parsing this lands while the secondary
+// framebuffer is released (~52 KB headroom), so it does not tighten the hot path.
 // ---------------------------------------------------------------------------
 static constexpr size_t kStackSize    = 2048;
 static constexpr size_t kElemNameLen  =   32;
-static constexpr size_t kAttrValueLen =  256;
-static constexpr size_t kMaxAttrs     =    8;
+static constexpr size_t kAttrValueLen =  384;
+static constexpr size_t kMaxAttrs     =   12;
 static constexpr size_t kMaxDepth     =   64;
 static constexpr size_t kCharBufLen   =  256;
 
@@ -141,7 +158,15 @@ bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb,
   errorLine_   = 0;
   errorString_ = nullptr;
 
-  auto* impl = new SaxParserImpl;
+  // nothrow + null-check: firmware builds with -fno-exceptions, so a bare new
+  // would abort() on OOM instead of letting init() honour its "returns false on
+  // allocation failure" contract. SaxParserImpl is ~10 KB (attr table + stacks),
+  // large enough to fail under heap fragmentation during a section build.
+  auto* impl = new (std::nothrow) SaxParserImpl;
+  if (!impl) {
+    errorString_ = "SaxParser: out of memory allocating parser state";
+    return false;
+  }
   impl->startCb   = startCb;
   impl->endCb     = endCb;
   impl->charCb    = charCb;

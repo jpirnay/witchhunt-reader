@@ -200,9 +200,11 @@ TEST(SaxParser, TruncationFlagsClearForWellSizedDoc) {
 }
 
 TEST(SaxParser, TruncationFlagsReportMaxAttrs) {
-  // 9 attributes — one more than kMaxAttrs (8). The 9th is dropped and the
+  // 13 attributes — one more than kMaxAttrs (12). The 13th is dropped and the
   // overflow is recorded so callers can log it (the yxml backend only).
-  const char* xml = "<e a1='1' a2='2' a3='3' a4='4' a5='5' a6='6' a7='7' a8='8' a9='9'/>";
+  const char* xml =
+      "<e a1='1' a2='2' a3='3' a4='4' a5='5' a6='6' a7='7' a8='8' a9='9' "
+      "a10='10' a11='11' a12='12' a13='13'/>";
 
   Collector c;
   SaxParser p;
