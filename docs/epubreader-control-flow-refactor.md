@@ -248,6 +248,30 @@ refusal above.
 
 ### 2.6 Sequentializing createSectionFile into loop-sized slices
 
+> **Update (yxml integrated).** This branch has merged `feat-yxml-saxparser-clean`,
+> replacing Expat with **yxml behind a `SaxParser` abstraction**
+> ([lib/SaxParser/SaxParser.h](../lib/SaxParser/SaxParser/SaxParser.h)). The analysis
+> below was written against Expat; the structural conclusion is unchanged, but the
+> seam is now *cleaner*, and two specifics shift:
+> - The push API is explicit and slice-friendly: `feed(buf, len)` (incremental),
+>   `stop()` (early abort — already wired so a stale half-parse can be torn down on
+>   navigation), and `byteOffset()` (first-class cursor, replaces
+>   `XML_GetCurrentByteIndex`). "Expat parser + SAX state" in the table below is now
+>   "`SaxParser` (yxml) + SAX state" held in `ChapterHtmlSlimParser::saxParser_`.
+> - yxml's resident state is **smaller and fixed-capacity** (no per-document heap
+>   growth) — measured `SaxParserImpl` ~10 KB. This directly eases the heap-budget
+>   risk that §2.4 flagged as dominant. The fixed caps truncate-and-flag rather than
+>   overflow; this branch widened the two content-HTML-risky caps (`kMaxAttrs` 8→12,
+>   `kAttrValueLen` 256→384) and made the state alloc fallible. See
+>   [[section-build-parse-pipeline-yield-seam]].
+> - yxml's `byteOffset()` semantics differ from Expat's (past the tag name, not the
+>   event-start index); `SECTION_FILE_VERSION` was bumped 44→45 for the persisted LUT
+>   seek hints. A resumable build must read offsets in yxml terms.
+>
+> Net: building Background B on the live yxml `SaxParser.feed()`/`stop()` API is both
+> the consistent choice and the lower-risk one. The rest of this section still holds.
+
+
 This is the heart of Background B: can `Section::createSectionFile()` be broken into
 blocks that each fit one epubreader loop tick, run "on top of each other" (i.e. one
 after another across successive ticks), and resume from a saved cursor? Below is the
