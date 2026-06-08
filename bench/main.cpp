@@ -10,10 +10,9 @@
 // Monitor:        pio device monitor -e bench
 
 #include <Arduino.h>
+#include <SaxParser/SaxParser.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
-
-#include <SaxParser/SaxParser.h>
 
 #include "fixtures.h"
 
@@ -25,9 +24,7 @@
 // Measured before warm-up so the first allocation is cold.
 // ---------------------------------------------------------------------------
 
-static size_t snapHeap() {
-  return esp_get_free_heap_size();
-}
+static size_t snapHeap() { return esp_get_free_heap_size(); }
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -44,8 +41,8 @@ static int64_t timerElapsedUs() { return esp_timer_get_time() - t0; }
 struct Counter {
   int starts = 0, ends = 0, chars = 0;
   static void onStart(void* ud, const char*, const char**) { ((Counter*)ud)->starts++; }
-  static void onEnd  (void* ud, const char*)               { ((Counter*)ud)->ends++;   }
-  static void onChar (void* ud, const char*, int)          { ((Counter*)ud)->chars++;  }
+  static void onEnd(void* ud, const char*) { ((Counter*)ud)->ends++; }
+  static void onChar(void* ud, const char*, int) { ((Counter*)ud)->chars++; }
 };
 
 // ---------------------------------------------------------------------------
@@ -53,25 +50,34 @@ struct Counter {
 // ---------------------------------------------------------------------------
 
 static void benchRawLifecycle() {
-  static void (*noop)(void*, const char*, const char**) = [](void*, const char*, const char**){};
-  static void (*noopEnd)(void*, const char*) = [](void*, const char*){};
+  static void (*noop)(void*, const char*, const char**) = [](void*, const char*, const char**) {};
+  static void (*noopEnd)(void*, const char*) = [](void*, const char*) {};
 
   constexpr int REPS = 500;
 
   // Cold heap measurement: one create/destroy before any warm-up.
   size_t before = snapHeap();
-  { SaxParser p; p.init(nullptr, noop, noopEnd); }
+  {
+    SaxParser p;
+    p.init(nullptr, noop, noopEnd);
+  }
   size_t after = snapHeap();
   int heapDelta = (int)before - (int)after;  // positive = consumed
 
   // Warm-up then timed loop.
-  { SaxParser w; w.init(nullptr, noop, noopEnd); }
+  {
+    SaxParser w;
+    w.init(nullptr, noop, noopEnd);
+  }
   timerStart();
-  for (int i = 0; i < REPS; ++i) { SaxParser p; p.init(nullptr, noop, noopEnd); }
+  for (int i = 0; i < REPS; ++i) {
+    SaxParser p;
+    p.init(nullptr, noop, noopEnd);
+  }
   int64_t us = timerElapsedUs();
 
-  Serial.printf("BENCH raw_lifecycle     heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d\n",
-                heapDelta, us, us / REPS, REPS);
+  Serial.printf("BENCH raw_lifecycle     heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d\n", heapDelta, us,
+                us / REPS, REPS);
 }
 
 // ---------------------------------------------------------------------------
@@ -92,8 +98,12 @@ static void benchContainerXml() {
   size_t after = snapHeap();
   int heapDelta = (int)before - (int)after;
 
-  { SaxParser w; w.init(&c, Counter::onStart, Counter::onEnd);
-    w.feed(container_xml_data, container_xml_size); w.finalize(); }
+  {
+    SaxParser w;
+    w.init(&c, Counter::onStart, Counter::onEnd);
+    w.feed(container_xml_data, container_xml_size);
+    w.finalize();
+  }
 
   timerStart();
   for (int i = 0; i < REPS; ++i) {
@@ -104,8 +114,8 @@ static void benchContainerXml() {
   }
   int64_t us = timerElapsedUs();
 
-  Serial.printf("BENCH container_xml     heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uB\n",
-                heapDelta, us, us / REPS, REPS, (unsigned)container_xml_size);
+  Serial.printf("BENCH container_xml     heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uB\n", heapDelta,
+                us, us / REPS, REPS, (unsigned)container_xml_size);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +136,12 @@ static void benchTocNcx() {
   size_t after = snapHeap();
   int heapDelta = (int)before - (int)after;
 
-  { SaxParser w; w.init(&c, Counter::onStart, Counter::onEnd);
-    w.feed(toc_ncx_data, toc_ncx_size); w.finalize(); }
+  {
+    SaxParser w;
+    w.init(&c, Counter::onStart, Counter::onEnd);
+    w.feed(toc_ncx_data, toc_ncx_size);
+    w.finalize();
+  }
 
   timerStart();
   for (int i = 0; i < REPS; ++i) {
@@ -138,8 +152,8 @@ static void benchTocNcx() {
   }
   int64_t us = timerElapsedUs();
 
-  Serial.printf("BENCH toc_ncx           heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uKB\n",
-                heapDelta, us, us / REPS, REPS, (unsigned)(toc_ncx_size / 1024));
+  Serial.printf("BENCH toc_ncx           heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uKB\n", heapDelta,
+                us, us / REPS, REPS, (unsigned)(toc_ncx_size / 1024));
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +174,12 @@ static void benchLargeXhtml() {
   size_t after = snapHeap();
   int heapDelta = (int)before - (int)after;
 
-  { SaxParser w; w.init(&c, Counter::onStart, Counter::onEnd, Counter::onChar);
-    w.feed(chapter_large_xhtml_data, chapter_large_xhtml_size); w.finalize(); }
+  {
+    SaxParser w;
+    w.init(&c, Counter::onStart, Counter::onEnd, Counter::onChar);
+    w.feed(chapter_large_xhtml_data, chapter_large_xhtml_size);
+    w.finalize();
+  }
 
   timerStart();
   for (int i = 0; i < REPS; ++i) {
@@ -172,8 +190,8 @@ static void benchLargeXhtml() {
   }
   int64_t us = timerElapsedUs();
 
-  Serial.printf("BENCH large_xhtml       heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uKB\n",
-                heapDelta, us, us / REPS, REPS, (unsigned)(chapter_large_xhtml_size / 1024));
+  Serial.printf("BENCH large_xhtml       heap_delta=%+dB  total=%lldus  avg=%lldus  reps=%d  input=%uKB\n", heapDelta,
+                us, us / REPS, REPS, (unsigned)(chapter_large_xhtml_size / 1024));
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +203,7 @@ void setup() {
   delay(2000);
 
   Serial.println("\n=== SaxParser ESP32-C3 benchmark ===");
-  Serial.printf("CPU: %u MHz   free heap: %u B\n\n",
-                (unsigned)getCpuFrequencyMhz(),
+  Serial.printf("CPU: %u MHz   free heap: %u B\n\n", (unsigned)getCpuFrequencyMhz(),
                 (unsigned)esp_get_free_heap_size());
 
   benchRawLifecycle();
@@ -194,8 +211,7 @@ void setup() {
   benchTocNcx();
   benchLargeXhtml();
 
-  Serial.printf("\nfree heap after: %u B   minimum ever: %u B\n",
-                (unsigned)esp_get_free_heap_size(),
+  Serial.printf("\nfree heap after: %u B   minimum ever: %u B\n", (unsigned)esp_get_free_heap_size(),
                 (unsigned)esp_get_minimum_free_heap_size());
   Serial.println("=== done ===");
 }

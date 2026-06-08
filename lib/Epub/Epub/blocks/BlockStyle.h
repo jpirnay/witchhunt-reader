@@ -50,7 +50,15 @@ struct BlockStyle {
   // a full line-height gap when the <br> block stays empty (section-break use case).
   // NOT propagated through getCombinedBlockStyle so it can't leak into sibling blocks.
   bool fromBrElement = false;
-  float fontSizeMultiplier = 1.0f;   // font-size multiplier for headings (h1=1.6, h2=1.4, h3=1.2)
+  // Heading sizing. Two strategies share these two fields:
+  //  - headingFontId == 0: scale the *body* font by fontSizeMultiplier (nearest-neighbor
+  //    upscale path). Used for SD fonts (only one size loaded), steps past the largest
+  //    built-in size, and CSS-driven arbitrary multipliers (font-size:1.7em).
+  //  - headingFontId != 0: render with that (taller, real) built-in fontId; fontSizeMultiplier
+  //    is then a small residual (usually 1.0) applied on top, so glyphs stay crisp.
+  // h1=1.6, h2=1.4, h3=1.2 are the default desired multipliers when no explicit CSS size.
+  float fontSizeMultiplier = 1.0f;
+  uint8_t headingFontId = 0;
   int16_t firstLineExtraIndent = 0;  // extra indent on the first line only (combined with CSS text-indent)
 
   // Float zones: left-floated images that narrow text width on overlapping lines.
@@ -98,6 +106,9 @@ struct BlockStyle {
     // fontSizeMultiplier: use child's if != 1.0, else parent's
     combinedBlockStyle.fontSizeMultiplier =
         (child.fontSizeMultiplier != 1.0f) ? child.fontSizeMultiplier : fontSizeMultiplier;
+    // headingFontId: use child's if set, else parent's, so inline children of a heading
+    // (e.g. <em> inside an <h2>) inherit the taller heading font.
+    combinedBlockStyle.headingFontId = (child.headingFontId != 0) ? child.headingFontId : headingFontId;
     return combinedBlockStyle;
   }
 

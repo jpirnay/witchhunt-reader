@@ -13,9 +13,13 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   }
 
   const bool scanning = renderer.isFontCacheScanning();
+  // Heading blocks may render with a taller real font (headingFontId) instead of scaling the
+  // body font. In that case fontSizeMultiplier is a small residual (usually 1.0). Resolve the
+  // effective (fontId, scale) pair once and use it for every measure/draw below.
+  const int effFontId = blockStyle.headingFontId != 0 ? blockStyle.headingFontId : fontId;
   const float scale = blockStyle.fontSizeMultiplier;
   const int ascender =
-      (scale == 1.0f) ? renderer.getFontAscenderSize(fontId) : renderer.getFontAscenderSizeScaled(fontId, scale);
+      (scale == 1.0f) ? renderer.getFontAscenderSize(effFontId) : renderer.getFontAscenderSizeScaled(effFontId, scale);
   for (size_t i = 0; i < words.size(); i++) {
     const int wordX = wordXpos[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyles[i];
@@ -30,17 +34,17 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       wordY += ascender / 4;
     }
     if (scale == 1.0f) {
-      renderer.drawText(fontId, wordX, wordY, words[i].c_str(), true, currentStyle);
+      renderer.drawText(effFontId, wordX, wordY, words[i].c_str(), true, currentStyle);
     } else {
-      renderer.drawTextScaled(fontId, wordX, wordY, words[i].c_str(), true, currentStyle, scale);
+      renderer.drawTextScaled(effFontId, wordX, wordY, words[i].c_str(), true, currentStyle, scale);
     }
 
     const bool hasDecoration =
         !scanning && (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
     if (hasDecoration) {
       const std::string& w = words[i];
-      const int lineWidth = (scale == 1.0f) ? renderer.getTextWidth(fontId, w.c_str(), currentStyle)
-                                            : renderer.getTextWidthScaled(fontId, w.c_str(), currentStyle, scale);
+      const int lineWidth = (scale == 1.0f) ? renderer.getTextWidth(effFontId, w.c_str(), currentStyle)
+                                            : renderer.getTextWidthScaled(effFontId, w.c_str(), currentStyle, scale);
 
       if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
         const int underlineY = y + ascender + 3;
@@ -82,6 +86,7 @@ bool TextBlock::serialize(FsFile& file) const {
   serialization::writePod(file, blockStyle.textIndent);
   serialization::writePod(file, blockStyle.textIndentDefined);
   serialization::writePod(file, blockStyle.fontSizeMultiplier);
+  serialization::writePod(file, blockStyle.headingFontId);
 
   return true;
 }
@@ -124,6 +129,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
   serialization::readPod(file, blockStyle.textIndent);
   serialization::readPod(file, blockStyle.textIndentDefined);
   serialization::readPod(file, blockStyle.fontSizeMultiplier);
+  serialization::readPod(file, blockStyle.headingFontId);
 
   return std::unique_ptr<TextBlock>(
       new TextBlock(std::move(words), std::move(wordXpos), std::move(wordStyles), blockStyle));

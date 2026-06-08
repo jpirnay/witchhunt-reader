@@ -394,6 +394,12 @@ class CrossPointSettings {
   // an override forces back to a known built-in even when an SD font is the
   // global default.
   static int getBuiltinReaderFontId(uint8_t family, uint8_t size);
+  // Heading sizing: return the built-in fontId `stepUp` sizes taller than `size` for
+  // `family`, clamped at the largest size. Steps walk the ascending-pixel ladder
+  // (TINY<SMALL<MEDIUM<LARGE<EXTRA_LARGE), not the FONT_SIZE enum order. `actualStep`
+  // (out) receives how many steps were actually taken before the cap (so the caller can
+  // compute a residual multiplier when clamped). Returns 0 for unknown families.
+  static int getTallerBuiltinReaderFontId(uint8_t family, uint8_t size, uint8_t stepUp, uint8_t* actualStep = nullptr);
 
   bool saveToFile() const;
   bool loadFromFile();

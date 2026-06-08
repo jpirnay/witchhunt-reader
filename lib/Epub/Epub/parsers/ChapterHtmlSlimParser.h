@@ -80,6 +80,12 @@ class ChapterHtmlSlimParser final : public Print {
   };
   ContinuationImage continuationImage_;
   int fontId;
+  // Resolved heading fonts (index 0=h1,1=h2,2=h3). headingFontId_[i]==0 => scale the body
+  // font by headingResidual_[i]; otherwise render the heading with that taller built-in
+  // fontId and apply headingResidual_[i] (usually 1.0) as a small residual scale. Set via
+  // setHeadingFonts(); defaults preserve the legacy scale-only behavior.
+  uint8_t headingFontId_[3] = {0, 0, 0};
+  float headingResidual_[3] = {1.6f, 1.4f, 1.2f};
   float lineCompression;
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
@@ -301,4 +307,22 @@ class ChapterHtmlSlimParser final : public Print {
   // Supplies printed-page labels from NCX <pageList> for this chapter. `anchors` maps
   // HTML id -> label; an entry with an empty id applies to the first page of this file.
   void setExternalPageBreakAnchors(std::vector<std::pair<std::string, std::string>> anchors);
+
+  // Supplies resolved heading fonts (h1/h2/h3). fontId[i]==0 keeps the scale-only path with
+  // residual[i] as the scale factor; fontId[i]!=0 renders that level with the taller built-in
+  // font and residual[i] as a small residual scale on top.
+  void setHeadingFonts(const uint8_t fontId[3], const float residual[3]) {
+    for (int i = 0; i < 3; ++i) {
+      headingFontId_[i] = fontId[i];
+      headingResidual_[i] = residual[i];
+    }
+  }
+
+ private:
+  // Effective fontId for a block: its heading font when set, else the body fontId.
+  int effectiveFontId(const BlockStyle& bs) const { return bs.headingFontId != 0 ? bs.headingFontId : fontId; }
+  // Line height for a block, honoring the taller heading font (residual multiplier on top)
+  // or the body-font scale path. Centralizes the layout-time sizing. Defined in the .cpp
+  // because it dereferences GfxRenderer, which is only forward-declared here.
+  int effectiveLineHeight(const BlockStyle& bs) const;
 };

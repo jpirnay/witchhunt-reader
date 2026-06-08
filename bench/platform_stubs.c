@@ -5,21 +5,17 @@
 // checking, so we just forward to the real implementations.
 
 #include <stdint.h>
+
 #include "esp_err.h"
 
 void __real_panic_abort(const char* message);
 void __real_panic_print_backtrace(const void* frame, int core);
 
-void __wrap_panic_abort(const char* message) {
-  __real_panic_abort(message);
-}
+void __wrap_panic_abort(const char* message) { __real_panic_abort(message); }
 
-void __wrap_panic_print_backtrace(const void* frame, int core) {
-  __real_panic_print_backtrace(frame, core);
-}
+void __wrap_panic_print_backtrace(const void* frame, int core) { __real_panic_print_backtrace(frame, core); }
 
-esp_err_t __wrap_bootloader_common_check_efuse_blk_validity(uint32_t min_rev_full,
-                                                             uint32_t max_rev_full) {
+esp_err_t __wrap_bootloader_common_check_efuse_blk_validity(uint32_t min_rev_full, uint32_t max_rev_full) {
   (void)min_rev_full;
   (void)max_rev_full;
   return 0;  // ESP_OK

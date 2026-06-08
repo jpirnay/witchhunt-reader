@@ -90,8 +90,7 @@ class XtcPageRowStream {
           return false;
         }
       }
-      if (!Storage.openFileForRead("XTC", bwPath, m_bwFile) ||
-          !Storage.openFileForRead("XTC", grayPath, m_grayFile)) {
+      if (!Storage.openFileForRead("XTC", bwPath, m_bwFile) || !Storage.openFileForRead("XTC", grayPath, m_grayFile)) {
         LOG_ERR("XTC", "Failed to open page cache for read");
         close();
         return false;
@@ -226,8 +225,7 @@ class XtcPageRowStream {
             const uint8_t b1 = (col1[byteInCol] >> bitInByte) & 1;
             const uint8_t b2 = (col2[byteInCol] >> bitInByte) & 1;
             const uint8_t v = static_cast<uint8_t>((b1 << 1) | b2);  // 0..3
-            grayBand[static_cast<size_t>(r) * m_grayRowBytes + x / 4] |=
-                static_cast<uint8_t>((v & 0x03) << grayShift);
+            grayBand[static_cast<size_t>(r) * m_grayRowBytes + x / 4] |= static_cast<uint8_t>((v & 0x03) << grayShift);
             if (v != 0) bwBand[static_cast<size_t>(r) * m_bwRowBytes + x / 8] |= bwBit;
           }
         }

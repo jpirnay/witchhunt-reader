@@ -323,11 +323,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       const int horizontalInset = splitBlockStyle.totalHorizontalInset();
       const uint16_t effectiveWidth =
           (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
-      const int splitLineHeight =
-          (splitBlockStyle.floatZoneCount > 0)
-              ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * splitBlockStyle.fontSizeMultiplier +
-                                 0.5f)
-              : 0;
+      const int splitLineHeight = (splitBlockStyle.floatZoneCount > 0) ? effectiveLineHeight(splitBlockStyle) : 0;
       if (splitBlockStyle.floatZoneCount > 0) {
         for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
           const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
@@ -1263,16 +1259,18 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
       headerBlockStyle.alignment = cssStyle.textAlign;
     }
-    // Apply default heading font-size multipliers when no explicit CSS font-size is set.
-    // Concept inspired by CidVonHighwind/microreader.
+    // Apply default heading sizing when no explicit CSS font-size is set.
+    // Concept inspired by CidVonHighwind/microreader. h1-h3 use the resolved heading fonts
+    // (taller built-in font when available, else a scale multiplier); h4-h6 stay at 1.0.
+    // When the author set an explicit font-size (hasFontSizeMultiplier), honor that CSS
+    // multiplier via the scale path — arbitrary em sizes can't map to a discrete font.
     if (!cssStyle.hasFontSizeMultiplier()) {
       const int level = name[1] - '0';  // 'h1'->1, 'h2'->2, …
-      if (level == 1)
-        headerBlockStyle.fontSizeMultiplier = 1.6f;
-      else if (level == 2)
-        headerBlockStyle.fontSizeMultiplier = 1.4f;
-      else if (level == 3)
-        headerBlockStyle.fontSizeMultiplier = 1.2f;
+      if (level >= 1 && level <= 3) {
+        const int idx = level - 1;
+        headerBlockStyle.headingFontId = self->headingFontId_[idx];
+        headerBlockStyle.fontSizeMultiplier = self->headingResidual_[idx];
+      }
       // h4-h6 stay at 1.0f
     }
     self->startNewTextBlock(headerBlockStyle);
@@ -2096,10 +2094,12 @@ bool ChapterHtmlSlimParser::finalize() {
   // truncated (dropped) the excess. Surface it so out-of-bounds documents are
   // diagnosable rather than failing invisibly (e.g. XPath/anchor drift).
   if (const uint32_t trunc = saxParser_.truncationFlags()) {
-    LOG_DBG("EHP", "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d maxDepth=%d",
-            static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
-            (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
-            (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0);
+    LOG_DBG(
+        "EHP",
+        "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d maxDepth=%d",
+        static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
+        (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
+        (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0);
   }
 
   // Process last page if there is still text. Done unconditionally so that a partial
@@ -2129,11 +2129,14 @@ bool ChapterHtmlSlimParser::finalize() {
   return success;
 }
 
+int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
+  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * lineCompression * bs.fontSizeMultiplier + 0.5f);
+}
+
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
                                                                    const bool suppressHyphenationRetry) {
-  const float scale = line->getBlockStyle().fontSizeMultiplier;
-  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * scale + 0.5f);
+  const int lineHeight = effectiveLineHeight(line->getBlockStyle());
 
   if (!currentPage) {
     currentPage.reset(new Page());
@@ -2211,8 +2214,7 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  const int lineHeight =
-      static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f);
+  const int lineHeight = effectiveLineHeight(blockStyle);
 
   // Apply top spacing before the paragraph — skip for continuation fragments
   // (words left over after an intermediate flush): the top margin was already
@@ -2244,10 +2246,7 @@ void ChapterHtmlSlimParser::makePages() {
   // Pre-correct float zone coordinates before line-breaking so widthForLine
   // and the xOffset check in addLineToPage use the same y values.
   // Image top aligns with the line top (currentPageNextY after margin-top).
-  const int lineHeightForFloat =
-      (blockStyle.floatZoneCount > 0)
-          ? static_cast<int>(renderer.getLineHeight(fontId) * lineCompression * blockStyle.fontSizeMultiplier + 0.5f)
-          : 0;
+  const int lineHeightForFloat = (blockStyle.floatZoneCount > 0) ? effectiveLineHeight(blockStyle) : 0;
   LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
           (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
   if (blockStyle.floatZoneCount > 0) {

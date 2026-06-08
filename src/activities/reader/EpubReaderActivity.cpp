@@ -1568,6 +1568,58 @@ int EpubReaderActivity::getEffectiveReaderFontId() const {
   return SETTINGS.getReaderFontId();
 }
 
+Section::HeadingFonts EpubReaderActivity::buildHeadingFonts() const {
+  Section::HeadingFonts hf;  // defaults: fontId all 0, residual {1.6, 1.4, 1.2} (scale fallback)
+
+  // Determine whether the effective body font is a BUILT-IN family (and which one). Headings
+  // only step up to a taller real font for built-ins; SD fonts have a single loaded size, so
+  // they keep the scale-fallback defaults above.
+  const uint8_t fontSize = (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
+  bool isBuiltin = false;
+  uint8_t family = SETTINGS.fontFamily;
+
+  if (bookFontFamilyOverride >= 0) {
+    isBuiltin = true;
+    family = static_cast<uint8_t>(bookFontFamilyOverride);
+  } else if (!bookSdFontFamilyOverride.empty()) {
+    isBuiltin = false;  // per-book SD override active
+  } else if (SETTINGS.sdFontFamilyName[0] != '\0' && resolveSdCardFontId(SETTINGS.sdFontFamilyName, fontSize) != 0) {
+    isBuiltin = false;  // global SD font active
+  } else {
+    isBuiltin = true;
+    family = SETTINGS.fontFamily;
+  }
+
+  if (!isBuiltin) {
+    return hf;  // scale-fallback (the fixed renderCharAtScale path)
+  }
+
+  const int bodyFontId = getEffectiveReaderFontId();
+  const int bodyEm = renderer.getLineHeight(bodyFontId);
+  const float desired[3] = {1.6f, 1.4f, 1.2f};  // h1, h2, h3
+  const uint8_t stepUp[3] = {3, 2, 1};
+  for (int i = 0; i < 3; ++i) {
+    uint8_t actualStep = 0;
+    const int tallerId = CrossPointSettings::getTallerBuiltinReaderFontId(family, fontSize, stepUp[i], &actualStep);
+    if (tallerId <= 0 || actualStep == 0 || tallerId == bodyFontId) {
+      // No taller size available (already at cap, or step collapsed) — keep scaling fallback.
+      hf.fontId[i] = 0;
+      hf.residual[i] = desired[i];
+      continue;
+    }
+    hf.fontId[i] = static_cast<uint8_t>(tallerId);
+    // Residual: scale up only if the discrete taller size still undershoots the desired ratio.
+    const int tallerEm = renderer.getLineHeight(tallerId);
+    float residual = 1.0f;
+    if (tallerEm > 0 && bodyEm > 0) {
+      const float achieved = static_cast<float>(tallerEm) / static_cast<float>(bodyEm);
+      residual = (achieved < desired[i]) ? (desired[i] / achieved) : 1.0f;
+    }
+    hf.residual[i] = residual;
+  }
+  return hf;
+}
+
 void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIndex) const {
   // Resolve to a baseline page first. Each branch records whether it produced a
   // precise page (LUT/anchor hit, percent jump, explicit page) or only an estimate.
@@ -1897,41 +1949,40 @@ void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spin
   const std::string nextBookPath =
       BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
   lock.unlock();
-  startActivityForResult(
-      std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
-      [this, nextBookPath](const ActivityResult& result) {
-        finishedBookActivityStarted_ = false;
-        if (result.isCancelled) {
-          requestUpdate();
-          return;
-        }
-        globalReadingSessionTracker().markFinished();
-        const auto& menuResult = std::get<MenuResult>(result.data);
-        if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-          if (SETTINGS.moveFinishedBooksToCompleted) {
-            std::string movedPath;
-            BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-          }
-          if (SETTINGS.removeFinishedBooksFromRecents) {
-            RECENT_BOOKS.removeBook(epub->getPath());
-          }
-          activityManager.goHome();
-          return;
-        }
-        if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-            !nextBookPath.empty()) {
-          if (SETTINGS.moveFinishedBooksToCompleted) {
-            std::string movedPath;
-            BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-          }
-          if (SETTINGS.removeFinishedBooksFromRecents) {
-            RECENT_BOOKS.removeBook(epub->getPath());
-          }
-          activityManager.goToReader(nextBookPath);
-          return;
-        }
-        requestUpdate();
-      });
+  startActivityForResult(std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
+                         [this, nextBookPath](const ActivityResult& result) {
+                           finishedBookActivityStarted_ = false;
+                           if (result.isCancelled) {
+                             requestUpdate();
+                             return;
+                           }
+                           globalReadingSessionTracker().markFinished();
+                           const auto& menuResult = std::get<MenuResult>(result.data);
+                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
+                             if (SETTINGS.moveFinishedBooksToCompleted) {
+                               std::string movedPath;
+                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
+                             }
+                             if (SETTINGS.removeFinishedBooksFromRecents) {
+                               RECENT_BOOKS.removeBook(epub->getPath());
+                             }
+                             activityManager.goHome();
+                             return;
+                           }
+                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
+                               !nextBookPath.empty()) {
+                             if (SETTINGS.moveFinishedBooksToCompleted) {
+                               std::string movedPath;
+                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
+                             }
+                             if (SETTINGS.removeFinishedBooksFromRecents) {
+                               RECENT_BOOKS.removeBook(epub->getPath());
+                             }
+                             activityManager.goToReader(nextBookPath);
+                             return;
+                           }
+                           requestUpdate();
+                         });
 }
 
 bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
@@ -2046,7 +2097,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     const bool createOk = section->createSectionFile(
         getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
         getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-        getEffectiveBionicReading(), imageRendering, nullptr);
+        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
     LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
             esp_get_free_heap_size());
     // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
@@ -2105,7 +2156,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     const bool rebuildOk = section->createSectionFile(
         getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
         getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-        getEffectiveBionicReading(), imageRendering, nullptr);
+        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
     if (rebuildOk) {
       const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
       section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
@@ -2893,7 +2944,8 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     if (!section->createSectionFile(effectiveFontId, effectiveLineCompression, SETTINGS.extraParagraphSpacing,
                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                    static_cast<bool>(SETTINGS.bionicReading), SETTINGS.imageRendering)) {
+                                    static_cast<bool>(SETTINGS.bionicReading), SETTINGS.imageRendering, nullptr,
+                                    /*skipEviction=*/false, buildHeadingFonts())) {
       LOG_ERR("SLP", "EPUB: failed to rebuild section cache for spine %d", spineIndex);
       return false;
     }

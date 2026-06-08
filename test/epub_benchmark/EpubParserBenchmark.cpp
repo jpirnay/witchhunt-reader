@@ -25,14 +25,13 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <string>
 #include <vector>
-
-#include <climits>
 
 // ---------------------------------------------------------------------------
 // malloc/free interception via weak-symbol override (GCC/Clang, Windows+Linux)
@@ -50,8 +49,8 @@
 // __libc_malloc as the real allocator.
 // ---------------------------------------------------------------------------
 
-#include <cstdlib>
 #include <atomic>
+#include <cstdlib>
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -59,17 +58,17 @@
 
 static std::atomic<size_t> g_liveBytes{0};
 static std::atomic<size_t> g_peakBytes{0};
-static std::atomic<bool>   g_tracking{false};
+static std::atomic<bool> g_tracking{false};
 // Re-entrancy guard: our malloc calls HeapAlloc internally on Windows, which
 // could recurse. Use a thread-local flag to break the cycle.
-static thread_local bool   g_inHook = false;
+static thread_local bool g_inHook = false;
 
 static void trackAlloc(size_t sz) {
   if (!g_tracking || g_inHook) return;
   size_t live = g_liveBytes.fetch_add(sz) + sz;
   size_t peak = g_peakBytes.load(std::memory_order_relaxed);
-  while (live > peak &&
-         !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {}
+  while (live > peak && !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
+  }
 }
 static void trackFree(size_t sz) {
   if (!g_tracking || g_inHook) return;
@@ -87,7 +86,7 @@ static void trackFree(size_t sz) {
 // Store the allocation size in a header word prepended to the block.
 // The header is padded to max_align_t so the returned pointer is always
 // suitably aligned for any type.
-static constexpr size_t kAlign      = alignof(std::max_align_t);
+static constexpr size_t kAlign = alignof(std::max_align_t);
 static constexpr size_t kHeaderSize = (sizeof(size_t) + kAlign - 1) & ~(kAlign - 1);
 
 // Raw allocator that bypasses our wrappers. On Windows (MinGW) HeapAlloc is
@@ -126,7 +125,10 @@ void* malloc(size_t size) {
 
 void free(void* ptr) {
   if (!ptr) return;
-  if (g_inHook) { rawFree(ptr); return; }
+  if (g_inHook) {
+    rawFree(ptr);
+    return;
+  }
   void* raw = static_cast<char*>(ptr) - kHeaderSize;
   size_t size = *static_cast<size_t*>(raw);
   trackFree(size);
@@ -153,12 +155,11 @@ void* realloc(void* ptr, size_t size) {
   return np;
 }
 
-} // extern "C"
+}  // extern "C"
 
 // operator new/delete route through our malloc/free above automatically.
 
-static size_t heapMeasureLivePeak(const std::function<void()>& createFn,
-                                   const std::function<void()>& destroyFn) {
+static size_t heapMeasureLivePeak(const std::function<void()>& createFn, const std::function<void()>& destroyFn) {
   g_liveBytes.store(0);
   g_peakBytes.store(0);
   g_tracking.store(true);
@@ -224,11 +225,20 @@ TEST(ExpatBaseline, RawLifecycleHeap) {
 
   SaxParser* p = nullptr;
   size_t coldPeak = heapMeasureLivePeak(
-      [&] { p = new SaxParser; p->init(nullptr, noop, noopEnd); },
-      [&] { delete p; p = nullptr; });
+      [&] {
+        p = new SaxParser;
+        p->init(nullptr, noop, noopEnd);
+      },
+      [&] {
+        delete p;
+        p = nullptr;
+      });
 
   constexpr int REPS = 1000;
-  { SaxParser w; w.init(nullptr, noop, noopEnd); }
+  {
+    SaxParser w;
+    w.init(nullptr, noop, noopEnd);
+  }
   auto t0 = Clock::now();
   for (int i = 0; i < REPS; ++i) {
     SaxParser q;
@@ -257,10 +267,17 @@ TEST(ExpatBaseline, ContainerParser) {
         fullPath = parser->fullPath;
         // parser is alive — heap snapshot taken here captures peak live bytes
       },
-      [&] { delete parser; parser = nullptr; });
+      [&] {
+        delete parser;
+        parser = nullptr;
+      });
 
   constexpr int REPS = 500;
-  { ContainerParser w(data.size()); w.setup(); w.write(data.data(), data.size()); }
+  {
+    ContainerParser w(data.size());
+    w.setup();
+    w.write(data.data(), data.size());
+  }
   auto t0 = Clock::now();
   for (int i = 0; i < REPS; ++i) {
     ContainerParser p(data.size());
@@ -271,8 +288,7 @@ TEST(ExpatBaseline, ContainerParser) {
 
   printf("BENCHMARK expat_container_parser heap_peak=");
   printHeapBytes(coldPeak);
-  printf(" time=%lldus avg_per_iter=%lldus fullPath=%s reps=%d\n",
-         us, us / REPS, fullPath.c_str(), REPS);
+  printf(" time=%lldus avg_per_iter=%lldus fullPath=%s reps=%d\n", us, us / REPS, fullPath.c_str(), REPS);
   EXPECT_FALSE(fullPath.empty());
 }
 
@@ -289,10 +305,17 @@ TEST(ExpatBaseline, TocNcxParser) {
         parser->setup();
         parser->write(data.data(), data.size());
       },
-      [&] { delete parser; parser = nullptr; });
+      [&] {
+        delete parser;
+        parser = nullptr;
+      });
 
   constexpr int REPS = 100;
-  { TocNcxParser w(base, data.size(), nullptr, nullptr); w.setup(); w.write(data.data(), data.size()); }
+  {
+    TocNcxParser w(base, data.size(), nullptr, nullptr);
+    w.setup();
+    w.write(data.data(), data.size());
+  }
   auto t0 = Clock::now();
   for (int i = 0; i < REPS; ++i) {
     TocNcxParser p(base, data.size(), nullptr, nullptr);
@@ -303,8 +326,7 @@ TEST(ExpatBaseline, TocNcxParser) {
 
   printf("BENCHMARK expat_toc_ncx_parser heap_peak=");
   printHeapBytes(coldPeak);
-  printf(" time=%lldus avg_per_iter=%lldus input=%zuKB reps=%d\n",
-         us, us / REPS, data.size() / 1024, REPS);
+  printf(" time=%lldus avg_per_iter=%lldus input=%zuKB reps=%d\n", us, us / REPS, data.size() / 1024, REPS);
   SUCCEED();
 }
 
@@ -322,10 +344,17 @@ TEST(ExpatBaseline, LargeXhtmlThroughNcxParser) {
         parser->setup();
         parser->write(data.data(), data.size());
       },
-      [&] { delete parser; parser = nullptr; });
+      [&] {
+        delete parser;
+        parser = nullptr;
+      });
 
   constexpr int REPS = 100;
-  { TocNcxParser w(base, data.size(), nullptr, nullptr); w.setup(); w.write(data.data(), data.size()); }
+  {
+    TocNcxParser w(base, data.size(), nullptr, nullptr);
+    w.setup();
+    w.write(data.data(), data.size());
+  }
   auto t0 = Clock::now();
   for (int i = 0; i < REPS; ++i) {
     TocNcxParser p(base, data.size(), nullptr, nullptr);
@@ -336,8 +365,7 @@ TEST(ExpatBaseline, LargeXhtmlThroughNcxParser) {
 
   printf("BENCHMARK expat_large_xhtml_parse heap_peak=");
   printHeapBytes(coldPeak);
-  printf(" time=%lldus avg_per_iter=%lldus input=%zuKB reps=%d\n",
-         us, us / REPS, data.size() / 1024, REPS);
+  printf(" time=%lldus avg_per_iter=%lldus input=%zuKB reps=%d\n", us, us / REPS, data.size() / 1024, REPS);
   SUCCEED();
 }
 

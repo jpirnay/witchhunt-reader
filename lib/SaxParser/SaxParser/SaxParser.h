@@ -49,11 +49,11 @@ class SaxParser {
   // the result is lossy. Callers with logging should surface a non-zero value
   // so field cases that exceed the bounds are diagnosable. Always 0 for expat.
   enum TruncationFlag : uint32_t {
-    kTruncElemName  = 1u << 0,  // element name longer than kElemNameLen
-    kTruncAttrName  = 1u << 1,  // attribute name longer than kElemNameLen
+    kTruncElemName = 1u << 0,   // element name longer than kElemNameLen
+    kTruncAttrName = 1u << 1,   // attribute name longer than kElemNameLen
     kTruncAttrValue = 1u << 2,  // attribute value longer than kAttrValueLen
-    kTruncMaxAttrs  = 1u << 3,  // more than kMaxAttrs attributes on one element
-    kTruncMaxDepth  = 1u << 4,  // nesting deeper than kMaxDepth
+    kTruncMaxAttrs = 1u << 3,   // more than kMaxAttrs attributes on one element
+    kTruncMaxDepth = 1u << 4,   // nesting deeper than kMaxDepth
   };
   uint32_t truncationFlags() const;
 

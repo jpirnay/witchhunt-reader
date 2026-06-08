@@ -1006,7 +1006,12 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
         const int pos = srcY * srcW + srcX;
         const uint8_t byte = bitmap[pos >> 2];
         const uint8_t raw = (byte >> ((3 - (pos & 3)) * 2)) & 0x3;
-        if (raw >= 2) {
+        // Draw raw in {1,2,3} -- i.e. every non-white source pixel -- to match the BW glyph
+        // path (drawMask 0x0E). Headings are *upscaled*, so dropping the light-gray (raw==1)
+        // pixels here erased glyph edges and thin horizontal strokes, which showed up as
+        // thinned glyphs and "every other line" stripes. (The SUP/SUB *downscaler* keeps the
+        // raw>=2 threshold on purpose, to stay crisp when shrinking.)
+        if (raw >= 1) {
           renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
         }
       }
@@ -2972,9 +2977,7 @@ void GfxRenderer::restoreBwBuffer() {
 // On X3 the display call transiently Y-flips frameBuffer in place and flips
 // it back before returning; the logical contents are unchanged but callers
 // must not race a framebuffer reader against this call. See the header.
-void GfxRenderer::cleanupGrayscaleWithPreviousBuffer() const {
-  display.cleanupGrayscaleWithPreviousBuffer();
-}
+void GfxRenderer::cleanupGrayscaleWithPreviousBuffer() const { display.cleanupGrayscaleWithPreviousBuffer(); }
 
 void GfxRenderer::syncRedRamFromFrameBuffer() const { display.syncRedRamFromFrameBuffer(); }
 

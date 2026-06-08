@@ -16,7 +16,7 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    45;  // bumped: yxml SaxParser byteOffset semantics differ from expat (seek hints in LUT)
+    46;  // bumped: per-block headingFontId added to TextBlock (taller-font heading rendering)
 
 namespace header {
 constexpr uint32_t kVersion = 0;
@@ -401,10 +401,9 @@ struct Section::BuildState {
 
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
-  st.propertyHash =
-      calculatePropertyHash(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment,
-                            p.viewportWidth, p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle,
-                            p.bionicReadingEnabled, p.imageRendering);
+  st.propertyHash = calculatePropertyHash(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment,
+                                          p.viewportWidth, p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle,
+                                          p.bionicReadingEnabled, p.imageRendering);
   filePath = getSectionFilePath(st.propertyHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
@@ -501,6 +500,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering, std::move(tocAnchors), st.progressFn,
       st.cssParser, epub->getImageManifest());
   st.visitor->setExternalPageBreakAnchors(std::move(externalPageBreakAnchors));
+  st.visitor->setHeadingFonts(p.headingFonts.fontId, p.headingFonts.residual);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
   if (!st.visitor->setup(st.inflatedSize)) {
@@ -696,7 +696,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
                                 const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                 const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
                                 const bool bionicReadingEnabled, const uint8_t imageRendering,
-                                const std::function<void(int)>& progressFn, const bool skipEviction) {
+                                const std::function<void(int)>& progressFn, const bool skipEviction,
+                                const HeadingFonts& headingFonts) {
   if (!skipEviction) {
     evictOldVariants();
   }
@@ -712,6 +713,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   params.embeddedStyle = embeddedStyle;
   params.bionicReadingEnabled = bionicReadingEnabled;
   params.imageRendering = imageRendering;
+  params.headingFonts = headingFonts;
 
   // The CSS/heap fallbacks (heap-too-low and parse-failed-with-CSS) both downgrade to a
   // no-CSS build by re-running from setup. Loop here rather than recurse so the fallback

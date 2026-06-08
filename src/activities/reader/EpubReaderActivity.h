@@ -461,6 +461,10 @@ class EpubReaderActivity final : public Activity {
   bool getEffectiveTextAntiAliasing() const;
   bool getEffectiveHyphenation() const;
   int getEffectiveReaderFontId() const;
+  // Resolve h1/h2/h3 heading fonts for the current body font: built-in families step up to a
+  // taller loaded size (crisp glyphs); SD fonts / over-cap fall back to scaling. Passed to
+  // createSectionFile so the layout bakes the right per-block font.
+  Section::HeadingFonts buildHeadingFonts() const;
   float getEffectiveReaderLineCompression() const;
   bool stepPageState(bool isForwardTurn);
   void pageTurn(bool isForwardTurn);

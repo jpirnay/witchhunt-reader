@@ -4,6 +4,7 @@
 #include <JsonSettingsIO.h>
 #include <Logging.h>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -180,6 +181,29 @@ int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, uint8_t size) {
           return NOTOSANS_18_FONT_ID;
       }
   }
+}
+
+int CrossPointSettings::getTallerBuiltinReaderFontId(const uint8_t family, const uint8_t size, const uint8_t stepUp,
+                                                     uint8_t* const actualStep) {
+  // Ascending pixel ladder (smallest -> largest). FONT_SIZE enum order is NOT pixel order
+  // (TINY=4), so step through this explicit table instead of enum arithmetic.
+  static constexpr uint8_t kLadder[] = {TINY, SMALL, MEDIUM, LARGE, EXTRA_LARGE};
+  constexpr int kLadderLen = static_cast<int>(sizeof(kLadder) / sizeof(kLadder[0]));
+
+  int idx = -1;
+  for (int i = 0; i < kLadderLen; ++i) {
+    if (kLadder[i] == size) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) {
+    if (actualStep) *actualStep = 0;
+    return 0;  // unknown size
+  }
+  const int target = std::min(idx + static_cast<int>(stepUp), kLadderLen - 1);
+  if (actualStep) *actualStep = static_cast<uint8_t>(target - idx);
+  return getBuiltinReaderFontId(family, kLadder[target]);
 }
 
 int CrossPointSettings::getReaderFontId() const {

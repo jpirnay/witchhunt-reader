@@ -42,47 +42,47 @@
 // a ~2.7 KB transient bump. For chapter parsing this lands while the secondary
 // framebuffer is released (~52 KB headroom), so it does not tighten the hot path.
 // ---------------------------------------------------------------------------
-static constexpr size_t kStackSize    = 2048;
-static constexpr size_t kElemNameLen  =   32;
-static constexpr size_t kAttrValueLen =  384;
-static constexpr size_t kMaxAttrs     =   12;
-static constexpr size_t kMaxDepth     =   64;
-static constexpr size_t kCharBufLen   =  256;
+static constexpr size_t kStackSize = 2048;
+static constexpr size_t kElemNameLen = 32;
+static constexpr size_t kAttrValueLen = 384;
+static constexpr size_t kMaxAttrs = 12;
+static constexpr size_t kMaxDepth = 64;
+static constexpr size_t kCharBufLen = 256;
 
 // ---------------------------------------------------------------------------
 // Internal state — entirely stack/struct allocated, zero heap after new.
 // ---------------------------------------------------------------------------
 struct AttrPair {
-  char   name [kElemNameLen];
-  char   value[kAttrValueLen];
+  char name[kElemNameLen];
+  char value[kAttrValueLen];
   size_t valueLen = 0;  // cursor: avoids strlen() on each ATTRVAL character
 };
 
 struct SaxParserImpl {
-  yxml_t        x;
+  yxml_t x;
   unsigned char yxmlStack[kStackSize];
 
-  SaxStartCb   startCb   = nullptr;
-  SaxEndCb     endCb     = nullptr;
-  SaxCharCb    charCb    = nullptr;
+  SaxStartCb startCb = nullptr;
+  SaxEndCb endCb = nullptr;
+  SaxCharCb charCb = nullptr;
   SaxDefaultCb defaultCb = nullptr;
-  void*        userData  = nullptr;
+  void* userData = nullptr;
 
   // Character-data accumulation; flushed before every start/end event and at
   // the end of each text node (ELEMEND).
-  char   charBuf[kCharBufLen];
+  char charBuf[kCharBufLen];
   size_t charLen = 0;
 
   // Opening-tag accumulation: collected between ELEMSTART and the first
   // non-ATTR token, then fired as a single startCb call.
-  char     pendingElem[kElemNameLen];  // element name waiting to be fired
+  char pendingElem[kElemNameLen];  // element name waiting to be fired
   AttrPair attrs[kMaxAttrs];
-  size_t   attrCount    = 0;
-  bool     inOpeningTag = false;
+  size_t attrCount = 0;
+  bool inOpeningTag = false;
 
   // Element-name stack for end-tag callbacks (yxml's x.elem points to the
   // parent at ELEMEND time, not the element just closed).
-  char   elemStack[kMaxDepth][kElemNameLen];
+  char elemStack[kMaxDepth][kElemNameLen];
   size_t elemDepth = 0;
 
   // Running byte offset (updated once per yxml_parse call).
@@ -99,8 +99,7 @@ struct SaxParserImpl {
 
 static void flushChar(SaxParserImpl* impl) {
   if (impl->charCb && impl->charLen > 0) {
-    impl->charCb(impl->userData, impl->charBuf,
-                 static_cast<int>(impl->charLen));
+    impl->charCb(impl->userData, impl->charBuf, static_cast<int>(impl->charLen));
   }
   impl->charLen = 0;
 }
@@ -128,14 +127,14 @@ static void fireStart(SaxParserImpl* impl) {
     const char* atts[kMaxAttrs * 2 + 1];
     size_t n = impl->attrCount;
     for (size_t i = 0; i < n; ++i) {
-      atts[i * 2]     = impl->attrs[i].name;
+      atts[i * 2] = impl->attrs[i].name;
       atts[i * 2 + 1] = impl->attrs[i].value;
     }
     atts[n * 2] = nullptr;
     impl->startCb(impl->userData, impl->pendingElem, atts);
   }
 
-  impl->attrCount   = 0;
+  impl->attrCount = 0;
   impl->inOpeningTag = false;
 }
 
@@ -151,11 +150,10 @@ void SaxParser::reset() {
 
 SaxParser::~SaxParser() { reset(); }
 
-bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb,
-                     SaxCharCb charCb, SaxDefaultCb defaultCb) {
+bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxCharCb charCb, SaxDefaultCb defaultCb) {
   reset();
-  stopped_     = false;
-  errorLine_   = 0;
+  stopped_ = false;
+  errorLine_ = 0;
   errorString_ = nullptr;
 
   // nothrow + null-check: firmware builds with -fno-exceptions, so a bare new
@@ -167,11 +165,11 @@ bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb,
     errorString_ = "SaxParser: out of memory allocating parser state";
     return false;
   }
-  impl->startCb   = startCb;
-  impl->endCb     = endCb;
-  impl->charCb    = charCb;
+  impl->startCb = startCb;
+  impl->endCb = endCb;
+  impl->charCb = charCb;
   impl->defaultCb = defaultCb;
-  impl->userData  = userData;
+  impl->userData = userData;
 
   yxml_init(&impl->x, impl->yxmlStack, kStackSize);
   impl_ = impl;
@@ -215,7 +213,7 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
     impl->byteOffset = static_cast<uint32_t>(impl->x.total);
 
     if (r < 0) {
-      errorLine_   = static_cast<int>(impl->x.line);
+      errorLine_ = static_cast<int>(impl->x.line);
       errorString_ = "yxml parse error";
       return false;
     }
@@ -227,7 +225,7 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
         if (strlen(impl->x.elem) > kElemNameLen - 1) impl->truncFlags |= SaxParser::kTruncElemName;
         strncpy(impl->pendingElem, impl->x.elem, kElemNameLen - 1);
         impl->pendingElem[kElemNameLen - 1] = '\0';
-        impl->attrCount    = 0;
+        impl->attrCount = 0;
         impl->inOpeningTag = true;
         break;
 
@@ -294,7 +292,7 @@ bool SaxParser::finalize() {
 
   yxml_ret_t r = yxml_eof(&impl->x);
   if (r != YXML_OK) {
-    errorLine_   = static_cast<int>(impl->x.line);
+    errorLine_ = static_cast<int>(impl->x.line);
     errorString_ = "yxml unexpected EOF";
     return false;
   }
