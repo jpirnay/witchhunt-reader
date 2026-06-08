@@ -6,6 +6,35 @@ already is. Part 2 is a *design* for the new "Background B" capability
 (idle-time section pre-analysis) — it is not yet implemented and carries real
 ESP32-C3 heap risk, so it is specified separately and gated behind Part 1.
 
+## Progress / resume point (last updated mid-effort)
+
+Work branch: **`feat-section-background-build`** (off `redesign-epubreader`, which holds
+the Part 1 cleanup + the yxml merge + hardening). Firmware build is green at each commit
+below.
+
+Committed so far (newest first):
+- `feat(epubreader)`: DEBUG_BACKGROUND_WORK overlay + serial counters (flag defaults 0).
+  Background A counters are wired; B counters/percent stay idle until B is scheduled.
+- `refactor(section)`: **sub-commit 2** — createSectionFile carved into
+  runBuildSetup/runBuildParse/runBuildFinalize on a shared `Section::BuildState` (visitor
+  now heap-owned). Behavior-preserving; parse still runs whole (budgetMs ignored).
+- `feat(section)`: **sub-commit 1** — `stepSectionBuild()` skeleton + BuildParams/BuildStep.
+- `refactor(epubreader)`: `serviceBackgroundWork()` idle dispatcher (deferred-AA folded in).
+- Part 1 (RenderPass dispatch) + yxml merge/hardening landed on `redesign-epubreader`.
+
+**Next up — sub-commit 3** (see §2.7): add a resumable/steppable reader to `ZipFile`
+(open an entry, "inflate up to N bytes" steppable object) and unit-test it against the
+one-shot `readFileToStream` (same bytes out). No `Section` change yet. Then sub-commit 4
+slices PARSE under `budgetMs` (wire B counters there), then resume-on-boundary-cross, then
+sub-commit 5 wires B into `serviceBackgroundWork()` behind the A-before-B + heap gates.
+
+Watch-outs when resuming:
+- The editor on this machine intermittently converts files to **CRLF**; the repo is LF and
+  has no `.gitattributes`. Before committing, `git status` may show large EOL-only diffs in
+  files you didn't touch (yxml.c, bench/*, etc.) — restore those to HEAD, don't commit the
+  churn. Only commit files you actually edited.
+- `DEBUG_BACKGROUND_WORK` must be committed as `0`; enable locally for testing only.
+
 ## Target logical flow (from the request)
 
 1. Consume a page from the section cache, render it, display on e-ink.
