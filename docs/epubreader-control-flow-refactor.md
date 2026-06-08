@@ -443,6 +443,40 @@ must own the pull side of the loop instead of handing it to `ZipFile`. Two ways:
   into `ZipFile` and still needs the loop's locals to persist — so it ends up needing (a)'s
   state object anyway. Prefer (a).
 
+**BuildState member set (classified by phase).** Every local in `createSectionFile`
+sorted by which phase first needs it and whether it must survive a yield:
+
+| Member | Set in | Used by | Why it must persist |
+|---|---|---|---|
+| `BuildParams params` | entry | all | re-passed every slice |
+| `uint32_t propertyHash` | Setup | Setup, Finalize (image evict on fail) | derives filePath / imageBasePath |
+| `std::string localPath` | Setup | Parse (stream source), Finalize (logResolveStats) | stream identity |
+| `std::string contentBase, imageBasePath` | Setup | Parse (visitor ctor) | parser config |
+| `size_t inflatedSize` | Setup | Parse (visitor.setup, progress), Finalize (fileSize) | total size |
+| `CssParser* cssParser` | Setup | Parse, Finalize (clear) | loaded rules |
+| `std::vector<uint32_t> lut` | Setup(empty)→Parse(filled) | Finalize (write LUT) | per-page offsets accumulated across slices |
+| `std::unique_ptr<ChapterHtmlSlimParser> visitor` | Setup | Parse (fed incrementally) | **the live SAX/yxml state — the whole point** |
+| `BuildStep phase` | entry | step dispatch | resume cursor |
+| timing stamps (`phase*Start`) | each phase | logging | cosmetic; can be per-call |
+
+Note `visitor` becomes a heap `unique_ptr` (it's currently a stack local) so it outlives
+a single `stepSectionBuild` call. `file` and `pageCount` are already `Section` members.
+
+**The two fallback recursions stay in the entry function, not the phase methods:**
+- Heap-too-low → no-CSS retry ([Section.cpp:385–398](../lib/Epub/Epub/Section.cpp#L385-L398))
+  runs *before* any state exists; it stays at the top of `createSectionFile`/the build
+  entry and just re-enters with `embeddedStyle=false`.
+- Parse-failed-with-CSS → no-CSS retry ([Section.cpp:539–551](../lib/Epub/Epub/Section.cpp#L539-L551))
+  happens after Parse; in the carved form the Finalize method reports "retry no-CSS" as a
+  distinct result, and the **entry function** tears down the BuildState and restarts from
+  Setup with `embeddedStyle=false`. The sliced path treats this the same way — a restart is
+  a fresh BuildState, which is acceptable (rare, and a parse failure means the partial work
+  is unusable anyway).
+
+This keeps the recursion/​fallback logic in one place and the three phase methods purely
+linear, which is what makes them safe to call either blocking (all three in a row) or
+sliced (Parse re-entered across ticks).
+
 **Sub-commit sequence (each builds + is behavior-neutral until the last):**
 
 1. **Skeleton, no yield.** Add `enum class Section::BuildStep { Setup, Parse, Finalize,

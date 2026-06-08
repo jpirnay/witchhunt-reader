@@ -9,6 +9,8 @@
 
 class Page;
 class GfxRenderer;
+class ChapterHtmlSlimParser;
+class CssParser;
 
 class Section {
   std::shared_ptr<Epub> epub;
@@ -35,6 +37,23 @@ class Section {
   void buildTocBoundaries(const std::vector<std::pair<std::string, uint16_t>>& anchors);
   void buildTocBoundariesFromFile(FsFile& f);
   void buildPageBreakLabelsFromFile(FsFile& f);
+
+  // Live state of an in-progress section build, shared by the blocking path and the
+  // sliceable stepSectionBuild() path. Holds exactly the locals that must survive across
+  // build phases (and, for the sliced path, across loop ticks). Declared here but defined
+  // in Section.cpp so the heavy parser type stays out of this header.
+  struct BuildState;
+  // Outcome of one phase method. Mostly maps to BuildStep, plus RetryNoCss which asks the
+  // entry function to tear the state down and restart from setup with embeddedStyle=false.
+  enum class BuildPhaseResult : uint8_t { Ok, Done, Failed, RetryNoCss };
+  // Phase methods. Each operates on the shared BuildState and is purely linear (the
+  // CSS/heap fallback recursion lives in the entry function, not here), which is what lets
+  // them be called either back-to-back (blocking) or with Parse re-entered across ticks.
+  BuildPhaseResult runBuildSetup(BuildState& st);
+  // Runs the parse. When budgetMs is 0 the whole stream is consumed in one call (blocking
+  // path); a non-zero budget is honoured by the sliced path (added in a later sub-commit).
+  BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
+  BuildPhaseResult runBuildFinalize(BuildState& st);
 
   // Open the section file and seek to the first paragraph LUT entry, validating the header
   // and LUT bounds against fileSize. On success, returns true with `outLutStart` set to the
