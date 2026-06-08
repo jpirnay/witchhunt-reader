@@ -2349,18 +2349,23 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   lastRenderStats.largestFreeBlockBefore = 0;
   showTruncatedSectionHintThisRender = false;
 
-  // Classify the pass, then consume the pre-render flags exactly as the former in-line
-  // ladder did. The stale-state clear is keyed on the *raw* flags (not the resolved
-  // pass): when usePreRenderedBuffer was set but a waveform is still pending, classify
-  // resolves to Normal yet preRenderedPage.ready must be preserved — clearing it on the
-  // resolved pass would diverge from the original behavior.
-  const bool wasPreRenderPass = pendingPreRender;
-  const bool wasBufferDisplayPass = usePreRenderedBuffer;
+  // Classify the pass, then consume the pre-render flags.
   const RenderPass pass = classifyRenderPass();
   pendingPreRender = false;
   usePreRenderedBuffer = false;
-  if (!wasPreRenderPass && !wasBufferDisplayPass) {
-    preRenderedPage.ready = false;
+  // Discard the pre-render only when it is actually STALE — i.e. it no longer describes the
+  // next page of the page currently displayed. A completed pre-render must survive an
+  // intervening Normal render (periodic status-bar/clock update, deferred-AA-triggered
+  // requestUpdate, etc.); the former "clear on any non-pre-render/non-buffer pass" rule threw
+  // away a valid pre-render whenever such a render landed between the pre-render and the page
+  // turn, turning a hit into a slow miss. Validity is keyed on (spineIndex, pageIndex) ==
+  // (current spine, currentPage+1); the BufferDisplay/PreRender passes manage ready themselves.
+  if (pass != RenderPass::PreRender && pass != RenderPass::BufferDisplay && preRenderedPage.ready) {
+    const bool stillValid = section && preRenderedPage.spineIndex == currentSpineIndex &&
+                            preRenderedPage.pageIndex == section->currentPage + 1;
+    if (!stillValid) {
+      preRenderedPage.ready = false;
+    }
   }
 
   switch (pass) {
@@ -2945,7 +2950,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                     static_cast<bool>(SETTINGS.bionicReading), SETTINGS.imageRendering, nullptr,
-                                    /*skipEviction=*/false, buildHeadingFonts())) {
+                                    /*skipEviction=*/false, Section::HeadingFonts{})) {
       LOG_ERR("SLP", "EPUB: failed to rebuild section cache for spine %d", spineIndex);
       return false;
     }
