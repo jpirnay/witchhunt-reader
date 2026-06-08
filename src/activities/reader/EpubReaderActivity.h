@@ -116,6 +116,30 @@ class EpubReaderActivity final : public Activity {
   enum class ReaderPhase : uint8_t { READING, PRECOMPILING };
   ReaderPhase readerPhase_ = ReaderPhase::READING;
 
+  // One render() invocation services exactly one of these passes. The pass is
+  // selected from the pending flags + reader state at entry by classifyRenderPass();
+  // render() then dispatches to the matching helper. Replaces the former in-line
+  // ladder of isPreRenderPass / isBufferDisplayPass / !section bool checks.
+  enum class RenderPass : uint8_t {
+    FinishedBook,   // currentSpineIndex == spineCount: hand off to FinishedBookActivity
+    PreRender,      // Background A: render next page content into the framebuffer only
+    BufferDisplay,  // fast page-turn: framebuffer already holds content; add status bar + flush
+    BuildSection,   // no section loaded → build/load the cache, then render normally
+    Normal,         // section present → load page, render, display
+  };
+
+  // Resolved screen geometry for one render pass: oriented + padded margins and the
+  // derived viewport. Computed once at the top of render() and threaded into the pass
+  // helpers so each helper takes one struct instead of six loose ints.
+  struct RenderLayout {
+    int marginTop = 0;
+    int marginRight = 0;
+    int marginBottom = 0;
+    int marginLeft = 0;
+    uint16_t viewportWidth = 0;
+    uint16_t viewportHeight = 0;
+  };
+
   std::shared_ptr<Epub> epub;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;
@@ -299,6 +323,30 @@ class EpubReaderActivity final : public Activity {
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
+
+  // --- render() pass dispatch (see RenderPass) ---
+  // Opportunistically restore the secondary display buffer if a prior OOM degraded it.
+  void recoverSecondaryBufferIfNeeded();
+  // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
+  void clampSpineIndex(int spineCount);
+  // Compute oriented + padded margins and the derived viewport for this render.
+  RenderLayout computeRenderLayout() const;
+  // Select which pass this render() invocation should run, from pending flags + reader state.
+  RenderPass classifyRenderPass() const;
+  // FinishedBook pass: transition to the finished-book flow. Consumes the lock.
+  void renderFinishedBookPass(RenderLock& lock, int spineCount);
+  // PreRender pass (Background A): render the next page's content into the framebuffer only.
+  void renderPreRenderPass(const RenderLayout& layout);
+  // BufferDisplay pass: framebuffer already holds the next page; add status bar + flush.
+  // Returns true if the page was displayed (render() should return); false if the fast path
+  // could not be taken (load failed / image page) and render() must fall through to Normal.
+  bool renderBufferDisplayPass(const RenderLayout& layout);
+  // BuildSection pass: construct/load the section cache for currentSpineIndex and resolve the
+  // nav target. Returns true if a section is ready to render; false if render() should return
+  // (build failed, finished-book handoff, or a requestUpdate retry was posted).
+  bool buildSection(const RenderLayout& layout);
+  // Normal pass: load the current page from the section cache, render it, persist progress.
+  void renderNormalPass(RenderLock& lock, const RenderLayout& layout);
 
   void renderContents(RenderLock& lock, std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
