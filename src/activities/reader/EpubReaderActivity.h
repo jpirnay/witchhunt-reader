@@ -348,6 +348,20 @@ class EpubReaderActivity final : public Activity {
   // Normal pass: load the current page from the section cache, render it, persist progress.
   void renderNormalPass(RenderLock& lock, const RenderLayout& layout);
 
+  // --- idle-time background work ---
+  // Called by loop() when input is idle and no page turn is pending. Dispatches the
+  // cooperative background routines in priority order, giving each a small time slice:
+  //   1. deferred grayscale AA (visible quality of the page just shown)
+  //   2. Background A — pre-render of the next page (scheduled via pendingPreRender)
+  //   3. Background B — idle section pre-analysis (only once A is finished; not yet implemented)
+  // Each routine must be partial-work-capable and yield promptly so the next loop tick
+  // can service input. Returns nothing; routines self-gate on their own pending flags.
+  void serviceBackgroundWork();
+  // Runs the deferred grayscale AA pass for the page just displayed, if one is pending and
+  // the display bus is free. Serialises against the render task via RenderLock. No-op when
+  // nothing is pending. Extracted from loop()'s idle branch.
+  void runDeferredGrayscalePass();
+
   void renderContents(RenderLock& lock, std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   // Renders page content into the frame buffer (prewarm + BW pass) without drawing the status bar

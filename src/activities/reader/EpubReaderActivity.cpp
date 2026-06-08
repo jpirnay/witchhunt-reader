@@ -419,38 +419,9 @@ void EpubReaderActivity::loop() {
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     if (!delayedPrevTurn && !delayedNextTurn) {
-      // Input-idle: run the deferred AA pass if one is pending.
-      // Guard: do not start the AA pass while the render task is still inside
-      // completeDisplay() — both paths touch the SPI display bus and must not
-      // run concurrently. isRefreshPending() is true from triggerDisplay() until
-      // completeDisplay() clears it; when it returns false the render task has
-      // finished all post-waveform SPI work and it is safe to issue new SPI writes.
-      if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
-        // Serialize deferred AA with the render task. This prevents loop-side
-        // grayscale SPI/framebuffer work from racing with render() updates.
-        RenderLock lock;
-        if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
-          pendingGrayscale_.active = false;
-          renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
-          const int fontId = pendingGrayscale_.fontId;
-          const int marginLeft = pendingGrayscale_.marginLeft;
-          const int contentTop = pendingGrayscale_.contentTop;
-          const Page* pagePtr = pendingGrayscale_.page.get();
-          const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
-            pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
-            pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
-          });
-          // The panel now shows the AA-dithered render, but cleanupGrayscaleWithPreviousBuffer()
-          // only resyncs RED RAM / frameBufferActive to the plain BW page (the correct content
-          // baseline, but not what's physically on screen). On X4 a fast differential would diff
-          // the next page against that BW bitmap while the panel shows dithered glyph edges,
-          // leaving ghosts where the two differ. Force HALF_REFRESH so the next page turn drives
-          // every pixel absolutely instead of trusting a stale physical-state assumption.
-          if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
-          pendingGrayscale_.page.reset();
-          LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
-        }
-      }
+      // Input-idle and no page turn pending: hand the idle slice to the background
+      // routines (deferred AA, then Background A pre-render, then Background B).
+      serviceBackgroundWork();
       return;
     }
     prevTriggered = delayedPrevTurn;
@@ -529,6 +500,54 @@ void EpubReaderActivity::loop() {
   } else {
     pageTurn(true);
   }
+}
+
+void EpubReaderActivity::serviceBackgroundWork() {
+  // Priority order, highest first. Each routine self-gates on its own pending state and
+  // is expected to do a bounded amount of work and return so the next loop tick can
+  // service input. Background A is already scheduled inside render() via pendingPreRender
+  // and runs as the PreRender pass when requestUpdate() fires; the deferred AA pass is the
+  // only background work driven directly from the idle loop today. Background B (idle
+  // section pre-analysis) will slot in here after A, gated on A having finished.
+  runDeferredGrayscalePass();
+}
+
+void EpubReaderActivity::runDeferredGrayscalePass() {
+  // Guard: do not start the AA pass while the render task is still inside
+  // completeDisplay() — both paths touch the SPI display bus and must not
+  // run concurrently. isRefreshPending() is true from triggerDisplay() until
+  // completeDisplay() clears it; when it returns false the render task has
+  // finished all post-waveform SPI work and it is safe to issue new SPI writes.
+  if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
+    return;
+  }
+  // Serialize deferred AA with the render task. This prevents loop-side
+  // grayscale SPI/framebuffer work from racing with render() updates.
+  RenderLock lock;
+  // Re-check under the lock: the render task may have flipped these between the
+  // unlocked test above and acquiring the lock.
+  if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
+    return;
+  }
+  pendingGrayscale_.active = false;
+  renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
+  const int fontId = pendingGrayscale_.fontId;
+  const int marginLeft = pendingGrayscale_.marginLeft;
+  const int contentTop = pendingGrayscale_.contentTop;
+  const Page* pagePtr = pendingGrayscale_.page.get();
+  const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
+    pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
+    pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
+  });
+  // The panel now shows the AA-dithered render, but cleanupGrayscaleWithPreviousBuffer()
+  // only resyncs RED RAM / frameBufferActive to the plain BW page (the correct content
+  // baseline, but not what's physically on screen). On X4 a fast differential would diff
+  // the next page against that BW bitmap while the panel shows dithered glyph edges,
+  // leaving ghosts where the two differ. Force HALF_REFRESH so the next page turn drives
+  // every pixel absolutely instead of trusting a stale physical-state assumption.
+  if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
+  pendingGrayscale_.page.reset();
+  LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
 }
 
 // Translate an absolute percent into a spine index plus a normalized position
