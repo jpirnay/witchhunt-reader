@@ -5,9 +5,9 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <SaxParser/SaxParser.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
-#include <expat.h>
 
 #include <algorithm>
 #include <cctype>
@@ -126,7 +126,7 @@ bool matches(const char* tag_name, const char* possible_tags[], const int possib
   return false;
 }
 
-const char* getAttribute(const XML_Char** atts, const char* attrName) {
+const char* getAttribute(const char** atts, const char* attrName) {
   if (!atts) return nullptr;
   for (int i = 0; atts[i]; i += 2) {
     if (strcmp(atts[i], attrName) == 0) return atts[i + 1];
@@ -260,9 +260,7 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   LOG_ERR("EHP", "Low heap (%u free, %u max alloc), aborting parse before %s", freeHeap, maxAllocHeap, phase);
   streamFailed = true;
   layoutFailed = true;
-  if (activeParser) {
-    XML_StopParser(activeParser, XML_FALSE);
-  }
+  saxParser_.stop();
   return false;
 }
 
@@ -548,7 +546,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   wordsExtractedInBlock = 0;
 }
 
-void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
+void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
 
   if (self->streamFailed) {
@@ -1136,9 +1134,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   // the forward mapper's partial-parse heuristic requires the seek hint to land on a
   // body-child boundary, otherwise partialBaseDepth can misidentify wrapped paragraphs.
   if (self->xpathBodyDepth >= 0 && self->depth == self->xpathBodyDepth + 1) {
-    if (self->activeParser) {
-      self->lastBodyChildByteOffset = static_cast<uint32_t>(XML_GetCurrentByteIndex(self->activeParser));
-    }
+    self->lastBodyChildByteOffset = self->saxParser_.byteOffset();
     if (strcmp(name, "p") == 0) {
       self->xpathParagraphIndex++;
     }
@@ -1592,7 +1588,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   self->depth += 1;
 }
 
-void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char* s, const int len) {
+void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const int len) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
 
   if (self->streamFailed) {
@@ -1754,9 +1750,9 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
     }
 
     // Skip Zero Width No-Break Space / BOM (U+FEFF) = 0xEF 0xBB 0xBF
-    const XML_Char FEFF_BYTE_1 = static_cast<XML_Char>(0xEF);
-    const XML_Char FEFF_BYTE_2 = static_cast<XML_Char>(0xBB);
-    const XML_Char FEFF_BYTE_3 = static_cast<XML_Char>(0xBF);
+    const char FEFF_BYTE_1 = static_cast<char>(0xEF);
+    const char FEFF_BYTE_2 = static_cast<char>(0xBB);
+    const char FEFF_BYTE_3 = static_cast<char>(0xBF);
 
     if (s[i] == FEFF_BYTE_1) {
       // Check if the next two bytes complete the 3-byte sequence
@@ -1797,7 +1793,7 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   }
 }
 
-void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const XML_Char* s, const int len) {
+void ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const char* s, const int len) {
   // Check if this looks like an entity reference (&...;)
   if (len >= 3 && s[0] == '&' && s[len - 1] == ';') {
     const char* utf8Value = lookupHtmlEntity(s, static_cast<size_t>(len));
@@ -1813,7 +1809,7 @@ void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const X
   // Not an entity we recognize - skip it
 }
 
-void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* name) {
+void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
 
   if (self->streamFailed) {
@@ -1999,15 +1995,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   }
 }
 
-ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
-  if (activeParser) {
-    XML_StopParser(activeParser, XML_FALSE);
-    XML_SetElementHandler(activeParser, nullptr, nullptr);
-    XML_SetCharacterDataHandler(activeParser, nullptr);
-    XML_ParserFree(activeParser);
-    activeParser = nullptr;
-  }
-}
+ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
 
 bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   auto paragraphAlignmentBlockStyle = BlockStyle();
@@ -2019,19 +2007,12 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   paragraphAlignmentBlockStyle.alignment = align;
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD.
+  // Using DefaultHandlerExpand preserves normal entity expansion from DOCTYPE.
+  if (!saxParser_.init(this, startElement, endElement, characterData, defaultHandlerExpand)) {
     LOG_ERR("EHP", "Couldn't allocate memory for parser");
     return false;
   }
-
-  // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD.
-  // Using DefaultHandlerExpand preserves normal entity expansion from DOCTYPE.
-  XML_SetDefaultHandlerExpand(parser, defaultHandlerExpand);
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
-  activeParser = parser;
 
   totalStreamSize = totalInflatedSize;
   bytesStreamed = 0;
@@ -2071,32 +2052,15 @@ size_t ChapterHtmlSlimParser::write(const uint8_t data) { return write(&data, 1)
 
 size_t ChapterHtmlSlimParser::write(const uint8_t* buffer, const size_t size) {
   if (size == 0) return 0;
-  if (!activeParser || streamFailed) return 0;
+  if (!saxParser_.isActive() || streamFailed) return 0;
 
-  size_t remaining = size;
-  const uint8_t* cursor = buffer;
-  while (remaining > 0) {
-    const size_t chunk = remaining < PARSE_BUFFER_SIZE ? remaining : PARSE_BUFFER_SIZE;
-    void* const buf = XML_GetBuffer(activeParser, static_cast<int>(chunk));
-    if (!buf) {
-      LOG_ERR("EHP", "Couldn't allocate buffer");
-      streamFailed = true;
-      return 0;
-    }
-    memcpy(buf, cursor, chunk);
-
-    bytesStreamed += chunk;
-    // The streaming source doesn't know "this was the last chunk" — pass isFinal=false
-    // here and let finalize() emit the terminating empty parse with isFinal=true.
-    if (XML_ParseBuffer(activeParser, static_cast<int>(chunk), 0) == XML_STATUS_ERROR) {
-      LOG_ERR("EHP", "Parse error at line %lu:\n%s", XML_GetCurrentLineNumber(activeParser),
-              XML_ErrorString(XML_GetErrorCode(activeParser)));
-      streamFailed = true;
-      return 0;
-    }
-
-    cursor += chunk;
-    remaining -= chunk;
+  bytesStreamed += size;
+  // The streaming source doesn't know "this was the last chunk" — pass isFinal=false
+  // here and let finalize() emit the terminating empty parse with isFinal=true.
+  if (!saxParser_.feed(buffer, size)) {
+    LOG_ERR("EHP", "Parse error at line %d:\n%s", saxParser_.errorLine(), saxParser_.errorString());
+    streamFailed = true;
+    return 0;
   }
 
   // Report progress at the granularity chosen up-front (see progressStepPercent).
@@ -2114,29 +2078,29 @@ size_t ChapterHtmlSlimParser::write(const uint8_t* buffer, const size_t size) {
 }
 
 bool ChapterHtmlSlimParser::finalize() {
-  if (!activeParser) {
-    return false;
-  }
-
   bool success = !streamFailed;
-  if (success) {
-    // Emit terminating empty parse so Expat finalizes any pending tokens.
-    if (XML_ParseBuffer(activeParser, 0, 1) == XML_STATUS_ERROR) {
-      LOG_ERR("EHP", "Parse error at line %lu (finalize):\n%s", XML_GetCurrentLineNumber(activeParser),
-              XML_ErrorString(XML_GetErrorCode(activeParser)));
+  if (saxParser_.isActive()) {
+    // Emit terminating empty parse so the parser finalizes any pending tokens.
+    if (success && !saxParser_.finalize()) {
+      LOG_ERR("EHP", "Parse error at line %d (finalize):\n%s", saxParser_.errorLine(), saxParser_.errorString());
       success = false;
       streamFailed = true;
     }
   }
 
-  XML_StopParser(activeParser, XML_FALSE);
-  XML_SetElementHandler(activeParser, nullptr, nullptr);
-  XML_SetCharacterDataHandler(activeParser, nullptr);
-  XML_ParserFree(activeParser);
-  activeParser = nullptr;
-
   const uint32_t totalTimeMs = millis() - streamStartTimeMs;
   LOG_DBG("EHP", "Time to parse and build pages: %lu ms", totalTimeMs);
+
+  // The yxml SaxParser backend uses fixed-capacity buffers sized from measured
+  // real-world maxima; if this chapter exceeded any of them the parser silently
+  // truncated (dropped) the excess. Surface it so out-of-bounds documents are
+  // diagnosable rather than failing invisibly (e.g. XPath/anchor drift).
+  if (const uint32_t trunc = saxParser_.truncationFlags()) {
+    LOG_DBG("EHP", "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d maxDepth=%d",
+            static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
+            (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
+            (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0);
+  }
 
   // Process last page if there is still text. Done unconditionally so that a partial
   // success scenario still flushes whatever pages were produced.

@@ -15,7 +15,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 44;  // bumped: PageTableFragment drops colWidths[], gains colspan support
+constexpr uint8_t SECTION_FILE_VERSION = 45;  // bumped: yxml SaxParser byteOffset semantics differ from expat (seek hints in LUT)
 
 namespace header {
 constexpr uint32_t kVersion = 0;

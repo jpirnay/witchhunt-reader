@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Print.h>
-#include <expat.h>
+#include <SaxParser/SaxParser.h>
 
 #include <climits>
 #include <functional>
@@ -194,10 +194,10 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::vector<ParagraphLutEntry> paragraphLutPerPage;  // deep LUT: one entry per page
 
-  // Active parser handle during streaming, nullptr otherwise.
-  // Stored as a member so page-break sites (addLineToPage, image breaks) can call
-  // XML_GetCurrentByteIndex without needing the parser threaded through every call.
-  XML_Parser activeParser = nullptr;
+  // Active parser for streaming. Stored as a member so page-break sites (addLineToPage,
+  // image breaks) can call saxParser_.byteOffset() without threading the parser through
+  // every call site.
+  SaxParser saxParser_;
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -241,10 +241,10 @@ class ChapterHtmlSlimParser final : public Print {
   // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
   void attachPendingFloatImage(BlockStyle& bs);
   // XML callbacks
-  static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
-  static void XMLCALL characterData(void* userData, const XML_Char* s, int len);
-  static void XMLCALL defaultHandlerExpand(void* userData, const XML_Char* s, int len);
-  static void XMLCALL endElement(void* userData, const XML_Char* name);
+  static void startElement(void* userData, const char* name, const char** atts);
+  static void characterData(void* userData, const char* s, int len);
+  static void defaultHandlerExpand(void* userData, const char* s, int len);
+  static void endElement(void* userData, const char* name);
 
  public:
   explicit ChapterHtmlSlimParser(

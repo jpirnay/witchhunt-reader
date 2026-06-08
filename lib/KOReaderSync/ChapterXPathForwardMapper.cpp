@@ -2,7 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
-#include <expat.h>
+#include <SaxParser/SaxParser.h>
 
 #include <algorithm>
 #include <string>
@@ -43,7 +43,7 @@ struct ForwardState : StackState {
   size_t targetOffset;
   std::string result;
   bool found = false;
-  XML_Parser parser = nullptr;
+  SaxParser* saxParser = nullptr;
 
   // Body-level text-node bookkeeping: only counts text nodes that are direct
   // children of <body>. Inline-element text contributes to totalTextBytes via
@@ -55,7 +55,7 @@ struct ForwardState : StackState {
 
   ForwardState(const int spineIndex, const size_t targetOffset) : spineIndex(spineIndex), targetOffset(targetOffset) {}
 
-  void onStartElement(const XML_Char* rawName) {
+  void onStartElement(const char* rawName) {
     inBodyTextNode = false;
     pushElement(rawName);
   }
@@ -65,7 +65,7 @@ struct ForwardState : StackState {
     popElement();
   }
 
-  void onCharData(const XML_Char* text, const int len) {
+  void onCharData(const char* text, const int len) {
     if (shouldSkipText(len) || found) {
       return;
     }
@@ -101,8 +101,8 @@ struct ForwardState : StackState {
         result = currentXPath(spineIndex);
       }
       found = true;
-      if (parser) {
-        XML_StopParser(parser, XML_FALSE);
+      if (saxParser) {
+        saxParser->stop();
       }
       return;
     }
@@ -160,7 +160,7 @@ struct ParagraphState : StackState {
   uint16_t targetParagraph;  // 1-based
   uint16_t paragraphCount = 0;
   std::string result;
-  XML_Parser parser = nullptr;
+  SaxParser* saxParser = nullptr;
   // When parsing from a seek offset, the DOM context (html/body ancestors) is missing from
   // the parser's perspective.  partialParse=true relaxes the bodyIdx() check and instead
   // counts any <p> at depth 0 relative to the first element seen (a heuristic that works
@@ -176,7 +176,7 @@ struct ParagraphState : StackState {
         partialParse(partialParse) {}
 };
 
-void XMLCALL paragraphStartCb(void* ud, const XML_Char* rawName, const XML_Char**) {
+void paragraphStartCb(void* ud, const char* rawName, const char**) {
   auto* s = static_cast<ParagraphState*>(ud);
   s->pushElement(rawName);
   if (!s->result.empty() || s->stack.empty() || s->stack.back().tag != "p") {
@@ -203,14 +203,14 @@ void XMLCALL paragraphStartCb(void* ud, const XML_Char* rawName, const XML_Char*
     s->paragraphCount++;
     if (s->paragraphCount >= s->targetParagraph) {
       s->result = s->currentXPath(s->spineIndex);
-      if (s->parser) {
-        XML_StopParser(s->parser, XML_FALSE);
+      if (s->saxParser) {
+        s->saxParser->stop();
       }
     }
   }
 }
 
-void XMLCALL paragraphEndCb(void* ud, const XML_Char*) { static_cast<ParagraphState*>(ud)->popElement(); }
+void paragraphEndCb(void* ud, const char*) { static_cast<ParagraphState*>(ud)->popElement(); }
 
 }  // namespace
 
@@ -228,41 +228,33 @@ std::string findXPathForParagraphInternal(const std::shared_ptr<Epub>& epub, con
 
   const bool partialParse = seekHint > 0;
   ParagraphState state(spineIndex, paragraphIndex, partialParse ? startParagraphCount : 0, partialParse);
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  SaxParser saxParser;
+  if (!saxParser.init(&state, paragraphStartCb, paragraphEndCb, nullptr, parserDefaultCb<ParagraphState>)) {
     Storage.remove(tmpPath.c_str());
     return "";
   }
 
-  state.parser = parser;
-  XML_SetUserData(parser, &state);
-  XML_SetElementHandler(parser, paragraphStartCb, paragraphEndCb);
+  state.saxParser = &saxParser;
   // No character data handler needed — we only care about element structure.
-  XML_SetDefaultHandlerExpand(parser, parserDefaultCb<ParagraphState>);
 
   // Use seek hint from section LUT if available — avoids scanning the whole chapter.
   // If the partial parse misses the target (e.g. the hint overshot), retry from byte 0.
-  runParseFromOffset(parser, tmpPath, seekHint);
+  runParseFromOffset(saxParser, tmpPath, seekHint);
 
   if (state.result.empty() && seekHint > 0) {
     // Partial parse missed — reset and retry from beginning with full-document context.
-    XML_ParserFree(parser);
-    parser = XML_ParserCreate(nullptr);
-    if (!parser) {
-      LOG_ERR("KOX", "XML_ParserCreate failed on retry: spine=%d p[%u] tmp=%s", spineIndex, paragraphIndex,
+    ParagraphState fullState(spineIndex, paragraphIndex, 0, false);
+    SaxParser fullParser;
+    if (!fullParser.init(&fullState, paragraphStartCb, paragraphEndCb, nullptr, parserDefaultCb<ParagraphState>)) {
+      LOG_ERR("KOX", "SaxParser init failed on retry: spine=%d p[%u] tmp=%s", spineIndex, paragraphIndex,
               tmpPath.c_str());
     } else {
-      ParagraphState fullState(spineIndex, paragraphIndex, 0, false);
-      fullState.parser = parser;
-      XML_SetUserData(parser, &fullState);
-      XML_SetElementHandler(parser, paragraphStartCb, paragraphEndCb);
-      XML_SetDefaultHandlerExpand(parser, parserDefaultCb<ParagraphState>);
-      runParse(parser, tmpPath);
+      fullState.saxParser = &fullParser;
+      runParse(fullParser, tmpPath);
       state.result = fullState.result;
     }
   }
 
-  XML_ParserFree(parser);
   Storage.remove(tmpPath.c_str());
 
   LOG_DBG("KOX", "Paragraph: spine=%d p[%u] seekHint=%u -> %s", spineIndex, paragraphIndex, seekHint,
@@ -289,19 +281,15 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
   const size_t targetOffset = static_cast<size_t>(clamped * static_cast<float>(totalTextBytes));
 
   ForwardState state(spineIndex, targetOffset);
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  SaxParser saxParser;
+  if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
+                      parserDefaultCb<ForwardState>)) {
     Storage.remove(tmpPath.c_str());
     return "";
   }
 
-  state.parser = parser;
-  XML_SetUserData(parser, &state);
-  XML_SetElementHandler(parser, parserStartCb<ForwardState>, parserEndCb<ForwardState>);
-  XML_SetCharacterDataHandler(parser, parserCharCb<ForwardState>);
-  XML_SetDefaultHandlerExpand(parser, parserDefaultCb<ForwardState>);
-  runParse(parser, tmpPath);
-  XML_ParserFree(parser);
+  state.saxParser = &saxParser;
+  runParse(saxParser, tmpPath);
   Storage.remove(tmpPath.c_str());
 
   if (state.result.empty()) {

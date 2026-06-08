@@ -8,7 +8,25 @@ lib/I18n/I18nStrings.h
 lib/I18n/I18nStrings.cpp
 *.generated.h
 .vs
+# CMake out-of-source build dirs (build, build2, build-debug, test/build, …)
 build
+build*/
+**/build/
+**/build*/
+# CMake FetchContent deps (GoogleTest et al.) and configure artifacts
+**/_deps/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+**/*.ninja
+**/.ninja_log
+**/Testing/
+# Compilation artifacts
+*.o
+*.obj
+*.a
+*.exe
 **/__pycache__/
 /compile_commands.json
 /.cache
@@ -22,7 +40,6 @@ lib/EpdFont/scripts/downloaded_fonts/
 lib/EpdFont/scripts/instanced_fonts/
 lib/EpdFont/scripts/output/
 .editorconfig
-.claude/settings.json
 # Claude Code: share project skills with the team, keep local agent state
 # (worktrees, scheduled-task locks, settings.local, scout CLEANUP.md) out.
 .claude/*
