@@ -2,6 +2,15 @@
 #define DEBUG_MEMORY_CONSUMPTION 0
 #endif
 
+// When 1, draws a small overlay in the status bar showing background-work progress:
+//   A<.|x>  next-page pre-render: '.' running/scheduled, 'x' ready
+//   B<nn%>  next-section background build percent (omitted when inactive)
+// and dumps A/B run+complete counters to serial every ~5s. Diagnostic aid for the
+// Background A/B work; compiled out (zero cost) when 0.
+#ifndef DEBUG_BACKGROUND_WORK
+#define DEBUG_BACKGROUND_WORK 0
+#endif
+
 #include "EpubReaderActivity.h"
 
 #include <Epub/Page.h>
@@ -319,6 +328,9 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Debug-only: periodic serial dump of background-work counters (no-op in release).
+  serviceBackgroundDebugLog();
+
   if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
     pendingProgressSave.pending.store(false, std::memory_order_relaxed);
     saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
@@ -510,6 +522,20 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // only background work driven directly from the idle loop today. Background B (idle
   // section pre-analysis) will slot in here after A, gated on A having finished.
   runDeferredGrayscalePass();
+}
+
+void EpubReaderActivity::serviceBackgroundDebugLog() {
+#if DEBUG_BACKGROUND_WORK
+  const unsigned long now = millis();
+  if (lastBgDebugLogMs_ != 0UL && (now - lastBgDebugLogMs_) < 5000UL) {
+    return;
+  }
+  lastBgDebugLogMs_ = now;
+  LOG_INF("ERS", "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu | preReady=%d buildPct=%d",
+          static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
+          static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
+          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_);
+#endif
 }
 
 void EpubReaderActivity::runDeferredGrayscalePass() {
@@ -1931,6 +1957,9 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   if (esp_get_free_heap_size() < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
     return;
   }
+#if DEBUG_BACKGROUND_WORK
+  bgCounters_.aRuns++;
+#endif
   const int savedPage = section->currentPage;
   section->currentPage = nextPage;
   auto p = section->loadPageFromSectionFile();
@@ -1942,6 +1971,9 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
     section->currentPage = savedPage;
     const unsigned long preRenderDuration = millis() - preRenderStart;
     preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis()};
+#if DEBUG_BACKGROUND_WORK
+    bgCounters_.aCompletes++;
+#endif
     LOG_DBG("ERS", "Pre-rendered page %d/%d in %lums", nextPage, section->pageCount - 1, preRenderDuration);
   }
 }
@@ -2639,6 +2671,8 @@ void EpubReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, isStarred, printedPageLabel);
 
+  renderBackgroundDebugOverlay();
+
   lastStatusBarPage = currentPage;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
   if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
@@ -2647,6 +2681,27 @@ void EpubReaderActivity::renderStatusBar() const {
   } else {
     lastStatusBarClockMinute = -1;
   }
+}
+
+void EpubReaderActivity::renderBackgroundDebugOverlay() const {
+#if DEBUG_BACKGROUND_WORK
+  // Background A state is derived from the live pre-render fields:
+  //   'x' ready  — preRenderedPage holds the next page for this spine
+  //   '.' running — a pre-render is scheduled (pendingPreRender) but not yet ready
+  //   '-' idle    — nothing scheduled (e.g. last page of section, or heap-gated)
+  const bool aReady = preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex;
+  const char aGlyph = aReady ? 'x' : (pendingPreRender ? '.' : '-');
+
+  // Build a compact "A<.|x|-> B<nn%>" string and draw it at the top-left of the content
+  // area, over whatever the status bar drew. Intentionally crude — a diagnostic aid.
+  char buf[24];
+  int n = snprintf(buf, sizeof(buf), "A%c", aGlyph);
+  if (backgroundBuildPercent_ >= 0 && n > 0 && n < static_cast<int>(sizeof(buf))) {
+    snprintf(buf + n, sizeof(buf) - n, " B%d%%", backgroundBuildPercent_);
+  }
+  // Draw near the top-left corner; UI_10_FONT_ID is the small status font used elsewhere.
+  renderer.drawText(UI_10_FONT_ID, 4, 2, buf, true, EpdFontFamily::BOLD);
+#endif
 }
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {

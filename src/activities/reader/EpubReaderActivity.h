@@ -254,6 +254,28 @@ class EpubReaderActivity final : public Activity {
     unsigned long completedAtMs = 0UL;
   };
   PreRenderedPage preRenderedPage;
+  // Debug-only Background B (section pre-analysis) progress, surfaced as a small
+  // status-bar overlay when DEBUG_BACKGROUND_WORK is enabled. Background A's state is
+  // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a
+  // field. -1 means no background build is active. Updated by the (future) B scheduler.
+  int8_t backgroundBuildPercent_ = -1;
+  int backgroundBuildSpineIndex_ = -1;
+  // Debug-only counters flushed to serial every ~5s by serviceBackgroundDebugLog() when
+  // DEBUG_BACKGROUND_WORK is enabled. "Runs" counts how often each background routine was
+  // invoked with work to do; "completes" counts how often it finished a unit (a pre-rendered
+  // page for A, a fully built section for B). Cheap monotonic counters; no release-build cost
+  // since the logger is compiled out when the flag is 0.
+  struct BackgroundWorkCounters {
+    uint32_t aRuns = 0;       // pre-render pass entered with a page to render
+    uint32_t aCompletes = 0;  // pre-render produced a ready next page
+    uint32_t bRuns = 0;       // section-build step ran a slice of work
+    uint32_t bCompletes = 0;  // section build reached Done
+  };
+  BackgroundWorkCounters bgCounters_;
+  unsigned long lastBgDebugLogMs_ = 0UL;
+  // Emit the background-work counters to serial roughly every 5s. No-op unless
+  // DEBUG_BACKGROUND_WORK is set. Called from loop().
+  void serviceBackgroundDebugLog();
   struct PageTurnStatsWindow {
     uint16_t turns = 0;
     uint16_t preRenderHits = 0;
@@ -379,6 +401,9 @@ class EpubReaderActivity final : public Activity {
   // SleepActivity's OVERLAY mode — rely on when transitioning out of the reader.
   void restoreCurrentPageToBufferIfPreRendered();
   void renderStatusBar() const;
+  // Debug overlay: draws the background-work indicators (A: '.'/'x', B: section build %)
+  // in a status-bar corner. Compiled to a no-op unless DEBUG_BACKGROUND_WORK is set.
+  void renderBackgroundDebugOverlay() const;
   // Snapshot of the three status-bar signals that can change while a page is otherwise idle.
   // Compared in shouldSkipPeriodicUpdate() to suppress no-op minute-tick re-renders that on
   // X3 panels accumulate visible speckle via repeated no-diff FAST refreshes.
