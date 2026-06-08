@@ -401,10 +401,10 @@ bool XtcReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   const uint16_t maxX = std::min(pageWidth, static_cast<uint16_t>(renderer.getScreenWidth()));
   const uint16_t maxY = std::min(pageHeight, static_cast<uint16_t>(renderer.getScreenHeight()));
 
-  // Both formats: stream.value() >= 1 means a non-white pixel -> draw black.
+  // Both formats: isInk() true means a non-white pixel -> draw black.
   for (uint16_t y = 0; y < maxY; y++) {
     for (uint16_t x = 0; x < maxX; x++) {
-      if (pageStream.value(x, y) >= 1) {
+      if (pageStream.isInk(x, y)) {
         renderer.drawPixel(x, y, true);
       }
     }
