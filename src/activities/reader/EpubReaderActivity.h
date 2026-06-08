@@ -148,14 +148,15 @@ class EpubReaderActivity final : public Activity {
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
   bool pendingHalfRefreshAfterImagePage = false;
-  // X4 only: set after a grayscale AA pass completes so the next BW page turn
-  // uses HALF_REFRESH (BYPASS_RED) instead of a fast differential.
-  // The X4 controller has no internal "previous pixel state" register — after
-  // the grayscale waveform the panel is in a gray state but RED RAM holds the
-  // BW page. A fast differential would leave gray pixels undriven where
-  // old==new, causing overlay ghosting. HALF_REFRESH ignores RED RAM and
-  // drives every pixel cleanly from the new BW frame.
-  bool pendingHalfRefreshAfterGrayscale_ = false;
+  // X4 only: set after the secondary display buffer is released + reallocated
+  // (chapter/section change indexing or buffer recovery) so the next BW page
+  // render uses HALF_REFRESH instead of a fast differential. After a section
+  // change the buffer is released for the build and the panel's physical state
+  // no longer matches RED RAM, so a fast differential ghosts heavily. The single
+  // HALF_REFRESH on the new section's first page clears that cleanly. NOTE: this
+  // is deliberately NOT set after a normal grayscale AA pass — doing so forced a
+  // half-refresh on every text page while AA was enabled (the clumsy old fix).
+  bool pendingHalfRefreshAfterBufferRealloc_ = false;
   // True when secondary display buffer allocation failed; while set we prefer
   // conservative refresh policy and skip grayscale AA to reduce ghosting.
   bool secondaryBufferDegraded_ = false;
@@ -260,6 +261,13 @@ class EpubReaderActivity final : public Activity {
   // field. -1 means no background build is active. Updated by the (future) B scheduler.
   int8_t backgroundBuildPercent_ = -1;
   int backgroundBuildSpineIndex_ = -1;
+  // Debug-only Background A glyph for the status-bar overlay. The transient flags
+  // (pendingPreRender / preRenderedPage.ready) are cleared at the top of render()
+  // before the status bar is drawn, so the overlay could never sample a non-idle
+  // state. Instead we latch per-page provenance here just before the status bar
+  // draws: 'x' = this page was served from the pre-render buffer (a Background-A
+  // hit), '-' = it was rendered fresh (a miss). Drawn only under the flag.
+  char backgroundAGlyph_ = '-';
   // Debug-only counters flushed to serial every ~5s by serviceBackgroundDebugLog() when
   // DEBUG_BACKGROUND_WORK is enabled. "Runs" counts how often each background routine was
   // invoked with work to do; "completes" counts how often it finished a unit (a pre-rendered

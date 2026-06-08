@@ -565,13 +565,6 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
     pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
     pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
   });
-  // The panel now shows the AA-dithered render, but cleanupGrayscaleWithPreviousBuffer()
-  // only resyncs RED RAM / frameBufferActive to the plain BW page (the correct content
-  // baseline, but not what's physically on screen). On X4 a fast differential would diff
-  // the next page against that BW bitmap while the panel shows dithered glyph edges,
-  // leaving ghosts where the two differ. Force HALF_REFRESH so the next page turn drives
-  // every pixel absolutely instead of trusting a stale physical-state assumption.
-  if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
   pendingGrayscale_.page.reset();
   LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
 }
@@ -1683,6 +1676,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
+      // Serialize against the render task: it reads section->currentPage (and the
+      // PreRender pass temporarily writes it), so the advance must not race.
+      RenderLock lock(*this);
       section->currentPage++;
     } else if (currentSpineIndex + 1 < epub->getSpineItemsCount()) {
       RenderLock lock(*this);
@@ -1699,6 +1695,7 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     }
   } else {
     if (section->currentPage > 0) {
+      RenderLock lock(*this);
       section->currentPage--;
     } else if (currentSpineIndex > 0) {
       RenderLock lock(*this);
@@ -1718,13 +1715,6 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
-  // Do NOT clear pendingHalfRefreshAfterGrayscale_ here: when an AA pass already
-  // completed for the outgoing page, the panel physically shows the AA-dithered
-  // render while RED RAM / frameBufferActive only track the plain BW bitmap. That
-  // flag is the only record that the next refresh must bypass the differential
-  // diff (HALF_REFRESH) instead of trusting a baseline that no longer matches the
-  // physical panel — clearing it here would silently reopen the ghosting window.
-  // It is consumed and reset at the top of renderContents() regardless.
   pendingGrayscale_ = {};
 
   auto logPageTurnWindowIfReady = [this]() {
@@ -1758,7 +1748,27 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
       preRenderedPage.pageIndex == section->currentPage + 1) {
     // Fast path: the frame buffer already holds the next page content. Advance state here on the
     // loop task, then hand off to render() via usePreRenderedBuffer — all display work (status
-    // bar, flush, AA pass) stays on the render task where it belongs. No RenderLock acquired here.
+    // bar, flush, AA pass) stays on the render task where it belongs.
+    //
+    // Serialize the shared-state mutation against the render task: the PreRender pass temporarily
+    // writes section->currentPage and rewrites preRenderedPage, so reading/advancing them here
+    // without the lock races (stale buffer shown, or a torn section pointer → reboot). Acquire the
+    // lock, then re-check the condition under it — the render task may have invalidated the
+    // pre-render between the unlocked test above and the lock.
+    RenderLock lock;
+    if (!(section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
+          preRenderedPage.pageIndex == section->currentPage + 1)) {
+      lock.unlock();
+      if (!stepPageState(isForwardTurn)) {
+        return;
+      }
+      sessionPagesAdvanced++;
+      globalReadingSessionTracker().onPageTurn();
+      preRenderedPage.ready = false;
+      pendingPreRender = false;
+      requestUpdate();
+      return;
+    }
     const unsigned long nowMs = millis();
     const unsigned long idleSlackMs = (preRenderedPage.completedAtMs > 0 && nowMs >= preRenderedPage.completedAtMs)
                                           ? (nowMs - preRenderedPage.completedAtMs)
@@ -1796,7 +1806,14 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
 
   sessionPagesAdvanced++;
   globalReadingSessionTracker().onPageTurn();
+  // Page state advanced without using a pre-render. Drop any pre-render that was
+  // scheduled for the page we just left: otherwise the coalesced render() would
+  // classify as a PreRender pass and try to pre-render the *new* current page's
+  // next page instead of displaying the page we just navigated to — leaving the
+  // previous (now stale) frame on screen. (This is the classic last-page case:
+  // turning onto the final page would otherwise show the penultimate page.)
   preRenderedPage.ready = false;
+  pendingPreRender = false;
   requestUpdate();
 }
 
@@ -1806,7 +1823,7 @@ void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
   if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
     if (renderer.reallocSecondaryBuffer()) {
       secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
       LOG_INF("ERS", "Secondary display buffer restored; re-enabling normal refresh/AA paths");
     }
   } else if (secondaryBufferDegraded_ && renderer.hasSecondaryBuffer()) {
@@ -2058,7 +2075,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       }
     } else {
       secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
       LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
     }
     renderer.restoreFontMetadata();
@@ -2107,7 +2124,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       }
     } else {
       secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
       LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
     }
     renderer.restoreFontMetadata();
@@ -2445,15 +2462,20 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
   bool forceHalfRefreshThisPage =
-      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
+      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterBufferRealloc_;
   pendingHalfRefreshAfterImagePage = false;
-  pendingHalfRefreshAfterGrayscale_ = false;
+  pendingHalfRefreshAfterBufferRealloc_ = false;
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   logReaderMemSnapshot("before_bw_render");
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
                imageMonochrome);
+#if DEBUG_BACKGROUND_WORK
+  // This page was rendered fresh on the render task (not served from a Background-A
+  // pre-render). Mark the overlay as a miss before the status bar draws it.
+  backgroundAGlyph_ = '-';
+#endif
   renderStatusBar();
   if (showTruncatedSectionHintThisRender) {
     const int hintX = orientedMarginLeft + 4;
@@ -2571,17 +2593,18 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
+#if DEBUG_BACKGROUND_WORK
+  // This page is being served from the Background-A pre-render buffer (a hit) — set the
+  // overlay glyph BEFORE renderStatusBar() draws it, so the status bar reflects that
+  // background rendering produced this page.
+  backgroundAGlyph_ = 'x';
+#endif
   renderStatusBar();
 
   // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
-  // imagePageWithAA never applies here — but a prior page's AA pass can still leave the
-  // panel showing AA-dithered pixels that don't match RED RAM / frameBufferActive (see
-  // pendingHalfRefreshAfterGrayscale_ doc comment), and this fast path is the only display
-  // call for pre-rendered pages — renderContents()'s forceHalfRefreshThisPage never runs.
-  const bool forceHalfRefreshThisPage =
-      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
+  // imagePageWithAA never applies here — only the image-page half-refresh can carry over.
+  const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
-  pendingHalfRefreshAfterGrayscale_ = false;
   if (secondaryBufferDegraded_) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -2598,11 +2621,6 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
-    // See the deferred-AA completion above: the panel now shows the AA-dithered
-    // render while RED RAM / frameBufferActive only tracks the plain BW bitmap.
-    // Force the next page turn to HALF_REFRESH on X4 to avoid diffing against a
-    // baseline that no longer matches the physical panel state.
-    if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
   }
 }
 
@@ -2685,12 +2703,13 @@ void EpubReaderActivity::renderStatusBar() const {
 
 void EpubReaderActivity::renderBackgroundDebugOverlay() const {
 #if DEBUG_BACKGROUND_WORK
-  // Background A state is derived from the live pre-render fields:
-  //   'x' ready  — preRenderedPage holds the next page for this spine
-  //   '.' running — a pre-render is scheduled (pendingPreRender) but not yet ready
-  //   '-' idle    — nothing scheduled (e.g. last page of section, or heap-gated)
-  const bool aReady = preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex;
-  const char aGlyph = aReady ? 'x' : (pendingPreRender ? '.' : '-');
+  // Background A state is latched per displayed page into backgroundAGlyph_ (see the
+  // field comment), set just before renderStatusBar() draws it. The live scheduling
+  // flags are cleared at the top of render() before this draws, so they always read
+  // idle; latching at display time gives a glyph that is correct and visible:
+  //   'x' hit  — this page was served from the Background-A pre-render buffer
+  //   '-' miss — this page was rendered fresh (first page, heap-gated, or no pre-render)
+  const char aGlyph = backgroundAGlyph_;
 
   // Build a compact "A<.|x|-> B<nn%>" string and draw it at the top-left of the content
   // area, over whatever the status bar drew. Intentionally crude — a diagnostic aid.
