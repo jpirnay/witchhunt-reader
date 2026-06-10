@@ -8,9 +8,14 @@ ESP32-C3 heap risk, so it is specified separately and gated behind Part 1.
 
 ## Progress / resume point (last updated mid-effort)
 
+> **Picking this up on another PC?** See the self-contained
+> [background-b-handoff.md](background-b-handoff.md) — it has the verified code state,
+> the exact next sub-commits, and the orientation commands. This section is the summary.
+
 Work branch: **`feat-section-background-build`** (off `redesign-epubreader`, which holds
-the Part 1 cleanup + the yxml merge + hardening). Firmware build is green at each commit
-below.
+the Part 1 cleanup + the yxml merge + hardening). The Background-B groundwork below is an
+**ancestor of the current branch tip**; unrelated work (half-refresh/font fixes) sits on
+top and does not touch the B code. Firmware build is green at each B commit.
 
 Committed so far (newest first):
 - `feat(epubreader)`: DEBUG_BACKGROUND_WORK overlay + serial counters (flag defaults 0).
