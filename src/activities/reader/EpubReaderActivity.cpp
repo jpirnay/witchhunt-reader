@@ -1710,11 +1710,13 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
       navTarget = NavigationTarget::makePage(0);
       currentSpineIndex++;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else if (currentSpineIndex + 1 == epub->getSpineItemsCount()) {
       RenderLock lock(*this);
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex++;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
@@ -1727,6 +1729,7 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex--;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
