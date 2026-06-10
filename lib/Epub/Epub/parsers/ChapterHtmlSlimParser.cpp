@@ -662,9 +662,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   // unknown future ID-injection patterns on other elements. TOC anchors bypass both the
   // span filter and the cap, since they drive page breaks and core navigation.
   if (!isPageBreakMarker && !idAttr.empty()) {
-    const bool isTocAnchor = std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
-    if (isTocAnchor ||
-        (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
+    const bool isTocAnchor =
+        std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
+    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
       self->pendingAnchorId = idAttr;
     }
   }
