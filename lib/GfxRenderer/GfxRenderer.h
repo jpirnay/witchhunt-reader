@@ -183,6 +183,11 @@ class GfxRenderer {
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;
+  // Copy one packed 1bpp row in the device's physical portrait coordinate
+  // space into the controller framebuffer. Source and framebuffer are MSB-first
+  // with 0 = black, 1 = white; set invertBits when the source row uses 1 = ink.
+  void writePhysicalPortraitPackedRow(int physicalY, const uint8_t* packedRow, int pixelWidth,
+                                      bool invertBits = false) const;
   void drawLine(int x1, int y1, int x2, int y2, bool state = true) const;
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool state) const;
   void drawArc(int maxRadius, int cx, int cy, int xDir, int yDir, int lineWidth, bool state) const;

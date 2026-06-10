@@ -1060,6 +1060,30 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   }
 }
 
+void GfxRenderer::writePhysicalPortraitPackedRow(const int physicalY, const uint8_t* packedRow, const int pixelWidth,
+                                                 const bool invertBits) const {
+  if (!frameBuffer || !packedRow || pixelWidth <= 0 || physicalY < 0 || physicalY >= static_cast<int>(panelWidth)) {
+    return;
+  }
+
+  const int visiblePixels = std::min(pixelWidth, static_cast<int>(panelHeight));
+  const int controllerX = physicalY;
+  const int byteCol = controllerX >> 3;
+  const uint8_t dstMask = static_cast<uint8_t>(0x80u >> (controllerX & 7));
+
+  for (int physicalX = 0; physicalX < visiblePixels; physicalX++) {
+    uint8_t bit = static_cast<uint8_t>((packedRow[physicalX >> 3] >> (7 - (physicalX & 7))) & 1);
+    if (invertBits) bit ^= 1;
+    const int controllerY = static_cast<int>(panelHeight) - 1 - physicalX;
+    uint8_t* const dst = frameBuffer + static_cast<uint32_t>(controllerY) * panelWidthBytes + byteCol;
+    if (bit) {
+      *dst |= dstMask;
+    } else {
+      *dst &= static_cast<uint8_t>(~dstMask);
+    }
+  }
+}
+
 int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style) const {
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {
