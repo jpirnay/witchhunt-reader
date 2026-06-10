@@ -16,7 +16,7 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    46;  // bumped: per-block headingFontId added to TextBlock (taller-font heading rendering)
+    48;  // bumped: headings revert to scaling (headingFontId always 0); discards v47 taller-font caches
 
 namespace header {
 constexpr uint32_t kVersion = 0;

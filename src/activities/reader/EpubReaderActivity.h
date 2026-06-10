@@ -157,6 +157,11 @@ class EpubReaderActivity final : public Activity {
   // is deliberately NOT set after a normal grayscale AA pass — doing so forced a
   // half-refresh on every text page while AA was enabled (the clumsy old fix).
   bool pendingHalfRefreshAfterBufferRealloc_ = false;
+  // Force-refresh button: -1 = none, else a HalDisplay::RefreshMode to apply on the next
+  // normal render of the CURRENT page (overrides the fast/half cadence for that one render).
+  // Used by BTN_FORCE_REFRESH / BTN_FORCE_FAST_REFRESH so the user's manual refresh re-displays
+  // the current page in the requested mode instead of raw-flushing a possibly pre-rendered buffer.
+  int8_t forceRefreshModeNextRender_ = -1;
   // True when secondary display buffer allocation failed; while set we prefer
   // conservative refresh policy and skip grayscale AA to reduce ghosting.
   bool secondaryBufferDegraded_ = false;

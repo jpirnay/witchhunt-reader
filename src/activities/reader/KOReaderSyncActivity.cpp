@@ -39,6 +39,17 @@ void trimMemoryBeforeTls(const GfxRenderer& renderer) {
     cacheManager->resetStats();
     LOG_DBG("KOSync", "Cleared font cache before TLS");
   }
+  // Release the ~52 KB secondary (previous-frame) framebuffer for the duration of the sync.
+  // TLS needs a large *contiguous* block (~36 KB); the secondary buffer is a big resident
+  // allocation that fragments the heap so the largest free block can't reach that threshold
+  // even when total free looks sufficient. Sync UI (status popups) renders fine on the primary
+  // buffer alone, and the device silently reboots after a sync (see resumeReader -> silentRestart),
+  // so it never needs to be reallocated in-place — the reboot rebuilds clean state.
+  if (renderer.hasSecondaryBuffer()) {
+    if (renderer.releaseSecondaryBuffer()) {
+      LOG_DBG("KOSync", "Released secondary framebuffer before TLS (~52 KB contiguous)");
+    }
+  }
 }
 
 bool shouldSyncNtpNow() {

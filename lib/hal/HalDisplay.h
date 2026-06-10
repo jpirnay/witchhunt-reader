@@ -46,6 +46,10 @@ class HalDisplay {
   void triggerDisplay(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
   void completeDisplay();
   bool isRefreshPending() const;
+  // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
+  RefreshMode getLastRefreshMode() const;
+  // Diagnostics: last X4 displayMode byte (0x0C fast / 0x1C OTP-flash / 0xD4 half / 0x34 full).
+  uint8_t getLastDisplayModeByte() const;
 
   // Request extra X3 ghost-clearing on the next display refresh.
   // No-op on non-X3 panels. Consumed by the next displayBuffer/refreshDisplay call.

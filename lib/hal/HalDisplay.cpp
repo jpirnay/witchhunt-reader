@@ -101,6 +101,12 @@ void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
 
 bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
 
+HalDisplay::RefreshMode HalDisplay::getLastRefreshMode() const {
+  return static_cast<RefreshMode>(einkDisplay.getLastRefreshMode());
+}
+
+uint8_t HalDisplay::getLastDisplayModeByte() const { return einkDisplay.getLastDisplayModeByte(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

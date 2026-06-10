@@ -86,7 +86,9 @@ class Section {
   // "scale the body font by `residual`" (the nearest-neighbor fallback for SD fonts / caps).
   // Index 0 = h1, 1 = h2, 2 = h3. Default-constructed = all-fallback (current behavior).
   struct HeadingFonts {
-    uint8_t fontId[3] = {0, 0, 0};
+    // 32-bit font-id hashes (see fontIds.h) — must NOT be truncated to a byte, or the
+    // heading font lookup fails and headings render nothing. 0 = scale-fallback for that level.
+    int32_t fontId[3] = {0, 0, 0};
     float residual[3] = {1.6f, 1.4f, 1.2f};
   };
 

@@ -84,7 +84,7 @@ class ChapterHtmlSlimParser final : public Print {
   // font by headingResidual_[i]; otherwise render the heading with that taller built-in
   // fontId and apply headingResidual_[i] (usually 1.0) as a small residual scale. Set via
   // setHeadingFonts(); defaults preserve the legacy scale-only behavior.
-  uint8_t headingFontId_[3] = {0, 0, 0};
+  int32_t headingFontId_[3] = {0, 0, 0};
   float headingResidual_[3] = {1.6f, 1.4f, 1.2f};
   float lineCompression;
   bool extraParagraphSpacing;
@@ -311,7 +311,7 @@ class ChapterHtmlSlimParser final : public Print {
   // Supplies resolved heading fonts (h1/h2/h3). fontId[i]==0 keeps the scale-only path with
   // residual[i] as the scale factor; fontId[i]!=0 renders that level with the taller built-in
   // font and residual[i] as a small residual scale on top.
-  void setHeadingFonts(const uint8_t fontId[3], const float residual[3]) {
+  void setHeadingFonts(const int32_t fontId[3], const float residual[3]) {
     for (int i = 0; i < 3; ++i) {
       headingFontId_[i] = fontId[i];
       headingResidual_[i] = residual[i];

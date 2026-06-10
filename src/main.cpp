@@ -858,13 +858,24 @@ void loop() {
           enterDeepSleep();
           return;  // enterDeepSleep() never returns, but return here to stop processing
         case BA::BTN_FORCE_REFRESH: {
-          RenderLock lock;
-          renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          // In the reader, route through the activity so it re-displays the CURRENT page in
+          // the requested mode (a raw displayBuffer() here can flush a Background-A pre-render
+          // of the next page, which looks like a page turn). Elsewhere, raw-flush is correct.
+          if (activityManager.isReaderActivity()) {
+            activityManager.dispatchButtonAction(BA::BTN_FORCE_REFRESH);
+          } else {
+            RenderLock lock;
+            renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          }
           break;
         }
         case BA::BTN_FORCE_FAST_REFRESH: {
-          RenderLock lock;
-          renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+          if (activityManager.isReaderActivity()) {
+            activityManager.dispatchButtonAction(BA::BTN_FORCE_FAST_REFRESH);
+          } else {
+            RenderLock lock;
+            renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+          }
           break;
         }
         case BA::BTN_OPEN_TOC:

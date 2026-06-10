@@ -7,6 +7,7 @@
 //   B<nn%>  next-section background build percent (omitted when inactive)
 // and dumps A/B run+complete counters to serial every ~5s. Diagnostic aid for the
 // Background A/B work; compiled out (zero cost) when 0.
+#define DEBUG_BACKGROUND_WORK 1
 #ifndef DEBUG_BACKGROUND_WORK
 #define DEBUG_BACKGROUND_WORK 0
 #endif
@@ -61,6 +62,20 @@
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
+
+// Human-readable effective refresh mode for the page-summary diagnostic log.
+const char* refreshModeName(HalDisplay::RefreshMode mode) {
+  switch (mode) {
+    case HalDisplay::FULL_REFRESH:
+      return "full";
+    case HalDisplay::HALF_REFRESH:
+      return "half";
+    case HalDisplay::FAST_REFRESH:
+      return "fast";
+    default:
+      return "?";
+  }
+}
 
 // Parse a printed-page label as a non-negative integer. Returns nullopt for empty strings,
 // strings with non-digit characters (e.g. roman "iv"), and overflow. Used both to gate the
@@ -1569,55 +1584,13 @@ int EpubReaderActivity::getEffectiveReaderFontId() const {
 }
 
 Section::HeadingFonts EpubReaderActivity::buildHeadingFonts() const {
-  Section::HeadingFonts hf;  // defaults: fontId all 0, residual {1.6, 1.4, 1.2} (scale fallback)
-
-  // Determine whether the effective body font is a BUILT-IN family (and which one). Headings
-  // only step up to a taller real font for built-ins; SD fonts have a single loaded size, so
-  // they keep the scale-fallback defaults above.
-  const uint8_t fontSize = (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
-  bool isBuiltin = false;
-  uint8_t family = SETTINGS.fontFamily;
-
-  if (bookFontFamilyOverride >= 0) {
-    isBuiltin = true;
-    family = static_cast<uint8_t>(bookFontFamilyOverride);
-  } else if (!bookSdFontFamilyOverride.empty()) {
-    isBuiltin = false;  // per-book SD override active
-  } else if (SETTINGS.sdFontFamilyName[0] != '\0' && resolveSdCardFontId(SETTINGS.sdFontFamilyName, fontSize) != 0) {
-    isBuiltin = false;  // global SD font active
-  } else {
-    isBuiltin = true;
-    family = SETTINGS.fontFamily;
-  }
-
-  if (!isBuiltin) {
-    return hf;  // scale-fallback (the fixed renderCharAtScale path)
-  }
-
-  const int bodyFontId = getEffectiveReaderFontId();
-  const int bodyEm = renderer.getLineHeight(bodyFontId);
-  const float desired[3] = {1.6f, 1.4f, 1.2f};  // h1, h2, h3
-  const uint8_t stepUp[3] = {3, 2, 1};
-  for (int i = 0; i < 3; ++i) {
-    uint8_t actualStep = 0;
-    const int tallerId = CrossPointSettings::getTallerBuiltinReaderFontId(family, fontSize, stepUp[i], &actualStep);
-    if (tallerId <= 0 || actualStep == 0 || tallerId == bodyFontId) {
-      // No taller size available (already at cap, or step collapsed) — keep scaling fallback.
-      hf.fontId[i] = 0;
-      hf.residual[i] = desired[i];
-      continue;
-    }
-    hf.fontId[i] = static_cast<uint8_t>(tallerId);
-    // Residual: scale up only if the discrete taller size still undershoots the desired ratio.
-    const int tallerEm = renderer.getLineHeight(tallerId);
-    float residual = 1.0f;
-    if (tallerEm > 0 && bodyEm > 0) {
-      const float achieved = static_cast<float>(tallerEm) / static_cast<float>(bodyEm);
-      residual = (achieved < desired[i]) ? (desired[i] / achieved) : 1.0f;
-    }
-    hf.residual[i] = residual;
-  }
-  return hf;
+  // Headings render by SCALING the body font (nearest-neighbor upscale in renderCharAtScale),
+  // not by switching to a taller built-in font. The taller-font approach was tried and dropped:
+  // it put a second font on chapter-opener pages, which thrashed the limited glyph-cache slots
+  // (multi-second page stalls), and only delivered quantized 2pt steps capped at 18pt for
+  // built-in fonts. Scaling gives the exact 1.6/1.4/1.2 ratios at any body size with one font
+  // per page (no cache pressure). Defaults already encode that: fontId all 0 = scale fallback.
+  return Section::HeadingFonts{};
 }
 
 void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIndex) const {
@@ -2008,8 +1981,9 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     pendingPreRender = true;
     requestUpdate();
   }
-  LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1", currentSpineIndex, section->currentPage,
-          section->pageCount);
+  LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1 refresh=%s mode=0x%02X", currentSpineIndex,
+          section->currentPage, section->pageCount, refreshModeName(renderer.getLastRefreshMode()),
+          renderer.getLastDisplayModeByte());
   return true;
 }
 
@@ -2291,9 +2265,11 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     const uint32_t fontHitRatePct =
         totalFontLookups > 0 ? (lastRenderStats.fontCacheHits * 100UL) / totalFontLookups : 0UL;
     LOG_DBG("ERS",
-            "Page summary: spine=%d page=%d/%d prerendered=0 renderMs=%lu prewarmMs=%lu bwMs=%lu displayMs=%lu "
-            "fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
-            currentSpineIndex, section->currentPage, section->pageCount, lastRenderStats.requestRenderMs,
+            "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X renderMs=%lu prewarmMs=%lu "
+            "bwMs=%lu displayMs=%lu fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
+            currentSpineIndex, section->currentPage, section->pageCount,
+            refreshModeName(renderer.getLastRefreshMode()), renderer.getLastDisplayModeByte(),
+            lastRenderStats.requestRenderMs,
             lastRenderStats.phases.prewarmMs, lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs,
             lastRenderStats.fontCacheHits, lastRenderStats.fontCacheMisses, fontHitRatePct,
             lastRenderStats.fontGetBitmapCalls, lastRenderStats.fontGetBitmapTimeUs);
@@ -2559,6 +2535,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (secondaryBufferDegraded_) {
     renderer.triggerDisplay(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (forceRefreshModeNextRender_ >= 0) {
+    // Manual force-refresh button: apply the requested mode for this one render.
+    renderer.triggerDisplay(static_cast<HalDisplay::RefreshMode>(forceRefreshModeNextRender_));
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    forceRefreshModeNextRender_ = -1;
   } else if (forceHalfRefreshThisPage) {
     renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -3196,6 +3177,19 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       if (epub) {
         openQuickOverrides();
       }
+      break;
+    case BA::BTN_FORCE_REFRESH:
+    case BA::BTN_FORCE_FAST_REFRESH:
+      // Re-display the CURRENT page to clear ghosting — do NOT raw displayBuffer() (the
+      // framebuffer may hold a Background-A pre-render of the *next* page, which would look
+      // like a page turn). Clear the pre-render flags so classifyRenderPass() picks a Normal
+      // render of the current page, request the forced mode for that render, and re-render.
+      pendingPreRender = false;
+      usePreRenderedBuffer = false;
+      preRenderedPage.ready = false;
+      forceRefreshModeNextRender_ =
+          static_cast<int8_t>(action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+      requestUpdate();
       break;
     default:
       break;

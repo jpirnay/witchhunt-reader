@@ -58,7 +58,9 @@ struct BlockStyle {
   //    is then a small residual (usually 1.0) applied on top, so glyphs stay crisp.
   // h1=1.6, h2=1.4, h3=1.2 are the default desired multipliers when no explicit CSS size.
   float fontSizeMultiplier = 1.0f;
-  uint8_t headingFontId = 0;
+  // 32-bit font-id hash (fontIds.h); 0 = use the body font + fontSizeMultiplier. Must be a
+  // full int — a uint8_t would truncate the hash and the heading would render nothing.
+  int32_t headingFontId = 0;
   int16_t firstLineExtraIndent = 0;  // extra indent on the first line only (combined with CSS text-indent)
 
   // Float zones: left-floated images that narrow text width on overlapping lines.
