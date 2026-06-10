@@ -2267,12 +2267,11 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     LOG_DBG("ERS",
             "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X renderMs=%lu prewarmMs=%lu "
             "bwMs=%lu displayMs=%lu fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
-            currentSpineIndex, section->currentPage, section->pageCount,
-            refreshModeName(renderer.getLastRefreshMode()), renderer.getLastDisplayModeByte(),
-            lastRenderStats.requestRenderMs,
-            lastRenderStats.phases.prewarmMs, lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs,
-            lastRenderStats.fontCacheHits, lastRenderStats.fontCacheMisses, fontHitRatePct,
-            lastRenderStats.fontGetBitmapCalls, lastRenderStats.fontGetBitmapTimeUs);
+            currentSpineIndex, section->currentPage, section->pageCount, refreshModeName(renderer.getLastRefreshMode()),
+            renderer.getLastDisplayModeByte(), lastRenderStats.requestRenderMs, lastRenderStats.phases.prewarmMs,
+            lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs, lastRenderStats.fontCacheHits,
+            lastRenderStats.fontCacheMisses, fontHitRatePct, lastRenderStats.fontGetBitmapCalls,
+            lastRenderStats.fontGetBitmapTimeUs);
 
     if (pendingScreenshot) {
       pendingScreenshot = false;
@@ -3187,8 +3186,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       pendingPreRender = false;
       usePreRenderedBuffer = false;
       preRenderedPage.ready = false;
-      forceRefreshModeNextRender_ =
-          static_cast<int8_t>(action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+      forceRefreshModeNextRender_ = static_cast<int8_t>(
+          action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
       requestUpdate();
       break;
     default:
