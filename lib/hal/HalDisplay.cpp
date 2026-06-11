@@ -1,8 +1,11 @@
+#include <BootHeapProbe.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 
-// Global HalDisplay instance
+// Global HalDisplay instance, bracketed by static-init heap probes (slots 0/1).
+static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
+static BootHeapProbe s_probePostDisplay(1);
 
 #define SD_SPI_MISO 7
 

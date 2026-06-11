@@ -44,6 +44,10 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+#include <BootHeapProbe.h>
+
+// Static-init heap probes bracketing this TU's globals (slots 4/5); see BootHeapProbe.h.
+static BootHeapProbe s_probeMainFirst(4);
 MappedInputManager mappedInputManager(gpio);
 ButtonEventManager buttonEventManager(mappedInputManager);
 ButtonEventManager& globalButtonEvents() { return buttonEventManager; }
@@ -401,6 +405,9 @@ extern "C" __attribute__((constructor(101))) void heapProbePreCppCtors() {
   s_heapOkPreCtors = heap_caps_check_integrity_all(/*print_errors=*/false);
 }
 
+// Last probe of this TU — constructed after every global declared above (slot 5).
+static BootHeapProbe s_probeMainLast(5);
+
 void setup() {
   s_heapOkSetupEntry = heap_caps_check_integrity_all(/*print_errors=*/false);
   {
@@ -484,6 +491,15 @@ void setup() {
   // postOta CORRUPT (setupEntry OK) ⇒ the OTA-rollback/NVS block at the top of setup().
   LOG_INF("MEM", "Heap integrity at boot: preCtors=%s setupEntry=%s postOta=%s", s_heapOkPreCtors ? "OK" : "CORRUPT",
           s_heapOkSetupEntry ? "OK" : "CORRUPT", heapIntactAtBoot ? "OK" : "CORRUPT");
+  {
+    // Static-init bisect pairs (see BootHeapProbe.h). A CORRUPT slot whose paired "pre"
+    // slot is OK convicts the global bracketed by that pair; all-OK pairs with
+    // setupEntry=CORRUPT mean the writer is a global in an unprobed translation unit.
+    const bool* s = bootHeapProbeSlots();
+    LOG_INF("MEM", "Static-init probes: preDisplay=%s postDisplay=%s preTheme=%s postTheme=%s mainFirst=%s mainLast=%s",
+            s[0] ? "OK" : "CORRUPT", s[1] ? "OK" : "CORRUPT", s[2] ? "OK" : "CORRUPT", s[3] ? "OK" : "CORRUPT",
+            s[4] ? "OK" : "CORRUPT", s[5] ? "OK" : "CORRUPT");
+  }
   logStartupMemory("after_hw_init");
 
   // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
