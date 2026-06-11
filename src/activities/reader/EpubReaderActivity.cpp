@@ -96,6 +96,20 @@ constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 // Pre-render of the next page within the current chapter only runs when heap is healthy.
 constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 64 * 1024;
 
+// Background B (next-section pre-build) heap gates. The build holds ~34 KB of ZIP/inflate
+// state across slices plus the parser working set, and unlike the foreground indexing path
+// it runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
+// risk OOM — the foreground blocking path remains the fallback. Overridable for tuning.
+#ifndef BG_BUILD_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_MIN_FREE_HEAP_BYTES (72 * 1024)
+#endif
+#ifndef BG_BUILD_MIN_CONTIG_HEAP_BYTES
+#define BG_BUILD_MIN_CONTIG_HEAP_BYTES (40 * 1024)  // 32 KB inflate ring + slack
+#endif
+// Per-slice time budget for a Background-B parse step. Conservative start (handoff plan
+// suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
+constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
+
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
@@ -329,6 +343,9 @@ void EpubReaderActivity::onExit() {
   APP_STATE.saveToFile();
   // Release any deferred AA page before tearing down the section/epub.
   pendingGrayscale_ = {};
+  // Abort any in-flight Background-B build (deletes its partial cache file) before the
+  // epub it references goes away.
+  resetBackgroundBuild();
   section.reset();
   UITheme::getInstance().getMutableTheme().onBookWillClose(epub ? epub->getPath() : "", epub.get(), nullptr, nullptr);
   epub.reset();
@@ -533,10 +550,14 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // Priority order, highest first. Each routine self-gates on its own pending state and
   // is expected to do a bounded amount of work and return so the next loop tick can
   // service input. Background A is already scheduled inside render() via pendingPreRender
-  // and runs as the PreRender pass when requestUpdate() fires; the deferred AA pass is the
-  // only background work driven directly from the idle loop today. Background B (idle
-  // section pre-analysis) will slot in here after A, gated on A having finished.
+  // and runs as the PreRender pass when requestUpdate() fires; from the idle loop we run
+  // the deferred AA pass first, then Background B (next-section pre-build) — B also
+  // self-gates on A having finished, since A drives perceived page-turn speed.
   runDeferredGrayscalePass();
+  if (pendingGrayscale_.active) {
+    return;  // AA still owed (display bus busy); it keeps priority over B
+  }
+  stepBackgroundSectionBuild();
 }
 
 void EpubReaderActivity::serviceBackgroundDebugLog() {
@@ -582,6 +603,141 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   });
   pendingGrayscale_.page.reset();
   LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+}
+
+Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
+  const RenderLayout layout = computeRenderLayout();
+  Section::BuildParams p;
+  p.fontId = getEffectiveReaderFontId();
+  p.lineCompression = getEffectiveReaderLineCompression();
+  p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.paragraphAlignment = getEffectiveParagraphAlignment();
+  p.viewportWidth = layout.viewportWidth;
+  p.viewportHeight = layout.viewportHeight;
+  p.hyphenationEnabled = getEffectiveHyphenation();
+  p.embeddedStyle = lastRenderStats.embeddedStyle;
+  p.bionicReadingEnabled = getEffectiveBionicReading();
+  p.imageRendering = lastRenderStats.imageRendering;
+  p.headingFonts = buildHeadingFonts();
+  return p;
+}
+
+void EpubReaderActivity::resetBackgroundBuild() {
+  backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
+  backgroundBuildSpineIndex_ = -1;
+  backgroundBuildState_ = BackgroundBuildState::Probe;
+  backgroundBuildPercent_ = -1;
+}
+
+void EpubReaderActivity::stepBackgroundSectionBuild() {
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
+    return;
+  }
+  // Background A keeps priority: it determines perceived page-turn speed, and its total
+  // cost is small against a multi-second page-read window. Wait until its pass has run
+  // (pendingPreRender clears whether or not it produced a ready page).
+  if (pendingPreRender || usePreRenderedBuffer) {
+    return;
+  }
+  // B does SD I/O only, no SPI — but it must not contend with the render task for the
+  // render lock while a waveform (or a render) is in flight: a blocked loop task cannot
+  // service input. Skip the tick instead; idle ticks are plentiful while the user reads.
+  if (renderer.isRefreshPending() || !RenderLock::peek()) {
+    return;
+  }
+  // One lock for the whole step: every branch below touches the SD (even discarding a
+  // stale build removes its partial file) and the parse slice reads glyph metrics from
+  // the shared renderer, so all of it must be serialised against the render task.
+  RenderLock lock;
+  // Re-check under the lock: the render task may have scheduled A or started a refresh
+  // between the unlocked test above and acquiring the lock (mirrors runDeferredGrayscalePass).
+  if (pendingPreRender || renderer.isRefreshPending()) {
+    return;
+  }
+
+  const int targetSpine = currentSpineIndex + 1;
+  if (targetSpine >= epub->getSpineItemsCount()) {
+    resetBackgroundBuild();
+    return;
+  }
+  // Navigation moved the target since the last tick: held state is for the wrong section.
+  if (backgroundBuildSpineIndex_ != targetSpine) {
+    resetBackgroundBuild();
+    backgroundBuildSpineIndex_ = targetSpine;
+  }
+
+  switch (backgroundBuildState_) {
+    case BackgroundBuildState::Settled:
+      return;
+
+    case BackgroundBuildState::Probe: {
+      // One SD probe per target: if the exact cache variant already exists there is
+      // nothing to pre-build.
+      backgroundSection_ = std::make_unique<Section>(epub, targetSpine, renderer);
+      const Section::BuildParams p = makeSectionBuildParams();
+      const bool cached = backgroundSection_->loadSectionFile(
+          p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth, p.viewportHeight,
+          p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled, p.imageRendering);
+      if (cached && !backgroundSection_->isEmbeddedStyleFallback()) {
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+      } else {
+        backgroundBuildState_ = BackgroundBuildState::WaitHeap;
+      }
+      return;  // one bounded step per tick
+    }
+
+    case BackgroundBuildState::WaitHeap: {
+      // Re-checked every idle tick (cheap), so a transient heap dip only delays B.
+      const uint32_t freeHeap = esp_get_free_heap_size();
+      const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+      if (freeHeap < BG_BUILD_MIN_FREE_HEAP_BYTES || contigHeap < BG_BUILD_MIN_CONTIG_HEAP_BYTES) {
+        return;
+      }
+      // Refuse — don't let startBuild silently downgrade — when the book wants embedded
+      // CSS but the heap can't fit it: a no-CSS background build would only produce the
+      // fallback variant and the foreground would still rebuild with CSS on entry.
+      if (lastRenderStats.embeddedStyle && !Section::heapAllowsEmbeddedStyle()) {
+        return;
+      }
+      backgroundBuildState_ = BackgroundBuildState::Building;
+      return;
+    }
+
+    case BackgroundBuildState::Building: {
+#if DEBUG_BACKGROUND_WORK
+      bgCounters_.bRuns++;
+#endif
+      const Section::BuildStep step =
+          backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      if (step == Section::BuildStep::More) {
+        backgroundBuildPercent_ = static_cast<int8_t>(backgroundSection_->activeBuildPercent());
+        return;
+      }
+
+      backgroundBuildPercent_ = -1;
+      if (step == Section::BuildStep::Done) {
+        if (backgroundSection_->isTruncatedCache()) {
+          // The parse ran out of memory mid-way and kept a partial cache. Don't hand that
+          // to the foreground: its blocking path runs with the secondary buffer released
+          // (~52 KB more headroom) and will likely build the section complete.
+          LOG_INF("ERS", "Background build spine=%d truncated; discarding for foreground rebuild", targetSpine);
+          backgroundSection_->clearCache();
+          backgroundSection_.reset();
+        } else {
+#if DEBUG_BACKGROUND_WORK
+          bgCounters_.bCompletes++;
+#endif
+          LOG_INF("ERS", "Background build spine=%d complete: %u pages", targetSpine, backgroundSection_->pageCount);
+        }
+      } else {
+        LOG_ERR("ERS", "Background build spine=%d failed", targetSpine);
+        backgroundSection_.reset();
+      }
+      backgroundBuildState_ = BackgroundBuildState::Settled;
+      return;
+    }
+  }
 }
 
 // Translate an absolute percent into a spine index plus a normalized position
@@ -2040,10 +2196,25 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   const uint8_t imageRendering = lastRenderStats.imageRendering;
   const auto filepath = epub->getSpineItem(currentSpineIndex).href;
   LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
-  section = std::make_unique<Section>(epub, currentSpineIndex, renderer);
+  // Adopt the Background-B Section when entering exactly the spine it was working on: a
+  // completed background build turns into a plain cache hit below, and a partial build
+  // resumes in the indexing path instead of restarting from scratch. On any other
+  // navigation the B state is stale — drop it (aborting a partial build). While a build
+  // is live, loadSectionFile must be skipped: it would clobber the live write handle.
+  bool resumeBackgroundBuild = false;
+  if (backgroundSection_ && backgroundBuildSpineIndex_ == currentSpineIndex) {
+    resumeBackgroundBuild = backgroundSection_->hasActiveBuild();
+    section = std::move(backgroundSection_);
+    LOG_INF("ERS", "Adopting background section for spine %d (%s)", currentSpineIndex,
+            resumeBackgroundBuild ? "resuming partial build" : "build complete");
+  } else {
+    section = std::make_unique<Section>(epub, currentSpineIndex, renderer);
+  }
+  resetBackgroundBuild();
   const unsigned long sectionStart = millis();
 
-  if (!section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
+  if (resumeBackgroundBuild ||
+      !section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                 SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
                                 viewportHeight, getEffectiveHyphenation(), embeddedStyle, getEffectiveBionicReading(),
                                 imageRendering)) {

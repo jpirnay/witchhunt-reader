@@ -263,9 +263,23 @@ class EpubReaderActivity final : public Activity {
   // Debug-only Background B (section pre-analysis) progress, surfaced as a small
   // status-bar overlay when DEBUG_BACKGROUND_WORK is enabled. Background A's state is
   // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a
-  // field. -1 means no background build is active. Updated by the (future) B scheduler.
+  // field. -1 means no background build is active.
   int8_t backgroundBuildPercent_ = -1;
+  // --- Background B (idle build of the next consecutive section's cache) ---
+  // Spine index the B state below refers to; -1 when B has no target. Whenever it differs
+  // from currentSpineIndex + 1 (any navigation), the B state is stale and gets discarded.
   int backgroundBuildSpineIndex_ = -1;
+  // Section being built (or already built) for backgroundBuildSpineIndex_. Owned here
+  // until buildSection() adopts it on a consecutive boundary cross or discards it on any
+  // other navigation. Its destructor aborts a partial build and deletes the partial file.
+  std::unique_ptr<Section> backgroundSection_;
+  // One-shot-per-target probe/settle latch so idle ticks don't re-hit the SD every loop:
+  //   Probe    — not yet checked whether the target's cache already exists
+  //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)
+  //   Building — backgroundSection_ has an in-flight incremental build
+  //   Settled  — done for this target (built / cached / failed); idle until the spine moves
+  enum class BackgroundBuildState : uint8_t { Probe, WaitHeap, Building, Settled };
+  BackgroundBuildState backgroundBuildState_ = BackgroundBuildState::Probe;
   // Debug-only Background A glyph for the status-bar overlay. The transient flags
   // (pendingPreRender / preRenderedPage.ready) are cleared at the top of render()
   // before the status bar is drawn, so the overlay could never sample a non-idle
@@ -396,6 +410,18 @@ class EpubReaderActivity final : public Activity {
   // the display bus is free. Serialises against the render task via RenderLock. No-op when
   // nothing is pending. Extracted from loop()'s idle branch.
   void runDeferredGrayscalePass();
+  // Background B: advance the idle build of the next consecutive section by one bounded
+  // step (state probe, heap gate, or one ~BG_BUILD_BUDGET_MS parse slice). Runs only after
+  // Background A has had its slice (A keeps priority: it drives perceived page-turn speed).
+  // Serialises SD access against the render task via RenderLock; skips the tick instead of
+  // blocking when the render task is busy.
+  void stepBackgroundSectionBuild();
+  // Render params for a section build of `spineIndex`, identical to what buildSection()
+  // passes to createSectionFile — B must build the exact variant the foreground will load.
+  Section::BuildParams makeSectionBuildParams() const;
+  // Drop all Background-B state (aborting a partial build and deleting its partial cache
+  // file via ~Section). Resets the overlay percent.
+  void resetBackgroundBuild();
 
   void renderContents(RenderLock& lock, std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);

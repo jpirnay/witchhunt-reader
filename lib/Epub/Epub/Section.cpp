@@ -809,20 +809,24 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
 }
 
+bool Section::heapAllowsEmbeddedStyle() {
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
+    LOG_INF("SCT", "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu)", freeHeap, contigHeap,
+            static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
+            static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
+    return false;
+  }
+  return true;
+}
+
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
                          const uint32_t requestedHash) {
   BuildParams p = params;
-  if (p.embeddedStyle) {
-    const uint32_t freeHeap = esp_get_free_heap_size();
-    const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
-      LOG_INF("SCT",
-              "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu); "
-              "building no-CSS section cache",
-              freeHeap, contigHeap, static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
-              static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
-      p.embeddedStyle = false;
-    }
+  if (p.embeddedStyle && !heapAllowsEmbeddedStyle()) {
+    LOG_INF("SCT", "Building no-CSS section cache");
+    p.embeddedStyle = false;
   }
 
   buildState_.reset(new (std::nothrow) BuildState());

@@ -159,6 +159,11 @@ class Section {
   // and drops the live parser/inflate state. No-op when no build is live. Call on
   // non-consecutive navigation or when render params change.
   void abortSectionBuild();
+  // True when current heap headroom permits an embedded-CSS build (the gate startBuild
+  // applies before silently downgrading to no-CSS). Exposed so a background caller can
+  // refuse to start instead — a downgraded background build would produce the fallback
+  // variant and the foreground would still rebuild with CSS, wasting the work.
+  static bool heapAllowsEmbeddedStyle();
   std::unique_ptr<Page> loadPageFromSectionFile();
   // Pre-decode every image in the section into its .pxc cache while heap is
   // maximally contiguous (secondary display buffer still released). Skips images
