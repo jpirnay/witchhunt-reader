@@ -660,7 +660,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // B does SD I/O only, no SPI — but it must not contend with the render task for the
   // render lock while a waveform (or a render) is in flight: a blocked loop task cannot
   // service input. Skip the tick instead; idle ticks are plentiful while the user reads.
-  if (renderer.isRefreshPending() || !RenderLock::peek()) {
+  // Note RenderLock::peek() returns true when the mutex is HELD (busy), not when free.
+  if (renderer.isRefreshPending() || RenderLock::peek()) {
     return;
   }
   // One lock for the whole step: every branch below touches the SD (even discarding a
@@ -735,11 +736,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
-        if (backgroundSection_->isTruncatedCache()) {
-          // The parse ran out of memory mid-way and kept a partial cache. Don't hand that
-          // to the foreground: its blocking path runs with the secondary buffer released
-          // (~52 KB more headroom) and will likely build the section complete.
-          LOG_INF("ERS", "Background build spine=%d truncated; discarding for foreground rebuild", targetSpine);
+        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded()) {
+          // Memory ran short mid-parse: either pages are missing (truncated) or CSS
+          // lookups were skipped (styles silently absent from the cached pages). Don't
+          // hand either to the foreground: its blocking path runs with the secondary
+          // buffer released (~52 KB more headroom) and will likely build it clean.
+          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine,
+                  backgroundSection_->isTruncatedCache() ? "truncated" : "css-degraded");
           backgroundSection_->clearCache();
           backgroundSection_.reset();
         } else {

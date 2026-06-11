@@ -21,6 +21,11 @@ class Section {
   std::vector<uint32_t> lut;  // Cached page byte-offsets; loaded once, avoids per-page LUT seek
   bool truncatedCache = false;
   bool embeddedStyleFallback = false;
+  // Set by the last build when CssParser hit its own low-heap mode mid-parse
+  // (lowHeapSkips > 0): some elements were cached without their styles. The cache is
+  // usable but visually degraded; background callers discard it so the foreground
+  // blocking path (more headroom) rebuilds it clean.
+  bool cssLowHeapDegraded_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -173,6 +178,9 @@ class Section {
   void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true);
   bool isTruncatedCache() const { return truncatedCache; }
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
+  // True when the last build's CSS resolution hit low-heap skips (styles silently
+  // missing from the cached pages). Only meaningful right after a build.
+  bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
 
   // Given a page in this section, return the TOC index for that page.
   int getTocIndexForPage(int page) const;

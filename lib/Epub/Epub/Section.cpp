@@ -57,11 +57,19 @@ namespace {
 constexpr uint32_t FNV_PRIME = 0x01000193;         // 16777619
 constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
-// On constrained targets, loading the CSS rules map before chapter parsing can
-// consume a large share of available heap and increase parse truncation risk.
-// Allow compile-time override for tuning.
+// On constrained targets, parsing with embedded CSS adds heap pressure and increases
+// parse truncation risk. Allow compile-time override for tuning.
+//
+// Floor sizing (measured, X3, 2026-06-11): since the sparse disk-backed CSS cache the
+// resident cost is small — selector index ≈ ruleCount × 16 B (~4.6 KB for a measured
+// 290-rule book, 24 KB at the 1500-rule cap), plus the bounded hot/negative caches
+// (≤ ~32 KB absolute worst, typically ~10 KB). CssParser::resolveStyle additionally
+// self-protects below CSS_MIN_FREE_HEAP_FOR_CSS (40 KB) by skipping disk lookups.
+// The original 96 KB predates trusting those bounds and made background (Background-B)
+// CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
+// Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (96 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
 
 #ifndef SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES
@@ -456,6 +464,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   file.close();
   pageCount = 0;
   this->lut.clear();
+  cssLowHeapDegraded_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -606,6 +615,9 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   st.parserStreamOk = st.visitor->streamSucceeded();
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
+    // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
+    // means pages were cached with styles silently missing.
+    cssLowHeapDegraded_ = st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
