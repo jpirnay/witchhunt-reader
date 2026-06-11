@@ -472,7 +472,8 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
     ctx.readBuf = fileReadBuffer;
     ctx.readBufSize = chunkSize;
 
-    if (!ctx.reader.init(true)) {
+    // Ring sized to the entry (≤32 KB) — frees up to ~29 KB during small-entry streams.
+    if (!ctx.reader.init(true, static_cast<size_t>(inflatedDataSize))) {
       LOG_ERR("ZIP", "Failed to init inflate reader");
       free(outputBuffer);
       free(fileReadBuffer);
@@ -702,7 +703,9 @@ bool ZipFile::EntryReader::open(const char* filename) {
     impl_->ctx.fileRemaining = fileStat.compressedSize;
     impl_->ctx.readBuf = impl_->readBuf;
     impl_->ctx.readBufSize = impl_->chunkSize;
-    if (!impl_->ctx.reader.init(true)) {
+    // Ring sized to the entry (≤32 KB): small chapters cost a small ring, which is what
+    // makes holding the reader across background-build slices affordable.
+    if (!impl_->ctx.reader.init(true, fileStat.uncompressedSize)) {
       LOG_ERR("ZIP", "EntryReader::open: OOM initialising inflate ring buffer");
       free(impl_->readBuf);
       impl_->readBuf = nullptr;
