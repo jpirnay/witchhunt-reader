@@ -276,6 +276,8 @@ class EpubReaderActivity final : public Activity {
   // Uncompressed size of the target spine's XHTML (fetched once in the Probe step).
   // Sizes the inflate ring share of the extraction heap gate.
   size_t backgroundBuildInflatedSize_ = 0;
+  // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
+  unsigned long backgroundBuildGateCheckMs_ = 0;
   // One-shot-per-target probe/settle latch so idle ticks don't re-hit the SD every loop:
   //   Probe    — not yet checked whether the target's cache already exists
   //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)

@@ -72,8 +72,14 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 #define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
 
+// Contiguous floor: the only sizable contiguous CSS allocation is the selector index
+// (~16 B/rule, measured 4.6 KB at 290 rules; 24 KB at the 1500-rule cap), which
+// heapAllowsEmbeddedStyle() adds dynamically from the actual rule count. This define is
+// just the baseline below the dynamic term. The old static 36 KB predated the sparse
+// disk-backed cache and refused builds the heap could easily serve (measured X3:
+// contig 26.6 KB post-indexing with a 4.6 KB actual need).
 #ifndef SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES (36 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
@@ -923,23 +929,25 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
 }
 
-bool Section::heapAllowsEmbeddedStyle() {
+bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
+  // Contig need is dominated by the selector index vector (16 B/rule) plus slack for
+  // file buffers; everything else (hot/negative caches) allocates in small nodes.
+  // Deliberately silent: callers decide whether a refusal is worth a log line —
+  // background gates re-check this often and must not spam.
+  const uint32_t requiredContig = std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
+                                                     static_cast<uint32_t>(cssRuleCount) * 16 + 8 * 1024);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
-    LOG_INF("SCT", "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu)", freeHeap, contigHeap,
-            static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
-            static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
-    return false;
-  }
-  return true;
+  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;
 }
 
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
                          const uint32_t requestedHash) {
   BuildParams p = params;
-  if (p.embeddedStyle && !heapAllowsEmbeddedStyle()) {
-    LOG_INF("SCT", "Building no-CSS section cache");
+  const CssParser* css = epub->getCssParser();
+  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+    LOG_INF("SCT", "Low heap for embedded CSS (free=%lu contig=%lu); building no-CSS section cache",
+            esp_get_free_heap_size(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
     p.embeddedStyle = false;
   }
 

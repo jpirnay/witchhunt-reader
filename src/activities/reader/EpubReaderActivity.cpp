@@ -96,7 +96,11 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
 constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 
 // Pre-render of the next page within the current chapter only runs when heap is healthy.
-constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 64 * 1024;
+// 56 KB, evidence-based (X3, 2026-06-11): normal foreground renders complete fine from
+// ~52 KB free, and post-render free heap sits at ~57-65 KB — the previous 64 KB floor
+// silently disabled Background A whenever steady free dipped to ~65 KB (e.g. right
+// after a cache rebuild), which also starved Background B behind it.
+constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 56 * 1024;
 
 // Background B (next-section pre-build) heap gates. Unlike the foreground indexing path,
 // B runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
@@ -648,6 +652,7 @@ void EpubReaderActivity::resetBackgroundBuild() {
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
   backgroundBuildInflatedSize_ = 0;
+  backgroundBuildGateCheckMs_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
 }
@@ -716,7 +721,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     }
 
     case BackgroundBuildState::WaitHeap: {
-      // Re-checked every idle tick (cheap), so a transient heap dip only delays B.
+      // Re-check at most ~1×/s: the gates walk the heap free-list, and their outcome
+      // only changes when other allocations move — not per ~70 ms loop tick.
+      const unsigned long now = millis();
+      if (backgroundBuildGateCheckMs_ != 0 && now - backgroundBuildGateCheckMs_ < 1000UL) {
+        return;
+      }
+      backgroundBuildGateCheckMs_ = now;
       const uint32_t ringBytes =
           static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
       const uint32_t freeHeap = esp_get_free_heap_size();
@@ -729,8 +740,12 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // Refuse — don't let startBuild silently downgrade — when the book wants embedded
       // CSS but the heap can't fit it: a no-CSS background build would only produce the
       // fallback variant and the foreground would still rebuild with CSS on entry.
-      if (lastRenderStats.embeddedStyle && !Section::heapAllowsEmbeddedStyle()) {
-        return;
+      // (Silent: state=waitheap + free/contig in the 5 s BG debug line tell the story.)
+      if (lastRenderStats.embeddedStyle) {
+        const CssParser* css = epub->getCssParser();
+        if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+          return;
+        }
       }
       backgroundBuildState_ = BackgroundBuildState::Building;
       return;
