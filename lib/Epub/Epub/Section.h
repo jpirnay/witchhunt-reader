@@ -43,15 +43,20 @@ class Section {
   // build phases (and, for the sliced path, across loop ticks). Declared here but defined
   // in Section.cpp so the heavy parser type stays out of this header.
   struct BuildState;
-  // Outcome of one phase method. Mostly maps to BuildStep, plus RetryNoCss which asks the
-  // entry function to tear the state down and restart from setup with embeddedStyle=false.
-  enum class BuildPhaseResult : uint8_t { Ok, Done, Failed, RetryNoCss };
+  // In-flight incremental build, owned across stepSectionBuild() calls. Null when no build
+  // is live. Heap-owned so the visitor's &lut capture stays stable across ticks.
+  std::unique_ptr<BuildState> buildState_;
+  // Outcome of one phase method. Mostly maps to BuildStep: More means the phase yielded
+  // mid-way after spending its time budget; RetryNoCss asks the entry function to tear the
+  // state down and restart from setup with embeddedStyle=false.
+  enum class BuildPhaseResult : uint8_t { Ok, More, Done, Failed, RetryNoCss };
   // Phase methods. Each operates on the shared BuildState and is purely linear (the
   // CSS/heap fallback recursion lives in the entry function, not here), which is what lets
   // them be called either back-to-back (blocking) or with Parse re-entered across ticks.
   BuildPhaseResult runBuildSetup(BuildState& st);
-  // Runs the parse. When budgetMs is 0 the whole stream is consumed in one call (blocking
-  // path); a non-zero budget is honoured by the sliced path (added in a later sub-commit).
+  // Drives the ZIP entry reader → parser feed loop. When budgetMs is 0 the whole stream is
+  // consumed in one call (blocking path); otherwise returns More once the budget is spent,
+  // with the live reader+visitor retained in BuildState for the next call.
   BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
   BuildPhaseResult runBuildFinalize(BuildState& st);
 
@@ -117,9 +122,11 @@ class Section {
   // Done/Failed are terminal. See docs/epubreader-control-flow-refactor.md §2.6–2.7.
   enum class BuildStep : uint8_t { Setup, Parse, Finalize, More, Done, Failed };
 
-  explicit Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRenderer& renderer)
-      : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
-  ~Section() = default;
+  // Ctor/dtor defined in Section.cpp: both need the complete BuildState type (the
+  // unique_ptr member's deleter is instantiated in each), and the dtor must abort a still
+  // in-flight incremental build so its partially written cache file doesn't survive.
+  explicit Section(const std::shared_ptr<Epub>& epub, int spineIndex, GfxRenderer& renderer);
+  ~Section();
   bool loadSectionFile(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                        uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
                        bool bionicReadingEnabled, uint8_t imageRendering);
@@ -129,15 +136,29 @@ class Section {
                          bool bionicReadingEnabled, uint8_t imageRendering, const std::function<void(int)>& progressFn,
                          bool skipEviction, const HeadingFonts& headingFonts);
 
-  // Incremental section-cache build. Advances the build by at most ~budgetMs of work and
-  // returns its phase. The caller invokes it repeatedly (typically from idle time) until it
-  // returns Done or Failed; the build state is owned by this Section across calls.
+  // Incremental section-cache build. Advances the build by at most ~budgetMs of work
+  // (budgetMs == 0 means no budget: run to a terminal state in one call) and returns More
+  // when work remains. The caller invokes it repeatedly (typically from idle time) until
+  // Done or Failed; the build state is owned by this Section across calls. Yield
+  // granularity is one ~1 KB inflate-feed chunk, so a slice never interrupts a page's SD
+  // write and overshoots the budget by at most one chunk's layout work.
   //
-  // SKELETON (sub-commit 1): currently runs the whole build to completion in one call by
-  // delegating to createSectionFile() and ignoring budgetMs — it returns Done/Failed only,
-  // never More. The slicing is introduced in later sub-commits. The signature is stable so
-  // call sites can migrate now.
-  BuildStep stepSectionBuild(const BuildParams& params, uint32_t budgetMs);
+  // Re-entry contract: a later call whose params hash differs from the original request
+  // discards the partial build (the partial cache is for the wrong variant) and starts
+  // fresh. progressFn/skipEviction only apply when a fresh build is started.
+  BuildStep stepSectionBuild(const BuildParams& params, uint32_t budgetMs,
+                             const std::function<void(int)>& progressFn = {}, bool skipEviction = false);
+  // True while an incremental build is in flight (stepSectionBuild returned More).
+  bool hasActiveBuild() const { return static_cast<bool>(buildState_); }
+  // Percent of the spine XHTML consumed by the in-flight build (0–100; 100 once the
+  // stream is exhausted and only Finalize remains). 0 when no build is live. Feeds the
+  // DEBUG_BACKGROUND_WORK overlay.
+  int activeBuildPercent() const;
+  // Discard an in-flight incremental build: deletes the partially written cache file
+  // (its header was never patched, so it must not be left for loadSectionFile to find)
+  // and drops the live parser/inflate state. No-op when no build is live. Call on
+  // non-consecutive navigation or when render params change.
+  void abortSectionBuild();
   std::unique_ptr<Page> loadPageFromSectionFile();
   // Pre-decode every image in the section into its .pxc cache while heap is
   // maximally contiguous (secondary display buffer still released). Skips images
@@ -203,4 +224,11 @@ class Section {
   // Returns nullopt if the paragraph LUT is unavailable (old cache format) or offset is 0
   // (last page, recorded after parse completion).
   std::optional<uint32_t> getXhtmlByteOffsetForPage(uint16_t page) const;
+
+ private:
+  // Allocates buildState_ and runs Setup. Applies the low-heap embedded-CSS downgrade.
+  // requestedHash is the property hash of the params as requested by the caller (before
+  // any CSS downgrade) — used to detect stale partial builds on later calls.
+  // Returns false (with buildState_ cleared) on failure.
+  bool startBuild(const BuildParams& params, const std::function<void(int)>& progressFn, uint32_t requestedHash);
 };

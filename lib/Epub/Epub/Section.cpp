@@ -1,8 +1,10 @@
 #include "Section.h"
 
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -68,6 +70,10 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
+
+// Inflate-feed chunk for the sliced parse: same size readFileToStream used, and the
+// granularity at which runBuildParse checks its time budget between visitor writes.
+constexpr size_t PARSE_CHUNK_BYTES = 1024;
 
 uint32_t fnv1a(const uint8_t* data, size_t length) {
   uint32_t hash = FNV_OFFSET_BASIS;
@@ -389,15 +395,35 @@ struct Section::BuildState {
   CssParser* cssParser = nullptr;
   std::vector<uint32_t> lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
+  // Live ZIP-side state of the sliced parse, created on the first runBuildParse call and
+  // released as soon as the stream is exhausted so the inflate ring (~32 KB) is not held
+  // through Finalize. zip must outlive reader (reader holds a reference to it). chunkBuf
+  // (PARSE_CHUNK_BYTES) is the feed buffer between reader and visitor — heap because it
+  // must survive across slices.
+  std::unique_ptr<ZipFile> zip;
+  std::unique_ptr<ZipFile::EntryReader> reader;
+  std::unique_ptr<uint8_t[]> chunkBuf;
+  bool parseStarted = false;
+  // Property hash of the params as requested by the caller, before any low-heap CSS
+  // downgrade. Lets stepSectionBuild detect a stale partial build (variant changed)
+  // without a heap-forced no-CSS build reading as a mismatch against its own request.
+  uint32_t requestedHash = 0;
   // Parse-result flags, set by runBuildParse and consumed by runBuildFinalize.
   bool streamOk = false;
   bool finalizeOk = false;
   bool parserStreamOk = false;
-  // Coarse timing for the summary log; per-phase wall clock.
+  // Coarse timing for the summary log; per-phase wall clock (parseMs accumulates across slices).
   uint32_t totalStartMs = 0;
   uint32_t setupMs = 0;
   uint32_t parseMs = 0;
 };
+
+// Out-of-line (see header): both need the complete BuildState type, and the dtor must
+// not leave a partially written cache file behind when a Section dies with a build in
+// flight (book close, activity exit) — its header was never patched with offsets.
+Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRenderer& renderer)
+    : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
+Section::~Section() { abortSectionBuild(); }
 
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
@@ -519,17 +545,69 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
 }
 
 Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t budgetMs) {
-  // budgetMs is ignored for now — the whole stream is consumed in one call. Sub-commit 4
-  // replaces this with a steppable inflate→feed loop that honours the budget.
-  (void)budgetMs;
-  const uint32_t phaseParseStart = millis();
-  st.streamOk = epub->readItemContentsToStream(st.localPath, *st.visitor, 1024);
+  const uint32_t sliceStart = millis();
+  bool streamFailed = false;
+
+  if (!st.parseStarted) {
+    st.parseStarted = true;
+    // Heap, not stack: all three must survive across slices. ~34 KB total while the
+    // stream is live (32 KB inflate ring + 2× PARSE_CHUNK_BYTES scratch) — the same
+    // buffers readFileToStream held for the whole parse, so net-neutral vs the old path.
+    st.zip.reset(new (std::nothrow) ZipFile(epub->getPath()));
+    st.chunkBuf.reset(new (std::nothrow) uint8_t[PARSE_CHUNK_BYTES]);
+    if (st.zip && st.chunkBuf) {
+      st.reader.reset(new (std::nothrow) ZipFile::EntryReader(*st.zip, PARSE_CHUNK_BYTES));
+    }
+    if (!st.reader) {
+      LOG_ERR("SCT", "Failed to allocate entry reader (%u bytes scratch, free=%lu)",
+              static_cast<uint32_t>(PARSE_CHUNK_BYTES), esp_get_free_heap_size());
+      streamFailed = true;
+    } else {
+      const std::string entryPath = FsHelpers::normalisePath(st.localPath);
+      if (!st.reader->open(entryPath.c_str())) {
+        streamFailed = true;  // EntryReader::open already logged the cause
+      }
+    }
+  }
+
+  if (!streamFailed) {
+    bool done = false;
+    while (!done) {
+      size_t produced = 0;
+      if (!st.reader->step(st.chunkBuf.get(), PARSE_CHUNK_BYTES, &produced, &done)) {
+        streamFailed = true;
+        break;
+      }
+      // A short write means the parser failed mid-stream (it returns 0 after an internal
+      // error) — same abort the one-shot readFileToStream path performed.
+      if (produced > 0 && st.visitor->write(st.chunkBuf.get(), produced) != produced) {
+        streamFailed = true;
+        break;
+      }
+      if (!done && budgetMs != 0 && millis() - sliceStart >= budgetMs) {
+        st.parseMs += millis() - sliceStart;
+        return BuildPhaseResult::More;
+      }
+    }
+    if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
+      LOG_ERR("SCT", "Decompressed size mismatch (expected %u, got %u)", static_cast<uint32_t>(st.inflatedSize),
+              static_cast<uint32_t>(st.reader->bytesProduced()));
+      streamFailed = true;
+    }
+  }
+
+  // Stream exhausted or failed — wrap up the phase exactly as the one-shot path did.
+  // Release the ZIP-side state first so the inflate ring isn't held through Finalize.
+  st.reader.reset();
+  st.zip.reset();
+  st.chunkBuf.reset();
+  st.streamOk = !streamFailed;
   st.finalizeOk = st.visitor->finalize();
   st.parserStreamOk = st.visitor->streamSucceeded();
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
   }
-  st.parseMs = millis() - phaseParseStart;
+  st.parseMs += millis() - sliceStart;
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
           esp_get_free_heap_size());
@@ -715,88 +793,129 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   params.imageRendering = imageRendering;
   params.headingFonts = headingFonts;
 
-  // The CSS/heap fallbacks (heap-too-low and parse-failed-with-CSS) both downgrade to a
-  // no-CSS build by re-running from setup. Loop here rather than recurse so the fallback
-  // logic lives in one place; at most one downgrade ever happens (embeddedStyle starts
-  // true and is only ever set false).
+  // Run-to-completion path: pump the incremental build with no time budget. budgetMs == 0
+  // never yields mid-parse, so the only More this loop sees is the restart after a
+  // RetryNoCss downgrade — foreground behaviour is unchanged. If a background build for
+  // this exact variant is already in flight, the pump resumes it instead of starting over.
   while (true) {
-    if (params.embeddedStyle) {
-      const uint32_t freeHeap = esp_get_free_heap_size();
-      const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
-        LOG_INF("SCT",
-                "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu); "
-                "building no-CSS section cache",
-                freeHeap, contigHeap, static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
-                static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
-        params.embeddedStyle = false;
-      }
-    }
-
-    BuildState st;
-    st.params = params;
-    st.progressFn = progressFn;
-    st.totalStartMs = millis();
-
-    if (runBuildSetup(st) != BuildPhaseResult::Ok) {
-      return false;
-    }
-    runBuildParse(st, /*budgetMs=*/0);
-    const BuildPhaseResult fin = runBuildFinalize(st);
-    switch (fin) {
-      case BuildPhaseResult::Done:
+    switch (stepSectionBuild(params, /*budgetMs=*/0, progressFn, skipEviction)) {
+      case BuildStep::Done:
         return true;
-      case BuildPhaseResult::Failed:
+      case BuildStep::Failed:
         return false;
-      case BuildPhaseResult::RetryNoCss:
-        params.embeddedStyle = false;
-        continue;  // restart from setup with CSS disabled
-      case BuildPhaseResult::Ok:
-        // Finalize never returns Ok; treat as failure defensively.
-        return false;
+      default:
+        continue;
     }
   }
 }
 
-Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const uint32_t budgetMs) {
-  // SKELETON (sub-commit 2): still runs to completion in one call, but now via the carved
-  // phase methods rather than delegating to createSectionFile(). Slicing (honouring
-  // budgetMs and returning More) and the heap-owned cross-tick BuildState arrive next.
-  (void)budgetMs;
-
-  evictOldVariants();
-
+bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
+                         const uint32_t requestedHash) {
   BuildParams p = params;
-  while (true) {
-    if (p.embeddedStyle) {
-      const uint32_t freeHeap = esp_get_free_heap_size();
-      const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
-        p.embeddedStyle = false;
-      }
-    }
-
-    BuildState st;
-    st.params = p;
-    st.totalStartMs = millis();
-
-    if (runBuildSetup(st) != BuildPhaseResult::Ok) {
-      return BuildStep::Failed;
-    }
-    runBuildParse(st, /*budgetMs=*/0);
-    const BuildPhaseResult fin = runBuildFinalize(st);
-    switch (fin) {
-      case BuildPhaseResult::Done:
-        return BuildStep::Done;
-      case BuildPhaseResult::Failed:
-        return BuildStep::Failed;
-      case BuildPhaseResult::RetryNoCss:
-        p.embeddedStyle = false;
-        continue;
-      case BuildPhaseResult::Ok:
-        return BuildStep::Failed;
+  if (p.embeddedStyle) {
+    const uint32_t freeHeap = esp_get_free_heap_size();
+    const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
+      LOG_INF("SCT",
+              "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu); "
+              "building no-CSS section cache",
+              freeHeap, contigHeap, static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
+              static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
+      p.embeddedStyle = false;
     }
   }
+
+  buildState_.reset(new (std::nothrow) BuildState());
+  if (!buildState_) {
+    LOG_ERR("SCT", "Failed to allocate build state (free=%lu)", esp_get_free_heap_size());
+    return false;
+  }
+  buildState_->params = p;
+  buildState_->progressFn = progressFn;
+  buildState_->requestedHash = requestedHash;
+  buildState_->totalStartMs = millis();
+
+  if (runBuildSetup(*buildState_) != BuildPhaseResult::Ok) {
+    buildState_.reset();
+    return false;
+  }
+  return true;
+}
+
+Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const uint32_t budgetMs,
+                                             const std::function<void(int)>& progressFn, const bool skipEviction) {
+  const uint32_t requestedHash = calculatePropertyHash(
+      params.fontId, params.lineCompression, params.extraParagraphSpacing, params.paragraphAlignment,
+      params.viewportWidth, params.viewportHeight, params.hyphenationEnabled, params.embeddedStyle,
+      params.bionicReadingEnabled, params.imageRendering);
+  // A live partial build is only resumable for the exact variant it was started for;
+  // when the request changed (font/margins/...) the partial cache is the wrong file.
+  if (buildState_ && buildState_->requestedHash != requestedHash) {
+    LOG_INF("SCT", "stepSectionBuild spine=%d: params changed, discarding partial build", spineIndex);
+    abortSectionBuild();
+  }
+
+  if (!buildState_) {
+    if (!skipEviction) {
+      evictOldVariants();
+    }
+    if (!startBuild(params, progressFn, requestedHash)) {
+      return BuildStep::Failed;
+    }
+  }
+
+  // The CSS fallback (parse-failed-with-CSS) downgrades to a no-CSS build by restarting
+  // from setup. Loop rather than recurse; at most one downgrade ever happens.
+  while (true) {
+    if (runBuildParse(*buildState_, budgetMs) == BuildPhaseResult::More) {
+      return BuildStep::More;
+    }
+
+    const BuildPhaseResult fin = runBuildFinalize(*buildState_);
+    if (fin == BuildPhaseResult::RetryNoCss) {
+      BuildParams retryParams = params;
+      retryParams.embeddedStyle = false;
+      const std::function<void(int)> keepProgress = std::move(buildState_->progressFn);
+      // Finalize already closed and removed the failed cache file — just drop the state.
+      buildState_.reset();
+      if (!startBuild(retryParams, keepProgress, requestedHash)) {
+        return BuildStep::Failed;
+      }
+      // The restart's setup consumed this slice; resume parsing on the next tick. The
+      // blocking path (budgetMs == 0) keeps going.
+      if (budgetMs != 0) {
+        return BuildStep::More;
+      }
+      continue;
+    }
+
+    buildState_.reset();
+    return fin == BuildPhaseResult::Done ? BuildStep::Done : BuildStep::Failed;
+  }
+}
+
+int Section::activeBuildPercent() const {
+  if (!buildState_ || !buildState_->parseStarted || buildState_->inflatedSize == 0) {
+    return 0;
+  }
+  if (!buildState_->reader) {
+    return 100;  // stream consumed; only Finalize remains
+  }
+  return static_cast<int>(buildState_->reader->bytesProduced() * 100 / buildState_->inflatedSize);
+}
+
+void Section::abortSectionBuild() {
+  if (!buildState_) {
+    return;
+  }
+  // During a live build, `file` is the build's write handle and filePath its cache path
+  // (both set by runBuildSetup). The header was never patched, so remove the file.
+  file.close();
+  Storage.remove(filePath.c_str());
+  if (buildState_->cssParser) {
+    buildState_->cssParser->clear();
+  }
+  buildState_.reset();
 }
 
 std::unique_ptr<Page> Section::loadPageFromSectionFile() {
