@@ -403,15 +403,30 @@ struct Section::BuildState {
   CssParser* cssParser = nullptr;
   std::vector<uint32_t> lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
-  // Live ZIP-side state of the sliced parse, created on the first runBuildParse call and
-  // released as soon as the stream is exhausted so the inflate ring (~32 KB) is not held
-  // through Finalize. zip must outlive reader (reader holds a reference to it). chunkBuf
-  // (PARSE_CHUNK_BYTES) is the feed buffer between reader and visitor — heap because it
-  // must survive across slices.
+  // Live ZIP-side state of the parse, created on the first runBuildParse call and
+  // released the moment the compressed stream is exhausted. zip must outlive reader
+  // (reader holds a reference to it). chunkBuf (PARSE_CHUNK_BYTES) is the feed buffer —
+  // heap because it must survive across slices. The inflate ring inside the reader is
+  // sized to the entry (≤32 KB).
   std::unique_ptr<ZipFile> zip;
   std::unique_ptr<ZipFile::EntryReader> reader;
   std::unique_ptr<uint8_t[]> chunkBuf;
   bool parseStarted = false;
+  // Two-phase sliced parse, latched at the first parse call (so a build started in the
+  // background stays on this path when the foreground resumes it with budget 0):
+  //   (a) extract — EntryReader slices inflate the entry to tempPath on SD, then ALL
+  //       ZIP state (ring + scratch + handles) is released;
+  //   (b) parse — slices read tempPath and feed the visitor with no ZIP memory resident.
+  // This keeps the inflate ring and the parser's layout working set from ever being
+  // live at the same time, which is what made background builds impossible on ~68 KB
+  // of reading heap. Blocking builds (budget 0 from the start) stream directly instead:
+  // they run with the secondary framebuffer released and don't need the split or the
+  // extra SD round-trip.
+  bool useTempExtract = false;
+  bool extractDone = false;
+  FsFile tempFile;
+  std::string tempPath;
+  size_t tempBytesFed = 0;
   // Property hash of the params as requested by the caller, before any low-heap CSS
   // downgrade. Lets stepSectionBuild detect a stale partial build (variant changed)
   // without a heap-forced no-CSS build reading as a mismatch against its own request.
@@ -555,13 +570,19 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
 
 Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t budgetMs) {
   const uint32_t sliceStart = millis();
+  const auto overBudget = [&] { return budgetMs != 0 && millis() - sliceStart >= budgetMs; };
+  const auto yieldSlice = [&] {
+    st.parseMs += millis() - sliceStart;
+    return BuildPhaseResult::More;
+  };
   bool streamFailed = false;
 
   if (!st.parseStarted) {
     st.parseStarted = true;
-    // Heap, not stack: all three must survive across slices. ~34 KB total while the
-    // stream is live (32 KB inflate ring + 2× PARSE_CHUNK_BYTES scratch) — the same
-    // buffers readFileToStream held for the whole parse, so net-neutral vs the old path.
+    st.useTempExtract = budgetMs != 0;
+    // Heap, not stack: these must survive across slices. Ring (≤32 KB, sized to the
+    // entry) + 2× PARSE_CHUNK_BYTES scratch — the same buffers readFileToStream held
+    // for the whole stream, so net-neutral vs the old one-shot path.
     st.zip.reset(new (std::nothrow) ZipFile(epub->getPath()));
     st.chunkBuf.reset(new (std::nothrow) uint8_t[PARSE_CHUNK_BYTES]);
     if (st.zip && st.chunkBuf) {
@@ -577,9 +598,17 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         streamFailed = true;  // EntryReader::open already logged the cause
       }
     }
+    if (!streamFailed && st.useTempExtract) {
+      st.tempPath = filePath + ".xtmp";
+      if (!Storage.openFileForWrite("SCT", st.tempPath, st.tempFile)) {
+        streamFailed = true;
+      }
+    }
   }
 
-  if (!streamFailed) {
+  // Phase (a), sliced path only: inflate the entry to a temp SD file, then release all
+  // ZIP state. Keeps the ring and the parser's layout working set temporally disjoint.
+  if (!streamFailed && st.useTempExtract && !st.extractDone) {
     bool done = false;
     while (!done) {
       size_t produced = 0;
@@ -587,15 +616,13 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         streamFailed = true;
         break;
       }
-      // A short write means the parser failed mid-stream (it returns 0 after an internal
-      // error) — same abort the one-shot readFileToStream path performed.
-      if (produced > 0 && st.visitor->write(st.chunkBuf.get(), produced) != produced) {
+      if (produced > 0 && st.tempFile.write(st.chunkBuf.get(), produced) != produced) {
+        LOG_ERR("SCT", "Failed to write extracted XHTML to %s", st.tempPath.c_str());
         streamFailed = true;
         break;
       }
-      if (!done && budgetMs != 0 && millis() - sliceStart >= budgetMs) {
-        st.parseMs += millis() - sliceStart;
-        return BuildPhaseResult::More;
+      if (!done && overBudget()) {
+        return yieldSlice();
       }
     }
     if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
@@ -603,13 +630,88 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
               static_cast<uint32_t>(st.reader->bytesProduced()));
       streamFailed = true;
     }
+    st.reader.reset();
+    st.zip.reset();
+    st.tempFile.flush();
+    st.tempFile.close();
+    st.extractDone = true;
+    if (!streamFailed) {
+      if (!Storage.openFileForRead("SCT", st.tempPath, st.tempFile)) {
+        streamFailed = true;
+      } else {
+        LOG_INF("SCT", "createSectionFile spine=%d extracted %u bytes to temp (free=%lu)", spineIndex,
+                static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
+        if (overBudget()) {
+          return yieldSlice();
+        }
+      }
+    }
+  }
+
+  // Phase (b): feed the visitor — from the temp file (sliced path, no ZIP state live)
+  // or straight from the inflate stream (blocking path).
+  if (!streamFailed) {
+    if (st.useTempExtract) {
+      while (true) {
+        const int n = st.tempFile.read(st.chunkBuf.get(), PARSE_CHUNK_BYTES);
+        if (n < 0) {
+          LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
+          streamFailed = true;
+          break;
+        }
+        if (n == 0) {
+          break;
+        }
+        st.tempBytesFed += static_cast<size_t>(n);
+        // A short write means the parser failed mid-stream (it returns 0 after an
+        // internal error) — same abort the one-shot readFileToStream path performed.
+        if (st.visitor->write(st.chunkBuf.get(), static_cast<size_t>(n)) != static_cast<size_t>(n)) {
+          streamFailed = true;
+          break;
+        }
+        if (overBudget()) {
+          return yieldSlice();
+        }
+      }
+      if (!streamFailed && st.tempBytesFed != st.inflatedSize) {
+        LOG_ERR("SCT", "Extracted size mismatch (expected %u, fed %u)", static_cast<uint32_t>(st.inflatedSize),
+                static_cast<uint32_t>(st.tempBytesFed));
+        streamFailed = true;
+      }
+    } else {
+      bool done = false;
+      while (!done) {
+        size_t produced = 0;
+        if (!st.reader->step(st.chunkBuf.get(), PARSE_CHUNK_BYTES, &produced, &done)) {
+          streamFailed = true;
+          break;
+        }
+        if (produced > 0 && st.visitor->write(st.chunkBuf.get(), produced) != produced) {
+          streamFailed = true;
+          break;
+        }
+      }
+      if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
+        LOG_ERR("SCT", "Decompressed size mismatch (expected %u, got %u)", static_cast<uint32_t>(st.inflatedSize),
+                static_cast<uint32_t>(st.reader->bytesProduced()));
+        streamFailed = true;
+      }
+    }
   }
 
   // Stream exhausted or failed — wrap up the phase exactly as the one-shot path did.
-  // Release the ZIP-side state first so the inflate ring isn't held through Finalize.
+  // Release the ZIP-side state (no-ops on the sliced path, which dropped it after
+  // extraction) and the temp file before the visitor finalizes.
   st.reader.reset();
   st.zip.reset();
   st.chunkBuf.reset();
+  if (st.tempFile) {
+    st.tempFile.close();
+  }
+  if (!st.tempPath.empty()) {
+    Storage.remove(st.tempPath.c_str());
+    st.tempPath.clear();
+  }
   st.streamOk = !streamFailed;
   st.finalizeOk = st.visitor->finalize();
   st.parserStreamOk = st.visitor->streamSucceeded();
@@ -914,15 +1016,31 @@ int Section::activeBuildPercent() const {
   if (!buildState_ || !buildState_->parseStarted || buildState_->inflatedSize == 0) {
     return 0;
   }
-  if (!buildState_->reader) {
+  const BuildState& st = *buildState_;
+  if (st.useTempExtract) {
+    // Extraction is cheap next to layout: report it as the first 10%, parsing as the rest.
+    if (!st.extractDone) {
+      const size_t produced = st.reader ? st.reader->bytesProduced() : 0;
+      return static_cast<int>(produced * 10 / st.inflatedSize);
+    }
+    return static_cast<int>(10 + st.tempBytesFed * 90 / st.inflatedSize);
+  }
+  if (!st.reader) {
     return 100;  // stream consumed; only Finalize remains
   }
-  return static_cast<int>(buildState_->reader->bytesProduced() * 100 / buildState_->inflatedSize);
+  return static_cast<int>(st.reader->bytesProduced() * 100 / st.inflatedSize);
 }
 
 void Section::abortSectionBuild() {
   if (!buildState_) {
     return;
+  }
+  // Drop the extraction temp file alongside the partial cache file.
+  if (buildState_->tempFile) {
+    buildState_->tempFile.close();
+  }
+  if (!buildState_->tempPath.empty()) {
+    Storage.remove(buildState_->tempPath.c_str());
   }
   // During a live build, `file` is the build's write handle and filePath its cache path
   // (both set by runBuildSetup). The header was never patched, so remove the file.

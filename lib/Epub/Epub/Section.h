@@ -59,9 +59,12 @@ class Section {
   // CSS/heap fallback recursion lives in the entry function, not here), which is what lets
   // them be called either back-to-back (blocking) or with Parse re-entered across ticks.
   BuildPhaseResult runBuildSetup(BuildState& st);
-  // Drives the ZIP entry reader → parser feed loop. When budgetMs is 0 the whole stream is
-  // consumed in one call (blocking path); otherwise returns More once the budget is spent,
-  // with the live reader+visitor retained in BuildState for the next call.
+  // Feeds the chapter XHTML to the parser. budgetMs == 0 (blocking path): streams the
+  // ZIP entry directly and consumes it in one call. budgetMs != 0 (sliced path): runs in
+  // two budget-sliced phases — (a) inflate the entry to a temp SD file, release all ZIP
+  // state, then (b) feed the parser from that file — so the inflate ring and the layout
+  // working set are never live at the same time. Returns More when over budget, with the
+  // live state retained in BuildState for the next call.
   BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
   BuildPhaseResult runBuildFinalize(BuildState& st);
 

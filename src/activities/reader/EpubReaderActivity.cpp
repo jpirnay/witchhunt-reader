@@ -98,21 +98,25 @@ constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 // Pre-render of the next page within the current chapter only runs when heap is healthy.
 constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 64 * 1024;
 
-// Background B (next-section pre-build) heap gates. The build holds ~34 KB of ZIP/inflate
-// state across slices plus the parser working set, and unlike the foreground indexing path
-// it runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
+// Background B (next-section pre-build) heap gates. Unlike the foreground indexing path,
+// B runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
 // risk OOM — the foreground blocking path remains the fallback. Overridable for tuning.
 //
-// Floor sizing: measured steady-state reading heap (X3, secondary buffer + pre-rendered
-// page live) is ~68 KB free, so the floor must sit below that to ever run. 56 KB
-// leaves B's ~45-50 KB peak dipping to ~18-23 KB free — above the ~15 KB min-free this
-// firmware already survives — and a low-memory parse degrades gracefully (truncated
-// result is discarded and left to the foreground blocking path).
-#ifndef BG_BUILD_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_MIN_FREE_HEAP_BYTES (56 * 1024)
+// The sliced build runs in two phases with disjoint peaks (see Section::runBuildParse):
+//   extract — holds the inflate ring (sized to the entry, ≤32 KB) + ~2 KB scratch, but
+//             no layout working set yet;
+//   parse   — holds the parser's layout working set (~20 KB), with no ZIP state.
+// Floors derived from measured X3 numbers (2026-06-11 serial logs): setup ≈ 12 KB (CSS
+// index + visitor), observed safe min-free ≈ 15 KB → ~16 KB reserve.
+// Required free heap = max(BG_BUILD_PARSE_MIN_FREE, BG_BUILD_EXTRACT_BASE + ring).
+#ifndef BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES (48 * 1024)  // setup + working set + reserve
+#endif
+#ifndef BG_BUILD_EXTRACT_BASE_HEAP_BYTES
+#define BG_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)  // setup + scratch + reserve (ring added per target)
 #endif
 #ifndef BG_BUILD_MIN_CONTIG_HEAP_BYTES
-#define BG_BUILD_MIN_CONTIG_HEAP_BYTES (40 * 1024)  // 32 KB inflate ring + slack
+#define BG_BUILD_MIN_CONTIG_HEAP_BYTES (24 * 1024)  // parse-phase floor; raised to ring+8 KB while extracting
 #endif
 // Per-slice time budget for a Background-B parse step. Conservative start (handoff plan
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
@@ -643,6 +647,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
 void EpubReaderActivity::resetBackgroundBuild() {
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
+  backgroundBuildInflatedSize_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
 }
@@ -701,6 +706,10 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
+        // The inflate ring is sized to the entry, so the extraction heap gate needs the
+        // uncompressed size (one central-dir scan, once per target spine).
+        backgroundBuildInflatedSize_ = 0;
+        epub->getItemSize(epub->getSpineItem(targetSpine).href, &backgroundBuildInflatedSize_);
         backgroundBuildState_ = BackgroundBuildState::WaitHeap;
       }
       return;  // one bounded step per tick
@@ -708,9 +717,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
     case BackgroundBuildState::WaitHeap: {
       // Re-checked every idle tick (cheap), so a transient heap dip only delays B.
+      const uint32_t ringBytes =
+          static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
       const uint32_t freeHeap = esp_get_free_heap_size();
       const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      if (freeHeap < BG_BUILD_MIN_FREE_HEAP_BYTES || contigHeap < BG_BUILD_MIN_CONTIG_HEAP_BYTES) {
+      if (freeHeap <
+              std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) ||
+          contigHeap < std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024)) {
         return;
       }
       // Refuse — don't let startBuild silently downgrade — when the book wants embedded

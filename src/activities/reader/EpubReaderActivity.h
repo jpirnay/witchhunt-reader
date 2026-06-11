@@ -273,6 +273,9 @@ class EpubReaderActivity final : public Activity {
   // until buildSection() adopts it on a consecutive boundary cross or discards it on any
   // other navigation. Its destructor aborts a partial build and deletes the partial file.
   std::unique_ptr<Section> backgroundSection_;
+  // Uncompressed size of the target spine's XHTML (fetched once in the Probe step).
+  // Sizes the inflate ring share of the extraction heap gate.
+  size_t backgroundBuildInflatedSize_ = 0;
   // One-shot-per-target probe/settle latch so idle ticks don't re-hit the SD every loop:
   //   Probe    — not yet checked whether the target's cache already exists
   //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)
