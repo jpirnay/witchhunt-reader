@@ -904,6 +904,16 @@ def main(
         print(f"Error: Output directory not found: {output_dir}")
         sys.exit(1)
 
+    out = Path(output_dir)
+    targets = [out / "I18nKeys.h", out / "I18nStrings.h", out / "I18nStrings.cpp"]
+    sources = list(Path(translations_dir).glob("*.yaml"))
+    if all(t.exists() for t in targets):
+        oldest_target = min(t.stat().st_mtime for t in targets)
+        newest_source = max(s.stat().st_mtime for s in sources)
+        if oldest_target >= newest_source:
+            print("Unchanged: all I18n outputs are up to date.")
+            return
+
     if verbose:
         print(f"Reading translations from: {translations_dir}")
         print(f"Output directory: {output_dir}")
@@ -975,7 +985,6 @@ def main(
             inherited_sets = [s - unused_set for s in inherited_sets]
             print(f"  Stripping {len(unused_set)} unused string(s) from output.")
 
-        out = Path(output_dir)
         generate_keys_header(
             languages, language_names, string_keys, str(out / "I18nKeys.h"), verbose
         )
