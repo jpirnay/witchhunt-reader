@@ -132,14 +132,19 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 
 #if DEBUG_BACKGROUND_WORK
 // Temporary corruption tripwire (debug builds): walks the entire heap and names the
-// first checkpoint that sees damage, to localize an intermittent build-window heap
-// corruption observed on X3 (multi_heap_free assert / "Bad head" after section builds).
-// heap_caps_check_integrity_all prints the corrupt block details itself. Remove once
-// the writer is found. Costs a few ms per call — debug-only.
+// checkpoint that sees damage, to localize an intermittent heap corruption observed on
+// X3 (multi_heap_free assert / "Bad head" after section builds). Once the heap is
+// damaged EVERY later checkpoint reports it, so only the FIRST line bounds the writer:
+// it acted between the previous clean checkpoint and that one. (heap_caps' own detail
+// prints go to the IDF console, not the app logger, so they don't appear in captures.)
+// Remove once the writer is found. Costs a few ms per call — debug-only.
 void checkHeapIntegrity(const char* checkpoint) {
-  if (!heap_caps_check_integrity_all(true)) {
-    LOG_ERR("ERS", "HEAP CORRUPT first detected at checkpoint: %s", checkpoint);
+  static bool corruptSeen = false;
+  if (heap_caps_check_integrity_all(true)) {
+    return;
   }
+  LOG_ERR("ERS", "HEAP CORRUPT at checkpoint: %s%s", checkpoint, corruptSeen ? " (repeat)" : " <-- FIRST");
+  corruptSeen = true;
 }
 #else
 inline void checkHeapIntegrity(const char*) {}
@@ -240,6 +245,10 @@ int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
   logReaderMemSnapshot("onEnter_begin");
+  // Bisect anchor: corruption already present HERE means the writer ran before the
+  // reader (Home sidecar JPEG conversion / thumb generation are prime suspects — see
+  // the long-standing "heap may be corrupt after image decode failures" note below).
+  checkHeapIntegrity("reader_onEnter");
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
@@ -346,6 +355,7 @@ void EpubReaderActivity::onEnter() {
   logReaderMemSnapshot("onEnter_before_request_update");
   requestUpdate();
   logReaderMemSnapshot("onEnter_ready");
+  checkHeapIntegrity("reader_onEnter_ready");
 }
 
 void EpubReaderActivity::onExit() {
@@ -612,6 +622,7 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
           (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
           static_cast<unsigned long>(esp_get_free_heap_size()),
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  checkHeapIntegrity("idle_5s");
 #endif
 }
 
@@ -2511,6 +2522,7 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
       truncatedSectionHintRendersRemaining--;
     }
     LOG_DBG("ERS", "Rendered page in %dms", lastRenderStats.requestRenderMs);
+    checkHeapIntegrity("after_page_render");
   }
   // Re-acquire the render lock before any further state mutation.
   // renderContents() released it early (after triggerDisplay) to free the loop
