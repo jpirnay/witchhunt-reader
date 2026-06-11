@@ -767,6 +767,18 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     }
 
     case BackgroundBuildState::Building: {
+      // Layout needs glyph metrics only (advance/kerning), never bitmaps — but the
+      // reading-path prewarm leaves SD-font styles wired to a page-scoped FULL (bitmap)
+      // cache covering only the displayed page's glyphs, and ensureFontReady's mmap
+      // metadata fast-path no-ops when any cache is already wired. The build's layout
+      // then misses on nearly every glyph and pulls BITMAPS through the 8-slot overflow
+      // loader (~180 ms each; measured 7.4 s of a 9.6 s background build). Reset
+      // accumulation so the parser's next metadata-only prewarm re-wires the
+      // flash-resident full metric tables — the same thing the foreground indexing path
+      // does before createSectionFile. Re-done every slice because an interleaved page
+      // render re-enters page mode; for mmap fonts the re-wire is pointer assignments,
+      // and the next foreground render rebuilds its page cache in its normal prewarm.
+      renderer.clearFontAccumulation();
 #if DEBUG_BACKGROUND_WORK
       bgCounters_.bRuns++;
 #endif
