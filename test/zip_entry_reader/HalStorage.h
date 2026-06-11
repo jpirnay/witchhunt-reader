@@ -2,8 +2,8 @@
 // Real-filesystem shim for host tests that exercise ZipFile.
 // Implements FsFile on top of stdio so ZipFile can open actual .epub files.
 
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -17,7 +17,11 @@ class HalFile : public Print {
 
   HalFile(HalFile&& o) noexcept : fp_(o.fp_) { o.fp_ = nullptr; }
   HalFile& operator=(HalFile&& o) noexcept {
-    if (this != &o) { close(); fp_ = o.fp_; o.fp_ = nullptr; }
+    if (this != &o) {
+      close();
+      fp_ = o.fp_;
+      o.fp_ = nullptr;
+    }
     return *this;
   }
   HalFile(const HalFile&) = delete;
@@ -30,7 +34,10 @@ class HalFile : public Print {
   }
 
   bool close() {
-    if (fp_) { fclose(fp_); fp_ = nullptr; }
+    if (fp_) {
+      fclose(fp_);
+      fp_ = nullptr;
+    }
     return true;
   }
 
@@ -82,18 +89,17 @@ using FsFile = HalFile;
 
 class HalStorage {
  public:
-  bool openFileForRead(const char*, const std::string& path, HalFile& f) {
-    return f.openForRead(path);
-  }
-  bool openFileForRead(const char*, const char* path, HalFile& f) {
-    return f.openForRead(path);
-  }
+  bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
+  bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
   bool openFileForWrite(const char*, const std::string&, HalFile&) { return false; }
   bool exists(const char*) { return false; }
   bool mkdir(const char*, bool = true) { return false; }
   bool remove(const char*) { return false; }
   std::vector<std::string> listFiles(const char* = "/", int = 200) { return {}; }
-  static HalStorage& getInstance() { static HalStorage i; return i; }
+  static HalStorage& getInstance() {
+    static HalStorage i;
+    return i;
+  }
 };
 
 #define Storage HalStorage::getInstance()

@@ -37,7 +37,10 @@ static bool drain(ZipFile::EntryReader& reader, std::vector<uint8_t>& out) {
 class VectorSink : public Print {
  public:
   std::vector<uint8_t> data;
-  size_t write(uint8_t b) override { data.push_back(b); return 1; }
+  size_t write(uint8_t b) override {
+    data.push_back(b);
+    return 1;
+  }
   size_t write(const uint8_t* buf, size_t n) override {
     data.insert(data.end(), buf, buf + n);
     return n;
