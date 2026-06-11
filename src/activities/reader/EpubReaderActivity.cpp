@@ -130,6 +130,21 @@ constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
 
+#if DEBUG_BACKGROUND_WORK
+// Temporary corruption tripwire (debug builds): walks the entire heap and names the
+// first checkpoint that sees damage, to localize an intermittent build-window heap
+// corruption observed on X3 (multi_heap_free assert / "Bad head" after section builds).
+// heap_caps_check_integrity_all prints the corrupt block details itself. Remove once
+// the writer is found. Costs a few ms per call — debug-only.
+void checkHeapIntegrity(const char* checkpoint) {
+  if (!heap_caps_check_integrity_all(true)) {
+    LOG_ERR("ERS", "HEAP CORRUPT first detected at checkpoint: %s", checkpoint);
+  }
+}
+#else
+inline void checkHeapIntegrity(const char*) {}
+#endif
+
 #if DEBUG_MEMORY_CONSUMPTION
 void logReaderMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
@@ -573,21 +588,6 @@ void EpubReaderActivity::serviceBackgroundWork() {
   if (pendingGrayscale_.active) {
     return;  // AA still owed (display bus busy); it keeps priority over B
   }
-  // Background A's pass runs right after the page render, while the deferred AA still
-  // holds the just-rendered page (~10 KB) — its heap floor can refuse at that moment
-  // (measured: 55.9 KB free vs the 56 KB floor) and nothing re-arms it. Give it one
-  // retry per displayed page from the idle loop, now that AA has released that memory.
-  // B stays parked behind pendingPreRender until the retry has run, preserving priority.
-  if (!preRenderedPage.ready && !pendingPreRender && section && epub &&
-      section->currentPage + 1 < section->pageCount &&
-      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
-      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
-    preRenderRearmSpine_ = currentSpineIndex;
-    preRenderRearmPage_ = section->currentPage;
-    pendingPreRender = true;
-    requestUpdate();
-    return;
-  }
   stepBackgroundSectionBuild();
 }
 
@@ -644,6 +644,7 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   });
   pendingGrayscale_.page.reset();
   LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+  checkHeapIntegrity("after_deferred_aa");
 }
 
 Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
@@ -696,6 +697,23 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // Re-check under the lock: the render task may have scheduled A or started a refresh
   // between the unlocked test above and acquiring the lock (mirrors runDeferredGrayscalePass).
   if (pendingPreRender || renderer.isRefreshPending()) {
+    return;
+  }
+
+  // Background A re-arm (one retry per displayed page): A's pass runs right after the
+  // page render, while the deferred AA still holds the just-rendered page (~10 KB) —
+  // its heap floor can refuse at that moment (measured 55.9 KB free vs the 56 KB floor)
+  // and nothing retries it. Done HERE, under the render lock, because it dereferences
+  // section state the render task mutates — an earlier unlocked version in
+  // serviceBackgroundWork() raced buildSection's reassignment of `section`. B keeps
+  // waiting behind pendingPreRender until the retry has run, preserving A's priority.
+  if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
+      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
+      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
+    preRenderRearmSpine_ = currentSpineIndex;
+    preRenderRearmPage_ = section->currentPage;
+    pendingPreRender = true;
+    requestUpdate();
     return;
   }
 
@@ -784,6 +802,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 #endif
       const Section::BuildStep step =
           backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      checkHeapIntegrity("after_b_slice");
       if (step == Section::BuildStep::More) {
         backgroundBuildPercent_ = static_cast<int8_t>(backgroundSection_->activeBuildPercent());
         return;
@@ -2253,6 +2272,7 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
 #endif
     LOG_DBG("ERS", "Pre-rendered page %d/%d in %lums", nextPage, section->pageCount - 1, preRenderDuration);
   }
+  checkHeapIntegrity("after_prerender");
 }
 
 bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
@@ -2324,6 +2344,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
     LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
             esp_get_free_heap_size());
+    checkHeapIntegrity("after_createSectionFile");
     // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
     // warmAllImageCaches writes pixels to the framebuffer as a side effect; clearScreen()
     // follows after reallocSecondaryBuffer so the framebuffer state doesn't matter here.
@@ -2333,6 +2354,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
       LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
       renderer.clearScreen();
+      checkHeapIntegrity("after_warmAllImageCaches");
     }
     if (!renderer.reallocSecondaryBuffer()) {
       LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
@@ -2353,6 +2375,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
       LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
     }
+    checkHeapIntegrity("after_fb_realloc");
     renderer.restoreFontMetadata();
     readerPhase_ = ReaderPhase::READING;
     if (!createOk) {
@@ -2920,6 +2943,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
         [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
   }
+  checkHeapIntegrity("after_bufferdisplay_aa");
 }
 
 void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {

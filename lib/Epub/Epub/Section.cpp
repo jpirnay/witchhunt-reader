@@ -778,9 +778,11 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
 
   const uint32_t lutOffset = file.position();
   bool hasFailedLutRecords = false;
-  // Write LUT
+  // Write LUT. 0 marks a failed onPageComplete; 0xFFFFFFFF is what FsFile::position()
+  // degenerates to on a broken handle — neither must ever reach the cache file, where
+  // it would only surface later as a failed seek at page-load time.
   for (const uint32_t& pos : st.lut) {
-    if (pos == 0) {
+    if (pos == 0 || pos == UINT32_MAX) {
       hasFailedLutRecords = true;
       break;
     }
