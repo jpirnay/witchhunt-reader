@@ -44,6 +44,18 @@ void HalDisplay::drawImageTransparent(const uint8_t* imageData, uint16_t x, uint
   einkDisplay.drawImageTransparent(imageData, x, y, w, h, fromProgmem);
 }
 
+static uint8_t refreshModeToByte(HalDisplay::RefreshMode mode) {
+  switch (mode) {
+    case HalDisplay::RefreshMode::FAST_REFRESH:
+      return 0x0C;
+    case HalDisplay::RefreshMode::HALF_REFRESH:
+      return 0xD4;
+    case HalDisplay::RefreshMode::FULL_REFRESH:
+    default:
+      return 0x34;
+  }
+}
+
 EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   switch (mode) {
     case HalDisplay::FULL_REFRESH:
@@ -63,6 +75,9 @@ void HalDisplay::requestResync(uint8_t settlePasses) {
 }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
@@ -73,7 +88,22 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
 }
 
+static uint8_t refreshModeToByte(HalDisplay::RefreshMode mode) {
+  switch (mode) {
+    case HalDisplay::RefreshMode::FAST_REFRESH:
+      return 0x0C;
+    case HalDisplay::RefreshMode::HALF_REFRESH:
+      return 0xD4;
+    case HalDisplay::RefreshMode::FULL_REFRESH:
+    default:
+      return 0x34;
+  }
+}
+
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
   if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
@@ -104,11 +134,9 @@ void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
 
 bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
 
-HalDisplay::RefreshMode HalDisplay::getLastRefreshMode() const {
-  return static_cast<RefreshMode>(einkDisplay.getLastRefreshMode());
-}
+HalDisplay::RefreshMode HalDisplay::getLastRefreshMode() const { return lastRefreshMode; }
 
-uint8_t HalDisplay::getLastDisplayModeByte() const { return einkDisplay.getLastDisplayModeByte(); }
+uint8_t HalDisplay::getLastDisplayModeByte() const { return lastDisplayModeByte; }
 
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);

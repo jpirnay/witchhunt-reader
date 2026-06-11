@@ -109,6 +109,8 @@ class HalDisplay {
  private:
   EInkDisplay einkDisplay;
   uint8_t pendingX3SettlePasses = 0;
+  RefreshMode lastRefreshMode = RefreshMode::FAST_REFRESH;
+  uint8_t lastDisplayModeByte = 0x0C;  // default to fast refresh mode byte
 };
 
 extern HalDisplay display;

@@ -54,6 +54,8 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 static std::atomic<size_t> g_liveBytes{0};
@@ -95,18 +97,32 @@ static void* rawAlloc(size_t bytes) {
 #if defined(_WIN32)
   return HeapAlloc(GetProcessHeap(), 0, bytes);
 #else
-  // On Linux call __libc_malloc if available; fall back to mmap or similar.
-  // For now just use __builtin_malloc which links against the real libc.
-  extern void* __libc_malloc(size_t) __attribute__((weak));
-  return __libc_malloc ? __libc_malloc(bytes) : nullptr;
+  using malloc_fn_t = void* (*)(size_t);
+  static malloc_fn_t realMalloc = nullptr;
+  if (!realMalloc) {
+    realMalloc = reinterpret_cast<malloc_fn_t>(dlsym(RTLD_NEXT, "malloc"));
+    if (!realMalloc) {
+      extern void* __libc_malloc(size_t) __attribute__((weak));
+      realMalloc = __libc_malloc;
+    }
+  }
+  return realMalloc ? realMalloc(bytes) : nullptr;
 #endif
 }
 static void rawFree(void* p) {
 #if defined(_WIN32)
   HeapFree(GetProcessHeap(), 0, p);
 #else
-  extern void __libc_free(void*) __attribute__((weak));
-  if (__libc_free) __libc_free(p);
+  using free_fn_t = void (*)(void*);
+  static free_fn_t realFree = nullptr;
+  if (!realFree) {
+    realFree = reinterpret_cast<free_fn_t>(dlsym(RTLD_NEXT, "free"));
+    if (!realFree) {
+      extern void __libc_free(void*) __attribute__((weak));
+      realFree = __libc_free;
+    }
+  }
+  if (realFree) realFree(p);
 #endif
 }
 
