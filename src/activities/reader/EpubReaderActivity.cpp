@@ -1,5 +1,6 @@
 #define DEBUG_MEMORY_CONSUMPTION 1
 #define DEBUG_BACKGROUND_WORK 1
+#define DEBUG_BACKGROUND_OVERLAY 0
 
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
@@ -3023,7 +3024,9 @@ void EpubReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, isStarred, printedPageLabel);
 
+#if DEBUG_BACKGROUND_WORK
   renderBackgroundDebugOverlay();
+#endif
 
   lastStatusBarPage = currentPage;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
@@ -3036,7 +3039,7 @@ void EpubReaderActivity::renderStatusBar() const {
 }
 
 void EpubReaderActivity::renderBackgroundDebugOverlay() const {
-#if DEBUG_BACKGROUND_WORK
+#if DEBUG_BACKGROUND_WORK && DEBUG_BACKGROUND_OVERLAY
   // Background A state is latched per displayed page into backgroundAGlyph_ (see the
   // field comment), set just before renderStatusBar() draws it. The live scheduling
   // flags are cleared at the top of render() before this draws, so they always read

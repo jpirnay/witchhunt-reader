@@ -2247,8 +2247,8 @@ void ChapterHtmlSlimParser::makePages() {
   // and the xOffset check in addLineToPage use the same y values.
   // Image top aligns with the line top (currentPageNextY after margin-top).
   const int lineHeightForFloat = (blockStyle.floatZoneCount > 0) ? effectiveLineHeight(blockStyle) : 0;
-  LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
-          (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
+  // LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
+  //         (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
   if (blockStyle.floatZoneCount > 0) {
     auto& mbs = currentTextBlock->getBlockStyle();
     for (int zi = 0; zi < mbs.floatZoneCount; ++zi) {
