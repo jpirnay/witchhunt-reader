@@ -384,7 +384,25 @@ void ensureSdFontLoadedForPath(const char* path) {
   }
 }
 
+// --- Temporary boot-phase heap-corruption bisect probes -------------------------------
+// Field data shows the heap can already be corrupt at the existing setup() check even
+// on the boot AFTER esp_restart()'s full DRAM re-init — i.e. the corruption is
+// re-created during early init, not inherited from the crashed session. These probes
+// record WHICH phase breaks it; results are logged once serial is up.
+//   preCtors  — C constructor at priority 101, runs before all C++ global ctors
+//               (default priority 65535). false here ⇒ IDF/Arduino SDK init.
+//   setupEntry — first statement of setup(). false here (with preCtors true) ⇒ one of
+//               OUR C++ global constructors.
+//   (the existing post-OTA check then isolates the OTA/NVS block)
+// Remove once the writer is found.
+static bool s_heapOkPreCtors = true;
+static bool s_heapOkSetupEntry = true;
+extern "C" __attribute__((constructor(101))) void heapProbePreCppCtors() {
+  s_heapOkPreCtors = heap_caps_check_integrity_all(/*print_errors=*/false);
+}
+
 void setup() {
+  s_heapOkSetupEntry = heap_caps_check_integrity_all(/*print_errors=*/false);
   {
     esp_ota_img_states_t otaState;
     const esp_partition_t* running = esp_ota_get_running_partition();
@@ -460,10 +478,12 @@ void setup() {
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
-  // Re-log the boot-time heap integrity result now that serial is open.
-  // If false, the heap was already corrupt before any application code ran —
-  // look for SDK/Arduino static-init corruption rather than our own code.
-  LOG_INF("MEM", "Heap integrity at boot: %s", heapIntactAtBoot ? "OK" : "CORRUPT");
+  // Re-log the boot-time heap integrity results now that serial is open. The three
+  // probes bracket the boot phases: preCtors CORRUPT ⇒ IDF/Arduino SDK init;
+  // setupEntry CORRUPT (preCtors OK) ⇒ one of our C++ global constructors;
+  // postOta CORRUPT (setupEntry OK) ⇒ the OTA-rollback/NVS block at the top of setup().
+  LOG_INF("MEM", "Heap integrity at boot: preCtors=%s setupEntry=%s postOta=%s", s_heapOkPreCtors ? "OK" : "CORRUPT",
+          s_heapOkSetupEntry ? "OK" : "CORRUPT", heapIntactAtBoot ? "OK" : "CORRUPT");
   logStartupMemory("after_hw_init");
 
   // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
