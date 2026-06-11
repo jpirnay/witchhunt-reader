@@ -278,6 +278,12 @@ class EpubReaderActivity final : public Activity {
   size_t backgroundBuildInflatedSize_ = 0;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
+  // One-shot Background-A re-arm latch (see serviceBackgroundWork): the (spine, page)
+  // whose pre-render was already retried after the deferred AA released its memory.
+  // Bounds retries to one per displayed page so an image-only next page (which can
+  // never produce a pre-render) doesn't re-trigger the pass every idle tick.
+  int preRenderRearmSpine_ = -1;
+  int preRenderRearmPage_ = -1;
   // One-shot-per-target probe/settle latch so idle ticks don't re-hit the SD every loop:
   //   Probe    — not yet checked whether the target's cache already exists
   //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)

@@ -573,6 +573,21 @@ void EpubReaderActivity::serviceBackgroundWork() {
   if (pendingGrayscale_.active) {
     return;  // AA still owed (display bus busy); it keeps priority over B
   }
+  // Background A's pass runs right after the page render, while the deferred AA still
+  // holds the just-rendered page (~10 KB) — its heap floor can refuse at that moment
+  // (measured: 55.9 KB free vs the 56 KB floor) and nothing re-arms it. Give it one
+  // retry per displayed page from the idle loop, now that AA has released that memory.
+  // B stays parked behind pendingPreRender until the retry has run, preserving priority.
+  if (!preRenderedPage.ready && !pendingPreRender && section && epub &&
+      section->currentPage + 1 < section->pageCount &&
+      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
+      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
+    preRenderRearmSpine_ = currentSpineIndex;
+    preRenderRearmPage_ = section->currentPage;
+    pendingPreRender = true;
+    requestUpdate();
+    return;
+  }
   stepBackgroundSectionBuild();
 }
 
