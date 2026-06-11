@@ -1,3 +1,6 @@
+#define DEBUG_MEMORY_CONSUMPTION 1
+#define DEBUG_BACKGROUND_WORK 1
+
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
 #endif
@@ -7,7 +10,6 @@
 //   B<nn%>  next-section background build percent (omitted when inactive)
 // and dumps A/B run+complete counters to serial every ~5s. Diagnostic aid for the
 // Background A/B work; compiled out (zero cost) when 0.
-#define DEBUG_BACKGROUND_WORK 1
 #ifndef DEBUG_BACKGROUND_WORK
 #define DEBUG_BACKGROUND_WORK 0
 #endif
@@ -100,8 +102,14 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 64 * 1024;
 // state across slices plus the parser working set, and unlike the foreground indexing path
 // it runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
 // risk OOM — the foreground blocking path remains the fallback. Overridable for tuning.
+//
+// Floor sizing: measured steady-state reading heap (X3, secondary buffer + pre-rendered
+// page live) is ~68 KB free, so the floor must sit below that to ever run. 56 KB
+// leaves B's ~45-50 KB peak dipping to ~18-23 KB free — above the ~15 KB min-free this
+// firmware already survives — and a low-memory parse degrades gracefully (truncated
+// result is discarded and left to the foreground blocking path).
 #ifndef BG_BUILD_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_MIN_FREE_HEAP_BYTES (72 * 1024)
+#define BG_BUILD_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
 #ifndef BG_BUILD_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_MIN_CONTIG_HEAP_BYTES (40 * 1024)  // 32 KB inflate ring + slack
@@ -567,10 +575,20 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
     return;
   }
   lastBgDebugLogMs_ = now;
-  LOG_INF("ERS", "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu | preReady=%d buildPct=%d",
+  // B state + gate inputs so a stalled B explains itself from the log alone (e.g. parked
+  // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
+  // little heap for Section::heapAllowsEmbeddedStyle()).
+  static constexpr const char* kBStateNames[] = {"probe", "waitheap", "building", "settled"};
+  LOG_INF("ERS",
+          "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d | preReady=%d "
+          "buildPct=%d free=%lu contig=%lu",
           static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
           static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
-          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_);
+          kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
+          lastRenderStats.embeddedStyle ? 1 : 0,
+          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
 #endif
 }
 
