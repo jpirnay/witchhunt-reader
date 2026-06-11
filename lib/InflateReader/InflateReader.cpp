@@ -22,9 +22,8 @@ bool InflateReader::init(const bool streaming, const size_t expectedOutputSize) 
     // Total output ≤ ring size guarantees no back-reference can outrun the ring, so a
     // known-small stream gets a correspondingly small ring. The 512 B floor guards
     // degenerate sizes (0 = unknown-empty entries) without meaningfully costing heap.
-    dictSize = (expectedOutputSize == 0)
-                   ? INFLATE_DICT_SIZE
-                   : std::min(INFLATE_DICT_SIZE, std::max<size_t>(expectedOutputSize, 512));
+    dictSize = (expectedOutputSize == 0) ? INFLATE_DICT_SIZE
+                                         : std::min(INFLATE_DICT_SIZE, std::max<size_t>(expectedOutputSize, 512));
     ringBuffer = static_cast<uint8_t*>(malloc(dictSize));
     if (!ringBuffer) return false;
     memset(ringBuffer, 0, dictSize);
