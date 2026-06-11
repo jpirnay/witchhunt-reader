@@ -409,7 +409,10 @@ extern "C" __attribute__((constructor(101))) void heapProbePreCppCtors() {
 static BootHeapProbe s_probeMainLast(5);
 
 void setup() {
-  s_heapOkSetupEntry = heap_caps_check_integrity_all(/*print_errors=*/false);
+  // print_errors=true: the corrupt block's address and overwritten values go to the
+  // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
+  // exact damaged block for THIS build so the written value can be symbolized.
+  s_heapOkSetupEntry = heap_caps_check_integrity_all(/*print_errors=*/true);
   {
     esp_ota_img_states_t otaState;
     const esp_partition_t* running = esp_ota_get_running_partition();
