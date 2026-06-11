@@ -936,8 +936,8 @@ bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
   // file buffers; everything else (hot/negative caches) allocates in small nodes.
   // Deliberately silent: callers decide whether a refusal is worth a log line —
   // background gates re-check this often and must not spam.
-  const uint32_t requiredContig = std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
-                                                     static_cast<uint32_t>(cssRuleCount) * 16 + 8 * 1024);
+  const uint32_t requiredContig =
+      std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES, static_cast<uint32_t>(cssRuleCount) * 16 + 8 * 1024);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;
