@@ -71,6 +71,12 @@ class GfxRenderer {
   // as before, concentrated in a single pointer instead of four fields.
   mutable FontCacheManager* fontCacheManager_ = nullptr;
   mutable std::atomic<unsigned int> refreshOverride = REFRESH_OVERRIDE_NONE;
+  // Atomically consume a pending setNextDisplayRefreshMode() override: if one is set, clear it
+  // and return its mode; otherwise return `requested`. Shared by displayBuffer() and
+  // triggerDisplay() so the override is honored on BOTH the blocking and non-blocking display
+  // paths (otherwise a HALF set before a triggerDisplay() render would persist and leak onto a
+  // later displayBuffer() turn).
+  HalDisplay::RefreshMode consumeRefreshOverride(HalDisplay::RefreshMode requested) const;
 
   void renderChar(const EpdFontFamily& fontFamily, uint32_t cp, int* x, int* y, bool pixelState,
                   EpdFontFamily::Style style) const;
@@ -162,12 +168,9 @@ class GfxRenderer {
   // FreeRTOS semaphore) until BUSY deasserts, then does post-waveform work.
   // Both must be called from the render task; no other task may call SPI
   // display methods between triggerDisplay() and completeDisplay().
-  void triggerDisplay(HalDisplay::RefreshMode mode = HalDisplay::FAST_REFRESH, bool turnOffScreen = false) const {
-    display.triggerDisplay(mode, turnOffScreen);
-    // triggerDisplay swaps display buffers; keep renderer's cached pointer in
-    // sync so subsequent draws/grayscale passes target the active write buffer.
-    frameBuffer = display.getFrameBuffer();
-  }
+  // Honors a pending setNextDisplayRefreshMode() override (see consumeRefreshOverride);
+  // defined out-of-line in the .cpp so it can share that logic with displayBuffer().
+  void triggerDisplay(HalDisplay::RefreshMode mode = HalDisplay::FAST_REFRESH, bool turnOffScreen = false) const;
   void completeDisplay() const {
     display.completeDisplay();
     // Match displayBuffer(): reseed RED RAM from the current BW frame after the
@@ -176,6 +179,10 @@ class GfxRenderer {
     display.syncRedRamFromFrameBuffer();
   }
   bool isRefreshPending() const { return display.isRefreshPending(); }
+  // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
+  HalDisplay::RefreshMode getLastRefreshMode() const { return display.getLastRefreshMode(); }
+  // Diagnostics: last X4 displayMode byte (0x0C fast / 0x1C OTP-flash / 0xD4 half / 0x34 full).
+  uint8_t getLastDisplayModeByte() const { return display.getLastDisplayModeByte(); }
   void displayWindow(int x, int y, int width, int height, bool turnOffScreen = false) const;
   void invertScreen() const;
   void clearScreen(uint8_t color = 0xFF) const;

@@ -76,7 +76,7 @@ jobs:
           echo "RC_TAG=${VERSION}-rc.${NEXT_RC}" >> $GITHUB_ENV
           echo "RELEASE_NOTES_PATH=${RUNNER_TEMP}/release-notes.md" >> $GITHUB_ENV
 
-      - name: Build CrossPoint Release Candidate
+      - name: Build Witch(hunt) Reader Release Candidate
         env:
           CROSSPOINT_RC_VERSION: ${{ env.RC_TAG }}
         run: pio run -e gh_release_rc

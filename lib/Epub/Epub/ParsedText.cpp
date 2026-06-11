@@ -221,12 +221,18 @@ int ParsedText::widthForLine(const int lineIndex, const int lineHeight, const in
 }
 
 void ParsedText::layoutAndExtractLines(
-    const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+    const GfxRenderer& renderer, const int bodyFontId, const uint16_t viewportWidth,
     const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
     const bool includeLastLine, const int16_t blockStartY, const int lineHeight) {
   if (words.empty()) {
     return;
   }
+  // Heading blocks lay out (and below render) with a taller real font instead of scaling the
+  // body font. Resolve the effective fontId once; all measurement helpers below take it as
+  // their fontId argument, so widths/kerning/indent are computed in the heading font and stay
+  // consistent with TextBlock::render(). For the scale-fallback path headingFontId==0 and this
+  // is just the body font (fontSizeMultiplier still applies inside the helpers).
+  const int fontId = blockStyle.headingFontId != 0 ? blockStyle.headingFontId : bodyFontId;
 
   // Apply fixed transforms before any per-line layout work.
   // Paragraph indent only applies to the first layout pass; skip on continuations.

@@ -1407,8 +1407,8 @@ void CrossPointWebServer::handleGetSettings() const {
   if (rejectIfLowMemory(server.get())) return;
   LOG_WEB_MEM("settings_enter");
 
-  // Iterate the static list by const reference — no copy, no ~14KB heap spike.
-  const auto& settings = SettingsListDetail::list;
+  // Build the settings list at runtime; this avoids the expensive static global initializer.
+  const auto settings = getSettingsList();
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
@@ -1554,8 +1554,9 @@ void CrossPointWebServer::handlePostSettings() {
 
   // Iterate the static list by reference — no copy, no 14KB heap spike.
   int applied = 0;
+  const auto settings = getSettingsList();
 
-  for (const auto& s : SettingsListDetail::list) {
+  for (const auto& s : settings) {
     if (!s.key) continue;
     if (!doc[s.key].is<JsonVariant>()) continue;
 

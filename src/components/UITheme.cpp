@@ -38,7 +38,13 @@ uint8_t normalizeStatusBarItemsPosition(const uint8_t position) {
 }
 }  // namespace
 
+#include <BootHeapProbe.h>
+
+// The singleton's ctor is the only global constructor that executes real code
+// (LOG_DBG + make_unique of a theme) — bracket it with static-init heap probes (slots 2/3).
+static BootHeapProbe s_probePreTheme(2);
 UITheme UITheme::instance;
+static BootHeapProbe s_probePostTheme(3);
 
 UITheme::UITheme() {
   auto themeType = static_cast<CrossPointSettings::UI_THEME>(SETTINGS.uiTheme);

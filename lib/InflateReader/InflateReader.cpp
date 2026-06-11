@@ -1,5 +1,6 @@
 #include "InflateReader.h"
 
+#include <algorithm>
 #include <cstring>
 #include <type_traits>
 
@@ -13,16 +14,22 @@ static_assert(std::is_standard_layout<InflateReader>::value,
 
 InflateReader::~InflateReader() { deinit(); }
 
-bool InflateReader::init(const bool streaming) {
+bool InflateReader::init(const bool streaming, const size_t expectedOutputSize) {
   deinit();  // free any previously allocated ring buffer and reset state
 
+  size_t dictSize = 0;
   if (streaming) {
-    ringBuffer = static_cast<uint8_t*>(malloc(INFLATE_DICT_SIZE));
+    // Total output ≤ ring size guarantees no back-reference can outrun the ring, so a
+    // known-small stream gets a correspondingly small ring. The 512 B floor guards
+    // degenerate sizes (0 = unknown-empty entries) without meaningfully costing heap.
+    dictSize = (expectedOutputSize == 0) ? INFLATE_DICT_SIZE
+                                         : std::min(INFLATE_DICT_SIZE, std::max<size_t>(expectedOutputSize, 512));
+    ringBuffer = static_cast<uint8_t*>(malloc(dictSize));
     if (!ringBuffer) return false;
-    memset(ringBuffer, 0, INFLATE_DICT_SIZE);
+    memset(ringBuffer, 0, dictSize);
   }
 
-  uzlib_uncompress_init(&decomp, ringBuffer, ringBuffer ? INFLATE_DICT_SIZE : 0);
+  uzlib_uncompress_init(&decomp, ringBuffer, ringBuffer ? dictSize : 0);
   return true;
 }
 

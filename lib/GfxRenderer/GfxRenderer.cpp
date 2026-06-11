@@ -1006,7 +1006,12 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
         const int pos = srcY * srcW + srcX;
         const uint8_t byte = bitmap[pos >> 2];
         const uint8_t raw = (byte >> ((3 - (pos & 3)) * 2)) & 0x3;
-        if (raw >= 2) {
+        // Draw raw in {1,2,3} -- i.e. every non-white source pixel -- to match the BW glyph
+        // path (drawMask 0x0E). Headings are *upscaled*, so dropping the light-gray (raw==1)
+        // pixels here erased glyph edges and thin horizontal strokes, which showed up as
+        // thinned glyphs and "every other line" stripes. (The SUP/SUB *downscaler* keeps the
+        // raw>=2 threshold on purpose, to stay crisp when shrinking.)
+        if (raw >= 1) {
           renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
         }
       }
@@ -2374,19 +2379,33 @@ void GfxRenderer::setNextDisplayRefreshMode(const HalDisplay::RefreshMode refres
   refreshOverride.store(encodeRefreshMode(refreshMode), std::memory_order_release);
 }
 
-void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
-  auto effectiveMode = refreshMode;
+HalDisplay::RefreshMode GfxRenderer::consumeRefreshOverride(const HalDisplay::RefreshMode requested) const {
   unsigned int overrideValue = refreshOverride.load(std::memory_order_acquire);
-  if (overrideValue != REFRESH_OVERRIDE_NONE) {
-    unsigned int expected = overrideValue;
-    if (refreshOverride.compare_exchange_strong(expected, REFRESH_OVERRIDE_NONE, std::memory_order_acq_rel,
-                                                std::memory_order_acquire)) {
-      effectiveMode = decodeRefreshMode(overrideValue);
-    } else if (expected != REFRESH_OVERRIDE_NONE) {
-      effectiveMode = decodeRefreshMode(expected);
-      refreshOverride.store(REFRESH_OVERRIDE_NONE, std::memory_order_release);
-    }
+  if (overrideValue == REFRESH_OVERRIDE_NONE) {
+    return requested;
   }
+  unsigned int expected = overrideValue;
+  if (refreshOverride.compare_exchange_strong(expected, REFRESH_OVERRIDE_NONE, std::memory_order_acq_rel,
+                                              std::memory_order_acquire)) {
+    return decodeRefreshMode(overrideValue);
+  }
+  if (expected != REFRESH_OVERRIDE_NONE) {
+    refreshOverride.store(REFRESH_OVERRIDE_NONE, std::memory_order_release);
+    return decodeRefreshMode(expected);
+  }
+  return requested;
+}
+
+void GfxRenderer::triggerDisplay(const HalDisplay::RefreshMode mode, const bool turnOffScreen) const {
+  const HalDisplay::RefreshMode effectiveMode = consumeRefreshOverride(mode);
+  display.triggerDisplay(effectiveMode, turnOffScreen);
+  // triggerDisplay swaps display buffers; keep renderer's cached pointer in
+  // sync so subsequent draws/grayscale passes target the active write buffer.
+  frameBuffer = display.getFrameBuffer();
+}
+
+void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const {
+  const auto effectiveMode = consumeRefreshOverride(refreshMode);
 
   if (start_ms_valid) {
     auto elapsed = millis() - start_ms;

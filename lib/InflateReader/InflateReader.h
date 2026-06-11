@@ -44,10 +44,14 @@ class InflateReader {
   InflateReader(const InflateReader&) = delete;
   InflateReader& operator=(const InflateReader&) = delete;
 
-  // Initialise decompressor. streaming=true allocates a 32KB ring buffer needed
-  // when read() or readAtMost() will be called multiple times.
+  // Initialise decompressor. streaming=true allocates the back-reference ring buffer
+  // needed when read() or readAtMost() will be called multiple times.
+  // expectedOutputSize (streaming only): total uncompressed size of the stream when
+  // known, 0 when unknown. A deflate back-reference can never reach further back than
+  // the bytes produced so far, so the ring is sized min(32 KB, expectedOutputSize) —
+  // a 3 KB chapter then costs a 3 KB ring instead of 32 KB. Pass 0 for the full window.
   // Returns false only in streaming mode if the ring buffer allocation fails.
-  bool init(bool streaming = false);
+  bool init(bool streaming = false, size_t expectedOutputSize = 0);
 
   // Release the ring buffer and reset internal state.
   void deinit();

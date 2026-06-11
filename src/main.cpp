@@ -44,6 +44,11 @@
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+#include <BootHeapProbe.h>
+// Static-init heap probes bracketing this TU's globals (slots 4/5); see BootHeapProbe.h.
+static BootHeapProbe s_probeMainFirst(4);
+#endif
 MappedInputManager mappedInputManager(gpio);
 ButtonEventManager buttonEventManager(mappedInputManager);
 ButtonEventManager& globalButtonEvents() { return buttonEventManager; }
@@ -384,7 +389,39 @@ void ensureSdFontLoadedForPath(const char* path) {
   }
 }
 
+// --- Temporary boot-phase heap-corruption bisect probes -------------------------------
+// Field data shows the heap can already be corrupt at the existing setup() check even
+// on the boot AFTER esp_restart()'s full DRAM re-init — i.e. the corruption is
+// re-created during early init, not inherited from the crashed session. These probes
+// record WHICH phase breaks it; results are logged once serial is up.
+//   preCtors  — C constructor at priority 101, runs before all C++ global ctors
+//               (default priority 65535). false here ⇒ IDF/Arduino SDK init.
+//   setupEntry — first statement of setup(). false here (with preCtors true) ⇒ one of
+//               OUR C++ global constructors.
+//   (the existing post-OTA check then isolates the OTA/NVS block)
+// Remove once the writer is found.
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+static bool s_heapOkPreCtors = true;
+static bool s_heapOkSetupEntry = true;
+extern "C" __attribute__((constructor(101))) void heapProbePreCppCtors() {
+  s_heapOkPreCtors = heap_caps_check_integrity_all(/*print_errors=*/false);
+}
+#endif
+
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+// Last probe of this TU — constructed after every global declared above (slot 5).
+static BootHeapProbe s_probeMainLast(5);
+#endif
+
 void setup() {
+  // print_errors=true: the corrupt block's address and overwritten values go to the
+  // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
+  // exact damaged block for THIS build so the written value can be symbolized.
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+  s_heapOkSetupEntry = heap_caps_check_integrity_all(/*print_errors=*/true);
+#else
+  heap_caps_check_integrity_all(/*print_errors=*/true);
+#endif
   {
     esp_ota_img_states_t otaState;
     const esp_partition_t* running = esp_ota_get_running_partition();
@@ -460,10 +497,42 @@ void setup() {
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
-  // Re-log the boot-time heap integrity result now that serial is open.
-  // If false, the heap was already corrupt before any application code ran —
-  // look for SDK/Arduino static-init corruption rather than our own code.
-  LOG_INF("MEM", "Heap integrity at boot: %s", heapIntactAtBoot ? "OK" : "CORRUPT");
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+  // Re-log the boot-time heap integrity results now that serial is open. The three
+  // probes bracket the boot phases: preCtors CORRUPT ⇒ IDF/Arduino SDK init;
+  // setupEntry CORRUPT (preCtors OK) ⇒ one of our C++ global constructors;
+  // postOta CORRUPT (setupEntry OK) ⇒ the OTA-rollback/NVS block at the top of setup().
+  LOG_INF("MEM", "Heap integrity at boot: preCtors=%s setupEntry=%s postOta=%s", s_heapOkPreCtors ? "OK" : "CORRUPT",
+          s_heapOkSetupEntry ? "OK" : "CORRUPT", heapIntactAtBoot ? "OK" : "CORRUPT");
+  {
+    // Static-init bisect pairs (see BootHeapProbe.h). A CORRUPT slot whose paired "pre"
+    // slot is OK convicts the global bracketed by that pair; all-OK pairs with
+    // setupEntry=CORRUPT mean the writer is a global in an unprobed translation unit.
+    const bool* s = bootHeapProbeSlots();
+    LOG_INF(
+        "MEM",
+        "Static-init probes: preDisplay=%s postDisplay=%s preTheme=%s postTheme=%s mainFirst=%s mainLast=%s "
+        "preHyphenation=%s postHyphenation=%s preGPIO=%s postGPIO=%s prePower=%s postPower=%s preTilt=%s postTilt=%s",
+        s[0] ? "OK" : "CORRUPT", s[1] ? "OK" : "CORRUPT", s[2] ? "OK" : "CORRUPT", s[3] ? "OK" : "CORRUPT",
+        s[4] ? "OK" : "CORRUPT", s[5] ? "OK" : "CORRUPT", s[6] ? "OK" : "CORRUPT", s[7] ? "OK" : "CORRUPT",
+        s[8] ? "OK" : "CORRUPT", s[9] ? "OK" : "CORRUPT", s[10] ? "OK" : "CORRUPT", s[11] ? "OK" : "CORRUPT",
+        s[12] ? "OK" : "CORRUPT", s[13] ? "OK" : "CORRUPT");
+  }
+  if (!s_heapOkSetupEntry) {
+    // Corruption geometry: the bad head sits at SOC_ROM_STACK_START - 0x2000 across
+    // builds — exactly 8 KB below the heap's top boundary, which abuts the ROM/startup
+    // stack that static init runs on. Dump the words around the canary: a downward
+    // stack spill leaves 0x42xxxxxx return addresses and 0x3fcdxxxx frame pointers;
+    // anything else points at a different writer.
+    const uintptr_t suspect = SOC_ROM_STACK_START - 0x2000;
+    const uint32_t* base = reinterpret_cast<const uint32_t*>(suspect - 0x40);
+    for (int row = 0; row < 8; row++) {
+      LOG_INF("MEM", "dump %08x: %08lx %08lx %08lx %08lx", static_cast<unsigned>(suspect - 0x40 + row * 16),
+              static_cast<unsigned long>(base[row * 4]), static_cast<unsigned long>(base[row * 4 + 1]),
+              static_cast<unsigned long>(base[row * 4 + 2]), static_cast<unsigned long>(base[row * 4 + 3]));
+    }
+  }
+#endif
   logStartupMemory("after_hw_init");
 
   // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
@@ -858,13 +927,24 @@ void loop() {
           enterDeepSleep();
           return;  // enterDeepSleep() never returns, but return here to stop processing
         case BA::BTN_FORCE_REFRESH: {
-          RenderLock lock;
-          renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          // In the reader, route through the activity so it re-displays the CURRENT page in
+          // the requested mode (a raw displayBuffer() here can flush a Background-A pre-render
+          // of the next page, which looks like a page turn). Elsewhere, raw-flush is correct.
+          if (activityManager.isReaderActivity()) {
+            activityManager.dispatchButtonAction(BA::BTN_FORCE_REFRESH);
+          } else {
+            RenderLock lock;
+            renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+          }
           break;
         }
         case BA::BTN_FORCE_FAST_REFRESH: {
-          RenderLock lock;
-          renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+          if (activityManager.isReaderActivity()) {
+            activityManager.dispatchButtonAction(BA::BTN_FORCE_FAST_REFRESH);
+          } else {
+            RenderLock lock;
+            renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+          }
           break;
         }
         case BA::BTN_OPEN_TOC:

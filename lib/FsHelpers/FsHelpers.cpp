@@ -1,6 +1,7 @@
 #include "FsHelpers.h"
 
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 
 namespace FsHelpers {

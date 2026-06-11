@@ -78,69 +78,29 @@ bool hasEquivalentAcquisitionLink(const OpdsEntry& entry, const OpdsAcquisitionL
 }  // namespace
 
 OpdsParser::OpdsParser() {
-  parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  if (!saxParser_.init(this, startElement, endElement, characterData)) {
     errorOccured = true;
     LOG_DBG("OPDS", "Couldn't allocate memory for parser");
   }
 }
 
-OpdsParser::~OpdsParser() {
-  if (parser) {
-    XML_StopParser(parser, XML_FALSE);
-    XML_SetElementHandler(parser, nullptr, nullptr);
-    XML_SetCharacterDataHandler(parser, nullptr);
-    XML_ParserFree(parser);
-    parser = nullptr;
-  }
-}
+OpdsParser::~OpdsParser() = default;
 
 size_t OpdsParser::write(uint8_t c) { return write(&c, 1); }
 
 size_t OpdsParser::write(const uint8_t* xmlData, const size_t length) {
   if (errorOccured) return length;
 
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
-
-  const char* currentPos = reinterpret_cast<const char*>(xmlData);
-  size_t remaining = length;
-  constexpr size_t chunkSize = 1024;
-
-  while (remaining > 0) {
-    const size_t toRead = remaining < chunkSize ? remaining : chunkSize;
-    void* const buf = XML_GetBuffer(parser, toRead);
-    if (!buf) {
-      errorOccured = true;
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return length;
-    }
-
-    memcpy(buf, currentPos, toRead);
-
-    if (XML_ParseBuffer(parser, static_cast<int>(toRead), 0) == XML_STATUS_ERROR) {
-      errorOccured = true;
-      XML_ParserFree(parser);
-      parser = nullptr;
-      return length;
-    }
-    currentPos += toRead;
-    remaining -= toRead;
+  if (!saxParser_.feed(xmlData, length)) {
+    errorOccured = true;
   }
   return length;
 }
 
 void OpdsParser::flush() {
-  if (!parser) {
+  if (errorOccured) return;
+  if (!saxParser_.finalize()) {
     errorOccured = true;
-    return;
-  }
-  if (XML_Parse(parser, nullptr, 0, XML_TRUE) != XML_STATUS_OK) {
-    errorOccured = true;
-    XML_ParserFree(parser);
-    parser = nullptr;
   }
 }
 
@@ -156,14 +116,14 @@ void OpdsParser::clear() {
   inEntry = inTitle = inAuthor = inAuthorName = inId = false;
 }
 
-const char* OpdsParser::findAttribute(const XML_Char** atts, const char* name) {
+const char* OpdsParser::findAttribute(const char** atts, const char* name) {
   for (int i = 0; atts[i]; i += 2) {
     if (strcmp(atts[i], name) == 0) return atts[i + 1];
   }
   return nullptr;
 }
 
-void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
+void OpdsParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<OpdsParser*>(userData);
 
   if (strcmp(name, "link") == 0 || strstr(name, ":link") != nullptr) {
@@ -234,7 +194,7 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
   }
 }
 
-void XMLCALL OpdsParser::endElement(void* userData, const XML_Char* name) {
+void OpdsParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<OpdsParser*>(userData);
 
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
@@ -261,7 +221,7 @@ void XMLCALL OpdsParser::endElement(void* userData, const XML_Char* name) {
   }
 }
 
-void XMLCALL OpdsParser::characterData(void* userData, const XML_Char* s, const int len) {
+void OpdsParser::characterData(void* userData, const char* s, const int len) {
   auto* self = static_cast<OpdsParser*>(userData);
   if (self->inTitle || self->inAuthorName || self->inId) {
     self->currentText.append(s, len);

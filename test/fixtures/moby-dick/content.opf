@@ -1,0 +1,122 @@
+<?xml version='1.0' encoding='UTF-8'?>
+
+<package xmlns:opf="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+  <metadata>
+    <dc:rights>Public domain in the USA.</dc:rights>
+    <dc:identifier opf:scheme="URI" id="id">http://www.gutenberg.org/2701</dc:identifier>
+    <dc:creator opf:file-as="Melville, Herman">Herman Melville</dc:creator>
+    <dc:title>Moby Dick; Or, The Whale</dc:title>
+    <dc:language xsi:type="dcterms:RFC4646">en</dc:language>
+    <dc:subject>Whaling -- Fiction</dc:subject>
+    <dc:subject>Sea stories</dc:subject>
+    <dc:subject>Psychological fiction</dc:subject>
+    <dc:subject>Ship captains -- Fiction</dc:subject>
+    <dc:subject>Adventure stories</dc:subject>
+    <dc:subject>Mentally ill -- Fiction</dc:subject>
+    <dc:subject>Ahab, Captain (Fictitious character) -- Fiction</dc:subject>
+    <dc:subject>Whales -- Fiction</dc:subject>
+    <dc:subject>Whaling ships -- Fiction</dc:subject>
+    <dc:date opf:event="publication">2001-07-01</dc:date>
+    <dc:date opf:event="conversion">2026-05-02T07:56:46.036974+00:00</dc:date>
+    <dc:source>https://www.gutenberg.org/files/2701/2701-h/2701-h.htm</dc:source>
+    <meta name="cover" content="id-4387449403645385311"/>
+  </metadata>
+  <manifest>
+    <!--Image: 780 x 1227 size=257017 q=30-->
+    <item href="5052452836713769443_cover.jpg" id="id-4387449403645385311" media-type="image/jpeg"/>
+    <item href="pgepub.css" id="item1" media-type="text/css"/>
+    <item href="0.css" id="item2" media-type="text/css"/>
+    <!--Chunk: size=58216 Split on div-->
+    <item href="3308270851576161417_2701-h-0.htm.html" id="pg-header" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=63945 Split on div-->
+    <item href="3308270851576161417_2701-h-1.htm.html" id="item3" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=58932 Split on div-->
+    <item href="3308270851576161417_2701-h-2.htm.html" id="item4" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=82520 Split on p-->
+    <item href="3308270851576161417_2701-h-3.htm.html" id="item5" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=54762 Split on div-->
+    <item href="3308270851576161417_2701-h-4.htm.html" id="item6" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=57976 Split on div-->
+    <item href="3308270851576161417_2701-h-5.htm.html" id="item7" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=51958 Split on div-->
+    <item href="3308270851576161417_2701-h-6.htm.html" id="item8" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=59669 Split on div-->
+    <item href="3308270851576161417_2701-h-7.htm.html" id="item9" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=72586 Split on div-->
+    <item href="3308270851576161417_2701-h-8.htm.html" id="item10" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=54850 Split on div-->
+    <item href="3308270851576161417_2701-h-9.htm.html" id="item11" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=51240 Split on div-->
+    <item href="3308270851576161417_2701-h-10.htm.html" id="item12" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=72309 Split on div-->
+    <item href="3308270851576161417_2701-h-11.htm.html" id="item13" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=52832 Split on div-->
+    <item href="3308270851576161417_2701-h-12.htm.html" id="item14" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=54654 Split on div-->
+    <item href="3308270851576161417_2701-h-13.htm.html" id="item15" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=66609 Split on div-->
+    <item href="3308270851576161417_2701-h-14.htm.html" id="item16" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=54423 Split on div-->
+    <item href="3308270851576161417_2701-h-15.htm.html" id="item17" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=62642 Split on div-->
+    <item href="3308270851576161417_2701-h-16.htm.html" id="item18" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=53535 Split on div-->
+    <item href="3308270851576161417_2701-h-17.htm.html" id="item19" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=54729 Split on div-->
+    <item href="3308270851576161417_2701-h-18.htm.html" id="item20" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=69420 Split on div-->
+    <item href="3308270851576161417_2701-h-19.htm.html" id="item21" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=57010 Split on div-->
+    <item href="3308270851576161417_2701-h-20.htm.html" id="item22" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=51588 Split on div-->
+    <item href="3308270851576161417_2701-h-21.htm.html" id="item23" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=53498 Split on div-->
+    <item href="3308270851576161417_2701-h-22.htm.html" id="item24" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=59281 Split on div-->
+    <item href="3308270851576161417_2701-h-23.htm.html" id="item25" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=56273 Split on div-->
+    <item href="3308270851576161417_2701-h-24.htm.html" id="item26" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=55092 Split on div-->
+    <item href="3308270851576161417_2701-h-25.htm.html" id="item27" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=2062 Split on div.section-->
+    <item href="3308270851576161417_2701-h-26.htm.html" id="item28" media-type="application/xhtml+xml"/>
+    <!--Chunk: size=19590-->
+    <item href="3308270851576161417_2701-h-27.htm.html" id="pg-footer" media-type="application/xhtml+xml"/>
+    <item href="toc.ncx" id="ncx" media-type="application/x-dtbncx+xml"/>
+    <item href="wrap0000.html" id="coverpage-wrapper" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="coverpage-wrapper" linear="yes"/>
+    <itemref idref="pg-header" linear="yes"/>
+    <itemref idref="item3" linear="yes"/>
+    <itemref idref="item4" linear="yes"/>
+    <itemref idref="item5" linear="yes"/>
+    <itemref idref="item6" linear="yes"/>
+    <itemref idref="item7" linear="yes"/>
+    <itemref idref="item8" linear="yes"/>
+    <itemref idref="item9" linear="yes"/>
+    <itemref idref="item10" linear="yes"/>
+    <itemref idref="item11" linear="yes"/>
+    <itemref idref="item12" linear="yes"/>
+    <itemref idref="item13" linear="yes"/>
+    <itemref idref="item14" linear="yes"/>
+    <itemref idref="item15" linear="yes"/>
+    <itemref idref="item16" linear="yes"/>
+    <itemref idref="item17" linear="yes"/>
+    <itemref idref="item18" linear="yes"/>
+    <itemref idref="item19" linear="yes"/>
+    <itemref idref="item20" linear="yes"/>
+    <itemref idref="item21" linear="yes"/>
+    <itemref idref="item22" linear="yes"/>
+    <itemref idref="item23" linear="yes"/>
+    <itemref idref="item24" linear="yes"/>
+    <itemref idref="item25" linear="yes"/>
+    <itemref idref="item26" linear="yes"/>
+    <itemref idref="item27" linear="yes"/>
+    <itemref idref="item28" linear="yes"/>
+    <itemref idref="pg-footer" linear="yes"/>
+  </spine>
+  <guide>
+    <reference type="cover" title="Cover" href="wrap0000.html"/>
+  </guide>
+</package>

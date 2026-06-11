@@ -1,5 +1,18 @@
+#define DEBUG_MEMORY_CONSUMPTION 1
+#define DEBUG_BACKGROUND_WORK 1
+#define DEBUG_BACKGROUND_OVERLAY 0
+
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
+#endif
+
+// When 1, draws a small overlay in the status bar showing background-work progress:
+//   A<.|x>  next-page pre-render: '.' running/scheduled, 'x' ready
+//   B<nn%>  next-section background build percent (omitted when inactive)
+// and dumps A/B run+complete counters to serial every ~5s. Diagnostic aid for the
+// Background A/B work; compiled out (zero cost) when 0.
+#ifndef DEBUG_BACKGROUND_WORK
+#define DEBUG_BACKGROUND_WORK 0
 #endif
 
 #include "EpubReaderActivity.h"
@@ -53,6 +66,20 @@ namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
 
+// Human-readable effective refresh mode for the page-summary diagnostic log.
+const char* refreshModeName(HalDisplay::RefreshMode mode) {
+  switch (mode) {
+    case HalDisplay::FULL_REFRESH:
+      return "full";
+    case HalDisplay::HALF_REFRESH:
+      return "half";
+    case HalDisplay::FAST_REFRESH:
+      return "fast";
+    default:
+      return "?";
+  }
+}
+
 // Parse a printed-page label as a non-negative integer. Returns nullopt for empty strings,
 // strings with non-digit characters (e.g. roman "iv"), and overflow. Used both to gate the
 // "go to printed page" menu item and to compute min/max for the numeric input.
@@ -70,11 +97,59 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
 constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 
 // Pre-render of the next page within the current chapter only runs when heap is healthy.
-constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 64 * 1024;
+// 56 KB, evidence-based (X3, 2026-06-11): normal foreground renders complete fine from
+// ~52 KB free, and post-render free heap sits at ~57-65 KB — the previous 64 KB floor
+// silently disabled Background A whenever steady free dipped to ~65 KB (e.g. right
+// after a cache rebuild), which also starved Background B behind it.
+constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 56 * 1024;
+
+// Background B (next-section pre-build) heap gates. Unlike the foreground indexing path,
+// B runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
+// risk OOM — the foreground blocking path remains the fallback. Overridable for tuning.
+//
+// The sliced build runs in two phases with disjoint peaks (see Section::runBuildParse):
+//   extract — holds the inflate ring (sized to the entry, ≤32 KB) + ~2 KB scratch, but
+//             no layout working set yet;
+//   parse   — holds the parser's layout working set (~20 KB), with no ZIP state.
+// Floors derived from measured X3 numbers (2026-06-11 serial logs): setup ≈ 12 KB (CSS
+// index + visitor), observed safe min-free ≈ 15 KB → ~16 KB reserve.
+// Required free heap = max(BG_BUILD_PARSE_MIN_FREE, BG_BUILD_EXTRACT_BASE + ring).
+#ifndef BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES (48 * 1024)  // setup + working set + reserve
+#endif
+#ifndef BG_BUILD_EXTRACT_BASE_HEAP_BYTES
+#define BG_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)  // setup + scratch + reserve (ring added per target)
+#endif
+#ifndef BG_BUILD_MIN_CONTIG_HEAP_BYTES
+#define BG_BUILD_MIN_CONTIG_HEAP_BYTES (24 * 1024)  // parse-phase floor; raised to ring+8 KB while extracting
+#endif
+// Per-slice time budget for a Background-B parse step. Conservative start (handoff plan
+// suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
+constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
+
+#if DEBUG_BACKGROUND_WORK
+// Temporary corruption tripwire (debug builds): walks the entire heap and names the
+// checkpoint that sees damage, to localize an intermittent heap corruption observed on
+// X3 (multi_heap_free assert / "Bad head" after section builds). Once the heap is
+// damaged EVERY later checkpoint reports it, so only the FIRST line bounds the writer:
+// it acted between the previous clean checkpoint and that one. (heap_caps' own detail
+// prints go to the IDF console, not the app logger, so they don't appear in captures.)
+// Remove once the writer is found. Costs a few ms per call — debug-only.
+void checkHeapIntegrity(const char* checkpoint) {
+  static bool corruptSeen = false;
+  if (heap_caps_check_integrity_all(true)) {
+    return;
+  }
+  LOG_ERR("ERS", "HEAP CORRUPT at checkpoint: %s%s", checkpoint, corruptSeen ? " (repeat)" : " <-- FIRST");
+  corruptSeen = true;
+}
+#else
+inline void checkHeapIntegrity(const char*) {}
+#endif
 
 #if DEBUG_MEMORY_CONSUMPTION
 void logReaderMemSnapshot(const char* stage) {
@@ -171,6 +246,10 @@ int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
   logReaderMemSnapshot("onEnter_begin");
+  // Bisect anchor: corruption already present HERE means the writer ran before the
+  // reader (Home sidecar JPEG conversion / thumb generation are prime suspects — see
+  // the long-standing "heap may be corrupt after image decode failures" note below).
+  checkHeapIntegrity("reader_onEnter");
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
@@ -277,6 +356,7 @@ void EpubReaderActivity::onEnter() {
   logReaderMemSnapshot("onEnter_before_request_update");
   requestUpdate();
   logReaderMemSnapshot("onEnter_ready");
+  checkHeapIntegrity("reader_onEnter_ready");
 }
 
 void EpubReaderActivity::onExit() {
@@ -305,6 +385,9 @@ void EpubReaderActivity::onExit() {
   APP_STATE.saveToFile();
   // Release any deferred AA page before tearing down the section/epub.
   pendingGrayscale_ = {};
+  // Abort any in-flight Background-B build (deletes its partial cache file) before the
+  // epub it references goes away.
+  resetBackgroundBuild();
   section.reset();
   UITheme::getInstance().getMutableTheme().onBookWillClose(epub ? epub->getPath() : "", epub.get(), nullptr, nullptr);
   epub.reset();
@@ -318,6 +401,9 @@ void EpubReaderActivity::loop() {
     finish();
     return;
   }
+
+  // Debug-only: periodic serial dump of background-work counters (no-op in release).
+  serviceBackgroundDebugLog();
 
   if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
     pendingProgressSave.pending.store(false, std::memory_order_relaxed);
@@ -419,38 +505,9 @@ void EpubReaderActivity::loop() {
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     if (!delayedPrevTurn && !delayedNextTurn) {
-      // Input-idle: run the deferred AA pass if one is pending.
-      // Guard: do not start the AA pass while the render task is still inside
-      // completeDisplay() — both paths touch the SPI display bus and must not
-      // run concurrently. isRefreshPending() is true from triggerDisplay() until
-      // completeDisplay() clears it; when it returns false the render task has
-      // finished all post-waveform SPI work and it is safe to issue new SPI writes.
-      if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
-        // Serialize deferred AA with the render task. This prevents loop-side
-        // grayscale SPI/framebuffer work from racing with render() updates.
-        RenderLock lock;
-        if (pendingGrayscale_.active && pendingGrayscale_.page && !renderer.isRefreshPending()) {
-          pendingGrayscale_.active = false;
-          renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
-          const int fontId = pendingGrayscale_.fontId;
-          const int marginLeft = pendingGrayscale_.marginLeft;
-          const int contentTop = pendingGrayscale_.contentTop;
-          const Page* pagePtr = pendingGrayscale_.page.get();
-          const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
-            pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
-            pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
-          });
-          // The panel now shows the AA-dithered render, but cleanupGrayscaleWithPreviousBuffer()
-          // only resyncs RED RAM / frameBufferActive to the plain BW page (the correct content
-          // baseline, but not what's physically on screen). On X4 a fast differential would diff
-          // the next page against that BW bitmap while the panel shows dithered glyph edges,
-          // leaving ghosts where the two differ. Force HALF_REFRESH so the next page turn drives
-          // every pixel absolutely instead of trusting a stale physical-state assumption.
-          if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
-          pendingGrayscale_.page.reset();
-          LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
-        }
-      }
+      // Input-idle and no page turn pending: hand the idle slice to the background
+      // routines (deferred AA, then Background A pre-render, then Background B).
+      serviceBackgroundWork();
       return;
     }
     prevTriggered = delayedPrevTurn;
@@ -528,6 +585,265 @@ void EpubReaderActivity::loop() {
     pageTurn(false);
   } else {
     pageTurn(true);
+  }
+}
+
+void EpubReaderActivity::serviceBackgroundWork() {
+  // Priority order, highest first. Each routine self-gates on its own pending state and
+  // is expected to do a bounded amount of work and return so the next loop tick can
+  // service input. Background A is already scheduled inside render() via pendingPreRender
+  // and runs as the PreRender pass when requestUpdate() fires; from the idle loop we run
+  // the deferred AA pass first, then Background B (next-section pre-build) — B also
+  // self-gates on A having finished, since A drives perceived page-turn speed.
+  runDeferredGrayscalePass();
+  if (pendingGrayscale_.active) {
+    return;  // AA still owed (display bus busy); it keeps priority over B
+  }
+  stepBackgroundSectionBuild();
+}
+
+void EpubReaderActivity::serviceBackgroundDebugLog() {
+#if DEBUG_BACKGROUND_WORK
+  const unsigned long now = millis();
+  if (lastBgDebugLogMs_ != 0UL && (now - lastBgDebugLogMs_) < 5000UL) {
+    return;
+  }
+  lastBgDebugLogMs_ = now;
+  // B state + gate inputs so a stalled B explains itself from the log alone (e.g. parked
+  // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
+  // little heap for Section::heapAllowsEmbeddedStyle()).
+  static constexpr const char* kBStateNames[] = {"probe", "waitheap", "building", "settled"};
+  LOG_INF("ERS",
+          "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d | preReady=%d "
+          "buildPct=%d free=%lu contig=%lu",
+          static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
+          static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
+          kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
+          lastRenderStats.embeddedStyle ? 1 : 0,
+          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  checkHeapIntegrity("idle_5s");
+#endif
+}
+
+void EpubReaderActivity::runDeferredGrayscalePass() {
+  // Guard: do not start the AA pass while the render task is still inside
+  // completeDisplay() — both paths touch the SPI display bus and must not
+  // run concurrently. isRefreshPending() is true from triggerDisplay() until
+  // completeDisplay() clears it; when it returns false the render task has
+  // finished all post-waveform SPI work and it is safe to issue new SPI writes.
+  if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
+    return;
+  }
+  // Serialize deferred AA with the render task. This prevents loop-side
+  // grayscale SPI/framebuffer work from racing with render() updates.
+  RenderLock lock;
+  // Re-check under the lock: the render task may have flipped these between the
+  // unlocked test above and acquiring the lock.
+  if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
+    return;
+  }
+  pendingGrayscale_.active = false;
+  renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
+  const int fontId = pendingGrayscale_.fontId;
+  const int marginLeft = pendingGrayscale_.marginLeft;
+  const int contentTop = pendingGrayscale_.contentTop;
+  const Page* pagePtr = pendingGrayscale_.page.get();
+  const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
+    pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
+    pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
+  });
+  pendingGrayscale_.page.reset();
+  LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+  checkHeapIntegrity("after_deferred_aa");
+}
+
+Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
+  const RenderLayout layout = computeRenderLayout();
+  Section::BuildParams p;
+  p.fontId = getEffectiveReaderFontId();
+  p.lineCompression = getEffectiveReaderLineCompression();
+  p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.paragraphAlignment = getEffectiveParagraphAlignment();
+  p.viewportWidth = layout.viewportWidth;
+  p.viewportHeight = layout.viewportHeight;
+  p.hyphenationEnabled = getEffectiveHyphenation();
+  p.embeddedStyle = lastRenderStats.embeddedStyle;
+  p.bionicReadingEnabled = getEffectiveBionicReading();
+  p.imageRendering = lastRenderStats.imageRendering;
+  p.headingFonts = buildHeadingFonts();
+  return p;
+}
+
+void EpubReaderActivity::resetBackgroundBuild() {
+  backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
+  backgroundBuildSpineIndex_ = -1;
+  backgroundBuildInflatedSize_ = 0;
+  backgroundBuildGateCheckMs_ = 0;
+  backgroundBuildState_ = BackgroundBuildState::Probe;
+  backgroundBuildPercent_ = -1;
+}
+
+void EpubReaderActivity::stepBackgroundSectionBuild() {
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
+    return;
+  }
+  // Background A keeps priority: it determines perceived page-turn speed, and its total
+  // cost is small against a multi-second page-read window. Wait until its pass has run
+  // (pendingPreRender clears whether or not it produced a ready page).
+  if (pendingPreRender || usePreRenderedBuffer) {
+    return;
+  }
+  // B does SD I/O only, no SPI — but it must not contend with the render task for the
+  // render lock while a waveform (or a render) is in flight: a blocked loop task cannot
+  // service input. Skip the tick instead; idle ticks are plentiful while the user reads.
+  // Note RenderLock::peek() returns true when the mutex is HELD (busy), not when free.
+  if (renderer.isRefreshPending() || RenderLock::peek()) {
+    return;
+  }
+  // One lock for the whole step: every branch below touches the SD (even discarding a
+  // stale build removes its partial file) and the parse slice reads glyph metrics from
+  // the shared renderer, so all of it must be serialised against the render task.
+  RenderLock lock;
+  // Re-check under the lock: the render task may have scheduled A or started a refresh
+  // between the unlocked test above and acquiring the lock (mirrors runDeferredGrayscalePass).
+  if (pendingPreRender || renderer.isRefreshPending()) {
+    return;
+  }
+
+  // Background A re-arm (one retry per displayed page): A's pass runs right after the
+  // page render, while the deferred AA still holds the just-rendered page (~10 KB) —
+  // its heap floor can refuse at that moment (measured 55.9 KB free vs the 56 KB floor)
+  // and nothing retries it. Done HERE, under the render lock, because it dereferences
+  // section state the render task mutates — an earlier unlocked version in
+  // serviceBackgroundWork() raced buildSection's reassignment of `section`. B keeps
+  // waiting behind pendingPreRender until the retry has run, preserving A's priority.
+  if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
+      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
+      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
+    preRenderRearmSpine_ = currentSpineIndex;
+    preRenderRearmPage_ = section->currentPage;
+    pendingPreRender = true;
+    requestUpdate();
+    return;
+  }
+
+  const int targetSpine = currentSpineIndex + 1;
+  if (targetSpine >= epub->getSpineItemsCount()) {
+    resetBackgroundBuild();
+    return;
+  }
+  // Navigation moved the target since the last tick: held state is for the wrong section.
+  if (backgroundBuildSpineIndex_ != targetSpine) {
+    resetBackgroundBuild();
+    backgroundBuildSpineIndex_ = targetSpine;
+  }
+
+  switch (backgroundBuildState_) {
+    case BackgroundBuildState::Settled:
+      return;
+
+    case BackgroundBuildState::Probe: {
+      // One SD probe per target: if the exact cache variant already exists there is
+      // nothing to pre-build.
+      backgroundSection_ = std::make_unique<Section>(epub, targetSpine, renderer);
+      const Section::BuildParams p = makeSectionBuildParams();
+      const bool cached = backgroundSection_->loadSectionFile(
+          p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth, p.viewportHeight,
+          p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled, p.imageRendering);
+      if (cached && !backgroundSection_->isEmbeddedStyleFallback()) {
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+      } else {
+        // The inflate ring is sized to the entry, so the extraction heap gate needs the
+        // uncompressed size (one central-dir scan, once per target spine).
+        backgroundBuildInflatedSize_ = 0;
+        epub->getItemSize(epub->getSpineItem(targetSpine).href, &backgroundBuildInflatedSize_);
+        backgroundBuildState_ = BackgroundBuildState::WaitHeap;
+      }
+      return;  // one bounded step per tick
+    }
+
+    case BackgroundBuildState::WaitHeap: {
+      // Re-check at most ~1×/s: the gates walk the heap free-list, and their outcome
+      // only changes when other allocations move — not per ~70 ms loop tick.
+      const unsigned long now = millis();
+      if (backgroundBuildGateCheckMs_ != 0 && now - backgroundBuildGateCheckMs_ < 1000UL) {
+        return;
+      }
+      backgroundBuildGateCheckMs_ = now;
+      const uint32_t ringBytes =
+          static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
+      const uint32_t freeHeap = esp_get_free_heap_size();
+      const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+      if (freeHeap <
+              std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) ||
+          contigHeap < std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024)) {
+        return;
+      }
+      // Refuse — don't let startBuild silently downgrade — when the book wants embedded
+      // CSS but the heap can't fit it: a no-CSS background build would only produce the
+      // fallback variant and the foreground would still rebuild with CSS on entry.
+      // (Silent: state=waitheap + free/contig in the 5 s BG debug line tell the story.)
+      if (lastRenderStats.embeddedStyle) {
+        const CssParser* css = epub->getCssParser();
+        if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+          return;
+        }
+      }
+      backgroundBuildState_ = BackgroundBuildState::Building;
+      return;
+    }
+
+    case BackgroundBuildState::Building: {
+      // Layout needs glyph metrics only (advance/kerning), never bitmaps — but the
+      // reading-path prewarm leaves SD-font styles wired to a page-scoped FULL (bitmap)
+      // cache covering only the displayed page's glyphs, and ensureFontReady's mmap
+      // metadata fast-path no-ops when any cache is already wired. The build's layout
+      // then misses on nearly every glyph and pulls BITMAPS through the 8-slot overflow
+      // loader (~180 ms each; measured 7.4 s of a 9.6 s background build). Reset
+      // accumulation so the parser's next metadata-only prewarm re-wires the
+      // flash-resident full metric tables — the same thing the foreground indexing path
+      // does before createSectionFile. Re-done every slice because an interleaved page
+      // render re-enters page mode; for mmap fonts the re-wire is pointer assignments,
+      // and the next foreground render rebuilds its page cache in its normal prewarm.
+      renderer.clearFontAccumulation();
+#if DEBUG_BACKGROUND_WORK
+      bgCounters_.bRuns++;
+#endif
+      const Section::BuildStep step =
+          backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      checkHeapIntegrity("after_b_slice");
+      if (step == Section::BuildStep::More) {
+        backgroundBuildPercent_ = static_cast<int8_t>(backgroundSection_->activeBuildPercent());
+        return;
+      }
+
+      backgroundBuildPercent_ = -1;
+      if (step == Section::BuildStep::Done) {
+        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded()) {
+          // Memory ran short mid-parse: either pages are missing (truncated) or CSS
+          // lookups were skipped (styles silently absent from the cached pages). Don't
+          // hand either to the foreground: its blocking path runs with the secondary
+          // buffer released (~52 KB more headroom) and will likely build it clean.
+          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine,
+                  backgroundSection_->isTruncatedCache() ? "truncated" : "css-degraded");
+          backgroundSection_->clearCache();
+          backgroundSection_.reset();
+        } else {
+#if DEBUG_BACKGROUND_WORK
+          bgCounters_.bCompletes++;
+#endif
+          LOG_INF("ERS", "Background build spine=%d complete: %u pages", targetSpine, backgroundSection_->pageCount);
+        }
+      } else {
+        LOG_ERR("ERS", "Background build spine=%d failed", targetSpine);
+        backgroundSection_.reset();
+      }
+      backgroundBuildState_ = BackgroundBuildState::Settled;
+      return;
+    }
   }
 }
 
@@ -1530,6 +1846,16 @@ int EpubReaderActivity::getEffectiveReaderFontId() const {
   return SETTINGS.getReaderFontId();
 }
 
+Section::HeadingFonts EpubReaderActivity::buildHeadingFonts() const {
+  // Headings render by SCALING the body font (nearest-neighbor upscale in renderCharAtScale),
+  // not by switching to a taller built-in font. The taller-font approach was tried and dropped:
+  // it put a second font on chapter-opener pages, which thrashed the limited glyph-cache slots
+  // (multi-second page stalls), and only delivered quantized 2pt steps capped at 18pt for
+  // built-in fonts. Scaling gives the exact 1.6/1.4/1.2 ratios at any body size with one font
+  // per page (no cache pressure). Defaults already encode that: fontId all 0 = scale fallback.
+  return Section::HeadingFonts{};
+}
+
 void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIndex) const {
   // Resolve to a baseline page first. Each branch records whether it produced a
   // precise page (LUT/anchor hit, percent jump, explicit page) or only an estimate.
@@ -1638,28 +1964,35 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
+      // Serialize against the render task: it reads section->currentPage (and the
+      // PreRender pass temporarily writes it), so the advance must not race.
+      RenderLock lock(*this);
       section->currentPage++;
     } else if (currentSpineIndex + 1 < epub->getSpineItemsCount()) {
       RenderLock lock(*this);
       navTarget = NavigationTarget::makePage(0);
       currentSpineIndex++;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else if (currentSpineIndex + 1 == epub->getSpineItemsCount()) {
       RenderLock lock(*this);
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex++;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
   } else {
     if (section->currentPage > 0) {
+      RenderLock lock(*this);
       section->currentPage--;
     } else if (currentSpineIndex > 0) {
       RenderLock lock(*this);
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex--;
       section.reset();
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
@@ -1673,13 +2006,6 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
-  // Do NOT clear pendingHalfRefreshAfterGrayscale_ here: when an AA pass already
-  // completed for the outgoing page, the panel physically shows the AA-dithered
-  // render while RED RAM / frameBufferActive only track the plain BW bitmap. That
-  // flag is the only record that the next refresh must bypass the differential
-  // diff (HALF_REFRESH) instead of trusting a baseline that no longer matches the
-  // physical panel — clearing it here would silently reopen the ghosting window.
-  // It is consumed and reset at the top of renderContents() regardless.
   pendingGrayscale_ = {};
 
   auto logPageTurnWindowIfReady = [this]() {
@@ -1713,7 +2039,27 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
       preRenderedPage.pageIndex == section->currentPage + 1) {
     // Fast path: the frame buffer already holds the next page content. Advance state here on the
     // loop task, then hand off to render() via usePreRenderedBuffer — all display work (status
-    // bar, flush, AA pass) stays on the render task where it belongs. No RenderLock acquired here.
+    // bar, flush, AA pass) stays on the render task where it belongs.
+    //
+    // Serialize the shared-state mutation against the render task: the PreRender pass temporarily
+    // writes section->currentPage and rewrites preRenderedPage, so reading/advancing them here
+    // without the lock races (stale buffer shown, or a torn section pointer → reboot). Acquire the
+    // lock, then re-check the condition under it — the render task may have invalidated the
+    // pre-render between the unlocked test above and the lock.
+    RenderLock lock;
+    if (!(section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
+          preRenderedPage.pageIndex == section->currentPage + 1)) {
+      lock.unlock();
+      if (!stepPageState(isForwardTurn)) {
+        return;
+      }
+      sessionPagesAdvanced++;
+      globalReadingSessionTracker().onPageTurn();
+      preRenderedPage.ready = false;
+      pendingPreRender = false;
+      requestUpdate();
+      return;
+    }
     const unsigned long nowMs = millis();
     const unsigned long idleSlackMs = (preRenderedPage.completedAtMs > 0 && nowMs >= preRenderedPage.completedAtMs)
                                           ? (nowMs - preRenderedPage.completedAtMs)
@@ -1751,92 +2097,43 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
 
   sessionPagesAdvanced++;
   globalReadingSessionTracker().onPageTurn();
+  // Page state advanced without using a pre-render. Drop any pre-render that was
+  // scheduled for the page we just left: otherwise the coalesced render() would
+  // classify as a PreRender pass and try to pre-render the *new* current page's
+  // next page instead of displaying the page we just navigated to — leaving the
+  // previous (now stale) frame on screen. (This is the classic last-page case:
+  // turning onto the final page would otherwise show the penultimate page.)
   preRenderedPage.ready = false;
+  pendingPreRender = false;
   requestUpdate();
 }
 
-// TODO: Failure handling
-void EpubReaderActivity::render(RenderLock&& lock) {
-  if (!epub) {
-    return;
-  }
-
+void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
   // Opportunistic recovery: after an OOM during chapter indexing, try to
   // restore the secondary buffer on subsequent renders when heap may be healthier.
   if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
     if (renderer.reallocSecondaryBuffer()) {
       secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
       LOG_INF("ERS", "Secondary display buffer restored; re-enabling normal refresh/AA paths");
     }
   } else if (secondaryBufferDegraded_ && renderer.hasSecondaryBuffer()) {
     secondaryBufferDegraded_ = false;
   }
+}
 
-  const int spineCount = epub->getSpineItemsCount();
-  if (spineCount <= 0) {
-    LOG_ERR("ERS", "EPUB has no spine items, aborting render");
-    automaticPageTurnActive = false;
-    return;
-  }
-
+void EpubReaderActivity::clampSpineIndex(const int spineCount) {
   // edge case handling for sub-zero spine index
   if (currentSpineIndex < 0) {
     currentSpineIndex = 0;
   }
-  // based bounds of book, show end of book screen
+  // based bounds of book, show end of book screen (spineCount is the finished-book sentinel)
   if (currentSpineIndex > spineCount) {
     currentSpineIndex = spineCount;
   }
+}
 
-  // Immediately transition to finished-book flow instead of showing an end-of-book screen
-  if (currentSpineIndex == spineCount) {
-    if (!finishedBookActivityStarted_) {
-      finishedBookActivityStarted_ = true;
-      const int lastSpineIndex = std::max(0, spineCount - 1);
-      writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
-      const std::string nextBookPath =
-          BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
-      lock.unlock();
-      startActivityForResult(
-          std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
-          [this, nextBookPath](const ActivityResult& result) {
-            finishedBookActivityStarted_ = false;
-            if (result.isCancelled) {
-              requestUpdate();
-              return;
-            }
-            globalReadingSessionTracker().markFinished();
-            const auto& menuResult = std::get<MenuResult>(result.data);
-            if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-              if (SETTINGS.moveFinishedBooksToCompleted) {
-                std::string movedPath;
-                BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-              }
-              if (SETTINGS.removeFinishedBooksFromRecents) {
-                RECENT_BOOKS.removeBook(epub->getPath());
-              }
-              activityManager.goHome();
-              return;
-            }
-            if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                !nextBookPath.empty()) {
-              if (SETTINGS.moveFinishedBooksToCompleted) {
-                std::string movedPath;
-                BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-              }
-              if (SETTINGS.removeFinishedBooksFromRecents) {
-                RECENT_BOOKS.removeBook(epub->getPath());
-              }
-              activityManager.goToReader(nextBookPath);
-              return;
-            }
-            requestUpdate();
-          });
-    }
-    return;
-  }
-
+EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const {
   // Apply screen viewable areas and additional padding
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -1849,247 +2146,331 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   orientedMarginRight += SETTINGS.screenMargin;
   orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarBottomHeight);
 
-  const uint16_t viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
-  const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
-  lastRenderStats = {};
-  lastRenderStats.orientation = static_cast<uint8_t>(renderer.getOrientation());
-  lastRenderStats.marginTop = orientedMarginTop;
-  lastRenderStats.marginRight = orientedMarginRight;
-  lastRenderStats.marginBottom = orientedMarginBottom;
-  lastRenderStats.marginLeft = orientedMarginLeft;
-  lastRenderStats.viewportWidth = viewportWidth;
-  lastRenderStats.viewportHeight = viewportHeight;
-  lastRenderStats.embeddedStyle = getEffectiveEmbeddedStyle();
-  lastRenderStats.imageRendering = getEffectiveImageRendering();
-  lastRenderStats.effectiveFontId = getEffectiveReaderFontId();
-  lastRenderStats.textAntiAliasing = getEffectiveTextAntiAliasing();
-  lastRenderStats.freeHeapBefore = esp_get_free_heap_size();
-  // Avoid heap walk in the hot render path; largest free block is sampled in index lifecycle logs.
-  lastRenderStats.largestFreeBlockBefore = 0;
-  showTruncatedSectionHintThisRender = false;
+  RenderLayout layout;
+  layout.marginTop = orientedMarginTop;
+  layout.marginRight = orientedMarginRight;
+  layout.marginBottom = orientedMarginBottom;
+  layout.marginLeft = orientedMarginLeft;
+  layout.viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
+  layout.viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
+  return layout;
+}
 
-  // Capture and clear all pre-render flags before any state checks.
-  // - isPreRenderPass:     render next page content only (no status bar, no flush).
-  // - isBufferDisplayPass: frame buffer already has content; just add status bar and flush.
-  // - anything else:       normal full render; discard any stale pre-render state.
-  const bool isPreRenderPass = pendingPreRender;
-  const bool isBufferDisplayPass = usePreRenderedBuffer;
-  pendingPreRender = false;
-  usePreRenderedBuffer = false;
-  if (!isPreRenderPass && !isBufferDisplayPass) {
-    preRenderedPage.ready = false;
+EpubReaderActivity::RenderPass EpubReaderActivity::classifyRenderPass() const {
+  if (currentSpineIndex == epub->getSpineItemsCount()) {
+    return RenderPass::FinishedBook;
   }
-
-  // Fast-display pass: frame buffer holds pre-rendered content; superimpose live status bar,
-  // flush to display, and run the AA pass — all on the render task with no SD font re-read.
-  // Guard: if the previous render's waveform + post-waveform SPI work (completeDisplay) is
-  // still in progress, do not start a new display operation — fall through to a full render
-  // which will wait for the waveform to settle naturally.
-  if (isBufferDisplayPass && !renderer.isRefreshPending()) {
-    if (section) {
-      auto p = section->loadPageFromSectionFile();
-      if (p && !p->hasImages()) {
-        currentPageFootnotes = std::move(p->footnotes);
-        displayPreRenderedPage(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
-
-        pendingProgressSave.spineIndex = currentSpineIndex;
-        pendingProgressSave.page = section->currentPage;
-        pendingProgressSave.pageCount = section->pageCount;
-        pendingProgressSave.pending.store(true, std::memory_order_release);
-
-        if (section->currentPage + 1 < section->pageCount) {
-          pendingPreRender = true;
-          requestUpdate();
-        }
-        LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1", currentSpineIndex, section->currentPage,
-                section->pageCount);
-        return;
-      }
-      // Page load failed or was an image page — fall through to full render.
-    }
+  // BufferDisplay is checked before PreRender to preserve the former in-line order
+  // (the buffer-display block ran ahead of the pre-render block). It applies only when
+  // the prior waveform + post-waveform SPI work has settled; otherwise we fall through
+  // to a full render that waits for the waveform naturally. The helper may still bail to
+  // Normal at runtime if the page load fails / is an image page.
+  if (usePreRenderedBuffer && !renderer.isRefreshPending()) {
+    return RenderPass::BufferDisplay;
   }
+  if (pendingPreRender) {
+    return RenderPass::PreRender;
+  }
+  if (!section) {
+    return RenderPass::BuildSection;
+  }
+  return RenderPass::Normal;
+}
 
-  // Pre-render pass: render next page content into the frame buffer (no status bar, no flush).
-  if (isPreRenderPass) {
-    if (section && !preRenderedPage.ready) {
-      const int nextPage = section->currentPage + 1;
-      if (nextPage < section->pageCount) {
-        if (esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES) {
-          const int savedPage = section->currentPage;
-          section->currentPage = nextPage;
-          auto p = section->loadPageFromSectionFile();
-          section->currentPage = savedPage;
-          if (p && !p->hasImages()) {
-            const unsigned long preRenderStart = millis();
-            section->currentPage = nextPage;
-            renderPageContentOnly(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
-            section->currentPage = savedPage;
-            const unsigned long preRenderDuration = millis() - preRenderStart;
-            preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis()};
-            LOG_DBG("ERS", "Pre-rendered page %d/%d in %lums", nextPage, section->pageCount - 1, preRenderDuration);
-          }
-        }
-      }
-    }
+void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spineCount) {
+  // Immediately transition to finished-book flow instead of showing an end-of-book screen
+  if (finishedBookActivityStarted_) {
     return;
   }
+  finishedBookActivityStarted_ = true;
+  const int lastSpineIndex = std::max(0, spineCount - 1);
+  writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
+  const std::string nextBookPath =
+      BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
+  lock.unlock();
+  startActivityForResult(std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
+                         [this, nextBookPath](const ActivityResult& result) {
+                           finishedBookActivityStarted_ = false;
+                           if (result.isCancelled) {
+                             requestUpdate();
+                             return;
+                           }
+                           globalReadingSessionTracker().markFinished();
+                           const auto& menuResult = std::get<MenuResult>(result.data);
+                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
+                             if (SETTINGS.moveFinishedBooksToCompleted) {
+                               std::string movedPath;
+                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
+                             }
+                             if (SETTINGS.removeFinishedBooksFromRecents) {
+                               RECENT_BOOKS.removeBook(epub->getPath());
+                             }
+                             activityManager.goHome();
+                             return;
+                           }
+                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
+                               !nextBookPath.empty()) {
+                             if (SETTINGS.moveFinishedBooksToCompleted) {
+                               std::string movedPath;
+                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
+                             }
+                             if (SETTINGS.removeFinishedBooksFromRecents) {
+                               RECENT_BOOKS.removeBook(epub->getPath());
+                             }
+                             activityManager.goToReader(nextBookPath);
+                             return;
+                           }
+                           requestUpdate();
+                         });
+}
 
+bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
+  // Fast-display pass: frame buffer holds pre-rendered content; superimpose live status bar,
+  // flush to display, and run the AA pass — all on the render task with no SD font re-read.
   if (!section) {
-    if (currentSpineIndex < 0 || currentSpineIndex >= spineCount) {
-      LOG_ERR("ERS", "Render rejected invalid spine index %d (valid 0..%d)", currentSpineIndex, spineCount - 1);
-      currentSpineIndex = 0;
-      navTarget = NavigationTarget::makePage(0);
-      automaticPageTurnActive = false;
-      requestUpdate();
-      return;
-    }
+    return false;
+  }
+  auto p = section->loadPageFromSectionFile();
+  if (!p || p->hasImages()) {
+    // Page load failed or was an image page — caller falls through to full render.
+    return false;
+  }
+  currentPageFootnotes = std::move(p->footnotes);
+  displayPreRenderedPage(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
 
-    const bool embeddedStyle = lastRenderStats.embeddedStyle;
-    const uint8_t imageRendering = lastRenderStats.imageRendering;
-    const auto filepath = epub->getSpineItem(currentSpineIndex).href;
-    LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
+  pendingProgressSave.spineIndex = currentSpineIndex;
+  pendingProgressSave.page = section->currentPage;
+  pendingProgressSave.pageCount = section->pageCount;
+  pendingProgressSave.pending.store(true, std::memory_order_release);
+
+  if (section->currentPage + 1 < section->pageCount) {
+    pendingPreRender = true;
+    requestUpdate();
+  }
+  LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1 refresh=%s mode=0x%02X", currentSpineIndex,
+          section->currentPage, section->pageCount, refreshModeName(renderer.getLastRefreshMode()),
+          renderer.getLastDisplayModeByte());
+  return true;
+}
+
+void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
+  // Pre-render pass: render next page content into the frame buffer (no status bar, no flush).
+  if (!section || preRenderedPage.ready) {
+    return;
+  }
+  const int nextPage = section->currentPage + 1;
+  if (nextPage >= section->pageCount) {
+    return;
+  }
+  if (esp_get_free_heap_size() < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
+    return;
+  }
+#if DEBUG_BACKGROUND_WORK
+  bgCounters_.aRuns++;
+#endif
+  const int savedPage = section->currentPage;
+  section->currentPage = nextPage;
+  auto p = section->loadPageFromSectionFile();
+  section->currentPage = savedPage;
+  if (p && !p->hasImages()) {
+    const unsigned long preRenderStart = millis();
+    section->currentPage = nextPage;
+    renderPageContentOnly(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
+    section->currentPage = savedPage;
+    const unsigned long preRenderDuration = millis() - preRenderStart;
+    preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis()};
+#if DEBUG_BACKGROUND_WORK
+    bgCounters_.aCompletes++;
+#endif
+    LOG_DBG("ERS", "Pre-rendered page %d/%d in %lums", nextPage, section->pageCount - 1, preRenderDuration);
+  }
+  checkHeapIntegrity("after_prerender");
+}
+
+bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
+  const int spineCount = epub->getSpineItemsCount();
+  if (currentSpineIndex < 0 || currentSpineIndex >= spineCount) {
+    LOG_ERR("ERS", "Render rejected invalid spine index %d (valid 0..%d)", currentSpineIndex, spineCount - 1);
+    currentSpineIndex = 0;
+    navTarget = NavigationTarget::makePage(0);
+    automaticPageTurnActive = false;
+    requestUpdate();
+    return false;
+  }
+
+  const uint16_t viewportWidth = layout.viewportWidth;
+  const uint16_t viewportHeight = layout.viewportHeight;
+  const bool embeddedStyle = lastRenderStats.embeddedStyle;
+  const uint8_t imageRendering = lastRenderStats.imageRendering;
+  const auto filepath = epub->getSpineItem(currentSpineIndex).href;
+  LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
+  // Adopt the Background-B Section when entering exactly the spine it was working on: a
+  // completed background build turns into a plain cache hit below, and a partial build
+  // resumes in the indexing path instead of restarting from scratch. On any other
+  // navigation the B state is stale — drop it (aborting a partial build). While a build
+  // is live, loadSectionFile must be skipped: it would clobber the live write handle.
+  bool resumeBackgroundBuild = false;
+  if (backgroundSection_ && backgroundBuildSpineIndex_ == currentSpineIndex) {
+    resumeBackgroundBuild = backgroundSection_->hasActiveBuild();
+    section = std::move(backgroundSection_);
+    LOG_INF("ERS", "Adopting background section for spine %d (%s)", currentSpineIndex,
+            resumeBackgroundBuild ? "resuming partial build" : "build complete");
+  } else {
     section = std::make_unique<Section>(epub, currentSpineIndex, renderer);
-    const unsigned long sectionStart = millis();
+  }
+  resetBackgroundBuild();
+  const unsigned long sectionStart = millis();
 
-    if (!section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
-                                  SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                  viewportHeight, getEffectiveHyphenation(), embeddedStyle, getEffectiveBionicReading(),
-                                  imageRendering)) {
-      LOG_DBG("ERS", "Cache not found, building...");
-      lastRenderStats.cacheRebuilt = true;
+  if (resumeBackgroundBuild ||
+      !section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
+                                SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
+                                viewportHeight, getEffectiveHyphenation(), embeddedStyle, getEffectiveBionicReading(),
+                                imageRendering)) {
+    LOG_DBG("ERS", "Cache not found, building...");
+    lastRenderStats.cacheRebuilt = true;
 
-      // Draw the popup BEFORE releasing the secondary buffer: drawPopup calls
-      // displayBuffer() → swapBuffers(). With the secondary buffer released,
-      // frameBufferActive is null and swapBuffers() would set frameBuffer = null,
-      // crashing any subsequent rendering.
-      // Use a cleaner waveform for indexing popup right after image pages; FAST popup refresh
-      // can leave visible bleed on X3 when transitioning image -> text.
-      if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
-        renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
-        pendingHalfRefreshAfterImagePage = false;
-        pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-      }
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
+    // Draw the popup BEFORE releasing the secondary buffer: drawPopup calls
+    // displayBuffer() → swapBuffers(). With the secondary buffer released,
+    // frameBufferActive is null and swapBuffers() would set frameBuffer = null,
+    // crashing any subsequent rendering.
+    // Use a cleaner waveform for indexing popup right after image pages; FAST popup refresh
+    // can leave visible bleed on X3 when transitioning image -> text.
+    if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
+      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+      pendingHalfRefreshAfterImagePage = false;
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    }
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
 
-      // Reset cumulative SD font metadata cache so this section starts fresh.
-      renderer.clearFontAccumulation();
-      readerPhase_ = ReaderPhase::PRECOMPILING;
-      renderer.dropFontMetadata();
-      LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
-      renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
-      LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
-      const uint32_t createStart = millis();
-      const bool createOk = section->createSectionFile(
-          getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-          getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-          getEffectiveBionicReading(), imageRendering, nullptr);
-      LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
-              esp_get_free_heap_size());
-      // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
-      // warmAllImageCaches writes pixels to the framebuffer as a side effect; clearScreen()
-      // follows after reallocSecondaryBuffer so the framebuffer state doesn't matter here.
-      if (createOk) {
-        const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-        const uint32_t warmStart = millis();
-        section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
-        LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
-        renderer.clearScreen();
-      }
-      if (!renderer.reallocSecondaryBuffer()) {
-        LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
-        secondaryBufferDegraded_ = true;
-        const uint32_t freeAfterIndex = esp_get_free_heap_size();
-        // Do NOT call heap_caps_get_largest_free_block here: the heap may be
-        // corrupt after image decode failures under pressure, and walking the
-        // TLSF free-block list on a corrupt heap causes an interrupt WDT crash.
-        // Pass 0 for contigHeap — the restart heuristic treats 0 as "contiguous
-        // block definitely too small", which is correct: malloc for ~52 KB just
-        // failed, so the largest free block is by definition < 52 KB.
-        LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
-        if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
-          return;
-        }
-      } else {
-        secondaryBufferDegraded_ = false;
-        if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
-        LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
-      }
-      renderer.restoreFontMetadata();
-      readerPhase_ = ReaderPhase::READING;
-      if (!createOk) {
-        LOG_ERR("ERS", "Failed to persist page data to SD");
-        section.reset();
-        return;
-      }
-    } else if (section->isEmbeddedStyleFallback()) {
-      LOG_INF("ERS", "No-CSS fallback loaded; rebuilding with embedded CSS...");
-      lastRenderStats.cacheRebuilt = true;
-
-      if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
-        renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
-        pendingHalfRefreshAfterImagePage = false;
-        pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-      }
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
-
-      renderer.clearFontAccumulation();
-      readerPhase_ = ReaderPhase::PRECOMPILING;
-      renderer.dropFontMetadata();
-      LOG_DBG("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
-      renderer.releaseSecondaryBuffer();
-      LOG_DBG("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
-      const bool rebuildOk = section->createSectionFile(
-          getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-          getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-          getEffectiveBionicReading(), imageRendering, nullptr);
-      if (rebuildOk) {
-        const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-        section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
-        renderer.clearScreen();
-      }
-      if (!renderer.reallocSecondaryBuffer()) {
-        LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
-        secondaryBufferDegraded_ = true;
-        const uint32_t freeAfterIndex = esp_get_free_heap_size();
-        // Same reasoning as the first indexing path: do not call
-        // heap_caps_get_largest_free_block on a potentially corrupt heap.
-        // Pass 0 — malloc for ~52 KB just failed so contig is by definition < 52 KB.
-        LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
-        if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
-          return;
-        }
-      } else {
-        secondaryBufferDegraded_ = false;
-        if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
-        LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
-      }
-      renderer.restoreFontMetadata();
-      readerPhase_ = ReaderPhase::READING;
-      if (!rebuildOk) {
-        LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
-        section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
-                                 SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
-                                 viewportHeight, getEffectiveHyphenation(), embeddedStyle, getEffectiveBionicReading(),
-                                 imageRendering);
+    // Reset cumulative SD font metadata cache so this section starts fresh.
+    renderer.clearFontAccumulation();
+    readerPhase_ = ReaderPhase::PRECOMPILING;
+    renderer.dropFontMetadata();
+    LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+    renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
+    LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+    const uint32_t createStart = millis();
+    const bool createOk = section->createSectionFile(
+        getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+        getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
+        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
+    LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
+            esp_get_free_heap_size());
+    checkHeapIntegrity("after_createSectionFile");
+    // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
+    // warmAllImageCaches writes pixels to the framebuffer as a side effect; clearScreen()
+    // follows after reallocSecondaryBuffer so the framebuffer state doesn't matter here.
+    if (createOk) {
+      const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+      const uint32_t warmStart = millis();
+      section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
+      LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
+      renderer.clearScreen();
+      checkHeapIntegrity("after_warmAllImageCaches");
+    }
+    if (!renderer.reallocSecondaryBuffer()) {
+      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+      secondaryBufferDegraded_ = true;
+      const uint32_t freeAfterIndex = esp_get_free_heap_size();
+      // Do NOT call heap_caps_get_largest_free_block here: the heap may be
+      // corrupt after image decode failures under pressure, and walking the
+      // TLSF free-block list on a corrupt heap causes an interrupt WDT crash.
+      // Pass 0 for contigHeap — the restart heuristic treats 0 as "contiguous
+      // block definitely too small", which is correct: malloc for ~52 KB just
+      // failed, so the largest free block is by definition < 52 KB.
+      LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+      if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
+        return false;
       }
     } else {
-      LOG_DBG("ERS", "Cache found, skipping build...");
+      secondaryBufferDegraded_ = false;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
+      LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
     }
-    lastRenderStats.sectionLoadMs = millis() - sectionStart;
-
-    if (section->isTruncatedCache() && currentSpineIndex != lastWarnedTruncatedSpineIndex) {
-      lastWarnedTruncatedSpineIndex = currentSpineIndex;
-      truncatedSectionHintRendersRemaining = TRUNCATED_SECTION_HINT_RENDER_COUNT;
-      LOG_INF("ERS", "Section %d is truncated; showing mitigation hint", currentSpineIndex);
+    checkHeapIntegrity("after_fb_realloc");
+    renderer.restoreFontMetadata();
+    readerPhase_ = ReaderPhase::READING;
+    if (!createOk) {
+      LOG_ERR("ERS", "Failed to persist page data to SD");
+      section.reset();
+      return false;
     }
+  } else if (section->isEmbeddedStyleFallback()) {
+    LOG_INF("ERS", "No-CSS fallback loaded; rebuilding with embedded CSS...");
+    lastRenderStats.cacheRebuilt = true;
 
-    LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
-    navTarget.resolveInto(*section, currentSpineIndex);
-    LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
-    navTarget = NavigationTarget::makePage(section->currentPage);
-    forceLoadLargeImages = false;
-    pageHasPlaceholders = false;
+    if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
+      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+      pendingHalfRefreshAfterImagePage = false;
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    }
+    GUI.drawPopup(renderer, tr(STR_INDEXING));
+
+    renderer.clearFontAccumulation();
+    readerPhase_ = ReaderPhase::PRECOMPILING;
+    renderer.dropFontMetadata();
+    LOG_DBG("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+    renderer.releaseSecondaryBuffer();
+    LOG_DBG("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+    const bool rebuildOk = section->createSectionFile(
+        getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+        getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
+        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
+    if (rebuildOk) {
+      const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+      section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
+      renderer.clearScreen();
+    }
+    if (!renderer.reallocSecondaryBuffer()) {
+      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+      secondaryBufferDegraded_ = true;
+      const uint32_t freeAfterIndex = esp_get_free_heap_size();
+      // Same reasoning as the first indexing path: do not call
+      // heap_caps_get_largest_free_block on a potentially corrupt heap.
+      // Pass 0 — malloc for ~52 KB just failed so contig is by definition < 52 KB.
+      LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+      if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
+        return false;
+      }
+    } else {
+      secondaryBufferDegraded_ = false;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
+      LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
+    }
+    renderer.restoreFontMetadata();
+    readerPhase_ = ReaderPhase::READING;
+    if (!rebuildOk) {
+      LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
+      section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
+                               SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
+                               viewportHeight, getEffectiveHyphenation(), embeddedStyle, getEffectiveBionicReading(),
+                               imageRendering);
+    }
+  } else {
+    LOG_DBG("ERS", "Cache found, skipping build...");
   }
+  lastRenderStats.sectionLoadMs = millis() - sectionStart;
+
+  if (section->isTruncatedCache() && currentSpineIndex != lastWarnedTruncatedSpineIndex) {
+    lastWarnedTruncatedSpineIndex = currentSpineIndex;
+    truncatedSectionHintRendersRemaining = TRUNCATED_SECTION_HINT_RENDER_COUNT;
+    LOG_INF("ERS", "Section %d is truncated; showing mitigation hint", currentSpineIndex);
+  }
+
+  LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
+  navTarget.resolveInto(*section, currentSpineIndex);
+  LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
+  navTarget = NavigationTarget::makePage(section->currentPage);
+  forceLoadLargeImages = false;
+  pageHasPlaceholders = false;
+  return true;
+}
+
+void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& layout) {
+  const int orientedMarginTop = layout.marginTop;
+  const int orientedMarginRight = layout.marginRight;
+  const int orientedMarginBottom = layout.marginBottom;
+  const int orientedMarginLeft = layout.marginLeft;
 
   renderer.clearScreen();
 
@@ -2142,6 +2523,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       truncatedSectionHintRendersRemaining--;
     }
     LOG_DBG("ERS", "Rendered page in %dms", lastRenderStats.requestRenderMs);
+    checkHeapIntegrity("after_page_render");
   }
   // Re-acquire the render lock before any further state mutation.
   // renderContents() released it early (after triggerDisplay) to free the loop
@@ -2169,12 +2551,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     const uint32_t fontHitRatePct =
         totalFontLookups > 0 ? (lastRenderStats.fontCacheHits * 100UL) / totalFontLookups : 0UL;
     LOG_DBG("ERS",
-            "Page summary: spine=%d page=%d/%d prerendered=0 renderMs=%lu prewarmMs=%lu bwMs=%lu displayMs=%lu "
-            "fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
-            currentSpineIndex, section->currentPage, section->pageCount, lastRenderStats.requestRenderMs,
-            lastRenderStats.phases.prewarmMs, lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs,
-            lastRenderStats.fontCacheHits, lastRenderStats.fontCacheMisses, fontHitRatePct,
-            lastRenderStats.fontGetBitmapCalls, lastRenderStats.fontGetBitmapTimeUs);
+            "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X renderMs=%lu prewarmMs=%lu "
+            "bwMs=%lu displayMs=%lu fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
+            currentSpineIndex, section->currentPage, section->pageCount, refreshModeName(renderer.getLastRefreshMode()),
+            renderer.getLastDisplayModeByte(), lastRenderStats.requestRenderMs, lastRenderStats.phases.prewarmMs,
+            lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs, lastRenderStats.fontCacheHits,
+            lastRenderStats.fontCacheMisses, fontHitRatePct, lastRenderStats.fontGetBitmapCalls,
+            lastRenderStats.fontGetBitmapTimeUs);
 
     if (pendingScreenshot) {
       pendingScreenshot = false;
@@ -2183,6 +2566,92 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
     // Pre-render was already scheduled in renderContents() before the lock was
     // released, so the loop task could start it during the waveform wait.
+  }
+}
+
+// TODO: Failure handling
+void EpubReaderActivity::render(RenderLock&& lock) {
+  if (!epub) {
+    return;
+  }
+
+  recoverSecondaryBufferIfNeeded();
+
+  const int spineCount = epub->getSpineItemsCount();
+  if (spineCount <= 0) {
+    LOG_ERR("ERS", "EPUB has no spine items, aborting render");
+    automaticPageTurnActive = false;
+    return;
+  }
+
+  clampSpineIndex(spineCount);
+
+  // The finished-book pass needs no layout/stats setup and consumes the lock itself.
+  if (currentSpineIndex == spineCount) {
+    renderFinishedBookPass(lock, spineCount);
+    return;
+  }
+
+  const RenderLayout layout = computeRenderLayout();
+  lastRenderStats = {};
+  lastRenderStats.orientation = static_cast<uint8_t>(renderer.getOrientation());
+  lastRenderStats.marginTop = layout.marginTop;
+  lastRenderStats.marginRight = layout.marginRight;
+  lastRenderStats.marginBottom = layout.marginBottom;
+  lastRenderStats.marginLeft = layout.marginLeft;
+  lastRenderStats.viewportWidth = layout.viewportWidth;
+  lastRenderStats.viewportHeight = layout.viewportHeight;
+  lastRenderStats.embeddedStyle = getEffectiveEmbeddedStyle();
+  lastRenderStats.imageRendering = getEffectiveImageRendering();
+  lastRenderStats.effectiveFontId = getEffectiveReaderFontId();
+  lastRenderStats.textAntiAliasing = getEffectiveTextAntiAliasing();
+  lastRenderStats.freeHeapBefore = esp_get_free_heap_size();
+  // Avoid heap walk in the hot render path; largest free block is sampled in index lifecycle logs.
+  lastRenderStats.largestFreeBlockBefore = 0;
+  showTruncatedSectionHintThisRender = false;
+
+  // Classify the pass, then consume the pre-render flags.
+  const RenderPass pass = classifyRenderPass();
+  pendingPreRender = false;
+  usePreRenderedBuffer = false;
+  // Discard the pre-render only when it is actually STALE — i.e. it no longer describes the
+  // next page of the page currently displayed. A completed pre-render must survive an
+  // intervening Normal render (periodic status-bar/clock update, deferred-AA-triggered
+  // requestUpdate, etc.); the former "clear on any non-pre-render/non-buffer pass" rule threw
+  // away a valid pre-render whenever such a render landed between the pre-render and the page
+  // turn, turning a hit into a slow miss. Validity is keyed on (spineIndex, pageIndex) ==
+  // (current spine, currentPage+1); the BufferDisplay/PreRender passes manage ready themselves.
+  if (pass != RenderPass::PreRender && pass != RenderPass::BufferDisplay && preRenderedPage.ready) {
+    const bool stillValid = section && preRenderedPage.spineIndex == currentSpineIndex &&
+                            preRenderedPage.pageIndex == section->currentPage + 1;
+    if (!stillValid) {
+      preRenderedPage.ready = false;
+    }
+  }
+
+  switch (pass) {
+    case RenderPass::FinishedBook:
+      // Handled above before layout setup; unreachable here.
+      return;
+    case RenderPass::PreRender:
+      renderPreRenderPass(layout);
+      return;
+    case RenderPass::BufferDisplay:
+      if (renderBufferDisplayPass(layout)) {
+        return;
+      }
+      // Fast path could not be taken (load failed / image page) — fall through to Normal.
+      renderNormalPass(lock, layout);
+      return;
+    case RenderPass::BuildSection:
+      if (!buildSection(layout)) {
+        return;
+      }
+      renderNormalPass(lock, layout);
+      return;
+    case RenderPass::Normal:
+      renderNormalPass(lock, layout);
+      return;
   }
 }
 
@@ -2310,15 +2779,20 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
   bool forceHalfRefreshThisPage =
-      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
+      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterBufferRealloc_;
   pendingHalfRefreshAfterImagePage = false;
-  pendingHalfRefreshAfterGrayscale_ = false;
+  pendingHalfRefreshAfterBufferRealloc_ = false;
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
   logReaderMemSnapshot("before_bw_render");
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
                imageMonochrome);
+#if DEBUG_BACKGROUND_WORK
+  // This page was rendered fresh on the render task (not served from a Background-A
+  // pre-render). Mark the overlay as a miss before the status bar draws it.
+  backgroundAGlyph_ = '-';
+#endif
   renderStatusBar();
   if (showTruncatedSectionHintThisRender) {
     const int hintX = orientedMarginLeft + 4;
@@ -2346,6 +2820,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (secondaryBufferDegraded_) {
     renderer.triggerDisplay(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (forceRefreshModeNextRender_ >= 0) {
+    // Manual force-refresh button: apply the requested mode for this one render.
+    renderer.triggerDisplay(static_cast<HalDisplay::RefreshMode>(forceRefreshModeNextRender_));
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    forceRefreshModeNextRender_ = -1;
   } else if (forceHalfRefreshThisPage) {
     renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -2436,17 +2915,18 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
   const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
+#if DEBUG_BACKGROUND_WORK
+  // This page is being served from the Background-A pre-render buffer (a hit) — set the
+  // overlay glyph BEFORE renderStatusBar() draws it, so the status bar reflects that
+  // background rendering produced this page.
+  backgroundAGlyph_ = 'x';
+#endif
   renderStatusBar();
 
   // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
-  // imagePageWithAA never applies here — but a prior page's AA pass can still leave the
-  // panel showing AA-dithered pixels that don't match RED RAM / frameBufferActive (see
-  // pendingHalfRefreshAfterGrayscale_ doc comment), and this fast path is the only display
-  // call for pre-rendered pages — renderContents()'s forceHalfRefreshThisPage never runs.
-  const bool forceHalfRefreshThisPage =
-      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterGrayscale_;
+  // imagePageWithAA never applies here — only the image-page half-refresh can carry over.
+  const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
-  pendingHalfRefreshAfterGrayscale_ = false;
   if (secondaryBufferDegraded_) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -2458,17 +2938,25 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   }
 
   if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int fontId = getEffectiveReaderFontId();
+    // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
+    // them, but background work since may have dropped or re-wired the cache (B's
+    // build slices reset the font accumulation to the metadata-only flash tables) —
+    // and replaying against a metadata-only table dereferences a null bitmap base
+    // (observed: Load access fault at glyph->dataOffset + heap corruption). When the
+    // cache is still warm this is nearly free via the prewarm coverage fast-path.
+    {
+      auto* fcm = renderer.getFontCacheManager();
+      auto scope = fcm->createPrewarmScope();
+      page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);  // scan pass
+      scope.endScanAndPrewarm();
+    }
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
-    // See the deferred-AA completion above: the panel now shows the AA-dithered
-    // render while RED RAM / frameBufferActive only tracks the plain BW bitmap.
-    // Force the next page turn to HALF_REFRESH on X4 to avoid diffing against a
-    // baseline that no longer matches the physical panel state.
-    if (!renderer.isX3()) pendingHalfRefreshAfterGrayscale_ = true;
   }
+  checkHeapIntegrity("after_bufferdisplay_aa");
 }
 
 void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
@@ -2536,6 +3024,10 @@ void EpubReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, isStarred, printedPageLabel);
 
+#if DEBUG_BACKGROUND_WORK
+  renderBackgroundDebugOverlay();
+#endif
+
   lastStatusBarPage = currentPage;
   lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
   if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
@@ -2544,6 +3036,52 @@ void EpubReaderActivity::renderStatusBar() const {
   } else {
     lastStatusBarClockMinute = -1;
   }
+}
+
+void EpubReaderActivity::renderBackgroundDebugOverlay() const {
+#if DEBUG_BACKGROUND_WORK && DEBUG_BACKGROUND_OVERLAY
+  // Background A state is latched per displayed page into backgroundAGlyph_ (see the
+  // field comment), set just before renderStatusBar() draws it. The live scheduling
+  // flags are cleared at the top of render() before this draws, so they always read
+  // idle; latching at display time gives a glyph that is correct and visible:
+  //   'x' hit  — this page was served from the Background-A pre-render buffer
+  //   '-' miss — this page was rendered fresh (first page, heap-gated, or no pre-render)
+  const char aGlyph = backgroundAGlyph_;
+
+  // B is sampled from its state machine rather than the live percent alone: the overlay
+  // only draws when a page renders, and B works precisely while the reader is idle — a
+  // build usually finishes between two page turns, so a percent-only chip was almost
+  // never visible (percent resets to -1 on completion). States:
+  //   Bp      — probing whether the next section is already cached
+  //   Bw      — waiting for the heap gates
+  //   B<nn>%  — build in flight (percent of the chapter consumed)
+  //   B+      — build complete, Section held for adoption on the next chapter cross
+  //   B.      — settled with nothing held (already cached, refused, or failed)
+  // Render task holds the render lock here and B mutates only under it, so the reads
+  // are consistent.
+  char bBuf[8];
+  switch (backgroundBuildState_) {
+    case BackgroundBuildState::Probe:
+      snprintf(bBuf, sizeof(bBuf), "p");
+      break;
+    case BackgroundBuildState::WaitHeap:
+      snprintf(bBuf, sizeof(bBuf), "w");
+      break;
+    case BackgroundBuildState::Building:
+      snprintf(bBuf, sizeof(bBuf), "%d%%", backgroundBuildPercent_ >= 0 ? backgroundBuildPercent_ : 0);
+      break;
+    case BackgroundBuildState::Settled:
+      snprintf(bBuf, sizeof(bBuf), "%s", backgroundSection_ ? "+" : ".");
+      break;
+  }
+
+  // Build a compact "A<x|-> B<state>" string and draw it at the top-left of the content
+  // area, over whatever the status bar drew. Intentionally crude — a diagnostic aid.
+  char buf[24];
+  snprintf(buf, sizeof(buf), "A%c B%s", aGlyph, bBuf);
+  // Draw near the top-left corner; UI_10_FONT_ID is the small status font used elsewhere.
+  renderer.drawText(UI_10_FONT_ID, 4, 2, buf, true, EpdFontFamily::BOLD);
+#endif
 }
 
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
@@ -2716,7 +3254,8 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     if (!section->createSectionFile(effectiveFontId, effectiveLineCompression, SETTINGS.extraParagraphSpacing,
                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                    static_cast<bool>(SETTINGS.bionicReading), SETTINGS.imageRendering)) {
+                                    static_cast<bool>(SETTINGS.bionicReading), SETTINGS.imageRendering, nullptr,
+                                    /*skipEviction=*/false, Section::HeadingFonts{})) {
       LOG_ERR("SLP", "EPUB: failed to rebuild section cache for spine %d", spineIndex);
       return false;
     }
@@ -2962,6 +3501,19 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       if (epub) {
         openQuickOverrides();
       }
+      break;
+    case BA::BTN_FORCE_REFRESH:
+    case BA::BTN_FORCE_FAST_REFRESH:
+      // Re-display the CURRENT page to clear ghosting — do NOT raw displayBuffer() (the
+      // framebuffer may hold a Background-A pre-render of the *next* page, which would look
+      // like a page turn). Clear the pre-render flags so classifyRenderPass() picks a Normal
+      // render of the current page, request the forced mode for that render, and re-render.
+      pendingPreRender = false;
+      usePreRenderedBuffer = false;
+      preRenderedPage.ready = false;
+      forceRefreshModeNextRender_ = static_cast<int8_t>(
+          action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+      requestUpdate();
       break;
     default:
       break;

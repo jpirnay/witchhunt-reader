@@ -2,7 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
-#include <expat.h>
+#include <SaxParser/SaxParser.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -115,7 +115,7 @@ struct ReverseState : StackState {
     }
   }
 
-  void onStartElement(const XML_Char* rawName) {
+  void onStartElement(const char* rawName) {
     inParentTextNode = false;
     pushElement(rawName);
     // Increment after pushElement so stack.back().tag is already lowercased and
@@ -134,7 +134,7 @@ struct ReverseState : StackState {
     popElement();
   }
 
-  void onCharData(const XML_Char* text, const int len) {
+  void onCharData(const char* text, const int len) {
     if (shouldSkipText(len)) {
       return;
     }
@@ -244,23 +244,19 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
 
   ReverseState state(spineIndex, xpath);
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  if (!parser) {
+  SaxParser saxParser;
+  if (!saxParser.init(&state, parserStartCb<ReverseState>, parserEndCb<ReverseState>, parserCharCb<ReverseState>,
+                      parserDefaultCb<ReverseState>)) {
     Storage.remove(tmpPath.c_str());
     return false;
   }
 
-  XML_SetUserData(parser, &state);
-  XML_SetElementHandler(parser, parserStartCb<ReverseState>, parserEndCb<ReverseState>);
-  XML_SetCharacterDataHandler(parser, parserCharCb<ReverseState>);
-  XML_SetDefaultHandlerExpand(parser, parserDefaultCb<ReverseState>);
-  const bool parseOk = runParse(parser, tmpPath);
+  const bool parseOk = runParse(saxParser, tmpPath);
 
   if (!parseOk) {
-    LOG_ERR("KOX", "XPath parse failed for spine=%d at line %lu: %s", spineIndex, XML_GetCurrentLineNumber(parser),
-            XML_ErrorString(XML_GetErrorCode(parser)));
+    LOG_ERR("KOX", "XPath parse failed for spine=%d at line %d: %s", spineIndex, saxParser.errorLine(),
+            saxParser.errorString());
   }
-  XML_ParserFree(parser);
   Storage.remove(tmpPath.c_str());
 
   if (!parseOk || state.bestTier == MatchTier::NONE) {

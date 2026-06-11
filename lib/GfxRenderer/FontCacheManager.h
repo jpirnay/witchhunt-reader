@@ -51,7 +51,13 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
-  std::string scanText_;
-  uint32_t scanStyleCounts_[4] = {};
-  int scanFontId_ = -1;
+  // Prewarm scan accumulates text PER fontId, not just the first one seen. A page that mixes
+  // fonts — e.g. a chapter opener with an h1/h2 heading in a taller font plus body text — must
+  // prewarm every font it uses, or the render thrashes the glyph cache (seconds of per-glyph
+  // flash decode) on whichever font wasn't warmed. Typically 1-2 entries.
+  struct ScanEntry {
+    std::string text;
+    uint32_t styleCounts[4] = {};
+  };
+  std::map<int, ScanEntry> scanByFont_;
 };

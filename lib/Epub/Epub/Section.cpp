@@ -1,8 +1,10 @@
 #include "Section.h"
 
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
@@ -15,7 +17,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 44;  // bumped: PageTableFragment drops colWidths[], gains colspan support
+constexpr uint8_t SECTION_FILE_VERSION =
+    48;  // bumped: headings revert to scaling (headingFontId always 0); discards v47 taller-font caches
 
 namespace header {
 constexpr uint32_t kVersion = 0;
@@ -54,19 +57,37 @@ namespace {
 constexpr uint32_t FNV_PRIME = 0x01000193;         // 16777619
 constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
-// On constrained targets, loading the CSS rules map before chapter parsing can
-// consume a large share of available heap and increase parse truncation risk.
-// Allow compile-time override for tuning.
+// On constrained targets, parsing with embedded CSS adds heap pressure and increases
+// parse truncation risk. Allow compile-time override for tuning.
+//
+// Floor sizing (measured, X3, 2026-06-11): since the sparse disk-backed CSS cache the
+// resident cost is small — selector index ≈ ruleCount × 16 B (~4.6 KB for a measured
+// 290-rule book, 24 KB at the 1500-rule cap), plus the bounded hot/negative caches
+// (≤ ~32 KB absolute worst, typically ~10 KB). CssParser::resolveStyle additionally
+// self-protects below CSS_MIN_FREE_HEAP_FOR_CSS (40 KB) by skipping disk lookups.
+// The original 96 KB predates trusting those bounds and made background (Background-B)
+// CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
+// Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (96 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
 
+// Contiguous floor: the only sizable contiguous CSS allocation is the selector index
+// (~16 B/rule, measured 4.6 KB at 290 rules; 24 KB at the 1500-rule cap), which
+// heapAllowsEmbeddedStyle() adds dynamically from the actual rule count. This define is
+// just the baseline below the dynamic term. The old static 36 KB predated the sparse
+// disk-backed cache and refused builds the heap could easily serve (measured X3:
+// contig 26.6 KB post-indexing with a 4.6 KB actual need).
 #ifndef SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES (36 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
+
+// Inflate-feed chunk for the sliced parse: same size readFileToStream used, and the
+// granularity at which runBuildParse checks its time budget between visitor writes.
+constexpr size_t PARSE_CHUNK_BYTES = 1024;
 
 uint32_t fnv1a(const uint8_t* data, size_t length) {
   uint32_t hash = FNV_OFFSET_BASIS;
@@ -373,37 +394,75 @@ bool Section::clearCache() {
   return true;
 }
 
-bool Section::createSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
-                                const uint8_t paragraphAlignment, const uint16_t viewportWidth,
-                                const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
-                                const bool bionicReadingEnabled, const uint8_t imageRendering,
-                                const std::function<void(int)>& progressFn, const bool skipEviction) {
-  if (!skipEviction) {
-    evictOldVariants();
-  }
-  if (embeddedStyle) {
-    const uint32_t freeHeap = esp_get_free_heap_size();
-    const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-    if (freeHeap < EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES || contigHeap < EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES) {
-      LOG_INF("SCT",
-              "Low heap for embedded CSS (free=%lu contig=%lu, need free>=%lu contig>=%lu); "
-              "building no-CSS section cache",
-              freeHeap, contigHeap, static_cast<uint32_t>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
-              static_cast<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES));
-      return createSectionFile(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                               viewportHeight, hyphenationEnabled, false, bionicReadingEnabled, imageRendering,
-                               progressFn, true);
-    }
-  }
+// Live state of an in-progress section build. Holds exactly the locals that span build
+// phases; see docs/epubreader-control-flow-refactor.md §2.7. Held by Section as a
+// unique_ptr so its address (and thus visitor's completePageFn lut capture) is stable
+// across phase calls and, later, across loop ticks.
+struct Section::BuildState {
+  BuildParams params;
+  std::function<void(int)> progressFn;
+  uint32_t propertyHash = 0;
+  std::string localPath;
+  std::string contentBase;
+  std::string imageBasePath;
+  size_t inflatedSize = 0;
+  CssParser* cssParser = nullptr;
+  std::vector<uint32_t> lut;
+  std::unique_ptr<ChapterHtmlSlimParser> visitor;
+  // Live ZIP-side state of the parse, created on the first runBuildParse call and
+  // released the moment the compressed stream is exhausted. zip must outlive reader
+  // (reader holds a reference to it). chunkBuf (PARSE_CHUNK_BYTES) is the feed buffer —
+  // heap because it must survive across slices. The inflate ring inside the reader is
+  // sized to the entry (≤32 KB).
+  std::unique_ptr<ZipFile> zip;
+  std::unique_ptr<ZipFile::EntryReader> reader;
+  std::unique_ptr<uint8_t[]> chunkBuf;
+  bool parseStarted = false;
+  // Two-phase sliced parse, latched at the first parse call (so a build started in the
+  // background stays on this path when the foreground resumes it with budget 0):
+  //   (a) extract — EntryReader slices inflate the entry to tempPath on SD, then ALL
+  //       ZIP state (ring + scratch + handles) is released;
+  //   (b) parse — slices read tempPath and feed the visitor with no ZIP memory resident.
+  // This keeps the inflate ring and the parser's layout working set from ever being
+  // live at the same time, which is what made background builds impossible on ~68 KB
+  // of reading heap. Blocking builds (budget 0 from the start) stream directly instead:
+  // they run with the secondary framebuffer released and don't need the split or the
+  // extra SD round-trip.
+  bool useTempExtract = false;
+  bool extractDone = false;
+  FsFile tempFile;
+  std::string tempPath;
+  size_t tempBytesFed = 0;
+  // Property hash of the params as requested by the caller, before any low-heap CSS
+  // downgrade. Lets stepSectionBuild detect a stale partial build (variant changed)
+  // without a heap-forced no-CSS build reading as a mismatch against its own request.
+  uint32_t requestedHash = 0;
+  // Parse-result flags, set by runBuildParse and consumed by runBuildFinalize.
+  bool streamOk = false;
+  bool finalizeOk = false;
+  bool parserStreamOk = false;
+  // Coarse timing for the summary log; per-phase wall clock (parseMs accumulates across slices).
+  uint32_t totalStartMs = 0;
+  uint32_t setupMs = 0;
+  uint32_t parseMs = 0;
+};
 
-  uint32_t propertyHash =
-      calculatePropertyHash(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                            viewportHeight, hyphenationEnabled, embeddedStyle, bionicReadingEnabled, imageRendering);
-  filePath = getSectionFilePath(propertyHash);
+// Out-of-line (see header): both need the complete BuildState type, and the dtor must
+// not leave a partially written cache file behind when a Section dies with a build in
+// flight (book close, activity exit) — its header was never patched with offsets.
+Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRenderer& renderer)
+    : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
+Section::~Section() { abortSectionBuild(); }
 
-  const uint32_t phaseTotalStart = millis();
-  const auto localPath = epub->getSpineItem(spineIndex).href;
-  LOG_INF("SCT", "createSectionFile spine=%d start: %s (free=%lu)", spineIndex, localPath.c_str(),
+Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
+  const BuildParams& p = st.params;
+  st.propertyHash = calculatePropertyHash(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment,
+                                          p.viewportWidth, p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle,
+                                          p.bionicReadingEnabled, p.imageRendering);
+  filePath = getSectionFilePath(st.propertyHash);
+
+  st.localPath = epub->getSpineItem(spineIndex).href;
+  LOG_INF("SCT", "createSectionFile spine=%d start: %s (free=%lu)", spineIndex, st.localPath.c_str(),
           esp_get_free_heap_size());
 
   // Create cache directory if it doesn't exist
@@ -414,10 +473,10 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   // Get inflated size up-front so the parser can choose progress granularity.
   const uint32_t phaseSetupStart = millis();
-  size_t inflatedSize = 0;
-  if (!epub->getItemSize(localPath, &inflatedSize)) {
-    LOG_ERR("SCT", "Failed to get inflated size for %s", localPath.c_str());
-    return false;
+  st.inflatedSize = 0;
+  if (!epub->getItemSize(st.localPath, &st.inflatedSize)) {
+    LOG_ERR("SCT", "Failed to get inflated size for %s", st.localPath.c_str());
+    return BuildPhaseResult::Failed;
   }
 
   // Reset build state — createSectionFile may be called on a Section that previously
@@ -426,27 +485,29 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   file.close();
   pageCount = 0;
   this->lut.clear();
+  cssLowHeapDegraded_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
-    return false;
+    return BuildPhaseResult::Failed;
   }
-  writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                         viewportHeight, hyphenationEnabled, embeddedStyle, bionicReadingEnabled, imageRendering);
-  std::vector<uint32_t> lut = {};
+  writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
+                         p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
+                         p.imageRendering);
+  st.lut.clear();
 
   // Derive the content base directory and image cache path prefix for the parser
-  size_t lastSlash = localPath.find_last_of('/');
-  std::string contentBase = (lastSlash != std::string::npos) ? localPath.substr(0, lastSlash + 1) : "";
-  std::string imageBasePath = getImageBasePath(propertyHash);
+  size_t lastSlash = st.localPath.find_last_of('/');
+  st.contentBase = (lastSlash != std::string::npos) ? st.localPath.substr(0, lastSlash + 1) : "";
+  st.imageBasePath = getImageBasePath(st.propertyHash);
 
-  CssParser* cssParser = nullptr;
-  if (embeddedStyle) {
-    cssParser = epub->getCssParser();
-    if (cssParser) {
-      if (!cssParser->loadFromCache()) {
+  st.cssParser = nullptr;
+  if (p.embeddedStyle) {
+    st.cssParser = epub->getCssParser();
+    if (st.cssParser) {
+      if (!st.cssParser->loadFromCache()) {
         LOG_ERR("SCT", "Failed to load CSS from cache");
       }
-      cssParser->resetResolveStats();
+      st.cssParser->resetResolveStats();
     }
   }
 
@@ -478,7 +539,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
         serialization::readString(pageListFile, href);
         serialization::readString(pageListFile, anchor);
         serialization::readString(pageListFile, label);
-        if (href == localPath) {
+        if (href == st.localPath) {
           externalPageBreakAnchors.emplace_back(std::move(anchor), std::move(label));
         }
       }
@@ -486,43 +547,198 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     }
   }
 
-  ChapterHtmlSlimParser visitor(
-      epub, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth, viewportHeight,
-      hyphenationEnabled, bionicReadingEnabled,
-      [this, &lut](std::unique_ptr<Page> page) { lut.emplace_back(this->onPageComplete(std::move(page))); },
-      embeddedStyle, contentBase, imageBasePath, imageRendering, std::move(tocAnchors), progressFn, cssParser,
-      epub->getImageManifest());
-  visitor.setExternalPageBreakAnchors(std::move(externalPageBreakAnchors));
+  // The visitor's completePageFn captures &st.lut: BuildState lives in a stable unique_ptr,
+  // so this reference is valid for the visitor's whole lifetime, including across slices.
+  st.visitor = std::make_unique<ChapterHtmlSlimParser>(
+      epub, renderer, p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
+      p.viewportHeight, p.hyphenationEnabled, p.bionicReadingEnabled,
+      [this, &st](std::unique_ptr<Page> page) { st.lut.emplace_back(this->onPageComplete(std::move(page))); },
+      p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering, std::move(tocAnchors), st.progressFn,
+      st.cssParser, epub->getImageManifest());
+  st.visitor->setExternalPageBreakAnchors(std::move(externalPageBreakAnchors));
+  st.visitor->setHeadingFonts(p.headingFonts.fontId, p.headingFonts.residual);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
-  if (!visitor.setup(inflatedSize)) {
+  if (!st.visitor->setup(st.inflatedSize)) {
     LOG_ERR("SCT", "Failed to set up chapter parser");
     file.close();
     Storage.remove(filePath.c_str());
-    if (cssParser) {
-      cssParser->clear();
+    if (st.cssParser) {
+      st.cssParser->clear();
     }
-    return false;
+    return BuildPhaseResult::Failed;
   }
-  const uint32_t setupMs = millis() - phaseSetupStart;
-  LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, setupMs,
-          static_cast<uint32_t>(inflatedSize), esp_get_free_heap_size());
+  st.setupMs = millis() - phaseSetupStart;
+  LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
+          static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
+  return BuildPhaseResult::Ok;
+}
 
-  // Stream EPUB item content directly into the parser — no temp file, no second SD pass.
-  const uint32_t phaseParseStart = millis();
-  const bool streamOk = epub->readItemContentsToStream(localPath, visitor, 1024);
-  const bool finalizeOk = visitor.finalize();
-  const bool parserStreamOk = visitor.streamSucceeded();
-  if (cssParser) {
-    cssParser->logResolveStats(localPath.c_str());
+Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t budgetMs) {
+  const uint32_t sliceStart = millis();
+  const auto overBudget = [&] { return budgetMs != 0 && millis() - sliceStart >= budgetMs; };
+  const auto yieldSlice = [&] {
+    st.parseMs += millis() - sliceStart;
+    return BuildPhaseResult::More;
+  };
+  bool streamFailed = false;
+
+  if (!st.parseStarted) {
+    st.parseStarted = true;
+    st.useTempExtract = budgetMs != 0;
+    // Heap, not stack: these must survive across slices. Ring (≤32 KB, sized to the
+    // entry) + 2× PARSE_CHUNK_BYTES scratch — the same buffers readFileToStream held
+    // for the whole stream, so net-neutral vs the old one-shot path.
+    st.zip.reset(new (std::nothrow) ZipFile(epub->getPath()));
+    st.chunkBuf.reset(new (std::nothrow) uint8_t[PARSE_CHUNK_BYTES]);
+    if (st.zip && st.chunkBuf) {
+      st.reader.reset(new (std::nothrow) ZipFile::EntryReader(*st.zip, PARSE_CHUNK_BYTES));
+    }
+    if (!st.reader) {
+      LOG_ERR("SCT", "Failed to allocate entry reader (%u bytes scratch, free=%lu)",
+              static_cast<uint32_t>(PARSE_CHUNK_BYTES), esp_get_free_heap_size());
+      streamFailed = true;
+    } else {
+      const std::string entryPath = FsHelpers::normalisePath(st.localPath);
+      if (!st.reader->open(entryPath.c_str())) {
+        streamFailed = true;  // EntryReader::open already logged the cause
+      }
+    }
+    if (!streamFailed && st.useTempExtract) {
+      st.tempPath = filePath + ".xtmp";
+      if (!Storage.openFileForWrite("SCT", st.tempPath, st.tempFile)) {
+        streamFailed = true;
+      }
+    }
   }
-  const bool parseComplete = streamOk && finalizeOk && parserStreamOk;
+
+  // Phase (a), sliced path only: inflate the entry to a temp SD file, then release all
+  // ZIP state. Keeps the ring and the parser's layout working set temporally disjoint.
+  if (!streamFailed && st.useTempExtract && !st.extractDone) {
+    bool done = false;
+    while (!done) {
+      size_t produced = 0;
+      if (!st.reader->step(st.chunkBuf.get(), PARSE_CHUNK_BYTES, &produced, &done)) {
+        streamFailed = true;
+        break;
+      }
+      if (produced > 0 && st.tempFile.write(st.chunkBuf.get(), produced) != produced) {
+        LOG_ERR("SCT", "Failed to write extracted XHTML to %s", st.tempPath.c_str());
+        streamFailed = true;
+        break;
+      }
+      if (!done && overBudget()) {
+        return yieldSlice();
+      }
+    }
+    if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
+      LOG_ERR("SCT", "Decompressed size mismatch (expected %u, got %u)", static_cast<uint32_t>(st.inflatedSize),
+              static_cast<uint32_t>(st.reader->bytesProduced()));
+      streamFailed = true;
+    }
+    st.reader.reset();
+    st.zip.reset();
+    st.tempFile.flush();
+    st.tempFile.close();
+    st.extractDone = true;
+    if (!streamFailed) {
+      if (!Storage.openFileForRead("SCT", st.tempPath, st.tempFile)) {
+        streamFailed = true;
+      } else {
+        LOG_INF("SCT", "createSectionFile spine=%d extracted %u bytes to temp (free=%lu)", spineIndex,
+                static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
+        if (overBudget()) {
+          return yieldSlice();
+        }
+      }
+    }
+  }
+
+  // Phase (b): feed the visitor — from the temp file (sliced path, no ZIP state live)
+  // or straight from the inflate stream (blocking path).
+  if (!streamFailed) {
+    if (st.useTempExtract) {
+      while (true) {
+        const int n = st.tempFile.read(st.chunkBuf.get(), PARSE_CHUNK_BYTES);
+        if (n < 0) {
+          LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
+          streamFailed = true;
+          break;
+        }
+        if (n == 0) {
+          break;
+        }
+        st.tempBytesFed += static_cast<size_t>(n);
+        // A short write means the parser failed mid-stream (it returns 0 after an
+        // internal error) — same abort the one-shot readFileToStream path performed.
+        if (st.visitor->write(st.chunkBuf.get(), static_cast<size_t>(n)) != static_cast<size_t>(n)) {
+          streamFailed = true;
+          break;
+        }
+        if (overBudget()) {
+          return yieldSlice();
+        }
+      }
+      if (!streamFailed && st.tempBytesFed != st.inflatedSize) {
+        LOG_ERR("SCT", "Extracted size mismatch (expected %u, fed %u)", static_cast<uint32_t>(st.inflatedSize),
+                static_cast<uint32_t>(st.tempBytesFed));
+        streamFailed = true;
+      }
+    } else {
+      bool done = false;
+      while (!done) {
+        size_t produced = 0;
+        if (!st.reader->step(st.chunkBuf.get(), PARSE_CHUNK_BYTES, &produced, &done)) {
+          streamFailed = true;
+          break;
+        }
+        if (produced > 0 && st.visitor->write(st.chunkBuf.get(), produced) != produced) {
+          streamFailed = true;
+          break;
+        }
+      }
+      if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
+        LOG_ERR("SCT", "Decompressed size mismatch (expected %u, got %u)", static_cast<uint32_t>(st.inflatedSize),
+                static_cast<uint32_t>(st.reader->bytesProduced()));
+        streamFailed = true;
+      }
+    }
+  }
+
+  // Stream exhausted or failed — wrap up the phase exactly as the one-shot path did.
+  // Release the ZIP-side state (no-ops on the sliced path, which dropped it after
+  // extraction) and the temp file before the visitor finalizes.
+  st.reader.reset();
+  st.zip.reset();
+  st.chunkBuf.reset();
+  if (st.tempFile) {
+    st.tempFile.close();
+  }
+  if (!st.tempPath.empty()) {
+    Storage.remove(st.tempPath.c_str());
+    st.tempPath.clear();
+  }
+  st.streamOk = !streamFailed;
+  st.finalizeOk = st.visitor->finalize();
+  st.parserStreamOk = st.visitor->streamSucceeded();
+  if (st.cssParser) {
+    st.cssParser->logResolveStats(st.localPath.c_str());
+    // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
+    // means pages were cached with styles silently missing.
+    cssLowHeapDegraded_ = st.cssParser->getResolveStats().lowHeapSkips > 0;
+  }
+  st.parseMs += millis() - sliceStart;
+  LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
+          spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
+          esp_get_free_heap_size());
+  return BuildPhaseResult::Ok;
+}
+
+Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
+  ChapterHtmlSlimParser& visitor = *st.visitor;
+  const bool parseComplete = st.streamOk && st.finalizeOk && st.parserStreamOk;
   bool success = parseComplete;
   const bool hasParsedPages = pageCount > 0;
-  const uint32_t parseMs = millis() - phaseParseStart;
-  LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
-          spineIndex, parseMs, pageCount, streamOk ? 1 : 0, finalizeOk ? 1 : 0, parserStreamOk ? 1 : 0,
-          esp_get_free_heap_size());
   // streamMs is no longer a separate phase (SD-write of temp file is gone); keep the
   // log breakdown stable by reporting it as 0.
   constexpr uint32_t streamMs = 0;
@@ -533,39 +749,40 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     // keep the partial section cache so the chapter remains readable instead of failing hard.
     if (hasParsedPages) {
       LOG_ERR("SCT", "Parse incomplete; keeping partial section cache with %u pages (stream=%d finalize=%d parser=%d)",
-              pageCount, streamOk ? 1 : 0, finalizeOk ? 1 : 0, parserStreamOk ? 1 : 0);
+              pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0);
       success = true;
-    } else if (embeddedStyle) {
+    } else if (st.params.embeddedStyle) {
       LOG_ERR("SCT",
               "Parse failed with embedded CSS enabled; retrying section creation with embeddedStyle=0 "
               "(stream=%d finalize=%d parser=%d)",
-              streamOk ? 1 : 0, finalizeOk ? 1 : 0, parserStreamOk ? 1 : 0);
+              st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0);
       file.close();
       Storage.remove(filePath.c_str());
-      if (cssParser) {
-        cssParser->clear();
+      if (st.cssParser) {
+        st.cssParser->clear();
       }
-      return createSectionFile(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-                               viewportHeight, hyphenationEnabled, false, bionicReadingEnabled, imageRendering,
-                               progressFn, true);
+      // Ask the entry function to restart the whole build with embeddedStyle disabled.
+      return BuildPhaseResult::RetryNoCss;
     } else {
-      LOG_ERR("SCT", "Failed to parse XML and build pages (stream=%d finalize=%d parser=%d)", streamOk ? 1 : 0,
-              finalizeOk ? 1 : 0, parserStreamOk ? 1 : 0);
+      LOG_ERR("SCT", "Failed to parse XML and build pages (stream=%d finalize=%d parser=%d)", st.streamOk ? 1 : 0,
+              st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0);
       file.close();
       Storage.remove(filePath.c_str());
-      if (cssParser) {
-        cssParser->clear();
+      if (st.cssParser) {
+        st.cssParser->clear();
       }
-      return false;
+      return BuildPhaseResult::Failed;
     }
   }
-  const uint32_t fileSize = static_cast<uint32_t>(inflatedSize);
+  const uint32_t fileSize = static_cast<uint32_t>(st.inflatedSize);
 
   const uint32_t lutOffset = file.position();
   bool hasFailedLutRecords = false;
-  // Write LUT
-  for (const uint32_t& pos : lut) {
-    if (pos == 0) {
+  // Write LUT. 0 marks a failed onPageComplete; 0xFFFFFFFF is what FsFile::position()
+  // degenerates to on a broken handle — neither must ever reach the cache file, where
+  // it would only surface later as a failed seek at page-load time.
+  for (const uint32_t& pos : st.lut) {
+    if (pos == 0 || pos == UINT32_MAX) {
       hasFailedLutRecords = true;
       break;
     }
@@ -576,7 +793,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     LOG_ERR("SCT", "Failed to write LUT due to invalid page positions");
     file.close();
     Storage.remove(filePath.c_str());
-    return false;
+    return BuildPhaseResult::Failed;
   }
 
   // Write anchor-to-page map for fragment navigation (TOC + footnote targets)
@@ -590,9 +807,9 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   // Write printed page label map for EPUB pagebreak markers.
   const uint32_t pageBreakMapOffset = file.position();
-  const auto& pageBreakLabels = visitor.getPageBreakLabels();
-  serialization::writePod(file, static_cast<uint16_t>(pageBreakLabels.size()));
-  for (const auto& [page, label] : pageBreakLabels) {
+  const auto& pageBreakLabelsLocal = visitor.getPageBreakLabels();
+  serialization::writePod(file, static_cast<uint16_t>(pageBreakLabelsLocal.size()));
+  for (const auto& [page, label] : pageBreakLabelsLocal) {
     serialization::writePod(file, page);
     serialization::writeString(file, label);
   }
@@ -607,7 +824,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
             static_cast<uint32_t>(pageCount));
     file.close();
     Storage.remove(filePath.c_str());
-    return false;
+    return BuildPhaseResult::Failed;
   }
   serialization::writePod(file, static_cast<uint16_t>(paragraphLut.size()));
   for (const auto& entry : paragraphLut) {
@@ -622,7 +839,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
     LOG_ERR("SCT", "Failed to seek to section header patch offset %u", header::kParseComplete);
     file.close();
     Storage.remove(filePath.c_str());
-    return false;
+    return BuildPhaseResult::Failed;
   }
   serialization::writePod(file, parseComplete);
   serialization::writePod(file, pageCount);
@@ -640,11 +857,11 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
             static_cast<unsigned>(file.position() - headerPatchStart), static_cast<unsigned>(headerPatchStart));
     file.close();
     Storage.remove(filePath.c_str());
-    return false;
+    return BuildPhaseResult::Failed;
   }
 
-  if (cssParser) {
-    cssParser->clear();
+  if (st.cssParser) {
+    st.cssParser->clear();
   }
 
   buildTocBoundaries(anchors);
@@ -663,16 +880,186 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   // subsequent loadPageFromSectionFile() calls can seek directly without re-opening.
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     LOG_ERR("SCT", "Failed to open section file for reading after creation");
-    return false;
+    return BuildPhaseResult::Failed;
   }
   truncatedCache = !parseComplete;
-  this->lut = std::move(lut);
+  this->lut = std::move(st.lut);
   const uint32_t finalizeMs = millis() - phaseFinalizeStart;
-  const uint32_t totalMs = millis() - phaseTotalStart;
+  const uint32_t totalMs = millis() - st.totalStartMs;
   LOG_INF("SCT",
           "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
-          spineIndex, totalMs, streamMs, setupMs, parseMs, finalizeMs, pageCount, fileSize);
+          spineIndex, totalMs, streamMs, st.setupMs, st.parseMs, finalizeMs, pageCount, fileSize);
+  return BuildPhaseResult::Done;
+}
+
+bool Section::createSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                                const uint8_t paragraphAlignment, const uint16_t viewportWidth,
+                                const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
+                                const bool bionicReadingEnabled, const uint8_t imageRendering,
+                                const std::function<void(int)>& progressFn, const bool skipEviction,
+                                const HeadingFonts& headingFonts) {
+  if (!skipEviction) {
+    evictOldVariants();
+  }
+
+  BuildParams params;
+  params.fontId = fontId;
+  params.lineCompression = lineCompression;
+  params.extraParagraphSpacing = extraParagraphSpacing;
+  params.paragraphAlignment = paragraphAlignment;
+  params.viewportWidth = viewportWidth;
+  params.viewportHeight = viewportHeight;
+  params.hyphenationEnabled = hyphenationEnabled;
+  params.embeddedStyle = embeddedStyle;
+  params.bionicReadingEnabled = bionicReadingEnabled;
+  params.imageRendering = imageRendering;
+  params.headingFonts = headingFonts;
+
+  // Run-to-completion path: pump the incremental build with no time budget. budgetMs == 0
+  // never yields mid-parse, so the only More this loop sees is the restart after a
+  // RetryNoCss downgrade — foreground behaviour is unchanged. If a background build for
+  // this exact variant is already in flight, the pump resumes it instead of starting over.
+  while (true) {
+    switch (stepSectionBuild(params, /*budgetMs=*/0, progressFn, skipEviction)) {
+      case BuildStep::Done:
+        return true;
+      case BuildStep::Failed:
+        return false;
+      default:
+        continue;
+    }
+  }
+}
+
+bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
+  // Contig need is dominated by the selector index vector (16 B/rule) plus slack for
+  // file buffers; everything else (hot/negative caches) allocates in small nodes.
+  // Deliberately silent: callers decide whether a refusal is worth a log line —
+  // background gates re-check this often and must not spam.
+  const uint32_t requiredContig =
+      std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES, static_cast<uint32_t>(cssRuleCount) * 16 + 8 * 1024);
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;
+}
+
+bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
+                         const uint32_t requestedHash) {
+  BuildParams p = params;
+  const CssParser* css = epub->getCssParser();
+  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+    LOG_INF("SCT", "Low heap for embedded CSS (free=%lu contig=%lu); building no-CSS section cache",
+            esp_get_free_heap_size(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+    p.embeddedStyle = false;
+  }
+
+  buildState_.reset(new (std::nothrow) BuildState());
+  if (!buildState_) {
+    LOG_ERR("SCT", "Failed to allocate build state (free=%lu)", esp_get_free_heap_size());
+    return false;
+  }
+  buildState_->params = p;
+  buildState_->progressFn = progressFn;
+  buildState_->requestedHash = requestedHash;
+  buildState_->totalStartMs = millis();
+
+  if (runBuildSetup(*buildState_) != BuildPhaseResult::Ok) {
+    buildState_.reset();
+    return false;
+  }
   return true;
+}
+
+Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const uint32_t budgetMs,
+                                             const std::function<void(int)>& progressFn, const bool skipEviction) {
+  const uint32_t requestedHash = calculatePropertyHash(
+      params.fontId, params.lineCompression, params.extraParagraphSpacing, params.paragraphAlignment,
+      params.viewportWidth, params.viewportHeight, params.hyphenationEnabled, params.embeddedStyle,
+      params.bionicReadingEnabled, params.imageRendering);
+  // A live partial build is only resumable for the exact variant it was started for;
+  // when the request changed (font/margins/...) the partial cache is the wrong file.
+  if (buildState_ && buildState_->requestedHash != requestedHash) {
+    LOG_INF("SCT", "stepSectionBuild spine=%d: params changed, discarding partial build", spineIndex);
+    abortSectionBuild();
+  }
+
+  if (!buildState_) {
+    if (!skipEviction) {
+      evictOldVariants();
+    }
+    if (!startBuild(params, progressFn, requestedHash)) {
+      return BuildStep::Failed;
+    }
+  }
+
+  // The CSS fallback (parse-failed-with-CSS) downgrades to a no-CSS build by restarting
+  // from setup. Loop rather than recurse; at most one downgrade ever happens.
+  while (true) {
+    if (runBuildParse(*buildState_, budgetMs) == BuildPhaseResult::More) {
+      return BuildStep::More;
+    }
+
+    const BuildPhaseResult fin = runBuildFinalize(*buildState_);
+    if (fin == BuildPhaseResult::RetryNoCss) {
+      BuildParams retryParams = params;
+      retryParams.embeddedStyle = false;
+      const std::function<void(int)> keepProgress = std::move(buildState_->progressFn);
+      // Finalize already closed and removed the failed cache file — just drop the state.
+      buildState_.reset();
+      if (!startBuild(retryParams, keepProgress, requestedHash)) {
+        return BuildStep::Failed;
+      }
+      // The restart's setup consumed this slice; resume parsing on the next tick. The
+      // blocking path (budgetMs == 0) keeps going.
+      if (budgetMs != 0) {
+        return BuildStep::More;
+      }
+      continue;
+    }
+
+    buildState_.reset();
+    return fin == BuildPhaseResult::Done ? BuildStep::Done : BuildStep::Failed;
+  }
+}
+
+int Section::activeBuildPercent() const {
+  if (!buildState_ || !buildState_->parseStarted || buildState_->inflatedSize == 0) {
+    return 0;
+  }
+  const BuildState& st = *buildState_;
+  if (st.useTempExtract) {
+    // Extraction is cheap next to layout: report it as the first 10%, parsing as the rest.
+    if (!st.extractDone) {
+      const size_t produced = st.reader ? st.reader->bytesProduced() : 0;
+      return static_cast<int>(produced * 10 / st.inflatedSize);
+    }
+    return static_cast<int>(10 + st.tempBytesFed * 90 / st.inflatedSize);
+  }
+  if (!st.reader) {
+    return 100;  // stream consumed; only Finalize remains
+  }
+  return static_cast<int>(st.reader->bytesProduced() * 100 / st.inflatedSize);
+}
+
+void Section::abortSectionBuild() {
+  if (!buildState_) {
+    return;
+  }
+  // Drop the extraction temp file alongside the partial cache file.
+  if (buildState_->tempFile) {
+    buildState_->tempFile.close();
+  }
+  if (!buildState_->tempPath.empty()) {
+    Storage.remove(buildState_->tempPath.c_str());
+  }
+  // During a live build, `file` is the build's write handle and filePath its cache path
+  // (both set by runBuildSetup). The header was never patched, so remove the file.
+  file.close();
+  Storage.remove(filePath.c_str());
+  if (buildState_->cssParser) {
+    buildState_->cssParser->clear();
+  }
+  buildState_.reset();
 }
 
 std::unique_ptr<Page> Section::loadPageFromSectionFile() {
