@@ -412,18 +412,28 @@ bool XtcReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
 
   renderer.clearScreen();
 
-  const uint16_t maxX = std::min(pageWidth, static_cast<uint16_t>(renderer.getScreenWidth()));
-  const uint16_t maxY = std::min(pageHeight, static_cast<uint16_t>(renderer.getScreenHeight()));
-
-  // Both formats: isInk() true means a non-white pixel -> draw black.
-  for (uint16_t y = 0; y < maxY; y++) {
-    for (uint16_t x = 0; x < maxX; x++) {
-      if (pageStream.isInk(x, y)) {
-        renderer.drawPixel(x, y, true);
-      }
-    }
+  const uint16_t maxX = std::min(pageWidth, renderer.getDisplayHeight());
+  const uint16_t maxY = std::min(pageHeight, renderer.getDisplayWidth());
+  const size_t rowBytes = (static_cast<size_t>(pageWidth) + 7) / 8;
+  uint8_t* row = static_cast<uint8_t*>(malloc(rowBytes));  // freed before return
+  if (!row) {
+    LOG_ERR("SLP", "XTC: failed to allocate row buffer (%u bytes)", static_cast<unsigned int>(rowBytes));
+    return false;
   }
 
+  // Both formats: stream.isInk() means a non-white pixel -> draw black.
+  for (uint16_t y = 0; y < maxY; y++) {
+    bool invertBits = false;
+    if (!pageStream.readBwRow(y, row, rowBytes, &invertBits)) {
+      free(row);
+      return false;
+    }
+    renderer.writePhysicalPortraitPackedRow(y, row, maxX, invertBits);
+  }
+
+  free(row);
+  return true;
+}
 
 void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
   using BA = CrossPointSettings::BUTTON_ACTION;
