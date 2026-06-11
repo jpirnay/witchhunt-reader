@@ -2902,8 +2902,20 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   }
 
   if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int fontId = getEffectiveReaderFontId();
+    // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
+    // them, but background work since may have dropped or re-wired the cache (B's
+    // build slices reset the font accumulation to the metadata-only flash tables) —
+    // and replaying against a metadata-only table dereferences a null bitmap base
+    // (observed: Load access fault at glyph->dataOffset + heap corruption). When the
+    // cache is still warm this is nearly free via the prewarm coverage fast-path.
+    {
+      auto* fcm = renderer.getFontCacheManager();
+      auto scope = fcm->createPrewarmScope();
+      page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop);  // scan pass
+      scope.endScanAndPrewarm();
+    }
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
     // timings not recorded for the pre-rendered path
