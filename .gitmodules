@@ -1,4 +1,4 @@
 [submodule "open-x4-sdk"]
 	path = open-x4-sdk
-	url = https://github.com/jpirnay/community-sdk.git
-	branch = crosspoint-sdcard-extensions
+	url = https://github.com/jpirnay/crosspoint-xdk.git
+	branch = main

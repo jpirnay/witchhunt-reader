@@ -127,6 +127,55 @@ class XtcPageRowStream {
     return ((m_bwRow[x / 8] >> (7 - (x % 8))) & 1) != 0;
   }
 
+  // Read one packed 1bpp framebuffer row (MSB-first, 0 = black, 1 = white).
+  // XTG rows already use that convention and stream directly from the page.
+  // XTH's cached BW plane stores 1 = ink, so callers should invert those bits
+  // when writing the row to the framebuffer.
+  bool readBwRow(uint16_t y, uint8_t* out, size_t outSize, bool* invertBits) {
+    if (!m_ok || !out || outSize < static_cast<size_t>(m_bwRowBytes)) return false;
+    if (invertBits) *invertBits = (m_bitDepth == 2);
+    if (m_bitDepth == 1) {
+      return m_parser->loadPageRange(m_pageIndex, static_cast<size_t>(y) * m_bwRowBytes, out, m_bwRowBytes) ==
+             static_cast<size_t>(m_bwRowBytes);
+    }
+    return m_bwFile.seek64(static_cast<uint64_t>(y) * m_bwRowBytes) && m_bwFile.read(out, m_bwRowBytes) == m_bwRowBytes;
+  }
+
+  enum class GrayMask { DarkOnly, LightOrDark };
+
+  // Build the packed grayscale control row used by the existing XTH gray
+  // overlay pipeline. Bits are 1 where the old drawPixel(..., false) loop
+  // would have written a white/untouched bit into an otherwise 0x00 plane.
+  bool readGrayMaskRow(uint16_t y, GrayMask mask, uint8_t* out, size_t outSize, uint16_t maxWidth) {
+    if (!m_ok || m_bitDepth != 2 || !out || outSize < static_cast<size_t>(m_bwRowBytes)) return false;
+    if (y != m_grayCachedY) {
+      if (!m_grayFile.seek64(static_cast<uint64_t>(y) * m_grayRowBytes) ||
+          m_grayFile.read(m_grayRow, m_grayRowBytes) != m_grayRowBytes) {
+        return false;
+      }
+      m_grayCachedY = y;
+    }
+    memset(out, 0, m_bwRowBytes);
+    const uint16_t w = (maxWidth < m_width) ? maxWidth : m_width;
+    const uint16_t groups = (w + 3) / 4;
+    for (uint16_t g = 0; g < groups; g++) {
+      const uint8_t grayByte = m_grayRow[g];
+      const uint8_t pixelsInGroup = static_cast<uint8_t>((w - static_cast<uint16_t>(g * 4) >= 4) ? 4 : (w - g * 4));
+      uint8_t nibble = 0;
+      for (uint8_t p = 0; p < pixelsInGroup; p++) {
+        const uint8_t v = static_cast<uint8_t>((grayByte >> (6 - p * 2)) & 0x03);
+        const bool set = (mask == GrayMask::DarkOnly) ? (v == 1) : (v == 1 || v == 2);
+        if (set) nibble |= static_cast<uint8_t>(0x08 >> p);
+      }
+      if ((g & 1) == 0) {
+        out[g / 2] |= static_cast<uint8_t>(nibble << 4);
+      } else {
+        out[g / 2] |= nibble;
+      }
+    }
+    return true;
+  }
+
   // Gray value 0..3 (0=white .. 3=black) at (x, y). XTH only; for XTG returns
   // 3 (black) / 0 (white) so callers need not special-case the format.
   uint8_t grayValue(uint16_t x, uint16_t y) {

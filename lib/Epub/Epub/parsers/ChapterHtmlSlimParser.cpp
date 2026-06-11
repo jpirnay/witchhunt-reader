@@ -35,6 +35,14 @@ constexpr size_t MIN_FREE_HEAP_FOR_INDEXING_POPUP = 32 * 1024;
 constexpr size_t MIN_CONTIG_HEAP_FOR_INDEXING_POPUP = 12 * 1024;
 
 constexpr size_t PARSE_BUFFER_SIZE = 1024;
+
+// Hard cap on the number of anchor IDs recorded per chapter. Legitimate navigation
+// anchors (TOC entries, footnotes, cross-references) rarely exceed a few hundred per
+// chapter. A runaway count usually means a converter injected machine-generated IDs on
+// every text fragment (e.g. Kobo KePub spans). The cap prevents unbounded heap growth
+// on resource-constrained devices. TOC anchors bypass this cap.
+constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
+
 // Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
 // No heap guard needed at parse time — only a ZIP header read (~4 KB buffer on stack in
 // getDimensionsFromZipEntry) happens during createSectionFile.
@@ -147,6 +155,14 @@ bool isInternalEpubLink(const char* href) {
 bool isHeaderOrBlock(const char* name) {
   return matches(name, HEADER_TAGS, NUM_HEADER_TAGS) || matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS);
 }
+
+// Returns true if the HTML element is a purely inline, non-navigable wrapper.
+// IDs on these elements are never meaningful navigation targets in epub content.
+// Reading-system converters (Kobo KePub, Calibre, etc.) frequently inject thousands
+// of such IDs for progress tracking or internal bookkeeping, and recording each one
+// as a navigation anchor exhausts the heap on memory-constrained devices.
+// Block-level, sectioning, and structural elements are always considered navigable.
+bool isNonNavigableInlineElement(const char* name) { return strcmp(name, "span") == 0; }
 
 bool isTableStructuralTag(const char* name) {
   return strcmp(name, "table") == 0 || strcmp(name, "tr") == 0 || strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
@@ -633,8 +649,18 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
   // Defer generic anchor recording until startNewTextBlock, after the previous block
   // is flushed to pages via makePages(). Skip pagebreak anchors since they were already recorded.
+  //
+  // Skip IDs on non-navigable inline elements (e.g. <span>): these are never link targets
+  // in epub content, but reading-system converters can inject tens of thousands of them per
+  // chapter, exhausting the heap. The MAX_ANCHORS_PER_CHAPTER cap is a fallback against
+  // unknown future ID-injection patterns on other elements. TOC anchors bypass both the
+  // span filter and the cap, since they drive page breaks and core navigation.
   if (!isPageBreakMarker && !idAttr.empty()) {
-    self->pendingAnchorId = idAttr;
+    const bool isTocAnchor =
+        std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
+    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
+      self->pendingAnchorId = idAttr;
+    }
   }
 
   auto centeredBlockStyle = BlockStyle();

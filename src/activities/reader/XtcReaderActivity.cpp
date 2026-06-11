@@ -13,6 +13,7 @@
 #include <I18n.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -242,11 +243,20 @@ void XtcReaderActivity::renderPage() {
   // Clear screen first
   renderer.clearScreen();
 
-  // Copy page bitmap using GfxRenderer's drawPixel
-  // XTC/XTCH pages are pre-rendered with status bar included, so render full page.
-  // Clamp to display bounds: some files are encoded for a different screen size.
-  const uint16_t maxSrcX = std::min(pageWidth, static_cast<uint16_t>(renderer.getScreenWidth()));
-  const uint16_t maxSrcY = std::min(pageHeight, static_cast<uint16_t>(renderer.getScreenHeight()));
+  // XTC/XTCH pages are pre-rendered for the device. Ignore logical reader
+  // orientation and map file pixels directly to the physical panel, cropping
+  // if the encoded page is larger than this device (X4: 480x800, X3: 528x792).
+  const uint16_t maxSrcX = std::min(pageWidth, renderer.getDisplayHeight());
+  const uint16_t maxSrcY = std::min(pageHeight, renderer.getDisplayWidth());
+  const size_t rowBytes = (static_cast<size_t>(pageWidth) + 7) / 8;
+  uint8_t* row = static_cast<uint8_t*>(malloc(rowBytes));  // freed before return
+  if (!row) {
+    LOG_ERR("XTR", "Failed to allocate XTC row buffer (%u bytes)", static_cast<unsigned int>(rowBytes));
+    renderer.clearScreen();
+    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_MEMORY_ERROR), true, EpdFontFamily::BOLD);
+    renderer.displayBuffer();
+    return;
+  }
 
   if (bitDepth == 2) {
     // XTH 2-bit mode (grayscale: 0=White, 1=Dark Grey, 2=Light Grey, 3=Black).
@@ -257,11 +267,12 @@ void XtcReaderActivity::renderPage() {
 
     // Pass 1: BW buffer - draw all ink (non-white) pixels as black.
     for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (pageStream.isInk(x, y)) {
-          renderer.drawPixel(x, y, true);
-        }
+      bool invertBits = false;
+      if (!pageStream.readBwRow(y, row, rowBytes, &invertBits)) {
+        free(row);
+        return;
       }
+      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
     }
 
     // Display BW with conditional refresh based on pagesUntilFullRefresh
@@ -271,11 +282,11 @@ void XtcReaderActivity::renderPage() {
     // In LUT: 0 bit = apply gray effect, 1 bit = untouched
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (pageStream.grayValue(x, y) == 1) {  // Dark grey only
-          renderer.drawPixel(x, y, false);
-        }
+      if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::DarkOnly, row, rowBytes, maxSrcX)) {
+        free(row);
+        return;
       }
+      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX);
     }
     renderer.copyGrayscaleLsbBuffers();
 
@@ -283,12 +294,11 @@ void XtcReaderActivity::renderPage() {
     // In LUT: 0 bit = apply gray effect, 1 bit = untouched
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        const uint8_t pv = pageStream.grayValue(x, y);
-        if (pv == 1 || pv == 2) {  // Dark grey or Light grey
-          renderer.drawPixel(x, y, false);
-        }
+      if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::LightOrDark, row, rowBytes, maxSrcX)) {
+        free(row);
+        return;
       }
+      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX);
     }
     renderer.copyGrayscaleMsbBuffers();
 
@@ -298,26 +308,29 @@ void XtcReaderActivity::renderPage() {
     // Pass 4: Re-render BW to framebuffer (restore for next frame, instead of restoreBwBuffer)
     renderer.clearScreen();
     for (uint16_t y = 0; y < maxSrcY; y++) {
-      for (uint16_t x = 0; x < maxSrcX; x++) {
-        if (pageStream.isInk(x, y)) {
-          renderer.drawPixel(x, y, true);
-        }
+      bool invertBits = false;
+      if (!pageStream.readBwRow(y, row, rowBytes, &invertBits)) {
+        free(row);
+        return;
       }
+      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
     }
 
     // Cleanup grayscale buffers with current frame buffer
     renderer.cleanupGrayscaleWithFrameBuffer();
 
+    free(row);
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
     return;
   } else {
     // 1-bit mode: ink (non-white) pixels drawn black.
-    for (uint16_t srcY = 0; srcY < maxSrcY; srcY++) {
-      for (uint16_t srcX = 0; srcX < maxSrcX; srcX++) {
-        if (pageStream.isInk(srcX, srcY)) {
-          renderer.drawPixel(srcX, srcY, true);
-        }
+    for (uint16_t y = 0; y < maxSrcY; y++) {
+      bool invertBits = false;
+      if (!pageStream.readBwRow(y, row, rowBytes, &invertBits)) {
+        free(row);
+        return;
       }
+      renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
     }
   }
   // White pixels are already cleared by clearScreen()
@@ -327,6 +340,7 @@ void XtcReaderActivity::renderPage() {
   // Display with appropriate refresh
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
+  free(row);
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
 }
 
@@ -410,8 +424,6 @@ bool XtcReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
     }
   }
 
-  return true;
-}
 
 void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
   using BA = CrossPointSettings::BUTTON_ACTION;
