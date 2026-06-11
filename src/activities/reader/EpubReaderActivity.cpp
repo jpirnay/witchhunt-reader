@@ -3033,13 +3033,37 @@ void EpubReaderActivity::renderBackgroundDebugOverlay() const {
   //   '-' miss — this page was rendered fresh (first page, heap-gated, or no pre-render)
   const char aGlyph = backgroundAGlyph_;
 
-  // Build a compact "A<.|x|-> B<nn%>" string and draw it at the top-left of the content
+  // B is sampled from its state machine rather than the live percent alone: the overlay
+  // only draws when a page renders, and B works precisely while the reader is idle — a
+  // build usually finishes between two page turns, so a percent-only chip was almost
+  // never visible (percent resets to -1 on completion). States:
+  //   Bp      — probing whether the next section is already cached
+  //   Bw      — waiting for the heap gates
+  //   B<nn>%  — build in flight (percent of the chapter consumed)
+  //   B+      — build complete, Section held for adoption on the next chapter cross
+  //   B.      — settled with nothing held (already cached, refused, or failed)
+  // Render task holds the render lock here and B mutates only under it, so the reads
+  // are consistent.
+  char bBuf[8];
+  switch (backgroundBuildState_) {
+    case BackgroundBuildState::Probe:
+      snprintf(bBuf, sizeof(bBuf), "p");
+      break;
+    case BackgroundBuildState::WaitHeap:
+      snprintf(bBuf, sizeof(bBuf), "w");
+      break;
+    case BackgroundBuildState::Building:
+      snprintf(bBuf, sizeof(bBuf), "%d%%", backgroundBuildPercent_ >= 0 ? backgroundBuildPercent_ : 0);
+      break;
+    case BackgroundBuildState::Settled:
+      snprintf(bBuf, sizeof(bBuf), "%s", backgroundSection_ ? "+" : ".");
+      break;
+  }
+
+  // Build a compact "A<x|-> B<state>" string and draw it at the top-left of the content
   // area, over whatever the status bar drew. Intentionally crude — a diagnostic aid.
   char buf[24];
-  int n = snprintf(buf, sizeof(buf), "A%c", aGlyph);
-  if (backgroundBuildPercent_ >= 0 && n > 0 && n < static_cast<int>(sizeof(buf))) {
-    snprintf(buf + n, sizeof(buf) - n, " B%d%%", backgroundBuildPercent_);
-  }
+  snprintf(buf, sizeof(buf), "A%c B%s", aGlyph, bBuf);
   // Draw near the top-left corner; UI_10_FONT_ID is the small status font used elsewhere.
   renderer.drawText(UI_10_FONT_ID, 4, 2, buf, true, EpdFontFamily::BOLD);
 #endif
