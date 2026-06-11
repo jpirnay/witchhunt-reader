@@ -88,18 +88,6 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
 }
 
-static uint8_t refreshModeToByte(HalDisplay::RefreshMode mode) {
-  switch (mode) {
-    case HalDisplay::RefreshMode::FAST_REFRESH:
-      return 0x0C;
-    case HalDisplay::RefreshMode::HALF_REFRESH:
-      return 0xD4;
-    case HalDisplay::RefreshMode::FULL_REFRESH:
-    default:
-      return 0x34;
-  }
-}
-
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
