@@ -5,6 +5,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstring>
 
 struct ZipInflateCtx {
   InflateReader reader;  // Must be first — callback casts uzlib_uncomp* to ZipInflateCtx*
@@ -608,3 +609,171 @@ size_t ZipFile::readBytesFromEntry(const char* filename, uint8_t* outBuf, const 
 
   return 0;
 }
+
+// ---------------------------------------------------------------------------
+// ZipFile::EntryReader — resumable per-entry inflate
+// ---------------------------------------------------------------------------
+
+struct ZipFile::EntryReader::Impl {
+  ZipFile& zf;
+  size_t chunkSize;
+
+  uint16_t method = 0;  // ZIP_METHOD_STORED or ZIP_METHOD_DEFLATED
+  FsFile file;
+  size_t inflatedSize_ = 0;
+  size_t bytesProduced_ = 0;
+  bool error_ = false;
+  bool done_ = false;
+
+  // Stored-entry tracking
+  size_t storedRemaining = 0;
+
+  // Deflated-entry state. ZipInflateCtx.reader must remain first (callback cast).
+  ZipInflateCtx ctx = {};
+  uint8_t* readBuf = nullptr;
+
+  explicit Impl(ZipFile& zf_, size_t chunkSize_) : zf(zf_), chunkSize(chunkSize_) {}
+  ~Impl() { reset(); }
+  Impl(const Impl&) = delete;
+  Impl& operator=(const Impl&) = delete;
+
+  void reset() {
+    if (readBuf) {
+      ctx.reader.deinit();
+      free(readBuf);
+      readBuf = nullptr;
+    }
+    ctx.file = nullptr;
+    ctx.fileRemaining = 0;
+    ctx.readBuf = nullptr;
+    ctx.readBufSize = 0;
+    if (file) file.close();
+    inflatedSize_ = 0;
+    bytesProduced_ = 0;
+    storedRemaining = 0;
+    method = 0;
+    error_ = false;
+    done_ = false;
+  }
+};
+
+ZipFile::EntryReader::EntryReader(ZipFile& zf, const size_t chunkSize) : impl_(std::make_unique<Impl>(zf, chunkSize)) {}
+
+ZipFile::EntryReader::~EntryReader() = default;
+ZipFile::EntryReader::EntryReader(EntryReader&&) noexcept = default;
+ZipFile::EntryReader& ZipFile::EntryReader::operator=(EntryReader&&) noexcept = default;
+
+bool ZipFile::EntryReader::open(const char* filename) {
+  impl_->reset();
+
+  FileStatSlim fileStat = {};
+  if (!impl_->zf.loadFileStatSlim(filename, &fileStat)) {
+    LOG_ERR("ZIP", "EntryReader::open: entry not found: %s", filename);
+    return false;
+  }
+  const long dataOffset = impl_->zf.getDataOffset(fileStat);
+  if (dataOffset < 0) {
+    LOG_ERR("ZIP", "EntryReader::open: bad data offset for %s", filename);
+    return false;
+  }
+
+  impl_->inflatedSize_ = fileStat.uncompressedSize;
+  impl_->method = fileStat.method;
+
+  if (!Storage.openFileForRead("ZIP", impl_->zf.filePath, impl_->file)) {
+    LOG_ERR("ZIP", "EntryReader::open: failed to open zip file");
+    return false;
+  }
+  impl_->file.seek(static_cast<size_t>(dataOffset));
+
+  if (fileStat.method == ZIP_METHOD_STORED) {
+    impl_->storedRemaining = fileStat.uncompressedSize;
+    return true;
+  }
+
+  if (fileStat.method == ZIP_METHOD_DEFLATED) {
+    impl_->readBuf = static_cast<uint8_t*>(malloc(impl_->chunkSize));
+    if (!impl_->readBuf) {
+      LOG_ERR("ZIP", "EntryReader::open: OOM allocating read buffer");
+      impl_->file.close();
+      return false;
+    }
+    impl_->ctx.file = &impl_->file;
+    impl_->ctx.fileRemaining = fileStat.compressedSize;
+    impl_->ctx.readBuf = impl_->readBuf;
+    impl_->ctx.readBufSize = impl_->chunkSize;
+    if (!impl_->ctx.reader.init(true)) {
+      LOG_ERR("ZIP", "EntryReader::open: OOM initialising inflate ring buffer");
+      free(impl_->readBuf);
+      impl_->readBuf = nullptr;
+      impl_->file.close();
+      return false;
+    }
+    impl_->ctx.reader.setReadCallback(zipReadCallback);
+    return true;
+  }
+
+  LOG_ERR("ZIP", "EntryReader::open: unsupported compression method %u", fileStat.method);
+  impl_->file.close();
+  return false;
+}
+
+bool ZipFile::EntryReader::step(uint8_t* out, const size_t cap, size_t* produced, bool* done) {
+  *produced = 0;
+  *done = false;
+
+  if (impl_->done_) {
+    *done = true;
+    return true;
+  }
+  if (impl_->error_) return false;
+
+  if (impl_->method == ZIP_METHOD_STORED) {
+    if (impl_->storedRemaining == 0) {
+      impl_->done_ = true;
+      *done = true;
+      return true;
+    }
+    const size_t toRead = cap < impl_->storedRemaining ? cap : impl_->storedRemaining;
+    const int n = impl_->file.read(out, toRead);
+    if (n <= 0) {
+      LOG_ERR("ZIP", "EntryReader::step: stored read error");
+      impl_->error_ = true;
+      return false;
+    }
+    impl_->storedRemaining -= static_cast<size_t>(n);
+    impl_->bytesProduced_ += static_cast<size_t>(n);
+    *produced = static_cast<size_t>(n);
+    if (impl_->storedRemaining == 0) {
+      impl_->done_ = true;
+      *done = true;
+    }
+    return true;
+  }
+
+  if (impl_->method == ZIP_METHOD_DEFLATED) {
+    size_t p = 0;
+    const InflateStatus status = impl_->ctx.reader.readAtMost(out, cap, &p);
+    impl_->bytesProduced_ += p;
+    *produced = p;
+    if (status == InflateStatus::Done) {
+      impl_->done_ = true;
+      *done = true;
+      return true;
+    }
+    if (status == InflateStatus::Error) {
+      LOG_ERR("ZIP", "EntryReader::step: inflate error");
+      impl_->error_ = true;
+      return false;
+    }
+    return true;
+  }
+
+  impl_->error_ = true;
+  return false;
+}
+
+void ZipFile::EntryReader::close() { impl_->reset(); }
+bool ZipFile::EntryReader::isOpen() const { return impl_ && static_cast<bool>(impl_->file); }
+size_t ZipFile::EntryReader::inflatedSize() const { return impl_ ? impl_->inflatedSize_ : 0; }
+size_t ZipFile::EntryReader::bytesProduced() const { return impl_ ? impl_->bytesProduced_ : 0; }

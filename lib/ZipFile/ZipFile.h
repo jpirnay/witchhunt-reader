@@ -1,6 +1,7 @@
 #pragma once
 #include <HalStorage.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -94,6 +95,58 @@ class ZipFile {
   // Returns the number of bytes actually written to outBuf (may be less than maxBytes if the
   // entry is smaller). Useful for header-only reads to get image dimensions.
   size_t readBytesFromEntry(const char* filename, uint8_t* outBuf, size_t maxBytes);
+
+  // Resumable reader for a single ZIP entry. Holds the file handle and inflate
+  // state alive across calls so the caller can feed decompressed bytes in small
+  // slices without consuming the whole entry in one shot.
+  //
+  // Usage:
+  //   ZipFile::EntryReader reader(zipFile);
+  //   if (!reader.open("OEBPS/chapter.xhtml")) { /* error */ }
+  //   uint8_t buf[1024];
+  //   size_t produced; bool done;
+  //   while (!done) {
+  //     if (!reader.step(buf, sizeof(buf), &produced, &done)) { /* error */ break; }
+  //     sink.write(buf, produced);
+  //   }
+  //
+  // The parent ZipFile may be used concurrently for other operations (stat
+  // lookups etc.) since EntryReader opens its own file handle.
+  // Non-copyable; movable.
+  class EntryReader {
+   public:
+    explicit EntryReader(ZipFile& zf, size_t chunkSize = 1024);
+    ~EntryReader();
+    EntryReader(EntryReader&&) noexcept;
+    EntryReader& operator=(EntryReader&&) noexcept;
+    EntryReader(const EntryReader&) = delete;
+    EntryReader& operator=(const EntryReader&) = delete;
+
+    // Open a named entry for reading. Looks up the central-dir stat and seeks
+    // to the data start. Returns false if the entry is not found or on I/O error.
+    // Closes any previously open entry first.
+    bool open(const char* filename);
+
+    // Decompress up to `cap` bytes into `out`. Sets `*produced` to the number
+    // of bytes written and `*done` to true when the entry is exhausted.
+    // Returns false on decompression error. Must not be called after done=true
+    // or after a previous false return.
+    bool step(uint8_t* out, size_t cap, size_t* produced, bool* done);
+
+    // Close the entry and release the file handle / inflate state.
+    // Safe to call repeatedly or on an already-closed reader.
+    void close();
+
+    bool isOpen() const;
+    // Total uncompressed size reported in the ZIP header; valid after open().
+    size_t inflatedSize() const;
+    // Bytes decompressed so far across all step() calls.
+    size_t bytesProduced() const;
+
+   private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+  };
 
   // Stream every filename in the central directory to a callback without building
   // the in-memory stat cache. Uses a fixed 256-byte stack buffer — O(1) heap.
