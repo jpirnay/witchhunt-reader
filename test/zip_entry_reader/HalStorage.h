@@ -1,10 +1,12 @@
 #pragma once
-// Real-filesystem shim for host tests that exercise ZipFile.
-// Implements FsFile on top of stdio so ZipFile can open actual .epub files.
+// Real-filesystem shim for host tests that exercise ZipFile or CssParser.
+// Implements FsFile on top of stdio so tests can read actual .epub files
+// and write real cache files under /tmp.
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,18 @@ class HalFile : public Print {
   bool openForRead(const std::string& path) {
     close();
     fp_ = fopen(path.c_str(), "rb");
+    return fp_ != nullptr;
+  }
+
+  bool openForWrite(const std::string& path) {
+    close();
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+      std::error_code ec;
+      std::filesystem::create_directories(parent, ec);
+      if (ec) return false;
+    }
+    fp_ = fopen(path.c_str(), "wb");
     return fp_ != nullptr;
   }
 
@@ -71,9 +85,17 @@ class HalFile : public Print {
   uint64_t size64() { return fileSize(); }
   uint64_t fileSize64() { return fileSize(); }
 
-  size_t write(const uint8_t*, size_t) { return 0; }
-  size_t write(uint8_t) override { return 0; }
-  void flush() {}
+  size_t write(const uint8_t* data, size_t size) {
+    if (!fp_) return 0;
+    return fwrite(data, 1, size, fp_);
+  }
+  size_t write(uint8_t c) override {
+    if (!fp_) return 0;
+    return fwrite(&c, 1, 1, fp_);
+  }
+  void flush() {
+    if (fp_) fflush(fp_);
+  }
   size_t getName(char*, size_t) { return 0; }
   bool rename(const char*) { return false; }
   bool getModifyDateTime(uint16_t*, uint16_t*) { return false; }
@@ -91,10 +113,13 @@ class HalStorage {
  public:
   bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
   bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
-  bool openFileForWrite(const char*, const std::string&, HalFile&) { return false; }
-  bool exists(const char*) { return false; }
-  bool mkdir(const char*, bool = true) { return false; }
-  bool remove(const char*) { return false; }
+  bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
+  bool exists(const char* path) { return std::filesystem::exists(path); }
+  bool mkdir(const char* path, bool recursive = true) {
+    std::error_code ec;
+    return recursive ? std::filesystem::create_directories(path, ec) : std::filesystem::create_directory(path, ec);
+  }
+  bool remove(const char* path) { return std::filesystem::remove(path); }
   std::vector<std::string> listFiles(const char* = "/", int = 200) { return {}; }
   static HalStorage& getInstance() {
     static HalStorage i;
@@ -103,4 +128,3 @@ class HalStorage {
 };
 
 #define Storage HalStorage::getInstance()
-#define String std::string
