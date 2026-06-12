@@ -2,8 +2,6 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
-#include <HalClock.h>
-#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Serialization.h>
@@ -14,15 +12,10 @@
 #include <numeric>
 
 #include "CrossPointSettings.h"
-#include "CrossPointState.h"
-#include "FinishedBookActivity.h"
-#include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "MdReaderTocSelectionActivity.h"
-#include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
-#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -40,33 +33,6 @@ static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   return result;
 }
 }  // namespace
-
-void MdReaderActivity::onEnter() {
-  Activity::onEnter();
-
-  inputDrainGuard.arm();
-
-  if (!txt) {
-    return;
-  }
-
-  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-
-  txt->setupCacheDir();
-
-  auto filePath = txt->getPath();
-  auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  const std::string txtSidecar = ReaderActivity::sidecarCoverPath(filePath);
-  const std::string txtCover = txtSidecar.empty() ? txt->getThumbBmpPath() : txtSidecar;
-  RECENT_BOOKS.addBook(filePath, fileName, "", "", txtCover);
-
-  // Start the stats session.
-  globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(filePath), fileName, "");
-
-  requestUpdate();
-}
 
 void MdReaderActivity::assignHeadingPageNumbers() {
   if (pageOffsets.empty()) {
@@ -220,119 +186,31 @@ void MdReaderActivity::scanHeadings() {
   }
 }
 
-void MdReaderActivity::onExit() {
-  Activity::onExit();
-
-  // Flush the stats session before tearing down the reader.
-  globalReadingSessionTracker().end();
-
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-
-  pageOffsets.clear();
+void MdReaderActivity::onReaderExit() {
   pageCodeBlockState.clear();
   currentPageLines.clear();
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
-  UITheme::getInstance().getMutableTheme().onBookWillClose(txt ? txt->getPath() : "", nullptr, nullptr, txt.get());
-  txt.reset();
 }
 
-void MdReaderActivity::loop() {
-  if (inputDrainGuard.shouldDrain(mappedInput)) {
-    buttonEvents.drain();
-    return;
+bool MdReaderActivity::onConfirmShortPress() {
+  if (headings.empty()) {
+    return false;
   }
+  onPageChanged();
+  ReaderUtils::enforceExitFullRefresh(renderer);
+  startActivityForResult(
+      std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          currentPage = std::get<PageResult>(result.data).page;
+          onPageChanged();
+          requestUpdate();
+        }
+      });
+  return true;
+}
 
-  ButtonEventManager::ButtonEvent ev;
-  while (buttonEvents.consumeEvent(ev)) {
-    if (ev.button == MappedInputManager::Button::Back) {
-      if (ev.type == ButtonEventManager::PressType::Long) {
-        activityManager.goToFileBrowser(txt ? txt->getPath() : "");
-        return;
-      }
-      if (ev.type == ButtonEventManager::PressType::Short) {
-        onGoHome();
-        return;
-      }
-    }
-
-    if (!headings.empty() && ev.button == MappedInputManager::Button::Confirm &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      startActivityForResult(
-          std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              currentPage = std::get<PageResult>(result.data).page;
-              currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-              requestUpdate();
-            }
-          });
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage > 0) {
-        currentPage--;
-        currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      }
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage < totalPages - 1) {
-        currentPage++;
-        currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      } else {
-        saveProgress();
-        const std::string currentBookPath = txt ? txt->getPath() : std::string();
-        const std::string nextBookPath =
-            BookFinished::findNextBookInDirectory(currentBookPath, std::string(), std::string());
-        startActivityForResult(
-            std::make_unique<FinishedBookActivity>(renderer, mappedInput, currentBookPath, nextBookPath),
-            [this, currentBookPath, nextBookPath](const ActivityResult& result) {
-              if (result.isCancelled) {
-                requestUpdate();
-                return;
-              }
-              globalReadingSessionTracker().markFinished();
-              const auto& menuResult = std::get<MenuResult>(result.data);
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(currentBookPath, movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(currentBookPath);
-                }
-                activityManager.goHome();
-                return;
-              }
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                  !nextBookPath.empty()) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(currentBookPath, movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(currentBookPath);
-                }
-                activityManager.goToReader(nextBookPath);
-                return;
-              }
-              requestUpdate();
-            });
-      }
-      return;
-    }
-  }
+void MdReaderActivity::onPageChanged() {
+  currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
 }
 
 void MdReaderActivity::initializeReader() {
@@ -340,28 +218,10 @@ void MdReaderActivity::initializeReader() {
     return;
   }
 
-  cachedFontId = SETTINGS.getTxtReaderFontId();
-  cachedScreenMargin = SETTINGS.screenMargin;
-  cachedParagraphAlignment = SETTINGS.paragraphAlignment;
-
-  renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
-                                   &cachedOrientedMarginLeft);
-  cachedOrientedMarginTop += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarTopHeight());
-  cachedOrientedMarginLeft += cachedScreenMargin;
-  cachedOrientedMarginRight += cachedScreenMargin;
-  cachedOrientedMarginBottom += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarBottomHeight());
-
-  viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;
-  const int viewportHeight = renderer.getScreenHeight() - cachedOrientedMarginTop - cachedOrientedMarginBottom;
-  const int lineHeight = renderer.getLineHeight(cachedFontId);
+  computeViewportLayout();
 
   pageBuffer.reserve(CHUNK_SIZE + 1);
   scanHeadings();
-
-  linesPerPage = viewportHeight / lineHeight;
-  if (linesPerPage < 1) linesPerPage = 1;
-
-  LOG_DBG("MDR", "Viewport: %dx%d, lines per page: %d", viewportWidth, viewportHeight, linesPerPage);
 
   if (!loadPageIndexCache()) {
     buildPageIndex();
@@ -877,7 +737,10 @@ void MdReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&]() { renderLines(); });
+    // Same AA pass as EpubReaderActivity — see TxtReaderActivity::renderPage()
+    // for why the legacy store/restore helper ghosted after swapBuffers().
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); });
   }
 }
 
@@ -889,71 +752,7 @@ void MdReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
 
-  lastStatusBarPage = currentPage + 1;
-  lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    lastStatusBarClockMinute = now > 0 ? static_cast<int>(now / 60) : -1;
-  } else {
-    lastStatusBarClockMinute = -1;
-  }
-}
-
-bool MdReaderActivity::shouldSkipPeriodicUpdate() const {
-  if (lastStatusBarPage < 0) return false;
-  if (currentPage + 1 != lastStatusBarPage) return false;
-  if (SETTINGS.statusBarBattery) {
-    if (static_cast<int>(powerManager.getBatteryPercentage()) != lastStatusBarBattery) return false;
-  }
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
-    if (minute != lastStatusBarClockMinute) return false;
-  }
-  return true;
-}
-
-void MdReaderActivity::saveProgress() const {
-  FsFile f;
-  if (Storage.openFileForWrite("MDR", txt->getCachePath() + "/progress.bin", f)) {
-    // 7-byte format matching TxtReaderActivity: page(2 bytes LE) + file offset(4 bytes LE) + overallPercent(1 byte)
-    const size_t offset =
-        (currentPage >= 0 && currentPage < static_cast<int>(pageOffsets.size())) ? pageOffsets[currentPage] : 0;
-    const uint8_t percent = ReaderUtils::pageProgressPercentByte(currentPage, totalPages);
-    uint8_t data[7];
-    data[0] = currentPage & 0xFF;
-    data[1] = (currentPage >> 8) & 0xFF;
-    data[2] = offset & 0xFF;
-    data[3] = (offset >> 8) & 0xFF;
-    data[4] = (offset >> 16) & 0xFF;
-    data[5] = (offset >> 24) & 0xFF;
-    data[6] = percent;
-    f.write(data, 7);
-    f.close();
-    globalReadingSessionTracker().updateProgress(percent);
-  }
-}
-
-void MdReaderActivity::loadProgress() {
-  FsFile f;
-  if (Storage.openFileForRead("MDR", txt->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[7];
-    const int dataSize = f.read(data, 7);
-    f.close();
-    if (dataSize >= 4) {
-      // Page sits in bytes 0-1 in both the old 4-byte uint32 format and the new 7-byte format
-      // (page counts stay well under 65536, so the upper bytes were always zero).
-      int loadedPage = data[0] + (data[1] << 8);
-      if (totalPages == 0) {
-        currentPage = 0;
-      } else if (loadedPage >= totalPages) {
-        currentPage = totalPages - 1;
-      } else {
-        currentPage = loadedPage;
-      }
-      LOG_DBG("MDR", "Loaded progress: page %d/%d", currentPage, totalPages);
-    }
-  }
+  noteStatusBarRendered();
 }
 
 bool MdReaderActivity::loadPageIndexCache() {
@@ -1088,7 +887,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_FORWARD:
       if (currentPage < totalPages - 1) {
         currentPage++;
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         globalReadingSessionTracker().onPageTurn();
         requestUpdate();
       }
@@ -1096,7 +895,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_BACK:
       if (currentPage > 0) {
         currentPage--;
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         globalReadingSessionTracker().onPageTurn();
         requestUpdate();
       }
@@ -1104,13 +903,13 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_FORWARD_10:
       currentPage += 10;
       clampPage();
-      currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+      onPageChanged();
       requestUpdate();
       break;
     case BA::BTN_PAGE_BACK_10:
       currentPage -= 10;
       clampPage();
-      currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+      onPageChanged();
       requestUpdate();
       break;
     case BA::BTN_NEXT_SECTION:
@@ -1121,13 +920,13 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
       break;
     case BA::BTN_OPEN_TOC:
       if (!headings.empty()) {
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         startActivityForResult(
             std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
             [this](const ActivityResult& result) {
               if (!result.isCancelled) {
                 currentPage = std::get<PageResult>(result.data).page;
-                currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+                onPageChanged();
                 requestUpdate();
               }
             });

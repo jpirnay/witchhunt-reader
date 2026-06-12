@@ -529,44 +529,8 @@ void EpubReaderActivity::loop() {
       }
       writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, lastPageIndex, lastPageCount, 100);
 
-      const std::string nextBookPath =
-          BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
-      startActivityForResult(
-          std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
-          [this, nextBookPath](const ActivityResult& result) {
-            if (result.isCancelled) {
-              requestUpdate();
-              return;
-            }
-            // User confirmed they're done with this book — credit a finish
-            // to the in-flight session before any tear-down side effects.
-            globalReadingSessionTracker().markFinished();
-            const auto& menuResult = std::get<MenuResult>(result.data);
-            if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-              if (SETTINGS.moveFinishedBooksToCompleted) {
-                std::string movedPath;
-                BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-              }
-              if (SETTINGS.removeFinishedBooksFromRecents) {
-                RECENT_BOOKS.removeBook(epub->getPath());
-              }
-              activityManager.goHome();
-              return;
-            }
-            if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                !nextBookPath.empty()) {
-              if (SETTINGS.moveFinishedBooksToCompleted) {
-                std::string movedPath;
-                BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-              }
-              if (SETTINGS.removeFinishedBooksFromRecents) {
-                RECENT_BOOKS.removeBook(epub->getPath());
-              }
-              activityManager.goToReader(nextBookPath);
-              return;
-            }
-            requestUpdate();
-          });
+      BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, epub->getPath(), epub->getSeries(),
+                                           epub->getSeriesIndex());
     } else {
       currentSpineIndex = epub->getSpineItemsCount() - 1;
       navTarget = NavigationTarget::makeLastPage();
@@ -1113,44 +1077,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
         }
       }
-      {
-        const std::string nextBookPath =
-            BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
-        startActivityForResult(
-            std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
-            [this, nextBookPath](const ActivityResult& result) {
-              if (result.isCancelled) {
-                requestUpdate();
-                return;
-              }
-              globalReadingSessionTracker().markFinished();
-              const auto& menuResult = std::get<MenuResult>(result.data);
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(epub->getPath());
-                }
-                activityManager.goHome();
-                return;
-              }
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                  !nextBookPath.empty()) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(epub->getPath());
-                }
-                activityManager.goToReader(nextBookPath);
-                return;
-              }
-              requestUpdate();
-            });
-      }
+      BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, epub->getPath(), epub->getSeries(),
+                                           epub->getSeriesIndex());
       return;
     }
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
@@ -2188,43 +2116,10 @@ void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spin
   finishedBookActivityStarted_ = true;
   const int lastSpineIndex = std::max(0, spineCount - 1);
   writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
-  const std::string nextBookPath =
-      BookFinished::findNextBookInDirectory(epub->getPath(), epub->getSeries(), epub->getSeriesIndex());
   lock.unlock();
-  startActivityForResult(std::make_unique<FinishedBookActivity>(renderer, mappedInput, epub->getPath(), nextBookPath),
-                         [this, nextBookPath](const ActivityResult& result) {
-                           finishedBookActivityStarted_ = false;
-                           if (result.isCancelled) {
-                             requestUpdate();
-                             return;
-                           }
-                           globalReadingSessionTracker().markFinished();
-                           const auto& menuResult = std::get<MenuResult>(result.data);
-                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-                             if (SETTINGS.moveFinishedBooksToCompleted) {
-                               std::string movedPath;
-                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-                             }
-                             if (SETTINGS.removeFinishedBooksFromRecents) {
-                               RECENT_BOOKS.removeBook(epub->getPath());
-                             }
-                             activityManager.goHome();
-                             return;
-                           }
-                           if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                               !nextBookPath.empty()) {
-                             if (SETTINGS.moveFinishedBooksToCompleted) {
-                               std::string movedPath;
-                               BookFinished::moveFinishedBookToCompleted(epub->getPath(), movedPath);
-                             }
-                             if (SETTINGS.removeFinishedBooksFromRecents) {
-                               RECENT_BOOKS.removeBook(epub->getPath());
-                             }
-                             activityManager.goToReader(nextBookPath);
-                             return;
-                           }
-                           requestUpdate();
-                         });
+  BookFinished::launchFinishedBookFlow(
+      *this, renderer, mappedInput, epub->getPath(), epub->getSeries(), epub->getSeriesIndex(),
+      [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this);
 }
 
 bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
