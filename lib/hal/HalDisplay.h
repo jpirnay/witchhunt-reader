@@ -61,6 +61,12 @@ class HalDisplay {
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
+  // Copy the just-displayed frame back into the write framebuffer. The display
+  // path ends with a buffer swap, so the write buffer otherwise holds the frame
+  // from two refreshes ago — partial repaints that patch a few regions and
+  // re-display must call this first. No-op in single-buffer mode.
+  void syncWriteBufferFromActive() const;
+
   // Release both frame buffers back to the heap (~52KB on X3, ~48KB on X4 each,
   // so ~104KB / ~96KB total). Call only after the final displayBuffer(); the
   // e-ink controller retains the image in its own RAM. No display operations

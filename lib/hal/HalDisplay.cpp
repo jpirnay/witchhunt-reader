@@ -106,6 +106,8 @@ void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
+void HalDisplay::syncWriteBufferFromActive() const { einkDisplay.syncWriteBufferFromActive(); }
+
 void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
 
 bool HalDisplay::releaseSecondaryBuffer() { return einkDisplay.releaseSecondaryBuffer(); }

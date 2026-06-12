@@ -455,6 +455,11 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
   const int prevPage = prevSelectorIndex >= 0 ? (prevSelectorIndex / GRID_COLS / visibleRows) : -1;
   const int curPage = selectedRow / visibleRows;
   if (!fullRedrawNeeded && prevSelectorIndex >= 0 && prevSelectorIndex != selectorIndex && prevPage == curPage) {
+    // The write framebuffer holds the frame from two refreshes ago (displayBuffer()
+    // swaps buffers), which still shows an older selection. Resync it to the
+    // displayed frame before patching just the two affected cells; without this,
+    // the stale highlight ships back to the panel and multiple cells appear selected.
+    renderer.syncWriteBufferFromDisplayed();
     int cx, cy;
     cellPos(prevSelectorIndex, cx, cy);
     renderGridCell(prevSelectorIndex, false, cx, cy, tw, th, labelW);
