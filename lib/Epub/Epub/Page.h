@@ -160,14 +160,12 @@ class Page {
   // i.e. is not a placeholder AND does not already have a pixel cache on disk.
   // Used to decide whether to release the secondary frame buffer before warm.
   bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput) const {
-    for (const auto& el : elements) {
-      if (el->getTag() != TAG_PageImage) continue;
+    return std::any_of(elements.begin(), elements.end(), [&](const std::shared_ptr<PageElement>& el) {
+      if (el->getTag() != TAG_PageImage) return false;
       const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
-      if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
-      if (monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache()) continue;
-      return true;
-    }
-    return false;
+      if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) return false;
+      return !(monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache());
+    });
   }
 
   // Get bounding box of all images on the page (union of image rects)

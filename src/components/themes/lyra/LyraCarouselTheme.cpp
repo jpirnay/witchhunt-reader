@@ -217,7 +217,7 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
-  uint8_t* frameBuffer = renderer.getFrameBuffer();
+  const uint8_t* frameBuffer = renderer.getFrameBuffer();
   if (!frameBuffer) return false;
 
   // Cover tile region: full width, from just above the centre cover outline to

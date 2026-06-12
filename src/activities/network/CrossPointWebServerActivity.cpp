@@ -380,7 +380,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     // owns this release so there is no race with the main task scheduling a
     // second render between our displayBuffer() and the free. The device
     // reboots on web server exit so the buffers are never needed again.
-    if (state == WebServerActivityState::SERVER_RUNNING && !buffersReleased) {
+    if (state == WebServerActivityState::SERVER_RUNNING) {
       buffersReleased = true;
       LOG_DBG("WEBACT", "Free heap before buffer release: %d bytes", ESP.getFreeHeap());
       renderer.releaseFrameBuffers();

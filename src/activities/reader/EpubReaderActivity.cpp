@@ -641,6 +641,7 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   RenderLock lock;
   // Re-check under the lock: the render task may have flipped these between the
   // unlocked test above and acquiring the lock.
+  // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
   if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
     return;
   }
@@ -708,6 +709,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   RenderLock lock;
   // Re-check under the lock: the render task may have scheduled A or started a refresh
   // between the unlocked test above and acquiring the lock (mirrors runDeferredGrayscalePass).
+  // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
   if (pendingPreRender || renderer.isRefreshPending()) {
     return;
   }
@@ -2047,6 +2049,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // lock, then re-check the condition under it — the render task may have invalidated the
     // pre-render between the unlocked test above and the lock.
     RenderLock lock;
+    // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
     if (!(section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
           preRenderedPage.pageIndex == section->currentPage + 1)) {
       lock.unlock();
@@ -2835,7 +2838,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 
   // Schedule a half-refresh on the next page turn after an image page to reduce ghosting.
   // Must be checked BEFORE page is moved into pendingGrayscale_ below.
-  if (page && page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
+  if (page->hasImages() && !page->allImagesArePlaceholders(effectiveForceLoad, imageMonochrome) &&
       getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
     pendingHalfRefreshAfterImagePage = true;
   }
