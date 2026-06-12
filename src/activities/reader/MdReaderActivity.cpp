@@ -2,8 +2,6 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
-#include <HalClock.h>
-#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Serialization.h>
@@ -14,15 +12,11 @@
 #include <numeric>
 
 #include "CrossPointSettings.h"
-#include "CrossPointState.h"
 #include "FinishedBookActivity.h"
-#include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "MdReaderTocSelectionActivity.h"
-#include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
-#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -40,33 +34,6 @@ static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   return result;
 }
 }  // namespace
-
-void MdReaderActivity::onEnter() {
-  Activity::onEnter();
-
-  inputDrainGuard.arm();
-
-  if (!txt) {
-    return;
-  }
-
-  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-
-  txt->setupCacheDir();
-
-  auto filePath = txt->getPath();
-  auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  const std::string txtSidecar = ReaderActivity::sidecarCoverPath(filePath);
-  const std::string txtCover = txtSidecar.empty() ? txt->getThumbBmpPath() : txtSidecar;
-  RECENT_BOOKS.addBook(filePath, fileName, "", "", txtCover);
-
-  // Start the stats session.
-  globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(filePath), fileName, "");
-
-  requestUpdate();
-}
 
 void MdReaderActivity::assignHeadingPageNumbers() {
   if (pageOffsets.empty()) {
@@ -220,21 +187,9 @@ void MdReaderActivity::scanHeadings() {
   }
 }
 
-void MdReaderActivity::onExit() {
-  Activity::onExit();
-
-  // Flush the stats session before tearing down the reader.
-  globalReadingSessionTracker().end();
-
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-
-  pageOffsets.clear();
+void MdReaderActivity::onReaderExit() {
   pageCodeBlockState.clear();
   currentPageLines.clear();
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
-  UITheme::getInstance().getMutableTheme().onBookWillClose(txt ? txt->getPath() : "", nullptr, nullptr, txt.get());
-  txt.reset();
 }
 
 void MdReaderActivity::loop() {
@@ -305,28 +260,10 @@ void MdReaderActivity::initializeReader() {
     return;
   }
 
-  cachedFontId = SETTINGS.getTxtReaderFontId();
-  cachedScreenMargin = SETTINGS.screenMargin;
-  cachedParagraphAlignment = SETTINGS.paragraphAlignment;
-
-  renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
-                                   &cachedOrientedMarginLeft);
-  cachedOrientedMarginTop += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarTopHeight());
-  cachedOrientedMarginLeft += cachedScreenMargin;
-  cachedOrientedMarginRight += cachedScreenMargin;
-  cachedOrientedMarginBottom += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarBottomHeight());
-
-  viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;
-  const int viewportHeight = renderer.getScreenHeight() - cachedOrientedMarginTop - cachedOrientedMarginBottom;
-  const int lineHeight = renderer.getLineHeight(cachedFontId);
+  computeViewportLayout();
 
   pageBuffer.reserve(CHUNK_SIZE + 1);
   scanHeadings();
-
-  linesPerPage = viewportHeight / lineHeight;
-  if (linesPerPage < 1) linesPerPage = 1;
-
-  LOG_DBG("MDR", "Viewport: %dx%d, lines per page: %d", viewportWidth, viewportHeight, linesPerPage);
 
   if (!loadPageIndexCache()) {
     buildPageIndex();
@@ -857,71 +794,7 @@ void MdReaderActivity::renderStatusBar() const {
   }
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
 
-  lastStatusBarPage = currentPage + 1;
-  lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    lastStatusBarClockMinute = now > 0 ? static_cast<int>(now / 60) : -1;
-  } else {
-    lastStatusBarClockMinute = -1;
-  }
-}
-
-bool MdReaderActivity::shouldSkipPeriodicUpdate() const {
-  if (lastStatusBarPage < 0) return false;
-  if (currentPage + 1 != lastStatusBarPage) return false;
-  if (SETTINGS.statusBarBattery) {
-    if (static_cast<int>(powerManager.getBatteryPercentage()) != lastStatusBarBattery) return false;
-  }
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
-    if (minute != lastStatusBarClockMinute) return false;
-  }
-  return true;
-}
-
-void MdReaderActivity::saveProgress() const {
-  FsFile f;
-  if (Storage.openFileForWrite("MDR", txt->getCachePath() + "/progress.bin", f)) {
-    // 7-byte format matching TxtReaderActivity: page(2 bytes LE) + file offset(4 bytes LE) + overallPercent(1 byte)
-    const size_t offset =
-        (currentPage >= 0 && currentPage < static_cast<int>(pageOffsets.size())) ? pageOffsets[currentPage] : 0;
-    const uint8_t percent = ReaderUtils::pageProgressPercentByte(currentPage, totalPages);
-    uint8_t data[7];
-    data[0] = currentPage & 0xFF;
-    data[1] = (currentPage >> 8) & 0xFF;
-    data[2] = offset & 0xFF;
-    data[3] = (offset >> 8) & 0xFF;
-    data[4] = (offset >> 16) & 0xFF;
-    data[5] = (offset >> 24) & 0xFF;
-    data[6] = percent;
-    f.write(data, 7);
-    f.close();
-    globalReadingSessionTracker().updateProgress(percent);
-  }
-}
-
-void MdReaderActivity::loadProgress() {
-  FsFile f;
-  if (Storage.openFileForRead("MDR", txt->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[7];
-    const int dataSize = f.read(data, 7);
-    f.close();
-    if (dataSize >= 4) {
-      // Page sits in bytes 0-1 in both the old 4-byte uint32 format and the new 7-byte format
-      // (page counts stay well under 65536, so the upper bytes were always zero).
-      int loadedPage = data[0] + (data[1] << 8);
-      if (totalPages == 0) {
-        currentPage = 0;
-      } else if (loadedPage >= totalPages) {
-        currentPage = totalPages - 1;
-      } else {
-        currentPage = loadedPage;
-      }
-      LOG_DBG("MDR", "Loaded progress: page %d/%d", currentPage, totalPages);
-    }
-  }
+  noteStatusBarRendered();
 }
 
 bool MdReaderActivity::loadPageIndexCache() {

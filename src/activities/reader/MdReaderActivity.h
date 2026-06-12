@@ -6,8 +6,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
-#include "ReaderUtils.h"
-#include "activities/Activity.h"
+#include "LineReaderActivity.h"
 
 struct MdHeading {
   size_t offset = 0;
@@ -16,13 +15,7 @@ struct MdHeading {
   int pageIndex = -1;
 };
 
-class MdReaderActivity final : public Activity {
-  std::unique_ptr<Txt> txt;
-
-  int currentPage = 0;
-  int totalPages = 1;
-  int pagesUntilFullRefresh = 0;
-
+class MdReaderActivity final : public LineReaderActivity {
   // A single rendered line on screen (after word-wrapping)
   struct RenderedLine {
     std::vector<MdParser::Span> spans;
@@ -31,27 +24,12 @@ class MdReaderActivity final : public Activity {
     bool isCodeBlock = false;
   };
 
-  // Streaming reader state
-  std::vector<size_t> pageOffsets;
   std::vector<uint8_t> pageCodeBlockState;  // 1 if page starts inside a code block
   std::vector<RenderedLine> currentPageLines;
   std::vector<uint8_t> pageBuffer;
 
   std::vector<MdHeading> headings;
   int currentHeadingIndex = -1;
-
-  int linesPerPage = 0;
-  int viewportWidth = 0;
-  bool initialized = false;
-
-  // Cached settings for cache validation
-  int cachedFontId = 0;
-  uint8_t cachedScreenMargin = 0;
-  uint8_t cachedParagraphAlignment = CrossPointSettings::LEFT_ALIGN;
-  int cachedOrientedMarginTop = 0;
-  int cachedOrientedMarginRight = 0;
-  int cachedOrientedMarginBottom = 0;
-  int cachedOrientedMarginLeft = 0;
 
   // Indent constants (in pixels)
   static constexpr int LIST_INDENT = 20;
@@ -60,10 +38,6 @@ class MdReaderActivity final : public Activity {
 
   void renderPage();
   void renderStatusBar() const;
-  // See EpubReaderActivity for rationale — suppresses no-op minute-tick re-renders.
-  mutable int lastStatusBarPage = -1;
-  mutable int lastStatusBarBattery = -1;
-  mutable int lastStatusBarClockMinute = -1;
 
   void initializeReader();
   bool loadPageAtOffset(size_t offset, bool startInCodeBlock, std::vector<RenderedLine>& outLines, size_t& nextOffset,
@@ -71,13 +45,10 @@ class MdReaderActivity final : public Activity {
   void buildPageIndex();
   bool loadPageIndexCache();
   void savePageIndexCache() const;
-  void saveProgress() const;
-  void loadProgress();
   void scanHeadings();
   void assignHeadingPageNumbers();
   int getHeadingIndexForOffset(size_t offset) const;
   void jumpToHeading(bool next);
-  ReaderUtils::InputDrainGuard inputDrainGuard;
 
   // Word-wrap a parsed markdown line into one or more RenderedLines.
   // Returns true if all content was emitted, false if truncated by maxLines.
@@ -87,14 +58,13 @@ class MdReaderActivity final : public Activity {
   // Measure total pixel width of a span list
   int measureSpans(const std::vector<MdParser::Span>& spans) const;
 
+ protected:
+  void onReaderExit() override;
+
  public:
   explicit MdReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt)
-      : Activity("MdReader", renderer, mappedInput), txt(std::move(txt)) {}
-  void onEnter() override;
-  void onExit() override;
+      : LineReaderActivity("MdReader", "MDR", renderer, mappedInput, std::move(txt)) {}
   void loop() override;
   void render(RenderLock&&) override;
-  bool isReaderActivity() const override { return true; }
-  bool shouldSkipPeriodicUpdate() const override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 };

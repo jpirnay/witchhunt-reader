@@ -2,8 +2,6 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
-#include <HalClock.h>
-#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Serialization.h>
@@ -15,12 +13,9 @@
 #include "CrossPointState.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
-#include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
-#include "ReaderActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionTracker.h"
-#include "RecentBooksStore.h"
 #include "StarredPagesActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -95,67 +90,17 @@ size_t parseAndWrapLines(const uint8_t* buffer, size_t chunkSize, size_t fileOff
 }
 }  // namespace
 
-void TxtReaderActivity::onEnter() {
-  Activity::onEnter();
-
-  // See ReaderUtils::InputDrainGuard — prevents wake-up power-button hold from leaking into
-  // the first detectPageTurn() call as a page turn or chapter skip.
-  inputDrainGuard.arm();
-
-  if (!txt) {
-    return;
-  }
-
-  {
-    RenderLock lock(*this);
-    ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-  }
-
-  txt->setupCacheDir();
+void TxtReaderActivity::onReaderEnter() {
   applyPendingBookmarkJump();
-
-  // Load bookmarks for this file
   bookmarkStore.load(txt->getCachePath());
-
-  // Save current txt as last opened file and add to recent books
-  auto filePath = txt->getPath();
-  auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  const std::string txtSidecar = ReaderActivity::sidecarCoverPath(filePath);
-  const std::string txtCover = txtSidecar.empty() ? txt->getThumbBmpPath() : txtSidecar;
-  RECENT_BOOKS.addBook(filePath, fileName, "", "", txtCover);
-
-  // Start reading-stats session. Same filename-hash policy as EPUB so renamed
-  // files start fresh; author is unknown for plain TXT.
-  globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(filePath), fileName, "");
-
-  // Trigger first update
-  requestUpdate();
 }
 
-void TxtReaderActivity::onExit() {
-  Activity::onExit();
-
-  // Flush the stats session before tearing down the txt — same pattern as
-  // EpubReaderActivity::onExit().
-  globalReadingSessionTracker().end();
-
-  // Save bookmarks before exit
+void TxtReaderActivity::onReaderExit() {
   bookmarkStore.save();
   if (txt) {
     GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, txt->getPath(), txt->getCachePath(), txt->getTitle(), true);
   }
-
-  // Reset orientation back to portrait for the rest of the UI
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-
-  pageOffsets.clear();
   currentPageLines.clear();
-  APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
-  UITheme::getInstance().getMutableTheme().onBookWillClose(txt ? txt->getPath() : "", nullptr, nullptr, txt.get());
-  txt.reset();
 }
 
 void TxtReaderActivity::loop() {
@@ -256,27 +201,7 @@ void TxtReaderActivity::initializeReader() {
     return;
   }
 
-  // Store current settings for cache validation
-  cachedFontId = SETTINGS.getTxtReaderFontId();
-  cachedScreenMargin = SETTINGS.screenMargin;
-  cachedParagraphAlignment = SETTINGS.paragraphAlignment;
-
-  // Calculate viewport dimensions
-  renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
-                                   &cachedOrientedMarginLeft);
-  cachedOrientedMarginTop += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarTopHeight());
-  cachedOrientedMarginLeft += cachedScreenMargin;
-  cachedOrientedMarginRight += cachedScreenMargin;
-  cachedOrientedMarginBottom += std::max(static_cast<int>(cachedScreenMargin), UITheme::getStatusBarBottomHeight());
-
-  viewportWidth = renderer.getScreenWidth() - cachedOrientedMarginLeft - cachedOrientedMarginRight;
-  const int viewportHeight = renderer.getScreenHeight() - cachedOrientedMarginTop - cachedOrientedMarginBottom;
-  const int lineHeight = renderer.getLineHeight(cachedFontId);
-
-  linesPerPage = viewportHeight / lineHeight;
-  if (linesPerPage < 1) linesPerPage = 1;
-
-  LOG_DBG("TRS", "Viewport: %dx%d, lines per page: %d", viewportWidth, viewportHeight, linesPerPage);
+  computeViewportLayout();
 
   // Try to load cached page index first
   if (!loadPageIndexCache()) {
@@ -472,49 +397,7 @@ void TxtReaderActivity::renderStatusBar() const {
   const bool isStarred = bookmarkStore.has(0, static_cast<uint16_t>(currentPage));
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title, 0, isStarred);
 
-  lastStatusBarPage = currentPage + 1;
-  lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    lastStatusBarClockMinute = now > 0 ? static_cast<int>(now / 60) : -1;
-  } else {
-    lastStatusBarClockMinute = -1;
-  }
-}
-
-bool TxtReaderActivity::shouldSkipPeriodicUpdate() const {
-  if (lastStatusBarPage < 0) return false;
-  if (currentPage + 1 != lastStatusBarPage) return false;
-  if (SETTINGS.statusBarBattery) {
-    if (static_cast<int>(powerManager.getBatteryPercentage()) != lastStatusBarBattery) return false;
-  }
-  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
-    const time_t now = HalClock::now();
-    const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
-    if (minute != lastStatusBarClockMinute) return false;
-  }
-  return true;
-}
-
-void TxtReaderActivity::saveProgress() const {
-  FsFile f;
-  if (Storage.openFileForWrite("TRS", txt->getCachePath() + "/progress.bin", f)) {
-    // 7-byte format: page(2 bytes LE) + file offset(4 bytes LE) + overallPercent(1 byte)
-    // The offset lets drawCurrentPageToBuffer render without requiring index.bin.
-    const size_t offset = (currentPage < static_cast<int>(pageOffsets.size())) ? pageOffsets[currentPage] : 0;
-    const uint8_t percent = ReaderUtils::pageProgressPercentByte(currentPage, totalPages);
-    uint8_t data[7];
-    data[0] = currentPage & 0xFF;
-    data[1] = (currentPage >> 8) & 0xFF;
-    data[2] = offset & 0xFF;
-    data[3] = (offset >> 8) & 0xFF;
-    data[4] = (offset >> 16) & 0xFF;
-    data[5] = (offset >> 24) & 0xFF;
-    data[6] = percent;
-    f.write(data, 7);
-    f.close();
-    globalReadingSessionTracker().updateProgress(percent);
-  }
+  noteStatusBarRendered();
 }
 
 void TxtReaderActivity::applyPendingBookmarkJump() {
@@ -542,24 +425,6 @@ void TxtReaderActivity::applyPendingBookmarkJump() {
   if (persisted) {
     jump.clear();
     APP_STATE.saveToFile();
-  }
-}
-
-void TxtReaderActivity::loadProgress() {
-  FsFile f;
-  if (Storage.openFileForRead("TRS", txt->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[4];
-    if (f.read(data, 4) == 4) {
-      currentPage = data[0] + (data[1] << 8);
-      if (currentPage >= totalPages) {
-        currentPage = totalPages - 1;
-      }
-      if (currentPage < 0) {
-        currentPage = 0;
-      }
-      LOG_DBG("TRS", "Loaded progress: page %d/%d", currentPage, totalPages);
-    }
-    f.close();
   }
 }
 
@@ -708,39 +573,17 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
   }
 
   // Apply the reader orientation so margins match what the reader would produce
-  switch (SETTINGS.orientation) {
-    case CrossPointSettings::ORIENTATION::PORTRAIT:
-      renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-      break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CW:
-      renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
-      break;
-    case CrossPointSettings::ORIENTATION::INVERTED:
-      renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
-      break;
-    case CrossPointSettings::ORIENTATION::LANDSCAPE_CCW:
-      renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
-      break;
-    default:
-      break;
-  }
+  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
-  // Compute layout values that match what initializeReader() produces
+  // Compute layout values that match what computeViewportLayout() produces
   const int fontId = SETTINGS.getTxtReaderFontId();
   const uint8_t screenMargin = SETTINGS.screenMargin;
   const uint8_t paragraphAlignment = SETTINGS.paragraphAlignment;
 
-  int marginTop, marginRight, marginBottom, marginLeft;
-  renderer.getOrientedViewableTRBL(&marginTop, &marginRight, &marginBottom, &marginLeft);
-  marginTop += std::max(static_cast<int>(screenMargin), UITheme::getStatusBarTopHeight());
-  marginLeft += screenMargin;
-  marginRight += screenMargin;
-  marginBottom += std::max(static_cast<int>(screenMargin), UITheme::getStatusBarBottomHeight());
-
-  const int vw = renderer.getScreenWidth() - marginLeft - marginRight;
-  const int vh = renderer.getScreenHeight() - marginTop - marginBottom;
+  const TextLayout layout = computeTextLayout(renderer, fontId, screenMargin);
+  const int vw = layout.viewportWidth;
   const int lineHeight = renderer.getLineHeight(fontId);
-  const int linesPerPage = std::max(1, vh / lineHeight);
+  const int linesPerPage = layout.linesPerPage;
 
   // Step 1: Try to read the saved page and its file offset from progress.bin.
   // The 6-byte format (written by saveProgress) stores: page(2) + offset(4).
@@ -846,16 +689,16 @@ bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gfx
 
   // Render lines to frame buffer (no displayBuffer call)
   renderer.clearScreen();
-  int y = marginTop;
+  int y = layout.marginTop;
   for (const auto& line : pageLines) {
     if (!line.empty()) {
-      int x = marginLeft;
+      int x = layout.marginLeft;
       switch (paragraphAlignment) {
         case CrossPointSettings::CENTER_ALIGN:
-          x = marginLeft + (vw - renderer.getTextWidth(fontId, line.c_str())) / 2;
+          x = layout.marginLeft + (vw - renderer.getTextWidth(fontId, line.c_str())) / 2;
           break;
         case CrossPointSettings::RIGHT_ALIGN:
-          x = marginLeft + vw - renderer.getTextWidth(fontId, line.c_str());
+          x = layout.marginLeft + vw - renderer.getTextWidth(fontId, line.c_str());
           break;
         default:
           break;
