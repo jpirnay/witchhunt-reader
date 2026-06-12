@@ -156,12 +156,14 @@ std::string_view stripTrailingImportant(std::string_view value) {
 
 }  // anonymous namespace
 
-// FNV-1a 64-bit hash — no heap, good distribution over short selector strings.
-uint64_t CssParser::selectorHash(const std::string& s) {
-  uint64_t h = 14695981039346656037ULL;
+// FNV-1a 32-bit hash — no heap, good distribution over short selector strings.
+// 32 bits keep the selector index at 8 bytes/entry; collisions are resolved by
+// verifying the on-disk selector string in readRuleFromDiskAtOffset().
+uint32_t CssParser::selectorHash(std::string_view s) {
+  uint32_t h = 2166136261u;
   for (unsigned char c : s) {
     h ^= c;
-    h *= 1099511628211ULL;
+    h *= 16777619u;
   }
   return h;
 }
@@ -1117,16 +1119,26 @@ void CssParser::cacheHotRule(const std::string& selector, const CssStyle& style)
   }
 }
 
-bool CssParser::readRuleFromDiskAtOffset(const uint32_t styleOffset, CssStyle& outStyle) const {
+// Reads the rule record at ruleOffset and returns its style only if the stored
+// selector matches `selector` exactly. A mismatch is not an error — it means the
+// 32-bit index hash collided and the caller should try the next candidate.
+bool CssParser::readRuleFromDiskAtOffset(const uint32_t ruleOffset, const std::string& selector,
+                                         CssStyle& outStyle) const {
   FsFile file;
   if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) {
     return false;
   }
-  if (!file.seek(styleOffset)) {
-    file.close();
-    return false;
-  }
-  const bool ok = readCssStylePayload(file, outStyle);
+
+  // 256 B stack buffer (bounded by MAX_SELECTOR_LENGTH): render-path code, so no
+  // heap; not live at the same time as the index-load buffer — both are reached
+  // sequentially from lookupRule, so peak stack on this chain stays ~256 B.
+  char selectorBuf[MAX_SELECTOR_LENGTH];
+  uint16_t selectorLen = 0;
+  bool ok = file.seek(ruleOffset) && file.read(&selectorLen, sizeof(selectorLen)) == sizeof(selectorLen) &&
+            selectorLen == selector.size() && selectorLen <= MAX_SELECTOR_LENGTH &&
+            file.read(selectorBuf, selectorLen) == selectorLen &&
+            std::string_view(selectorBuf, selectorLen) == selector;
+  ok = ok && readCssStylePayload(file, outStyle);
   file.close();
   return ok;
 }
@@ -1161,24 +1173,24 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  const uint64_t h = selectorHash(selector);
+  const uint32_t h = selectorHash(selector);
   auto it = std::lower_bound(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(), h,
-                             [](const SelectorEntry& e, uint64_t key) { return e.hash < key; });
-  if (it == cacheRuleOffsets_.end() || it->hash != h) {
-    if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
-      negativeRuleCache_.clear();
+                             [](const SelectorEntry& e, uint32_t key) { return e.hash < key; });
+  // Equal hashes are adjacent after the sort; probe each candidate until the
+  // on-disk selector matches (collisions are expected to be rare).
+  for (; it != cacheRuleOffsets_.end() && it->hash == h; ++it) {
+    if (readRuleFromDiskAtOffset(it->offset, selector, outStyle)) {
+      cacheHotRule(selector, outStyle);
+      resolveStats_.diskHits++;
+      return true;
     }
-    negativeRuleCache_.insert(selector);
-    return false;
   }
 
-  if (!readRuleFromDiskAtOffset(it->offset, outStyle)) {
-    return false;
+  if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
+    negativeRuleCache_.clear();
   }
-
-  cacheHotRule(selector, outStyle);
-  resolveStats_.diskHits++;
-  return true;
+  negativeRuleCache_.insert(selector);
+  return false;
 }
 
 bool CssParser::ensureCacheIndexLoaded() const {
@@ -1226,6 +1238,7 @@ bool CssParser::ensureCacheIndexLoaded() const {
   char selectorBuf[MAX_SELECTOR_LENGTH + 1];
 
   for (uint16_t i = 0; i < ruleCount; ++i) {
+    const uint32_t ruleOffset = file.position();
     uint16_t selectorLen = 0;
     if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen == 0 ||
         selectorLen > MAX_SELECTOR_LENGTH) {
@@ -1239,18 +1252,10 @@ bool CssParser::ensureCacheIndexLoaded() const {
       cacheRuleOffsets_.clear();
       return false;
     }
-    selectorBuf[selectorLen] = '\0';
 
-    const uint32_t styleOffset = file.position();
-    // Hash the selector in-place — no heap allocation.
-    uint64_t h = 14695981039346656037ULL;
-    for (uint16_t j = 0; j < selectorLen; ++j) {
-      h ^= static_cast<uint8_t>(selectorBuf[j]);
-      h *= 1099511628211ULL;
-    }
-    cacheRuleOffsets_.push_back({h, styleOffset});
+    cacheRuleOffsets_.push_back({selectorHash(std::string_view(selectorBuf, selectorLen)), ruleOffset});
 
-    if (!file.seek(styleOffset + CSS_FIXED_STYLE_BYTES)) {
+    if (!file.seek(file.position() + CSS_FIXED_STYLE_BYTES)) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;

@@ -4,6 +4,7 @@
 
 #include <list>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -48,6 +49,11 @@ class CssParser {
   // v8: v7 builds wrote saveToCache() payloads without the cssFloat byte the reader
   //     expects — bump invalidates those malformed caches.
   static constexpr uint8_t CSS_CACHE_VERSION = 8;
+
+  // Retained RAM per rule in disk-backed lookup mode (the sorted SelectorEntry index).
+  // Heap gates (Section::heapAllowsEmbeddedStyle) size their contiguous-block floor
+  // from this; a static_assert in CssParser.cpp pins it to sizeof(SelectorEntry).
+  static constexpr size_t CSS_INDEX_BYTES_PER_RULE = 8;
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;
@@ -141,17 +147,22 @@ class CssParser {
   // Disk-backed CSS dictionary index: FNV-1a hash of selector -> byte offset in cache file.
   // Flat sorted array — 8 bytes per entry vs ~60 bytes for unordered_map node.
   // At 1500 rules: ~12 KB instead of ~96 KB. Binary search on hot path.
+  // The hash is only a candidate filter: lookups re-read the length-prefixed selector
+  // at `offset` and compare it to the query, so a 32-bit collision costs one extra
+  // disk read instead of resolving the wrong style.
   struct SelectorEntry {
-    uint64_t hash;    // FNV-1a 64-bit of the normalized selector string
-    uint32_t offset;  // byte offset of the CssStyle payload in the cache file
+    uint32_t hash;    // FNV-1a 32-bit of the normalized selector string
+    uint32_t offset;  // byte offset of the rule record (selector + payload) in the cache file
   };
+  static_assert(sizeof(SelectorEntry) == CSS_INDEX_BYTES_PER_RULE,
+                "SelectorEntry size changed — update CSS_INDEX_BYTES_PER_RULE so heap gates stay calibrated");
   mutable bool cacheIndexLoaded_ = false;
   mutable size_t cachedRuleCount_ = 0;
   mutable std::vector<SelectorEntry> cacheRuleOffsets_;
   mutable uint32_t totalSelectorCandidates_ = 0;
   mutable uint32_t unsupportedSelectorSkips_ = 0;
 
-  static uint64_t selectorHash(const std::string& s);
+  static uint32_t selectorHash(std::string_view s);
 
   // Bounded hot cache of most recently used rules.
   mutable std::list<std::string> hotRuleLru_;
@@ -189,7 +200,7 @@ class CssParser {
   // On-demand rule loading helpers
   bool ensureCacheIndexLoaded() const;
   bool lookupRule(const std::string& selector, CssStyle& outStyle, bool allowDiskLookup = true) const;
-  bool readRuleFromDiskAtOffset(uint32_t styleOffset, CssStyle& outStyle) const;
+  bool readRuleFromDiskAtOffset(uint32_t ruleOffset, const std::string& selector, CssStyle& outStyle) const;
   static bool readCssStylePayload(FsFile& file, CssStyle& style);
   static void writeCssStylePayload(FsFile& file, const CssStyle& style);
   void touchHotRule(const std::string& selector) const;
