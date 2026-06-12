@@ -131,14 +131,14 @@ constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
 
-#if DEBUG_BACKGROUND_WORK
-// Temporary corruption tripwire (debug builds): walks the entire heap and names the
-// checkpoint that sees damage, to localize an intermittent heap corruption observed on
-// X3 (multi_heap_free assert / "Bad head" after section builds). Once the heap is
-// damaged EVERY later checkpoint reports it, so only the FIRST line bounds the writer:
-// it acted between the previous clean checkpoint and that one. (heap_caps' own detail
-// prints go to the IDF console, not the app logger, so they don't appear in captures.)
-// Remove once the writer is found. Costs a few ms per call — debug-only.
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+// Temporary corruption tripwire: walks the entire heap and names the checkpoint that
+// sees damage. DANGEROUS on this platform: the ESP32-C3 startup-stack heap region
+// ([SOC_ROM_STACK_START - SOC_ROM_STACK_SIZE, SOC_ROM_STACK_START)) carries trampled
+// TLSF metadata from boot, and tlsf_check chasing its garbage pointers crashes the
+// walker (observed: Load access fault inside block_is_free on X4, decoded via
+// addr2line). Only enable for dedicated diagnostics sessions, never in normal builds —
+// gated on the same flag as the BootHeapProbe static-init probes.
 void checkHeapIntegrity(const char* checkpoint) {
   static bool corruptSeen = false;
   if (heap_caps_check_integrity_all(true)) {
