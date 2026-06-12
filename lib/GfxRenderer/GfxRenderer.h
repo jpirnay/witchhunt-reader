@@ -151,6 +151,12 @@ class GfxRenderer {
   int getScreenHeight() const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
+  // Make the write framebuffer match the currently displayed frame. Call before
+  // a partial repaint that patches a few regions and re-displays without
+  // re-rendering the full frame: displayBuffer() ends with swapBuffers(), so
+  // the write buffer otherwise holds the frame from two refreshes ago. No-op in
+  // single-buffer mode, where the write buffer is already the displayed frame.
+  void syncWriteBufferFromDisplayed() const { display.syncWriteBufferFromActive(); }
 
   // Temporarily free the secondary (previous-frame) buffer (~52 KB) during
   // operations that don't need it (e.g. chapter compilation). BW rendering
