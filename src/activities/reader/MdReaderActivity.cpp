@@ -12,7 +12,6 @@
 #include <numeric>
 
 #include "CrossPointSettings.h"
-#include "FinishedBookActivity.h"
 #include "MappedInputManager.h"
 #include "MdReaderTocSelectionActivity.h"
 #include "ReaderUtils.h"
@@ -192,67 +191,26 @@ void MdReaderActivity::onReaderExit() {
   currentPageLines.clear();
 }
 
-void MdReaderActivity::loop() {
-  if (inputDrainGuard.shouldDrain(mappedInput)) {
-    buttonEvents.drain();
-    return;
+bool MdReaderActivity::onConfirmShortPress() {
+  if (headings.empty()) {
+    return false;
   }
+  onPageChanged();
+  ReaderUtils::enforceExitFullRefresh(renderer);
+  startActivityForResult(
+      std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          currentPage = std::get<PageResult>(result.data).page;
+          onPageChanged();
+          requestUpdate();
+        }
+      });
+  return true;
+}
 
-  ButtonEventManager::ButtonEvent ev;
-  while (buttonEvents.consumeEvent(ev)) {
-    if (ev.button == MappedInputManager::Button::Back) {
-      if (ev.type == ButtonEventManager::PressType::Long) {
-        activityManager.goToFileBrowser(txt ? txt->getPath() : "");
-        return;
-      }
-      if (ev.type == ButtonEventManager::PressType::Short) {
-        onGoHome();
-        return;
-      }
-    }
-
-    if (!headings.empty() && ev.button == MappedInputManager::Button::Confirm &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      startActivityForResult(
-          std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              currentPage = std::get<PageResult>(result.data).page;
-              currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-              requestUpdate();
-            }
-          });
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage > 0) {
-        currentPage--;
-        currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      }
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage < totalPages - 1) {
-        currentPage++;
-        currentHeadingIndex = getHeadingIndexForOffset(pageOffsets[currentPage]);
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      } else {
-        saveProgress();
-        BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, txt ? txt->getPath() : std::string(),
-                                             std::string(), std::string());
-      }
-      return;
-    }
-  }
+void MdReaderActivity::onPageChanged() {
+  currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
 }
 
 void MdReaderActivity::initializeReader() {
@@ -929,7 +887,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_FORWARD:
       if (currentPage < totalPages - 1) {
         currentPage++;
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         globalReadingSessionTracker().onPageTurn();
         requestUpdate();
       }
@@ -937,7 +895,7 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_BACK:
       if (currentPage > 0) {
         currentPage--;
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         globalReadingSessionTracker().onPageTurn();
         requestUpdate();
       }
@@ -945,13 +903,13 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
     case BA::BTN_PAGE_FORWARD_10:
       currentPage += 10;
       clampPage();
-      currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+      onPageChanged();
       requestUpdate();
       break;
     case BA::BTN_PAGE_BACK_10:
       currentPage -= 10;
       clampPage();
-      currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+      onPageChanged();
       requestUpdate();
       break;
     case BA::BTN_NEXT_SECTION:
@@ -962,13 +920,13 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
       break;
     case BA::BTN_OPEN_TOC:
       if (!headings.empty()) {
-        currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+        onPageChanged();
         startActivityForResult(
             std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
             [this](const ActivityResult& result) {
               if (!result.isCancelled) {
                 currentPage = std::get<PageResult>(result.data).page;
-                currentHeadingIndex = pageOffsets.empty() ? -1 : getHeadingIndexForOffset(pageOffsets[currentPage]);
+                onPageChanged();
                 requestUpdate();
               }
             });

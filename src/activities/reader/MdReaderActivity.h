@@ -60,11 +60,14 @@ class MdReaderActivity final : public LineReaderActivity {
 
  protected:
   void onReaderExit() override;
+  // Opens the ToC overlay when the document has headings.
+  bool onConfirmShortPress() override;
+  // Keeps currentHeadingIndex in sync with the page shown.
+  void onPageChanged() override;
 
  public:
   explicit MdReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt)
       : LineReaderActivity("MdReader", "MDR", renderer, mappedInput, std::move(txt)) {}
-  void loop() override;
   void render(RenderLock&&) override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 };
