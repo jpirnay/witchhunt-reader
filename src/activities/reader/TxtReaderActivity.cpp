@@ -486,7 +486,14 @@ void TxtReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
+    // Same AA pass as EpubReaderActivity: displayBuffer() above ended with
+    // swapBuffers(), so the write framebuffer now holds the stale previous
+    // frame. renderGrayscalePlanesSequential() reseeds the controller baseline
+    // from frameBufferActive (the just-displayed page); snapshotting/restoring
+    // the write framebuffer instead would diff the next fast refresh against
+    // the previous page and ghost heavily.
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); });
   }
   // scope destructor clears font cache via FontCacheManager
 }

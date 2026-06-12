@@ -877,7 +877,10 @@ void MdReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   if (SETTINGS.textAntiAliasing) {
-    ReaderUtils::renderAntiAliased(renderer, [&]() { renderLines(); });
+    // Same AA pass as EpubReaderActivity — see TxtReaderActivity::renderPage()
+    // for why the legacy store/restore helper ghosted after swapBuffers().
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); });
   }
 }
 
