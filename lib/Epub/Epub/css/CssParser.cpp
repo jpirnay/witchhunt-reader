@@ -71,9 +71,8 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                          sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t),
-              "CSS_FIXED_STYLE_BYTES must match the compiled style payload layout");
+static_assert(CSS_FIXED_STYLE_BYTES == 65,
+              "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
 constexpr char rulesCache[] = "/css_rules.cache";
@@ -1187,6 +1186,10 @@ bool CssParser::ensureCacheIndexLoaded() const {
     return true;
   }
 
+  if (cachePath.empty()) {
+    return false;
+  }
+
   FsFile file;
   if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) {
     return false;
@@ -1427,6 +1430,7 @@ bool CssParser::saveToCache() const {
     file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
     file.write(static_cast<uint8_t>(style.verticalAlign));
     file.write(static_cast<uint8_t>(style.defined.verticalAlign));
+    file.write(static_cast<uint8_t>(style.cssFloat));
   }
 
   LOG_DBG("CSS", "Saved %u rules to cache", ruleCount);

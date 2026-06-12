@@ -45,7 +45,9 @@ class CssParser {
   };
 
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
-  static constexpr uint8_t CSS_CACHE_VERSION = 7;  // added cssFloat to style payload
+  // v8: v7 builds wrote saveToCache() payloads without the cssFloat byte the reader
+  //     expects — bump invalidates those malformed caches.
+  static constexpr uint8_t CSS_CACHE_VERSION = 8;
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;
