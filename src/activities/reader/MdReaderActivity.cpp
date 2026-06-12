@@ -292,43 +292,8 @@ void MdReaderActivity::loop() {
         requestUpdate();
       } else {
         saveProgress();
-        const std::string currentBookPath = txt ? txt->getPath() : std::string();
-        const std::string nextBookPath =
-            BookFinished::findNextBookInDirectory(currentBookPath, std::string(), std::string());
-        startActivityForResult(
-            std::make_unique<FinishedBookActivity>(renderer, mappedInput, currentBookPath, nextBookPath),
-            [this, currentBookPath, nextBookPath](const ActivityResult& result) {
-              if (result.isCancelled) {
-                requestUpdate();
-                return;
-              }
-              globalReadingSessionTracker().markFinished();
-              const auto& menuResult = std::get<MenuResult>(result.data);
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::GoHome)) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(currentBookPath, movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(currentBookPath);
-                }
-                activityManager.goHome();
-                return;
-              }
-              if (menuResult.action == static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook) &&
-                  !nextBookPath.empty()) {
-                if (SETTINGS.moveFinishedBooksToCompleted) {
-                  std::string movedPath;
-                  BookFinished::moveFinishedBookToCompleted(currentBookPath, movedPath);
-                }
-                if (SETTINGS.removeFinishedBooksFromRecents) {
-                  RECENT_BOOKS.removeBook(currentBookPath);
-                }
-                activityManager.goToReader(nextBookPath);
-                return;
-              }
-              requestUpdate();
-            });
+        BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, txt ? txt->getPath() : std::string(),
+                                             std::string(), std::string());
       }
       return;
     }

@@ -16,6 +16,20 @@ enum class FinishedBookAction {
   GoHome = 1,
   OpenNextBook = 2,
 };
+
+// Launches the finished-book menu on top of `host` and handles its result:
+// credits a finish to the reading-stats session, applies the move-to-/COMPLETED
+// and remove-from-recents settings, then navigates home or to the next book.
+// On cancel/stay the host gets a requestUpdate() to re-render its last page.
+// The caller is responsible for persisting reading progress beforehand (the
+// progress formats differ per reader).
+// `onMenuClosed` (optional, with `onMenuClosedCtx`) runs first in the result
+// handler regardless of outcome — readers use it to clear a "menu is open"
+// flag. Plain function pointer + context instead of std::function per the
+// project callback convention.
+void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputManager& mappedInput,
+                            const std::string& bookPath, const std::string& series, const std::string& seriesIndex,
+                            void (*onMenuClosed)(void*) = nullptr, void* onMenuClosedCtx = nullptr);
 }  // namespace BookFinished
 
 class FinishedBookActivity : public Activity {

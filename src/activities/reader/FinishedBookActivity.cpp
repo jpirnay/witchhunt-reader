@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "ReaderActivity.h"
+#include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -444,6 +445,47 @@ bool moveFinishedBookToCompleted(const std::string& currentBookPath, std::string
 
   outMovedPath = targetPath;
   return true;
+}
+
+void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputManager& mappedInput,
+                            const std::string& bookPath, const std::string& series, const std::string& seriesIndex,
+                            void (*onMenuClosed)(void*), void* onMenuClosedCtx) {
+  const std::string nextBookPath = findNextBookInDirectory(bookPath, series, seriesIndex);
+  Activity* hostPtr = &host;
+  host.startActivityForResult(
+      std::make_unique<FinishedBookActivity>(renderer, mappedInput, bookPath, nextBookPath),
+      [hostPtr, bookPath, nextBookPath, onMenuClosed, onMenuClosedCtx](const ActivityResult& result) {
+        if (onMenuClosed) {
+          onMenuClosed(onMenuClosedCtx);
+        }
+        if (result.isCancelled) {
+          hostPtr->requestUpdate();
+          return;
+        }
+        // User confirmed they're done with this book — credit a finish to the
+        // in-flight session before any tear-down side effects.
+        globalReadingSessionTracker().markFinished();
+        const auto& menuResult = std::get<MenuResult>(result.data);
+        const bool goHome = menuResult.action == static_cast<int>(FinishedBookAction::GoHome);
+        const bool openNext =
+            menuResult.action == static_cast<int>(FinishedBookAction::OpenNextBook) && !nextBookPath.empty();
+        if (!goHome && !openNext) {
+          hostPtr->requestUpdate();
+          return;
+        }
+        if (SETTINGS.moveFinishedBooksToCompleted) {
+          std::string movedPath;
+          moveFinishedBookToCompleted(bookPath, movedPath);
+        }
+        if (SETTINGS.removeFinishedBooksFromRecents) {
+          RECENT_BOOKS.removeBook(bookPath);
+        }
+        if (goHome) {
+          activityManager.goHome();
+        } else {
+          activityManager.goToReader(nextBookPath);
+        }
+      });
 }
 
 }  // namespace BookFinished
