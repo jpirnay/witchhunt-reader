@@ -73,11 +73,11 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 #endif
 
 // Contiguous floor: the only sizable contiguous CSS allocation is the selector index
-// (~16 B/rule, measured 4.6 KB at 290 rules; 24 KB at the 1500-rule cap), which
-// heapAllowsEmbeddedStyle() adds dynamically from the actual rule count. This define is
-// just the baseline below the dynamic term. The old static 36 KB predated the sparse
-// disk-backed cache and refused builds the heap could easily serve (measured X3:
-// contig 26.6 KB post-indexing with a 4.6 KB actual need).
+// (CssParser::CSS_INDEX_BYTES_PER_RULE = 8 B/rule, i.e. ~2.3 KB at 290 rules and
+// 12 KB at the 1500-rule cap), which heapAllowsEmbeddedStyle() adds dynamically from
+// the actual rule count. This define is just the baseline below the dynamic term. The
+// old static 36 KB predated the sparse disk-backed cache and refused builds the heap
+// could easily serve (measured X3: contig 26.6 KB post-indexing, small actual need).
 #ifndef SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES
 #define SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
@@ -932,12 +932,13 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 }
 
 bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
-  // Contig need is dominated by the selector index vector (16 B/rule) plus slack for
-  // file buffers; everything else (hot/negative caches) allocates in small nodes.
-  // Deliberately silent: callers decide whether a refusal is worth a log line —
-  // background gates re-check this often and must not spam.
+  // Contig need is dominated by the selector index vector (CSS_INDEX_BYTES_PER_RULE)
+  // plus slack for file buffers; everything else (hot/negative caches) allocates in
+  // small nodes. Deliberately silent: callers decide whether a refusal is worth a
+  // log line — background gates re-check this often and must not spam.
   const uint32_t requiredContig =
-      std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES, static_cast<uint32_t>(cssRuleCount) * 16 + 8 * 1024);
+      std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
+                         static_cast<uint32_t>(cssRuleCount * CssParser::CSS_INDEX_BYTES_PER_RULE) + 8 * 1024);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;

@@ -71,9 +71,8 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                          sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t),
-              "CSS_FIXED_STYLE_BYTES must match the compiled style payload layout");
+static_assert(CSS_FIXED_STYLE_BYTES == 65,
+              "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
 constexpr char rulesCache[] = "/css_rules.cache";
@@ -157,12 +156,14 @@ std::string_view stripTrailingImportant(std::string_view value) {
 
 }  // anonymous namespace
 
-// FNV-1a 64-bit hash — no heap, good distribution over short selector strings.
-uint64_t CssParser::selectorHash(const std::string& s) {
-  uint64_t h = 14695981039346656037ULL;
+// FNV-1a 32-bit hash — no heap, good distribution over short selector strings.
+// 32 bits keep the selector index at 8 bytes/entry; collisions are resolved by
+// verifying the on-disk selector string in readRuleFromDiskAtOffset().
+uint32_t CssParser::selectorHash(std::string_view s) {
+  uint32_t h = 2166136261u;
   for (unsigned char c : s) {
     h ^= c;
-    h *= 1099511628211ULL;
+    h *= 16777619u;
   }
   return h;
 }
@@ -1118,16 +1119,26 @@ void CssParser::cacheHotRule(const std::string& selector, const CssStyle& style)
   }
 }
 
-bool CssParser::readRuleFromDiskAtOffset(const uint32_t styleOffset, CssStyle& outStyle) const {
+// Reads the rule record at ruleOffset and returns its style only if the stored
+// selector matches `selector` exactly. A mismatch is not an error — it means the
+// 32-bit index hash collided and the caller should try the next candidate.
+bool CssParser::readRuleFromDiskAtOffset(const uint32_t ruleOffset, const std::string& selector,
+                                         CssStyle& outStyle) const {
   FsFile file;
   if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) {
     return false;
   }
-  if (!file.seek(styleOffset)) {
-    file.close();
-    return false;
-  }
-  const bool ok = readCssStylePayload(file, outStyle);
+
+  // 256 B stack buffer (bounded by MAX_SELECTOR_LENGTH): render-path code, so no
+  // heap; not live at the same time as the index-load buffer — both are reached
+  // sequentially from lookupRule, so peak stack on this chain stays ~256 B.
+  char selectorBuf[MAX_SELECTOR_LENGTH];
+  uint16_t selectorLen = 0;
+  bool ok = file.seek(ruleOffset) && file.read(&selectorLen, sizeof(selectorLen)) == sizeof(selectorLen) &&
+            selectorLen == selector.size() && selectorLen <= MAX_SELECTOR_LENGTH &&
+            file.read(selectorBuf, selectorLen) == selectorLen &&
+            std::string_view(selectorBuf, selectorLen) == selector;
+  ok = ok && readCssStylePayload(file, outStyle);
   file.close();
   return ok;
 }
@@ -1162,29 +1173,33 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
     return false;
   }
 
-  const uint64_t h = selectorHash(selector);
+  const uint32_t h = selectorHash(selector);
   auto it = std::lower_bound(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(), h,
-                             [](const SelectorEntry& e, uint64_t key) { return e.hash < key; });
-  if (it == cacheRuleOffsets_.end() || it->hash != h) {
-    if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
-      negativeRuleCache_.clear();
+                             [](const SelectorEntry& e, uint32_t key) { return e.hash < key; });
+  // Equal hashes are adjacent after the sort; probe each candidate until the
+  // on-disk selector matches (collisions are expected to be rare).
+  for (; it != cacheRuleOffsets_.end() && it->hash == h; ++it) {
+    if (readRuleFromDiskAtOffset(it->offset, selector, outStyle)) {
+      cacheHotRule(selector, outStyle);
+      resolveStats_.diskHits++;
+      return true;
     }
-    negativeRuleCache_.insert(selector);
-    return false;
   }
 
-  if (!readRuleFromDiskAtOffset(it->offset, outStyle)) {
-    return false;
+  if (negativeRuleCache_.size() >= NEGATIVE_CACHE_SIZE) {
+    negativeRuleCache_.clear();
   }
-
-  cacheHotRule(selector, outStyle);
-  resolveStats_.diskHits++;
-  return true;
+  negativeRuleCache_.insert(selector);
+  return false;
 }
 
 bool CssParser::ensureCacheIndexLoaded() const {
   if (cacheIndexLoaded_) {
     return true;
+  }
+
+  if (cachePath.empty()) {
+    return false;
   }
 
   FsFile file;
@@ -1223,6 +1238,7 @@ bool CssParser::ensureCacheIndexLoaded() const {
   char selectorBuf[MAX_SELECTOR_LENGTH + 1];
 
   for (uint16_t i = 0; i < ruleCount; ++i) {
+    const uint32_t ruleOffset = file.position();
     uint16_t selectorLen = 0;
     if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen == 0 ||
         selectorLen > MAX_SELECTOR_LENGTH) {
@@ -1236,18 +1252,10 @@ bool CssParser::ensureCacheIndexLoaded() const {
       cacheRuleOffsets_.clear();
       return false;
     }
-    selectorBuf[selectorLen] = '\0';
 
-    const uint32_t styleOffset = file.position();
-    // Hash the selector in-place — no heap allocation.
-    uint64_t h = 14695981039346656037ULL;
-    for (uint16_t j = 0; j < selectorLen; ++j) {
-      h ^= static_cast<uint8_t>(selectorBuf[j]);
-      h *= 1099511628211ULL;
-    }
-    cacheRuleOffsets_.push_back({h, styleOffset});
+    cacheRuleOffsets_.push_back({selectorHash(std::string_view(selectorBuf, selectorLen)), ruleOffset});
 
-    if (!file.seek(styleOffset + CSS_FIXED_STYLE_BYTES)) {
+    if (!file.seek(file.position() + CSS_FIXED_STYLE_BYTES)) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
@@ -1373,60 +1381,14 @@ bool CssParser::saveToCache() const {
   file.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   file.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
 
-  // Write each rule: selector string + CssStyle fields
+  // Write each rule: selector string (length-prefixed) + style payload.
+  // The payload must go through writeCssStylePayload so the format can never
+  // drift from readCssStylePayload again (v7 caches were broken exactly that way).
   for (const auto& pair : rulesBySelector_) {
-    // Write selector string (length-prefixed)
     const auto selectorLen = static_cast<uint16_t>(pair.first.size());
     file.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
     file.write(reinterpret_cast<const uint8_t*>(pair.first.data()), selectorLen);
-
-    // Write CssStyle fields (all are POD types)
-    const CssStyle& style = pair.second;
-    file.write(static_cast<uint8_t>(style.textAlign));
-    file.write(static_cast<uint8_t>(style.fontStyle));
-    file.write(static_cast<uint8_t>(style.fontWeight));
-    file.write(static_cast<uint8_t>(style.textDecoration));
-
-    // Write CssLength fields (value + unit)
-    auto writeLength = [&file](const CssLength& len) {
-      file.write(reinterpret_cast<const uint8_t*>(&len.value), sizeof(len.value));
-      file.write(static_cast<uint8_t>(len.unit));
-    };
-
-    writeLength(style.textIndent);
-    writeLength(style.marginTop);
-    writeLength(style.marginBottom);
-    writeLength(style.marginLeft);
-    writeLength(style.marginRight);
-    writeLength(style.paddingTop);
-    writeLength(style.paddingBottom);
-    writeLength(style.paddingLeft);
-    writeLength(style.paddingRight);
-    writeLength(style.imageHeight);
-    writeLength(style.imageWidth);
-    file.write(static_cast<uint8_t>(style.display));
-
-    // Write defined flags as uint16_t
-    uint16_t definedBits = 0;
-    if (style.defined.textAlign) definedBits |= 1 << 0;
-    if (style.defined.fontStyle) definedBits |= 1 << 1;
-    if (style.defined.fontWeight) definedBits |= 1 << 2;
-    if (style.defined.textDecoration) definedBits |= 1 << 3;
-    if (style.defined.textIndent) definedBits |= 1 << 4;
-    if (style.defined.marginTop) definedBits |= 1 << 5;
-    if (style.defined.marginBottom) definedBits |= 1 << 6;
-    if (style.defined.marginLeft) definedBits |= 1 << 7;
-    if (style.defined.marginRight) definedBits |= 1 << 8;
-    if (style.defined.paddingTop) definedBits |= 1 << 9;
-    if (style.defined.paddingBottom) definedBits |= 1 << 10;
-    if (style.defined.paddingLeft) definedBits |= 1 << 11;
-    if (style.defined.paddingRight) definedBits |= 1 << 12;
-    if (style.defined.imageHeight) definedBits |= 1 << 13;
-    if (style.defined.imageWidth) definedBits |= 1 << 14;
-    if (style.defined.display) definedBits |= 1 << 15;
-    file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
-    file.write(static_cast<uint8_t>(style.verticalAlign));
-    file.write(static_cast<uint8_t>(style.defined.verticalAlign));
+    writeCssStylePayload(file, pair.second);
   }
 
   LOG_DBG("CSS", "Saved %u rules to cache", ruleCount);
