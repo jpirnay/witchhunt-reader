@@ -12,10 +12,12 @@
 // Shared scaffolding for the line-oriented file readers (TXT, Markdown).
 // Owns the document handle, page-offset index, viewport layout, reading
 // progress persistence and status-bar freshness tracking, plus the common
-// enter/exit lifecycle (orientation, recents, reading-stats session).
-// Subclasses provide the format-specific parsing, page rendering and input
-// handling, and hook into onReaderEnter()/onReaderExit() for extras such as
-// bookmarks or headings.
+// enter/exit lifecycle (orientation, recents, reading-stats session) and the
+// loop() input handling (back/page buttons, tilt page turns, finished-book
+// flow). Subclasses provide the format-specific parsing and page rendering,
+// and hook in via onReaderEnter()/onReaderExit() for extras such as bookmarks
+// or headings, onConfirmShortPress() for their navigation overlay, and
+// onPageChanged() for per-page bookkeeping.
 class LineReaderActivity : public Activity {
  protected:
   std::unique_ptr<Txt> txt;
@@ -59,6 +61,19 @@ class LineReaderActivity : public Activity {
   // Called from onExit() after the stats session is flushed, before the
   // document is torn down (TXT syncs bookmarks, subclasses clear their lines).
   virtual void onReaderExit() {}
+  // Called from loop() on a Confirm short press. Return true when handled
+  // (TXT opens starred pages, MD opens the ToC); false lets the press fall
+  // through unhandled.
+  virtual bool onConfirmShortPress() { return false; }
+  // Called after currentPage changed through the shared page-turn handling
+  // (MD recomputes the current heading here).
+  virtual void onPageChanged() {}
+
+  // Page-turn helpers used by loop(); going forward past the last page
+  // launches the finished-book flow.
+  void goToPreviousPage();
+  void goToNextPage();
+  void launchFinishedBookFlow();
 
   // Reads the current font/margin/alignment settings and fills the cached
   // layout fields (oriented margins, viewportWidth, linesPerPage).
@@ -89,6 +104,7 @@ class LineReaderActivity : public Activity {
 
   void onEnter() override;
   void onExit() override;
+  void loop() override;
   bool isReaderActivity() const override { return true; }
   bool shouldSkipPeriodicUpdate() const override;
 };

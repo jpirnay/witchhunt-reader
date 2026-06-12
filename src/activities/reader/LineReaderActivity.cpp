@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "CrossPointState.h"
+#include "FinishedBookActivity.h"
 #include "KOReaderDocumentId.h"
 #include "ReaderActivity.h"
 #include "ReadingSessionTracker.h"
@@ -66,6 +67,87 @@ void LineReaderActivity::onExit() {
   APP_STATE.saveToFile();
   UITheme::getInstance().getMutableTheme().onBookWillClose(txt ? txt->getPath() : "", nullptr, nullptr, txt.get());
   txt.reset();
+}
+
+void LineReaderActivity::loop() {
+  const bool drainActive = inputDrainGuard.shouldDrain(mappedInput);
+  if (!drainActive && drainWasActive) {
+    halTiltSensor.clearPendingEvents();
+  }
+  drainWasActive = drainActive;
+
+  if (drainActive) {
+    buttonEvents.drain();
+    return;
+  }
+
+  ButtonEventManager::ButtonEvent ev;
+  while (buttonEvents.consumeEvent(ev)) {
+    if (ev.button == MappedInputManager::Button::Back) {
+      if (ev.type == ButtonEventManager::PressType::Long) {
+        ReaderUtils::enforceExitFullRefresh(renderer);
+        onGoHome();
+        return;
+      }
+      if (ev.type == ButtonEventManager::PressType::Short) {
+        ReaderUtils::enforceExitFullRefresh(renderer);
+        finish();
+        return;
+      }
+    }
+
+    if (ev.button == MappedInputManager::Button::Confirm && ev.type == ButtonEventManager::PressType::Short) {
+      if (onConfirmShortPress()) {
+        return;
+      }
+      continue;
+    }
+
+    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
+        ev.type == ButtonEventManager::PressType::Short) {
+      goToPreviousPage();
+      return;
+    }
+
+    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
+        ev.type == ButtonEventManager::PressType::Short) {
+      goToNextPage();
+      return;
+    }
+  }
+
+  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  if (prevTriggered) {
+    goToPreviousPage();
+  } else if (nextTriggered) {
+    goToNextPage();
+  }
+}
+
+void LineReaderActivity::goToPreviousPage() {
+  if (currentPage > 0) {
+    currentPage--;
+    onPageChanged();
+    globalReadingSessionTracker().onPageTurn();
+    requestUpdate();
+  }
+}
+
+void LineReaderActivity::goToNextPage() {
+  if (currentPage < totalPages - 1) {
+    currentPage++;
+    onPageChanged();
+    globalReadingSessionTracker().onPageTurn();
+    requestUpdate();
+  } else {
+    launchFinishedBookFlow();
+  }
+}
+
+void LineReaderActivity::launchFinishedBookFlow() {
+  saveProgress();
+  BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, txt ? txt->getPath() : std::string(),
+                                       std::string(), std::string());
 }
 
 LineReaderActivity::TextLayout LineReaderActivity::computeTextLayout(const GfxRenderer& renderer, const int fontId,

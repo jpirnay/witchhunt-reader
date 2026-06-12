@@ -11,7 +11,6 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
-#include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
@@ -103,97 +102,22 @@ void TxtReaderActivity::onReaderExit() {
   currentPageLines.clear();
 }
 
-void TxtReaderActivity::loop() {
-  const bool drainActive = inputDrainGuard.shouldDrain(mappedInput);
-  if (!drainActive && drainWasActive) {
-    halTiltSensor.clearPendingEvents();
+bool TxtReaderActivity::onConfirmShortPress() {
+  if (bookmarkStore.isEmpty()) {
+    return false;
   }
-  drainWasActive = drainActive;
-
-  if (drainActive) {
-    buttonEvents.drain();
-    return;
-  }
-
-  ButtonEventManager::ButtonEvent ev;
-  while (buttonEvents.consumeEvent(ev)) {
-    if (ev.button == MappedInputManager::Button::Back) {
-      if (ev.type == ButtonEventManager::PressType::Long) {
-        ReaderUtils::enforceExitFullRefresh(renderer);
-        onGoHome();
-        return;
-      }
-      if (ev.type == ButtonEventManager::PressType::Short) {
-        ReaderUtils::enforceExitFullRefresh(renderer);
-        finish();
-        return;
-      }
-    }
-
-    if (!bookmarkStore.isEmpty() && ev.button == MappedInputManager::Button::Confirm &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      ReaderUtils::enforceExitFullRefresh(renderer);
-      startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
-                             [this](const ActivityResult& result) {
-                               if (!result.isCancelled) {
-                                 const auto& starred = std::get<StarredPageResult>(result.data);
-                                 currentPage = starred.pageNumber;
-                                 if (currentPage >= totalPages) currentPage = totalPages - 1;
-                                 if (currentPage < 0) currentPage = 0;
-                               }
-                               requestUpdate();
-                             });
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage > 0) {
-        currentPage--;
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      }
-      return;
-    }
-
-    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
-        ev.type == ButtonEventManager::PressType::Short) {
-      if (currentPage < totalPages - 1) {
-        currentPage++;
-        globalReadingSessionTracker().onPageTurn();
-        requestUpdate();
-      } else {
-        launchFinishedBookFlow();
-      }
-      return;
-    }
-  }
-
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
-  if (!prevTriggered && !nextTriggered) {
-    return;
-  }
-
-  if (prevTriggered) {
-    if (currentPage > 0) {
-      currentPage--;
-      globalReadingSessionTracker().onPageTurn();
-      requestUpdate();
-    }
-  } else if (nextTriggered) {
-    if (currentPage < totalPages - 1) {
-      currentPage++;
-      globalReadingSessionTracker().onPageTurn();
-      requestUpdate();
-    } else {
-      launchFinishedBookFlow();
-    }
-  }
-}
-
-void TxtReaderActivity::launchFinishedBookFlow() {
-  saveProgress();
-  BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, txt->getPath(), std::string(), std::string());
+  ReaderUtils::enforceExitFullRefresh(renderer);
+  startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const auto& starred = std::get<StarredPageResult>(result.data);
+                             currentPage = starred.pageNumber;
+                             if (currentPage >= totalPages) currentPage = totalPages - 1;
+                             if (currentPage < 0) currentPage = 0;
+                           }
+                           requestUpdate();
+                         });
+  return true;
 }
 
 void TxtReaderActivity::initializeReader() {

@@ -25,16 +25,16 @@ class TxtReaderActivity final : public LineReaderActivity {
   // Consume a persisted bookmark-jump request (from GlobalBookmarksActivity) for
   // this TXT file. Rewrites progress.bin before initializeReader() reads it.
   void applyPendingBookmarkJump();
-  void launchFinishedBookFlow();
 
  protected:
   void onReaderEnter() override;
   void onReaderExit() override;
+  // Opens the starred-pages overlay when bookmarks exist.
+  bool onConfirmShortPress() override;
 
  public:
   explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt)
       : LineReaderActivity("TxtReader", "TRS", renderer, mappedInput, std::move(txt)) {}
-  void loop() override;
   void render(RenderLock&&) override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 
