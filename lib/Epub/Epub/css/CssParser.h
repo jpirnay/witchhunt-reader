@@ -48,7 +48,13 @@ class CssParser {
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
   // v8: v7 builds wrote saveToCache() payloads without the cssFloat byte the reader
   //     expects — bump invalidates those malformed caches.
-  static constexpr uint8_t CSS_CACHE_VERSION = 8;
+  // v9: header gains a 4-byte indexOffset field; a pre-sorted {hash,offset} array is
+  //     appended after the rule payloads so ensureCacheIndexLoaded() can bulk-read the
+  //     entire index in one seek instead of scanning every selector record individually.
+  // v10: indexOffset field removed; the sorted index is placed immediately after the
+  //      11-byte header (before rule payloads), so ensureCacheIndexLoaded() reads header
+  //      + index sequentially from file position 0 — no seek over the 37KB rule block.
+  static constexpr uint8_t CSS_CACHE_VERSION = 10;
 
   // Retained RAM per rule in disk-backed lookup mode (the sorted SelectorEntry index).
   // Heap gates (Section::heapAllowsEmbeddedStyle) size their contiguous-block floor
@@ -101,6 +107,13 @@ class CssParser {
    * Clear all loaded rules
    */
   void clear();
+
+  /**
+   * Clear per-section caches (hot/negative LRU) between section builds.
+   * Retains the disk index in RAM if it fits within 10 KB, avoiding a cold SD
+   * re-read (~240 ms) on the next section. Evicts if larger to protect heap.
+   */
+  void clearCaches();
 
   /**
    * Check if CSS rules cache file exists

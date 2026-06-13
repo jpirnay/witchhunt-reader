@@ -474,7 +474,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // Get inflated size up-front so the parser can choose progress granularity.
   const uint32_t phaseSetupStart = millis();
   st.inflatedSize = 0;
-  if (!epub->getItemSize(st.localPath, &st.inflatedSize)) {
+  if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
     LOG_ERR("SCT", "Failed to get inflated size for %s", st.localPath.c_str());
     return BuildPhaseResult::Failed;
   }
@@ -861,7 +861,7 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   }
 
   if (st.cssParser) {
-    st.cssParser->clear();
+    st.cssParser->clearCaches();
   }
 
   buildTocBoundaries(anchors);

@@ -68,7 +68,10 @@ class BookMetadataCache {
   std::vector<SpineHrefIndexEntry> spineHrefIndex;
   bool useSpineHrefIndex = false;
 
-  static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
+  // Batch ZIP size lookup and fast spine-href index are always better when N is
+  // larger than a handful — lower threshold so even moderate books (e.g. 105
+  // spine items) take the O(n·log m) batch path instead of O(n·m) per-item scans.
+  static constexpr uint16_t LARGE_SPINE_THRESHOLD = 16;
 
   // FNV-1a 64-bit hash function
   static uint64_t fnvHash64(const std::string& s) {

@@ -858,6 +858,7 @@ bool CssParser::endCacheCompile() {
   outFile.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   outFile.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   outFile.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
+  // v10: index immediately after the 11-byte header — write zeroed placeholder, patch below.
 
   FsFile tempFile;
   if (!Storage.openFileForRead("CSS", compileTempPath_, tempFile)) {
@@ -868,8 +869,18 @@ bool CssParser::endCacheCompile() {
     return false;
   }
 
+  std::vector<SelectorEntry> indexEntries;
+  indexEntries.reserve(ruleCount);
+  {
+    constexpr SelectorEntry kZero{};
+    for (uint16_t i = 0; i < ruleCount; ++i) {
+      outFile.write(reinterpret_cast<const uint8_t*>(&kZero), sizeof(kZero));
+    }
+  }
+
   std::array<uint8_t, CSS_FIXED_STYLE_BYTES> styleBytes{};
   for (const auto& it : compileSelectorOffsets_) {
+    const uint32_t ruleOffset = outFile.position();
     const auto selectorLen = static_cast<uint16_t>(it.first.size());
     outFile.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
     outFile.write(reinterpret_cast<const uint8_t*>(it.first.data()), selectorLen);
@@ -891,9 +902,19 @@ bool CssParser::endCacheCompile() {
       return false;
     }
     outFile.write(styleBytes.data(), styleBytes.size());
+    indexEntries.push_back({selectorHash(it.first), ruleOffset});
   }
 
   tempFile.close();
+
+  // Sort and patch the index placeholder at position 11.
+  std::sort(indexEntries.begin(), indexEntries.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
+  outFile.seek(11);
+  for (const auto& entry : indexEntries) {
+    outFile.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
+  }
+
   outFile.close();
   Storage.remove(compileTempPath_.c_str());
 
@@ -920,6 +941,20 @@ size_t CssParser::ruleCount() const {
     return cachedRuleCount_;
   }
   return 0;
+}
+
+void CssParser::clearCaches() {
+  rulesBySelector_.clear();
+  hotRuleCache_.clear();
+  hotRuleLru_.clear();
+  negativeRuleCache_.clear();
+  // Retain the sorted disk index if it fits in 10 KB — avoids a cold SD re-read
+  // (~240 ms) at the start of each section build. Evict if larger to protect heap.
+  if (cacheRuleOffsets_.size() * CSS_INDEX_BYTES_PER_RULE > 10 * 1024) {
+    cacheRuleOffsets_.clear();
+    cacheIndexLoaded_ = false;
+    cachedRuleCount_ = 0;
+  }
 }
 
 void CssParser::clear() {
@@ -1228,49 +1263,28 @@ bool CssParser::ensureCacheIndexLoaded() const {
     return false;
   }
 
+  // v10: index is immediately after the 11-byte header — read sequentially, no seek.
   cacheRuleOffsets_.clear();
-  cacheRuleOffsets_.reserve(ruleCount);
   hotRuleCache_.clear();
   hotRuleLru_.clear();
   negativeRuleCache_.clear();
 
-  // Stack buffer avoids a heap string allocation per selector during index load.
-  char selectorBuf[MAX_SELECTOR_LENGTH + 1];
-
-  for (uint16_t i = 0; i < ruleCount; ++i) {
-    const uint32_t ruleOffset = file.position();
-    uint16_t selectorLen = 0;
-    if (file.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) || selectorLen == 0 ||
-        selectorLen > MAX_SELECTOR_LENGTH) {
-      file.close();
-      cacheRuleOffsets_.clear();
-      return false;
-    }
-
-    if (file.read(selectorBuf, selectorLen) != selectorLen) {
-      file.close();
-      cacheRuleOffsets_.clear();
-      return false;
-    }
-
-    cacheRuleOffsets_.push_back({selectorHash(std::string_view(selectorBuf, selectorLen)), ruleOffset});
-
-    if (!file.seek(file.position() + CSS_FIXED_STYLE_BYTES)) {
+  if (ruleCount > 0) {
+    cacheRuleOffsets_.resize(ruleCount);
+    const size_t indexBytes = static_cast<size_t>(ruleCount) * sizeof(SelectorEntry);
+    if (file.read(reinterpret_cast<uint8_t*>(cacheRuleOffsets_.data()), indexBytes) != static_cast<int>(indexBytes)) {
       file.close();
       cacheRuleOffsets_.clear();
       return false;
     }
   }
 
-  // Sort by hash for binary search in lookupRule.
-  std::sort(cacheRuleOffsets_.begin(), cacheRuleOffsets_.end(),
-            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
+  file.close();
 
   cachedRuleCount_ = cacheRuleOffsets_.size();
   totalSelectorCandidates_ = totalCandidates;
   unsupportedSelectorSkips_ = unsupportedSkips;
   cacheIndexLoaded_ = true;
-  file.close();
   LOG_DBG("CSS", "Loaded CSS index: %u selectors (hot cache size=%u, unsupported=%lu/%lu)",
           static_cast<unsigned>(cachedRuleCount_), static_cast<unsigned>(HOT_RULE_CACHE_SIZE),
           static_cast<unsigned long>(unsupportedSelectorSkips_), static_cast<unsigned long>(totalSelectorCandidates_));
@@ -1372,23 +1386,40 @@ bool CssParser::saveToCache() const {
     return false;
   }
 
-  // Write version
   file.write(CssParser::CSS_CACHE_VERSION);
-
-  // Write rule count
   const auto ruleCount = static_cast<uint16_t>(rulesBySelector_.size());
   file.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   file.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   file.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
+  // v10: index lives immediately after the 11-byte header (before rule payloads).
+  // Write zeroed placeholder entries now; patch with sorted data below.
+  // ensureCacheIndexLoaded() reads header + index sequentially — no seek over payloads.
+  std::vector<SelectorEntry> indexEntries;
+  indexEntries.reserve(ruleCount);
+  {
+    constexpr SelectorEntry kZero{};
+    for (uint16_t i = 0; i < ruleCount; ++i) {
+      file.write(reinterpret_cast<const uint8_t*>(&kZero), sizeof(kZero));
+    }
+  }
 
   // Write each rule: selector string (length-prefixed) + style payload.
-  // The payload must go through writeCssStylePayload so the format can never
-  // drift from readCssStylePayload again (v7 caches were broken exactly that way).
+  // Record {hash, ruleOffset} pairs as we go so we can build the sorted index.
   for (const auto& pair : rulesBySelector_) {
+    const uint32_t ruleOffset = file.position();
     const auto selectorLen = static_cast<uint16_t>(pair.first.size());
     file.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
     file.write(reinterpret_cast<const uint8_t*>(pair.first.data()), selectorLen);
     writeCssStylePayload(file, pair.second);
+    indexEntries.push_back({selectorHash(pair.first), ruleOffset});
+  }
+
+  // Sort and patch the index placeholder at position 11.
+  std::sort(indexEntries.begin(), indexEntries.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
+  file.seek(11);
+  for (const auto& entry : indexEntries) {
+    file.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
   }
 
   LOG_DBG("CSS", "Saved %u rules to cache", ruleCount);
@@ -1401,14 +1432,17 @@ bool CssParser::loadFromCache() {
     return false;
   }
 
-  // Drop parse-time in-memory rules, then initialize on-disk selector index.
+  // Drop parse-time in-memory rules and LRU caches.
   rulesBySelector_.clear();
   hotRuleCache_.clear();
   hotRuleLru_.clear();
   negativeRuleCache_.clear();
-  cacheRuleOffsets_.clear();
-  cacheIndexLoaded_ = false;
-  cachedRuleCount_ = 0;
+  // If clearCaches() retained the disk index, ensureCacheIndexLoaded() will
+  // short-circuit immediately — don't evict it here.
+  if (!cacheIndexLoaded_) {
+    cacheRuleOffsets_.clear();
+    cachedRuleCount_ = 0;
+  }
 
   if (!ensureCacheIndexLoaded()) {
     return false;
