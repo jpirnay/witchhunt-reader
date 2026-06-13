@@ -561,7 +561,13 @@ class LzwEncoder {
         emit(prev);
         if (next_ < 4096) {
           dict_[key] = next_++;
-          if (next_ == (1 << codeSize_) && codeSize_ < 12) codeSize_++;
+          // GIF "early change": the encoder builds the string table one code ahead
+          // of the decoder (the decoder needs the *next* code to finish an entry), so
+          // a decoder that widens when its counter hits 2^codeSize sees this code at
+          // the OLD width. Widen one code later — when next_ passes 2^codeSize — so the
+          // triggering code is still emitted at the old width and both sides stay in
+          // sync. (Widening at == 2^codeSize emitted it one bit too wide and desynced.)
+          if (next_ == (1 << codeSize_) + 1 && codeSize_ < 12) codeSize_++;
         }
         prev = px;
       }
@@ -653,10 +659,25 @@ std::vector<uint8_t> buildGif(int w, int h, const std::vector<uint8_t>& palette 
   gif.push_back(h & 0xFF);
   gif.push_back((h >> 8) & 0xFF);
   gif.push_back(interlaced ? 0x40 : 0x00);
-  // LZW data.
+  // LZW data. Interlaced GIFs store rows in the four-pass interlace order on the
+  // wire (rows 0,8,16,…; then 4,12,…; then 2,6,…; then 1,3,…), so reorder the
+  // source rows into stream order before compressing — the decoder places each
+  // decoded stream row back at its display Y.
+  std::vector<uint8_t> streamPixels;
+  if (interlaced) {
+    static const int passStart[] = {0, 4, 2, 1};
+    static const int passStep[] = {8, 8, 4, 2};
+    streamPixels.reserve(pixels.size());
+    for (int p = 0; p < 4; p++) {
+      for (int y = passStart[p]; y < h; y += passStep[p]) {
+        streamPixels.insert(streamPixels.end(), pixels.begin() + y * w, pixels.begin() + (y + 1) * w);
+      }
+    }
+  }
+  const std::vector<uint8_t>& encodePixels = interlaced ? streamPixels : pixels;
   gif.push_back(static_cast<uint8_t>(minCodeSize));
   LzwEncoder enc(minCodeSize);
-  auto blocks = enc.encode(pixels);
+  auto blocks = enc.encode(encodePixels);
   gif.insert(gif.end(), blocks.begin(), blocks.end());
   gif.push_back(0x3B);  // trailer
   return gif;
