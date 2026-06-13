@@ -127,6 +127,20 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 56 * 1024;
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
+// Foreground in-place section build (the "keep the secondary buffer" path). When heap is
+// ample we build the new section WITHOUT releasing the secondary framebuffer, so the chapter's
+// first page keeps a valid fast-refresh baseline and avoids the baseline-resetting half-
+// refresh. Conservative floors: the foreground build runs at page-turn time with the secondary
+// buffer (and possibly a pre-rendered page) resident, so pin above Background-B's idle gate.
+// Failure is recoverable — the build retries with the buffer released — so these gate "try in
+// place" rather than guaranteeing success; tune from the "Index start mem" serial logs.
+#ifndef IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES
+#define IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES (60 * 1024)
+#endif
+#ifndef IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES
+#define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
+#endif
+
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
@@ -1892,6 +1906,12 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     return false;
   }
 
+  // NOTE: crossing a section boundary used to pre-arm pendingHalfRefreshAfterBufferRealloc_
+  // here. It no longer does: the half-refresh is only needed when the secondary buffer is
+  // actually released + reallocated (white baseline), so that flag is now owned by the real
+  // release sites (buildSection's indexing path, the image-warm pass, buffer recovery). A
+  // section change served from cache or from a completed Background-B build never releases the
+  // buffer, so its baseline is intact and the first page can use a normal fast refresh.
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       // Serialize against the render task: it reads section->currentPage (and the
@@ -1903,13 +1923,11 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
       navTarget = NavigationTarget::makePage(0);
       currentSpineIndex++;
       section.reset();
-      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else if (currentSpineIndex + 1 == epub->getSpineItemsCount()) {
       RenderLock lock(*this);
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex++;
       section.reset();
-      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
@@ -1922,7 +1940,6 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
       navTarget = NavigationTarget::makeLastPage();
       currentSpineIndex--;
       section.reset();
-      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
     } else {
       return false;
     }
@@ -2185,6 +2202,131 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   checkHeapIntegrity("after_prerender");
 }
 
+bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle) const {
+  // Mirror the gate Background-B uses to build with the secondary buffer resident: if a CSS
+  // book's selector index won't fit alongside the buffer, don't even attempt the in-place
+  // build. Then require a free/contig floor pinned above B's idle gate — the foreground build
+  // runs at page-turn time with the secondary buffer (and possibly a pre-rendered page) live.
+  if (embeddedStyle) {
+    const CssParser* css = epub->getCssParser();
+    if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+      return false;
+    }
+  }
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  return freeHeap >= IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES && contigHeap >= IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES;
+}
+
+EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const RenderLayout& layout,
+                                                                         const bool embeddedStyle,
+                                                                         const uint8_t imageRendering) {
+  // Use a cleaner waveform for the indexing popup right after image pages; a FAST popup refresh
+  // can leave visible bleed on X3 transitioning image -> text.
+  if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
+    renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+    pendingHalfRefreshAfterImagePage = false;
+    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  }
+  // Draw the popup BEFORE any secondary-buffer release: drawPopup() → displayBuffer() →
+  // swapBuffers(), and with the buffer released frameBufferActive is null, so swapBuffers()
+  // would set frameBuffer = null and crash subsequent rendering. Drawing it here also makes the
+  // popup the fast-refresh baseline on the in-place path — the panel shows the popup, and the
+  // first page diffs popup → page cleanly with no ghosting.
+  GUI.drawPopup(renderer, tr(STR_INDEXING));
+
+  // Reset cumulative SD font metadata cache so this section starts fresh.
+  renderer.clearFontAccumulation();
+  readerPhase_ = ReaderPhase::PRECOMPILING;
+  renderer.dropFontMetadata();
+
+  const auto runCreate = [&]() {
+    return section->createSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
+                                      SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(),
+                                      layout.viewportWidth, layout.viewportHeight, getEffectiveHyphenation(),
+                                      embeddedStyle, getEffectiveBionicReading(), imageRendering, nullptr,
+                                      /*skipEviction=*/false, buildHeadingFonts());
+  };
+
+  // Prefer to build WITHOUT releasing the secondary buffer when heap is ample, so the chapter's
+  // first page keeps a valid fast-refresh baseline. The in-place attempt defers image decode to
+  // the lazy per-page path, so a failure here is a graceful parser abort (not a corruption-prone
+  // decode under pressure). On X3 we always release: its baseline lives in the controller, so
+  // keeping the RAM buffer buys no display benefit, only less headroom.
+  bool released = false;
+  const bool inPlace = !renderer.isX3() && renderer.hasSecondaryBuffer() && heapAllowsInPlaceBuild(embeddedStyle);
+  if (inPlace) {
+    LOG_INF("ERS", "Building section in place (secondary buffer kept): free=%lu contig=%lu", esp_get_free_heap_size(),
+            heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  } else {
+    LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+    renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
+    released = true;
+    LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+  }
+
+  const uint32_t createStart = millis();
+  bool createOk = runCreate();
+  LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
+          esp_get_free_heap_size());
+  checkHeapIntegrity("after_createSectionFile");
+
+  if (!createOk && inPlace) {
+    // The conservative in-place gate was too optimistic. createSectionFile already reset its
+    // build state on failure (Section::stepSectionBuild), so the retry starts clean; free the
+    // buffer for the headroom the blocking foreground path has always relied on.
+    LOG_INF("ERS", "In-place section build failed; retrying with secondary buffer released (free=%lu)",
+            esp_get_free_heap_size());
+    renderer.releaseSecondaryBuffer();
+    released = true;
+    const uint32_t retryStart = millis();
+    createOk = runCreate();
+    LOG_INF("ERS", "createSectionFile retry returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - retryStart,
+            esp_get_free_heap_size());
+    checkHeapIntegrity("after_createSectionFile_retry");
+  }
+
+  // Eager image pre-decode only on the released path (it needs the freed headroom).
+  // warmAllImageCaches writes pixels into the framebuffer as a side effect; clearScreen()
+  // follows. In-place builds skip this — images decode lazily at first render, where
+  // renderContents releases + reallocs the buffer per image page on demand.
+  if (createOk && released) {
+    const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+    const uint32_t warmStart = millis();
+    section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
+    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
+    renderer.clearScreen();
+    checkHeapIntegrity("after_warmAllImageCaches");
+  }
+
+  // Restore the secondary buffer only if we released it. The realloc gives a white baseline that
+  // no longer matches the panel, so arm a one-shot half-refresh (X4 only). The in-place path
+  // leaves the buffer — and the baseline — untouched, so the first page uses a normal fast
+  // refresh.
+  const BuildOutcome outcome = createOk ? BuildOutcome::Built : BuildOutcome::Failed;
+  if (released) {
+    if (!renderer.reallocSecondaryBuffer()) {
+      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
+      secondaryBufferDegraded_ = true;
+      const uint32_t freeAfterIndex = esp_get_free_heap_size();
+      // Do NOT call heap_caps_get_largest_free_block here: the heap may be corrupt after image
+      // decode failures under pressure, and walking the TLSF free-block list on a corrupt heap
+      // causes an interrupt WDT crash. Pass 0 for contigHeap — the restart heuristic treats 0 as
+      // "contiguous block definitely too small", which is correct: malloc for ~52 KB just failed.
+      LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+      if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
+        return BuildOutcome::Restarting;
+      }
+    } else {
+      secondaryBufferDegraded_ = false;
+      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
+      LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
+    }
+  }
+  checkHeapIntegrity("after_fb_realloc");
+  return outcome;
+}
+
 bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   const int spineCount = epub->getSpineItemsCount();
   if (currentSpineIndex < 0 || currentSpineIndex >= spineCount) {
@@ -2227,68 +2369,13 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     LOG_DBG("ERS", "Cache not found, building...");
     lastRenderStats.cacheRebuilt = true;
 
-    // Draw the popup BEFORE releasing the secondary buffer: drawPopup calls
-    // displayBuffer() → swapBuffers(). With the secondary buffer released,
-    // frameBufferActive is null and swapBuffers() would set frameBuffer = null,
-    // crashing any subsequent rendering.
-    // Use a cleaner waveform for indexing popup right after image pages; FAST popup refresh
-    // can leave visible bleed on X3 when transitioning image -> text.
-    if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
-      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
-      pendingHalfRefreshAfterImagePage = false;
-      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    const BuildOutcome outcome = compileSectionCache(layout, embeddedStyle, imageRendering);
+    if (outcome == BuildOutcome::Restarting) {
+      return false;  // fragmented-heap recovery reboot in progress
     }
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-
-    // Reset cumulative SD font metadata cache so this section starts fresh.
-    renderer.clearFontAccumulation();
-    readerPhase_ = ReaderPhase::PRECOMPILING;
-    renderer.dropFontMetadata();
-    LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
-    renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
-    LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
-    const uint32_t createStart = millis();
-    const bool createOk = section->createSectionFile(
-        getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-        getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
-    LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
-            esp_get_free_heap_size());
-    checkHeapIntegrity("after_createSectionFile");
-    // Pre-decode images while the secondary buffer is still released (~52 KB headroom).
-    // warmAllImageCaches writes pixels to the framebuffer as a side effect; clearScreen()
-    // follows after reallocSecondaryBuffer so the framebuffer state doesn't matter here.
-    if (createOk) {
-      const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-      const uint32_t warmStart = millis();
-      section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
-      LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
-      renderer.clearScreen();
-      checkHeapIntegrity("after_warmAllImageCaches");
-    }
-    if (!renderer.reallocSecondaryBuffer()) {
-      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
-      secondaryBufferDegraded_ = true;
-      const uint32_t freeAfterIndex = esp_get_free_heap_size();
-      // Do NOT call heap_caps_get_largest_free_block here: the heap may be
-      // corrupt after image decode failures under pressure, and walking the
-      // TLSF free-block list on a corrupt heap causes an interrupt WDT crash.
-      // Pass 0 for contigHeap — the restart heuristic treats 0 as "contiguous
-      // block definitely too small", which is correct: malloc for ~52 KB just
-      // failed, so the largest free block is by definition < 52 KB.
-      LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
-      if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
-        return false;
-      }
-    } else {
-      secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
-      LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
-    }
-    checkHeapIntegrity("after_fb_realloc");
     renderer.restoreFontMetadata();
     readerPhase_ = ReaderPhase::READING;
-    if (!createOk) {
+    if (outcome == BuildOutcome::Failed) {
       LOG_ERR("ERS", "Failed to persist page data to SD");
       section.reset();
       return false;
@@ -2297,47 +2384,13 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     LOG_INF("ERS", "No-CSS fallback loaded; rebuilding with embedded CSS...");
     lastRenderStats.cacheRebuilt = true;
 
-    if (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) {
-      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
-      pendingHalfRefreshAfterImagePage = false;
-      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-    }
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-
-    renderer.clearFontAccumulation();
-    readerPhase_ = ReaderPhase::PRECOMPILING;
-    renderer.dropFontMetadata();
-    LOG_DBG("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
-    renderer.releaseSecondaryBuffer();
-    LOG_DBG("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
-    const bool rebuildOk = section->createSectionFile(
-        getEffectiveReaderFontId(), getEffectiveReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-        getEffectiveParagraphAlignment(), viewportWidth, viewportHeight, getEffectiveHyphenation(), embeddedStyle,
-        getEffectiveBionicReading(), imageRendering, nullptr, /*skipEviction=*/false, buildHeadingFonts());
-    if (rebuildOk) {
-      const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-      section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
-      renderer.clearScreen();
-    }
-    if (!renderer.reallocSecondaryBuffer()) {
-      LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
-      secondaryBufferDegraded_ = true;
-      const uint32_t freeAfterIndex = esp_get_free_heap_size();
-      // Same reasoning as the first indexing path: do not call
-      // heap_caps_get_largest_free_block on a potentially corrupt heap.
-      // Pass 0 — malloc for ~52 KB just failed so contig is by definition < 52 KB.
-      LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
-      if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
-        return false;
-      }
-    } else {
-      secondaryBufferDegraded_ = false;
-      if (!renderer.isX3()) pendingHalfRefreshAfterBufferRealloc_ = true;
-      LOG_DBG("ERS", "Index end mem (after fb realloc): free=%lu", esp_get_free_heap_size());
+    const BuildOutcome outcome = compileSectionCache(layout, embeddedStyle, imageRendering);
+    if (outcome == BuildOutcome::Restarting) {
+      return false;  // fragmented-heap recovery reboot in progress
     }
     renderer.restoreFontMetadata();
     readerPhase_ = ReaderPhase::READING;
-    if (!rebuildOk) {
+    if (outcome == BuildOutcome::Failed) {
       LOG_ERR("ERS", "Failed to rebuild CSS section cache; keeping fallback");
       section->loadSectionFile(getEffectiveReaderFontId(), getEffectiveReaderLineCompression(),
                                SETTINGS.extraParagraphSpacing, getEffectiveParagraphAlignment(), viewportWidth,
@@ -2659,6 +2712,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     if (!renderer.reallocSecondaryBuffer()) {
       LOG_ERR("ERS", "Failed to reallocate secondary buffer after image warm — display quality degraded");
       secondaryBufferDegraded_ = true;
+    } else if (!renderer.isX3()) {
+      // The realloc whitened the secondary buffer, so on X4 RED RAM no longer matches the panel.
+      // Force this page through HALF_REFRESH (read just below) instead of a fast differential, which
+      // would otherwise diff against a white baseline and ghost. Mirrors the section-change realloc.
+      pendingHalfRefreshAfterBufferRealloc_ = true;
     }
   }
   renderer.clearScreen();
@@ -2831,9 +2889,17 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   renderStatusBar();
 
   // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
-  // imagePageWithAA never applies here — only the image-page half-refresh can carry over.
-  const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
+  // imagePageWithAA never applies here. Two half-refresh requests can still carry over: the
+  // image-page follow-up AND the post-buffer-realloc request. The realloc one is critical here:
+  // after a section change / OOM recovery the secondary buffer is reallocated to white, so on X4
+  // RED RAM no longer matches the panel. If this pre-rendered page is the first display after that
+  // realloc and we let it run a fast differential, it diffs against a white baseline and ghosts
+  // heavily. Honour (and clear) the flag exactly like renderContents() does, so the fast pre-render
+  // path can't race ahead of the required baseline-restoring half-refresh.
+  const bool forceHalfRefreshThisPage =
+      (pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage) || pendingHalfRefreshAfterBufferRealloc_;
   pendingHalfRefreshAfterImagePage = false;
+  pendingHalfRefreshAfterBufferRealloc_ = false;
   if (secondaryBufferDegraded_) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();

@@ -405,6 +405,19 @@ class EpubReaderActivity final : public Activity {
   // nav target. Returns true if a section is ready to render; false if render() should return
   // (build failed, finished-book handoff, or a requestUpdate retry was posted).
   bool buildSection(const RenderLayout& layout);
+  // Outcome of compileSectionCache(). Restarting means a fragmented-heap recovery reboot was
+  // triggered and the caller must return immediately without further work.
+  enum class BuildOutcome : uint8_t { Built, Failed, Restarting };
+  // Draws the indexing popup, then builds the section cache file for the current section.
+  // Prefers an in-place build that keeps the secondary display buffer (preserving the fast-
+  // refresh baseline); falls back to releasing the buffer — for parse/decode headroom — when
+  // heap is tight or the in-place attempt fails. On the released path it pre-decodes images
+  // eagerly and reallocates the buffer (arming a half-refresh); the in-place path defers images
+  // to lazy per-page decode and leaves the baseline intact for a normal fast refresh.
+  BuildOutcome compileSectionCache(const RenderLayout& layout, bool embeddedStyle, uint8_t imageRendering);
+  // True when heap is ample enough to build the current section WITHOUT releasing the secondary
+  // buffer (the in-place path). Reuses Section::heapAllowsEmbeddedStyle for CSS books.
+  bool heapAllowsInPlaceBuild(bool embeddedStyle) const;
   // Normal pass: load the current page from the section cache, render it, persist progress.
   void renderNormalPass(RenderLock& lock, const RenderLayout& layout);
 
