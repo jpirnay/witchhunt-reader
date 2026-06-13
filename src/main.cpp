@@ -713,6 +713,17 @@ void loop() {
     // and has triggered interrupt WDTs under heavy allocation churn.
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes", ESP.getFreeHeap(), ESP.getHeapSize(),
             ESP.getMinFreeHeap());
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+    // loop() runs on the Arduino loopTask (8 KB stack), which also drives the reader's
+    // sliced background section builds (serviceBackgroundWork → createSectionFile /
+    // HTML parse / image dimension reads). That task is NOT covered by the render-task
+    // stack instrumentation, yet is an equally plausible source of a stack-into-heap
+    // spill (the original crash SP sat against SOC_ROM_STACK_START). High-water is the
+    // minimum free stack ever seen by this task (bytes); a small/shrinking value here
+    // would point the finger at the loop task rather than the render task.
+    LOG_INF("MEM", "loopTask stack high-water=%u bytes free (min ever)",
+            static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
     lastMemPrint = millis();
   }
 

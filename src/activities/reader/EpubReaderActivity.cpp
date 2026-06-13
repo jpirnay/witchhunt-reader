@@ -2650,6 +2650,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     LOG_DBG("ERS", "Released secondary buffer for image warm pass");
   }
   page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome);
+  // Image decode (JPEG/PNG) is the deepest, most heap-hungry work in a render pass
+  // and the prime suspect for the lazy multi_heap poisoning assert. Check here, right
+  // after the warm/decode pass, so corruption is attributed to the decode rather than
+  // to whatever frees next. Mirrors the after_createSectionFile tripwire.
+  checkHeapIntegrity("after_image_warm_pass");
   if (releasedSecondaryForWarm) {
     if (!renderer.reallocSecondaryBuffer()) {
       LOG_ERR("ERS", "Failed to reallocate secondary buffer after image warm — display quality degraded");
@@ -2686,6 +2691,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   logReaderMemSnapshot("before_bw_render");
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
                imageMonochrome);
+  // The BW render also touches images (placeholder/cache draws) and runs the full
+  // glyph pipeline; check here too so a clean after_image_warm_pass followed by a
+  // corrupt reading convicts the BW render rather than the decode.
+  checkHeapIntegrity("after_bw_render");
 #if DEBUG_BACKGROUND_WORK
   // This page was rendered fresh on the render task (not served from a Background-A
   // pre-render). Mark the overlay as a miss before the status bar draws it.
