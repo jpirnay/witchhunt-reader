@@ -383,19 +383,18 @@ constexpr int FP_SHIFT = 16;
 constexpr int32_t FP_ONE = 1 << FP_SHIFT;
 constexpr int32_t FP_MASK = FP_ONE - 1;
 
-int jpegDrawCallback(JPEGDRAW* pDraw) {
-  JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
-  if (!ctx || !ctx->config || !ctx->renderer) return 0;
+// Emit one decoded grayscale block into the framebuffer (and the streaming cache),
+// applying fine resampling and the active ditherer. Engine-neutral: it takes a raw
+// 8-bit grayscale block — densely packed at `stride`, with `validW` valid columns and
+// `blockH` rows — at its scaled-source-space origin (blockX, blockY). Consumed by the
+// TJpgDec output callback and by the JPEGDEC draw-callback adapter below. Returns 1 to
+// continue decoding (0 would abort), matching both engines' callback contract.
+int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int blockY, int validW, int blockH,
+                  int stride) {
+  JpegContext* ctx = &ctxRef;
 
-  // Feed the interrupt WDT every MCU row — large JPEGs can take many seconds.
+  // Feed the interrupt WDT every block — large JPEGs can take many seconds.
   esp_task_wdt_reset();
-
-  // In EIGHT_BIT_GRAYSCALE mode, pPixels contains 8-bit grayscale values
-  // Buffer is densely packed: stride = pDraw->iWidth, valid columns = pDraw->iWidthUsed
-  uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
-  const int stride = pDraw->iWidth;
-  const int validW = pDraw->iWidthUsed;
-  const int blockH = pDraw->iHeight;
 
   if (stride <= 0 || blockH <= 0 || validW <= 0) return 1;
 
@@ -407,8 +406,6 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   GfxRenderer& renderer = *ctx->renderer;
   const int cfgX = ctx->config->x;
   const int cfgY = ctx->config->y;
-  const int blockX = pDraw->x;
-  const int blockY = pDraw->y;
 
   // Determine destination pixel range covered by this source block
   const int srcYEnd = blockY + blockH;
@@ -601,6 +598,16 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   }
 
   return 1;
+}
+
+// JPEGDEC draw-callback adapter: unpack the JPEGDRAW block and forward to
+// emitGrayBlock(). EIGHT_BIT_GRAYSCALE packs 8-bit gray densely at iWidth stride,
+// with iWidthUsed valid columns.
+int jpegDrawCallback(JPEGDRAW* pDraw) {
+  JpegContext* ctx = reinterpret_cast<JpegContext*>(pDraw->pUser);
+  if (!ctx || !ctx->config || !ctx->renderer) return 0;
+  return emitGrayBlock(*ctx, reinterpret_cast<const uint8_t*>(pDraw->pPixels), pDraw->x, pDraw->y, pDraw->iWidthUsed,
+                       pDraw->iHeight, pDraw->iWidth);
 }
 
 }  // namespace
