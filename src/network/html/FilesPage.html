@@ -4477,8 +4477,9 @@
 
     // Normalize a JPEG or PNG File to a baseline JPEG File via a canvas round-trip.
     // The browser decodes any JPEG encoding (progressive, multi-scan, etc.) and
-    // canvas.toBlob always produces a standard baseline JPEG that JPEGDEC can decode.
-    // PNG files are also converted to JPEG for the same reason (JPEGDEC only handles JPEG).
+    // canvas.toBlob always produces a standard baseline JPEG. The device's JPEG
+    // decoder (TJpgDec) is baseline-only, so this keeps uploaded covers decodable
+    // rather than falling back to a placeholder.
     // Falls back to the original file if decode or encode fails.
     async function normalizeImageToBaseline(file) {
       return new Promise((resolve) => {
@@ -5613,7 +5614,8 @@
 
           // Normalize JPEG/PNG to baseline JPEG via a canvas round-trip.
           // The browser decodes any JPEG variant (including multi-scan progressive)
-          // and canvas.toBlob always emits baseline JPEG — which JPEGDEC can handle.
+          // and canvas.toBlob always emits baseline JPEG — which the device's
+          // baseline-only TJpgDec decoder can handle.
           if ((isJpeg || isPng) && !needsConversion) {
             try {
               file = await normalizeImageToBaseline(file);
