@@ -7,11 +7,13 @@
 #include <memory>
 #include <string>
 
+#include "GifToFramebufferConverter.h"
 #include "JpegToFramebufferConverter.h"
 #include "PngToFramebufferConverter.h"
 
 std::unique_ptr<JpegToFramebufferConverter> ImageDecoderFactory::jpegDecoder = nullptr;
 std::unique_ptr<PngToFramebufferConverter> ImageDecoderFactory::pngDecoder = nullptr;
+std::unique_ptr<GifToFramebufferConverter> ImageDecoderFactory::gifDecoder = nullptr;
 
 ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string& imagePath) {
   std::string ext = imagePath;
@@ -35,6 +37,11 @@ ImageToFramebufferDecoder* ImageDecoderFactory::getDecoder(const std::string& im
       pngDecoder.reset(new PngToFramebufferConverter());
     }
     return pngDecoder.get();
+  } else if (GifToFramebufferConverter::supportsFormat(ext)) {
+    if (!gifDecoder) {
+      gifDecoder.reset(new GifToFramebufferConverter());
+    }
+    return gifDecoder.get();
   }
 
   LOG_ERR("DEC", "No decoder found for image: %s", imagePath.c_str());
@@ -70,6 +77,8 @@ bool ImageDecoderFactory::getDimensionsFromZipEntry(const std::string& epubFileP
     ok = JpegToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
   } else if (bytesRead >= 8 && buf[0] == 0x89 && buf[1] == 0x50) {
     ok = PngToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
+  } else if (bytesRead >= 10 && buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F') {
+    ok = GifToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
   } else {
     uint32_t sig = 0;
     if (bytesRead >= 4) {

@@ -17,7 +17,28 @@
 #include "DitherUtils.h"
 #include "PixelCache.h"
 
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+#include <esp_heap_caps.h>
+#endif
+
 namespace {
+
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+// Heap-corruption tripwire for the cover-JPEG decode path (the buildSection warm pass
+// where the multi_heap poisoning crash surfaces). Walks the whole heap and names the
+// checkpoint; the symbolized crash shows the poison is only DETECTED at cache.abort()'s
+// SD-buffer free, so these checks before/after jpeg->decode() convict the writer:
+//   jpg_decode_entry corrupt   -> corruption is UPSTREAM of the JPEG path (CSS/build)
+//   jpg_before_decode corrupt  -> the ditherer/cache-stream setup allocs trashed it
+//   jpg_after_decode corrupt   -> the decode itself (band-cache / pixel writes) is the writer
+// Same caveat as EpubReaderActivity::checkHeapIntegrity: only for diagnostic builds.
+void jpgCheckHeap(const char* checkpoint) {
+  if (heap_caps_check_integrity_all(true)) return;
+  LOG_ERR("JPG", "HEAP CORRUPT at checkpoint: %s", checkpoint);
+}
+#else
+inline void jpgCheckHeap(const char*) {}
+#endif
 
 // Context struct passed through JPEGDEC callbacks to avoid global mutable state.
 // The draw callback receives this via pDraw->pUser (set by setUserPointer()).
@@ -180,6 +201,12 @@ int32_t jpegSeek(JPEGFILE* pFile, int32_t pos) {
 // Heap-allocate on demand so memory is only used during active decode.
 constexpr size_t JPEG_DECODER_APPROX_SIZE = 20 * 1024;
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
+
+// Band-aid threshold: baseline JPEGs wider than this that are being downscaled are
+// forced off JPEGDEC's crashing 1/1 full-scale grayscale path (see the scale-select
+// block in decodeToFramebuffer). ~640 keeps normal inline images on the native path
+// while catching oversized covers/full-page art on a ~800 px panel.
+constexpr int JPEG_SAFE_FULL_DECODE_WIDTH = 640;
 
 // Optional memory-behavior knobs for embedded targets.
 #ifndef JPEG_ENABLE_FIRST_RENDER_NO_CACHE
@@ -609,6 +636,7 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
+  jpgCheckHeap("jpg_decode_entry");
 
   size_t freeHeap = ESP.getFreeHeap();
   if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
@@ -706,6 +734,21 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jpegScaleDenom = 8;
   } else {
     jpegScaleDenom = chooseJpegScale(targetScale, jpegScaleOption);
+
+    // BAND-AID (perf-css, 2026-06-13): JPEGDEC's baseline full-scale (1/1)
+    // EIGHT_BIT_GRAYSCALE decode overflows the heap on wide source images — the
+    // jpg_after_decode tripwire trips and a later free() asserts in multi_heap
+    // poisoning (observed on an 825-wide cover; the 1/4-scale thumb of the same
+    // file decodes cleanly). When we'd decode a large baseline image at 1/1 only
+    // to fine-downscale it anyway, drop to 1/2 so the wide grayscale MCU buffering
+    // never runs; the fine resampler covers the residual ratio (a mild upscale if
+    // src/2 < dest). Remove once JPEGDEC is replaced (TJpgDec eval) or patched.
+    if (jpegScaleDenom == 1 && srcWidth > JPEG_SAFE_FULL_DECODE_WIDTH && targetScale < 0.85f) {
+      jpegScaleOption = JPEG_SCALE_HALF;
+      jpegScaleDenom = 2;
+      LOG_INF("JPG", "Band-aid: 1/2 DCT scale for wide baseline JPEG %dx%d (avoids JPEGDEC 1/1 grayscale overflow)",
+              srcWidth, srcHeight);
+    }
   }
 
   ctx.scaledSrcWidth = (srcWidth + jpegScaleDenom - 1) / jpegScaleDenom;
@@ -742,6 +785,13 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // (See PixelCache for why streaming replaced a full-image buffer; ported from
   // upstream commit d9bcef7a, crosspoint-reader#2230.)
   ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight);
+#ifdef JPG_DIAG_DISABLE_CACHE
+  // Diagnostic bisect: skip the streaming band-cache writer (DirectCacheWriter into
+  // ctx.cache.buffer) entirely. If the multi_heap poisoning crash stops with this
+  // defined, the band-cache path is the heap-overflow writer. Define in
+  // platformio.local.ini (build_flags) for a dedicated run, never in normal builds.
+  ctx.caching = false;
+#endif
   if (ctx.caching) {
     const int maxBlockDstRows = (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
     if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {
@@ -787,9 +837,14 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
 #endif
   }
 
+  jpgCheckHeap("jpg_before_decode");
   unsigned long decodeStart = millis();
   rc = jpeg->decode(0, 0, jpegScaleOption);
   unsigned long decodeTime = millis() - decodeStart;
+  // Check before close()/abort() so a corrupt reading is attributed to the decode
+  // itself rather than to the SD-buffer free inside cache cleanup (where the crash
+  // currently surfaces). Runs on both the success and failure paths below.
+  jpgCheckHeap("jpg_after_decode");
 
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());

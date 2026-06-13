@@ -85,6 +85,7 @@ class Epub {
   // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
+  bool getSpineItemInflatedSize(int spineIndex, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;
   int getSpineItemsCount() const;

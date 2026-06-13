@@ -1117,6 +1117,19 @@ bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
   return ZipFile(filepath).getInflatedFileSize(path.c_str(), size);
 }
 
+bool Epub::getSpineItemInflatedSize(const int spineIndex, size_t* size) const {
+  if (bookMetadataCache && bookMetadataCache->isLoaded() && spineIndex >= 0 &&
+      spineIndex < bookMetadataCache->getSpineCount()) {
+    const size_t cumSize = getSpineItem(spineIndex).cumulativeSize;
+    if (cumSize > 0) {
+      const size_t prevCumSize = (spineIndex > 0) ? getSpineItem(spineIndex - 1).cumulativeSize : 0;
+      *size = cumSize - prevCumSize;
+      return true;
+    }
+  }
+  return getItemSize(getSpineItem(spineIndex).href, size);
+}
+
 int Epub::getSpineItemsCount() const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
     return 0;

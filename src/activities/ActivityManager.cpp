@@ -64,6 +64,19 @@ void ActivityManager::renderTaskTrampoline(void* param) {
 }
 
 void ActivityManager::renderTaskLoop() {
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+  // The kernel's CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK is OFF in the precompiled
+  // arduino-esp32 IDF libs and can't be flipped without rebuilding IDF. The canary
+  // (configCHECK_FOR_STACK_OVERFLOW==2) IS on but only fires at a context switch —
+  // too late here, because a deep render excursion spills into the heap and the next
+  // synchronous free trips multi_heap poisoning before any yield. Install the
+  // end-of-stack hardware watchpoint ourselves on THIS task so an overflow faults at
+  // the exact instruction that writes past the stack limit, yielding a backtrace at
+  // the offending frame. Single-core C3: one set persists (the kernel does not re-arm
+  // watchpoints on context switch when the Kconfig option is off), and the watched
+  // address belongs only to this task's stack, so other tasks can't false-trigger it.
+  vPortSetStackWatchpoint(pxTaskGetStackStart(nullptr));
+#endif
   while (true) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
@@ -72,6 +85,26 @@ void ActivityManager::renderTaskLoop() {
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
+#ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
+      // Render runs the deepest call chains in the firmware (page build + image
+      // decode + dither) on this task's fixed 8 KB stack, which is heap-allocated
+      // at the top of RAM abutting the heap's top block. If a render pass overflows
+      // it spills downward into that block, surfacing later as a lazy multi_heap
+      // poisoning assert on an unrelated free (e.g. a JPEG cleanup). The high-water
+      // mark is the MINIMUM free stack ever seen by this task, so sampling it right
+      // after render() returns captures the deepest excursion of the pass just run.
+      // bytes (StackType_t == uint8_t on the C3). Approaching 0 ⇒ overflow.
+      // Emit the stack high-water on its own line BEFORE the heap walk: if the
+      // corruption is a stack-into-heap spill, heap_caps_check_integrity_all() can
+      // itself fault while chasing trampled TLSF pointers (see the warning on
+      // checkHeapIntegrity in EpubReaderActivity), which would swallow this number.
+      const unsigned stackFreeBytes = static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr));
+      LOG_INF("MEM", "Render pass done [%s]: stack high-water=%u bytes free (min ever)",
+              currentActivity->getName().c_str(), stackFreeBytes);
+      if (!heap_caps_check_integrity_all(/*print_errors=*/true)) {
+        LOG_ERR("MEM", "HEAP CORRUPT immediately after render pass <-- the render task is the writer");
+      }
+#endif
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
