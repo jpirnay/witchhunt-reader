@@ -261,7 +261,19 @@ bool shouldForceBayerDither(const RenderConfig& config) {
   return freeHeap < JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP;
 }
 
-bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions& out) {
+// Classify a SOF marker byte into the coding mode used for engine selection.
+// Only SOF0 is true baseline (the sole mode TJpgDec accepts); SOF2 is progressive;
+// everything else (extended-sequential SOF1, arithmetic, lossless, …) is Other and
+// stays on the more capable JPEGDEC path.
+JpegToFramebufferConverter::JpegMode classifyJpegMode(uint8_t sofMarker) {
+  using JpegMode = JpegToFramebufferConverter::JpegMode;
+  if (sofMarker == 0xC0) return JpegMode::Baseline;
+  if (sofMarker == 0xC2) return JpegMode::Progressive;
+  return JpegMode::Other;
+}
+
+bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions& out,
+                                  JpegToFramebufferConverter::JpegMode* outMode = nullptr) {
   FsFile f;
   if (!Storage.openFileForRead("JPG", imagePath, f)) {
     LOG_ERR("JPG", "Failed to open file for dimensions: %s", imagePath.c_str());
@@ -331,6 +343,7 @@ bool readJpegDimensionsFromHeader(const std::string& imagePath, ImageDimensions&
 
       out.width = static_cast<int16_t>(width);
       out.height = static_cast<int16_t>(height);
+      if (outMode) *outMode = classifyJpegMode(marker);
       return true;
     }
 
@@ -592,7 +605,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
 }  // namespace
 
-bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
+bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out,
+                                                         JpegMode* outMode) {
   if (!buf || len < 4) return false;
   if (buf[0] != 0xFF || buf[1] != 0xD8) return false;
 
@@ -618,11 +632,17 @@ bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, con
       if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
       out.width = static_cast<int16_t>(w);
       out.height = static_cast<int16_t>(h);
+      if (outMode) *outMode = classifyJpegMode(marker);
       return true;
     }
     pos += segLen;
   }
   return false;
+}
+
+bool JpegToFramebufferConverter::getModeFromHeader(const std::string& imagePath, JpegMode& out) {
+  ImageDimensions dims{};
+  return readJpegDimensionsFromHeader(imagePath, dims, &out);
 }
 
 bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePath, ImageDimensions& out) {

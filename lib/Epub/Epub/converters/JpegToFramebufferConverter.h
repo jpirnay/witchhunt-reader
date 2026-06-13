@@ -8,9 +8,20 @@
 
 class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
  public:
+  // Coarse JPEG coding mode, derived from the SOF marker. Drives engine selection:
+  // only Baseline (SOF0) is handed to TJpgDec — it rejects everything else — so
+  // Progressive (SOF2) and Other (extended-sequential, arithmetic, …) stay on JPEGDEC.
+  enum class JpegMode : uint8_t { Baseline, Progressive, Other };
+
+  // Determine the coding mode from already-read header bytes. Returns false if no
+  // SOF marker is found within the buffer (then *out is left untouched).
+  static bool getModeFromHeader(const std::string& imagePath, JpegMode& out);
+
   static bool getDimensionsStatic(const std::string& imagePath, ImageDimensions& out);
   // Parse dimensions from already-read header bytes (no file I/O). Needs ~4 KB for typical JPEGs.
-  static bool getDimensionsFromBuffer(const uint8_t* buf, size_t len, ImageDimensions& out);
+  // When outMode is non-null it is set to the coding mode of the first SOF marker.
+  static bool getDimensionsFromBuffer(const uint8_t* buf, size_t len, ImageDimensions& out,
+                                      JpegMode* outMode = nullptr);
 
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
