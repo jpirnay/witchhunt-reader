@@ -9,8 +9,8 @@
 class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
  public:
   // Coarse JPEG coding mode, derived from the SOF marker. Drives engine selection:
-  // only Baseline (SOF0) is handed to TJpgDec — it rejects everything else — so
-  // Progressive (SOF2) and Other (extended-sequential, arithmetic, …) stay on JPEGDEC.
+  // only Baseline (SOF0) is decodable by TJpgDec — it rejects everything else — so
+  // Progressive (SOF2) and Other (extended-sequential, arithmetic, …) render a placeholder.
   enum class JpegMode : uint8_t { Baseline, Progressive, Other };
 
   // Determine the coding mode from already-read header bytes. Returns false if no
