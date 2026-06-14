@@ -561,13 +561,8 @@ class LzwEncoder {
         emit(prev);
         if (next_ < 4096) {
           dict_[key] = next_++;
-          // GIF "early change": the encoder builds the string table one code ahead
-          // of the decoder (the decoder needs the *next* code to finish an entry), so
-          // a decoder that widens when its counter hits 2^codeSize sees this code at
-          // the OLD width. Widen one code later — when next_ passes 2^codeSize — so the
-          // triggering code is still emitted at the old width and both sides stay in
-          // sync. (Widening at == 2^codeSize emitted it one bit too wide and desynced.)
-          if (next_ == (1 << codeSize_) + 1 && codeSize_ < 12) codeSize_++;
+          // Both encoder and decoder widen when nextCode reaches 2^codeSize.
+          if (next_ == (1 << codeSize_) && codeSize_ < 12) codeSize_++;
         }
         prev = px;
       }
