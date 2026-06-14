@@ -20,7 +20,9 @@
 #define JD_TBLCLIP 1
 /* Use table conversion for saturation arithmetic. A bit faster, +1 KB code. */
 
-#define JD_FASTDECODE 1
-/* Optimization level. 1 = + 32-bit barrel shifter, suitable for the 32-bit
-/  ESP32-C3. (2 adds huffman LUTs that want 6<<HUFF_BIT bytes of RAM — avoided
-/  on this RAM-constrained target; revisit only if decode time demands it.) */
+#define JD_FASTDECODE 2
+/* Optimization level. 2 = + table-driven huffman decode (32-bit barrel shifter
+/  plus a 1<<HUFF_BIT LUT per huffman table). The LUTs are carved from the caller's
+/  work pool (~6 KB extra for a colour JPEG), so TJPG_WORK_POOL_SIZE is sized for it.
+/  Worth it here: baseline decode is huffman-bound on the single-core C3 and the RAM
+/  is available. (lovyan03's dual-core decomp_multitask is N/A — C3 is single-core.) */

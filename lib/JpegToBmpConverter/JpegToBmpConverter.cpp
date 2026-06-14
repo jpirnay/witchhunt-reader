@@ -163,8 +163,9 @@ namespace {
 
 // Max MCU height supported by any JPEG (4:2:0 chroma = 16 rows, 4:4:4 = 8 rows)
 constexpr int MAX_MCU_HEIGHT = 16;
-// TJpgDec needs <=3092 bytes of work area; round up to a word-aligned 4 KB pool.
-constexpr size_t TJPG_WORK_POOL_SIZE = 4 * 1024;
+// TJpgDec work area. With JD_FASTDECODE=2 the huffman LUTs (~6 KB for a colour JPEG)
+// come from this pool on top of the ~3 KB base; 12 KB leaves headroom.
+constexpr size_t TJPG_WORK_POOL_SIZE = 12 * 1024;
 constexpr size_t MIN_FREE_HEAP = TJPG_WORK_POOL_SIZE + 28 * 1024;
 
 struct BmpConvertCtx;  // forward decl for the session below

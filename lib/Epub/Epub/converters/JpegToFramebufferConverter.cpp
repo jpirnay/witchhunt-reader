@@ -175,10 +175,11 @@ size_t tjpgInput(JDEC* jd, uint8_t* buff, size_t ndata) {
   return ndata;
 }
 
-// TJpgDec needs <=3092 bytes of work area (header-table dependent); round up to a
-// word-aligned 4 KB pool. This is the whole point of the migration — vs JPEGDEC's
-// ~20 KB struct + internal buffers.
-constexpr size_t TJPG_WORK_POOL_SIZE = 4 * 1024;
+// TJpgDec work area. With JD_FASTDECODE=2 the huffman LUTs (~6 KB for a colour JPEG)
+// are carved from this pool on top of the ~3 KB base tables/buffers; 12 KB leaves
+// headroom and still beats JPEGDEC's ~20 KB struct. (jd_prepare returns JDR_MEM1 and
+// we fail gracefully if an unusual image needs more.)
+constexpr size_t TJPG_WORK_POOL_SIZE = 12 * 1024;
 // Minimum free heap to attempt a decode: the work pool plus headroom for the
 // streaming cache band and the ditherer rows allocated further below.
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = TJPG_WORK_POOL_SIZE + 16 * 1024;
