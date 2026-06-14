@@ -4,9 +4,10 @@
 /*
  * CrossPoint configuration of ChaN's TJpgDec (vendored, see library.json).
  * Used as the baseline-JPEG decode engine (progressive renders a placeholder).
- * Modified from upstream only here (config + the JD_FASTPATH macro below) and in
- * the JD_FASTPATH annotations on the hot decode functions in tjpgd.c; tjpgd.h is
- * verbatim.
+ * Modified from upstream here (config + the JD_FASTPATH macro below) and in tjpgd.c
+ * (the JD_FASTPATH annotations on the hot decode functions, plus a BYTECLIP clamp
+ * on the grayscale output path that fixes an upstream wrap-around bug — see the
+ * note in mcu_output); tjpgd.h is verbatim.
  */
 
 #define JD_SZBUF 512
