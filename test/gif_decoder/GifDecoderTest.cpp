@@ -561,8 +561,12 @@ class LzwEncoder {
         emit(prev);
         if (next_ < 4096) {
           dict_[key] = next_++;
-          // Both encoder and decoder widen when nextCode reaches 2^codeSize.
-          if (next_ == (1 << codeSize_) && codeSize_ < 12) codeSize_++;
+          // GIF "early change": the decoder builds its table one entry behind the
+          // encoder (it needs the next code's first char), so it widens one code
+          // later. Match that lag by widening when next_ EXCEEDS 2^codeSize, not
+          // when it reaches it — otherwise code (2^codeSize - 1), which still fits
+          // in codeSize bits, gets emitted one bit too wide and the decoder desyncs.
+          if (next_ > (1 << codeSize_) && codeSize_ < 12) codeSize_++;
         }
         prev = px;
       }
