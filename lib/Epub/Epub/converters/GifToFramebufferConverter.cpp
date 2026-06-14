@@ -218,18 +218,17 @@ static int gifDecodeLzw(FsFile& f, GifState& st, uint8_t* indexedRow, RowSink on
     int c = code;
 
     if (!firstCode && code == st.nextCode) {
+      // KwKwK: output is S(oldCode) + first_char(oldCode). Reserve index 0 for
+      // first_char (emitted last), build the chain above it, then fill index 0
+      // with the root character discovered during the walk — no memmove needed.
+      stackTop = 1;  // reserve slot 0
       c = oldCode;
       while (st.prefix[c] != GIF_NO_PREFIX && stackTop < GIF_MAX_CODES - 1) {
         st.lzwStack[stackTop++] = st.suffix[c];
         c = st.prefix[c];
       }
-      st.lzwStack[stackTop++] = st.suffix[c];
-      uint8_t fchar = st.lzwStack[stackTop - 1];
-      if (stackTop < GIF_MAX_CODES) {
-        memmove(&st.lzwStack[1], &st.lzwStack[0], stackTop);
-        st.lzwStack[0] = fchar;
-        stackTop++;
-      }
+      st.lzwStack[stackTop++] = st.suffix[c];  // root at top, emitted first
+      st.lzwStack[0] = st.suffix[c];           // fill reserved slot: first_char emitted last
     } else if (code <= st.eoiCode || code < st.nextCode) {
       while (st.prefix[c] != GIF_NO_PREFIX && stackTop < GIF_MAX_CODES - 1) {
         st.lzwStack[stackTop++] = st.suffix[c];
@@ -246,7 +245,7 @@ static int gifDecodeLzw(FsFile& f, GifState& st, uint8_t* indexedRow, RowSink on
       st.prefix[st.nextCode] = (uint16_t)oldCode;
       st.suffix[st.nextCode] = firstChar;
       st.nextCode++;
-      if (st.nextCode == (1 << st.codeSize) && st.codeSize < 12) st.codeSize++;
+      if (st.nextCode > (1 << st.codeSize) && st.codeSize < 12) st.codeSize++;
     }
     firstCode = false;
     oldCode = code;
