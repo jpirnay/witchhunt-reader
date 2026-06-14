@@ -10,6 +10,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <Txt.h>
 #include <Xtc.h>
 
 #include <algorithm>
@@ -68,7 +69,16 @@ std::string gridThumbPath(const std::string& coverBmpPath, int tw, int th) {
 }
 }  // namespace
 
-void RecentBooksActivity::loadRecentBooks() { recentBooks = RECENT_BOOKS.getBooks(); }
+void RecentBooksActivity::loadRecentBooks() {
+  recentBooks = RECENT_BOOKS.getBooks();
+  // Cache each book's reading progress once so the grid badge avoids an SD read
+  // per cell per repaint. Progress can only change by opening a book, which exits
+  // this activity, so the cache stays valid for the activity's lifetime.
+  bookProgress.assign(recentBooks.size(), -1);
+  for (size_t i = 0; i < recentBooks.size(); i++) {
+    bookProgress[i] = static_cast<int8_t>(UITheme::getBookProgressPercent(recentBooks[i]));
+  }
+}
 
 bool RecentBooksActivity::loadNextCover() {
   const Rect contentRect = UITheme::getContentRect(renderer, true, true);
@@ -77,7 +87,39 @@ bool RecentBooksActivity::loadNextCover() {
 
   for (; nextCoverIndex < recentBooks.size(); nextCoverIndex++) {
     RecentBook& book = recentBooks[nextCoverIndex];
-    if (book.coverBmpPath.empty()) continue;
+
+    // Never-opened book (or a book whose cover path was cleared after a failed
+    // extraction / cache wipe): try to extract the embedded cover now so the grid
+    // shows a thumbnail without having to open the book first. Mirrors
+    // HomeActivity::loadRecentCovers' empty-path branch.
+    if (book.coverBmpPath.empty()) {
+      if (!Storage.exists(book.path.c_str())) continue;
+      std::string placeholder;
+      bool ok = false;
+      if (FsHelpers::hasEpubExtension(book.path)) {
+        Epub epub(book.path, "/.crosspoint");
+        if (epub.load(true, true)) {
+          placeholder = epub.getThumbBmpPath();
+          ok = epub.generateThumbBmp(tw, th);
+        }
+      } else if (FsHelpers::hasXtcExtension(book.path)) {
+        Xtc xtc(book.path, "/.crosspoint");
+        if (xtc.load()) {
+          placeholder = xtc.getThumbBmpPath();
+          ok = xtc.generateThumbBmp(tw, th);
+        }
+      } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
+        Txt txt(book.path, "/.crosspoint");
+        placeholder = txt.getThumbBmpPath();
+        ok = txt.generateThumbBmp(tw, th);
+      }
+      if (ok && !placeholder.empty()) {
+        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+        book.coverBmpPath = placeholder;
+      }
+      nextCoverIndex++;
+      return false;
+    }
 
     const bool isSidecar =
         FsHelpers::hasJpgExtension(book.coverBmpPath) || FsHelpers::hasPngExtension(book.coverBmpPath);
@@ -144,6 +186,7 @@ void RecentBooksActivity::onEnter() {
   nextCoverIndex = 0;
   prevSelectorIndex = -1;
   fullRedrawNeeded = true;
+  openingBook = false;
 
   requestUpdate();
 }
@@ -151,6 +194,7 @@ void RecentBooksActivity::onEnter() {
 void RecentBooksActivity::onExit() {
   Activity::onExit();
   recentBooks.clear();
+  bookProgress.clear();
 }
 
 void RecentBooksActivity::switchViewMode(bool grid) {
@@ -218,6 +262,7 @@ void RecentBooksActivity::loop() {
         sync.exitToHomeAfterSync = false;
         APP_STATE.saveToFile();
       }
+      openingBook = true;
       ReturnHint hint;
       hint.target = ReturnTo::RecentBooks;
       hint.selectIndex = selectorIndex;
@@ -296,6 +341,11 @@ void RecentBooksActivity::loop() {
 }
 
 void RecentBooksActivity::render(RenderLock&& lock) {
+  // Confirm has committed to opening a book; the reader is taking over the
+  // screen. Skip any grid repaint so the selection highlight can't visibly
+  // jump to a stale buffer position during the transition.
+  if (openingBook) return;
+
   if (APP_STATE.recentBooksGridView) {
     renderGridView(std::move(lock));
     if (!firstRenderDone) {
@@ -416,6 +466,23 @@ void RecentBooksActivity::renderGridCell(int index, bool selected, int cellX, in
   } else {
     // No cover — clear the whole interior so the placeholder looks clean.
     renderer.fillRect(cellX + 1, cellY + 1, tw - 2, th - 2, false);
+  }
+
+  // Reading-progress badge in the thumbnail's top-right corner. Drawn as a
+  // white box with a black border and black text so it stays legible over
+  // both the white (unselected) and black (selected) cell backgrounds.
+  const int progressPercent = (index >= 0 && index < static_cast<int>(bookProgress.size())) ? bookProgress[index] : -1;
+  if (progressPercent >= 0) {
+    const std::string badgeText = std::to_string(progressPercent) + "%";
+    const int textW = renderer.getTextWidth(SMALL_FONT_ID, badgeText.c_str());
+    const int textH = renderer.getLineHeight(SMALL_FONT_ID);
+    const int badgeW = textW + 8;
+    const int badgeH = textH + 4;
+    const int badgeX = cellX + tw - badgeW - 3;
+    const int badgeY = cellY + 3;
+    renderer.fillRect(badgeX, badgeY, badgeW, badgeH, false);
+    renderer.drawRect(badgeX, badgeY, badgeW, badgeH, true);
+    renderer.drawText(SMALL_FONT_ID, badgeX + 4, badgeY + 2, badgeText.c_str(), true);
   }
 
   // Label: title line 1, author line 2; white text on black for selected, black on white otherwise

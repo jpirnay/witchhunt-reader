@@ -1,15 +1,11 @@
 #include "LyraTheme.h"
 
-#include <Epub.h>
-#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <Txt.h>
-#include <Xtc.h>
 
 #include <cmath>
 #include <cstdint>
@@ -128,45 +124,10 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
   return nullptr;
 }
 
-// Reads the overall progress percent stored as the last byte of progress.bin.
-// The cache path is derived from the book path alone (no epub/xtc/txt loading needed).
+// Reads the overall progress percent for a recent book. Delegates to the shared
+// UITheme helper so the progress.bin layout lives in one place.
 // Returns -1 if the file is absent or the percent byte is not yet written.
-int LyraTheme::getRecentBookProgressPercent(const RecentBook& book) {
-  if (book.path.empty()) {
-    return -1;
-  }
-
-  std::string cachePath;
-  int percentByteOffset = 0;  // byte index of the percent field in progress.bin
-
-  if (FsHelpers::hasEpubExtension(book.path)) {
-    cachePath = Epub(book.path, "/.crosspoint").getCachePath();
-    percentByteOffset = 6;  // epub: [spineIdx(2), page(2), chapterPageCount(2), percent(1)]
-  } else if (FsHelpers::hasXtcExtension(book.path)) {
-    cachePath = Xtc(book.path, "/.crosspoint").getCachePath();
-    percentByteOffset = 4;  // xtc: [page(4), percent(1)]
-  } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-    cachePath = Txt(book.path, "/.crosspoint").getCachePath();
-    percentByteOffset = 6;  // [page(2), offset(4), percent(1)]
-  } else {
-    return -1;
-  }
-
-  FsFile progressFile;
-  if (!Storage.openFileForRead("LYR", cachePath + "/progress.bin", progressFile)) {
-    return -1;
-  }
-
-  uint8_t data[7];
-  const int dataSize = progressFile.read(data, 7);
-  progressFile.close();
-
-  if (dataSize < percentByteOffset + 1) {
-    return -1;  // old format (or pre-render placeholder) without the percent byte
-  }
-
-  return clampProgressPercent(static_cast<int>(data[percentByteOffset]));
-}
+int LyraTheme::getRecentBookProgressPercent(const RecentBook& book) { return UITheme::getBookProgressPercent(book); }
 
 void LyraTheme::drawProgressBadge(const GfxRenderer& renderer, Rect anchorRect, int progressPercent) {
   if (progressPercent < 0) {

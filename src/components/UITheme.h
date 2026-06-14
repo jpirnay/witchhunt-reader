@@ -62,6 +62,10 @@ class UITheme {
   static Rect getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static std::string getCoverThumbPath(std::string coverBmpPath, int width, int height);
+  // Reads the overall progress percent (0..100) for a recent book from its cached
+  // progress.bin. Cheap: derives the cache path from the book path, no book parsing.
+  // Returns -1 when the book was never opened or the percent byte isn't written yet.
+  static int getBookProgressPercent(const RecentBook& book);
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarTopHeight(bool forceStatusItems = false);
   static int getStatusBarBottomHeight(bool forceStatusItems = false);
