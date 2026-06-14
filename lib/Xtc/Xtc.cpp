@@ -318,42 +318,75 @@ bool Xtc::generateCoverBmp() const {
     return false;
   }
 
-  // Write 1-bit BMP header (top-down row order)
-  BmpHeader bmpHeader;
-  createBmpHeader(&bmpHeader, pageInfo.width, pageInfo.height, BmpRowOrder::TopDown);
-  coverBmp.write(reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
-
-  const uint32_t rowSize = ((pageInfo.width + 31) / 32) * 4;
-
-  // Write bitmap data
-  // BMP requires 4-byte row alignment
-  const size_t dstRowSize = (pageInfo.width + 7) / 8;  // 1-bit destination row size
   const uint8_t padding[4] = {0, 0, 0, 0};
-  const size_t paddingSize = rowSize - dstRowSize;
-
-  // 1-bit destination row buffer, reused across rows (bounded: ~60 bytes).
-  uint8_t* rowBuffer = static_cast<uint8_t*>(malloc(dstRowSize));  // freed before every return below
-  if (!rowBuffer) {
-    LOG_ERR("XTC", "OOM cover row buffer (%u bytes)", (unsigned)dstRowSize);
-    coverBmp.close();
-    Storage.remove(getCoverBmpPath().c_str());
-    return false;
-  }
 
   if (bitDepth == 2) {
-    // XTH 2-bit: stream the column-major page through a row-major transpose
-    // (small RAM band + temp file) instead of holding the whole page in heap.
+    // XTH 2-bit: emit a 2-bpp grayscale BMP so the four XTH levels survive to the
+    // cover, rather than thresholding to pure black/white. (Original 1-bit code
+    // collapsed dark gray / light gray / black all to black.) Issue identified by
+    // GitHub user itsthisjustin in crosspoint-reader PR #2335.
+    //
+    // The Bitmap reader maps a 2-bpp pixel as paletteLum[index] >> 6, producing
+    // output color 0=black .. 3=white. We therefore pick a 4-entry palette of the
+    // native gray levels and map each XTH value to the palette index whose
+    // luminance reproduces it: XTH 0=white, 1=dark gray, 2=light gray, 3=black.
+    static constexpr uint8_t kXthToBmp[4] = {3, 1, 2, 0};
+
+    // 2-bpp BMP: 40-byte info header + 4-entry palette = 70 bytes before pixels.
+    const uint32_t paletteSize = 4u * 4u;  // 4 RGBQUAD entries
+    const uint32_t offBits = 14u + 40u + paletteSize;
+    const uint32_t rowSize = ((static_cast<uint32_t>(pageInfo.width) * 2 + 31) / 32) * 4;
+    const size_t dstRowSize = (pageInfo.width + 3) / 4;  // 2-bit packed source bytes
+    const size_t paddingSize = rowSize - dstRowSize;
+    const uint32_t imageSize = rowSize * pageInfo.height;
+
+    auto writeLE16 = [&](uint16_t v) {
+      const uint8_t b[2] = {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8)};
+      coverBmp.write(b, 2);
+    };
+    auto writeLE32 = [&](uint32_t v) {
+      const uint8_t b[4] = {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
+                            static_cast<uint8_t>(v >> 24)};
+      coverBmp.write(b, 4);
+    };
+
+    // BITMAPFILEHEADER
+    coverBmp.write(reinterpret_cast<const uint8_t*>("BM"), 2);
+    writeLE32(offBits + imageSize);  // bfSize
+    writeLE16(0);                    // bfReserved1
+    writeLE16(0);                    // bfReserved2
+    writeLE32(offBits);              // bfOffBits
+    // BITMAPINFOHEADER
+    writeLE32(40);                                       // biSize
+    writeLE32(static_cast<uint32_t>(pageInfo.width));    // biWidth
+    writeLE32(static_cast<uint32_t>(-pageInfo.height));  // biHeight (negative = top-down)
+    writeLE16(1);                                        // biPlanes
+    writeLE16(2);                                        // biBitCount
+    writeLE32(0);                                        // biCompression (BI_RGB)
+    writeLE32(imageSize);                                // biSizeImage
+    writeLE32(2835);                                     // biXPelsPerMeter (~72 DPI)
+    writeLE32(2835);                                     // biYPelsPerMeter
+    writeLE32(4);                                        // biClrUsed
+    writeLE32(4);                                        // biClrImportant
+    // Palette: black, dark gray, light gray, white (BGRA)
+    const uint8_t palette[16] = {0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x55, 0x00,
+                                 0xAA, 0xAA, 0xAA, 0x00, 0xFF, 0xFF, 0xFF, 0x00};
+    coverBmp.write(palette, sizeof(palette));
+
+    // Stream the column-major page through a row-major transpose (small RAM band +
+    // temp file) instead of holding the whole page in heap.
     XthRowTranspose xth(mutParser, 0, pageInfo.width, pageInfo.height, cachePath + "/cover.t2bit");
     if (!xth.ok) {
-      free(rowBuffer);
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
     }
 
     uint8_t* packedRow = static_cast<uint8_t*>(malloc(xth.packedRowBytes));  // freed below
-    if (!packedRow) {
-      LOG_ERR("XTC", "OOM cover packed row (%d bytes)", xth.packedRowBytes);
+    uint8_t* rowBuffer = static_cast<uint8_t*>(malloc(dstRowSize));          // 2-bit BMP row, freed below
+    if (!packedRow || !rowBuffer) {
+      LOG_ERR("XTC", "OOM cover row buffers (%d + %u bytes)", xth.packedRowBytes, (unsigned)dstRowSize);
+      free(packedRow);
       free(rowBuffer);
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
@@ -366,26 +399,39 @@ bool Xtc::generateCoverBmp() const {
         failed = true;
         break;
       }
-      memset(rowBuffer, 0xFF, dstRowSize);  // start all white
+      memset(rowBuffer, 0, dstRowSize);
       for (uint16_t x = 0; x < pageInfo.width; x++) {
-        // Threshold: 0=white (bit 1); 1,2,3=black (bit 0)
-        if (packedPixel(packedRow, x) >= 1) {
-          rowBuffer[x / 8] &= ~(1 << (7 - (x % 8)));
-        }
+        const uint8_t bmpVal = kXthToBmp[packedPixel(packedRow, x)];
+        rowBuffer[(x * 2) / 8] |= static_cast<uint8_t>(bmpVal << (6 - ((x * 2) % 8)));
       }
       coverBmp.write(rowBuffer, dstRowSize);
       if (paddingSize > 0) coverBmp.write(padding, paddingSize);
     }
     free(packedRow);
+    free(rowBuffer);
     if (failed) {
-      free(rowBuffer);
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
     }
   } else {
-    // 1-bit source: row-major, stream one source row at a time straight to BMP.
-    const size_t srcRowSize = (pageInfo.width + 7) / 8;  // == dstRowSize
+    // 1-bit source: write a 1-bit BMP header and stream source rows straight to it.
+    BmpHeader bmpHeader;
+    createBmpHeader(&bmpHeader, pageInfo.width, pageInfo.height, BmpRowOrder::TopDown);
+    coverBmp.write(reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
+
+    const uint32_t rowSize = ((pageInfo.width + 31) / 32) * 4;
+    const size_t srcRowSize = (pageInfo.width + 7) / 8;  // packed 1-bit source/dest row
+    const size_t paddingSize = rowSize - srcRowSize;
+
+    uint8_t* rowBuffer = static_cast<uint8_t*>(malloc(srcRowSize));  // freed before every return below
+    if (!rowBuffer) {
+      LOG_ERR("XTC", "OOM cover row buffer (%u bytes)", (unsigned)srcRowSize);
+      coverBmp.close();
+      Storage.remove(getCoverBmpPath().c_str());
+      return false;
+    }
+
     bool failed = false;
     for (uint16_t y = 0; y < pageInfo.height; y++) {
       if (mutParser->loadPageRange(0, static_cast<size_t>(y) * srcRowSize, rowBuffer, srcRowSize) != srcRowSize) {
@@ -396,15 +442,14 @@ bool Xtc::generateCoverBmp() const {
       if (paddingSize > 0) coverBmp.write(padding, paddingSize);
     }
     mutParser->endPageRange();
+    free(rowBuffer);
     if (failed) {
-      free(rowBuffer);
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
     }
   }
 
-  free(rowBuffer);
   coverBmp.close();
   LOG_DBG("XTC", "Generated cover BMP: %s", getCoverBmpPath().c_str());
   return true;
@@ -532,9 +577,13 @@ bool Xtc::generateThumbBmp(int width, int height) const {
           dst[x] = ((packRow[x / 8] >> (7 - (x % 8))) & 1) ? 255 : 0;
         }
       } else {
+        // XTH levels: 0=white, 1=dark gray, 2=light gray, 3=black. A plain
+        // (3 - v) * 85 would swap dark and light gray, so map through a table that
+        // matches the cover encoding. (Mapping fix from crosspoint-reader PR #2335,
+        // itsthisjustin.)
+        static constexpr uint8_t kXthToGray[4] = {255, 85, 170, 0};
         for (uint16_t x = 0; x < pageInfo.width; x++) {
-          const uint8_t v = xth->pixelValue(x, srcY);  // 0..3 (0=white)
-          dst[x] = static_cast<uint8_t>((3 - v) * 85);
+          dst[x] = kXthToGray[xth->pixelValue(x, srcY)];
         }
       }
     }
