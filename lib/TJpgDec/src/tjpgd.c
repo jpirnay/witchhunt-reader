@@ -279,7 +279,7 @@ static JRESULT create_huffman_tbl (	/* 0:OK, !0:Failed */
 /* Extract a huffman decoded data from input stream                      */
 /*-----------------------------------------------------------------------*/
 
-static int huffext (	/* >=0: decoded data, <0: error code */
+static JD_FASTPATH int huffext (	/* >=0: decoded data, <0: error code */
 	JDEC* jd,			/* Pointer to the decompressor object */
 	unsigned int id,	/* Table ID (0:Y, 1:C) */
 	unsigned int cls	/* Table class (0:DC, 1:AC) */
@@ -420,7 +420,7 @@ static int huffext (	/* >=0: decoded data, <0: error code */
 /* Extract N bits from input stream                                      */
 /*-----------------------------------------------------------------------*/
 
-static int bitext (	/* >=0: extracted data, <0: error code */
+static JD_FASTPATH int bitext (	/* >=0: extracted data, <0: error code */
 	JDEC* jd,			/* Pointer to the decompressor object */
 	unsigned int nbit	/* Number of bits to extract (1 to 16) */
 )
@@ -576,7 +576,7 @@ static JRESULT restart (
 /* Apply Inverse-DCT in Arai Algorithm (see also aa_idct.png)            */
 /*-----------------------------------------------------------------------*/
 
-static void block_idct (
+static JD_FASTPATH void block_idct (
 	int32_t* src,	/* Input block data (de-quantized and pre-scaled for Arai Algorithm) */
 	jd_yuv_t* dst	/* Pointer to the destination to store the block as byte array */
 )
@@ -699,7 +699,7 @@ static void block_idct (
 /* Load all blocks in an MCU into working buffer                         */
 /*-----------------------------------------------------------------------*/
 
-static JRESULT mcu_load (
+static JD_FASTPATH JRESULT mcu_load (
 	JDEC* jd		/* Pointer to the decompressor object */
 )
 {
@@ -1115,7 +1115,7 @@ JRESULT jd_prepare (
 /* Start to decompress the JPEG picture                                  */
 /*-----------------------------------------------------------------------*/
 
-JRESULT jd_decomp (
+JD_FASTPATH JRESULT jd_decomp (
 	JDEC* jd,								/* Initialized decompression object */
 	int (*outfunc)(JDEC*, void*, JRECT*),	/* RGB output function */
 	uint8_t scale							/* Output de-scaling factor (0 to 3) */

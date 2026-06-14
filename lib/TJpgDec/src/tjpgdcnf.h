@@ -3,8 +3,10 @@
 /*----------------------------------------------*/
 /*
  * CrossPoint configuration of ChaN's TJpgDec (vendored, see library.json).
- * Used as the baseline-JPEG decode engine (progressive stays on JPEGDEC).
- * Only this config file is modified from upstream; tjpgd.c / tjpgd.h are verbatim.
+ * Used as the baseline-JPEG decode engine (progressive renders a placeholder).
+ * Modified from upstream only here (config + the JD_FASTPATH macro below) and in
+ * the JD_FASTPATH annotations on the hot decode functions in tjpgd.c; tjpgd.h is
+ * verbatim.
  */
 
 #define JD_SZBUF 512
@@ -26,3 +28,25 @@
 /  work pool (~6 KB extra for a colour JPEG), so TJPG_WORK_POOL_SIZE is sized for it.
 /  Worth it here: baseline decode is huffman-bound on the single-core C3 and the RAM
 /  is available. (lovyan03's dual-core decomp_multitask is N/A — C3 is single-core.) */
+
+/*----------------------------------------------*/
+/* Hot-path placement (CrossPoint, ESP32-C3)    */
+/*----------------------------------------------*/
+/* On the C3 the per-MCU decode loop executes from flash through the instruction
+/  cache, so the tight inner functions pay i-cache miss stalls. With
+/  JD_FASTPATH_IRAM=1 the compute-bound functions are linked into IRAM, trading a
+/  few KB of IRAM for the removal of those stalls. huffext/bitext stay out-of-line
+/  and land in IRAM directly; block_idct, mcu_load and mcu_output get inlined into
+/  the jd_decomp driver by -O2, so jd_decomp itself carries the attribute to pull
+/  those inlined bodies into IRAM too. Set from platformio.ini build flags so the
+/  benchmark can A/B it; default 0 keeps host/native builds (no esp_attr.h) clean. */
+#ifndef JD_FASTPATH_IRAM
+#define JD_FASTPATH_IRAM 0
+#endif
+
+#if JD_FASTPATH_IRAM
+#include "esp_attr.h"
+#define JD_FASTPATH IRAM_ATTR
+#else
+#define JD_FASTPATH
+#endif
