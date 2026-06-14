@@ -769,8 +769,12 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   uint8_t tjpgScale;
   int jpegScaleDenom = chooseJpegScale(targetScale, tjpgScale);
 
-  ctx.scaledSrcWidth = (srcWidth + jpegScaleDenom - 1) / jpegScaleDenom;
-  ctx.scaledSrcHeight = (srcHeight + jpegScaleDenom - 1) / jpegScaleDenom;
+  // TJpgDec descales by floor(dim / 2^scale): each MCU side (8 or 16 px) is a multiple of
+  // the scale denominator, so its per-MCU shifts sum to exactly the floor. Match that here
+  // (not ceil) so scaledSrc* equals the decoder's true output extent — the fine-scale
+  // factors and the right/bottom edge snapping below are derived from these.
+  ctx.scaledSrcWidth = srcWidth / jpegScaleDenom;
+  ctx.scaledSrcHeight = srcHeight / jpegScaleDenom;
 
   // Validate memory footprint against the post-scaling decode size, not raw dimensions.
   // A 1447x2200 image decoded at 1/4 scale is only ~362x550 — well within limits.

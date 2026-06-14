@@ -488,8 +488,14 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     }
   }
 
-  const int effectiveSrcW = (srcWidth + jpegScaleDenom - 1) / jpegScaleDenom;
-  const int effectiveSrcH = (srcHeight + jpegScaleDenom - 1) / jpegScaleDenom;
+  // TJpgDec's descaled output is floor(dim / 2^scale): every MCU side (8 or 16 px) is a
+  // multiple of the scale denominator, so the per-MCU right/bottom shifts sum to exactly
+  // the floor. These MUST match TJpgDec's actual output extent — the output callback only
+  // flushes an MCU row once a block reaches `srcWidth`, so an over-estimate (e.g. ceil
+  // division on an odd dimension like 333 -> 167 vs TJpgDec's 166) means the last column
+  // never arrives and zero rows are ever written.
+  const int effectiveSrcW = srcWidth / jpegScaleDenom;
+  const int effectiveSrcH = srcHeight / jpegScaleDenom;
 
   if (jpegScaleDenom > 1) {
     LOG_DBG("JPG", "Using 1/%d DCT scale: %dx%d -> %dx%d", jpegScaleDenom, srcWidth, srcHeight, effectiveSrcW,
