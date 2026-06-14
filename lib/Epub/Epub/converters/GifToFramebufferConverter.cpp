@@ -245,7 +245,7 @@ static int gifDecodeLzw(FsFile& f, GifState& st, uint8_t* indexedRow, RowSink on
       st.prefix[st.nextCode] = (uint16_t)oldCode;
       st.suffix[st.nextCode] = firstChar;
       st.nextCode++;
-      if (st.nextCode > (1 << st.codeSize) && st.codeSize < 12) st.codeSize++;
+      if (st.nextCode >= (1 << st.codeSize) && st.codeSize < 12) st.codeSize++;
     }
     firstCode = false;
     oldCode = code;
