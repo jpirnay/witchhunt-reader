@@ -366,8 +366,8 @@ class CrossPointSettings {
   // Double-press actions (default: BTN_DEFAULT = disabled, no disambiguation wait)
   uint8_t btnDoubleBack = BTN_DEFAULT;
   uint8_t btnDoubleConfirm = BTN_DEFAULT;
-  uint8_t btnDoubleLeft = BTN_DEFAULT;
-  uint8_t btnDoubleRight = BTN_DEFAULT;
+  uint8_t btnDoubleLeft = BTN_PAGE_BACK_10;
+  uint8_t btnDoubleRight = BTN_PAGE_FORWARD_10;
   uint8_t btnDoublePageBack = BTN_DEFAULT;
   uint8_t btnDoublePageForward = BTN_DEFAULT;
   uint8_t btnDoublePower = BTN_DEFAULT;
@@ -375,8 +375,8 @@ class CrossPointSettings {
   // Long-press actions (default: built-in)
   uint8_t btnLongBack = BTN_DEFAULT;
   uint8_t btnLongConfirm = BTN_DEFAULT;
-  uint8_t btnLongLeft = BTN_DEFAULT;
-  uint8_t btnLongRight = BTN_DEFAULT;
+  uint8_t btnLongLeft = BTN_PREV_SECTION;
+  uint8_t btnLongRight = BTN_NEXT_SECTION;
   uint8_t btnLongPageBack = BTN_DEFAULT;
   uint8_t btnLongPageForward = BTN_DEFAULT;
   uint8_t btnLongPower = BTN_DEFAULT;
