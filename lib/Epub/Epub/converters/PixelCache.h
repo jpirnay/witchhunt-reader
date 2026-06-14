@@ -21,7 +21,7 @@
 // and the image is decoded exactly once.
 //
 // Correctness relies on the decoder delivering blocks in raster top-to-bottom
-// order with bounded per-block height (JPEGDEC: raster MCU rows; PNGdec: one
+// order with bounded per-block height (TJpgDec: raster MCU rows; PNGdec: one
 // scanline at a time). Once a block whose top destination row is Y arrives,
 // every output row < Y is final and can be flushed to disk; advanceTo() is told
 // the tallest possible block height up front (maxBlockDstRows) so the band is

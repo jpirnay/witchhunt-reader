@@ -5,6 +5,27 @@ This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-
 # Attributions
 If in doubt consider all the work being done here based on the work of others - especially crosspoint reader (as the ancestor of this version) and microreader have been a great source of inspiration.
 
+## Project ancestry & inspiration
+- **crosspoint-reader** by Dave Allie and others — the direct ancestor this firmware is forked from. https://github.com/crosspoint-reader/crosspoint-reader (MIT).
+- **MicroReader** by CidVonHighwind — a source of inspiration, and still the most memory-efficient reader for the X4. https://github.com/CidVonHighwind/microreader
+- **OpenX4 E-Paper Community SDK** (a.k.a. crosspoint-xdk) — the shared X4 hardware/display/utility libraries, included as a submodule. https://github.com/open-x4-epaper/community-sdk (MIT).
+
+## Vendored third-party components (`lib/`)
+These are bundled directly in the repository. Each retains its upstream copyright header in source.
+
+- **TJpgDec — Tiny JPEG Decompressor** by ChaN (R0.03) — baseline-JPEG decode engine for the EPUB image path. http://elm-chan.org/fsw/tjpgd/ — Copyright (C) 2021 ChaN, BSD-1-Clause. Vendored under [`lib/TJpgDec`](lib/TJpgDec); modified from upstream only in `tjpgdcnf.h` (config + the `JD_FASTPATH` IRAM macro) and the `JD_FASTPATH` annotations on the hot decode functions in `tjpgd.c`.
+- **yxml** by Yoran Heling — the XML/HTML SAX parser backend (`SaxParser`), used by the EPUB and OPDS parsers. https://dev.yorhel.nl/yxml — Copyright (c) 2013-2014 Yoran Heling, MIT. Vendored under [`lib/SaxParser`](lib/SaxParser).
+- **Expat** — the XML SAX parser previously used project-wide, now largely replaced by yxml; still linked for the OPDS OpenSearch-description parser in `OpdsBookBrowserActivity` (slated for removal once that call site moves to yxml). https://github.com/libexpat/libexpat — Copyright (c) 1997-2000 Thai Open Source Software Center Ltd, Clark Cooper, and the Expat maintainers, MIT. Vendored under [`lib/expat`](lib/expat).
+- **uzlib** by Joergen Ibsen and Paul Sokolovsky — tiny DEFLATE/inflate, used for ZIP/EPUB extraction and PNG inflate. https://github.com/pfalcon/uzlib — Copyright (c) 2003 Joergen Ibsen, (c) 2014-2018 Paul Sokolovsky, zlib license. Vendored under [`lib/uzlib`](lib/uzlib).
+- **QR-Code-generator (qrcodegen)** by Project Nayuki — QR code generation. https://github.com/nayuki/QR-Code-generator — Copyright (c) Project Nayuki, MIT. Vendored under [`lib/QRCode`](lib/QRCode).
+
+## External libraries (PlatformIO `lib_deps`)
+Pulled from the PlatformIO registry at build time.
+
+- **ArduinoJson** by Benoît Blanchon — JSON parsing/serialization. https://github.com/bblanchon/ArduinoJson — MIT.
+- **PNGdec** by Larry Bank (bitbank2) — PNG decoding. https://github.com/bitbank2/PNGdec — Apache-2.0.
+- **arduinoWebSockets** by Markus Sattler — WebSocket client (KOReader sync). https://github.com/Links2004/arduinoWebSockets — LGPL-2.1.
+
 # What this reader does differently
 - Speed - rendering should be *fast*
 - CSS layout - a lot of effort have gone into rendering 

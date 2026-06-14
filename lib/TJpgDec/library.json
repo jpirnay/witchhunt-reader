@@ -1,0 +1,16 @@
+{
+  "name": "TJpgDec",
+  "version": "0.03",
+  "description": "ChaN's Tiny JPEG Decompressor (vendored). Baseline-JPEG decode engine for the EPUB image path; uses a small caller-supplied work pool instead of JPEGDEC's ~20 KB struct. Configured for grayscale output (JD_FORMAT=2) with DCT scaling. Source from http://elm-chan.org/fsw/tjpgd/ (R0.03); modified from upstream in tjpgdcnf.h (config + JD_FASTPATH macro) and tjpgd.c (JD_FASTPATH annotations on the hot decode functions, plus a BYTECLIP clamp on the grayscale output path fixing an upstream wrap-around bug).",
+  "keywords": ["jpeg", "decoder", "embedded"],
+  "license": "BSD-1-Clause",
+  "homepage": "http://elm-chan.org/fsw/tjpgd/",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src",
+    "flags": [
+      "-O2"
+    ]
+  }
+}
