@@ -202,12 +202,6 @@ int32_t jpegSeek(JPEGFILE* pFile, int32_t pos) {
 constexpr size_t JPEG_DECODER_APPROX_SIZE = 20 * 1024;
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = JPEG_DECODER_APPROX_SIZE + 16 * 1024;
 
-// Band-aid threshold: baseline JPEGs wider than this that are being downscaled are
-// forced off JPEGDEC's crashing 1/1 full-scale grayscale path (see the scale-select
-// block in decodeToFramebuffer). ~640 keeps normal inline images on the native path
-// while catching oversized covers/full-page art on a ~800 px panel.
-constexpr int JPEG_SAFE_FULL_DECODE_WIDTH = 640;
-
 // Optional memory-behavior knobs for embedded targets.
 #ifndef JPEG_ENABLE_FIRST_RENDER_NO_CACHE
 #define JPEG_ENABLE_FIRST_RENDER_NO_CACHE 1
@@ -736,17 +730,20 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jpegScaleDenom = chooseJpegScale(targetScale, jpegScaleOption);
 
     // BAND-AID (perf-css, 2026-06-13): JPEGDEC's baseline full-scale (1/1)
-    // EIGHT_BIT_GRAYSCALE decode overflows the heap on wide source images — the
-    // jpg_after_decode tripwire trips and a later free() asserts in multi_heap
-    // poisoning (observed on an 825-wide cover; the 1/4-scale thumb of the same
-    // file decodes cleanly). When we'd decode a large baseline image at 1/1 only
-    // to fine-downscale it anyway, drop to 1/2 so the wide grayscale MCU buffering
-    // never runs; the fine resampler covers the residual ratio (a mild upscale if
-    // src/2 < dest). Remove once JPEGDEC is replaced (TJpgDec eval) or patched.
-    if (jpegScaleDenom == 1 && srcWidth > JPEG_SAFE_FULL_DECODE_WIDTH && targetScale < 0.85f) {
+    // EIGHT_BIT_GRAYSCALE decode corrupts the heap on ANY baseline JPEG — not just
+    // wide ones. Observed on 333x500, 423x640, and 825-wide images: after decode,
+    // free() asserts in multi_heap_poisoning (head != NULL). The bug is in JPEGDEC's
+    // JPEGPutMCU8BitGray() fast path (ALLOWS_UNALIGNED 32-bit stores writing past
+    // the usPixels[] boundary into adjacent heap blocks). Forcing 1/2 DCT scale
+    // avoids the buggy 1/1 MCU path entirely; the fine resampler covers the residual
+    // ratio (a 2x upscale from decoded 1/2 back to the target size). This applies
+    // unconditionally to all baseline JPEGs because even 333x500 at 1:1 triggers it.
+    // Remove once JPEGDEC is replaced (TJpgDec eval) or patched.
+    if (jpegScaleDenom == 1) {
       jpegScaleOption = JPEG_SCALE_HALF;
       jpegScaleDenom = 2;
-      LOG_INF("JPG", "Band-aid: 1/2 DCT scale for wide baseline JPEG %dx%d (avoids JPEGDEC 1/1 grayscale overflow)",
+      LOG_INF("JPG",
+              "Band-aid: forcing 1/2 DCT scale for baseline JPEG %dx%d (avoids JPEGDEC 1/1 grayscale heap corruption)",
               srcWidth, srcHeight);
     }
   }
@@ -849,7 +846,23 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   if (rc != 1) {
     LOG_ERR("JPG", "Decode failed (rc=%d, lastError=%d)", rc, jpeg->getLastError());
     jpeg->close();
-    if (ctx.caching) ctx.cache.abort();
+    // Do NOT call ctx.cache.abort() here: JPEGDEC may have corrupted the heap during
+    // a malformed-entropy decode. PixelCache::cachePath is now a char[] on the stack
+    // (immune to heap corruption), so we can safely close the FsFile and delete the
+    // partial cache via it; then null the buffer pointer before ~PixelCache() runs.
+    if (ctx.caching) {
+      ctx.cache.ok = false;  // suppress ~PixelCache() destructor abort() path
+      if (ctx.cache.file.isOpen()) ctx.cache.file.close();
+      if (ctx.cache.cachePath[0] != '\0') Storage.remove(ctx.cache.cachePath);
+      // Free the band buffer explicitly; if its malloc header was corrupted by JPEGDEC
+      // this call may still crash, but that's the last resort — the alternative is
+      // crashing in ~PixelCache() which is harder to diagnose.
+      free(ctx.cache.buffer);
+      ctx.cache.buffer = nullptr;
+    }
+    // Delete the source JPEG so the next open re-extracts it; a file that causes
+    // JPEGDEC to crash mid-decode cannot be rendered and should not be retried as-is.
+    Storage.remove(imagePath.c_str());
     return false;
   }
 

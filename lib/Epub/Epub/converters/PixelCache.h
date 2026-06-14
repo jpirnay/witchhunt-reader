@@ -43,7 +43,10 @@ struct PixelCache {
   int bandStart;    // image-local row index of band buffer row 0
   int flushedRows;  // image-local rows already written to file
   FsFile file;
-  std::string cachePathStr;
+  // Fixed-size path buffer instead of std::string: if JPEGDEC corrupts the heap
+  // during a malformed-entropy decode, ~std::string() calling free() on a corrupted
+  // heap pointer would crash. A char[] lives on the stack and has no destructor.
+  char cachePath[256];
   bool ok;
 
   PixelCache()
@@ -57,7 +60,9 @@ struct PixelCache {
         bandRows(0),
         bandStart(0),
         flushedRows(0),
-        ok(false) {}
+        ok(false) {
+    cachePath[0] = '\0';
+  }
   PixelCache(const PixelCache&) = delete;
   PixelCache& operator=(const PixelCache&) = delete;
 
@@ -66,7 +71,7 @@ struct PixelCache {
 
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
-  bool begin(const std::string& cachePath, int w, int h, int ox, int oy, int maxBlockDstRows) {
+  bool begin(const std::string& path, int w, int h, int ox, int oy, int maxBlockDstRows) {
     width = w;
     height = h;
     originX = ox;
@@ -103,23 +108,26 @@ struct PixelCache {
     memset(buffer, 0, bufSize);
     zeroRow = buffer + (size_t)bandRows * bytesPerRow;
 
-    if (!Storage.openFileForWrite("IMG", cachePath, file)) {
-      LOG_ERR("IMG", "Failed to open cache file for writing: %s", cachePath.c_str());
+    if (!Storage.openFileForWrite("IMG", path, file)) {
+      LOG_ERR("IMG", "Failed to open cache file for writing: %s", path.c_str());
       free(buffer);
       buffer = nullptr;
       return false;
     }
-    cachePathStr = cachePath;
+    size_t n = path.size();
+    if (n >= sizeof(cachePath)) n = sizeof(cachePath) - 1;
+    memcpy(cachePath, path.c_str(), n);
+    cachePath[n] = '\0';
 
     uint16_t w16 = (uint16_t)w;
     uint16_t h16 = (uint16_t)h;
     if (file.write(&w16, 2) != 2 || file.write(&h16, 2) != 2) {
-      LOG_ERR("IMG", "Failed to write cache header: %s", cachePath.c_str());
+      LOG_ERR("IMG", "Failed to write cache header: %s", cachePath);
       abort();
       return false;
     }
 
-    LOG_DBG("IMG", "Cache stream started: %s (%dx%d, band %d rows)", cachePath.c_str(), w, h, bandRows);
+    LOG_DBG("IMG", "Cache stream started: %s (%dx%d, band %d rows)", cachePath, w, h, bandRows);
     ok = true;
     return true;
   }
@@ -164,8 +172,7 @@ struct PixelCache {
       }
     }
     file.close();
-    LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,
-            4 + bytesPerRow * height);
+    LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePath, width, height, 4 + bytesPerRow * height);
     ok = false;  // file handed off; nothing left to clean up
     return true;
   }
@@ -173,8 +180,8 @@ struct PixelCache {
   // Drop a partial/failed cache so a later decode re-creates it cleanly.
   void abort() {
     if (file.isOpen()) file.close();
-    if (!cachePathStr.empty()) {
-      Storage.remove(cachePathStr.c_str());
+    if (cachePath[0] != '\0') {
+      Storage.remove(cachePath);
     }
     ok = false;
   }
