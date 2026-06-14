@@ -39,7 +39,7 @@ using OpdsBook = OpdsEntry;
 
 /**
  * Parser for OPDS (Open Publication Distribution System) Atom feeds.
- * Uses the Expat XML parser to parse OPDS catalog entries.
+ * Uses the SaxParser (yxml backend) to parse OPDS catalog entries.
  *
  * Usage:
  *   OpdsParser parser;

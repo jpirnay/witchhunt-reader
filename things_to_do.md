@@ -4,7 +4,7 @@
 | 1 | Fix the failing gif test | Done |
 | 1 | Deal with the "dead" time when opening the the first page of the section, seems to be stuck | |
 | 1 | Still a strange behaviour in the recent thumbnail activity, making the "cursor" jump | |
-| 1 | Replace OPDS usage of expat with new saxxml parser | |
+| 1 | Replace OPDS usage of expat with new saxxml parser | Done |
 | 2 | Update attributions | |
 | 2 | Show some popup indicators to let the user know something is happening  | Done |
 | 2 | Continue with the next undealt with chapter to background indexing if the next one is already done | |

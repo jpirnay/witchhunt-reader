@@ -6,9 +6,9 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <OpdsStream.h>
+#include <SaxParser/SaxParser.h>
 #include <WiFi.h>
 #include <Xtc.h>
-#include <expat.h>
 
 #include <cctype>
 #include <cstdio>
@@ -599,7 +599,7 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
 
   struct OsdState {
     std::string templateUrl;
-    static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** atts) {
+    static void onStart(void* ud, const char* name, const char** atts) {
       if (strcmp(name, "Url") != 0 && strstr(name, ":Url") == nullptr) return;
       auto* state = static_cast<OsdState*>(ud);
       for (int i = 0; atts[i]; i += 2) {
@@ -611,15 +611,14 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
     }
   } osdState;
 
-  XML_Parser p = XML_ParserCreate(nullptr);
-  if (!p) {
+  SaxParser parser;
+  if (!parser.init(&osdState, OsdState::onStart, nullptr)) {
     LOG_ERR("OPDS", "OSD parser alloc failed");
     return;
   }
-  XML_SetUserData(p, &osdState);
-  XML_SetElementHandler(p, OsdState::onStart, nullptr);
-  XML_Parse(p, content.c_str(), static_cast<int>(content.size()), XML_TRUE);
-  XML_ParserFree(p);
+  if (!parser.feed(reinterpret_cast<const uint8_t*>(content.data()), content.size()) || !parser.finalize()) {
+    LOG_ERR("OPDS", "OSD parse error at line %d: %s", parser.errorLine(), parser.errorString());
+  }
 
   if (!osdState.templateUrl.empty()) {
     searchTemplate = UrlUtils::buildUrl(osdUrl, osdState.templateUrl);
