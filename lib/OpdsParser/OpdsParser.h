@@ -78,6 +78,11 @@ class OpdsParser final : public Print {
 
   operator bool() { return !error(); }
 
+  // Bitmask of SaxParser::TruncationFlag values hit while parsing — non-zero
+  // means a field (e.g. a long acquisition href) exceeded the parser's fixed
+  // buffers and was silently truncated. Callers should log a non-zero result.
+  uint32_t truncationFlags() const { return saxParser_.truncationFlags(); }
+
   /**
    * Clear all parsed entries.
    */

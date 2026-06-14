@@ -27,6 +27,13 @@
 
 namespace {
 constexpr int PAGE_ITEMS = 23;
+
+// Hard ceiling on entries held from a single feed. Each entry costs 4 bytes in
+// the in-RAM entryOffsets index; the bodies live on the SD cache file. Well-behaved
+// OPDS servers paginate (we follow the next/prev links), so this only bites on a
+// server returning one giant unpaginated feed — where we'd otherwise grow the
+// offset vector until the heap OOMs. 2000 entries ≈ 8 KB, a safe bound on 380 KB RAM.
+constexpr size_t MAX_FEED_ENTRIES = 2000;
 constexpr int FORMAT_ITEM_HEIGHT = 30;
 constexpr int FORMAT_LIST_TOP_OFFSET = 20;
 constexpr int FORMAT_LIST_BOTTOM_PADDING = 20;
@@ -373,6 +380,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   }
 
   entryOffsets.clear();
+  // Reserve up front so the per-entry push_back loop doesn't repeatedly realloc
+  // (2x grow + copy) and fragment the heap mid-fetch. One page-ish worth covers
+  // the common case; larger feeds grow once or twice up to MAX_FEED_ENTRIES.
+  entryOffsets.reserve(PAGE_ITEMS + 2);  // +2 for prev/next nav entries
+  bool feedCapped = false;
 
   std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(server.url, path);
   LOG_DBG("OPDS", "Fetching: %s", url.c_str());
@@ -389,6 +401,13 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   }
 
   parser.onEntryParsed = [&](const OpdsEntry& entry) {
+    if (entryOffsets.size() >= MAX_FEED_ENTRIES) {
+      if (!feedCapped) {
+        feedCapped = true;
+        LOG_ERR("OPDS", "Feed exceeds %zu entries; ignoring the rest. Use a paginated catalog.", MAX_FEED_ENTRIES);
+      }
+      return;  // drop the excess rather than grow the offset index unbounded
+    }
     uint32_t offset = cacheFile.position();
     entryOffsets.push_back(offset);
     writeEntryToCache(cacheFile, entry);
@@ -409,6 +428,13 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     errorMessage = tr(STR_PARSE_FEED_FAILED);
     requestUpdate();
     return;
+  }
+
+  // yxml has fixed-capacity buffers; a non-zero mask means a field (commonly a
+  // long acquisition href with query params, or a long title) was silently
+  // truncated. Log it so field cases that exceed the bounds are diagnosable.
+  if (const uint32_t trunc = parser.truncationFlags()) {
+    LOG_ERR("OPDS", "Feed parse truncated some fields (flags=0x%lx)", static_cast<unsigned long>(trunc));
   }
 
   searchTemplate = parser.getSearchTemplate();
