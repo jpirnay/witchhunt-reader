@@ -225,7 +225,6 @@ int UITheme::getBookProgressPercent(const RecentBook& book) {
   }
 
   int percent = static_cast<int>(data[percentByteOffset]);
-  if (percent < 0) percent = 0;
   if (percent > 100) percent = 100;
   return percent;
 }
