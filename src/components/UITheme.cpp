@@ -1,10 +1,14 @@
 #include "UITheme.h"
 
+#include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Txt.h>
+#include <Xtc.h>
 
 #include <algorithm>
 #include <memory>
@@ -184,6 +188,46 @@ std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int width, int 
     coverBmpPath.replace(pos, 8, std::to_string(width) + "x" + std::to_string(height));
   }
   return coverBmpPath;
+}
+
+int UITheme::getBookProgressPercent(const RecentBook& book) {
+  if (book.path.empty()) {
+    return -1;
+  }
+
+  std::string cachePath;
+  int percentByteOffset = 0;  // byte index of the percent field in progress.bin
+
+  if (FsHelpers::hasEpubExtension(book.path)) {
+    cachePath = Epub(book.path, "/.crosspoint").getCachePath();
+    percentByteOffset = 6;  // epub: [spineIdx(2), page(2), chapterPageCount(2), percent(1)]
+  } else if (FsHelpers::hasXtcExtension(book.path)) {
+    cachePath = Xtc(book.path, "/.crosspoint").getCachePath();
+    percentByteOffset = 4;  // xtc: [page(4), percent(1)]
+  } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
+    cachePath = Txt(book.path, "/.crosspoint").getCachePath();
+    percentByteOffset = 6;  // txt: [page(2), offset(4), percent(1)]
+  } else {
+    return -1;
+  }
+
+  FsFile progressFile;
+  if (!Storage.openFileForRead("UIT", cachePath + "/progress.bin", progressFile)) {
+    return -1;
+  }
+
+  uint8_t data[7];
+  const int dataSize = progressFile.read(data, 7);
+  progressFile.close();
+
+  if (dataSize < percentByteOffset + 1) {
+    return -1;  // old format (or pre-render placeholder) without the percent byte
+  }
+
+  int percent = static_cast<int>(data[percentByteOffset]);
+  if (percent < 0) percent = 0;
+  if (percent > 100) percent = 100;
+  return percent;
 }
 
 UIIcon UITheme::getFileIcon(const std::string& filename) {

@@ -21,6 +21,10 @@ class RecentBooksActivity final : public Activity {
   int initialFocusIndex = -1;  // applied once in onEnter(), then cleared
 
   std::vector<RecentBook> recentBooks;
+  // Reading-progress percent per recent book (parallel to recentBooks), cached so
+  // the grid badge doesn't re-read progress.bin from SD on every cell repaint.
+  // -1 = not started / unknown. Refreshed whenever recentBooks is (re)loaded.
+  std::vector<int8_t> bookProgress;
 
   // Lazy cover loading state for grid view
   bool coversLoaded = false;
@@ -31,6 +35,11 @@ class RecentBooksActivity final : public Activity {
   // Partial selection repaint: track previous index so we only redraw two cells
   int prevSelectorIndex = -1;
   bool fullRedrawNeeded = true;
+
+  // Set once Confirm commits to opening a book. Suppresses any further grid
+  // selection repaint so the highlight can't visibly jump during the
+  // transition into the reader.
+  bool openingBook = false;
 
   void loadRecentBooks();
   // Generates the next missing grid thumbnail (one per call). Returns true when all done.
