@@ -32,6 +32,7 @@ struct GifState {
 
   // Screen / frame layout
   int screenWidth, screenHeight;
+  int frameLeft, frameTop;
   int frameWidth, frameHeight;
   bool interlaced;
 
@@ -168,6 +169,8 @@ static bool parseGifHeader(FsFile& f, GifState& st) {
     if (blockId == 0x2C) {  // Image Descriptor
       uint8_t desc[9];
       if (f.read(desc, 9) != 9) return false;
+      st.frameLeft = desc[0] | (desc[1] << 8);
+      st.frameTop = desc[2] | (desc[3] << 8);
       st.frameWidth = desc[4] | (desc[5] << 8);
       st.frameHeight = desc[6] | (desc[7] << 8);
       st.interlaced = (desc[8] >> 6) & 1;
@@ -222,9 +225,11 @@ static int gifDecodeLzw(FsFile& f, GifState& st, uint8_t* indexedRow, RowSink on
       }
       st.lzwStack[stackTop++] = st.suffix[c];
       uint8_t fchar = st.lzwStack[stackTop - 1];
-      memmove(&st.lzwStack[1], &st.lzwStack[0], stackTop);
-      st.lzwStack[0] = fchar;
-      stackTop++;
+      if (stackTop < GIF_MAX_CODES) {
+        memmove(&st.lzwStack[1], &st.lzwStack[0], stackTop);
+        st.lzwStack[0] = fchar;
+        stackTop++;
+      }
     } else if (code <= st.eoiCode || code < st.nextCode) {
       while (st.prefix[c] != GIF_NO_PREFIX && stackTop < GIF_MAX_CODES - 1) {
         st.lzwStack[stackTop++] = st.suffix[c];
@@ -365,8 +370,8 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
-  const int cfgX = config.x;
-  const int cfgY = config.y;
+  const int cfgX = config.x + (int)(st->frameLeft * scale);
+  const int cfgY = config.y + (int)(st->frameTop * scale);
   int lastDstY = -1;
 
   int srcRow = gifDecodeLzw(f, *st, indexedRow, [&](int actualY, const uint8_t* idxRow, int w) {
