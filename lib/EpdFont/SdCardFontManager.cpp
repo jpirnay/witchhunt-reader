@@ -102,7 +102,8 @@ static bool writeFamily(const SdCardFontFamilyInfo& family, uint8_t requestedPoi
   return true;
 }
 
-bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize) {
+bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize,
+                                   const std::function<void()>& onColdLoad) {
   if (!renderer_) renderer_ = &renderer;
   if (!loadedFamilyName_.empty()) unloadAll(renderer);
 
@@ -129,6 +130,9 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
 
     bool readyToMmap = alreadyCached;
     if (!alreadyCached) {
+      // Genuine first load: writing the family into the flash partition takes
+      // a noticeable moment — let the caller advertise it before we start.
+      if (onColdLoad) onColdLoad();
       readyToMmap = writeFamily(family, selected->pointSize);
       if (!readyToMmap) {
         LOG_ERR("SDMGR", "Flash write failed for %s, falling back to SD load", family.name.c_str());

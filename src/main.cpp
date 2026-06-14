@@ -361,12 +361,17 @@ void ensureSdFontLoadedForPath(const char* path) {
     ensureSdFontLoaded();
     return;
   }
+  // Writing a not-yet-cached SD font into the flash partition stalls the open for a
+  // moment; advertise it. Callers (goToReader/replaceWithReader) already hold a
+  // RenderLock, so the lambda must not take one. Fires only on a genuine first load.
+  const auto onColdFontLoad = [] { GUI.drawPopup(renderer, tr(STR_LOADING_FONT)); };
+
   const std::string_view filePath(path);
   const bool isTxtMd = static_cast<bool (*)(std::string_view)>(FsHelpers::hasTxtExtension)(filePath) ||
                        static_cast<bool (*)(std::string_view)>(FsHelpers::hasMarkdownExtension)(filePath);
   if (isTxtMd) {
     // TXT/MD has no per-book SD font override — use global settings directly.
-    sdFontSystem.ensureLoaded(renderer, SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontSize);
+    sdFontSystem.ensureLoaded(renderer, SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontSize, onColdFontLoad);
     return;
   }
 
@@ -379,13 +384,13 @@ void ensureSdFontLoadedForPath(const char* path) {
 
   if (!book.sdFontFamilyOverride.empty()) {
     // Per-book SD font override: load that family at the effective size.
-    sdFontSystem.ensureLoaded(renderer, book.sdFontFamilyOverride.c_str(), effectiveSize);
+    sdFontSystem.ensureLoaded(renderer, book.sdFontFamilyOverride.c_str(), effectiveSize, onColdFontLoad);
   } else if (book.fontFamilyOverride >= 0) {
     // Per-book built-in font override: no SD font needed; unload if one was active.
-    sdFontSystem.ensureLoaded(renderer, "", effectiveSize);
+    sdFontSystem.ensureLoaded(renderer, "", effectiveSize, onColdFontLoad);
   } else {
     // No family override: use global SD font (if any) at the effective size.
-    sdFontSystem.ensureLoaded(renderer, SETTINGS.sdFontFamilyName, effectiveSize);
+    sdFontSystem.ensureLoaded(renderer, SETTINGS.sdFontFamilyName, effectiveSize, onColdFontLoad);
   }
 }
 

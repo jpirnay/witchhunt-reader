@@ -120,6 +120,10 @@ class BookMetadataCache {
   // Post-processing to update mappings and sizes
   bool buildBookBin(const std::string& epubPath, const BookMetadata& metadata);
 
+  // True when the spine/TOC cache file (book.bin) already exists for this cachePath,
+  // i.e. load() can read it instead of rebuilding. Cheap (a single Storage.exists).
+  static bool cacheExists(const std::string& cachePath);
+
   // Reading phase (read mode)
   bool load();
   SpineEntry getSpineEntry(int index);

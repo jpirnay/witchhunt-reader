@@ -25,6 +25,10 @@ std::string extractedPathFor(const std::string& cachePath, const std::string& ep
 }
 }  // namespace
 
+bool EpubImageManifest::cacheExists(const std::string& cachePath) {
+  return Storage.exists((cachePath + kImagesBinFile).c_str());
+}
+
 bool EpubImageManifest::load(const std::string& cachePath) {
   loaded_ = false;
   entries_.clear();

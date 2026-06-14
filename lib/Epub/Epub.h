@@ -58,6 +58,15 @@ class Epub {
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
+
+  // True when opening the book will trigger the (multi-second) first-open index
+  // build inside load(): the spine/TOC cache (book.bin) or the compiled CSS rules
+  // cache is missing. Cheap (only file-existence checks) so callers can decide
+  // whether to show a progress popup before calling load().
+  bool needsFirstOpenIndexing() const;
+  // True when loadImageManifest() will have to scan the ZIP to build images.bin.
+  bool needsImageManifestBuild() const;
+
   bool clearCache(bool preserveThumbs = false) const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;

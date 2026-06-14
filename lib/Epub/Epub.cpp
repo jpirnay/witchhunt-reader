@@ -455,6 +455,16 @@ void Epub::buildImageManifest(ZipFile& zf) {
   }
 }
 
+bool Epub::needsFirstOpenIndexing() const {
+  // Spine/TOC cache missing -> load() rebuilds it (content.opf + TOC/NCX + book.bin).
+  if (!BookMetadataCache::cacheExists(cachePath)) return true;
+  // Compiled CSS rules cache missing -> load() runs the (slow) CSS compile.
+  if (!CssParser(cachePath).hasCache()) return true;
+  return false;
+}
+
+bool Epub::needsImageManifestBuild() const { return !EpubImageManifest::cacheExists(cachePath); }
+
 void Epub::loadImageManifest() {
   // Return immediately if already loaded (e.g. built during this same load()).
   if (imageManifest && imageManifest->isLoaded()) return;

@@ -406,6 +406,10 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
 
 /* ============= READING / LOADING FUNCTIONS ================ */
 
+bool BookMetadataCache::cacheExists(const std::string& cachePath) {
+  return Storage.exists((cachePath + bookBinFile).c_str());
+}
+
 bool BookMetadataCache::load() {
   if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, bookFile)) {
     return false;

@@ -28,6 +28,10 @@ class EpubImageManifest {
   // Load images.bin from cachePath. Returns true when loaded successfully.
   bool load(const std::string& cachePath);
 
+  // True when images.bin already exists for this cachePath, i.e. loadImageManifest()
+  // won't have to scan the ZIP to rebuild it. Cheap (a single Storage.exists).
+  static bool cacheExists(const std::string& cachePath);
+
   // Build images.bin by scanning zf (must have loadAllFileStatSlims() already called)
   // and reading each image header from the zip. epubPath is the on-disk epub file path.
   bool build(const std::string& cachePath, const std::string& epubPath, ZipFile& zf);

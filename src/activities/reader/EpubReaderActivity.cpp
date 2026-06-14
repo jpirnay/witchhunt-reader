@@ -286,6 +286,12 @@ void EpubReaderActivity::onEnter() {
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
 
   if (getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+    // Building the image manifest scans the whole ZIP (~1s+); show a popup when it's
+    // a cache miss. Warm re-opens load images.bin instantly and skip the flash.
+    if (epub->needsImageManifestBuild()) {
+      RenderLock lock;
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+    }
     epub->loadImageManifest();
     logReaderMemSnapshot("onEnter_after_image_manifest");
   }

@@ -242,6 +242,15 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
+    // The first open of a book runs a multi-second index build inside load()
+    // (spine/TOC, content.opf, and the CSS compile). Show a popup so the wait
+    // isn't a dead screen; skip it on a warm cache so cached re-opens don't add
+    // an extra e-ink flash. The throwaway Epub only computes paths + does a few
+    // file-existence checks (no parsing), so this is cheap.
+    if (Epub(initialBookPath, "/.crosspoint").needsFirstOpenIndexing()) {
+      RenderLock lock;
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+    }
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
       onGoBack();

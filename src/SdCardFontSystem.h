@@ -3,6 +3,8 @@
 #include <SdCardFontManager.h>
 #include <SdCardFontRegistry.h>
 
+#include <functional>
+
 class GfxRenderer;
 
 /// Facade that owns the SD card font registry, manager, and resolver logic.
@@ -24,7 +26,10 @@ class SdCardFontSystem {
 
   /// Ensure the correct SD font family is loaded for an explicit family + size.
   /// Used when the reader type determines which settings field to consult.
-  void ensureLoaded(GfxRenderer& renderer, const char* familyName, uint8_t fontSizeEnum);
+  /// onColdLoad (if set) fires only when the font has to be written to the flash
+  /// partition (genuine first load) — callers use it to show a "loading font" popup.
+  void ensureLoaded(GfxRenderer& renderer, const char* familyName, uint8_t fontSizeEnum,
+                    const std::function<void()>& onColdLoad = {});
 
   /// Resolve an SD card font ID from family name + fontSize enum.
   /// Returns 0 if not found. Used by CrossPointSettings::getReaderFontId().

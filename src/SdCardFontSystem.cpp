@@ -166,7 +166,8 @@ static uint8_t targetPtSizeFromEnum(uint8_t fontSizeEnum) {
   return FONT_SIZE_TO_PT[fontSizeEnum];
 }
 
-void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* wantedFamily, uint8_t fontSizeEnum) {
+void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* wantedFamily, uint8_t fontSizeEnum,
+                                    const std::function<void()>& onColdLoad) {
   const std::string& currentFamily = manager_.currentFamilyName();
   const uint8_t targetPt = targetPtSizeFromEnum(fontSizeEnum);
 
@@ -190,7 +191,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* wantedFam
 
   const auto* family = registry_.findFamily(wantedFamily);
   if (family) {
-    if (!manager_.loadFamily(*family, renderer, targetPt)) {
+    if (!manager_.loadFamily(*family, renderer, targetPt, onColdLoad)) {
       LOG_ERR("SDFS", "Failed to load SD font family: %s", wantedFamily);
     }
   }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,11 @@ class SdCardFontManager {
   // resident interval + kern/ligature tables to one size's worth of memory
   // (see PR #1327 discussion re: Literata OOM).
   // Returns true on success.
-  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize);
+  // onColdLoad (if set) is invoked once, just before the slow path that writes the
+  // font into the flash partition (i.e. only on a genuine first load, not on a
+  // flash-cache mmap hit) — callers use it to show a "loading font" popup.
+  bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize,
+                  const std::function<void()>& onColdLoad = {});
 
   // Unload everything, unregister from renderer.
   void unloadAll(GfxRenderer& renderer);
