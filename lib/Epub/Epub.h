@@ -48,7 +48,6 @@ class Epub {
   bool parsePageMapFile() const;
   void parseCssFiles() const;
   void discoverCssFilesFromZip();
-  void buildImageManifest(ZipFile& zf);
 
  public:
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
@@ -64,8 +63,6 @@ class Epub {
   // cache is missing. Cheap (only file-existence checks) so callers can decide
   // whether to show a progress popup before calling load().
   bool needsFirstOpenIndexing() const;
-  // True when loadImageManifest() will have to scan the ZIP to build images.bin.
-  bool needsImageManifestBuild() const;
 
   bool clearCache(bool preserveThumbs = false) const;
   void setupCacheDir() const;
@@ -112,7 +109,13 @@ class Epub {
   // Load (or build) the image manifest. Call after load() when images will be rendered.
   // Skipping this is valid for text-only or placeholder rendering modes.
   void loadImageManifest();
+  // Non-const: section indexing resolves + caches new image dimensions through it.
+  EpubImageManifest* getImageManifest() { return imageManifest.get(); }
   const EpubImageManifest* getImageManifest() const { return imageManifest.get(); }
+  // Flush newly-resolved image dimensions to images.bin (no-op when nothing changed).
+  void persistImageManifest() {
+    if (imageManifest) imageManifest->persistIfDirty();
+  }
   int resolveHrefToSpineIndex(const std::string& href) const;
 
   // Printed-page list (from NCX <pageList> / EPUB 3 nav page-list / EPUB 2.01 page-map.xml).

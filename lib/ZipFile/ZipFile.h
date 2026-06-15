@@ -96,6 +96,10 @@ class ZipFile {
   // entry is smaller). Useful for header-only reads to get image dimensions.
   size_t readBytesFromEntry(const char* filename, uint8_t* outBuf, size_t maxBytes);
 
+  // Same as readBytesFromEntry but for a caller that already holds the entry's central-dir
+  // stat (e.g. from a prior loadFileStatSlim), avoiding a second central-directory scan.
+  size_t readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf, size_t maxBytes);
+
   // Resumable reader for a single ZIP entry. Holds the file handle and inflate
   // state alive across calls so the caller can feed decompressed bytes in small
   // slices without consuming the whole entry in one shot.

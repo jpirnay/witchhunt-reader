@@ -538,6 +538,15 @@ size_t ZipFile::readBytesFromEntry(const char* filename, uint8_t* outBuf, const 
   FileStatSlim fileStat = {};
   if (!loadFileStatSlim(filename, &fileStat)) return 0;
 
+  return readBytesFromStat(fileStat, outBuf, maxBytes);
+}
+
+size_t ZipFile::readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf, const size_t maxBytes) {
+  if (!outBuf || maxBytes == 0) return 0;
+
+  const ScopedOpenClose zip{*this};
+  if (!zip) return 0;
+
   const long fileOffset = getDataOffset(fileStat);
   if (fileOffset < 0) return 0;
 

@@ -286,12 +286,8 @@ void EpubReaderActivity::onEnter() {
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
 
   if (getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
-    // Building the image manifest scans the whole ZIP (~1s+); show a popup when it's
-    // a cache miss. Warm re-opens load images.bin instantly and skip the flash.
-    if (epub->needsImageManifestBuild()) {
-      RenderLock lock;
-      GUI.drawPopup(renderer, tr(STR_INDEXING));
-    }
+    // Just loads images.bin (or starts an empty cache) — no whole-ZIP scan. Image
+    // dimensions are resolved + cached lazily as section indexing first hits each image.
     epub->loadImageManifest();
     logReaderMemSnapshot("onEnter_after_image_manifest");
   }
@@ -827,6 +823,9 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         LOG_ERR("ERS", "Background build spine=%d failed", targetSpine);
         backgroundSection_.reset();
       }
+      // Flush any image dimensions this background build resolved (valid regardless of the
+      // build's outcome). One write per completed background section, under the render lock.
+      epub->persistImageManifest();
       backgroundBuildState_ = BackgroundBuildState::Settled;
       return;
     }
@@ -2604,6 +2603,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (!buildSection(layout)) {
         return;
       }
+      // Flush any image dimensions this build just resolved (foreground path).
+      epub->persistImageManifest();
       renderNormalPass(lock, layout);
       return;
     case RenderPass::Normal:

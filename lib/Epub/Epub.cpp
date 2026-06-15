@@ -226,9 +226,6 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
     if (bookMetadata.coverItemHref.empty()) {
       LOG_DBG("EBP", "Cover ZIP scan found no match (%lu ms)", millis() - coverBatchStart);
     }
-
-    // buildImageManifest uses streamCentralDirectoryNames — no stat cache needed.
-    buildImageManifest(zip);
   }
 
   bookMetadata.textReferenceHref = opfParser.textReferenceHref;
@@ -443,18 +440,6 @@ bool Epub::parsePageMapFile() const {
   return true;
 }
 
-void Epub::buildImageManifest(ZipFile& zf) {
-  imageManifest.reset(new (std::nothrow) EpubImageManifest());
-  if (!imageManifest) {
-    LOG_ERR("EBP", "Failed to alloc EpubImageManifest");
-    return;
-  }
-  if (!imageManifest->build(cachePath, filepath, zf)) {
-    LOG_ERR("EBP", "Failed to build image manifest");
-    imageManifest.reset();
-  }
-}
-
 bool Epub::needsFirstOpenIndexing() const {
   // Spine/TOC cache missing -> load() rebuilds it (content.opf + TOC/NCX + book.bin).
   if (!BookMetadataCache::cacheExists(cachePath)) return true;
@@ -463,10 +448,8 @@ bool Epub::needsFirstOpenIndexing() const {
   return false;
 }
 
-bool Epub::needsImageManifestBuild() const { return !EpubImageManifest::cacheExists(cachePath); }
-
 void Epub::loadImageManifest() {
-  // Return immediately if already loaded (e.g. built during this same load()).
+  // Return immediately if already loaded (e.g. during this same session).
   if (imageManifest && imageManifest->isLoaded()) return;
 
   imageManifest.reset(new (std::nothrow) EpubImageManifest());
@@ -474,12 +457,10 @@ void Epub::loadImageManifest() {
     LOG_ERR("EBP", "Failed to alloc EpubImageManifest");
     return;
   }
-  if (imageManifest->load(cachePath)) return;
-
-  // Cache miss — build it now. streamCentralDirectoryNames handles large EPUBs safely.
-  LOG_DBG("EBP", "Image manifest cache miss, building now");
-  ZipFile zf(filepath);
-  buildImageManifest(zf);
+  // Loads images.bin if present, else starts an empty cache. Either way the manifest fills
+  // incrementally via ensureResolved() as section indexing first encounters each image, so
+  // there is no up-front whole-book header scan.
+  imageManifest->load(cachePath);
 }
 
 void Epub::discoverCssFilesFromZip() {

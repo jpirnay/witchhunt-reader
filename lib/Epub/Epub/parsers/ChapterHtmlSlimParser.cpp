@@ -905,7 +905,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
             ImageDimensions dims = {0, 0};
             bool dimsOk = false;
             if (self->imageManifest) {
-              const ImageManifestEntry* entry = self->imageManifest->find(resolvedPath);
+              // Resolve + cache on a miss: each image's header is read at most once ever.
+              const ImageManifestEntry* entry =
+                  self->imageManifest->ensureResolved(self->epub->getPath(), resolvedPath);
               if (entry) {
                 dims.width = entry->width;
                 dims.height = entry->height;
@@ -2354,7 +2356,7 @@ void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
     ImageDimensions dims = {0, 0};
     bool dimsOk = false;
     if (imageManifest) {
-      const ImageManifestEntry* entry = imageManifest->find(resolvedPath);
+      const ImageManifestEntry* entry = imageManifest->ensureResolved(epub->getPath(), resolvedPath);
       if (entry) {
         dims.width = entry->width;
         dims.height = entry->height;
