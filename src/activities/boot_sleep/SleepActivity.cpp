@@ -7,7 +7,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <PNGdec.h>
+#include <PngStreamDecoder.h>
 #include <Serialization.h>
 #include <Txt.h>
 #include <Xtc.h>
@@ -28,53 +28,6 @@
 #include "images/MoonIcon.h"
 
 namespace {
-
-// Context passed through PNGdec's decode() user-pointer to the per-scanline draw callback.
-struct PngOverlayCtx {
-  const GfxRenderer* renderer;
-  int screenW;
-  int screenH;
-  int srcWidth;
-  int dstWidth;
-  int dstX;
-  int dstY;
-  float yScale;
-  int lastDstY;
-  // Color-key transparency (tRNS chunk) for TRUECOLOR and GRAYSCALE images.
-  // Initialized lazily on the first draw callback because tRNS is processed during decode(),
-  // not during open() — so hasAlpha()/getTransparentColor() are only valid once decode() starts.
-  // -2 = not yet read; -1 = no color key; >=0 = 0x00RRGGBB (TRUECOLOR) or low-byte gray.
-  int32_t transparentColor;
-  PNG* pngObj;  // for lazy-init of transparentColor on first callback
-};
-
-// PNGdec file I/O callbacks — mirror the pattern in PngToFramebufferConverter.cpp.
-void* pngSleepOpen(const char* filename, int32_t* size) {
-  FsFile* f =
-      new FsFile();  // NOLINT(cppcoreguidelines-owning-memory) — ownership transferred via void* to PNGdec callbacks
-  if (!Storage.openFileForRead("SLP", std::string(filename), *f)) {
-    delete f;  // NOLINT(cppcoreguidelines-owning-memory)
-    return nullptr;
-  }
-  *size = f->size();
-  return f;
-}
-void pngSleepClose(void* handle) {
-  FsFile* f = reinterpret_cast<FsFile*>(handle);
-  if (f) {
-    f->close();
-    delete f;  // NOLINT(cppcoreguidelines-owning-memory)
-  }
-}
-int32_t pngSleepRead(PNGFILE* pFile, uint8_t* pBuf, int32_t len) {
-  FsFile* f = reinterpret_cast<FsFile*>(pFile->fHandle);
-  return f ? f->read(pBuf, len) : 0;
-}
-int32_t pngSleepSeek(PNGFILE* pFile, int32_t pos) {
-  FsFile* f = reinterpret_cast<FsFile*>(pFile->fHandle);
-  if (!f) return -1;
-  return f->seek(pos);
-}
 
 bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, const BookOverlayInfo& overlayInfo) {
   constexpr size_t MIN_FREE_HEAP = 60 * 1024;  // PNG decoder ~42 KB + overhead
@@ -195,95 +148,6 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   renderer.displayGrayBuffer();
   renderer.setRenderMode(GfxRenderer::BW);
   return true;
-}
-
-// Per-scanline draw callback for PNG overlay compositing.
-// Transparent pixels (alpha < 128) are skipped so the reader page shows through.
-// Opaque pixels are drawn in their grayscale brightness (dark → black, light → white).
-int pngOverlayDraw(PNGDRAW* pDraw) {
-  PngOverlayCtx* ctx = reinterpret_cast<PngOverlayCtx*>(pDraw->pUser);
-
-  // Lazy-init: tRNS chunk is processed during decode() before any IDAT data, so by the time
-  // the first draw callback fires, hasAlpha() / getTransparentColor() are already valid.
-  if (ctx->transparentColor == -2) {
-    const int pt = pDraw->iPixelType;
-    ctx->transparentColor = (pDraw->iHasAlpha && (pt == PNG_PIXEL_TRUECOLOR || pt == PNG_PIXEL_GRAYSCALE))
-                                ? (int32_t)ctx->pngObj->getTransparentColor()
-                                : -1;
-  }
-
-  const int destY = ctx->dstY + (int)(pDraw->y * ctx->yScale);
-  if (destY == ctx->lastDstY) return 1;  // skip duplicate rows from Y scaling
-  ctx->lastDstY = destY;
-  if (destY < 0 || destY >= ctx->screenH) return 1;
-
-  const int srcWidth = ctx->srcWidth;
-  const int dstWidth = ctx->dstWidth;
-  const uint8_t* pixels = pDraw->pPixels;
-  const int pixelType = pDraw->iPixelType;
-  const int hasAlpha = pDraw->iHasAlpha;
-
-  int srcX = 0, error = 0;
-  for (int dstX = 0; dstX < dstWidth; dstX++) {
-    const int outX = ctx->dstX + dstX;
-    if (outX >= 0 && outX < ctx->screenW) {
-      uint8_t alpha = 255, gray = 0;
-      switch (pixelType) {
-        case PNG_PIXEL_TRUECOLOR_ALPHA: {
-          const uint8_t* p = &pixels[srcX * 4];
-          alpha = p[3];
-          gray = (uint8_t)((p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8);
-          break;
-        }
-        case PNG_PIXEL_GRAY_ALPHA:
-          gray = pixels[srcX * 2];
-          alpha = pixels[srcX * 2 + 1];
-          break;
-        case PNG_PIXEL_TRUECOLOR: {
-          const uint8_t* p = &pixels[srcX * 3];
-          gray = (uint8_t)((p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8);
-          // tRNS color-key: if pixel matches the designated transparent color, skip it
-          if (ctx->transparentColor >= 0 && p[0] == (uint8_t)((ctx->transparentColor >> 16) & 0xFF) &&
-              p[1] == (uint8_t)((ctx->transparentColor >> 8) & 0xFF) &&
-              p[2] == (uint8_t)(ctx->transparentColor & 0xFF)) {
-            alpha = 0;
-          }
-          break;
-        }
-        case PNG_PIXEL_GRAYSCALE:
-          gray = pixels[srcX];
-          // tRNS color-key: transparent gray value stored in low byte
-          if (ctx->transparentColor >= 0 && gray == (uint8_t)(ctx->transparentColor & 0xFF)) {
-            alpha = 0;
-          }
-          break;
-        case PNG_PIXEL_INDEXED:
-          if (pDraw->pPalette) {
-            const uint8_t idx = pixels[srcX];
-            const uint8_t* p = &pDraw->pPalette[idx * 3];
-            gray = (uint8_t)((p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8);
-            if (hasAlpha) alpha = pDraw->pPalette[768 + idx];
-          }
-          break;
-        default:
-          gray = pixels[srcX];
-          break;
-      }
-
-      if (alpha >= 128) {
-        ctx->renderer->drawPixel(outX, destY, gray < 128);  // true = black, false = white
-      }
-      // alpha < 128: transparent — leave the reader page pixel intact
-    }
-
-    // Bresenham-style X stepping (handles downscaling; 1:1 when srcWidth == dstWidth)
-    error += srcWidth;
-    while (error >= dstWidth) {
-      error -= dstWidth;
-      srcX++;
-    }
-  }
-  return 1;
 }
 
 // Collects full paths of valid image files from /.sleep and /sleep, with no preference between
@@ -901,20 +765,26 @@ void SleepActivity::renderOverlaySleepScreen() const {
   };
 
   auto tryDrawPngOverlay = [&](const std::string& filename) -> bool {
-    constexpr size_t MIN_FREE_HEAP = 60 * 1024;  // PNG decoder ~42 KB + overhead
+    constexpr size_t MIN_FREE_HEAP = 36 * 1024;  // uzlib ring (≤32 KB) + scanline buffers
     if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
       LOG_ERR("SLP", "Not enough heap for PNG overlay decoder");
       return false;
     }
-    auto png = std::make_unique<PNG>();
 
-    int rc = png->open(filename.c_str(), pngSleepOpen, pngSleepClose, pngSleepRead, pngSleepSeek, pngOverlayDraw);
-    if (rc != PNG_SUCCESS) {
-      LOG_DBG("SLP", "PNG open failed: %s (%d)", filename.c_str(), rc);
+    FsFile file;
+    if (!Storage.openFileForRead("SLP", filename, file)) {
+      LOG_DBG("SLP", "PNG open failed: %s", filename.c_str());
+      return false;
+    }
+    auto decoder = std::make_unique<PngStreamDecoder>();
+    PngStreamDecoder::Info info;
+    if (!decoder->begin(file, info)) {
+      LOG_DBG("SLP", "PNG decode start failed: %s", filename.c_str());
+      file.close();
       return false;
     }
 
-    const int srcW = png->getWidth(), srcH = png->getHeight();
+    const int srcW = static_cast<int>(info.width), srcH = static_cast<int>(info.height);
     float yScale = 1.0f;
     int dstW = srcW, dstH = srcH;
     if (srcW > pageWidth || srcH > pageHeight) {
@@ -924,23 +794,48 @@ void SleepActivity::renderOverlaySleepScreen() const {
       dstH = (int)(srcH * scale);
       yScale = (float)dstH / srcH;
     }
+    const int dstX = (pageWidth - dstW) / 2;
+    const int dstY = (pageHeight - dstH) / 2;
 
-    PngOverlayCtx ctx;
-    ctx.renderer = &renderer;
-    ctx.screenW = pageWidth;
-    ctx.screenH = pageHeight;
-    ctx.srcWidth = srcW;
-    ctx.dstWidth = dstW;
-    ctx.dstX = (pageWidth - dstW) / 2;
-    ctx.dstY = (pageHeight - dstH) / 2;
-    ctx.yScale = yScale;
-    ctx.lastDstY = -1;
-    ctx.transparentColor = -2;  // will be resolved on first draw callback (after tRNS is parsed)
-    ctx.pngObj = png.get();
+    // Per-pixel alpha lets transparent pixels show the reader page beneath; opaque
+    // pixels draw in their grayscale brightness (dark → black, light → white).
+    std::unique_ptr<uint8_t[]> grayRow(new (std::nothrow) uint8_t[srcW]);
+    std::unique_ptr<uint8_t[]> alphaRow(new (std::nothrow) uint8_t[srcW]);
+    if (!grayRow || !alphaRow) {
+      file.close();
+      return false;
+    }
 
-    rc = png->decode(&ctx, 0);
-    png->close();
-    return rc == PNG_SUCCESS;
+    bool ok = true;
+    int lastDstY = -1;
+    for (int srcY = 0; srcY < srcH; srcY++) {
+      if (!decoder->nextRow(grayRow.get(), alphaRow.get())) {
+        ok = false;
+        break;
+      }
+      const int destY = dstY + (int)(srcY * yScale);
+      if (destY == lastDstY) continue;  // skip duplicate rows from Y scaling
+      lastDstY = destY;
+      if (destY < 0 || destY >= pageHeight) continue;
+
+      int srcX = 0, error = 0;
+      for (int dx = 0; dx < dstW; dx++) {
+        const int outX = dstX + dx;
+        if (outX >= 0 && outX < pageWidth && alphaRow[srcX] >= 128) {
+          renderer.drawPixel(outX, destY, grayRow[srcX] < 128);  // true = black, false = white
+        }
+        // Bresenham-style X stepping (handles downscaling; 1:1 when srcW == dstW)
+        error += srcW;
+        while (error >= dstW) {
+          error -= dstW;
+          srcX++;
+        }
+      }
+    }
+
+    decoder->end();
+    file.close();
+    return ok;
   };
 
   // Collect images from both /.sleep and /sleep directories (no preference between them).

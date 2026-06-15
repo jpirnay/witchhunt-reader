@@ -18,7 +18,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    48;  // bumped: headings revert to scaling (headingFontId always 0); discards v47 taller-font caches
+    49;  // bumped: figright/figleft floats now allow up to half-width / full-viewport-height
+         // images (was width/3 & 120px); discards v48 caches that laid these out as blocks
 
 namespace header {
 constexpr uint32_t kVersion = 0;

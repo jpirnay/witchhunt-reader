@@ -1024,11 +1024,20 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   LOG_DBG("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
                 }
 
-                // Inline image path: if inside a CSS float context and image is small enough,
-                // defer placement beside the next paragraph rather than emitting as a block.
+                // Inline image path: if inside a CSS float context and the image leaves a
+                // usable text column, defer placement beside the following paragraph rather
+                // than emitting it as a centered block.
                 // Concept inspired by CidVonHighwind/microreader and KOReader/CREngine research.
-                const bool isInlineCandidate =
-                    self->floatDepth_ > 0 && displayWidth <= self->viewportWidth / 3 && displayHeight <= 120;
+                //
+                // Width: the float must leave at least half the column for text, otherwise the
+                //   wrapped lines are too narrow to read — fall back to a centered block.
+                // Height: a real figright/figleft illustration (e.g. a half-page Gutenberg plate)
+                //   is much taller than a drop-cap or decorator, so allow up to a full viewport.
+                //   attachPendingFloatImage() splits anything taller than the remaining page into
+                //   a continuation tile on the next page; capping at viewportHeight keeps that
+                //   single-continuation split correct (tileB never exceeds one page).
+                const bool isInlineCandidate = self->floatDepth_ > 0 && displayWidth <= self->viewportWidth / 2 &&
+                                               displayHeight <= self->viewportHeight;
                 if (isInlineCandidate) {
                   self->pendingInlineImage_.cachedPath = std::move(cachedImagePath);
                   self->pendingInlineImage_.epubEntryPath = resolvedPath;

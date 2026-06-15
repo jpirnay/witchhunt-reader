@@ -438,7 +438,8 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     cx = contentRect.x + margin + col * (tw + margin);
     cy = contentTop + row * cellHeight;
   };
-
+  LOG_DBG("RBA", "Render grid: sel=%d prev=%d start=%d pageStartRow=%d visibleRows=%d totalRows=%d", selectorIndex,
+          prevSelectorIndex, startIndex, pageStartRow, visibleRows, totalRows);
   // Partial fast path: only the selection changed within the same page
   const int prevPage = prevSelectorIndex >= 0 ? (prevSelectorIndex / GRID_COLS / visibleRows) : -1;
   const int curPage = selectedRow / visibleRows;
@@ -447,6 +448,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     // swaps buffers), which still shows an older selection. Resync it to the
     // displayed frame before patching just the two affected cells; without this,
     // the stale highlight ships back to the panel and multiple cells appear selected.
+    LOG_DBG("RBA", "Partial grid redraw: sel=%d prev=%d", selectorIndex, prevSelectorIndex);
     renderer.syncWriteBufferFromDisplayed();
     int cx, cy;
     cellPos(prevSelectorIndex, cx, cy);
@@ -477,6 +479,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
   }
 
   const int endIndex = std::min(startIndex + visibleRows * GRID_COLS, static_cast<int>(recentBooks.size()));
+  LOG_DBG("RBA", "Full grid redraw: sel=%d prev=%d", selectorIndex, prevSelectorIndex);
   for (int i = startIndex; i < endIndex; i++) {
     int cx, cy;
     cellPos(i, cx, cy);
