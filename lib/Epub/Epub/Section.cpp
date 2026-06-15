@@ -18,8 +18,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    49;  // bumped: figright/figleft floats now allow up to half-width / full-viewport-height
-         // images (was width/3 & 120px); discards v48 caches that laid these out as blocks
+    51;  // bumped: long (>96-word) paragraphs beside a tall float now wrap in the mid-block
+         // split path too; discards v50 caches where such paragraphs overflowed the image
 
 namespace header {
 constexpr uint32_t kVersion = 0;

@@ -336,11 +336,27 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       }
       LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
       auto& splitBlockStyle = currentTextBlock->getBlockStyle();
+
+      // A long paragraph (>96 words) beside a tall float lays out here, bypassing
+      // makePages(). Inject the active float so it keeps wrapping in this mid-block
+      // flush too — otherwise its first chunk renders full-width over the image.
+      const bool splitIsOriginating = static_cast<bool>(deferredPageImage_);
+      if (!splitIsOriginating && activeFloatBottom_ > 0 && currentPageNextY < activeFloatBottom_ &&
+          splitBlockStyle.floatZoneCount == 0) {
+        auto& z = splitBlockStyle.floatZones[splitBlockStyle.floatZoneCount++];
+        z.top = activeFloatTop_;  // absolute image coordinates (no re-anchor below)
+        z.bottom = activeFloatBottom_;
+        z.width = activeFloatWidth_;
+        z.isRight = activeFloatIsRight_;
+      }
+
       const int horizontalInset = splitBlockStyle.totalHorizontalInset();
       const uint16_t effectiveWidth =
           (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
       const int splitLineHeight = (splitBlockStyle.floatZoneCount > 0) ? effectiveLineHeight(splitBlockStyle) : 0;
-      if (splitBlockStyle.floatZoneCount > 0) {
+      // Re-anchor only the originating block's zone to the first line; injected
+      // zones already carry absolute image coordinates and must not be moved.
+      if (splitIsOriginating && splitBlockStyle.floatZoneCount > 0) {
         for (int zi = 0; zi < splitBlockStyle.floatZoneCount; ++zi) {
           const int imgH = splitBlockStyle.floatZones[zi].bottom - splitBlockStyle.floatZones[zi].top;
           splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
@@ -374,37 +390,15 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
-  deferredPageImage_.reset();  // tile A's deferred yPos update is no longer needed
+  deferredPageImage_.reset();  // the deferred yPos update is moot on a fresh page
 
-  if (continuationImage_.active) {
-    // Capture dimensions before moving the imageBlock out.
-    const int16_t contH = continuationImage_.renderedHeight;
-    const int16_t contW = continuationImage_.width;
-    const bool contIsRight = continuationImage_.isRight;
-    const int16_t contX = contIsRight ? static_cast<int16_t>(viewportWidth - contW) : 0;
-
-    // Place tile B (bottom crop of split image) at the top of the new page.
-    auto pageImg = std::make_shared<PageImage>(std::move(continuationImage_.imageBlock), contX, 0);
-    currentPage->elements.push_back(pageImg);
-    continuationImage_.active = false;
-
-    // Set a float zone on the continuing text block so lines on the new page
-    // are indented for the duration of tile B's height.
-    if (currentTextBlock) {
-      auto& bs = currentTextBlock->getBlockStyle();
-      bs.floatZoneCount = 0;  // clear stale zones from old page first
-      auto& z = bs.floatZones[bs.floatZoneCount++];
-      z.top = 0;
-      z.bottom = contH;
-      z.width = static_cast<int16_t>(contW + 4);
-      z.isRight = contIsRight;
-    }
-  } else {
-    // No continuation image: clear float zones so text on the new page is not
-    // indented for an image that lives on the previous page.
-    if (currentTextBlock) {
-      currentTextBlock->getBlockStyle().floatZoneCount = 0;
-    }
+  // A floated image never crosses a page boundary, so any active float ended on the
+  // page we just emitted. Clear it and drop stale float zones from the block that
+  // continues onto the new page, so its lines are not indented for a prior image.
+  activeFloatTop_ = 0;
+  activeFloatBottom_ = 0;
+  if (currentTextBlock) {
+    currentTextBlock->getBlockStyle().floatZoneCount = 0;
   }
 }
 
@@ -442,43 +436,41 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   const int16_t imgH = pendingInlineImage_.height;
   const int16_t imgW = pendingInlineImage_.width;
   const bool imgIsRight = pendingInlineImage_.isRight;
-  const int16_t remainingOnPage = static_cast<int16_t>(viewportHeight - currentPageNextY);
+
+  // A floated image is never split across a page boundary. If it would not fit in the
+  // space left on this page, break first so it floats at the top of a fresh page —
+  // its height is capped at one viewport by the float gate, so a fresh page always
+  // has room. This avoids the fragile cross-page tile/continuation path entirely and
+  // lets the whole image (with text wrapping beside it) live on a single page.
+  if (imgH > static_cast<int16_t>(viewportHeight - currentPageNextY) && currentPage && !currentPage->elements.empty()) {
+    emitPage(lastBodyChildByteOffset);  // resets currentPage + currentPageNextY=0, clears stale float state
+  }
+
   const int16_t imgX = imgIsRight ? static_cast<int16_t>(viewportWidth - imgW) : 0;
+  const int16_t top = static_cast<int16_t>(currentPageNextY);
 
   auto fullImageBlock =
       std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt, epub->getPath(),
                                    pendingInlineImage_.epubEntryPath);
+  deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, top);
+  currentPage->elements.push_back(deferredPageImage_);
 
-  if (remainingOnPage >= imgH) {
-    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
-      auto& z = bs.floatZones[bs.floatZoneCount++];
-      z.top = static_cast<int16_t>(currentPageNextY);
-      z.bottom = static_cast<int16_t>(currentPageNextY + imgH);
-      z.width = static_cast<int16_t>(imgW + 4);
-      z.isRight = imgIsRight;
-    }
-    deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, currentPageNextY);
-    currentPage->elements.push_back(deferredPageImage_);
-    continuationImage_.active = false;
-  } else {
-    const int16_t tileAHeight = remainingOnPage;
-    const int16_t tileBHeight = static_cast<int16_t>(imgH - tileAHeight);
-    if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
-      auto& z = bs.floatZones[bs.floatZoneCount++];
-      z.top = static_cast<int16_t>(currentPageNextY);
-      z.bottom = static_cast<int16_t>(viewportHeight);
-      z.width = static_cast<int16_t>(imgW + 4);
-      z.isRight = imgIsRight;
-    }
-    auto tileA = fullImageBlock->makeCrop(0, tileAHeight);
-    deferredPageImage_ = std::make_shared<PageImage>(std::move(tileA), imgX, currentPageNextY);
-    currentPage->elements.push_back(deferredPageImage_);
-    continuationImage_.imageBlock = fullImageBlock->makeCrop(tileAHeight, tileBHeight);
-    continuationImage_.width = imgW;
-    continuationImage_.renderedHeight = tileBHeight;
-    continuationImage_.isRight = imgIsRight;
-    continuationImage_.active = true;
+  // Attach the float zone to the originating block (the caption/first paragraph).
+  // makePages() re-anchors it to the first line and then propagates it to every
+  // following block that overlaps the image, via the active-float state below.
+  if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+    auto& z = bs.floatZones[bs.floatZoneCount++];
+    z.top = top;
+    z.bottom = static_cast<int16_t>(top + imgH);
+    z.width = static_cast<int16_t>(imgW + 4);
+    z.isRight = imgIsRight;
   }
+  // Provisional active-float extent; makePages() finalises top/bottom once the
+  // originating block's first line (and thus the image top) is positioned.
+  activeFloatTop_ = top;
+  activeFloatBottom_ = static_cast<int16_t>(top + imgH);
+  activeFloatWidth_ = static_cast<int16_t>(imgW + 4);
+  activeFloatIsRight_ = imgIsRight;
 
   pendingInlineImage_.active = false;
   pendingInlineImage_.cachedPath.clear();
@@ -2280,19 +2272,41 @@ void ChapterHtmlSlimParser::makePages() {
     return;
   }
 
+  // Active-float propagation. A tall floated image spans several text blocks (its
+  // caption plus the following paragraphs). The image is attached to the first of
+  // those blocks; here we re-inject the same zone into every later block that still
+  // overlaps the image vertically, so they all wrap beside it — then drop it once
+  // layout has passed the image bottom.
+  const bool isOriginatingBlock = static_cast<bool>(deferredPageImage_);
+  if (activeFloatBottom_ > 0 && currentPageNextY >= activeFloatBottom_) {
+    activeFloatBottom_ = 0;  // layout has moved past the image; float no longer applies
+  }
+  if (!isOriginatingBlock && activeFloatBottom_ > 0 && currentPageNextY < activeFloatBottom_ &&
+      currentTextBlock->getBlockStyle().floatZoneCount == 0) {
+    BlockStyle& mbs = currentTextBlock->getBlockStyle();
+    auto& z = mbs.floatZones[mbs.floatZoneCount++];
+    z.top = activeFloatTop_;  // absolute (already-anchored) image coordinates
+    z.bottom = activeFloatBottom_;
+    z.width = activeFloatWidth_;
+    z.isRight = activeFloatIsRight_;
+  }
+
   // Pre-correct float zone coordinates before line-breaking so widthForLine
-  // and the xOffset check in addLineToPage use the same y values.
-  // Image top aligns with the line top (currentPageNextY after margin-top).
+  // and the xOffset check in addLineToPage use the same y values. Only the
+  // originating block re-anchors (its zone, and the image, snap to the first
+  // line top); injected zones already carry absolute image coordinates.
   const int lineHeightForFloat = (blockStyle.floatZoneCount > 0) ? effectiveLineHeight(blockStyle) : 0;
-  // LOG_DBG("EHP", "makePages: floatZoneCount=%d lineHeightForFloat=%d currentPageNextY=%d",
-  //         (int)blockStyle.floatZoneCount, lineHeightForFloat, (int)currentPageNextY);
-  if (blockStyle.floatZoneCount > 0) {
+  if (isOriginatingBlock && blockStyle.floatZoneCount > 0) {
     auto& mbs = currentTextBlock->getBlockStyle();
     for (int zi = 0; zi < mbs.floatZoneCount; ++zi) {
       const int imgH = mbs.floatZones[zi].bottom - mbs.floatZones[zi].top;
       mbs.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
       mbs.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
     }
+    // Finalise the active-float extent so following blocks reference the image's
+    // real on-page position (after this block's top margin).
+    activeFloatTop_ = static_cast<int16_t>(currentPageNextY);
+    activeFloatBottom_ = static_cast<int16_t>(currentPageNextY + (mbs.floatZones[0].bottom - mbs.floatZones[0].top));
   }
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,

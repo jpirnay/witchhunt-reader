@@ -69,16 +69,17 @@ class ChapterHtmlSlimParser final : public Print {
   PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
   std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
 
-  // When an inline float image crosses a page boundary, the bottom crop is carried here
-  // so emitPage() can place it at the top of the new page.
-  struct ContinuationImage {
-    std::shared_ptr<ImageBlock> imageBlock;  // cropped tile (srcYOffset set)
-    int16_t width = 0;
-    int16_t renderedHeight = 0;  // height of this tile on the new page
-    bool active = false;
-    bool isRight = false;  // true when float: right
-  };
-  ContinuationImage continuationImage_;
+  // Active float occupying the current page. A floated image never crosses a page
+  // boundary (attachPendingFloatImage page-breaks first if it would not fit), so the
+  // float lives entirely within one page. While currentPageNextY is above
+  // activeFloatBottom_, makePages() injects this zone into every text block so the
+  // caption AND the following paragraphs wrap beside the image — not just the one
+  // block the image was attached to. Cleared once layout passes activeFloatBottom_
+  // or on a page break. activeFloatBottom_ == 0 means no active float.
+  int16_t activeFloatTop_ = 0;
+  int16_t activeFloatBottom_ = 0;
+  int16_t activeFloatWidth_ = 0;  // image width + gap
+  bool activeFloatIsRight_ = false;
   int fontId;
   // Resolved heading fonts (index 0=h1,1=h2,2=h3). headingFontId_[i]==0 => scale the body
   // font by headingResidual_[i]; otherwise render the heading with that taller built-in
