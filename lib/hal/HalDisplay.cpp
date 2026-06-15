@@ -116,6 +116,8 @@ bool HalDisplay::reallocSecondaryBuffer() { return einkDisplay.reallocSecondaryB
 
 bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
 
+void HalDisplay::setSingleBufferFastDiff(bool enabled) { einkDisplay.setSingleBufferFastDiff(enabled); }
+
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }

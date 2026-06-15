@@ -88,6 +88,12 @@ class HalDisplay {
   // Returns true when the secondary (previous-frame) buffer is allocated.
   bool hasSecondaryBuffer() const;
 
+  // Allow fast differential refresh to continue (X4) after the secondary buffer
+  // is released, diffing against the controller's retained RED-RAM baseline
+  // instead of downgrading to half/full. See EInkDisplay::setSingleBufferFastDiff
+  // for the contract the caller must uphold.
+  void setSingleBufferFastDiff(bool enabled);
+
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
   void copyGrayscaleMsbBuffers(const uint8_t* msbBuffer);

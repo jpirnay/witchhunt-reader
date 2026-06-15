@@ -165,6 +165,9 @@ class GfxRenderer {
   bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
   bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
+  // Keep fast differential alive (X4) after releaseSecondaryBuffer() by diffing
+  // against the controller's retained baseline. See HalDisplay::setSingleBufferFastDiff.
+  void setSingleBufferFastDiff(bool enabled) const { display.setSingleBufferFastDiff(enabled); }
   bool isX3() const { return display.deviceIsX3(); }
 
   // Non-blocking display split.

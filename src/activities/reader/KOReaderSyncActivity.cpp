@@ -48,6 +48,12 @@ void trimMemoryBeforeTls(const GfxRenderer& renderer) {
   if (renderer.hasSecondaryBuffer()) {
     if (renderer.releaseSecondaryBuffer()) {
       LOG_DBG("KOSync", "Released secondary framebuffer before TLS (~52 KB contiguous)");
+      // The controller still holds the last displayed frame in RED RAM, and the
+      // sync UI only ever issues plain BW full-frame redraws, so fast
+      // differential refresh can continue against that baseline instead of
+      // downgrading every status update to a half/full waveform (X4 only; X3
+      // fast differential is unaffected by the release).
+      renderer.setSingleBufferFastDiff(true);
     }
   }
 }
