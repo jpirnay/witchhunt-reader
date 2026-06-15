@@ -29,35 +29,6 @@
 #include "fontIds.h"
 
 namespace {
-std::string convertSidecarToBmp(const std::string& cacheDir, const std::string& sidecarPath, int width, int height,
-                                const std::string& fileName) {
-  Storage.mkdir(cacheDir.c_str());
-  const std::string bmpPath = cacheDir + "/" + fileName;
-  if (Storage.exists(bmpPath.c_str())) return bmpPath;
-
-  FsFile src;
-  if (!Storage.openFileForRead("HOME", sidecarPath, src)) return "";
-  FsFile dst;
-  if (!Storage.openFileForWrite("HOME", bmpPath, dst)) {
-    src.close();
-    return "";
-  }
-
-  bool ok = false;
-  if (FsHelpers::hasJpgExtension(sidecarPath)) {
-    ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, width, height);
-  } else if (FsHelpers::hasPngExtension(sidecarPath)) {
-    ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, width, height);
-  }
-  src.close();
-  dst.close();
-  if (!ok) {
-    Storage.remove(bmpPath.c_str());
-    return "";
-  }
-  return bmpPath;
-}
-
 constexpr int CLASSIC_MIN_RECENT_TILE_HEIGHT = 280;
 constexpr int LYRA_MIN_RECENT_TILE_HEIGHT = 170;
 constexpr int LYRA_3_COVERS_MIN_RECENT_TILE_HEIGHT = 200;
@@ -223,187 +194,58 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   for (; nextRecentCoverIndex < recentBooks.size(); nextRecentCoverIndex++) {
     RecentBook& book = recentBooks[nextRecentCoverIndex];
+    if (!Storage.exists(book.path.c_str())) continue;
 
-    // If coverBmpPath was previously cleared (failed cover extraction) or is missing after
-    // a cache wipe, attempt to generate it now using the full load path (buildIfMissing=true).
-    if (book.coverBmpPath.empty() && Storage.exists(book.path.c_str())) {
-      if (FsHelpers::hasEpubExtension(book.path)) {
-        Epub epub(book.path, "/.crosspoint");
-        if (epub.load(true, true)) {
-          const std::string thumbPath = epub.getThumbBmpPath();
-          bool success = thumbSizes.empty() ? epub.generateThumbBmp(coverHeight)
-                                            : epub.generateThumbBmp(thumbSizes[0].first, thumbSizes[0].second);
-          if (success) {
-            RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, thumbPath);
-            book.coverBmpPath = thumbPath;
-            LOG_DBG("HOME", "Generated missing cover for %s", book.path.c_str());
-          }
-        }
-      } else if (FsHelpers::hasXtcExtension(book.path)) {
-        Xtc xtc(book.path, "/.crosspoint");
-        if (xtc.load()) {
-          const std::string thumbPath = xtc.getThumbBmpPath();
-          bool success = thumbSizes.empty() ? xtc.generateThumbBmp(coverHeight)
-                                            : xtc.generateThumbBmp(thumbSizes[0].first, thumbSizes[0].second);
-          if (success) {
-            RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, thumbPath);
-            book.coverBmpPath = thumbPath;
-            LOG_DBG("HOME", "Generated missing cover for %s", book.path.c_str());
-          }
-        }
-      } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-        Txt txt(book.path, "/.crosspoint");
-        const std::string thumbPath = txt.getThumbBmpPath();
-        bool success = thumbSizes.empty() ? txt.generateThumbBmp(coverHeight)
-                                          : txt.generateThumbBmp(thumbSizes[0].first, thumbSizes[0].second);
-        if (success) {
-          RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, thumbPath);
-          book.coverBmpPath = thumbPath;
-          LOG_DBG("HOME", "Generated surrogate cover for %s", book.path.c_str());
+    // The grid thumbnail is source-agnostic: ReaderActivity::ensureCoverThumb() produces an
+    // identical "<bookCacheDir>/thumb_..." BMP whether the cover comes from a sidecar image
+    // (preferred source) or the embedded cover, and we always store the canonical placeholder.
+    const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
+
+    // Which thumbnail sizes are missing or are 0-byte sentinels left by a prior failed extract?
+    // (Storage.exists() is true for a sentinel but drawCover() can't render it.)
+    bool anyMissing = false;
+    if (!thumbSizes.empty()) {
+      for (const auto& sz : thumbSizes) {
+        const std::string path = UITheme::getCoverThumbPath(placeholder, sz.first, sz.second);
+        FsFile thumbFile;
+        const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
+        thumbFile.close();
+        if (!validThumb) {
+          anyMissing = true;
+          break;
         }
       }
+    } else {
+      const std::string path = UITheme::getCoverThumbPath(placeholder, coverHeight);
+      FsFile thumbFile;
+      const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
+      thumbFile.close();
+      anyMissing = !validThumb;
+    }
+
+    if (anyMissing) {
+      // Cover decode (PNG/JPEG sidecar or embedded) needs ~42 KB contiguous heap, unavailable
+      // while the 48 KB carousel frame buffer is held; free it first (rebuilt on next render).
+      invalidateFrameCacheSafely();
+
+      bool success = true;
+      if (!thumbSizes.empty()) {
+        for (const auto& sz : thumbSizes)
+          success = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second) && success;
+      } else {
+        success = ReaderActivity::ensureCoverThumb(book.path, coverHeight);
+      }
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, success ? placeholder : "");
+      book.coverBmpPath = success ? placeholder : "";
       onCoverGenerated();
       return;
     }
 
-    if (!book.coverBmpPath.empty()) {
-      // Sidecar covers (JPG/PNG paths stored directly) must be converted to BMP thumbnails
-      // and the stored coverBmpPath updated to the cache path with [WIDTH]x[HEIGHT] placeholder.
-      const bool isSidecar =
-          FsHelpers::hasJpgExtension(book.coverBmpPath) || FsHelpers::hasPngExtension(book.coverBmpPath);
-      if (isSidecar) {
-        LOG_DBG("HOME", "Converting sidecar %s for book %s", book.coverBmpPath.c_str(), book.path.c_str());
-        if (!Storage.exists(book.coverBmpPath.c_str())) {
-          LOG_ERR("HOME", "Sidecar file missing: %s", book.coverBmpPath.c_str());
-          RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-          book.coverBmpPath = "";
-        } else {
-          // Free the carousel frame cache before converting — PNG/JPEG decode needs ~42 KB
-          // contiguous heap, which won't be available while the 48 KB frame buffer is held.
-          // The cache will be rebuilt on the next render.
-          invalidateFrameCacheSafely();
-
-          const std::string cacheBase = ReaderActivity::bookCacheDir(book.path);
-          const std::string placeholder = cacheBase + "/[HEIGHT].bmp";
-          bool success = true;
-          if (!thumbSizes.empty()) {
-            for (const auto& sz : thumbSizes) {
-              const std::string name = std::to_string(sz.first) + "x" + std::to_string(sz.second) + ".bmp";
-              if (convertSidecarToBmp(cacheBase, book.coverBmpPath, sz.first, sz.second, name).empty()) {
-                success = false;
-                break;
-              }
-            }
-          } else {
-            const int w = coverHeight * 6 / 10;
-            const std::string name = std::to_string(coverHeight) + ".bmp";
-            if (convertSidecarToBmp(cacheBase, book.coverBmpPath, w, coverHeight, name).empty()) success = false;
-          }
-          if (success) {
-            LOG_DBG("HOME", "Sidecar converted, placeholder: %s", placeholder.c_str());
-            RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
-            book.coverBmpPath = placeholder;
-          } else {
-            LOG_ERR("HOME", "Failed to convert sidecar cover for %s", book.path.c_str());
-            // Don't permanently clear the path on failure — keep the raw sidecar path
-            // so the next home visit can retry (e.g. after more memory becomes available).
-          }
-          onCoverGenerated();
-          return;
-        }
-      }
-
-      if (!book.coverBmpPath.empty()) {
-        if (!thumbSizes.empty()) {
-          // Theme uses WxH thumbnails — check which are missing or empty and generate.
-          // Size check guards against empty sentinel files written by generateThumbBmp()
-          // when cover extraction fails: Storage.exists() returns true for a 0-byte sentinel
-          // but drawCover() can't render it, so we must treat it as missing and retry.
-          bool anyMissing = false;
-          for (const auto& sz : thumbSizes) {
-            const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, sz.first, sz.second);
-            FsFile thumbFile;
-            const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
-            thumbFile.close();
-            if (!validThumb) {
-              if (Storage.exists(path.c_str())) Storage.remove(path.c_str());  // clear sentinel so regeneration works
-              anyMissing = true;
-              break;
-            }
-          }
-
-          if (anyMissing) {
-            bool success = true;
-            if (FsHelpers::hasEpubExtension(book.path)) {
-              Epub epub(book.path, "/.crosspoint");
-              epub.load(true, true);
-              for (const auto& sz : thumbSizes) {
-                const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, sz.first, sz.second);
-                if (!Storage.exists(path.c_str())) success = epub.generateThumbBmp(sz.first, sz.second) && success;
-              }
-            } else if (FsHelpers::hasXtcExtension(book.path)) {
-              Xtc xtc(book.path, "/.crosspoint");
-              if (xtc.load()) {
-                for (const auto& sz : thumbSizes) {
-                  const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, sz.first, sz.second);
-                  if (!Storage.exists(path.c_str())) success = xtc.generateThumbBmp(sz.first, sz.second) && success;
-                }
-              }
-            } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-              Txt txt(book.path, "/.crosspoint");
-              for (const auto& sz : thumbSizes) {
-                const std::string path = UITheme::getCoverThumbPath(book.coverBmpPath, sz.first, sz.second);
-                if (!Storage.exists(path.c_str())) success = txt.generateThumbBmp(sz.first, sz.second) && success;
-              }
-            }
-            if (!success) {
-              RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-              book.coverBmpPath = "";
-            }
-            onCoverGenerated();
-            return;
-          }
-        } else {
-          std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
-          FsFile legacyThumb;
-          const bool legacyValid = Storage.openFileForRead("HOME", coverPath, legacyThumb) && legacyThumb.size() > 0;
-          legacyThumb.close();
-          if (!legacyValid) {
-            if (Storage.exists(coverPath.c_str())) Storage.remove(coverPath.c_str());  // clear sentinel
-            if (FsHelpers::hasEpubExtension(book.path)) {
-              Epub epub(book.path, "/.crosspoint");
-              epub.load(true, true);
-              bool success = epub.generateThumbBmp(coverHeight);
-              if (!success) {
-                RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-                book.coverBmpPath = "";
-              }
-              onCoverGenerated();
-              return;
-            } else if (FsHelpers::hasXtcExtension(book.path)) {
-              Xtc xtc(book.path, "/.crosspoint");
-              if (xtc.load()) {
-                bool success = xtc.generateThumbBmp(coverHeight);
-                if (!success) {
-                  RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-                  book.coverBmpPath = "";
-                }
-                onCoverGenerated();
-                return;
-              }
-            } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-              Txt txt(book.path, "/.crosspoint");
-              bool success = txt.generateThumbBmp(coverHeight);
-              if (!success) {
-                RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-                book.coverBmpPath = "";
-              }
-              onCoverGenerated();
-              return;
-            }
-          }
-        }
-      }  // if (!book.coverBmpPath.empty()) after sidecar check
+    // Already present — make sure the stored path is the canonical placeholder so a stale
+    // "[HEIGHT].bmp" / raw-sidecar entry self-heals to the unified naming without a re-decode.
+    if (book.coverBmpPath != placeholder) {
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+      book.coverBmpPath = placeholder;
     }
   }
 

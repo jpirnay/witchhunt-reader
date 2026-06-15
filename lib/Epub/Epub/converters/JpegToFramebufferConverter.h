@@ -23,6 +23,13 @@ class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
   static bool getDimensionsFromBuffer(const uint8_t* buf, size_t len, ImageDimensions& out,
                                       JpegMode* outMode = nullptr);
 
+  // Stream the SOF marker out of a ZIP entry, skipping over arbitrarily large leading
+  // metadata segments (Exif thumbnails, XMP, ICC profiles) that can push the SOF past
+  // any fixed header buffer. O(1) memory — uses a resumable ZipFile::EntryReader.
+  // When outMode is non-null it is set to the coding mode of the first SOF marker.
+  static bool getDimensionsFromZipEntryStreaming(const std::string& epubPath, const std::string& entryPath,
+                                                 ImageDimensions& out, JpegMode* outMode = nullptr);
+
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {

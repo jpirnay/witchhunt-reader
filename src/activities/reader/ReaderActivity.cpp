@@ -3,7 +3,9 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <PngToBmpConverter.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
@@ -75,6 +77,108 @@ std::string ReaderActivity::bookCacheDir(const std::string& bookPath) {
   if (FsHelpers::hasEpubExtension(bookPath)) return Epub(bookPath, "/.crosspoint").getCachePath();
   if (FsHelpers::hasXtcExtension(bookPath)) return Xtc(bookPath, "/.crosspoint").getCachePath();
   return Txt(bookPath, "/.crosspoint").getCachePath();
+}
+
+std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, const std::string& sidecarPath, int width,
+                                                int height, const std::string& fileName) {
+  if (!Storage.exists(cacheDir.c_str())) Storage.mkdir(cacheDir.c_str());
+  const std::string bmpPath = cacheDir + "/" + fileName;
+  if (Storage.exists(bmpPath.c_str())) return bmpPath;
+
+  FsFile src;
+  if (!Storage.openFileForRead("COVER", sidecarPath, src)) return "";
+  FsFile dst;
+  if (!Storage.openFileForWrite("COVER", bmpPath, dst)) {
+    src.close();
+    return "";
+  }
+
+  bool ok = false;
+  if (FsHelpers::hasJpgExtension(sidecarPath)) {
+    ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, width, height);
+  } else if (FsHelpers::hasPngExtension(sidecarPath)) {
+    ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, width, height);
+  } else if (FsHelpers::hasBmpExtension(sidecarPath)) {
+    uint8_t buffer[1024];
+    while (src.available()) dst.write(buffer, src.read(buffer, sizeof(buffer)));
+    ok = true;
+  }
+  src.close();
+  dst.close();
+  if (!ok) {
+    Storage.remove(bmpPath.c_str());
+    return "";
+  }
+  return bmpPath;
+}
+
+std::string ReaderActivity::coverThumbPlaceholder(const std::string& bookPath) {
+  return bookCacheDir(bookPath) + "/thumb_[HEIGHT].bmp";
+}
+
+namespace {
+// True if a thumbnail file exists and is non-empty (a 0-byte sentinel left by a prior failed
+// extraction must be treated as missing so regeneration retries).
+bool thumbFileValid(const std::string& path) {
+  FsFile f;
+  const bool ok = Storage.openFileForRead("COVER", path, f) && f.size() > 0;
+  f.close();
+  return ok;
+}
+}  // namespace
+
+bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int width, int height) {
+  const std::string dir = bookCacheDir(bookPath);
+  const std::string name = "thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
+  const std::string file = dir + "/" + name;
+  if (thumbFileValid(file)) return true;
+  if (Storage.exists(file.c_str())) Storage.remove(file.c_str());  // clear sentinel before retry
+
+  // Source preference: a sidecar image beside the book wins over the embedded cover.
+  const std::string sidecar = sidecarCoverPath(bookPath);
+  if (!sidecar.empty() && !convertSidecarToBmp(dir, sidecar, width, height, name).empty()) return true;
+
+  // No usable sidecar — fall back to the embedded cover (deferred load: a sidecar hit never
+  // pays for a full book parse).
+  if (FsHelpers::hasEpubExtension(bookPath)) {
+    Epub epub(bookPath, "/.crosspoint");
+    return epub.load(true, true) && epub.generateThumbBmp(width, height);
+  }
+  if (FsHelpers::hasXtcExtension(bookPath)) {
+    Xtc xtc(bookPath, "/.crosspoint");
+    return xtc.load() && xtc.generateThumbBmp(width, height);
+  }
+  if (FsHelpers::hasTxtExtension(bookPath) || FsHelpers::hasMarkdownExtension(bookPath)) {
+    Txt txt(bookPath, "/.crosspoint");
+    return txt.generateThumbBmp(width, height);
+  }
+  return false;
+}
+
+bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int height) {
+  const std::string dir = bookCacheDir(bookPath);
+  const std::string name = "thumb_" + std::to_string(height) + ".bmp";
+  const std::string file = dir + "/" + name;
+  if (thumbFileValid(file)) return true;
+  if (Storage.exists(file.c_str())) Storage.remove(file.c_str());  // clear sentinel before retry
+
+  // Embedded single-height thumbnails scale to height*0.6 wide; mirror that for the sidecar.
+  const std::string sidecar = sidecarCoverPath(bookPath);
+  if (!sidecar.empty() && !convertSidecarToBmp(dir, sidecar, height * 6 / 10, height, name).empty()) return true;
+
+  if (FsHelpers::hasEpubExtension(bookPath)) {
+    Epub epub(bookPath, "/.crosspoint");
+    return epub.load(true, true) && epub.generateThumbBmp(height);
+  }
+  if (FsHelpers::hasXtcExtension(bookPath)) {
+    Xtc xtc(bookPath, "/.crosspoint");
+    return xtc.load() && xtc.generateThumbBmp(height);
+  }
+  if (FsHelpers::hasTxtExtension(bookPath) || FsHelpers::hasMarkdownExtension(bookPath)) {
+    Txt txt(bookPath, "/.crosspoint");
+    return txt.generateThumbBmp(height);
+  }
+  return false;
 }
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {

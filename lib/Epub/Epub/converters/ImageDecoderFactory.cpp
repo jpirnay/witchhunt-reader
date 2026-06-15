@@ -75,6 +75,11 @@ bool ImageDecoderFactory::getDimensionsFromZipEntry(const std::string& epubFileP
   bool ok = false;
   if (bytesRead >= 2 && buf[0] == 0xFF && buf[1] == 0xD8) {
     ok = JpegToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
+    if (!ok) {
+      // SOF can sit behind large Exif/XMP/ICC metadata beyond the header buffer
+      // (Photoshop exports are common offenders). Stream the entry to find it.
+      ok = JpegToFramebufferConverter::getDimensionsFromZipEntryStreaming(epubFilePath, normalised, out);
+    }
   } else if (bytesRead >= 8 && buf[0] == 0x89 && buf[1] == 0x50) {
     ok = PngToFramebufferConverter::getDimensionsFromBuffer(buf, bytesRead, out);
   } else if (bytesRead >= 10 && buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F') {

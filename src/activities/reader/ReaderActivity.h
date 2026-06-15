@@ -33,6 +33,20 @@ class ReaderActivity final : public Activity {
   static std::string sidecarCoverPath(const std::string& bookPath);
   static std::string bookCacheDir(const std::string& bookPath);
 
+  // Grid cover thumbnails. The on-disk result is source-agnostic and identical no matter
+  // where the cover came from: "<bookCacheDir>/thumb_<W>x<H>.bmp" (or "thumb_<H>.bmp" for the
+  // single-height themes), registered in RecentBooks via the template coverThumbPlaceholder()
+  // returns. A sidecar image beside the book always takes precedence over the embedded cover
+  // as the *source*; the embedded cover is only parsed when no sidecar exists.
+  static std::string coverThumbPlaceholder(const std::string& bookPath);
+  static bool ensureCoverThumb(const std::string& bookPath, int width, int height);
+  static bool ensureCoverThumb(const std::string& bookPath, int height);
+
+  // Render a sidecar image (or copy a sidecar BMP) into a scaled 1-bit BMP at
+  // "<cacheDir>/<fileName>". Returns the written path, or "" on failure.
+  static std::string convertSidecarToBmp(const std::string& cacheDir, const std::string& sidecarPath, int width,
+                                         int height, const std::string& fileName);
+
   explicit ReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialBookPath)
       : Activity("Reader", renderer, mappedInput), initialBookPath(std::move(initialBookPath)) {}
   void onEnter() override;

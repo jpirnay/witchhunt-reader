@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <ZipFile.h>
 #include <esp_task_wdt.h>
 #include <tjpgd.h>
 
@@ -636,6 +637,76 @@ bool JpegToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, con
     pos += segLen;
   }
   return false;
+}
+
+bool JpegToFramebufferConverter::getDimensionsFromZipEntryStreaming(const std::string& epubPath,
+                                                                    const std::string& entryPath, ImageDimensions& out,
+                                                                    JpegMode* outMode) {
+  ZipFile zip(epubPath);
+  ZipFile::EntryReader reader(zip, 512);
+  if (!reader.open(entryPath.c_str())) return false;
+
+  // Pull decompressed bytes one chunk at a time. Segment bodies are skipped byte-by-byte
+  // through this same source, so memory stays bounded no matter how large the metadata is.
+  uint8_t chunk[512];
+  size_t chunkLen = 0;
+  size_t chunkPos = 0;
+  bool streamDone = false;
+  auto nextByte = [&](uint8_t& b) -> bool {
+    while (chunkPos >= chunkLen) {
+      if (streamDone) return false;
+      size_t produced = 0;
+      bool done = false;
+      if (!reader.step(chunk, sizeof(chunk), &produced, &done)) return false;
+      chunkLen = produced;
+      chunkPos = 0;
+      streamDone = done;
+      if (produced == 0 && done) return false;
+    }
+    b = chunk[chunkPos++];
+    return true;
+  };
+
+  uint8_t b0 = 0, b1 = 0;
+  if (!nextByte(b0) || !nextByte(b1) || b0 != 0xFF || b1 != 0xD8) return false;  // SOI
+
+  while (true) {
+    uint8_t b = 0;
+    if (!nextByte(b)) return false;
+    if (b != 0xFF) continue;  // resync to next marker prefix
+    uint8_t marker = 0;
+    do {
+      if (!nextByte(marker)) return false;  // skip fill bytes
+    } while (marker == 0xFF);
+    // Standalone markers carry no length payload.
+    if (marker == 0x00 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD9)) continue;
+
+    uint8_t l0 = 0, l1 = 0;
+    if (!nextByte(l0) || !nextByte(l1)) return false;
+    const uint16_t segLen = (static_cast<uint16_t>(l0) << 8) | l1;
+    if (segLen < 2) return false;
+
+    const bool isSof = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
+                       (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
+    if (isSof) {
+      uint8_t sof[5] = {0};  // precision, height(hi,lo), width(hi,lo)
+      for (uint8_t& s : sof)
+        if (!nextByte(s)) return false;
+      const uint16_t h = (static_cast<uint16_t>(sof[1]) << 8) | sof[2];
+      const uint16_t w = (static_cast<uint16_t>(sof[3]) << 8) | sof[4];
+      if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
+      out.width = static_cast<int16_t>(w);
+      out.height = static_cast<int16_t>(h);
+      if (outMode) *outMode = classifyJpegMode(marker);
+      return true;
+    }
+    if (marker == 0xDA) return false;  // SOS — entropy data begins, no SOF was found
+
+    for (uint16_t i = 0; i < segLen - 2; i++) {
+      uint8_t skip = 0;
+      if (!nextByte(skip)) return false;
+    }
+  }
 }
 
 bool JpegToFramebufferConverter::getModeFromHeader(const std::string& imagePath, JpegMode& out) {

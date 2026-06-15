@@ -7,9 +7,7 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <JpegToBmpConverter.h>
 #include <Logging.h>
-#include <PngToBmpConverter.h>
 #include <Txt.h>
 #include <Xtc.h>
 
@@ -23,41 +21,12 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
 namespace {
-std::string convertSidecarToBmp(const std::string& bookPath, const std::string& sidecarPath, int width, int height,
-                                const std::string& fileName) {
-  const std::string cacheDir = "/.crosspoint/sidecar_" + std::to_string(std::hash<std::string>{}(bookPath));
-  Storage.mkdir(cacheDir.c_str());
-  const std::string bmpPath = cacheDir + "/" + fileName;
-  if (Storage.exists(bmpPath.c_str())) return bmpPath;
-
-  FsFile src;
-  if (!Storage.openFileForRead("RBA", sidecarPath, src)) return "";
-  FsFile dst;
-  if (!Storage.openFileForWrite("RBA", bmpPath, dst)) {
-    src.close();
-    return "";
-  }
-
-  bool ok = false;
-  if (FsHelpers::hasJpgExtension(sidecarPath)) {
-    ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dst, width, height);
-  } else if (FsHelpers::hasPngExtension(sidecarPath)) {
-    ok = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dst, width, height);
-  }
-  src.close();
-  dst.close();
-  if (!ok) {
-    Storage.remove(bmpPath.c_str());
-    return "";
-  }
-  return bmpPath;
-}
-
 int gridThumbWidth(int contentWidth) {
   const int margin = RecentBooksActivity::GRID_THUMB_MARGIN;
   const int cols = RecentBooksActivity::GRID_COLS;
@@ -87,78 +56,30 @@ bool RecentBooksActivity::loadNextCover() {
 
   for (; nextCoverIndex < recentBooks.size(); nextCoverIndex++) {
     RecentBook& book = recentBooks[nextCoverIndex];
+    if (!Storage.exists(book.path.c_str())) continue;
 
-    // Never-opened book (or a book whose cover path was cleared after a failed
-    // extraction / cache wipe): try to extract the embedded cover now so the grid
-    // shows a thumbnail without having to open the book first. Mirrors
-    // HomeActivity::loadRecentCovers' empty-path branch.
-    if (book.coverBmpPath.empty()) {
-      if (!Storage.exists(book.path.c_str())) continue;
-      std::string placeholder;
-      bool ok = false;
-      if (FsHelpers::hasEpubExtension(book.path)) {
-        Epub epub(book.path, "/.crosspoint");
-        if (epub.load(true, true)) {
-          placeholder = epub.getThumbBmpPath();
-          ok = epub.generateThumbBmp(tw, th);
-        }
-      } else if (FsHelpers::hasXtcExtension(book.path)) {
-        Xtc xtc(book.path, "/.crosspoint");
-        if (xtc.load()) {
-          placeholder = xtc.getThumbBmpPath();
-          ok = xtc.generateThumbBmp(tw, th);
-        }
-      } else if (FsHelpers::hasTxtExtension(book.path) || FsHelpers::hasMarkdownExtension(book.path)) {
-        Txt txt(book.path, "/.crosspoint");
-        placeholder = txt.getThumbBmpPath();
-        ok = txt.generateThumbBmp(tw, th);
-      }
-      if (ok && !placeholder.empty()) {
-        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
-        book.coverBmpPath = placeholder;
-      }
+    // The grid thumbnail is source-agnostic: ensureCoverThumb() produces an identical
+    // "<bookCacheDir>/thumb_<W>x<H>.bmp" whether the cover comes from a sidecar image
+    // (preferred source) or the embedded cover, and we always store the canonical placeholder.
+    const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
+    const std::string thumbPath = gridThumbPath(placeholder, tw, th);
+
+    FsFile thumbFile;
+    const bool valid = Storage.openFileForRead("RBA", thumbPath, thumbFile) && thumbFile.size() > 0;
+    thumbFile.close();
+    if (!valid) {
+      const bool ok = ReaderActivity::ensureCoverThumb(book.path, tw, th);
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, ok ? placeholder : "");
+      book.coverBmpPath = ok ? placeholder : "";
       nextCoverIndex++;
       return false;
     }
 
-    const bool isSidecar =
-        FsHelpers::hasJpgExtension(book.coverBmpPath) || FsHelpers::hasPngExtension(book.coverBmpPath);
-
-    if (isSidecar) {
-      if (!Storage.exists(book.coverBmpPath.c_str())) {
-        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-        book.coverBmpPath = "";
-        continue;
-      }
-      const std::string cacheBase = "/.crosspoint/sidecar_" + std::to_string(std::hash<std::string>{}(book.path));
-      const std::string placeholder = cacheBase + "/[HEIGHT].bmp";
-      const std::string name = std::to_string(tw) + "x" + std::to_string(th) + ".bmp";
-      const std::string result = convertSidecarToBmp(book.path, book.coverBmpPath, tw, th, name);
-      if (!result.empty()) {
-        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
-        book.coverBmpPath = placeholder;
-      }
-      nextCoverIndex++;
-      return false;
-    }
-
-    const std::string thumbPath = gridThumbPath(book.coverBmpPath, tw, th);
-    if (!Storage.exists(thumbPath.c_str())) {
-      bool ok = false;
-      if (FsHelpers::hasEpubExtension(book.path)) {
-        Epub epub(book.path, "/.crosspoint");
-        epub.load(false, true);
-        ok = epub.generateThumbBmp(tw, th);
-      } else if (FsHelpers::hasXtcExtension(book.path)) {
-        Xtc xtc(book.path, "/.crosspoint");
-        if (xtc.load()) ok = xtc.generateThumbBmp(tw, th);
-      }
-      if (!ok) {
-        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
-        book.coverBmpPath = "";
-      }
-      nextCoverIndex++;
-      return false;
+    // Already present — make sure the stored path is the canonical placeholder so a stale
+    // "[HEIGHT].bmp" / raw-sidecar entry self-heals to the unified naming without a re-decode.
+    if (book.coverBmpPath != placeholder) {
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+      book.coverBmpPath = placeholder;
     }
   }
 
