@@ -31,7 +31,30 @@ class PngStreamDecoder {
     uint8_t colorType = 0;
   };
 
-  PngStreamDecoder() = default;
+  PngStreamDecoder()
+      : file_(nullptr),
+        width_(0),
+        height_(0),
+        bitDepth_(0),
+        colorType_(0),
+        bytesPerPixel_(0),
+        rawRowBytes_(0),
+        rowsProduced_(0),
+        currentRow_(nullptr),
+        previousRow_(nullptr),
+        chunkBytesRemaining_(0),
+        idatFinished_(false),
+        readBuf_{},
+        palette_{},
+        paletteAlpha_{},
+        paletteSize_(0),
+        hasPaletteAlpha_(false),
+        hasColorKey_(false),
+        keyGray_(0),
+        keyR_(0),
+        keyG_(0),
+        keyB_(0),
+        started_(false) {}
   ~PngStreamDecoder();
   PngStreamDecoder(const PngStreamDecoder&) = delete;
   PngStreamDecoder& operator=(const PngStreamDecoder&) = delete;
