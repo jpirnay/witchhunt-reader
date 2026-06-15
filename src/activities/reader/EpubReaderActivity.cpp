@@ -127,6 +127,14 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 56 * 1024;
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
+// How many consecutive sections ahead of the reading position B keeps indexed. After the
+// immediate next section settles, the cursor walks forward to index up to this many spines
+// ahead, then idles until navigation re-anchors the window. Bounds the continuous CPU/SD
+// cost on a battery e-reader (vs. indexing the whole book on first open).
+#ifndef BG_BUILD_LOOKAHEAD
+#define BG_BUILD_LOOKAHEAD 3
+#endif
+
 // Foreground in-place section build (the "keep the secondary buffer" path). When heap is
 // ample we build the new section WITHOUT releasing the secondary framebuffer, so the chapter's
 // first page keeps a valid fast-refresh baseline and avoids the baseline-resetting half-
@@ -711,20 +719,32 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     return;
   }
 
-  const int targetSpine = currentSpineIndex + 1;
-  if (targetSpine >= epub->getSpineItemsCount()) {
+  const int spineCount = epub->getSpineItemsCount();
+  // Re-anchor the lookahead window whenever the reading position moves (any navigation):
+  // the per-target state held below is then stale, and the cursor restarts at the new +1.
+  if (backgroundBuildBaseSpine_ != currentSpineIndex) {
     resetBackgroundBuild();
+    backgroundBuildBaseSpine_ = currentSpineIndex;
+    backgroundBuildSpineIndex_ = currentSpineIndex + 1;
+  }
+  // Index up to BG_BUILD_LOOKAHEAD sections ahead. The cursor advances as each target
+  // settles (Settled case below); already-cached spines settle for free in Probe. Once the
+  // cursor passes the window end or the book end, idle until the next navigation re-anchors.
+  const int windowEnd = std::min(currentSpineIndex + BG_BUILD_LOOKAHEAD, spineCount - 1);
+  if (backgroundBuildSpineIndex_ < currentSpineIndex + 1 || backgroundBuildSpineIndex_ > windowEnd) {
     return;
   }
-  // Navigation moved the target since the last tick: held state is for the wrong section.
-  if (backgroundBuildSpineIndex_ != targetSpine) {
-    resetBackgroundBuild();
-    backgroundBuildSpineIndex_ = targetSpine;
-  }
+  const int targetSpine = backgroundBuildSpineIndex_;
 
   switch (backgroundBuildState_) {
-    case BackgroundBuildState::Settled:
-      return;
+    case BackgroundBuildState::Settled: {
+      // Target indexed (freshly built or already cached): advance the cursor to the next
+      // section. The window/navigation guard above stops the walk at the window or book end.
+      const int next = targetSpine + 1;
+      resetBackgroundBuild();
+      backgroundBuildSpineIndex_ = next;
+      return;  // re-probe `next` on the following tick
+    }
 
     case BackgroundBuildState::Probe: {
       // One SD probe per target: if the exact cache variant already exists there is

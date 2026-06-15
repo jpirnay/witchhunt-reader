@@ -265,10 +265,14 @@ class EpubReaderActivity final : public Activity {
   // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a
   // field. -1 means no background build is active.
   int8_t backgroundBuildPercent_ = -1;
-  // --- Background B (idle build of the next consecutive section's cache) ---
-  // Spine index the B state below refers to; -1 when B has no target. Whenever it differs
-  // from currentSpineIndex + 1 (any navigation), the B state is stale and gets discarded.
+  // --- Background B (idle build of the next consecutive sections' caches) ---
+  // Lookahead cursor: spine index the B state below currently targets; -1 when B has no
+  // target. Walks forward through [currentSpineIndex+1 .. +BG_BUILD_LOOKAHEAD] as each
+  // target settles, then idles until navigation re-anchors the window.
   int backgroundBuildSpineIndex_ = -1;
+  // Reading position the lookahead window is anchored at. When it no longer matches
+  // currentSpineIndex (any navigation) the held B state is stale and the window restarts.
+  int backgroundBuildBaseSpine_ = -1;
   // Section being built (or already built) for backgroundBuildSpineIndex_. Owned here
   // until buildSection() adopts it on a consecutive boundary cross or discards it on any
   // other navigation. Its destructor aborts a partial build and deletes the partial file.
@@ -288,7 +292,8 @@ class EpubReaderActivity final : public Activity {
   //   Probe    — not yet checked whether the target's cache already exists
   //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)
   //   Building — backgroundSection_ has an in-flight incremental build
-  //   Settled  — done for this target (built / cached / failed); idle until the spine moves
+  //   Settled  — done for this target (built / cached / failed); advances the cursor to the
+  //              next section in the lookahead window (or idles if the window is exhausted)
   enum class BackgroundBuildState : uint8_t { Probe, WaitHeap, Building, Settled };
   BackgroundBuildState backgroundBuildState_ = BackgroundBuildState::Probe;
   // Debug-only Background A glyph for the status-bar overlay. The transient flags
