@@ -107,9 +107,13 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
   }
   ZipFile& zf = *resolveZip_;
 
-  // Hold the file open across both reads so loadFileStatSlim and readBytesFromStat share one
-  // SD open instead of opening/closing the file twice per image.
-  if (!zf.open()) {
+  // Open once and keep it open across all the resolves in this build. ZipFile caches both the
+  // EOCD details and a sequential central-dir cursor, but ZipFile::close() wipes the cursor —
+  // so closing per image would re-scan the central directory from the start every time, which
+  // is most of the per-image cost on a large book. persistIfDirty() (run once at each build's
+  // end, under RenderLock) releases the handle. While open, loadFileStatSlim and
+  // readBytesFromStat also share this one SD open instead of opening/closing per call.
+  if (!zf.isOpen() && !zf.open()) {
     LOG_DBG("IMF", "ensureResolved: failed to open zip for %s", epubEntryPath.c_str());
     return nullptr;
   }
@@ -148,8 +152,14 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
     LOG_ERR("IMF", "ensureResolved: header buffer alloc failed");
   }
 
-  zf.close();
+  // Note: the handle is intentionally left open; closeResolveHandle() releases it at persist.
   return result;
+}
+
+void EpubImageManifest::closeResolveHandle() {
+  // Release the SD descriptor the resolve loop held open across this build's images. The
+  // ZipFile object itself is kept (cheap) and reused for the next build, which reopens lazily.
+  if (resolveZip_) resolveZip_->close();
 }
 
 const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {
@@ -161,6 +171,8 @@ const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPa
 }
 
 void EpubImageManifest::persistIfDirty() {
+  // The build whose resolves just ran is finished — release the handle they kept open.
+  closeResolveHandle();
   if (!dirty_) return;
 
   // Ensure img/ subdir exists (extracted images land there at render time).

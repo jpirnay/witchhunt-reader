@@ -50,9 +50,16 @@ class EpubImageManifest {
   const ImageManifestEntry* find(const std::string& epubEntryPath) const;
 
   // Rewrite images.bin if entries were added since the last persist. Cheap no-op when clean.
+  // Also releases the reused resolve handle (see closeResolveHandle): callers invoke this at
+  // each build's end, which is also when the run of ensureResolved() resolves is finished.
   void persistIfDirty();
 
  private:
+  // Close the SD descriptor that ensureResolved() keeps open across a build's images. Run from
+  // persistIfDirty() regardless of dirty state, so a build that resolved nothing new (or only
+  // failed lookups) still releases the handle.
+  void closeResolveHandle();
+
   std::vector<ImageManifestEntry> entries_;
   std::string cachePath_;
   bool loaded_ = false;
