@@ -41,6 +41,9 @@ bool EpubImageManifest::load(const std::string& cachePath) {
   dirty_ = false;
   entries_.clear();
   cachePath_ = cachePath;
+  // Drop any ZipFile bound to a previous book; ensureResolved() lazily recreates it.
+  resolveZip_.reset();
+  resolveEpubPath_.clear();
 
   const std::string path = cachePath + kImagesBinFile;
   FsFile f;
@@ -88,46 +91,65 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
   if (const ImageManifestEntry* hit = find(epubEntryPath)) return hit;
 
   // Miss: read just this one image's header by its central-dir offset. One image, on demand —
-  // not the whole book — so this stays cheap even on image-heavy EPUBs.
-  ZipFile zf(epubPath);
+  // not the whole book. Reuse a single ZipFile across misses: it caches the EOCD details and
+  // a sequential central-directory cursor in its members, so consecutive image lookups resume
+  // the scan instead of re-reading the whole central directory each time. A fresh ZipFile per
+  // call made this O(images × entries) of SD I/O, and because it all runs inside one parser
+  // write() — which the section build's time budget cannot interrupt mid-call — an image-heavy
+  // section froze input for the duration of the (background) build.
+  if (!resolveZip_ || resolveEpubPath_ != epubPath) {
+    resolveEpubPath_ = epubPath;
+    resolveZip_.reset(new (std::nothrow) ZipFile(resolveEpubPath_));
+    if (!resolveZip_) {
+      LOG_ERR("IMF", "ensureResolved: ZipFile alloc failed");
+      return nullptr;
+    }
+  }
+  ZipFile& zf = *resolveZip_;
+
+  // Hold the file open across both reads so loadFileStatSlim and readBytesFromStat share one
+  // SD open instead of opening/closing the file twice per image.
+  if (!zf.open()) {
+    LOG_DBG("IMF", "ensureResolved: failed to open zip for %s", epubEntryPath.c_str());
+    return nullptr;
+  }
+
+  const ImageManifestEntry* result = nullptr;
   ZipFile::FileStatSlim stat = {};
   if (!zf.loadFileStatSlim(epubEntryPath.c_str(), &stat)) {
     LOG_DBG("IMF", "ensureResolved: entry not found: %s", epubEntryPath.c_str());
-    return nullptr;
-  }
+  } else if (auto* headerBuf = static_cast<uint8_t*>(malloc(kHeaderBufSize))) {
+    const size_t bytesRead = zf.readBytesFromStat(stat, headerBuf, kHeaderBufSize);
+    ImageDimensions dims = {0, 0};
+    const bool ok = bytesRead > 0 && parseImageDimensions(headerBuf, bytesRead, dims);
+    free(headerBuf);
+    if (!ok || dims.width <= 0 || dims.height <= 0) {
+      LOG_DBG("IMF", "ensureResolved: no dimensions for %s", epubEntryPath.c_str());
+    } else {
+      ImageManifestEntry e;
+      e.epubEntryPath = epubEntryPath;  // caller passes the normalised key
+      e.width = dims.width;
+      e.height = dims.height;
+      e.method = stat.method;
+      e.compressedSize = stat.compressedSize;
+      e.uncompressedSize = stat.uncompressedSize;
+      e.localHeaderOffset = stat.localHeaderOffset;
+      e.extractedPath = extractedPathFor(cachePath_, epubEntryPath);
 
-  auto* headerBuf = static_cast<uint8_t*>(malloc(kHeaderBufSize));
-  if (!headerBuf) {
+      // Insert keeping entries_ sorted so find()'s binary search stays valid.
+      auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
+                                 [](const ImageManifestEntry& a, const std::string& k) { return a.epubEntryPath < k; });
+      result = &*entries_.insert(it, std::move(e));
+      dirty_ = true;
+      LOG_DBG("IMF", "Resolved %s -> %dx%d (%u cached)", epubEntryPath.c_str(), result->width, result->height,
+              static_cast<unsigned>(entries_.size()));
+    }
+  } else {
     LOG_ERR("IMF", "ensureResolved: header buffer alloc failed");
-    return nullptr;
-  }
-  const size_t bytesRead = zf.readBytesFromStat(stat, headerBuf, kHeaderBufSize);
-  ImageDimensions dims = {0, 0};
-  const bool ok = bytesRead > 0 && parseImageDimensions(headerBuf, bytesRead, dims);
-  free(headerBuf);
-  if (!ok || dims.width <= 0 || dims.height <= 0) {
-    LOG_DBG("IMF", "ensureResolved: no dimensions for %s", epubEntryPath.c_str());
-    return nullptr;
   }
 
-  ImageManifestEntry e;
-  e.epubEntryPath = epubEntryPath;  // caller passes the normalised key
-  e.width = dims.width;
-  e.height = dims.height;
-  e.method = stat.method;
-  e.compressedSize = stat.compressedSize;
-  e.uncompressedSize = stat.uncompressedSize;
-  e.localHeaderOffset = stat.localHeaderOffset;
-  e.extractedPath = extractedPathFor(cachePath_, epubEntryPath);
-
-  // Insert keeping entries_ sorted so find()'s binary search stays valid.
-  auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
-                             [](const ImageManifestEntry& a, const std::string& k) { return a.epubEntryPath < k; });
-  const ImageManifestEntry* inserted = &*entries_.insert(it, std::move(e));
-  dirty_ = true;
-  LOG_DBG("IMF", "Resolved %s -> %dx%d (%u cached)", epubEntryPath.c_str(), inserted->width, inserted->height,
-          static_cast<unsigned>(entries_.size()));
-  return inserted;
+  zf.close();
+  return result;
 }
 
 const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {

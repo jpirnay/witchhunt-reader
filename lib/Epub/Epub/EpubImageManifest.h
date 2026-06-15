@@ -2,6 +2,7 @@
 
 #include <ZipFile.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -56,4 +57,12 @@ class EpubImageManifest {
   std::string cachePath_;
   bool loaded_ = false;
   bool dirty_ = false;
+
+  // One ZipFile reused across ensureResolved() misses (see the .cpp). ZipFile caches the
+  // EOCD details and a sequential central-directory cursor in its members; reusing the
+  // instance keeps both alive between images instead of re-scanning the whole central
+  // directory per image. resolveEpubPath_ backs the reference ZipFile holds, so it must
+  // outlive resolveZip_ — they are always (re)assigned together.
+  std::string resolveEpubPath_;
+  std::unique_ptr<ZipFile> resolveZip_;
 };
