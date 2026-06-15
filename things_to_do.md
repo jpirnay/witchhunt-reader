@@ -7,7 +7,7 @@
 | 1 | Replace OPDS usage of expat with new saxxml parser | Done |
 | 2 | Update attributions | |
 | 2 | Show some popup indicators to let the user know something is happening  | Done |
-| 2 | Continue with the next undealt with chapter to background indexing if the next one is already done | |
+| 2 | Continue with the next undealt with chapter to background indexing if the next one is already done | Done |
 | 3 | Add time to finish to status bar options | |
 | 3 | Add read badges to thumbnail overview | Done |
 | 3 | Read cover thumbnails even when book hasnt been opened yet | Done |
