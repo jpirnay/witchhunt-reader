@@ -1402,8 +1402,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->currentPage.reset(new Page());
       self->currentPageNextY = 0;
     }
-    self->currentPage->elements.push_back(
-        std::make_shared<PageHR>(0, self->currentPageNextY, static_cast<int16_t>(self->viewportWidth)));
+    // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
+    // the conventional reader default. Books rarely set hr width in their own CSS.
+    const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
+    const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
+    self->currentPage->elements.push_back(std::make_shared<PageHR>(hrX, self->currentPageNextY, hrWidth));
     self->currentPageNextY += 1 + marginV;
     BlockStyle emptyStyle;
     self->startNewTextBlock(emptyStyle);

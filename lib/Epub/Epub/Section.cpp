@@ -18,8 +18,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    51;  // bumped: long (>96-word) paragraphs beside a tall float now wrap in the mid-block
-         // split path too; discards v50 caches where such paragraphs overflowed the image
+    52;  // bumped: horizontal rules now render centered at 50% width instead of edge-to-edge;
+         // discards v51 caches that baked the old full-width hr geometry
 
 namespace header {
 constexpr uint32_t kVersion = 0;

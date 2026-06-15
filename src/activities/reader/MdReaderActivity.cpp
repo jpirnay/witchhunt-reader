@@ -598,6 +598,10 @@ void MdReaderActivity::buildPageIndex() {
 
   LOG_DBG("MDR", "Building page index for %zu bytes...", fileSize);
 
+  // Resync the write buffer to the displayed frame so the popup overlays what's
+  // on screen rather than the stale two-refreshes-ago frame left by a partial
+  // repaint (e.g. the recent-books grid that launched us). See ReaderActivity.
+  renderer.syncWriteBufferFromDisplayed();
   GUI.drawPopup(renderer, tr(STR_INDEXING));
 
   while (offset < fileSize) {
@@ -671,9 +675,12 @@ void MdReaderActivity::renderPage() {
     int y = cachedOrientedMarginTop;
     for (const auto& line : currentPageLines) {
       if (line.isHR) {
-        // Draw horizontal rule as a thin line
+        // Draw horizontal rule as a thin line, centered at 50% width (25%→75%) of the
+        // available content area rather than edge-to-edge, matching the conventional reader default.
         int hrY = y + lineHeight / 2;
-        renderer.drawLine(cachedOrientedMarginLeft + line.indent, hrY, cachedOrientedMarginLeft + viewportWidth, hrY);
+        const int contentWidth = viewportWidth - line.indent;
+        const int hrX = cachedOrientedMarginLeft + line.indent + contentWidth / 4;
+        renderer.drawLine(hrX, hrY, hrX + contentWidth / 2, hrY);
         y += lineHeight;
       } else {
         if (line.isCodeBlock) {
