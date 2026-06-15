@@ -389,30 +389,34 @@ void WifiSelectionActivity::issueWifiBegin(bool useHint) {
   if (useHint) {
     const auto* cred = WIFI_STORE.findCredential(selectedSSID);
     if (cred && cred->channel != 0) {
-      std::memcpy(currentAttemptBssid, cred->bssid, 6);
-      currentAttemptChannel = cred->channel;
+      // Discard the whole cached profile (BSSID/channel hint + IP) once it ages past the
+      // TTL: a >1-week-old hint and DHCP lease can no longer be trusted, so fall back to a
+      // full scan + DHCP for this attempt too. cacheTimestamp==0 means it predates clock
+      // sync (trust indefinitely); now==0 means the clock isn't synced right now so we
+      // can't judge age (keep it). Signed arithmetic so a future timestamp (clock corrected
+      // backwards between write and read) reads as fresh rather than ancient.
+      constexpr int64_t TTL_SECONDS = 7 * 24 * 60 * 60;
+      const time_t now = HalClock::now();
+      const int64_t elapsed = (now == 0) ? 0 : (static_cast<int64_t>(now) - static_cast<int64_t>(cred->cacheTimestamp));
+      const bool ttlExpired = (cred->cacheTimestamp != 0) && (now != 0) && (elapsed >= TTL_SECONDS);
+      if (ttlExpired) {
+        LOG_DBG("WIFI", "Connection cache aged out (ts=%u, now=%ld), discarding for full scan + DHCP",
+                cred->cacheTimestamp, (long)now);
+        RenderLock lock(*this);  // clearConnectionCache writes the SD/SPI bus shared with the display
+        WIFI_STORE.clearConnectionCache(selectedSSID);
+      } else {
+        std::memcpy(currentAttemptBssid, cred->bssid, 6);
+        currentAttemptChannel = cred->channel;
 
-      // Apply cached static IP only when the IP cache is keyed to this same BSSID and
-      // (if we have a synced clock) hasn't aged out. cacheTimestamp==0 means it was
-      // written before clock-sync; we trust it indefinitely in that case.
-      if (cred->ip[0] != 0) {
-        constexpr int64_t TTL_SECONDS = 7 * 24 * 60 * 60;
-        const time_t now = HalClock::now();
-        // Use signed arithmetic so we don't underflow when ts is in the future (which
-        // happens when NTP corrects the clock backwards between cache write and read).
-        // Future timestamps are treated as fresh (negative elapsed clamped to 0).
-        const int64_t elapsed =
-            (now == 0) ? 0 : (static_cast<int64_t>(now) - static_cast<int64_t>(cred->cacheTimestamp));
-        const bool ttlOk = (cred->cacheTimestamp == 0) || (now == 0) || (elapsed < TTL_SECONDS);
-        if (ttlOk) {
+        // Replay the cached static IP to skip DHCP. Captured alongside this BSSID/channel on
+        // the last successful connect, so it's only applied together with the hint above.
+        if (cred->ip[0] != 0) {
           IPAddress ip(cred->ip[0], cred->ip[1], cred->ip[2], cred->ip[3]);
           IPAddress gw(cred->gateway[0], cred->gateway[1], cred->gateway[2], cred->gateway[3]);
           IPAddress mask(cred->mask[0], cred->mask[1], cred->mask[2], cred->mask[3]);
           IPAddress dns(cred->dns[0], cred->dns[1], cred->dns[2], cred->dns[3]);
           WiFi.config(ip, gw, mask, dns);
           appliedStaticIp = true;
-        } else {
-          LOG_DBG("WIFI", "IP cache aged out (ts=%u, now=%ld), using DHCP", cred->cacheTimestamp, (long)now);
         }
       }
     }
@@ -663,12 +667,19 @@ void WifiSelectionActivity::loop() {
       }
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
                mappedInput.wasPressed(MappedInputManager::Button::Right)) {
-      if (forgetPromptSelection < 1) {
+      if (forgetPromptSelection < 2) {
         forgetPromptSelection++;
         requestUpdate();
       }
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (forgetPromptSelection == 1) {
+        RenderLock lock(*this);
+        // User chose "Reset info" - drop the cached BSSID/channel hint + IP/gw/mask/DNS but
+        // keep the saved password, so the next connect does a full scan + DHCP and re-fetches
+        // a fresh DNS. Fixes a stale cached DNS that survives because static config never
+        // re-pulls it from DHCP.
+        WIFI_STORE.clearConnectionCache(selectedSSID);
+      } else if (forgetPromptSelection == 2) {
         RenderLock lock(*this);
         // User chose "Forget network" - forget the network
         WIFI_STORE.removeCredential(selectedSSID);
@@ -679,7 +690,7 @@ void WifiSelectionActivity::loop() {
           network->hasSavedPassword = false;
         }
       }
-      // Go back to network list (whether Cancel or Forget network was selected)
+      // Go back to network list (whichever action, including Cancel, was selected)
       startWifiScan();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
       // Skip forgetting, go back to network list
@@ -873,9 +884,9 @@ void WifiSelectionActivity::renderNetworkList() const {
       tr(STR_NETWORK_LEGEND));
 
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
-  const char* forgetLabel = hasSavedPassword ? tr(STR_FORGET_BUTTON) : "";
+  const char* optionsLabel = hasSavedPassword ? tr(STR_OPTIONS_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), optionsLabel, tr(STR_RETRY));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -981,7 +992,7 @@ void WifiSelectionActivity::renderForgetPrompt() const {
   const auto height = renderer.getLineHeight(UI_10_FONT_ID);
   const auto top = (pageHeight - height * 3) / 2;
 
-  renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_FORGET_NETWORK), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_NETWORK_OPTIONS), true, EpdFontFamily::BOLD);
 
   std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
   if (ssidInfo.length() > 28) {
@@ -989,36 +1000,34 @@ void WifiSelectionActivity::renderForgetPrompt() const {
   }
   renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
 
+  // Contextual description for the highlighted action (Cancel has none).
+  const char* desc = forgetPromptSelection == 1   ? tr(STR_RESET_INFO_DESC)
+                     : forgetPromptSelection == 2 ? tr(STR_FORGET_AND_REMOVE)
+                                                  : "";
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int hintWidth = pageWidth - 2 * metrics.contentSidePadding;
-  const auto forgetLines = renderer.wrappedText(UI_10_FONT_ID, tr(STR_FORGET_AND_REMOVE), hintWidth, 3);
-  int forgetY = top + 40;
-  for (const auto& line : forgetLines) {
-    renderer.drawCenteredText(UI_10_FONT_ID, forgetY, line.c_str());
-    forgetY += height;
+  const auto descLines = renderer.wrappedText(UI_10_FONT_ID, desc, hintWidth, 3);
+  int descY = top + 40;
+  for (const auto& line : descLines) {
+    renderer.drawCenteredText(UI_10_FONT_ID, descY, line.c_str());
+    descY += height;
   }
 
-  // Draw Cancel/Forget network buttons
+  // Draw Cancel / Reset info / Forget buttons
   const int buttonY = top + 80;
-  constexpr int buttonWidth = 120;
-  constexpr int buttonSpacing = 30;
-  constexpr int totalWidth = buttonWidth * 2 + buttonSpacing;
+  constexpr int buttonWidth = 150;
+  constexpr int buttonSpacing = 20;
+  constexpr int totalWidth = buttonWidth * 3 + buttonSpacing * 2;
   const int startX = (pageWidth - totalWidth) / 2;
-
-  // Draw "Cancel" button
-  if (forgetPromptSelection == 0) {
-    std::string text = "[" + std::string(tr(STR_CANCEL)) + "]";
-    renderer.drawText(UI_10_FONT_ID, startX, buttonY, text.c_str());
-  } else {
-    renderer.drawText(UI_10_FONT_ID, startX + 4, buttonY, tr(STR_CANCEL));
-  }
-
-  // Draw "Forget network" button
-  if (forgetPromptSelection == 1) {
-    std::string text = "[" + std::string(tr(STR_FORGET_BUTTON)) + "]";
-    renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing, buttonY, text.c_str());
-  } else {
-    renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing + 4, buttonY, tr(STR_FORGET_BUTTON));
+  const char* const buttonLabels[3] = {tr(STR_CANCEL), tr(STR_RESET_INFO_BUTTON), tr(STR_FORGET_BUTTON)};
+  for (int i = 0; i < 3; i++) {
+    const int x = startX + i * (buttonWidth + buttonSpacing);
+    if (forgetPromptSelection == i) {
+      std::string text = "[" + std::string(buttonLabels[i]) + "]";
+      renderer.drawText(UI_10_FONT_ID, x, buttonY, text.c_str());
+    } else {
+      renderer.drawText(UI_10_FONT_ID, x + 4, buttonY, buttonLabels[i]);
+    }
   }
 
   // Use centralized button hints
