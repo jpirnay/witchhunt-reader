@@ -15,9 +15,14 @@
 class RecentBooksActivity final : public Activity {
  public:
   static constexpr int GRID_COLS = 3;
-  static constexpr int GRID_THUMB_HEIGHT = 160;
+  // Cell display size: how tall each thumbnail cell appears on screen.
+  static constexpr int GRID_CELL_HEIGHT = 160;
   static constexpr int GRID_THUMB_MARGIN = 10;
   static constexpr int GRID_LABEL_HEIGHT = 36;  // two small-font lines below each thumbnail
+  // Stored BMP dimensions — shared with FinishedBookActivity so one file serves both.
+  // The grid scales this BMP down to the runtime cell width for display.
+  static constexpr int GRID_THUMB_WIDTH = 220;
+  static constexpr int GRID_THUMB_HEIGHT = 240;
 
  private:
   int selectorIndex = 0;

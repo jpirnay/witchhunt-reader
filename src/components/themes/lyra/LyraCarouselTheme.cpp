@@ -143,16 +143,14 @@ void LyraCarouselTheme::setPreRenderIndex(int idx) { lastCarouselSelectorIndex =
 void LyraCarouselTheme::invalidateFrameCache() { freeFrameCache(); }
 void LyraCarouselTheme::markFrameCacheDirty() { gFrameCacheDirty = true; }
 
-void LyraCarouselTheme::onBookWillClose(const std::string& /*path*/, Epub* epub, Xtc* xtc, Txt* /*txt*/) {
-  if (epub) {
-    epub->generateThumbBmp(kCenterCoverW, kCenterCoverH);
-    epub->generateThumbBmp(kSideCoverW, kSideCoverH);
-  }
+void LyraCarouselTheme::onBookWillClose(const std::string& /*path*/, Epub* /*epub*/, Xtc* xtc, Txt* /*txt*/) {
+  // EPUB thumbnail generation is handled lazily by HomeActivity (sliced ZIP + PNG decode).
+  // XTC covers are generated synchronously here — they read from the first page of the XTC
+  // file directly, no ZIP involved, so the extraction is fast enough to run at close time.
   if (xtc) {
-    xtc->generateThumbBmp(kCenterCoverW, kCenterCoverH);
-    xtc->generateThumbBmp(kSideCoverW, kSideCoverH);
+    xtc->generateThumbBmp(kCenterCoverMaxW, kCenterCoverMaxH);
+    xtc->generateThumbBmp(kSideCoverMaxW, kSideCoverMaxH);
   }
-  // txt files have no cover image — nothing to generate
   invalidateFrameCache();
 }
 

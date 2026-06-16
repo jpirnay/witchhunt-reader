@@ -50,8 +50,9 @@ void RecentBooksActivity::loadRecentBooks() {
 }
 
 bool RecentBooksActivity::loadNextCover() {
-  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
-  const int tw = gridThumbWidth(contentRect.width);
+  // Fixed thumbnail dimensions shared with FinishedBookActivity.
+  // The cell renderer scales the BMP down to the runtime cell width for display.
+  const int tw = GRID_THUMB_WIDTH;
   const int th = GRID_THUMB_HEIGHT;
 
   // ── Cover extract session tick ───────────────────────────────────────────────
@@ -412,7 +413,7 @@ void RecentBooksActivity::renderGridCell(int index, bool selected, int cellX, in
   }
 
   if (!book.coverBmpPath.empty()) {
-    const std::string thumbPath = gridThumbPath(book.coverBmpPath, tw, th);
+    const std::string thumbPath = gridThumbPath(book.coverBmpPath, GRID_THUMB_WIDTH, GRID_THUMB_HEIGHT);
     FsFile file;
     bool thumbDrawn = false;
     if (Storage.openFileForRead("RBA", thumbPath, file)) {
@@ -489,7 +490,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
   const int margin = GRID_THUMB_MARGIN;
   const int tw = gridThumbWidth(contentRect.width);
-  const int th = GRID_THUMB_HEIGHT;
+  const int th = GRID_CELL_HEIGHT;
   const int cellHeight = th + GRID_LABEL_HEIGHT + margin;
   const int visibleRows = std::max(1, contentHeight / cellHeight);
   const int totalRows = (static_cast<int>(recentBooks.size()) + GRID_COLS - 1) / GRID_COLS;

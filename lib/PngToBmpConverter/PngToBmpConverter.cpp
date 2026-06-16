@@ -417,8 +417,7 @@ bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, 
   scaleY_fp_ = 65536;
   needsScaling_ = false;
 
-  if (targetWidth > 0 && targetHeight > 0 &&
-      (outWidth_ != targetWidth || outHeight_ != targetHeight)) {
+  if (targetWidth > 0 && targetHeight > 0 && (outWidth_ != targetWidth || outHeight_ != targetHeight)) {
     const float sw = static_cast<float>(targetWidth) / width_;
     const float sh = static_cast<float>(targetHeight) / height_;
     const float scale = (sw < sh) ? sw : sh;
@@ -510,7 +509,10 @@ PngDecodeSession::Status PngDecodeSession::continueRows(uint32_t maxSourceRows) 
           sum += grayRow_[sx];
           count++;
         }
-        if (count == 0 && srcXStart < static_cast<int>(width_)) { sum = grayRow_[srcXStart]; count = 1; }
+        if (count == 0 && srcXStart < static_cast<int>(width_)) {
+          sum = grayRow_[srcXStart];
+          count = 1;
+        }
         rowAccum_[outX] += sum;
         rowCount_[outX] += count;
       }
@@ -539,11 +541,16 @@ PngDecodeSession::Status PngDecodeSession::continueRows(uint32_t maxSourceRows) 
 }
 
 void PngDecodeSession::cleanup() {
-  free(grayRow_);   grayRow_ = nullptr;
-  free(rowBuffer_); rowBuffer_ = nullptr;
-  delete[] rowAccum_; rowAccum_ = nullptr;
-  delete[] rowCount_; rowCount_ = nullptr;
-  delete ditherer_;   ditherer_ = nullptr;
+  free(grayRow_);
+  grayRow_ = nullptr;
+  free(rowBuffer_);
+  rowBuffer_ = nullptr;
+  delete[] rowAccum_;
+  rowAccum_ = nullptr;
+  delete[] rowCount_;
+  rowCount_ = nullptr;
+  delete ditherer_;
+  ditherer_ = nullptr;
   decoder_.end();
 }
 
