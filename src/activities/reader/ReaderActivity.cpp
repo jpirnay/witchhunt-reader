@@ -6,6 +6,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
@@ -39,6 +40,106 @@ void logReaderLaunchMemSnapshot(const char* stage) {
 inline void logReaderLaunchMemSnapshot(const char*) {}
 #endif
 }  // namespace
+
+// ── CoverExtractSession ──────────────────────────────────────────────────────
+
+ReaderActivity::CoverExtractSession::~CoverExtractSession() {
+  if (buf_) {
+    free(buf_);
+    buf_ = nullptr;
+  }
+  if (dst_.isOpen()) dst_.close();
+  // reader_ destructor closes entry; zip_ destructor is harmless
+}
+
+bool ReaderActivity::CoverExtractSession::begin(const std::string& epubPath, const std::string& zipEntryPath,
+                                                const std::string& destPath) {
+  destPath_ = destPath;
+  zip_ = std::unique_ptr<ZipFile>(new ZipFile(epubPath));
+  reader_ = std::unique_ptr<ZipFile::EntryReader>(new ZipFile::EntryReader(*zip_));
+  if (!reader_->open(zipEntryPath.c_str())) {
+    LOG_ERR("CEX", "Failed to open ZIP entry %s in %s", zipEntryPath.c_str(), epubPath.c_str());
+    return false;
+  }
+  if (!Storage.openFileForWrite("CEX", destPath_, dst_)) {
+    LOG_ERR("CEX", "Failed to open dest %s for write", destPath_.c_str());
+    return false;
+  }
+  LOG_DBG("CEX", "Extracting %s -> %s (%zu bytes)", zipEntryPath.c_str(), destPath_.c_str(), reader_->inflatedSize());
+  return true;
+}
+
+ReaderActivity::CoverExtractSession::Status ReaderActivity::CoverExtractSession::continueStep(size_t chunkBytes) {
+  if (!reader_ || !reader_->isOpen()) return Status::Error;
+
+  if (!buf_ || chunkBytes_ != chunkBytes) {
+    free(buf_);
+    buf_ = static_cast<uint8_t*>(malloc(chunkBytes));
+    if (!buf_) {
+      LOG_ERR("CEX", "OOM allocating %zu byte chunk buffer", chunkBytes);
+      return Status::Error;
+    }
+    chunkBytes_ = chunkBytes;
+  }
+
+  size_t produced = 0;
+  bool done = false;
+  if (!reader_->step(buf_, chunkBytes, &produced, &done)) {
+    LOG_ERR("CEX", "ZIP inflate error at %zu/%zu bytes", reader_->bytesProduced(), reader_->inflatedSize());
+    dst_.close();
+    Storage.remove(destPath_.c_str());
+    return Status::Error;
+  }
+  if (produced > 0) dst_.write(buf_, produced);
+
+  if (done) {
+    dst_.close();
+    LOG_DBG("CEX", "Extraction complete: %zu bytes -> %s", reader_->bytesProduced(), destPath_.c_str());
+    return Status::Done;
+  }
+  return Status::Running;
+}
+
+size_t ReaderActivity::CoverExtractSession::bytesProduced() const { return reader_ ? reader_->bytesProduced() : 0; }
+
+size_t ReaderActivity::CoverExtractSession::totalBytes() const { return reader_ ? reader_->inflatedSize() : 0; }
+
+std::unique_ptr<ReaderActivity::CoverExtractSession> ReaderActivity::beginCoverExtractSession(
+    const std::string& bookPath) {
+  if (!FsHelpers::hasEpubExtension(bookPath)) return nullptr;
+  if (!sidecarCoverPath(bookPath).empty()) return nullptr;  // sidecar takes priority; no extract needed
+
+  Epub epub(bookPath, "/.crosspoint");
+  if (!epub.load(true, true)) return nullptr;
+
+  // If cover.img already exists and is valid, no extraction needed.
+  const std::string coverImgPath = epub.getCoverImageCachePath();
+  if (Storage.exists(coverImgPath.c_str())) {
+    FsFile existing;
+    if (Storage.openFileForRead("CEX", coverImgPath, existing)) {
+      const bool valid = existing.size() > 0;
+      existing.close();
+      if (valid) return nullptr;  // already cached
+    }
+  }
+
+  const std::string coverHref = epub.getCoverItemHref();
+  if (coverHref.empty()) {
+    LOG_DBG("CEX", "No cover item href for %s", bookPath.c_str());
+    return nullptr;
+  }
+
+  const std::string normHref = FsHelpers::normalisePath(coverHref);
+  const std::string dir = epub.getCachePath();
+  if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+
+  auto session = std::unique_ptr<CoverExtractSession>(new CoverExtractSession());
+  if (!session->begin(bookPath, normHref, coverImgPath)) return nullptr;
+
+  return session;
+}
+
+// ── end CoverExtractSession ──────────────────────────────────────────────────
 
 std::string ReaderActivity::extractFolderPath(const std::string& filePath) {
   const auto lastSlash = filePath.find_last_of('/');

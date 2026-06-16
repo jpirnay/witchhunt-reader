@@ -35,7 +35,10 @@ class RecentBooksActivity final : public Activity {
   bool firstRenderDone = false;
   size_t nextCoverIndex = 0;
 
-  // Sliced PNG decode session (non-null while a PNG cover is being decoded row-by-row)
+  // Phase 1: sliced ZIP extraction of cover.img for large embedded PNG covers
+  std::unique_ptr<ReaderActivity::CoverExtractSession> extractSession;
+
+  // Phase 2: sliced PNG decode session (non-null while a PNG cover is being decoded row-by-row)
   std::unique_ptr<PngDecodeSession> pngSession;
   ReaderActivity::PngThumbFiles pngSessionFiles;
   bool pngSessionFailed = false;

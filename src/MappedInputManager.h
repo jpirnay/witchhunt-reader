@@ -20,6 +20,9 @@ class MappedInputManager {
   bool wasReleased(Button button) const;
   bool isPressed(Button button) const;
   bool wasAnyPressed() const;
+  // True if any press has been sampled since the last update(). Safe to call
+  // mid-stall from within loop() to yield expensive work to button input.
+  bool hasPendingInput() const { return gpio.hasPendingInput(); }
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
   Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;

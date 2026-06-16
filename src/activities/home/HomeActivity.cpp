@@ -194,6 +194,26 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     requestUpdate();
   };
 
+  // ── Cover extract session drain ──────────────────────────────────────────────
+  // Sliced ZIP extraction of cover.img for a large embedded PNG cover.
+  // One 4 KB chunk per loop() tick; when done, fall through to beginPngThumbSession.
+  if (extractSession) {
+    const auto status = extractSession->continueStep(4096);
+    if (status == ReaderActivity::CoverExtractSession::Status::Running) {
+      recentsLoading = false;
+      return;
+    }
+    extractSession.reset();
+    if (status == ReaderActivity::CoverExtractSession::Status::Error) {
+      LOG_ERR("HOME", "Cover extract failed for book %zu", nextRecentCoverIndex);
+      // Leave whatever partial file exists; beginPngThumbSession will see it missing/invalid
+      // and leave a sentinel, which is the right outcome.
+      pngSessionFailed = true;
+    }
+    // On Done: cover.img is now on disk. Fall through to the for-loop which will
+    // retry ensureCoverThumb (still fails for PNG) then call beginPngThumbSession.
+  }
+
   // ── PNG session drain ────────────────────────────────────────────────────────
   // A sliced PNG decode was started in a previous loop() call.  Drive it a few
   // rows at a time so button input stays responsive between calls.
@@ -275,20 +295,30 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
           LOG_DBG("HOME", "ensureCoverThumb(%dx%d) for %s: %s", sz.first, sz.second, book.path.c_str(),
                   ok ? "ok" : "FAILED");
           if (!ok) {
-            // Synchronous path failed — try starting a sliced PNG decode session,
-            // unless a previous session for this same size already failed mid-decode.
             if (!pngSessionFailed) {
+              // Try sliced PNG decode (succeeds when cover.img is already cached).
               pngSession = ReaderActivity::beginPngThumbSession(book.path, sz.first, sz.second, pngSessionFiles);
+              if (!pngSession) {
+                // cover.img not yet cached — try sliced ZIP extraction first.
+                extractSession = ReaderActivity::beginCoverExtractSession(book.path);
+                if (extractSession) {
+                  LOG_DBG("HOME", "Started cover extract session for %s (%zu bytes)", book.path.c_str(),
+                          extractSession->totalBytes());
+                  nextThumbSizeIndex = i;
+                  recentsLoading = false;
+                  return;
+                }
+              }
             }
             pngSessionFailed = false;  // consumed
             if (pngSession) {
               LOG_DBG("HOME", "Started PNG session for %s [%dx%d] (%u rows)", book.path.c_str(), sz.first, sz.second,
                       pngSession->totalRows());
-              nextThumbSizeIndex = i;  // stay on this size; session drain above will advance it
+              nextThumbSizeIndex = i;
               recentsLoading = false;
               return;
             }
-            // Failed for this size with no PNG fallback — record empty path and move on.
+            // No session available — record empty path and move on.
             RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
             book.coverBmpPath = "";
             LOG_DBG("HOME", "After generate: stored coverBmpPath=<empty>");
@@ -342,8 +372,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         // Cover decode needs ~42 KB contiguous heap — free the frame cache first.
         invalidateFrameCacheSafely();
         const bool success = ReaderActivity::ensureCoverThumb(book.path, coverHeight);
-        LOG_DBG("HOME", "ensureCoverThumb(h=%d) for %s: %s", coverHeight, book.path.c_str(),
-                success ? "ok" : "FAILED");
+        LOG_DBG("HOME", "ensureCoverThumb(h=%d) for %s: %s", coverHeight, book.path.c_str(), success ? "ok" : "FAILED");
         RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, success ? placeholder : "");
         book.coverBmpPath = success ? placeholder : "";
         LOG_DBG("HOME", "After generate: stored coverBmpPath=%s", book.coverBmpPath.c_str());
@@ -354,8 +383,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       // Already present — make sure the stored path is the canonical placeholder so a stale
       // "[HEIGHT].bmp" / raw-sidecar entry self-heals to the unified naming without a re-decode.
       if (book.coverBmpPath != placeholder) {
-        LOG_DBG("HOME", "Self-heal: coverBmpPath=%s -> placeholder=%s", book.coverBmpPath.c_str(),
-                placeholder.c_str());
+        LOG_DBG("HOME", "Self-heal: coverBmpPath=%s -> placeholder=%s", book.coverBmpPath.c_str(), placeholder.c_str());
         RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
         book.coverBmpPath = placeholder;
       }
@@ -377,6 +405,7 @@ void HomeActivity::onEnter() {
   firstRenderDone = false;
   nextRecentCoverIndex = 0;
   nextThumbSizeIndex = 0;
+  extractSession.reset();
   pngSession.reset();
   pngSessionFiles.close();
   pngSessionFailed = false;
@@ -464,7 +493,7 @@ void HomeActivity::loop() {
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
 
   if (isCarousel) {
-    if (firstRenderDone && !recentsLoaded && !recentsLoading) {
+    if (firstRenderDone && !recentsLoaded && !recentsLoading && !mappedInput.hasPendingInput()) {
       loadRecentCovers(UITheme::getInstance().getMetrics().homeCoverHeight);
       return;
     }
@@ -509,7 +538,7 @@ void HomeActivity::loop() {
   } else {
     const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
 
-    if (firstRenderDone && !recentsLoaded && !recentsLoading) {
+    if (firstRenderDone && !recentsLoaded && !recentsLoading && !mappedInput.hasPendingInput()) {
       const auto& metrics = UITheme::getInstance().getMetrics();
       const Rect contentRect = UITheme::getContentRect(renderer, true, false);
       const HomeScreenLayout layout =

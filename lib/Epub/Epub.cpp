@@ -842,6 +842,11 @@ std::string Epub::getCoverBmpPath(bool cropped) const {
 
 std::string Epub::getCoverImageCachePath() const { return cachePath + "/cover.img"; }
 
+std::string Epub::getCoverItemHref() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return "";
+  return bookMetadataCache->coreMetadata.coverItemHref;
+}
+
 bool Epub::ensureCoverImageCached() const {
   const auto coverCachePath = getCoverImageCachePath();
   if (Storage.exists(coverCachePath.c_str())) {

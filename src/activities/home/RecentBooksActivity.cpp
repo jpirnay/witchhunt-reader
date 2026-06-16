@@ -54,6 +54,19 @@ bool RecentBooksActivity::loadNextCover() {
   const int tw = gridThumbWidth(contentRect.width);
   const int th = GRID_THUMB_HEIGHT;
 
+  // ── Cover extract session tick ───────────────────────────────────────────────
+  if (extractSession) {
+    const auto status = extractSession->continueStep(4096);
+    if (status == ReaderActivity::CoverExtractSession::Status::Running) return false;
+    extractSession.reset();
+    if (status == ReaderActivity::CoverExtractSession::Status::Error) {
+      LOG_ERR("RBA", "Cover extract failed for book %zu", nextCoverIndex);
+      pngSessionFailed = true;
+    }
+    // On Done: fall through to PNG session setup on next call via the for-loop.
+    return false;
+  }
+
   // ── PNG session tick ────────────────────────────────────────────────────────
   if (pngSession) {
     constexpr uint32_t ROWS_PER_TICK = 6;
@@ -101,9 +114,16 @@ bool RecentBooksActivity::loadNextCover() {
       const bool ok = ReaderActivity::ensureCoverThumb(book.path, tw, th);
       if (!ok && !pngSessionFailed) {
         pngSession = ReaderActivity::beginPngThumbSession(book.path, tw, th, pngSessionFiles);
-        if (pngSession) {
+        if (!pngSession) {
+          extractSession = ReaderActivity::beginCoverExtractSession(book.path);
+          if (extractSession) {
+            LOG_DBG("RBA", "Started cover extract session for %s (%zu bytes)", book.path.c_str(),
+                    extractSession->totalBytes());
+            return false;
+          }
+        } else {
           LOG_DBG("RBA", "Started PNG session for %s (%u rows)", book.path.c_str(), pngSession->totalRows());
-          return false;  // session drain above handles completion
+          return false;
         }
       }
       pngSessionFailed = false;  // consumed
@@ -146,6 +166,7 @@ void RecentBooksActivity::onEnter() {
   prevSelectorIndex = -1;
   fullRedrawNeeded = true;
   openingBook = false;
+  extractSession.reset();
   pngSession.reset();
   pngSessionFiles.close();
   pngSessionFailed = false;
@@ -167,6 +188,7 @@ void RecentBooksActivity::switchViewMode(bool grid) {
   firstRenderDone = false;
   nextCoverIndex = 0;
   prevSelectorIndex = -1;
+  extractSession.reset();
   pngSession.reset();
   pngSessionFiles.close();
   pngSessionFailed = false;
