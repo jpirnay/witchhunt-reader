@@ -105,12 +105,55 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
         line->render(renderer, fontId, colX[c] + TABLE_CELL_PADDING, lineY);
         lineY += renderer.getLineHeight(fontId);
       }
+      // In-cell graphic, drawn below the cell text. Always 1-bit (BW) thumbnails:
+      // the decode/cache machinery lives in ImageBlock; the BW cache is built during
+      // the warm pass and simply blitted here (and again in grayscale strip passes).
+      if (cell.image) {
+        cell.image->render(renderer, colX[c] + TABLE_CELL_PADDING, lineY, /*forceLoad=*/true,
+                           /*monochromeOutput=*/true);
+      }
     }
     rowY += row.height;
     // Draw horizontal separator between rows (skip after last row)
     if (hasBorder && r + 1 < rows.size()) {
       const int sepLineWidth = row.isHeaderRow ? 2 : 1;
       renderer.drawLine(drawX, rowY, drawX + totalWidth - 1, rowY, sepLineWidth, true);
+    }
+  }
+}
+
+bool PageTableFragment::hasImages() const {
+  for (const auto& row : rows) {
+    for (const auto& cell : row.cells) {
+      if (cell.image) return true;
+    }
+  }
+  return false;
+}
+
+bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monochromeOutput) const {
+  for (const auto& row : rows) {
+    for (const auto& cell : row.cells) {
+      if (!cell.image) continue;
+      if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
+      const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
+      if (!cached) return true;
+    }
+  }
+  return false;
+}
+
+void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput) const {
+  for (const auto& row : rows) {
+    for (const auto& cell : row.cells) {
+      if (!cell.image) continue;
+      if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
+      const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
+      if (cached) continue;
+      // The decode is the heap-hungry work; do it now (caller has freed the secondary buffer).
+      // The cache is position-independent, so warm at the origin — the framebuffer write is
+      // discarded by the caller's clearScreen().
+      cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
     }
   }
 }
@@ -136,6 +179,9 @@ bool PageTableFragment::serialize(FsFile& file) {
       for (const auto& line : cell.lines) {
         if (!line->serialize(file)) return false;
       }
+      const bool hasImage = static_cast<bool>(cell.image);
+      serialization::writePod(file, hasImage);
+      if (hasImage && !cell.image->serialize(file)) return false;
     }
   }
   return true;
@@ -198,6 +244,15 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
         }
         cell.lines.push_back(std::move(tb));
       }
+      bool hasImage = false;
+      serialization::readPod(file, hasImage);
+      if (hasImage) {
+        cell.image = ImageBlock::deserialize(file);
+        if (!cell.image) {
+          LOG_ERR("PGE", "TableFragment: ImageBlock deserialize failed at row %u cell %u", r, c);
+          return nullptr;
+        }
+      }
       row.cells.push_back(std::move(cell));
     }
     rows.push_back(std::move(row));
@@ -235,6 +290,10 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
   // do not need the contiguous heap headroom, so skipping the iteration entirely
   // saves the no-op overhead on text-only pages (the common case).
   for (auto& element : elements) {
+    if (element->getTag() == TAG_PageTable) {
+      static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput);
+      continue;
+    }
     if (element->getTag() != TAG_PageImage) continue;
     const auto& ib = static_cast<const PageImage&>(*element).getImageBlock();
     if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;

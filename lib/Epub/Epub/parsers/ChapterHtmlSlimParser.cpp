@@ -796,10 +796,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         }
       }
 
-      // Images inside table cells cannot be placed inline in the cell (no layout space).
-      // Defer them so they are emitted as block images immediately after the table.
+      // Image inside a table cell: attach it to the cell so the layout can place it inside the
+      // grid (first image per cell wins). The fragment layout sizes the cell to fit it; the
+      // paragraph fallback re-emits it as a block image below the table.
       if (self->currentTableCell && self->currentTable && !src.empty() && self->imageRendering != 2) {
-        self->currentTable->deferredImages.push_back({src, alt});
+        if (self->currentTableCell->imageSrc.empty()) {
+          self->currentTableCell->imageSrc = src;
+          self->currentTableCell->imageAlt = alt;
+        }
         self->depth += 1;
         return;
       }
@@ -2358,78 +2362,90 @@ void ChapterHtmlSlimParser::emitBufferedTable() {
   if (currentTable->unsupported || currentTable->rows.empty()) {
     LOG_DBG("EHP", "Table unsupported or empty — falling back to paragraph mode");
     emitTableAsParagraphs(*currentTable);
+    emitCellImagesAsBlocks(*currentTable);
   } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
     LOG_ERR("EHP", "Low heap (%u), falling back to paragraph mode for table", ESP.getFreeHeap());
     emitTableAsParagraphs(*currentTable);
+    emitCellImagesAsBlocks(*currentTable);
   } else {
+    // Fragment path places cell images inside the grid; no separate block-image emit.
     emitTableAsFragments(*currentTable);
   }
-
-  emitDeferredTableImages(*currentTable);
 }
 
-void ChapterHtmlSlimParser::emitDeferredTableImages(BufferedTable& table) {
-  if (table.deferredImages.empty()) return;
+std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::string& src, const std::string& alt,
+                                                                  const uint16_t maxWidth, const uint16_t maxHeight) {
+  if (src.empty() || maxWidth == 0 || maxHeight == 0) return nullptr;
 
-  // Images found inside table cells are emitted sequentially below the table, one per line,
-  // scaled to fit the full viewport width (same as any other block image).
-  for (auto& img : table.deferredImages) {
-    if (img.src.empty()) continue;
+  const std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(contentBase + src));
+  if (!ImageDecoderFactory::isFormatSupported(resolvedPath)) return nullptr;
 
-    const std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(contentBase + img.src));
-    if (!ImageDecoderFactory::isFormatSupported(resolvedPath)) continue;
-
-    ImageDimensions dims = {0, 0};
-    bool dimsOk = false;
-    if (imageManifest) {
-      const ImageManifestEntry* entry = imageManifest->ensureResolved(epub->getPath(), resolvedPath);
-      if (entry) {
-        dims.width = entry->width;
-        dims.height = entry->height;
-        dimsOk = true;
-      }
+  ImageDimensions dims = {0, 0};
+  bool dimsOk = false;
+  if (imageManifest) {
+    const ImageManifestEntry* entry = imageManifest->ensureResolved(epub->getPath(), resolvedPath);
+    if (entry) {
+      dims.width = entry->width;
+      dims.height = entry->height;
+      dimsOk = true;
     }
-    if (!dimsOk) {
-      dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(epub->getPath(), resolvedPath, dims);
-    }
-    if (!dimsOk || dims.width == 0 || dims.height == 0) {
-      LOG_DBG("EHP", "Deferred table image: no dims for %s", resolvedPath.c_str());
-      continue;
-    }
+  }
+  if (!dimsOk) {
+    dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(epub->getPath(), resolvedPath, dims);
+  }
+  if (!dimsOk || dims.width == 0 || dims.height == 0) {
+    LOG_DBG("EHP", "Table cell image: no dims for %s", resolvedPath.c_str());
+    return nullptr;
+  }
 
-    // Scale to fit viewport, preserving aspect ratio.
-    float scale = 1.0f;
-    if (static_cast<int>(dims.width) > static_cast<int>(viewportWidth))
-      scale = static_cast<float>(viewportWidth) / dims.width;
-    if (static_cast<int>(dims.height) * scale > static_cast<int>(viewportHeight))
-      scale = static_cast<float>(viewportHeight) / dims.height;
-    const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
-    const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
+  // Scale to fit the cell box, preserving aspect ratio. Never upscale.
+  float scale = 1.0f;
+  if (static_cast<int>(dims.width) > static_cast<int>(maxWidth)) scale = static_cast<float>(maxWidth) / dims.width;
+  if (static_cast<int>(dims.height) * scale > static_cast<int>(maxHeight))
+    scale = static_cast<float>(maxHeight) / dims.height;
+  const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
+  const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
 
-    std::string ext;
-    const size_t extPos = resolvedPath.rfind('.');
-    if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
-    const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
+  std::string ext;
+  const size_t extPos = resolvedPath.rfind('.');
+  if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
+  const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
 
+  return std::make_shared<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
+                                      static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+}
+
+void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBlock>& image) {
+  if (!image) return;
+  const int displayWidth = image->getWidth();
+  const int displayHeight = image->getRenderedHeight();
+
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
+  if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
+    emitPage(lastBodyChildByteOffset);
     if (!currentPage) {
       currentPage.reset(new Page());
       currentPageNextY = 0;
     }
+  }
 
-    if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
-      emitPage(lastBodyChildByteOffset);
-      if (!currentPage) {
-        currentPage.reset(new Page());
-        currentPageNextY = 0;
-      }
+  const int xPos = (viewportWidth - displayWidth) / 2;
+  currentPage->elements.push_back(std::make_shared<PageImage>(image, xPos, currentPageNextY));
+  currentPageNextY += displayHeight;
+  LOG_DBG("EHP", "Table cell image placed as block: %dx%d", displayWidth, displayHeight);
+}
+
+void ChapterHtmlSlimParser::emitCellImagesAsBlocks(BufferedTable& table) {
+  // Fallback (paragraph) path: cells are flattened to paragraphs, so any cell image is emitted
+  // as a full-width block image below the table, one per line — same as any other block image.
+  for (auto& row : table.rows) {
+    for (auto& cell : row.cells) {
+      if (cell.imageSrc.empty()) continue;
+      placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
     }
-
-    const int xPos = (viewportWidth - displayWidth) / 2;
-    auto imageBlock =
-        std::make_shared<ImageBlock>(cachedPath, displayWidth, displayHeight, img.alt, epub->getPath(), resolvedPath);
-    currentPage->elements.push_back(std::make_shared<PageImage>(imageBlock, xPos, currentPageNextY));
-    currentPageNextY += displayHeight;
-    LOG_DBG("EHP", "Deferred table image placed: %s %dx%d", resolvedPath.c_str(), displayWidth, displayHeight);
   }
 }
 
@@ -2490,11 +2506,18 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       return;
     }
 
+    // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
+    // paragraph fallback and drop the image).
+    const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
+        std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
+    const uint16_t cellImageMaxWidth =
+        (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
+
     LayoutRow lr;
     lr.isHeaderRow = bufRow.isHeaderRow;
     lr.renderCols = renderCols;
     lr.cells.reserve(renderCols);
-    uint16_t maxLines = 0;
+    uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
 
     for (auto& bufCell : bufRow.cells) {
       TableCell cell;
@@ -2510,9 +2533,13 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
                                             });
       }
 
-      if (cell.lines.size() > maxLines) {
-        maxLines = static_cast<uint16_t>(cell.lines.size());
+      if (!bufCell.imageSrc.empty()) {
+        cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
       }
+
+      uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
+      if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
+      if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
       lr.cells.push_back(std::move(cell));
     }
 
@@ -2523,8 +2550,8 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       }
     }
 
-    lr.height = static_cast<uint16_t>(maxLines * lineHeight + 2 * TABLE_CELL_PADDING);
-    if (lr.height == 0) lr.height = static_cast<uint16_t>(lineHeight + 2 * TABLE_CELL_PADDING);
+    if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
+    lr.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);
     layoutRows.push_back(std::move(lr));
   }
 
@@ -2581,6 +2608,9 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       }
       singleRowFallback.rows.push_back(std::move(fbRow));
       emitTableAsParagraphs(singleRowFallback);
+      // The paragraph fallback only carries text; re-emit any cell images as block images so
+      // they are not lost on an over-tall row.
+      for (auto& cell : lr.cells) placeImageBlockAsBlock(cell.image);
       continue;
     }
 

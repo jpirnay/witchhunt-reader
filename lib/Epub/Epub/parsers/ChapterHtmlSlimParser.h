@@ -126,6 +126,8 @@ class ChapterHtmlSlimParser final : public Print {
   // Buffered table model — populated while inside <table>, emitted on </table>
   struct BufferedTableCell {
     std::unique_ptr<ParsedText> text;
+    std::string imageSrc;  // first image found in this cell (empty if none)
+    std::string imageAlt;
     bool isHeader = false;
     uint8_t colSpan = 1;
   };
@@ -134,17 +136,12 @@ class ChapterHtmlSlimParser final : public Print {
     bool isHeaderRow = false;   // true when all cells in this row are <th>
     uint8_t effectiveCols = 0;  // sum of colSpan values; tracks actual column footprint
   };
-  struct DeferredTableImage {
-    std::string src;
-    std::string alt;
-  };
   struct BufferedTable {
     std::vector<BufferedTableRow> rows;
-    std::vector<DeferredTableImage> deferredImages;  // images found in cells, emitted after the table
-    int depth = 0;                                   // nesting depth; > 1 means we're inside a nested table
-    bool unsupported = false;                        // true → emit as paragraphs instead of grid
-    bool hasBorder = true;                           // false when border="0" on the <table> element
-    uint8_t maxCols = 0;                             // max effectiveCols across all rows
+    int depth = 0;             // nesting depth; > 1 means we're inside a nested table
+    bool unsupported = false;  // true → emit as paragraphs instead of grid
+    bool hasBorder = true;     // false when border="0" on the <table> element
+    uint8_t maxCols = 0;       // max effectiveCols across all rows
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -238,7 +235,15 @@ class ChapterHtmlSlimParser final : public Print {
   void emitBufferedTable();
   void emitTableAsFragments(BufferedTable& table);
   void emitTableAsParagraphs(BufferedTable& table);
-  void emitDeferredTableImages(BufferedTable& table);
+  // Fallback path: emit each cell's image as a full-width block image below the table.
+  void emitCellImagesAsBlocks(BufferedTable& table);
+  // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
+  // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
+  // cannot be resolved. Advances imageCounter to allocate a unique cache path.
+  std::shared_ptr<ImageBlock> buildCellImage(const std::string& src, const std::string& alt, uint16_t maxWidth,
+                                             uint16_t maxHeight);
+  // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
+  void placeImageBlockAsBlock(const std::shared_ptr<ImageBlock>& image);
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.

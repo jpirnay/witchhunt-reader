@@ -16,6 +16,9 @@ static constexpr uint16_t MAX_TABLE_ROWS = 48;
 static constexpr uint8_t TABLE_CELL_PADDING = 5;
 static constexpr uint16_t MIN_COL_INNER_WIDTH = 24;
 static constexpr uint8_t MAX_CELL_LINES = 64;
+// Cap on the rendered height of an in-cell graphic, so a single image never blows
+// a row past the viewport (which would force the paragraph fallback and drop it).
+static constexpr uint16_t MAX_CELL_IMAGE_HEIGHT = 240;
 
 enum PageElementTag : uint8_t {
   TAG_PageLine = 1,
@@ -79,6 +82,7 @@ class PageHR final : public PageElement {
 
 struct TableCell {
   std::vector<std::shared_ptr<TextBlock>> lines;
+  std::shared_ptr<ImageBlock> image;  // optional in-cell graphic, drawn below any cell text
   bool isHeader = false;
 };
 
@@ -110,6 +114,14 @@ class PageTableFragment final : public PageElement {
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
+
+  // In-cell graphics participate in the Page-level image passes below.
+  bool hasImages() const;
+  bool hasUncachedImages(bool forceLoad, bool monochromeOutput) const;
+  // Decode any missing cell-image pixel caches. Position is irrelevant to the cache
+  // (it is position-independent); images are warmed at the origin and the framebuffer
+  // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
+  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput) const;
 };
 
 class Page {
@@ -152,8 +164,10 @@ class Page {
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {
-    return std::any_of(elements.begin(), elements.end(),
-                       [](const std::shared_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
+    return std::any_of(elements.begin(), elements.end(), [](const std::shared_ptr<PageElement>& el) {
+      if (el->getTag() == TAG_PageImage) return true;
+      return el->getTag() == TAG_PageTable && static_cast<const PageTableFragment&>(*el).hasImages();
+    });
   }
 
   // Returns true if any image on this page would require a decoder allocation —
@@ -161,6 +175,8 @@ class Page {
   // Used to decide whether to release the secondary frame buffer before warm.
   bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput) const {
     return std::any_of(elements.begin(), elements.end(), [&](const std::shared_ptr<PageElement>& el) {
+      if (el->getTag() == TAG_PageTable)
+        return static_cast<const PageTableFragment&>(*el).hasUncachedImages(forceLoadLargeImages, monochromeOutput);
       if (el->getTag() != TAG_PageImage) return false;
       const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
       if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) return false;

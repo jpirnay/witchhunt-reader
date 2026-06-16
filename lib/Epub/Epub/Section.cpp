@@ -18,8 +18,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    52;  // bumped: horizontal rules now render centered at 50% width instead of edge-to-edge;
-         // discards v51 caches that baked the old full-width hr geometry
+    53;  // bumped: table cells can now embed an image (TableCell gains a serialized ImageBlock);
+         // discards v52 caches whose table fragments predate the per-cell image field
 
 namespace header {
 constexpr uint32_t kVersion = 0;
