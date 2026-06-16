@@ -64,7 +64,6 @@
 
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
-constexpr unsigned long skipChapterMs = 700;
 
 // Human-readable effective refresh mode for the page-summary diagnostic log.
 const char* refreshModeName(HalDisplay::RefreshMode mode) {
@@ -504,6 +503,27 @@ void EpubReaderActivity::loop() {
         ReaderUtils::enforceExitFullRefresh(renderer);
         if (tryAutoPushOnClose()) return;
         finish();
+        return;
+      }
+    }
+
+    // Built-in default for a long-press on a page-turn button is chapter skip
+    // (prev for Left/PageBack, next for Right/PageForward). Non-default long
+    // actions are dispatched by the global handler in main.cpp and never reach
+    // here, so a Long event arriving for these buttons with the setting at
+    // BTN_DEFAULT is the built-in case. markLongPressDispatched() suppresses the
+    // wasReleased-based page turn that detectPageTurn() would otherwise fire when
+    // the button is released after the skip.
+    if (ev.type == ButtonEventManager::PressType::Long) {
+      const bool prevChapter =
+          (ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnLongPageBack == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT);
+      const bool nextChapter =
+          (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
+      if (prevChapter || nextChapter) {
+        globalButtonEvents().markLongPressDispatched(ev.button);
+        onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
         return;
       }
     }

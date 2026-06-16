@@ -1015,6 +1015,12 @@ void loop() {
         case BA::BTN_QUICK_OVERRIDES:
           activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
           break;
+        case BA::BTN_IGNORE:
+          // Explicit "do nothing": swallow the event so neither a global action nor
+          // the activity's built-in behaviour fires. For a long-press on a page-turn
+          // button the markLongPressDispatched() above also suppresses the
+          // release-driven page turn, so the press is fully inert.
+          break;
         default:
           break;
       }

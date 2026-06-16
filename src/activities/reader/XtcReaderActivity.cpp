@@ -112,6 +112,24 @@ void XtcReaderActivity::loop() {
       }
     }
 
+    // Built-in default for a long-press on a page-turn button is chapter skip.
+    // onButtonAction() no-ops when the XTC has no chapters. markLongPressDispatched()
+    // suppresses the release-driven page turn that would otherwise also fire.
+    // (Mirrors EpubReaderActivity; non-default long actions are dispatched by main.cpp.)
+    if (ev.type == ButtonEventManager::PressType::Long) {
+      const bool prevChapter =
+          (ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnLongPageBack == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT);
+      const bool nextChapter =
+          (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
+      if (prevChapter || nextChapter) {
+        globalButtonEvents().markLongPressDispatched(ev.button);
+        onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
+        return;
+      }
+    }
+
     if (ev.type == ButtonEventManager::PressType::Short) {
       if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT &&
            globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageBack)) ||

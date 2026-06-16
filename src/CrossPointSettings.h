@@ -327,7 +327,15 @@ class CrossPointSettings {
   uint8_t includeBetaUpdates = 0;
 
   // Configurable actions for short / double / long press on each logical button.
-  // BTN_DEFAULT means "use the button's normal built-in behaviour".
+  //
+  // BTN_DEFAULT means "do the activity's natural behaviour for this button" — it
+  // is context-sensitive on purpose (e.g. Confirm-short opens the reader menu but
+  // selects an entry in a list), which is why it can't be replaced by baking a
+  // fixed action into the defaults. BTN_IGNORE is the opposite: explicitly do
+  // nothing and suppress the built-in behaviour for that press.
+  //
+  // New values MUST be appended before BUTTON_ACTION_COUNT — the settings option
+  // list (SettingsList.h btnActionOptions) and persisted JSON map by numeric value.
   enum BUTTON_ACTION {
     BTN_DEFAULT = 0,
     BTN_PAGE_FORWARD,
@@ -351,6 +359,7 @@ class CrossPointSettings {
     BTN_CYCLE_FONT_SIZE,
     BTN_CYCLE_ORIENTATION,
     BTN_QUICK_OVERRIDES,
+    BTN_IGNORE,
     BUTTON_ACTION_COUNT
   };
 
