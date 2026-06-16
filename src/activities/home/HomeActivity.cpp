@@ -212,6 +212,8 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         const std::string path = UITheme::getCoverThumbPath(placeholder, sz.first, sz.second);
         FsFile thumbFile;
         const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
+        LOG_DBG("HOME", "Cover check [%dx%d] path=%s valid=%d size=%u", sz.first, sz.second, path.c_str(),
+                validThumb ? 1 : 0, (unsigned)thumbFile.size());
         thumbFile.close();
         if (!validThumb) {
           anyMissing = true;
@@ -222,9 +224,14 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       const std::string path = UITheme::getCoverThumbPath(placeholder, coverHeight);
       FsFile thumbFile;
       const bool validThumb = Storage.openFileForRead("HOME", path, thumbFile) && thumbFile.size() > 0;
+      LOG_DBG("HOME", "Cover check [h=%d] path=%s valid=%d size=%u", coverHeight, path.c_str(), validThumb ? 1 : 0,
+              (unsigned)thumbFile.size());
       thumbFile.close();
       anyMissing = !validThumb;
     }
+
+    LOG_DBG("HOME", "loadRecentCovers[%zu]: coverBmpPath=%s placeholder=%s anyMissing=%d", nextRecentCoverIndex,
+            book.coverBmpPath.c_str(), placeholder.c_str(), anyMissing ? 1 : 0);
 
     if (anyMissing) {
       // Cover decode (PNG/JPEG sidecar or embedded) needs ~42 KB contiguous heap, unavailable
@@ -233,13 +240,19 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
       bool success = true;
       if (!thumbSizes.empty()) {
-        for (const auto& sz : thumbSizes)
-          success = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second) && success;
+        for (const auto& sz : thumbSizes) {
+          const bool ok = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second);
+          LOG_DBG("HOME", "ensureCoverThumb(%dx%d) for %s: %s", sz.first, sz.second, book.path.c_str(),
+                  ok ? "ok" : "FAILED");
+          success = ok && success;
+        }
       } else {
         success = ReaderActivity::ensureCoverThumb(book.path, coverHeight);
+        LOG_DBG("HOME", "ensureCoverThumb(h=%d) for %s: %s", coverHeight, book.path.c_str(), success ? "ok" : "FAILED");
       }
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, success ? placeholder : "");
       book.coverBmpPath = success ? placeholder : "";
+      LOG_DBG("HOME", "After generate: stored coverBmpPath=%s", book.coverBmpPath.c_str());
       onCoverGenerated();
       return;
     }
@@ -247,6 +260,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     // Already present — make sure the stored path is the canonical placeholder so a stale
     // "[HEIGHT].bmp" / raw-sidecar entry self-heals to the unified naming without a re-decode.
     if (book.coverBmpPath != placeholder) {
+      LOG_DBG("HOME", "Self-heal: coverBmpPath=%s -> placeholder=%s", book.coverBmpPath.c_str(), placeholder.c_str());
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
       book.coverBmpPath = placeholder;
     }

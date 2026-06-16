@@ -47,9 +47,8 @@ void XtcReaderActivity::onEnter() {
   // Save current XTC as last opened book and add to recent books
   APP_STATE.openEpubPath = xtc->getPath();
   APP_STATE.saveToFile();
-  const std::string xtcSidecar = ReaderActivity::sidecarCoverPath(xtc->getPath());
-  const std::string xtcCover = xtcSidecar.empty() ? xtc->getThumbBmpPath() : xtcSidecar;
-  RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), "", xtcCover);
+  RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), "",
+                       ReaderActivity::coverThumbPlaceholder(xtc->getPath()));
 
   // Start the reading-stats session. XTC has real title/author from the
   // file header so the per-book screen will look nicer than TXT/MD.

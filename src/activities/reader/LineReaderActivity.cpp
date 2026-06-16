@@ -38,9 +38,7 @@ void LineReaderActivity::onEnter() {
   const std::string fileName = filePath.substr(filePath.rfind('/') + 1);
   APP_STATE.openEpubPath = filePath;
   APP_STATE.saveToFile();
-  const std::string sidecar = ReaderActivity::sidecarCoverPath(filePath);
-  const std::string cover = sidecar.empty() ? txt->getThumbBmpPath() : sidecar;
-  RECENT_BOOKS.addBook(filePath, fileName, "", "", cover);
+  RECENT_BOOKS.addBook(filePath, fileName, "", "", ReaderActivity::coverThumbPlaceholder(filePath));
 
   // Start reading-stats session. Same filename-hash policy as EPUB so renamed
   // files start fresh; author is unknown for plain text formats.

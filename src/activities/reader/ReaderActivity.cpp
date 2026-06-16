@@ -83,7 +83,13 @@ std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, con
                                                 int height, const std::string& fileName) {
   if (!Storage.exists(cacheDir.c_str())) Storage.mkdir(cacheDir.c_str());
   const std::string bmpPath = cacheDir + "/" + fileName;
-  if (Storage.exists(bmpPath.c_str())) return bmpPath;
+  if (Storage.exists(bmpPath.c_str())) {
+    FsFile existing;
+    const uint32_t existingSize = Storage.openFileForRead("COVER", bmpPath, existing) ? (uint32_t)existing.size() : 0;
+    existing.close();
+    LOG_DBG("COVER", "convertSidecarToBmp: BMP already exists path=%s size=%u", bmpPath.c_str(), existingSize);
+    return bmpPath;
+  }
 
   FsFile src;
   if (!Storage.openFileForRead("COVER", sidecarPath, src)) return "";
@@ -106,9 +112,12 @@ std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, con
   src.close();
   dst.close();
   if (!ok) {
+    LOG_DBG("COVER", "convertSidecarToBmp: conversion FAILED sidecar=%s bmpPath=%s", sidecarPath.c_str(),
+            bmpPath.c_str());
     Storage.remove(bmpPath.c_str());
     return "";
   }
+  LOG_DBG("COVER", "convertSidecarToBmp: wrote %s from %s", bmpPath.c_str(), sidecarPath.c_str());
   return bmpPath;
 }
 
@@ -136,7 +145,12 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int width, in
 
   // Source preference: a sidecar image beside the book wins over the embedded cover.
   const std::string sidecar = sidecarCoverPath(bookPath);
-  if (!sidecar.empty() && !convertSidecarToBmp(dir, sidecar, width, height, name).empty()) return true;
+  if (!sidecar.empty()) {
+    const std::string result = convertSidecarToBmp(dir, sidecar, width, height, name);
+    LOG_DBG("COVER", "convertSidecarToBmp(%dx%d) sidecar=%s result=%s", width, height, sidecar.c_str(),
+            result.empty() ? "FAILED" : result.c_str());
+    if (!result.empty()) return true;
+  }
 
   // No usable sidecar — fall back to the embedded cover (deferred load: a sidecar hit never
   // pays for a full book parse).
@@ -164,7 +178,12 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int height) {
 
   // Embedded single-height thumbnails scale to height*0.6 wide; mirror that for the sidecar.
   const std::string sidecar = sidecarCoverPath(bookPath);
-  if (!sidecar.empty() && !convertSidecarToBmp(dir, sidecar, height * 6 / 10, height, name).empty()) return true;
+  if (!sidecar.empty()) {
+    const std::string result = convertSidecarToBmp(dir, sidecar, height * 6 / 10, height, name);
+    LOG_DBG("COVER", "convertSidecarToBmp(h=%d) sidecar=%s result=%s", height, sidecar.c_str(),
+            result.empty() ? "FAILED" : result.c_str());
+    if (!result.empty()) return true;
+  }
 
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");

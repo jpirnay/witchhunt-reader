@@ -353,9 +353,8 @@ void EpubReaderActivity::onEnter() {
   if (!series.empty() && !epub->getSeriesIndex().empty()) {
     series += " #" + epub->getSeriesIndex();
   }
-  const std::string epubSidecar = ReaderActivity::sidecarCoverPath(epub->getPath());
-  const std::string epubCover = epubSidecar.empty() ? epub->getThumbBmpPath() : epubSidecar;
-  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series, epubCover);
+  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), series,
+                       ReaderActivity::coverThumbPlaceholder(epub->getPath()));
   const RecentBook currentBook = RECENT_BOOKS.getBookByPath(epub->getPath());
   bookEmbeddedStyleOverride = currentBook.embeddedStyleOverride;
   bookImageRenderingOverride = currentBook.imageRenderingOverride;
