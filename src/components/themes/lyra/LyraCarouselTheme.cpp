@@ -256,7 +256,7 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     for (int i = 0; i < frameCount; ++i) {
       gCachedFrames[i] = static_cast<uint8_t*>(malloc(regionBytes));
       if (!gCachedFrames[i]) {
-        LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d (%u bytes)", i,
+        LOG_DBG("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d (%u bytes) — retrying next render", i,
                 static_cast<unsigned>(regionBytes));
         freeFrameCache();
         return false;
@@ -279,7 +279,7 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   if (!gCachedFrames[slotIdx]) {
     gCachedFrames[slotIdx] = static_cast<uint8_t*>(malloc(gCachedFrameBytes));
     if (!gCachedFrames[slotIdx]) {
-      LOG_ERR("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d", slotIdx);
+      LOG_DBG("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d — retrying next render", slotIdx);
       return false;
     }
   }

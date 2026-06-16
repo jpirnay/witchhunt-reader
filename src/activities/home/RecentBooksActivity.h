@@ -1,13 +1,16 @@
 #pragma once
 #include <I18n.h>
+#include <PngToBmpConverter.h>
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../Activity.h"
 #include "RecentBooksStore.h"
+#include "activities/reader/ReaderActivity.h"
 
 class RecentBooksActivity final : public Activity {
  public:
@@ -31,6 +34,11 @@ class RecentBooksActivity final : public Activity {
   bool coversLoading = false;
   bool firstRenderDone = false;
   size_t nextCoverIndex = 0;
+
+  // Sliced PNG decode session (non-null while a PNG cover is being decoded row-by-row)
+  std::unique_ptr<PngDecodeSession> pngSession;
+  ReaderActivity::PngThumbFiles pngSessionFiles;
+  bool pngSessionFailed = false;
 
   // Partial selection repaint: track previous index so we only redraw two cells
   int prevSelectorIndex = -1;

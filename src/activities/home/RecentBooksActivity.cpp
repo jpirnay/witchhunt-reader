@@ -54,6 +54,36 @@ bool RecentBooksActivity::loadNextCover() {
   const int tw = gridThumbWidth(contentRect.width);
   const int th = GRID_THUMB_HEIGHT;
 
+  // ── PNG session tick ────────────────────────────────────────────────────────
+  if (pngSession) {
+    constexpr uint32_t ROWS_PER_TICK = 6;
+    const auto status = pngSession->continueRows(ROWS_PER_TICK);
+    if (status == PngDecodeSession::Status::Running) {
+      return false;  // not done yet — render() will requestUpdate() and call us again
+    }
+    pngSessionFiles.close();
+    pngSessionFailed = (status == PngDecodeSession::Status::Error);
+    pngSession.reset();
+
+    RecentBook& book = recentBooks[nextCoverIndex];
+    const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
+    if (!pngSessionFailed) {
+      LOG_DBG("RBA", "PNG session complete for %s", book.path.c_str());
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+      book.coverBmpPath = placeholder;
+    } else {
+      // Remove the partial BMP; the normal failure path below will store empty.
+      const std::string thumbPath = gridThumbPath(placeholder, tw, th);
+      Storage.remove(thumbPath.c_str());
+      LOG_ERR("RBA", "PNG session failed for %s", book.path.c_str());
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
+      book.coverBmpPath = "";
+    }
+    nextCoverIndex++;
+    return false;  // advance to next book on next render tick
+  }
+  // ───────────────────────────────────────────────────────────────────────────
+
   for (; nextCoverIndex < recentBooks.size(); nextCoverIndex++) {
     RecentBook& book = recentBooks[nextCoverIndex];
     if (!Storage.exists(book.path.c_str())) continue;
@@ -69,6 +99,14 @@ bool RecentBooksActivity::loadNextCover() {
     thumbFile.close();
     if (!valid) {
       const bool ok = ReaderActivity::ensureCoverThumb(book.path, tw, th);
+      if (!ok && !pngSessionFailed) {
+        pngSession = ReaderActivity::beginPngThumbSession(book.path, tw, th, pngSessionFiles);
+        if (pngSession) {
+          LOG_DBG("RBA", "Started PNG session for %s (%u rows)", book.path.c_str(), pngSession->totalRows());
+          return false;  // session drain above handles completion
+        }
+      }
+      pngSessionFailed = false;  // consumed
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, ok ? placeholder : "");
       book.coverBmpPath = ok ? placeholder : "";
       nextCoverIndex++;
@@ -108,6 +146,9 @@ void RecentBooksActivity::onEnter() {
   prevSelectorIndex = -1;
   fullRedrawNeeded = true;
   openingBook = false;
+  pngSession.reset();
+  pngSessionFiles.close();
+  pngSessionFailed = false;
 
   requestUpdate();
 }
@@ -126,6 +167,9 @@ void RecentBooksActivity::switchViewMode(bool grid) {
   firstRenderDone = false;
   nextCoverIndex = 0;
   prevSelectorIndex = -1;
+  pngSession.reset();
+  pngSessionFiles.close();
+  pngSessionFailed = false;
   fullRedrawNeeded = true;
   requestUpdate(true);
 }
