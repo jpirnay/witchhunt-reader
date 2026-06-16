@@ -53,9 +53,9 @@ Rendering examples from [Alice in Wonderland](https://www.gutenberg.org/ebooks/2
 | Graphics | <img src="docs/images/comparison/04_graphic.png">  | <img src="docs/images/comparison/04_graphic_mr.png">  | <img src="docs/images/comparison/04_graphic_cpr.png">  |    |
 | Images in tables | <img src="docs/images/comparison/05_tablegraphic.png">  | <img src="docs/images/comparison/05_tablegraphic_mr.png">  | <img src="docs/images/comparison/05_tablegraphic_cpr.png">  |    |
 
-1) Apologies for the poor image quality of the microreader screenshots, i needed to make photos with my mobile, as I coulnt figure out how to create screenshots from within the reader
+1) Apologies for the poor image quality of the microreader screenshots, i needed to make photos with my mobile, as I couldn't figure out how to create screenshots from within the reader
    
-2) The Rendering of the Mouse poem in MicroReader is even more refined, it manages to deal with different font sizes. too
+2) The Rendering of the Mouse poem in MicroReader is even more refined, it manages to deal with different font sizes, too
 
 # Attributions
 If in doubt consider all the work being done here based on the work of others - especially crosspoint reader (as the ancestor of this version) and microreader have been a great source of inspiration.
