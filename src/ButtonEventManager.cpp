@@ -73,89 +73,114 @@ void ButtonEventManager::drain() {
   }
   eventHead = eventTail = 0;
   longPressDispatchedMask = 0;
+  // Drop edges the sampler queued for the outgoing activity so they don't bleed in.
+  input.flushRawEdges();
 }
 
-void ButtonEventManager::processButton(const int idx, const Button btn) {
+void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool pressed, const unsigned long t) {
   PerButton& s = buttons[idx];
-  const unsigned long now = millis();
-  const bool pressed = input.wasPressed(btn);
-  const bool released = input.wasReleased(btn);
-  const bool held = input.isPressed(btn);
-
   switch (s.state) {
     case State::Idle:
       if (pressed) {
         s.state = State::Pressed;
-        s.pressDownTime = now;
+        s.pressDownTime = t;
       }
       break;
 
     case State::Pressed:
-      if (released) {
-        const unsigned long heldMs = now - s.pressDownTime;
+      if (!pressed) {
+        const unsigned long heldMs = t - s.pressDownTime;
         if (heldMs >= LONG_PRESS_MS) {
           pushEvent(btn, PressType::Long);
           s.state = State::Idle;
         } else if (hasDoubleAction(btn)) {
-          // Delay short-press decision until double-click window expires
-          s.releaseTime = now;
+          // Delay short-press decision until double-click window expires.
+          s.releaseTime = t;
           s.state = State::ReleasedOnce;
         } else {
-          // No double action configured — fire immediately
+          // No double action configured — fire immediately.
           pushEvent(btn, PressType::Short);
           s.state = State::Idle;
         }
-      } else if (held && now - s.pressDownTime >= LONG_PRESS_MS) {
-        // Fire long press immediately once the threshold is reached.
-        pushEvent(btn, PressType::Long);
+      }
+      break;
+
+    case State::ReleasedOnce:
+      if (pressed) {
+        if (t - s.releaseTime >= DOUBLE_WINDOW_MS) {
+          // Window already elapsed before this press arrived (e.g. the loop task
+          // was blocked past it): the first press was a Short, this starts fresh.
+          pushEvent(btn, PressType::Short);
+          s.state = State::Pressed;
+          s.pressDownTime = t;
+        } else {
+          // Second press within the window — start tracking the double.
+          s.state = State::DoublePressed;
+          s.pressDownTime = t;
+        }
+      }
+      break;
+
+    case State::DoublePressed:
+      if (!pressed) {
+        pushEvent(btn, PressType::Double);
         s.state = State::Idle;
-      } else if (!held) {
-        // Button disappeared without wasReleased edge (e.g. after drain) — reset
+      }
+      break;
+  }
+}
+
+void ButtonEventManager::applyTimeout(const int idx, const Button btn, const unsigned long now, const bool heldNow) {
+  PerButton& s = buttons[idx];
+  switch (s.state) {
+    case State::Pressed:
+      if (heldNow && now - s.pressDownTime >= LONG_PRESS_MS) {
+        // Fire Long as soon as the hold threshold passes, without waiting for
+        // release. The eventual release edge lands in Idle and is ignored.
+        pushEvent(btn, PressType::Long);
         s.state = State::Idle;
       }
       break;
 
     case State::ReleasedOnce:
       if (now - s.releaseTime >= DOUBLE_WINDOW_MS) {
-        // Window expired without a second press — it was a short press.
+        // Window expired without a second press — it was a Short.
         pushEvent(btn, PressType::Short);
         s.state = State::Idle;
-        if (pressed) {
-          // The user pressed again after the double-click window expired;
-          // start a fresh press sequence instead of treating it as a double click.
-          s.state = State::Pressed;
-          s.pressDownTime = now;
-        }
-      } else if (pressed) {
-        // Second press within window — start tracking it
-        s.state = State::DoublePressed;
-        s.pressDownTime = now;
       }
       break;
 
-    case State::DoublePressed:
-      if (released) {
-        pushEvent(btn, PressType::Double);
-        s.state = State::Idle;
-      } else if (!held) {
-        // Disappeared without edge — treat as double anyway
-        pushEvent(btn, PressType::Double);
-        s.state = State::Idle;
-      }
+    default:
       break;
   }
 }
 
 void ButtonEventManager::update() {
-  // Clear the long-press-dispatched flag for buttons that are pressed again.
-  // This allows the flag to survive through the release tick (so detectPageTurn
-  // can suppress the page-turn on release) and resets cleanly on the next press.
-  for (int i = 0; i < NUM_BUTTONS; i++) {
-    if ((longPressDispatchedMask & (1u << i)) && input.wasPressed(ALL_BUTTONS[i])) {
-      longPressDispatchedMask &= ~(1u << i);
+  // 1) Replay every debounced edge the sampler captured since the last tick, in
+  //    order, each with its own timestamp. Processing edges discretely (rather
+  //    than sampling instantaneous wasPressed/wasReleased) means a press+release
+  //    that both landed inside one slow loop iteration is still classified.
+  HalGPIO::ButtonEdge edge;
+  while (input.popRawEdge(edge)) {
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      const Button btn = ALL_BUTTONS[i];
+      if (input.rawIndex(btn) != edge.button) {
+        continue;
+      }
+      // A fresh press clears the long-press-dispatched suppression for this button
+      // (it survives through the release so detectPageTurn can skip the release
+      // page-turn, then resets on the next press).
+      if (edge.pressed) {
+        longPressDispatchedMask &= ~(1u << static_cast<int>(btn));
+      }
+      applyEdge(i, btn, edge.pressed, edge.timeMs);
     }
   }
+
+  // 2) Time-based transitions that no edge will deliver: long-press-while-held and
+  //    double-click-window expiry.
+  const unsigned long now = millis();
   for (int i = 0; i < NUM_BUTTONS; i++) {
-    processButton(i, ALL_BUTTONS[i]);
+    applyTimeout(i, ALL_BUTTONS[i], now, input.isPressed(ALL_BUTTONS[i]));
   }
 }

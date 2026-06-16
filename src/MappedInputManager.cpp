@@ -26,6 +26,30 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
   return false;
 }
 
+uint8_t MappedInputManager::rawIndex(const Button button) const {
+  switch (button) {
+    case Button::Back:
+      return SETTINGS.frontButtonBack;
+    case Button::Confirm:
+      return SETTINGS.frontButtonConfirm;
+    case Button::Left:
+      return SETTINGS.frontButtonLeft;
+    case Button::Right:
+      return SETTINGS.frontButtonRight;
+    case Button::Up:
+      return HalGPIO::BTN_UP;
+    case Button::Down:
+      return HalGPIO::BTN_DOWN;
+    case Button::Power:
+      return HalGPIO::BTN_POWER;
+    case Button::PageBack:
+      return HalGPIO::BTN_UP;
+    case Button::PageForward:
+      return HalGPIO::BTN_DOWN;
+  }
+  return 0xFF;
+}
+
 bool MappedInputManager::wasPressed(const Button button) const { return mapButton(button, &HalGPIO::wasPressed); }
 
 bool MappedInputManager::wasReleased(const Button button) const { return mapButton(button, &HalGPIO::wasReleased); }

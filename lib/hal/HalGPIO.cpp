@@ -202,8 +202,131 @@ void HalGPIO::begin() {
   }
 }
 
-void HalGPIO::update() {
+// Push one debounced edge into the loop-drained FIFO. Caller holds inputMux_.
+// Drops the newest edge if the ring is full — a full ring means the loop task
+// has been blocked through 32 distinct transitions, far more than any real burst.
+void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
+  const int next = (edgeTail_ + 1) % EDGE_BUF;
+  if (next == edgeHead_) {
+    return;
+  }
+  edgeBuf_[edgeTail_] = {button, pressed, timeMs};
+  edgeTail_ = next;
+}
+
+// One sampling pass: read + debounce the buttons, then latch any edges. Runs on
+// the sampler task once started; also called synchronously from update() before
+// the sampler is up. inputMgr.update() does the ADC read and must run OUTSIDE the
+// critical section (analogRead may take the ADC driver mutex). Only the latching
+// of the results into the shared accumulators/queue is done under inputMux_.
+void HalGPIO::sampleOnce() {
   inputMgr.update();
+
+  uint8_t live = 0;
+  uint8_t pressed = 0;
+  uint8_t released = 0;
+  for (uint8_t i = 0; i <= BTN_POWER; i++) {
+    if (inputMgr.isPressed(i)) live |= (1u << i);
+    if (inputMgr.wasPressed(i)) pressed |= (1u << i);
+    if (inputMgr.wasReleased(i)) released |= (1u << i);
+  }
+  const uint32_t now = millis();
+  const unsigned long held = inputMgr.getHeldTime();
+
+  portENTER_CRITICAL(&inputMux_);
+  liveState_ = live;
+  accumPressed_ |= pressed;
+  accumReleased_ |= released;
+  heldTimeSnapshot_ = held;
+  for (uint8_t i = 0; i <= BTN_POWER; i++) {
+    // A debounced button makes at most one transition per pass, so a button can
+    // appear in pressed or released here, never both.
+    if (pressed & (1u << i)) pushEdgeLocked(i, true, now);
+    if (released & (1u << i)) pushEdgeLocked(i, false, now);
+  }
+  portEXIT_CRITICAL(&inputMux_);
+}
+
+void HalGPIO::samplerTask(void* arg) {
+  HalGPIO* self = static_cast<HalGPIO*>(arg);
+  TickType_t last = xTaskGetTickCount();
+  while (self->samplerRunning_) {
+    vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
+    self->sampleOnce();
+  }
+  vTaskDelete(nullptr);  // self-terminate once stopInputSampler() clears the flag
+}
+
+void HalGPIO::startInputSampler() {
+  if (samplerRunning_) {
+    return;
+  }
+  samplerRunning_ = true;
+  sampleOnce();  // prime so the first loop iteration sees current state
+  // Priority above the Arduino loop task (1) so the 10ms cadence holds even while
+  // the loop task is busy in a long build slice. 2 KB stack: the sampler's deepest
+  // path (inputMgr.update → analogRead) was measured at ~380 bytes peak on device,
+  // so this leaves >4x headroom while staying small (this codebase is sensitive to
+  // stack-into-heap spills). Watch the btnSampler high-water [MEM] line if changed.
+  xTaskCreate(&HalGPIO::samplerTask, "btnsample", 2048, this, 2, &samplerTaskHandle_);
+}
+
+void HalGPIO::stopInputSampler() {
+  if (!samplerRunning_) {
+    return;
+  }
+  // Signal the task to exit on its next wake and self-delete. Avoids vTaskDelete()
+  // tearing it down mid-analogRead (which would leak the ADC driver mutex).
+  samplerRunning_ = false;
+  samplerTaskHandle_ = nullptr;
+}
+
+bool HalGPIO::popButtonEdge(ButtonEdge& out) {
+  bool got = false;
+  portENTER_CRITICAL(&inputMux_);
+  if (edgeHead_ != edgeTail_) {
+    out = edgeBuf_[edgeHead_];
+    edgeHead_ = (edgeHead_ + 1) % EDGE_BUF;
+    got = true;
+  }
+  portEXIT_CRITICAL(&inputMux_);
+  return got;
+}
+
+void HalGPIO::flushButtonEdges() {
+  portENTER_CRITICAL(&inputMux_);
+  edgeHead_ = 0;
+  edgeTail_ = 0;
+  accumPressed_ = 0;
+  accumReleased_ = 0;
+  portEXIT_CRITICAL(&inputMux_);
+  snapPressed_ = 0;
+  snapReleased_ = 0;
+}
+
+void HalGPIO::update() {
+  if (samplerRunning_) {
+    // Drain the sampler's accumulated edges + latest state into the loop-side
+    // snapshot. No edge seen since the last drain is ever lost, regardless of how
+    // long this loop iteration took.
+    portENTER_CRITICAL(&inputMux_);
+    snapState_ = liveState_;
+    snapPressed_ = accumPressed_;
+    snapReleased_ = accumReleased_;
+    accumPressed_ = 0;
+    accumReleased_ = 0;
+    portEXIT_CRITICAL(&inputMux_);
+  } else {
+    // Pre-sampler (early boot): sample synchronously on the calling task.
+    sampleOnce();
+    portENTER_CRITICAL(&inputMux_);
+    snapState_ = liveState_;
+    snapPressed_ = accumPressed_;
+    snapReleased_ = accumReleased_;
+    accumPressed_ = 0;
+    accumReleased_ = 0;
+    portEXIT_CRITICAL(&inputMux_);
+  }
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
@@ -211,17 +334,17 @@ void HalGPIO::update() {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
-bool HalGPIO::isPressed(uint8_t buttonIndex) const { return inputMgr.isPressed(buttonIndex); }
+bool HalGPIO::isPressed(uint8_t buttonIndex) const { return (snapState_ & (1u << buttonIndex)) != 0; }
 
-bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
+bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return (snapPressed_ & (1u << buttonIndex)) != 0; }
 
-bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
+bool HalGPIO::wasAnyPressed() const { return snapPressed_ != 0; }
 
-bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }
+bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return (snapReleased_ & (1u << buttonIndex)) != 0; }
 
-bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
+bool HalGPIO::wasAnyReleased() const { return snapReleased_ != 0; }
 
-unsigned long HalGPIO::getHeldTime() const { return inputMgr.getHeldTime(); }
+unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
 
 void HalGPIO::waitForStablePowerRelease() {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS

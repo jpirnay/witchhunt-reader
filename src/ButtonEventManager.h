@@ -11,7 +11,11 @@ ButtonEventManager& globalButtonEvents();
 
 // Classifies raw button edges into Short, Double, and Long press events.
 //
-// Per-button state machines run each loop() tick. The key latency rule:
+// Edges are produced by the background sampler (HalGPIO) and queued with the
+// millis() timestamp at which they were detected. update() drains that queue and
+// drives a per-button state machine from each discrete edge, so a complete tap
+// that began and ended while the loop task was busy (a single drained edge pair)
+// is still classified correctly. The key latency rule:
 //   - If no double-click action is configured for a button, Short fires immediately
 //     on release (zero extra wait).
 //   - If a double-click action IS configured, Short is delayed by DOUBLE_WINDOW_MS
@@ -111,6 +115,10 @@ class ButtonEventManager {
   MappedInputManager& input;
 
   void pushEvent(Button button, PressType type);
-  void processButton(int idx, Button btn);
+  // Advance one button's FSM on a discrete press/release edge captured at time t.
+  void applyEdge(int idx, Button btn, bool pressed, unsigned long t);
+  // Advance one button's FSM on elapsed time (long-press-while-held, double-window
+  // expiry), evaluated at `now` against whether the button is currently held.
+  void applyTimeout(int idx, Button btn, unsigned long now, bool heldNow);
   static int buttonToIndex(Button button);
 };

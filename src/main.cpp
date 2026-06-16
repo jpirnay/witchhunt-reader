@@ -268,6 +268,10 @@ static void logStartupMemory(const char* stage) {
 void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
           gpio.isPressed(HalGPIO::BTN_POWER), digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
+  // Stop the background sampler before tearing down the display/power rails so no
+  // ADC read races with that teardown. From here sleep prep reads the power pin
+  // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
+  gpio.stopInputSampler();
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // On X3 the DS3231 keeps time independently, so there's no need to keep the MCU
@@ -687,6 +691,10 @@ void setup() {
   if (!isSilentReboot) {
     gpio.waitForStablePowerRelease();
   }
+  // All boot-time power-button handling (which drives inputMgr.update() directly)
+  // is done — hand button sampling to the background sampler so presses are caught
+  // on a steady ~10ms cadence even while the loop task is busy building sections.
+  gpio.startInputSampler();
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();
@@ -718,6 +726,11 @@ void loop() {
     // and has triggered interrupt WDTs under heavy allocation churn.
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes", ESP.getFreeHeap(), ESP.getHeapSize(),
             ESP.getMinFreeHeap());
+    // Right-sizing aid for the background button sampler task (2 KB allocated).
+    // High-water is the min free stack ever seen; shrink the xTaskCreate size if
+    // this stays comfortably high across a session.
+    LOG_INF("MEM", "btnSampler stack high-water=%u bytes free (min ever)",
+            static_cast<unsigned>(gpio.samplerStackHighWater()));
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
     // loop() runs on the Arduino loopTask (8 KB stack), which also drives the reader's
     // sliced background section builds (serviceBackgroundWork → createSectionFile /

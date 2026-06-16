@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <InputManager.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 // Display SPI pins (custom pins for XteinkX4, not hardware SPI defaults)
 #define EPD_SCLK 8   // SPI Clock
@@ -56,8 +58,49 @@ class HalGPIO {
  public:
   enum class DeviceType : uint8_t { X4, X3 };
 
+  // A single debounced button transition captured by the background sampler.
+  // `button` is a raw BTN_* index; `pressed` is true for a press edge, false for
+  // a release edge; `timeMs` is the millis() value at the time the edge was
+  // detected, so consumers can classify Short/Long/Double independent of how
+  // often the loop task gets around to draining the queue.
+  struct ButtonEdge {
+    uint8_t button = 0;
+    bool pressed = false;
+    uint32_t timeMs = 0;
+  };
+
  private:
   DeviceType _deviceType = DeviceType::X4;
+
+  // ---- Background button sampler (see HalGPIO.cpp) ----------------------------
+  // The buttons are read by polling the ADC; the loop task can be blocked for
+  // hundreds of ms at a time (e.g. a sliced background section build whose slice
+  // overshoots its budget on a heavy page), so polling once per loop iteration
+  // drops presses that begin and end inside one slow iteration. A dedicated task
+  // samples + debounces on a fixed ~10ms cadence regardless of loop progress and
+  // latches every edge for the loop task to drain.
+  TaskHandle_t samplerTaskHandle_ = nullptr;
+  volatile bool samplerRunning_ = false;
+  portMUX_TYPE inputMux_ = portMUX_INITIALIZER_UNLOCKED;
+
+  // Shared sampler→loop state, guarded by inputMux_.
+  uint8_t accumPressed_ = 0;   // press edges seen since the last update() drain
+  uint8_t accumReleased_ = 0;  // release edges seen since the last update() drain
+  uint8_t liveState_ = 0;      // latest debounced button state
+  unsigned long heldTimeSnapshot_ = 0;
+  static constexpr int EDGE_BUF = 32;
+  ButtonEdge edgeBuf_[EDGE_BUF] = {};
+  int edgeHead_ = 0;
+  int edgeTail_ = 0;
+
+  // Loop-side snapshot refreshed by update(); only the loop task reads/writes these.
+  uint8_t snapState_ = 0;
+  uint8_t snapPressed_ = 0;
+  uint8_t snapReleased_ = 0;
+
+  void sampleOnce();
+  void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
+  static void samplerTask(void* arg);
 
  public:
   HalGPIO() = default;
@@ -77,6 +120,27 @@ class HalGPIO {
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
+
+  // Start/stop the background sampler. startInputSampler() must be called once
+  // input handling is wanted (end of setup, after the boot-time power-button
+  // handling that drives inputMgr.update() directly). Until then update() falls
+  // back to sampling synchronously. stopInputSampler() is called before deep
+  // sleep so no ADC read races with the display/power-rail teardown.
+  void startInputSampler();
+  void stopInputSampler();
+
+  // Pop the oldest queued button edge (FIFO). Returns false when the queue is
+  // empty. Drained by ButtonEventManager to drive its press-type FSM.
+  bool popButtonEdge(ButtonEdge& out);
+  // Drop all queued edges and pending accumulated press/release bits. Called on
+  // activity transitions so stale input does not bleed across screens.
+  void flushButtonEdges();
+
+  // Minimum free stack (bytes) the sampler task has ever had, for right-sizing its
+  // stack allocation. 0 when the sampler is not running.
+  UBaseType_t samplerStackHighWater() const {
+    return samplerTaskHandle_ ? uxTaskGetStackHighWaterMark(samplerTaskHandle_) : 0;
+  }
 
   // Wait until the raw power-button GPIO reads HIGH (released) for a sustained period.
   // Uses the raw pin directly instead of the InputManager debounced state to avoid

@@ -26,6 +26,16 @@ class MappedInputManager {
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
 
+  // Raw HalGPIO button index a logical button currently maps to. Used to route a
+  // raw edge from the sampler queue to the logical button(s) it drives.
+  uint8_t rawIndex(Button button) const;
+
+  // Drain one queued raw button edge from the background sampler (FIFO). Returns
+  // false when empty. Used by ButtonEventManager to drive its press-type FSM.
+  bool popRawEdge(HalGPIO::ButtonEdge& out) const { return gpio.popButtonEdge(out); }
+  // Drop all queued/pending raw edges (activity transitions).
+  void flushRawEdges() const { gpio.flushButtonEdges(); }
+
  private:
   HalGPIO& gpio;
 
