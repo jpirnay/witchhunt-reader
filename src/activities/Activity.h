@@ -47,6 +47,12 @@ class Activity {
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
 
+  // Called before something captures the raw frame buffer (e.g. a screenshot) outside the
+  // normal render flow. An activity that may leave content other than what is on screen in
+  // the frame buffer (e.g. the reader's pre-rendered next page) must redraw the visible page
+  // here so the capture matches the display. Default is a no-op.
+  virtual void prepareFramebufferForCapture() {}
+
   // Return true to suppress the minute-tick requestUpdate() from ActivityManager when nothing
   // status-bar-relevant has changed since the last render. Skipping avoids a no-op page render
   // followed by a no-diff e-ink refresh, which on X3 panels accumulates visible speckle.

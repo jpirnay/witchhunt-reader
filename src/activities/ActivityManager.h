@@ -163,6 +163,10 @@ class ActivityManager {
   bool isReaderActivity() const;
   bool skipLoopDelay() const;
 
+  // Forward to the current activity so it can redraw the visible screen into the frame
+  // buffer before a raw capture (e.g. a screenshot). See Activity::prepareFramebufferForCapture().
+  void prepareFramebufferForCapture();
+
   // Dispatch a globally-configured button action to the current activity.
   // Reader-specific actions (page navigation, TOC, bookmarks, footnotes) are forwarded
   // only when the current activity is a reader; others are no-ops in other contexts.
