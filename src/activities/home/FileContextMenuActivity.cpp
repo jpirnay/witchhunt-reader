@@ -18,21 +18,26 @@ FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedIn
       isBrowserMode(filePath.empty()),
       sortMode(sortMode),
       sortDirection(sortDirection) {
-  // Sort mode (Name, Date, Size, Type) — stored as local state via lambdas
-  auto& sortModeRef = this->sortMode;
-  menuItems.push_back(SettingInfo::DynamicEnum(
-      StrId::STR_SORT_BY,
-      {StrId::STR_SORT_NAME, StrId::STR_SORT_DATE, StrId::STR_SORT_SIZE, StrId::STR_SORT_TYPE},
-      [&sortModeRef]() -> uint8_t { return static_cast<uint8_t>(sortModeRef); },
-      [&sortModeRef](uint8_t v) { sortModeRef = static_cast<CrossPointSettings::FILE_SORT_MODE>(v); }));
+  // Sort mode - show current value in title
+  const char* sortModeLabel = "";
+  switch (sortMode) {
+    case CrossPointSettings::SORT_BY_NAME: sortModeLabel = tr(STR_SORT_NAME); break;
+    case CrossPointSettings::SORT_BY_DATE: sortModeLabel = tr(STR_SORT_DATE); break;
+    case CrossPointSettings::SORT_BY_SIZE: sortModeLabel = tr(STR_SORT_SIZE); break;
+    case CrossPointSettings::SORT_BY_TYPE: sortModeLabel = tr(STR_SORT_TYPE); break;
+  }
+  // Separator showing current sort mode
+  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_BY));
+  // Cycle through sort modes
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_NAME, SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DATE, SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_SIZE, SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_TYPE, SettingAction::None));
 
-  // Sort direction (Ascending, Descending)
-  auto& sortDirRef = this->sortDirection;
-  menuItems.push_back(SettingInfo::DynamicEnum(
-      StrId::STR_SORT_DIR,
-      {StrId::STR_SORT_ASC, StrId::STR_SORT_DESC},
-      [&sortDirRef]() -> uint8_t { return static_cast<uint8_t>(sortDirRef); },
-      [&sortDirRef](uint8_t v) { sortDirRef = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(v); }));
+  // Sort direction - show current value in separator
+  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_DIR));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_ASC, SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DESC, SettingAction::None));
 
   // If no file selected (browser options mode), stop here
   if (isBrowserMode) {
@@ -85,8 +90,28 @@ void FileContextMenuActivity::onActionSelected(int index) {
   const StrId nameId = menuItems[index].nameId;
   Action action = Action::None;
 
+  // Display options (sort mode/direction)
+  if (nameId == StrId::STR_SORT_NAME) {
+    sortMode = CrossPointSettings::SORT_BY_NAME;
+    action = Action::ChangeSortMode;
+  } else if (nameId == StrId::STR_SORT_DATE) {
+    sortMode = CrossPointSettings::SORT_BY_DATE;
+    action = Action::ChangeSortMode;
+  } else if (nameId == StrId::STR_SORT_SIZE) {
+    sortMode = CrossPointSettings::SORT_BY_SIZE;
+    action = Action::ChangeSortMode;
+  } else if (nameId == StrId::STR_SORT_TYPE) {
+    sortMode = CrossPointSettings::SORT_BY_TYPE;
+    action = Action::ChangeSortMode;
+  } else if (nameId == StrId::STR_SORT_ASC) {
+    sortDirection = CrossPointSettings::SORT_ASCENDING;
+    action = Action::ChangeSortDirection;
+  } else if (nameId == StrId::STR_SORT_DESC) {
+    sortDirection = CrossPointSettings::SORT_DESCENDING;
+    action = Action::ChangeSortDirection;
+  }
   // File-specific actions (only if not in browser mode)
-  if (!isBrowserMode) {
+  else if (!isBrowserMode) {
     if (nameId == StrId::STR_OPEN) {
       action = Action::Open;
     } else if (nameId == StrId::STR_FETCH_AND_OPEN) {
@@ -110,29 +135,6 @@ void FileContextMenuActivity::onActionSelected(int index) {
 
   MenuResult res;
   res.action = static_cast<int>(action);
-  ActivityResult result{std::move(res)};
-  result.isCancelled = false;
-  setResult(std::move(result));
-  finish();
-}
-
-void FileContextMenuActivity::onSettingToggled(int index) {
-  if (index < 0 || index >= static_cast<int>(menuItems.size())) return;
-
-  const StrId nameId = menuItems[index].nameId;
-  Action action = Action::None;
-
-  // Notify FileBrowserActivity of sort mode/direction changes
-  if (nameId == StrId::STR_SORT_BY) {
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_DIR) {
-    action = Action::ChangeSortDirection;
-  }
-
-  if (action == Action::None) return;
-
-  MenuResult res;
-  res.action = static_cast<int>(action);
   res.sortMode = static_cast<uint8_t>(sortMode);
   res.sortDirection = static_cast<uint8_t>(sortDirection);
   ActivityResult result{std::move(res)};
@@ -140,6 +142,7 @@ void FileContextMenuActivity::onSettingToggled(int index) {
   setResult(std::move(result));
   finish();
 }
+
 
 void FileContextMenuActivity::onBackPressed() {
   ActivityResult result;

@@ -44,5 +44,4 @@ class FileContextMenuActivity final : public MenuListActivity {
 
   void onActionSelected(int index) override;
   void onBackPressed() override;
-  void onSettingToggled(int index) override;
 };
