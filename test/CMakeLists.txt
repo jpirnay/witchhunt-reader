@@ -55,6 +55,7 @@ include(GoogleTest)
 
 add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParser)
 
+add_subdirectory(natural_sort)
 add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
 add_subdirectory(url_utils)

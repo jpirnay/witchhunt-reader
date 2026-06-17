@@ -1,4 +1,5 @@
 #include "FsHelpers.h"
+#include "NaturalSort.h"
 
 #include <cctype>
 #include <cstdint>
