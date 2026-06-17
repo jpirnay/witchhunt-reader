@@ -10,6 +10,8 @@
 #include <Xtc.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstring>
 
 #include "../ActivityManager.h"
 #include "../ActivityResult.h"
@@ -26,6 +28,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+// Legacy global function (for backward compat if needed elsewhere)
 void sortFileList(std::vector<std::string>& strs) {
   std::sort(begin(strs), end(strs), [](const std::string& str1, const std::string& str2) {
     // Directories first
@@ -74,7 +77,7 @@ void FileBrowserActivity::loadFiles() {
     file.close();
   }
   root.close();
-  sortFileList(files);
+  sortFileList();
 }
 
 void FileBrowserActivity::onEnter() {
@@ -351,6 +354,107 @@ size_t FileBrowserActivity::findEntry(const std::string& name) const {
   for (size_t i = 0; i < files.size(); i++)
     if (files[i] == name) return i;
   return files.size();
+}
+
+std::string FileBrowserActivity::getFileExtension(const std::string& name) const {
+  const char* dot = strrchr(name.c_str(), '.');
+  if (!dot || dot == name.c_str() || name.back() == '/') {
+    return "";  // directory, no extension, or dot-file
+  }
+  return std::string(dot + 1);
+}
+
+uint32_t FileBrowserActivity::getFileSize(const std::string& filePath) const {
+  auto file = Storage.open(filePath.c_str());
+  if (!file) return 0;
+  uint32_t size = static_cast<uint32_t>(file.fileSize());
+  file.close();
+  return size;
+}
+
+uint32_t FileBrowserActivity::getFileDateTime(const std::string& filePath) const {
+  auto file = Storage.open(filePath.c_str());
+  if (!file) return 0;
+  uint16_t date = 0, time = 0;
+  file.getModifyDateTime(&date, &time);
+  // Pack into 32-bit: (date << 16) | time (matching FAT format used by HalStorage)
+  file.close();
+  return (static_cast<uint32_t>(date) << 16) | time;
+}
+
+void FileBrowserActivity::sortFileList() {
+  std::sort(files.begin(), files.end(), [this](const std::string& a, const std::string& b) {
+    const bool isDir_a = a.back() == '/';
+    const bool isDir_b = b.back() == '/';
+
+    // Directories always sort first
+    if (isDir_a != isDir_b) return isDir_a;
+
+    // Both are directories or both are files; apply sort mode
+    const char* name_a = a.c_str();
+    const char* name_b = b.c_str();
+
+    int cmp = 0;  // -1 if a < b, 0 if equal, +1 if a > b
+
+    switch (sortMode) {
+      case CrossPointSettings::SORT_BY_NAME:
+        cmp = FsHelpers::naturalCompare(name_a, name_b);
+        break;
+
+      case CrossPointSettings::SORT_BY_DATE: {
+        const std::string fullPath_a = basepath + (basepath.back() != '/' ? "/" : "") + a;
+        const std::string fullPath_b = basepath + (basepath.back() != '/' ? "/" : "") + b;
+        uint32_t dt_a = getFileDateTime(fullPath_a);
+        uint32_t dt_b = getFileDateTime(fullPath_b);
+        if (dt_a < dt_b) {
+          cmp = -1;
+        } else if (dt_a > dt_b) {
+          cmp = 1;
+        } else {
+          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
+        }
+        break;
+      }
+
+      case CrossPointSettings::SORT_BY_SIZE: {
+        const std::string fullPath_a = basepath + (basepath.back() != '/' ? "/" : "") + a;
+        const std::string fullPath_b = basepath + (basepath.back() != '/' ? "/" : "") + b;
+        uint32_t size_a = isDir_a ? 0 : getFileSize(fullPath_a);
+        uint32_t size_b = isDir_b ? 0 : getFileSize(fullPath_b);
+        if (size_a < size_b) {
+          cmp = -1;
+        } else if (size_a > size_b) {
+          cmp = 1;
+        } else {
+          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
+        }
+        break;
+      }
+
+      case CrossPointSettings::SORT_BY_TYPE: {
+        std::string ext_a = getFileExtension(a);
+        std::string ext_b = getFileExtension(b);
+        // Case-insensitive extension comparison
+        std::transform(ext_a.begin(), ext_a.end(), ext_a.begin(), ::tolower);
+        std::transform(ext_b.begin(), ext_b.end(), ext_b.begin(), ::tolower);
+        cmp = FsHelpers::naturalCompare(ext_a.c_str(), ext_b.c_str());
+        if (cmp == 0) {
+          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
+        }
+        break;
+      }
+
+      default:
+        cmp = 0;
+    }
+
+    // Apply sort direction
+    if (sortDirection == CrossPointSettings::SORT_DESCENDING) {
+      cmp = -cmp;
+    }
+
+    return cmp < 0;
+  });
 }
 
 void FileBrowserActivity::openContextMenu() {

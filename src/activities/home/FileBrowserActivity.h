@@ -35,9 +35,18 @@ class FileBrowserActivity final : public Activity {
   std::string focusName;  // entry to select on first load (e.g. the file just returned from)
   std::vector<std::string> files;
 
+  // Sorting state (per-session, not persisted)
+  CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME;
+  CrossPointSettings::FILE_SORT_DIRECTION sortDirection = CrossPointSettings::SORT_ASCENDING;
+  bool hideExtensions = false;
+
   // Data loading
   void loadFiles();
   size_t findEntry(const std::string& name) const;
+  void sortFileList();
+  uint32_t getFileDateTime(const std::string& filePath) const;
+  uint32_t getFileSize(const std::string& filePath) const;
+  std::string getFileExtension(const std::string& name) const;
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",
