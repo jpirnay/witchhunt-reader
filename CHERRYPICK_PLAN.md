@@ -264,11 +264,12 @@ Co-Authored-By: zgredex <112968378+zgredex@users.noreply.github.com>
 
 ## Implementation Order
 
-1. **Phase 1** (NaturalSort extraction) — prerequisite for all others
-2. **Phase 2** (RTC + callback) — independent, enables Phase 3 (Date sort)
-3. **Phase 3** (Sort enum + comparators) — foundation for Phase 4
-4. **Phase 4** (Menu UI) — user-visible, brings everything together
-5. **Phase 5** (Hotspot timestamps) — polish, optional if web uploads not a priority
+1. ✅ **Phase 1** (NaturalSort extraction) — completed
+2. ✅ **Phase 2** (RTC + callback) — completed
+3. ✅ **Phase 3** (Sort enum + comparators) — completed
+4. ✅ **Phase 4** (Menu UI) — completed
+5. **Phase 5** (Hotspot timestamps) — polish (webserver already has &t= support)
+6. **Phase 6** (FileIndex for large directories) — conditional, only if OOM reports
 
 ---
 
@@ -310,6 +311,52 @@ The justification: Patryk wrote the bulk of the logic; we're adapting it for wit
 
 ---
 
+## Webserver File Browser
+
+**Status:** Already implemented in CrossPointWebServer.cpp
+
+The webserver `/api/files` endpoint streams JSON-formatted file listing with:
+- Handles hidden files via SETTINGS.showHiddenFiles
+- Streaming response (doesn't load all entries in RAM at once)
+- Watchdog resets to avoid timeout on large directories
+
+**Sorting:** Currently not sorted by the webserver. The JS frontend (FilesPage.html) 
+handles sorting client-side. With Phase 3-4 infrastructure, we could:
+- Add query params `/api/files?path=/foo&sort=date&dir=asc`
+- Server-side sort in scanFiles callback
+- Identical sorting modes and logic as device browser
+
+**Not urgent:** Web UI already works; user typically doesn't sort large folders on web.
+
+---
+
+## FileIndex (Phase 6): On-SD Streaming Index for Large Folders
+
+**When needed:** If real-world users report OOM when sorting folders with 500+ files.
+
+**Design from PR #1446:**
+- Bounded external merge sort (2 KB chunks, two scratch files)
+- Sort keys: 28-byte prefixes (section + numeric value + naturalSortKey)
+- Only visible rows read back from SD; heap cost stays ~25 KB worst case
+- Staleness detection via FNV32 hash (catches sort-mode/filter changes)
+- Atomic swap-in (power loss leaves only stale scratch files)
+
+**Implementation plan if needed:**
+1. Copy `lib/FileIndex/` from PR #1446 (1100 LOC)
+2. Integrate into FileBrowserActivity:
+   - Use in-RAM sort for <64 entries (current threshold)
+   - Use FileIndex for 64+ entries
+   - Fallback to capped in-RAM list if index build fails
+3. Extend to webserver: make /api/files use FileIndex for consistency
+4. Test with 1000+ file folders to verify heap stays flat
+
+**Cost-benefit:**
+- **Benefit:** Constant heap regardless of folder size; sub-second sort response
+- **Cost:** 1100 LOC, more complex, needs testing on real large folders
+- **Decision:** Skip for now. Add only if field reports show OOM issues.
+
+---
+
 ## Files Checklist
 
 ### To Add
@@ -319,36 +366,64 @@ The justification: Patryk wrote the bulk of the logic; we're adapting it for wit
 - [ ] (Updated) src/I18n/translations/english.yaml
 
 ### To Modify
-- [ ] lib/FsHelpers/FsHelpers.h
-- [ ] lib/FsHelpers/FsHelpers.cpp
-- [ ] lib/hal/HalClock.h
-- [ ] lib/hal/HalClock.cpp
-- [ ] lib/hal/HalStorage.h
-- [ ] lib/hal/HalStorage.cpp
-- [ ] src/CrossPointSettings.h (add SortMode enum)
-- [ ] src/activities/home/FileBrowserActivity.h
-- [ ] src/activities/home/FileBrowserActivity.cpp
-- [ ] src/activities/home/FileContextMenuActivity.h (rename or extend)
-- [ ] src/activities/home/FileContextMenuActivity.cpp
-- [ ] src/network/CrossPointWebServer.cpp (Phase 5)
-- [ ] src/network/html/FilesPage.html (Phase 5)
+- ✅ lib/FsHelpers/FsHelpers.h (Phase 1)
+- ✅ lib/FsHelpers/FsHelpers.cpp (Phase 1)
+- ✅ lib/hal/HalClock.h (Phase 2)
+- ✅ lib/hal/HalClock.cpp (Phase 2)
+- ✅ src/CrossPointSettings.h (Phase 3: added SortMode enum)
+- ✅ src/activities/home/FileBrowserActivity.h (Phase 3-4)
+- ✅ src/activities/home/FileBrowserActivity.cpp (Phase 3-4)
+- ✅ src/activities/home/FileContextMenuActivity.h (Phase 4: extended)
+- ✅ src/activities/home/FileContextMenuActivity.cpp (Phase 4: extended)
+- ✅ src/network/CrossPointWebServer.cpp (Phase 2: hotspot timestamps)
+- ⏳ src/network/html/FilesPage.html (Phase 5: optional, client-side timestamp)
 
-### To Review / No Changes
-- [ ] test/CMakeLists.txt (add NaturalSortTest)
-- [ ] lib/hal/HalStorage constructor/begin() (add callback registration)
+### To Add (Conditional - Phase 6 only)
+- ⏳ lib/FileIndex/FileIndex.h
+- ⏳ lib/FileIndex/FileIndex.cpp
+
+### Already Done
+- ✅ test/CMakeLists.txt (Phase 1: added NaturalSortTest)
+- ✅ lib/hal/HalStorage.cpp (FsDateTime callback already exists)
 
 ---
 
 ## Success Criteria
 
-✅ Files sorted by Name, Date, Size, Type in browser  
-✅ Sort direction (Asc/Desc) toggleable  
-✅ Sorting options accessible via right-button menu in browser  
-✅ Hidden files toggle works across all sort modes  
-✅ Extensions toggle hides ".epub" etc. at render time  
-✅ FAT timestamps on SD files are real dates (not epoch 1980)  
-✅ Timestamps persist across reboots (X3 with RTC)  
-✅ Hotspot uploads timestamp the files correctly  
-✅ No regression in existing file browser behavior  
-✅ Natural sort matches PR #1446 order  
+### Phase 1-4 (Completed ✅)
+- ✅ Natural sort extracted to shared NaturalSort.h/cpp utility
+- ✅ Files sorted by Name, Date, Size, Type in browser
+- ✅ Sort direction (Asc/Desc) toggleable
+- ✅ Sorting options accessible via right-button menu (always shown)
+- ✅ Hidden files toggle works across all sort modes (reloads browser)
+- ✅ Extensions toggle placeholder for Phase 5 (UI only, no effect yet)
+- ✅ FAT timestamps on SD files are real dates (not epoch 1980)
+- ✅ Timestamps persist across reboots (X3 with RTC persists full date)
+- ✅ RTC seeded at boot; clock survives one NTP sync forever after
+- ✅ No regression in existing file browser behavior
+
+### Phase 5 (Optional - Hotspot Upload Timestamps)
+- ⏳ Hotspot uploads receive `&t=<unix-timestamp>` from client
+- ⏳ Timestamp applied if clock not synced from NTP (conditional)
+- ⏳ Validate bounds [2020-01-01, 2100-01-01]
+
+### Phase 6 (Conditional - Large Folder OOM)
+- ⏳ FileIndex enables 1000+ file folders without OOM
+- ⏳ Bounded RAM (heap stays ~25 KB regardless of folder size)
+- ⏳ All sort modes work via external merge sort
+- ⏳ Integration with webserver /api/files endpoint
+
+---
+
+## Commits Summary
+
+```
+1dda0c48 feat: add browser options menu for sort and display settings
+aa7c6cb2 feat: add file browser sorting by name, date, size, and type
+1b38b8bc feat: use DS3231 RTC for persistent FAT file timestamps
+8c5595a8 docs: add PR #1446 cherrypick strategy and phases
+0c077db4 i18n: add sort-related string keys
+cb79870c refactor: extract natural sort to shared NaturalSort utility
+3d6ecfaa refactor: simplify file sorting with shared NaturalSort utility
+```
 
