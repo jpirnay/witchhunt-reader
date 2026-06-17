@@ -248,14 +248,14 @@ static void writeExternalRTC(time_t t) {
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
   Wire.beginTransmission(DS3231_ADDRESS);
-  Wire.write(0x00);                                         // Start at register 0x00 (seconds)
-  Wire.write(bin2bcd(timeinfo.tm_sec));                    // 0x00: Seconds
-  Wire.write(bin2bcd(timeinfo.tm_min));                    // 0x01: Minutes
-  Wire.write(bin2bcd(timeinfo.tm_hour));                   // 0x02: Hours (24h mode)
-  Wire.write(bin2bcd(timeinfo.tm_wday + 1));               // 0x03: Day of week (1-7)
-  Wire.write(bin2bcd(timeinfo.tm_mday));                   // 0x04: Date (01-31)
-  Wire.write(bin2bcd(timeinfo.tm_mon + 1));                // 0x05: Month (01-12, century bit 0 = 20xx)
-  Wire.write(bin2bcd(timeinfo.tm_year - 100));             // 0x06: Year (00-99 = 2000-2099)
+  Wire.write(0x00);                             // Start at register 0x00 (seconds)
+  Wire.write(bin2bcd(timeinfo.tm_sec));         // 0x00: Seconds
+  Wire.write(bin2bcd(timeinfo.tm_min));         // 0x01: Minutes
+  Wire.write(bin2bcd(timeinfo.tm_hour));        // 0x02: Hours (24h mode)
+  Wire.write(bin2bcd(timeinfo.tm_wday + 1));    // 0x03: Day of week (1-7)
+  Wire.write(bin2bcd(timeinfo.tm_mday));        // 0x04: Date (01-31)
+  Wire.write(bin2bcd(timeinfo.tm_mon + 1));     // 0x05: Month (01-12, century bit 0 = 20xx)
+  Wire.write(bin2bcd(timeinfo.tm_year - 100));  // 0x06: Year (00-99 = 2000-2099)
   Wire.endTransmission();
 }
 
@@ -764,8 +764,8 @@ void wifiOff(bool skipNtpSync) {
 
 bool applyClientTime(time_t timestamp) {
   // Validate bounds: [2020-01-01, 2100-01-01]
-  static constexpr time_t MIN_TIMESTAMP = 1577836800;   // 2020-01-01 UTC
-  static constexpr time_t MAX_TIMESTAMP = 4102444800;   // 2100-01-01 UTC
+  static constexpr time_t MIN_TIMESTAMP = 1577836800;  // 2020-01-01 UTC
+  static constexpr time_t MAX_TIMESTAMP = 4102444800;  // 2100-01-01 UTC
 
   if (timestamp < MIN_TIMESTAMP || timestamp > MAX_TIMESTAMP) {
     LOG_ERR("CLK", "Client time %lld out of bounds [%lld, %lld]", (long long)timestamp, (long long)MIN_TIMESTAMP,

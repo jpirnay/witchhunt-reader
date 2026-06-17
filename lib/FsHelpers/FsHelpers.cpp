@@ -1,9 +1,10 @@
 #include "FsHelpers.h"
-#include "NaturalSort.h"
 
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+
+#include "NaturalSort.h"
 
 namespace FsHelpers {
 

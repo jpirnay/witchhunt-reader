@@ -122,7 +122,7 @@ void FileBrowserActivity::tryOpenFileIndex() {
   fileIndex = std::make_unique<FileIndex>();
   const FileIndex::SortMode indexSortMode = static_cast<FileIndex::SortMode>(sortMode);
   if (!fileIndex->open(basepath.c_str(), indexSortMode, acceptFileForBrowser)) {
-    LOG_WRN("FBR", "FileIndex build failed for %s, falling back to in-RAM sort", basepath.c_str());
+    LOG_ERR("FBR", "FileIndex build failed for %s, falling back to in-RAM sort", basepath.c_str());
     fileIndex = nullptr;
   }
 }
@@ -551,7 +551,7 @@ void FileBrowserActivity::openContextMenu() {
   if (cleanBase.back() != '/') cleanBase += "/";
   const std::string fullPath = cleanBase + entry;
 
-  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath),
+  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath, sortMode, sortDirection),
                          [this, fullPath, entry](const ActivityResult& res) {
                            if (res.isCancelled) {
                              requestUpdate();
@@ -567,7 +567,7 @@ void FileBrowserActivity::openContextMenu() {
 }
 
 void FileBrowserActivity::showBrowserOptionsMenu() {
-  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, ""),
+  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, "", sortMode, sortDirection),
                          [this](const ActivityResult& res) {
                            if (res.isCancelled) {
                              requestUpdate();
@@ -588,15 +588,12 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
 
   // Display options (handled directly without reloading)
   if (actionEnum == Action::ChangeSortMode) {
-    // Determine which sort mode was selected based on the menu path
-    // This is a simplified approach; in a real implementation, we'd pass the mode more explicitly
-    sortMode = CrossPointSettings::SORT_BY_NAME;
+    sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
     sortFileList();
     requestUpdate();
     return;
   } else if (actionEnum == Action::ChangeSortDirection) {
-    sortDirection = (sortDirection == CrossPointSettings::SORT_ASCENDING) ? CrossPointSettings::SORT_DESCENDING
-                                                                          : CrossPointSettings::SORT_ASCENDING;
+    sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
     sortFileList();
     requestUpdate();
     return;

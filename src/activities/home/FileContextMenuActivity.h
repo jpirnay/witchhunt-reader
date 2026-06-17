@@ -28,7 +28,9 @@ class FileContextMenuActivity final : public MenuListActivity {
   };
 
   explicit FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                   const std::string& filePath = "");
+                                   const std::string& filePath = "",
+                                   CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME,
+                                   CrossPointSettings::FILE_SORT_DIRECTION sortDirection = CrossPointSettings::SORT_ASCENDING);
 
   void render(RenderLock&&) override;
 

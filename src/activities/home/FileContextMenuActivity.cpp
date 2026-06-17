@@ -10,8 +10,14 @@
 #include "components/UITheme.h"
 
 FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                                 const std::string& filePath)
-    : MenuListActivity("FileContextMenu", renderer, mappedInput), filePath(filePath), isBrowserMode(filePath.empty()) {
+                                                 const std::string& filePath,
+                                                 CrossPointSettings::FILE_SORT_MODE sortMode,
+                                                 CrossPointSettings::FILE_SORT_DIRECTION sortDirection)
+    : MenuListActivity("FileContextMenu", renderer, mappedInput),
+      filePath(filePath),
+      isBrowserMode(filePath.empty()),
+      sortMode(sortMode),
+      sortDirection(sortDirection) {
   // Sort mode (Name, Date, Size, Type) — stored as local state in FileBrowserActivity
   menuItems.push_back(SettingInfo::DynamicEnum(
       StrId::STR_SORT_BY,
@@ -125,6 +131,8 @@ void FileContextMenuActivity::onSettingToggled(int index) {
 
   MenuResult res;
   res.action = static_cast<int>(action);
+  res.sortMode = static_cast<uint8_t>(sortMode);
+  res.sortDirection = static_cast<uint8_t>(sortDirection);
   ActivityResult result{std::move(res)};
   result.isCancelled = false;
   setResult(std::move(result));

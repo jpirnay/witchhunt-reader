@@ -144,20 +144,10 @@ class CrossPointSettings {
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
 
   // File browser sort mode (per-session, not persisted)
-  enum FILE_SORT_MODE {
-    SORT_BY_NAME = 0,
-    SORT_BY_DATE = 1,
-    SORT_BY_SIZE = 2,
-    SORT_BY_TYPE = 3,
-    FILE_SORT_MODE_COUNT
-  };
+  enum FILE_SORT_MODE { SORT_BY_NAME = 0, SORT_BY_DATE = 1, SORT_BY_SIZE = 2, SORT_BY_TYPE = 3, FILE_SORT_MODE_COUNT };
 
   // File browser sort direction (per-session, not persisted)
-  enum FILE_SORT_DIRECTION {
-    SORT_ASCENDING = 0,
-    SORT_DESCENDING = 1,
-    FILE_SORT_DIRECTION_COUNT
-  };
+  enum FILE_SORT_DIRECTION { SORT_ASCENDING = 0, SORT_DESCENDING = 1, FILE_SORT_DIRECTION_COUNT };
 
   // Action mapped to each tilt gesture direction.
   enum TILT_GESTURE_ACTION {

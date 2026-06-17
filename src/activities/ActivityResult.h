@@ -28,6 +28,9 @@ struct MenuResult {
   int8_t fontFamilyOverride = -1;
   std::string sdFontFamilyOverride;
   int8_t fontSizeOverride = -1;
+  // Browser menu: updated sort mode and direction from FileContextMenuActivity
+  uint8_t sortMode = 0;
+  uint8_t sortDirection = 0;
   uint8_t textDarkness = 1;
   uint8_t bionicReadingOverride = 0;
   int8_t paragraphAlignmentOverride = -1;
