@@ -783,6 +783,9 @@ void loop() {
       screenshotButtonsReleased = false;
       {
         RenderLock lock;
+        // The reader may have left a pre-rendered next page in the frame buffer; ask the
+        // current activity to redraw the visible page first so the screenshot matches the screen.
+        activityManager.prepareFramebufferForCapture();
         ScreenshotUtil::takeScreenshot(renderer);
       }
       // Discard the POWER+DOWN presses so they don't fire Short/Long events
