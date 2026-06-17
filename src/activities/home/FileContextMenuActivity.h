@@ -36,6 +36,11 @@ class FileContextMenuActivity final : public MenuListActivity {
   std::string filePath;  // Empty string = browser options mode
   bool isBrowserMode;
 
+  // Sort state (for DynamicEnum lambdas)
+  CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME;
+  CrossPointSettings::FILE_SORT_DIRECTION sortDirection = CrossPointSettings::SORT_ASCENDING;
+
   void onActionSelected(int index) override;
   void onBackPressed() override;
+  void onSettingToggled(int index) override;
 };

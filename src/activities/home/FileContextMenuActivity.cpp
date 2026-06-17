@@ -12,19 +12,19 @@
 FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                  const std::string& filePath)
     : MenuListActivity("FileContextMenu", renderer, mappedInput), filePath(filePath), isBrowserMode(filePath.empty()) {
-  // Display options section (always shown in browser mode, or when a file is selected)
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_BY));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_NAME, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DATE, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_SIZE, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_TYPE, SettingAction::None));
+  // Sort mode (Name, Date, Size, Type) — stored as local state in FileBrowserActivity
+  menuItems.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_SORT_BY,
+      {StrId::STR_SORT_NAME, StrId::STR_SORT_DATE, StrId::STR_SORT_SIZE, StrId::STR_SORT_TYPE},
+      [this]() -> uint8_t { return static_cast<uint8_t>(sortMode); },
+      [this](uint8_t v) { sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(v); }));
 
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_DIR));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_ASC, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DESC, SettingAction::None));
-
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SHOW_HIDDEN_FILES, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SHOW_FILE_EXTENSIONS, SettingAction::None));
+  // Sort direction (Ascending, Descending)
+  menuItems.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_SORT_DIR,
+      {StrId::STR_SORT_ASC, StrId::STR_SORT_DESC},
+      [this]() -> uint8_t { return static_cast<uint8_t>(sortDirection); },
+      [this](uint8_t v) { sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(v); }));
 
   // If no file selected (browser options mode), stop here
   if (isBrowserMode) {
@@ -72,29 +72,13 @@ FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedIn
 }
 
 void FileContextMenuActivity::onActionSelected(int index) {
+  if (index < 0 || index >= static_cast<int>(menuItems.size())) return;
+
   const StrId nameId = menuItems[index].nameId;
   Action action = Action::None;
 
-  // Display options section
-  if (nameId == StrId::STR_SORT_NAME) {
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_DATE) {
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_SIZE) {
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_TYPE) {
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_ASC) {
-    action = Action::ChangeSortDirection;
-  } else if (nameId == StrId::STR_SORT_DESC) {
-    action = Action::ChangeSortDirection;
-  } else if (nameId == StrId::STR_SHOW_HIDDEN_FILES) {
-    action = Action::ToggleHiddenFiles;
-  } else if (nameId == StrId::STR_SHOW_FILE_EXTENSIONS) {
-    action = Action::ToggleExtensions;
-  }
   // File-specific actions (only if not in browser mode)
-  else if (!isBrowserMode) {
+  if (!isBrowserMode) {
     if (nameId == StrId::STR_OPEN) {
       action = Action::Open;
     } else if (nameId == StrId::STR_FETCH_AND_OPEN) {
@@ -112,6 +96,29 @@ void FileContextMenuActivity::onActionSelected(int index) {
     } else if (nameId == StrId::STR_REMOVE) {
       action = Action::Remove;
     }
+  }
+
+  if (action == Action::None) return;
+
+  MenuResult res;
+  res.action = static_cast<int>(action);
+  ActivityResult result{std::move(res)};
+  result.isCancelled = false;
+  setResult(std::move(result));
+  finish();
+}
+
+void FileContextMenuActivity::onSettingToggled(int index) {
+  if (index < 0 || index >= static_cast<int>(menuItems.size())) return;
+
+  const StrId nameId = menuItems[index].nameId;
+  Action action = Action::None;
+
+  // Notify FileBrowserActivity of sort mode/direction changes
+  if (nameId == StrId::STR_SORT_BY) {
+    action = Action::ChangeSortMode;
+  } else if (nameId == StrId::STR_SORT_DIR) {
+    action = Action::ChangeSortDirection;
   }
 
   if (action == Action::None) return;
