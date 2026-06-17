@@ -339,11 +339,10 @@ void FileBrowserActivity::loop() {
     }
 
     if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Short) {
-      if (files.empty()) return;
-      const std::string& entry = files[selectorIndex];
-      if (entry.back() != '/') {
-        openContextMenu();
-      }
+      // Open the context menu for any selection. openContextMenu() shows
+      // file-specific actions for supported files and the browser display
+      // options (sort + visibility) for directories / unsupported types.
+      openContextMenu();
       return;
     }
   }
@@ -402,8 +401,11 @@ void FileBrowserActivity::render(RenderLock&&) {
   const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
   const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
   const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
-  const bool hasContextMenu = mode == Mode::Books && !files.empty() && files[selectorIndex].back() != '/';
-  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, "", hasContextMenu ? tr(STR_OPTIONS) : "");
+  // The Options menu is available for every entry in Books mode. The menu always
+  // offers the browser display options (sort + visibility); supported files get
+  // extra file-specific actions appended. So the hint shows for files and dirs alike.
+  const bool showOptionsHint = mode == Mode::Books && !files.empty();
+  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, "", showOptionsHint ? tr(STR_OPTIONS) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
@@ -551,19 +553,20 @@ void FileBrowserActivity::openContextMenu() {
   if (cleanBase.back() != '/') cleanBase += "/";
   const std::string fullPath = cleanBase + entry;
 
-  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath, sortMode, sortDirection),
-                         [this, fullPath, entry](const ActivityResult& res) {
-                           if (res.isCancelled) {
-                             requestUpdate();
-                             return;
-                           }
-                           const auto* menuRes = std::get_if<MenuResult>(&res.data);
-                           if (!menuRes) {
-                             requestUpdate();
-                             return;
-                           }
-                           handleContextMenuAction(menuRes->action, fullPath, entry, menuRes);
-                         });
+  startActivityForResult(
+      std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath, sortMode, sortDirection),
+      [this, fullPath, entry](const ActivityResult& res) {
+        if (res.isCancelled) {
+          requestUpdate();
+          return;
+        }
+        const auto* menuRes = std::get_if<MenuResult>(&res.data);
+        if (!menuRes) {
+          requestUpdate();
+          return;
+        }
+        handleContextMenuAction(menuRes->action, fullPath, entry, menuRes);
+      });
 }
 
 void FileBrowserActivity::showBrowserOptionsMenu() {
@@ -582,28 +585,31 @@ void FileBrowserActivity::showBrowserOptionsMenu() {
                          });
 }
 
-void FileBrowserActivity::handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry, const MenuResult* menuRes) {
+void FileBrowserActivity::handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry,
+                                                  const MenuResult* menuRes) {
   using Action = FileContextMenuActivity::Action;
   const Action actionEnum = static_cast<Action>(action);
 
-  // Display options (handled directly without reloading)
-  if (actionEnum == Action::ChangeSortMode) {
-    if (menuRes) sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
-    sortFileList();
-    requestUpdate();
-    return;
-  } else if (actionEnum == Action::ChangeSortDirection) {
-    if (menuRes) sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
-    sortFileList();
-    requestUpdate();
-    return;
-  } else if (actionEnum == Action::ToggleHiddenFiles) {
-    SETTINGS.showHiddenFiles = !SETTINGS.showHiddenFiles;
-    loadFiles();
-    requestUpdate();
-    return;
-  } else if (actionEnum == Action::ToggleExtensions) {
-    hideExtensions = !hideExtensions;
+  // Display options: apply sort + visibility state returned from the menu.
+  if (actionEnum == Action::DisplayOptionsChanged) {
+    if (!menuRes) {
+      requestUpdate();
+      return;
+    }
+    sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
+    sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
+
+    // Hidden-files visibility changes the set of entries, so reload from disk.
+    const bool hiddenChanged = (SETTINGS.showHiddenFiles != menuRes->showHiddenFiles);
+    SETTINGS.showHiddenFiles = menuRes->showHiddenFiles;
+    SETTINGS.showFileExtensions = menuRes->showFileExtensions;
+    SETTINGS.saveToFile();
+
+    if (hiddenChanged) {
+      loadFiles();  // re-enumerate (also re-sorts with current mode)
+    } else {
+      sortFileList();
+    }
     requestUpdate();
     return;
   }

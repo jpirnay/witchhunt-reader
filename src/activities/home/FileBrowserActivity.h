@@ -20,7 +20,8 @@ class FileBrowserActivity final : public Activity {
   void clearFileMetadata(const std::string& fullPath);
   bool removeDirRecursive(const std::string& fullPath);
   void openContextMenu();
-  void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry, const struct MenuResult* menuRes = nullptr);
+  void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry,
+                               const struct MenuResult* menuRes = nullptr);
   void doMarkAsRead(const std::string& fullPath);
   void doSetAsSleepCover(const std::string& fullPath);
   void doDeleteCache(const std::string& fullPath, const std::string& entry);
@@ -44,10 +45,10 @@ class FileBrowserActivity final : public Activity {
   // Threshold: use FileIndex for folders with 64+ entries (bounded RAM always)
   static constexpr size_t FILE_INDEX_THRESHOLD = 64;
 
-  // Sorting state (per-session, not persisted)
+  // Sorting state (per-session, not persisted). Visibility toggles
+  // (showHiddenFiles / showFileExtensions) live in SETTINGS.
   CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME;
   CrossPointSettings::FILE_SORT_DIRECTION sortDirection = CrossPointSettings::SORT_ASCENDING;
-  bool hideExtensions = false;
 
   // Data loading
   void loadFiles();

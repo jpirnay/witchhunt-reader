@@ -16,35 +16,52 @@ FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedIn
     : MenuListActivity("FileContextMenu", renderer, mappedInput),
       filePath(filePath),
       isBrowserMode(filePath.empty()),
-      sortMode(sortMode),
-      sortDirection(sortDirection) {
-  // Sort mode - show current value in title
-  const char* sortModeLabel = "";
-  switch (sortMode) {
-    case CrossPointSettings::SORT_BY_NAME: sortModeLabel = tr(STR_SORT_NAME); break;
-    case CrossPointSettings::SORT_BY_DATE: sortModeLabel = tr(STR_SORT_DATE); break;
-    case CrossPointSettings::SORT_BY_SIZE: sortModeLabel = tr(STR_SORT_SIZE); break;
-    case CrossPointSettings::SORT_BY_TYPE: sortModeLabel = tr(STR_SORT_TYPE); break;
-  }
-  // Separator showing current sort mode
+      sortMode(static_cast<uint8_t>(sortMode)),
+      sortDirection(static_cast<uint8_t>(sortDirection)),
+      showHiddenFiles(SETTINGS.showHiddenFiles),
+      showFileExtensions(SETTINGS.showFileExtensions) {
+  buildMenuItems();
+}
+
+void FileContextMenuActivity::buildMenuItems() {
+  auto* self = this;
+
+  // --- Display options (always shown: files, directories, unsupported types) ---
   menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_BY));
-  // Cycle through sort modes
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_NAME, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DATE, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_SIZE, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_TYPE, SettingAction::None));
 
-  // Sort direction - show current value in separator
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_DIR));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_ASC, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DESC, SettingAction::None));
+  // Sort mode: single cycling item Name -> Date -> Size -> Type
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_SORT_BY, {StrId::STR_SORT_NAME, StrId::STR_SORT_DATE, StrId::STR_SORT_SIZE, StrId::STR_SORT_TYPE},
+      self, [](const void* ctx) -> uint8_t { return static_cast<const FileContextMenuActivity*>(ctx)->sortMode; },
+      [](void* ctx, uint8_t v) { static_cast<FileContextMenuActivity*>(ctx)->sortMode = v; }));
 
-  // If no file selected (browser options mode), stop here
-  if (isBrowserMode) {
-    return;
-  }
+  // Sort direction: single cycling item Ascending -> Descending
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_SORT_DIR, {StrId::STR_SORT_ASC, StrId::STR_SORT_DESC}, self,
+      [](const void* ctx) -> uint8_t { return static_cast<const FileContextMenuActivity*>(ctx)->sortDirection; },
+      [](void* ctx, uint8_t v) { static_cast<FileContextMenuActivity*>(ctx)->sortDirection = v; }));
 
-  // File-specific actions (only when a file is selected)
+  menuItems.push_back(SettingInfo::Separator(StrId::STR_SHOW_FILES));
+  // Visibility: show hidden files (OFF/ON)
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_SHOW_HIDDEN_FILES, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, self,
+      [](const void* ctx) -> uint8_t {
+        return static_cast<const FileContextMenuActivity*>(ctx)->showHiddenFiles ? 1 : 0;
+      },
+      [](void* ctx, uint8_t v) { static_cast<FileContextMenuActivity*>(ctx)->showHiddenFiles = (v != 0) ? 1 : 0; }));
+
+  // Visibility: show file extensions (OFF/ON)
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_SHOW_FILE_EXTENSIONS, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, self,
+      [](const void* ctx) -> uint8_t {
+        return static_cast<const FileContextMenuActivity*>(ctx)->showFileExtensions ? 1 : 0;
+      },
+      [](void* ctx, uint8_t v) { static_cast<FileContextMenuActivity*>(ctx)->showFileExtensions = (v != 0) ? 1 : 0; }));
+
+  // In browser mode (no file / directory / unsupported type) we stop here.
+  if (isBrowserMode) return;
+
+  // --- File-specific actions (only when a supported file is selected) ---
   const std::string_view name{filePath};
   const bool isBin = FsHelpers::checkFileExtension(name, ".bin");
   const bool isEpub = FsHelpers::hasEpubExtension(name);
@@ -84,71 +101,58 @@ FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedIn
   }
 }
 
-void FileContextMenuActivity::onActionSelected(int index) {
-  if (index < 0 || index >= static_cast<int>(menuItems.size())) return;
-
-  const StrId nameId = menuItems[index].nameId;
-  Action action = Action::None;
-
-  // Display options (sort mode/direction)
-  if (nameId == StrId::STR_SORT_NAME) {
-    sortMode = CrossPointSettings::SORT_BY_NAME;
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_DATE) {
-    sortMode = CrossPointSettings::SORT_BY_DATE;
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_SIZE) {
-    sortMode = CrossPointSettings::SORT_BY_SIZE;
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_TYPE) {
-    sortMode = CrossPointSettings::SORT_BY_TYPE;
-    action = Action::ChangeSortMode;
-  } else if (nameId == StrId::STR_SORT_ASC) {
-    sortDirection = CrossPointSettings::SORT_ASCENDING;
-    action = Action::ChangeSortDirection;
-  } else if (nameId == StrId::STR_SORT_DESC) {
-    sortDirection = CrossPointSettings::SORT_DESCENDING;
-    action = Action::ChangeSortDirection;
-  }
-  // File-specific actions (only if not in browser mode)
-  else if (!isBrowserMode) {
-    if (nameId == StrId::STR_OPEN) {
-      action = Action::Open;
-    } else if (nameId == StrId::STR_FETCH_AND_OPEN) {
-      action = Action::FetchAndOpen;
-    } else if (nameId == StrId::STR_MARK_AS_READ) {
-      action = Action::MarkAsRead;
-    } else if (nameId == StrId::STR_INFO) {
-      action = Action::Info;
-    } else if (nameId == StrId::STR_DELETE_CACHE) {
-      action = Action::DeleteCache;
-    } else if (nameId == StrId::STR_SET_SLEEP_SCREEN) {
-      action = Action::SetAsSleepCover;
-    } else if (nameId == StrId::STR_FLASH_FIRMWARE) {
-      action = Action::FlashFirmware;
-    } else if (nameId == StrId::STR_REMOVE) {
-      action = Action::Remove;
-    }
-  }
-
-  if (action == Action::None) return;
-
+void FileContextMenuActivity::finishWithDisplayOptions(Action action) {
   MenuResult res;
   res.action = static_cast<int>(action);
-  res.sortMode = static_cast<uint8_t>(sortMode);
-  res.sortDirection = static_cast<uint8_t>(sortDirection);
+  res.sortMode = sortMode;
+  res.sortDirection = sortDirection;
+  res.showHiddenFiles = showHiddenFiles;
+  res.showFileExtensions = showFileExtensions;
   ActivityResult result{std::move(res)};
   result.isCancelled = false;
   setResult(std::move(result));
   finish();
 }
 
+void FileContextMenuActivity::onActionSelected(int index) {
+  if (index < 0 || index >= static_cast<int>(menuItems.size())) return;
 
-void FileContextMenuActivity::onBackPressed() {
-  ActivityResult result;
-  result.isCancelled = true;
+  const StrId nameId = menuItems[index].nameId;
+  Action action = Action::None;
+
+  // Only file-specific actions reach here; display options are DynamicEnum
+  // items handled inline via their setters (no finish() until the menu closes).
+  if (nameId == StrId::STR_OPEN) {
+    action = Action::Open;
+  } else if (nameId == StrId::STR_FETCH_AND_OPEN) {
+    action = Action::FetchAndOpen;
+  } else if (nameId == StrId::STR_MARK_AS_READ) {
+    action = Action::MarkAsRead;
+  } else if (nameId == StrId::STR_INFO) {
+    action = Action::Info;
+  } else if (nameId == StrId::STR_DELETE_CACHE) {
+    action = Action::DeleteCache;
+  } else if (nameId == StrId::STR_SET_SLEEP_SCREEN) {
+    action = Action::SetAsSleepCover;
+  } else if (nameId == StrId::STR_FLASH_FIRMWARE) {
+    action = Action::FlashFirmware;
+  } else if (nameId == StrId::STR_REMOVE) {
+    action = Action::Remove;
+  }
+
+  if (action == Action::None) return;
+
+  MenuResult res;
+  res.action = static_cast<int>(action);
+  ActivityResult result{std::move(res)};
+  result.isCancelled = false;
   setResult(std::move(result));
   finish();
+}
+
+void FileContextMenuActivity::onBackPressed() {
+  // Closing the menu commits any display-option changes the user cycled through.
+  finishWithDisplayOptions(Action::DisplayOptionsChanged);
 }
 
 void FileContextMenuActivity::render(RenderLock&&) {
@@ -157,11 +161,13 @@ void FileContextMenuActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, true);
 
-  // Show the bare filename (without path) as the header
-  const auto slashPos = filePath.rfind('/');
-  const std::string fileName = (slashPos == std::string::npos) ? filePath : filePath.substr(slashPos + 1);
+  // Header: bare filename when a file is selected, otherwise a generic title
+  const std::string header = isBrowserMode ? std::string(tr(STR_SORT_BY)) : [&] {
+    const auto slashPos = filePath.rfind('/');
+    return (slashPos == std::string::npos) ? filePath : filePath.substr(slashPos + 1);
+  }();
   GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 fileName.c_str());
+                 header.c_str());
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
