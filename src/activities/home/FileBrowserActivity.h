@@ -1,6 +1,9 @@
 #pragma once
 
+#include <FileIndex.h>
+
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -30,10 +33,14 @@ class FileBrowserActivity final : public Activity {
 
   Mode mode = Mode::Books;
 
-  // Files state
+  // Files state (small folders use in-RAM vector; large folders use SD index)
   std::string basepath = "/";
   std::string focusName;  // entry to select on first load (e.g. the file just returned from)
   std::vector<std::string> files;
+  std::unique_ptr<FileIndex> fileIndex;  // null for small folders, active for 64+ entries
+
+  // Threshold: use FileIndex for folders with 64+ entries (bounded RAM always)
+  static constexpr size_t FILE_INDEX_THRESHOLD = 64;
 
   // Sorting state (per-session, not persisted)
   CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME;
@@ -48,6 +55,12 @@ class FileBrowserActivity final : public Activity {
   uint32_t getFileSize(const std::string& filePath) const;
   std::string getFileExtension(const std::string& name) const;
   void showBrowserOptionsMenu();
+
+  // FileIndex backend: filter for index scanning/building
+  static bool acceptFileForBrowser(const char* name, bool isDir);
+  void tryOpenFileIndex();
+  bool useFileIndexForEntry(size_t displayIndex, FileIndex::Entry& out);
+  size_t getDisplayEntryCount() const;
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",

@@ -77,7 +77,53 @@ void FileBrowserActivity::loadFiles() {
     file.close();
   }
   root.close();
-  sortFileList();
+
+  // Try to use FileIndex for large folders (64+ entries); fall back to in-RAM sort
+  tryOpenFileIndex();
+
+  // Only sort in-RAM if FileIndex is not in use
+  if (!fileIndex) {
+    sortFileList();
+  }
+}
+
+bool FileBrowserActivity::acceptFileForBrowser(const char* name, bool isDir) {
+  // Mirror loadFiles() filter logic for FileIndex
+  if (!SETTINGS.showHiddenFiles && name[0] == '.') return false;
+  if (strcmp(name, "System Volume Information") == 0) return false;
+  if (isDir) return true;  // all dirs accepted
+
+  // File: check extension
+  std::string_view filename{name};
+  return FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
+         FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
+         FsHelpers::hasBmpExtension(filename) || FsHelpers::hasJpgExtension(filename) ||
+         FsHelpers::hasPngExtension(filename);
+}
+
+void FileBrowserActivity::tryOpenFileIndex() {
+  // For large folders (64+ entries), use SD-backed index to keep RAM bounded
+  if (files.size() < FILE_INDEX_THRESHOLD) {
+    fileIndex = nullptr;
+    return;
+  }
+
+  fileIndex = std::make_unique<FileIndex>();
+  const FileIndex::SortMode indexSortMode = static_cast<FileIndex::SortMode>(sortMode);
+  if (!fileIndex->open(basepath.c_str(), indexSortMode, acceptFileForBrowser)) {
+    LOG_WRN("FBR", "FileIndex build failed for %s, falling back to in-RAM sort", basepath.c_str());
+    fileIndex = nullptr;
+  }
+}
+
+size_t FileBrowserActivity::getDisplayEntryCount() const {
+  return fileIndex ? fileIndex->totalCount() : files.size();
+}
+
+bool FileBrowserActivity::useFileIndexForEntry(size_t displayIndex, FileIndex::Entry& out) {
+  if (!fileIndex) return false;
+  const bool desc = (sortDirection == CrossPointSettings::SORT_DESCENDING);
+  return fileIndex->entryAt(displayIndex, desc, out);
 }
 
 void FileBrowserActivity::onEnter() {
@@ -100,6 +146,8 @@ void FileBrowserActivity::onEnter() {
 void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
+  if (fileIndex) fileIndex->close();
+  fileIndex = nullptr;
 }
 
 void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
@@ -518,9 +566,8 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
     requestUpdate();
     return;
   } else if (actionEnum == Action::ChangeSortDirection) {
-    sortDirection = (sortDirection == CrossPointSettings::SORT_ASCENDING)
-                        ? CrossPointSettings::SORT_DESCENDING
-                        : CrossPointSettings::SORT_ASCENDING;
+    sortDirection = (sortDirection == CrossPointSettings::SORT_ASCENDING) ? CrossPointSettings::SORT_DESCENDING
+                                                                          : CrossPointSettings::SORT_ASCENDING;
     sortFileList();
     requestUpdate();
     return;
