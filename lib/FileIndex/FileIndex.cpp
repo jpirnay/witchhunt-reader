@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 
 namespace {
 constexpr const char* INDEX_DIR = "/.crosspoint/fileindex";
@@ -178,10 +179,13 @@ struct FileIndex::BuildState {
 bool FileIndex::open(const char* dirPath, SortMode sortMode, AcceptFn accept) {
   close();
 
-  if (!nameBuf) nameBuf = makeUniqueNoThrow<char[]>(NAME_BUF_SIZE);
   if (!nameBuf) {
-    LOG_ERR("FIDX", "name buffer alloc failed");
-    return false;
+    try {
+      nameBuf = std::make_unique<char[]>(NAME_BUF_SIZE);
+    } catch (...) {
+      LOG_ERR("FIDX", "name buffer alloc failed");
+      return false;
+    }
   }
 
   uint32_t signature = 0, dirs = 0, files = 0;
@@ -356,8 +360,13 @@ bool FileIndex::build(const char* dirPath, SortMode sortMode, AcceptFn accept, u
     return false;
   }
 
-  auto bsPtr = makeUniqueNoThrow<BuildState>();
-  if (!bsPtr) return false;
+  std::unique_ptr<BuildState> bsPtr;
+  try {
+    bsPtr = std::make_unique<BuildState>();
+  } catch (...) {
+    LOG_ERR("FIDX", "build state alloc failed");
+    return false;
+  }
   BuildState& bs = *bsPtr;
 
   snprintf(bs.tmpPath, sizeof(bs.tmpPath), "%s.tmp", idxPath);
@@ -366,10 +375,11 @@ bool FileIndex::build(const char* dirPath, SortMode sortMode, AcceptFn accept, u
   Storage.remove(TIES_PATH_A);
   Storage.remove(TIES_PATH_B);
 
-  bs.chunk = makeUniqueNoThrow<RunRecord[]>(CHUNK_ENTRIES);
-  bs.nameA = makeUniqueNoThrow<char[]>(NAME_BUF_SIZE);
-  bs.nameB = makeUniqueNoThrow<char[]>(NAME_BUF_SIZE);
-  if (!bs.chunk || !bs.nameA || !bs.nameB) {
+  try {
+    bs.chunk = std::make_unique<RunRecord[]>(CHUNK_ENTRIES);
+    bs.nameA = std::make_unique<char[]>(NAME_BUF_SIZE);
+    bs.nameB = std::make_unique<char[]>(NAME_BUF_SIZE);
+  } catch (...) {
     LOG_ERR("FIDX", "build alloc failed");
     return false;
   }
