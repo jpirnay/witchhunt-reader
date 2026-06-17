@@ -11,16 +11,15 @@
 
 FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                  const std::string& filePath)
-    : MenuListActivity("FileContextMenu", renderer, mappedInput), filePath(filePath),
-      isBrowserMode(filePath.empty()) {
+    : MenuListActivity("FileContextMenu", renderer, mappedInput), filePath(filePath), isBrowserMode(filePath.empty()) {
   // Display options section (always shown in browser mode, or when a file is selected)
-  menuItems.push_back(SettingInfo::Title(StrId::STR_SORT_BY));
+  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_BY));
   menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_NAME, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DATE, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(SettingInfo::create(StrId::STR_SORT_SIZE, "", SettingAction::None, SettingType::Action), SettingAction::None));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_SIZE, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_TYPE, SettingAction::None));
 
-  menuItems.push_back(SettingInfo::Title(StrId::STR_SORT_DIR));
+  menuItems.push_back(SettingInfo::Separator(StrId::STR_SORT_DIR));
   menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_ASC, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_SORT_DESC, SettingAction::None));
 
