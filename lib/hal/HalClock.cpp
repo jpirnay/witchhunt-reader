@@ -242,20 +242,20 @@ static bool initExternalRTC() {
   return exists;
 }
 
-// Write time to DS3231
+// Write full date+time to DS3231 (all 7 registers)
 static void writeExternalRTC(time_t t) {
   struct tm timeinfo;
-  gmtime_r(&t, &timeinfo);  // DS3231 gets usually operated in UTC
+  gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
   Wire.beginTransmission(DS3231_ADDRESS);
-  Wire.write(0x00);  // start-register (seconds)
-  Wire.write(bin2bcd(timeinfo.tm_sec));
-  Wire.write(bin2bcd(timeinfo.tm_min));
-  Wire.write(bin2bcd(timeinfo.tm_hour));
-  Wire.write(bin2bcd(0));  // weekday (ignored here)
-  Wire.write(bin2bcd(timeinfo.tm_mday));
-  Wire.write(bin2bcd(timeinfo.tm_mon + 1));
-  Wire.write(bin2bcd(timeinfo.tm_year - 100));  // DS3231 stores years since 2000
+  Wire.write(0x00);                                         // Start at register 0x00 (seconds)
+  Wire.write(bin2bcd(timeinfo.tm_sec));                    // 0x00: Seconds
+  Wire.write(bin2bcd(timeinfo.tm_min));                    // 0x01: Minutes
+  Wire.write(bin2bcd(timeinfo.tm_hour));                   // 0x02: Hours (24h mode)
+  Wire.write(bin2bcd(timeinfo.tm_wday + 1));               // 0x03: Day of week (1-7)
+  Wire.write(bin2bcd(timeinfo.tm_mday));                   // 0x04: Date (01-31)
+  Wire.write(bin2bcd(timeinfo.tm_mon + 1));                // 0x05: Month (01-12, century bit 0 = 20xx)
+  Wire.write(bin2bcd(timeinfo.tm_year - 100));             // 0x06: Year (00-99 = 2000-2099)
   Wire.endTransmission();
 }
 
@@ -760,6 +760,49 @@ void wifiOff(bool skipNtpSync) {
   delay(100);
   WiFi.mode(WIFI_OFF);
   delay(100);
+}
+
+bool applyClientTime(time_t timestamp) {
+  // Validate bounds: [2020-01-01, 2100-01-01]
+  static constexpr time_t MIN_TIMESTAMP = 1577836800;   // 2020-01-01 UTC
+  static constexpr time_t MAX_TIMESTAMP = 4102444800;   // 2100-01-01 UTC
+
+  if (timestamp < MIN_TIMESTAMP || timestamp > MAX_TIMESTAMP) {
+    LOG_ERR("CLK", "Client time %lld out of bounds [%lld, %lld]", (long long)timestamp, (long long)MIN_TIMESTAMP,
+            (long long)MAX_TIMESTAMP);
+    return false;
+  }
+
+  // Only apply when SNTP is not active (clock not synced from network).
+  // NTP-synced time has priority and should never be overwritten by a client.
+  if (esp_sntp_enabled()) {
+    LOG_INF("CLK", "SNTP is active; not applying client time");
+    return false;
+  }
+
+  // If we're in STA mode (connected to WiFi as a regular station), don't apply
+  // client time — NTP sync is preferred and should happen soon.
+  if (WiFi.getMode() == WIFI_STA) {
+    LOG_INF("CLK", "In STA mode; not applying client time");
+    return false;
+  }
+
+  setSystemClock(timestamp);
+  clockApproximate = false;
+  rtcEpoch = timestamp;
+  LOG_INF("CLK", "Applied client time: %lld", (long long)timestamp);
+
+  // Persist to RTC if available (X3 only)
+  if (initExternalRTC()) {
+    writeExternalRTC(timestamp);
+    LOG_DBG("CLK", "Persisted client time to DS3231 RTC");
+  }
+
+  // Also persist to NVS
+  nvsWrite(timestamp);
+  nvsWriteSyncTime(timestamp);
+
+  return true;
 }
 
 }  // namespace HalClock

@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <Epub.h>
 #include <FsHelpers.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Txt.h>
@@ -11,6 +12,8 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -1038,6 +1041,19 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 }
 
 void CrossPointWebServer::handleUploadPost(UploadState& state) const {
+  // Try to apply client-supplied timestamp for hotspot mode (if clock not synced from network)
+  if (server->hasArg("t")) {
+    const String tStr = server->arg("t");
+    char* endptr = nullptr;
+    errno = 0;
+    long long timestamp = strtoll(tStr.c_str(), &endptr, 10);
+
+    // Validate: full token consumed, no overflow
+    if (endptr == tStr.c_str() + tStr.length() && errno == 0) {
+      HalClock::applyClientTime((time_t)timestamp);
+    }
+  }
+
   if (state.success) {
     server->send(200, "text/plain", "File uploaded successfully: " + state.fileName);
   } else {

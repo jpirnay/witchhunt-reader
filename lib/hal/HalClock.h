@@ -87,4 +87,9 @@ void formatLogTime(char* buf, size_t bufSize);
 /// disconnecting — essentially free since we already have a connection.
 void wifiOff(bool skipNtpSync = false);
 
+/// Apply a Unix timestamp (e.g., from a hotspot client upload).
+/// Only updates system clock if SNTP is not active (clock not synced from network).
+/// Bounds check: [2020-01-01, 2100-01-01]. Returns true on success.
+bool applyClientTime(time_t timestamp);
+
 }  // namespace HalClock

@@ -4,8 +4,9 @@ add_executable(NaturalSortTest
 )
 
 target_include_directories(NaturalSortTest PRIVATE
-  ${REPO_ROOT}
+  ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/FsHelpers
 )
 
 target_link_libraries(NaturalSortTest PRIVATE
