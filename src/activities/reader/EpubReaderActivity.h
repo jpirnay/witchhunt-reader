@@ -545,6 +545,9 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
+  // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
+  // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
+  void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
   bool shouldSkipPeriodicUpdate() const override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 

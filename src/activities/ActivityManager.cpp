@@ -455,6 +455,12 @@ bool ActivityManager::isReaderActivity() const {
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
 
+void ActivityManager::prepareFramebufferForCapture() {
+  if (currentActivity) {
+    currentActivity->prepareFramebufferForCapture();
+  }
+}
+
 void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
   if (currentActivity && currentActivity->isReaderActivity()) {
     currentActivity->onButtonAction(action);
