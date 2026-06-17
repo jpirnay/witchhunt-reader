@@ -20,7 +20,7 @@ class FileBrowserActivity final : public Activity {
   void clearFileMetadata(const std::string& fullPath);
   bool removeDirRecursive(const std::string& fullPath);
   void openContextMenu();
-  void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry);
+  void handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry, const struct MenuResult* menuRes = nullptr);
   void doMarkAsRead(const std::string& fullPath);
   void doSetAsSleepCover(const std::string& fullPath);
   void doDeleteCache(const std::string& fullPath, const std::string& entry);

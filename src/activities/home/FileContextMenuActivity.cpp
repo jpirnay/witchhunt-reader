@@ -18,19 +18,21 @@ FileContextMenuActivity::FileContextMenuActivity(GfxRenderer& renderer, MappedIn
       isBrowserMode(filePath.empty()),
       sortMode(sortMode),
       sortDirection(sortDirection) {
-  // Sort mode (Name, Date, Size, Type) — stored as local state in FileBrowserActivity
+  // Sort mode (Name, Date, Size, Type) — stored as local state via lambdas
+  auto& sortModeRef = this->sortMode;
   menuItems.push_back(SettingInfo::DynamicEnum(
       StrId::STR_SORT_BY,
       {StrId::STR_SORT_NAME, StrId::STR_SORT_DATE, StrId::STR_SORT_SIZE, StrId::STR_SORT_TYPE},
-      [this]() -> uint8_t { return static_cast<uint8_t>(sortMode); },
-      [this](uint8_t v) { sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(v); }));
+      [&sortModeRef]() -> uint8_t { return static_cast<uint8_t>(sortModeRef); },
+      [&sortModeRef](uint8_t v) { sortModeRef = static_cast<CrossPointSettings::FILE_SORT_MODE>(v); }));
 
   // Sort direction (Ascending, Descending)
+  auto& sortDirRef = this->sortDirection;
   menuItems.push_back(SettingInfo::DynamicEnum(
       StrId::STR_SORT_DIR,
       {StrId::STR_SORT_ASC, StrId::STR_SORT_DESC},
-      [this]() -> uint8_t { return static_cast<uint8_t>(sortDirection); },
-      [this](uint8_t v) { sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(v); }));
+      [&sortDirRef]() -> uint8_t { return static_cast<uint8_t>(sortDirRef); },
+      [&sortDirRef](uint8_t v) { sortDirRef = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(v); }));
 
   // If no file selected (browser options mode), stop here
   if (isBrowserMode) {

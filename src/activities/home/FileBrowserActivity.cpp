@@ -562,7 +562,7 @@ void FileBrowserActivity::openContextMenu() {
                              requestUpdate();
                              return;
                            }
-                           handleContextMenuAction(menuRes->action, fullPath, entry);
+                           handleContextMenuAction(menuRes->action, fullPath, entry, menuRes);
                          });
 }
 
@@ -578,22 +578,22 @@ void FileBrowserActivity::showBrowserOptionsMenu() {
                              requestUpdate();
                              return;
                            }
-                           handleContextMenuAction(menuRes->action, "", "");
+                           handleContextMenuAction(menuRes->action, "", "", menuRes);
                          });
 }
 
-void FileBrowserActivity::handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry) {
+void FileBrowserActivity::handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry, const MenuResult* menuRes) {
   using Action = FileContextMenuActivity::Action;
   const Action actionEnum = static_cast<Action>(action);
 
   // Display options (handled directly without reloading)
   if (actionEnum == Action::ChangeSortMode) {
-    sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
+    if (menuRes) sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
     sortFileList();
     requestUpdate();
     return;
   } else if (actionEnum == Action::ChangeSortDirection) {
-    sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
+    if (menuRes) sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
     sortFileList();
     requestUpdate();
     return;
