@@ -232,6 +232,9 @@ bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPat
 bool HalFile::getModifyDateTime(uint16_t* pdate, uint16_t* ptime) {
   HAL_FILE_WRAPPED_CALL(getModifyDateTime, pdate, ptime);
 }
+bool HalFile::getCreateDateTime(uint16_t* pdate, uint16_t* ptime) {
+  HAL_FILE_WRAPPED_CALL(getCreateDateTime, pdate, ptime);
+}
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
 bool HalFile::close() { HAL_FILE_WRAPPED_CALL(close, ); }

@@ -37,6 +37,8 @@ class FileBrowserActivity final : public Activity {
   std::string basepath = "/";
   std::string focusName;  // entry to select on first load (e.g. the file just returned from)
   std::vector<std::string> files;
+  std::vector<uint32_t> fileSizes;       // cached file sizes (0 for directories)
+  std::vector<uint32_t> fileDateTimes;   // cached FAT date/time pairs
   std::unique_ptr<FileIndex> fileIndex;  // null for small folders, active for 64+ entries
 
   // Threshold: use FileIndex for folders with 64+ entries (bounded RAM always)

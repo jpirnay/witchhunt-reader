@@ -42,6 +42,8 @@ void sortFileList(std::vector<std::string>& strs) {
 
 void FileBrowserActivity::loadFiles() {
   files.clear();
+  fileSizes.clear();
+  fileDateTimes.clear();
 
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
@@ -61,17 +63,26 @@ void FileBrowserActivity::loadFiles() {
 
     if (file.isDirectory()) {
       files.emplace_back(std::string(name) + "/");
+      fileSizes.push_back(0);      // directories have size 0
+      fileDateTimes.push_back(0);  // will use default date
     } else {
       std::string_view filename{name};
+      bool shouldAdd = false;
       if (mode == Mode::PickFirmware) {
-        if (FsHelpers::checkFileExtension(filename, ".bin")) {
-          files.emplace_back(filename);
-        }
-      } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
-                 FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-                 FsHelpers::hasBmpExtension(filename) || FsHelpers::hasJpgExtension(filename) ||
-                 FsHelpers::hasPngExtension(filename)) {
+        shouldAdd = FsHelpers::checkFileExtension(filename, ".bin");
+      } else {
+        shouldAdd = FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
+                    FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
+                    FsHelpers::hasBmpExtension(filename) || FsHelpers::hasJpgExtension(filename) ||
+                    FsHelpers::hasPngExtension(filename);
+      }
+      if (shouldAdd) {
         files.emplace_back(filename);
+        fileSizes.push_back(static_cast<uint32_t>(file.fileSize()));
+        uint16_t fdate = 0, ftime = 0;
+        file.getModifyDateTime(&fdate, &ftime);
+        uint32_t combined = (static_cast<uint32_t>(fdate) << 16) | ftime;
+        fileDateTimes.push_back(combined);
       }
     }
     file.close();
@@ -116,9 +127,7 @@ void FileBrowserActivity::tryOpenFileIndex() {
   }
 }
 
-size_t FileBrowserActivity::getDisplayEntryCount() const {
-  return fileIndex ? fileIndex->totalCount() : files.size();
-}
+size_t FileBrowserActivity::getDisplayEntryCount() const { return fileIndex ? fileIndex->totalCount() : files.size(); }
 
 bool FileBrowserActivity::useFileIndexForEntry(size_t displayIndex, FileIndex::Entry& out) {
   if (!fileIndex) return false;
@@ -146,6 +155,8 @@ void FileBrowserActivity::onEnter() {
 void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
+  fileSizes.clear();
+  fileDateTimes.clear();
   if (fileIndex) fileIndex->close();
   fileIndex = nullptr;
 }
@@ -431,7 +442,13 @@ uint32_t FileBrowserActivity::getFileDateTime(const std::string& filePath) const
 }
 
 void FileBrowserActivity::sortFileList() {
-  std::sort(files.begin(), files.end(), [this](const std::string& a, const std::string& b) {
+  // Create index array to preserve metadata array alignment
+  std::vector<size_t> indices(files.size());
+  for (size_t i = 0; i < files.size(); ++i) indices[i] = i;
+
+  std::sort(indices.begin(), indices.end(), [this](size_t idx_a, size_t idx_b) {
+    const std::string& a = files[idx_a];
+    const std::string& b = files[idx_b];
     const bool isDir_a = a.back() == '/';
     const bool isDir_b = b.back() == '/';
 
@@ -450,10 +467,9 @@ void FileBrowserActivity::sortFileList() {
         break;
 
       case CrossPointSettings::SORT_BY_DATE: {
-        const std::string fullPath_a = basepath + (basepath.back() != '/' ? "/" : "") + a;
-        const std::string fullPath_b = basepath + (basepath.back() != '/' ? "/" : "") + b;
-        uint32_t dt_a = getFileDateTime(fullPath_a);
-        uint32_t dt_b = getFileDateTime(fullPath_b);
+        // Use cached metadata (no file opens)
+        uint32_t dt_a = (idx_a < fileDateTimes.size()) ? fileDateTimes[idx_a] : 0;
+        uint32_t dt_b = (idx_b < fileDateTimes.size()) ? fileDateTimes[idx_b] : 0;
         if (dt_a < dt_b) {
           cmp = -1;
         } else if (dt_a > dt_b) {
@@ -465,10 +481,9 @@ void FileBrowserActivity::sortFileList() {
       }
 
       case CrossPointSettings::SORT_BY_SIZE: {
-        const std::string fullPath_a = basepath + (basepath.back() != '/' ? "/" : "") + a;
-        const std::string fullPath_b = basepath + (basepath.back() != '/' ? "/" : "") + b;
-        uint32_t size_a = isDir_a ? 0 : getFileSize(fullPath_a);
-        uint32_t size_b = isDir_b ? 0 : getFileSize(fullPath_b);
+        // Use cached metadata (no file opens)
+        uint32_t size_a = (idx_a < fileSizes.size()) ? fileSizes[idx_a] : 0;
+        uint32_t size_b = (idx_b < fileSizes.size()) ? fileSizes[idx_b] : 0;
         if (size_a < size_b) {
           cmp = -1;
         } else if (size_a > size_b) {
@@ -503,6 +518,20 @@ void FileBrowserActivity::sortFileList() {
 
     return cmp < 0;
   });
+
+  // Reorder files vector and metadata arrays based on sorted indices
+  std::vector<std::string> sorted_files(files.size());
+  std::vector<uint32_t> sorted_sizes(fileSizes.size());
+  std::vector<uint32_t> sorted_dateTimes(fileDateTimes.size());
+  for (size_t i = 0; i < indices.size(); ++i) {
+    size_t idx = indices[i];
+    sorted_files[i] = files[idx];
+    if (idx < fileSizes.size()) sorted_sizes[i] = fileSizes[idx];
+    if (idx < fileDateTimes.size()) sorted_dateTimes[i] = fileDateTimes[idx];
+  }
+  files = std::move(sorted_files);
+  fileSizes = std::move(sorted_sizes);
+  fileDateTimes = std::move(sorted_dateTimes);
 }
 
 void FileBrowserActivity::openContextMenu() {
