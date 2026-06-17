@@ -842,9 +842,26 @@ std::string Epub::getCoverBmpPath(bool cropped) const {
 
 std::string Epub::getCoverImageCachePath() const { return cachePath + "/cover.img"; }
 
+std::string Epub::getCoverItemHref() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return "";
+  return bookMetadataCache->coreMetadata.coverItemHref;
+}
+
 bool Epub::ensureCoverImageCached() const {
   const auto coverCachePath = getCoverImageCachePath();
-  if (Storage.exists(coverCachePath.c_str())) return true;
+  if (Storage.exists(coverCachePath.c_str())) {
+    FsFile existing;
+    if (Storage.openFileForRead("EBP", coverCachePath, existing)) {
+      const CoverImageFormat fmt = detectCoverImageFormat(existing);
+      existing.close();
+      if (fmt != CoverImageFormat::Unknown) return true;
+    } else {
+      existing.close();
+      return true;  // can't open to validate — assume valid, let generateThumbBmp fail if needed
+    }
+    LOG_ERR("EBP", "Cached cover.img has unsupported format, deleting: %s", coverCachePath.c_str());
+    Storage.remove(coverCachePath.c_str());
+  }
 
   // Sidecar cover: a .jpg/.jpeg/.png/.bmp file alongside the EPUB takes priority
   // over the embedded cover image (same resolution, no ZIP decompression needed).
@@ -902,9 +919,11 @@ bool Epub::ensureCoverImageCached() const {
 
   if (!Storage.openFileForRead("EBP", coverCachePath, coverFile)) return false;
   const bool empty = coverFile.size() == 0;
+  const CoverImageFormat fmt = empty ? CoverImageFormat::Unknown : detectCoverImageFormat(coverFile);
   coverFile.close();
-  if (empty) {
-    LOG_ERR("EBP", "Cover image extracted as empty file: %s", coverImageHref.c_str());
+  if (empty || fmt == CoverImageFormat::Unknown) {
+    LOG_ERR("EBP", "Cover image %s: %s", empty ? "extracted as empty file" : "has unsupported format",
+            coverImageHref.c_str());
     Storage.remove(coverCachePath.c_str());
     return false;
   }
@@ -965,7 +984,16 @@ std::string Epub::getThumbBmpPath(int width, int height) const {
 }
 
 bool Epub::generateThumbBmp(int height) const {
-  if (Storage.exists(getThumbBmpPath(height).c_str())) return true;
+  {
+    FsFile existing;
+    if (Storage.openFileForRead("EBP", getThumbBmpPath(height), existing)) {
+      const bool valid = existing.size() > 0;
+      existing.close();
+      if (valid) return true;
+      LOG_DBG("EBP", "Sentinel found for h=%d thumb, skipping retry", height);
+      return false;
+    }
+  }
 
   if (!ensureCoverImageCached()) {
     // Write an empty sentinel so we don't retry on every call
@@ -1004,16 +1032,24 @@ bool Epub::generateThumbBmp(int height) const {
   coverImage.close();
   thumbBmp.close();
 
-  if (!success) {
-    LOG_ERR("EBP", "Failed to generate thumb BMP from cover image");
-    Storage.remove(getThumbBmpPath(height).c_str());
-  }
+  // Leave 0-byte sentinel on failure so we don't retry a known-failing decode.
+  if (!success) LOG_DBG("EBP", "Leaving 0-byte sentinel for h=%d — will not retry", height);
   LOG_DBG("EBP", "Generated thumb BMP from cover image, success: %s", success ? "yes" : "no");
   return success;
 }
 
 bool Epub::generateThumbBmp(int width, int height) const {
-  if (Storage.exists(getThumbBmpPath(width, height).c_str())) return true;
+  {
+    FsFile existing;
+    if (Storage.openFileForRead("EBP", getThumbBmpPath(width, height), existing)) {
+      const bool valid = existing.size() > 0;
+      existing.close();
+      if (valid) return true;
+      // 0-byte sentinel — permanent failure, don't retry.
+      LOG_DBG("EBP", "Sentinel found for %dx%d thumb, skipping retry", width, height);
+      return false;
+    }
+  }
 
   if (!ensureCoverImageCached()) {
     // Write an empty sentinel so we don't retry on every call
@@ -1051,7 +1087,10 @@ bool Epub::generateThumbBmp(int width, int height) const {
   coverImage.close();
   thumbBmp.close();
 
-  if (!success) Storage.remove(getThumbBmpPath(width, height).c_str());
+  // On failure, leave the 0-byte sentinel so generateThumbBmp won't be retried on every
+  // homescreen load.  The sentinel is removed by ensureCoverThumb when a cache-clear or
+  // sidecar update makes a retry worthwhile.
+  if (!success) LOG_DBG("EBP", "Leaving 0-byte sentinel for %dx%d — will not retry", width, height);
   LOG_DBG("EBP", "Generated %dx%d thumb BMP from cover image, success: %s", width, height, success ? "yes" : "no");
   return success;
 }

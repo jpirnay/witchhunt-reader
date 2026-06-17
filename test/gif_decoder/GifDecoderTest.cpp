@@ -20,12 +20,13 @@ static std::string writeTempGif(const std::vector<uint8_t>& bytes) {
   // Use a fixed name derived from a counter so parallel runs don't clash.
   static int counter = 0;
   path = std::filesystem::temp_directory_path() / ("giftest_" + std::to_string(++counter) + ".gif");
-  FILE* f = fopen(path.c_str(), "wb");
+  const std::string pathStr = path.string();
+  FILE* f = fopen(pathStr.c_str(), "wb");
   if (f) {
     fwrite(bytes.data(), 1, bytes.size(), f);
     fclose(f);
   }
-  return path.string();
+  return pathStr;
 }
 
 // GIF87a: 1×1 image, 2-colour GCT (red, black), single red pixel.

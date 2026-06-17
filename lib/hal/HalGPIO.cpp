@@ -281,6 +281,14 @@ void HalGPIO::stopInputSampler() {
   samplerTaskHandle_ = nullptr;
 }
 
+bool HalGPIO::hasPendingInput() const {
+  bool pending = false;
+  portENTER_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
+  pending = accumPressed_ != 0;
+  portEXIT_CRITICAL_SAFE(const_cast<portMUX_TYPE*>(&inputMux_));
+  return pending;
+}
+
 bool HalGPIO::popButtonEdge(ButtonEdge& out) {
   bool got = false;
   portENTER_CRITICAL(&inputMux_);

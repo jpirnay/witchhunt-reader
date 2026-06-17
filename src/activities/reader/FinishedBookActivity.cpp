@@ -24,6 +24,7 @@
 #include "ReaderActivity.h"
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
+#include "activities/home/RecentBooksActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -44,8 +45,8 @@ std::string getFilename(const std::string& filePath) {
   return filePath.substr(lastSlash + 1);
 }
 
-static constexpr int kFinishedBookCoverHeight = 240;
-static constexpr int kFinishedBookCoverMaxWidth = 220;
+static constexpr int kFinishedBookCoverHeight = RecentBooksActivity::GRID_THUMB_HEIGHT;
+static constexpr int kFinishedBookCoverMaxWidth = RecentBooksActivity::GRID_THUMB_WIDTH;
 
 std::string findUniquePathWithSuffix(const std::string& basePath) {
   if (!Storage.exists(basePath.c_str())) {
@@ -181,8 +182,8 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
       if (!metadata.series.empty() && !epub.getSeriesIndex().empty()) {
         metadata.series += " #" + epub.getSeriesIndex();
       }
-      if (epub.generateThumbBmp(kFinishedBookCoverHeight)) {
-        metadata.coverPath = epub.getThumbBmpPath(kFinishedBookCoverHeight);
+      if (epub.generateThumbBmp(kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight)) {
+        metadata.coverPath = epub.getThumbBmpPath(kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight);
       } else {
         metadata.coverPath = getSidecarCoverBmpPath(nextBookPath, kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight);
       }
@@ -195,8 +196,8 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
     if (xtc.load()) {
       metadata.title = xtc.getTitle();
       metadata.author = xtc.getAuthor();
-      if (xtc.generateThumbBmp(kFinishedBookCoverHeight)) {
-        metadata.coverPath = xtc.getThumbBmpPath(kFinishedBookCoverHeight);
+      if (xtc.generateThumbBmp(kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight)) {
+        metadata.coverPath = xtc.getThumbBmpPath(kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight);
       } else {
         metadata.coverPath = getSidecarCoverBmpPath(nextBookPath, kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight);
       }
@@ -647,7 +648,8 @@ void FinishedBookActivity::render(RenderLock&&) {
     int previewTextX = previewX;
 
     if (!nextBookCoverPath_.empty()) {
-      const std::string coverPath = UITheme::getCoverThumbPath(nextBookCoverPath_, previewWidth, previewHeight);
+      const std::string coverPath =
+          UITheme::getCoverThumbPath(nextBookCoverPath_, kFinishedBookCoverMaxWidth, kFinishedBookCoverHeight);
       HalFile coverFile = Storage.open(coverPath.c_str());
       if (coverFile) {
         Bitmap bmp(coverFile);

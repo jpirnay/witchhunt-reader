@@ -50,9 +50,53 @@ void RecentBooksActivity::loadRecentBooks() {
 }
 
 bool RecentBooksActivity::loadNextCover() {
-  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
-  const int tw = gridThumbWidth(contentRect.width);
+  // Fixed thumbnail dimensions shared with FinishedBookActivity.
+  // The cell renderer scales the BMP down to the runtime cell width for display.
+  const int tw = GRID_THUMB_WIDTH;
   const int th = GRID_THUMB_HEIGHT;
+
+  // ── Cover extract session tick ───────────────────────────────────────────────
+  if (extractSession) {
+    const auto status = extractSession->continueStep(4096);
+    if (status == ReaderActivity::CoverExtractSession::Status::Running) return false;
+    extractSession.reset();
+    if (status == ReaderActivity::CoverExtractSession::Status::Error) {
+      LOG_ERR("RBA", "Cover extract failed for book %zu", nextCoverIndex);
+      pngSessionFailed = true;
+    }
+    // On Done: fall through to PNG session setup on next call via the for-loop.
+    return false;
+  }
+
+  // ── PNG session tick ────────────────────────────────────────────────────────
+  if (pngSession) {
+    constexpr uint32_t ROWS_PER_TICK = 6;
+    const auto status = pngSession->continueRows(ROWS_PER_TICK);
+    if (status == PngDecodeSession::Status::Running) {
+      return false;  // not done yet — render() will requestUpdate() and call us again
+    }
+    pngSessionFiles.close();
+    pngSessionFailed = (status == PngDecodeSession::Status::Error);
+    pngSession.reset();
+
+    RecentBook& book = recentBooks[nextCoverIndex];
+    const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
+    if (!pngSessionFailed) {
+      LOG_DBG("RBA", "PNG session complete for %s", book.path.c_str());
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+      book.coverBmpPath = placeholder;
+    } else {
+      // Remove the partial BMP; the normal failure path below will store empty.
+      const std::string thumbPath = gridThumbPath(placeholder, tw, th);
+      Storage.remove(thumbPath.c_str());
+      LOG_ERR("RBA", "PNG session failed for %s", book.path.c_str());
+      RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, "");
+      book.coverBmpPath = "";
+    }
+    nextCoverIndex++;
+    return false;  // advance to next book on next render tick
+  }
+  // ───────────────────────────────────────────────────────────────────────────
 
   for (; nextCoverIndex < recentBooks.size(); nextCoverIndex++) {
     RecentBook& book = recentBooks[nextCoverIndex];
@@ -69,6 +113,21 @@ bool RecentBooksActivity::loadNextCover() {
     thumbFile.close();
     if (!valid) {
       const bool ok = ReaderActivity::ensureCoverThumb(book.path, tw, th);
+      if (!ok && !pngSessionFailed) {
+        pngSession = ReaderActivity::beginPngThumbSession(book.path, tw, th, pngSessionFiles);
+        if (!pngSession) {
+          extractSession = ReaderActivity::beginCoverExtractSession(book.path);
+          if (extractSession) {
+            LOG_DBG("RBA", "Started cover extract session for %s (%zu bytes)", book.path.c_str(),
+                    extractSession->totalBytes());
+            return false;
+          }
+        } else {
+          LOG_DBG("RBA", "Started PNG session for %s (%u rows)", book.path.c_str(), pngSession->totalRows());
+          return false;
+        }
+      }
+      pngSessionFailed = false;  // consumed
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, ok ? placeholder : "");
       book.coverBmpPath = ok ? placeholder : "";
       nextCoverIndex++;
@@ -108,6 +167,10 @@ void RecentBooksActivity::onEnter() {
   prevSelectorIndex = -1;
   fullRedrawNeeded = true;
   openingBook = false;
+  extractSession.reset();
+  pngSession.reset();
+  pngSessionFiles.close();
+  pngSessionFailed = false;
 
   requestUpdate();
 }
@@ -126,6 +189,10 @@ void RecentBooksActivity::switchViewMode(bool grid) {
   firstRenderDone = false;
   nextCoverIndex = 0;
   prevSelectorIndex = -1;
+  extractSession.reset();
+  pngSession.reset();
+  pngSessionFiles.close();
+  pngSessionFailed = false;
   fullRedrawNeeded = true;
   requestUpdate(true);
 }
@@ -346,7 +413,7 @@ void RecentBooksActivity::renderGridCell(int index, bool selected, int cellX, in
   }
 
   if (!book.coverBmpPath.empty()) {
-    const std::string thumbPath = gridThumbPath(book.coverBmpPath, tw, th);
+    const std::string thumbPath = gridThumbPath(book.coverBmpPath, GRID_THUMB_WIDTH, GRID_THUMB_HEIGHT);
     FsFile file;
     bool thumbDrawn = false;
     if (Storage.openFileForRead("RBA", thumbPath, file)) {
@@ -423,7 +490,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
   const int margin = GRID_THUMB_MARGIN;
   const int tw = gridThumbWidth(contentRect.width);
-  const int th = GRID_THUMB_HEIGHT;
+  const int th = GRID_CELL_HEIGHT;
   const int cellHeight = th + GRID_LABEL_HEIGHT + margin;
   const int visibleRows = std::max(1, contentHeight / cellHeight);
   const int totalRows = (static_cast<int>(recentBooks.size()) + GRID_COLS - 1) / GRID_COLS;

@@ -129,6 +129,11 @@ class HalGPIO {
   void startInputSampler();
   void stopInputSampler();
 
+  // True if any button press has been sampled since the last update() drain.
+  // Safe to call from any context (e.g. mid-stall inside loop()); does not
+  // consume the edge — update() will still see it on the next main-loop tick.
+  bool hasPendingInput() const;
+
   // Pop the oldest queued button edge (FIFO). Returns false when the queue is
   // empty. Drained by ButtonEventManager to drive its press-type FSM.
   bool popButtonEdge(ButtonEdge& out);

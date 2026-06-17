@@ -1,4 +1,7 @@
 #pragma once
+#include <PngToBmpConverter.h>
+#include <ZipFile.h>
+
 #include <memory>
 
 #include "../Activity.h"
@@ -41,6 +44,58 @@ class ReaderActivity final : public Activity {
   static std::string coverThumbPlaceholder(const std::string& bookPath);
   static bool ensureCoverThumb(const std::string& bookPath, int width, int height);
   static bool ensureCoverThumb(const std::string& bookPath, int height);
+
+  // Sliced extraction of a ZIP entry to a file, one chunk per continueStep() call.
+  // Used to extract an embedded PNG cover (cover.img) without blocking loop() for
+  // the full ~35-second decompress. Owns the ZipFile (which EntryReader references).
+  class CoverExtractSession {
+   public:
+    enum class Status { Running, Done, Error };
+
+    // Begin extracting zipEntryPath from epubPath into destPath.
+    // Returns false if the entry cannot be opened.
+    bool begin(const std::string& epubPath, const std::string& zipEntryPath, const std::string& destPath);
+
+    // Decompress up to chunkBytes into destPath. Call repeatedly until not Running.
+    Status continueStep(size_t chunkBytes = 4096);
+
+    size_t bytesProduced() const;
+    size_t totalBytes() const;
+
+    ~CoverExtractSession();
+
+   private:
+    std::unique_ptr<ZipFile> zip_;
+    std::unique_ptr<ZipFile::EntryReader> reader_;
+    FsFile dst_;
+    std::string destPath_;
+    uint8_t* buf_ = nullptr;
+    size_t chunkBytes_ = 0;
+  };
+
+  // Begin a sliced ZIP extraction for the embedded cover of bookPath.
+  // Returns nullptr if the book has no extractable embedded PNG cover, or if
+  // cover.img is already cached. On success the caller drives the session via
+  // continueStep() each loop() tick until Done, then calls beginPngThumbSession.
+  static std::unique_ptr<CoverExtractSession> beginCoverExtractSession(const std::string& bookPath);
+
+  // Open FsFiles that must outlive a PngDecodeSession (session borrows pointers to them).
+  struct PngThumbFiles {
+    FsFile src;  // source PNG (sidecar or cover.img)
+    FsFile dst;  // destination BMP (opened for write)
+    void close() {
+      if (src.isOpen()) src.close();
+      if (dst.isOpen()) dst.close();
+    }
+  };
+
+  // Start a sliced PNG decode for bookPath at the given thumb dimensions.
+  // Returns nullptr if the cover is not a PNG, is already cached, or setup fails.
+  // On success, *filesOut owns the open FsFiles; caller must keep them alive until
+  // the session completes and then close them.
+  // On failure (nullptr return), the thumb file is left as a 0-byte sentinel.
+  static std::unique_ptr<PngDecodeSession> beginPngThumbSession(const std::string& bookPath, int width, int height,
+                                                                PngThumbFiles& filesOut);
 
   // Render a sidecar image (or copy a sidecar BMP) into a scaled 1-bit BMP at
   // "<cacheDir>/<fileName>". Returns the written path, or "" on failure.

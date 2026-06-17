@@ -1,10 +1,14 @@
 #pragma once
+#include <PngToBmpConverter.h>
+
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "../Activity.h"
 #include "./FileBrowserActivity.h"
+#include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "util/ButtonNavigator.h"
 
@@ -40,6 +44,16 @@ class HomeActivity final : public Activity {
   bool coverRendered = false;
   bool coverBufferStored = false;
   size_t nextRecentCoverIndex = 0;
+  size_t nextThumbSizeIndex = 0;  // which thumb size within the current book is next
+
+  // Phase 1: sliced ZIP extraction of cover.img (only needed for large embedded PNG covers)
+  std::unique_ptr<ReaderActivity::CoverExtractSession> extractSession;
+
+  // Phase 2: sliced PNG decode session (non-null while a PNG cover is being decoded row-by-row)
+  std::unique_ptr<PngDecodeSession> pngSession;
+  ReaderActivity::PngThumbFiles pngSessionFiles;  // open FsFiles borrowed by pngSession
+  bool pngSessionFailed = false;                  // set on error; triggers empty-path store same as sync failure
+
   uint8_t* coverBuffer = nullptr;
   size_t coverBufferSize = 0;
   int coverRectX = 0;
@@ -74,4 +88,5 @@ class HomeActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool skipLoopDelay() override { return recentsLoading || extractSession != nullptr || pngSession != nullptr; }
 };

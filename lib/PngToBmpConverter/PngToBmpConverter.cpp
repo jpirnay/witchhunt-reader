@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 #include "BitmapHelpers.h"
 
@@ -149,6 +150,16 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
   }
   const uint32_t width = info.width;
   const uint32_t height = info.height;
+
+  // Reject images whose source pixel count would cause the row-by-row decode to
+  // stall the main loop for tens of seconds.  Unlike JPEG (which has DCT pre-scaling),
+  // the PNG decoder processes every source row at full resolution before downscaling.
+  // 800*1200 = 960 kpx decodes in ~10 s on the ESP32-C3; cap there.
+  constexpr uint32_t MAX_PNG_PIXELS = 800u * 1200u;
+  if (width * height > MAX_PNG_PIXELS) {
+    LOG_ERR("PNG", "Source PNG too large for thumbnail (%ux%u, max %u px) — skipping", width, height, MAX_PNG_PIXELS);
+    return false;
+  }
 
   // Calculate output dimensions (same logic as JpegToBmpConverter)
   int outWidth = width;
@@ -383,6 +394,167 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
   }
   return success;
 }
+
+// ============================================================================
+// PngDecodeSession — sliced 1-bit PNG decode for use in loop()-driven contexts
+// ============================================================================
+
+bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight) {
+  bmpOut_ = &bmpFile;
+
+  PngStreamDecoder::Info info;
+  if (!decoder_.begin(pngFile, info)) {
+    LOG_ERR("PNG", "Session begin: failed to start PNG decode");
+    return false;
+  }
+  width_ = info.width;
+  height_ = info.height;
+
+  // Output dimensions (fit, no crop — same as pngFileTo1BitBmpStreamWithSize)
+  outWidth_ = static_cast<int>(width_);
+  outHeight_ = static_cast<int>(height_);
+  scaleX_fp_ = 65536;
+  scaleY_fp_ = 65536;
+  needsScaling_ = false;
+
+  if (targetWidth > 0 && targetHeight > 0 && (outWidth_ != targetWidth || outHeight_ != targetHeight)) {
+    const float sw = static_cast<float>(targetWidth) / width_;
+    const float sh = static_cast<float>(targetHeight) / height_;
+    const float scale = (sw < sh) ? sw : sh;
+    outWidth_ = static_cast<int>(width_ * scale);
+    outHeight_ = static_cast<int>(height_ * scale);
+    if (outWidth_ < 1) outWidth_ = 1;
+    if (outHeight_ < 1) outHeight_ = 1;
+    scaleX_fp_ = (width_ << 16) / outWidth_;
+    scaleY_fp_ = (height_ << 16) / outHeight_;
+    needsScaling_ = true;
+    LOG_DBG("PNG", "Session: scaling %ux%u -> %dx%d (target %dx%d)", width_, height_, outWidth_, outHeight_,
+            targetWidth, targetHeight);
+  }
+
+  // 1-bit BMP header
+  bytesPerRow_ = (outWidth_ + 31) / 32 * 4;
+  writeBmpHeader1bit(bmpFile, outWidth_, outHeight_);
+
+  // Allocate buffers
+  grayRow_ = static_cast<uint8_t*>(malloc(width_));
+  rowBuffer_ = static_cast<uint8_t*>(malloc(bytesPerRow_));
+  if (!grayRow_ || !rowBuffer_) {
+    LOG_ERR("PNG", "Session begin: row buffer alloc failed");
+    cleanup();
+    return false;
+  }
+
+  if (needsScaling_) {
+    rowAccum_ = new (std::nothrow) uint32_t[outWidth_]();
+    rowCount_ = new (std::nothrow) uint16_t[outWidth_]();
+    if (!rowAccum_ || !rowCount_) {
+      LOG_ERR("PNG", "Session begin: scaling buffer alloc failed");
+      cleanup();
+      return false;
+    }
+    nextOutY_srcStart_ = scaleY_fp_;
+  }
+
+  ditherer_ = new (std::nothrow) Atkinson1BitDitherer(outWidth_);
+  if (!ditherer_) {
+    LOG_ERR("PNG", "Session begin: ditherer alloc failed");
+    cleanup();
+    return false;
+  }
+
+  srcY_ = 0;
+  currentOutY_ = 0;
+  return true;
+}
+
+void PngDecodeSession::writeOutputRow(const uint8_t* gray) {
+  memset(rowBuffer_, 0, bytesPerRow_);
+  for (int x = 0; x < outWidth_; x++) {
+    const uint8_t bit = ditherer_->processPixel(gray[x], x);
+    rowBuffer_[x / 8] |= (bit << (7 - (x % 8)));
+  }
+  ditherer_->nextRow();
+  bmpOut_->write(rowBuffer_, bytesPerRow_);
+}
+
+void PngDecodeSession::flushScaledRow() {
+  memset(rowBuffer_, 0, bytesPerRow_);
+  for (int x = 0; x < outWidth_; x++) {
+    const uint8_t gray = (rowCount_[x] > 0) ? static_cast<uint8_t>(rowAccum_[x] / rowCount_[x]) : 0;
+    const uint8_t bit = ditherer_->processPixel(gray, x);
+    rowBuffer_[x / 8] |= (bit << (7 - (x % 8)));
+  }
+  ditherer_->nextRow();
+  bmpOut_->write(rowBuffer_, bytesPerRow_);
+  currentOutY_++;
+}
+
+PngDecodeSession::Status PngDecodeSession::continueRows(uint32_t maxSourceRows) {
+  for (uint32_t processed = 0; processed < maxSourceRows && srcY_ < height_; processed++, srcY_++) {
+    if (!decoder_.nextRow(grayRow_)) {
+      LOG_ERR("PNG", "Session: decode failed at row %u", srcY_);
+      return Status::Error;
+    }
+
+    if (!needsScaling_) {
+      writeOutputRow(grayRow_);
+    } else {
+      // Accumulate source row into X-averaged output columns
+      for (int outX = 0; outX < outWidth_; outX++) {
+        const int srcXStart = (static_cast<uint32_t>(outX) * scaleX_fp_) >> 16;
+        const int srcXEnd = (static_cast<uint32_t>(outX + 1) * scaleX_fp_) >> 16;
+        int sum = 0, count = 0;
+        for (int sx = srcXStart; sx < srcXEnd && sx < static_cast<int>(width_); sx++) {
+          sum += grayRow_[sx];
+          count++;
+        }
+        if (count == 0 && srcXStart < static_cast<int>(width_)) {
+          sum = grayRow_[srcXStart];
+          count = 1;
+        }
+        rowAccum_[outX] += sum;
+        rowCount_[outX] += count;
+      }
+
+      // Flush output rows whose Y boundary we've passed
+      const uint32_t srcY_fp = (srcY_ + 1) << 16;
+      while (srcY_fp >= nextOutY_srcStart_ && currentOutY_ < outHeight_) {
+        flushScaledRow();
+        nextOutY_srcStart_ = static_cast<uint32_t>(currentOutY_ + 1) * scaleY_fp_;
+        if (srcY_fp >= nextOutY_srcStart_) continue;
+        memset(rowAccum_, 0, outWidth_ * sizeof(uint32_t));
+        memset(rowCount_, 0, outWidth_ * sizeof(uint16_t));
+      }
+    }
+  }
+
+  if (srcY_ < height_) return Status::Running;
+
+  // Verify all output rows were written
+  if (needsScaling_ && currentOutY_ < outHeight_) {
+    LOG_ERR("PNG", "Session: incomplete — %d/%d output rows written", currentOutY_, outHeight_);
+    return Status::Error;
+  }
+  LOG_DBG("PNG", "Session: decode complete (%ux%u -> %dx%d)", width_, height_, outWidth_, outHeight_);
+  return Status::Done;
+}
+
+void PngDecodeSession::cleanup() {
+  free(grayRow_);
+  grayRow_ = nullptr;
+  free(rowBuffer_);
+  rowBuffer_ = nullptr;
+  delete[] rowAccum_;
+  rowAccum_ = nullptr;
+  delete[] rowCount_;
+  rowCount_ = nullptr;
+  delete ditherer_;
+  ditherer_ = nullptr;
+  decoder_.end();
+}
+
+// ============================================================================
 
 bool PngToBmpConverter::pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop) {
   // Use runtime display dimensions (swapped for portrait cover sizing)

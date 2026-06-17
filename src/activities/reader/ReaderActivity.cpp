@@ -6,6 +6,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
@@ -39,6 +40,106 @@ void logReaderLaunchMemSnapshot(const char* stage) {
 inline void logReaderLaunchMemSnapshot(const char*) {}
 #endif
 }  // namespace
+
+// ── CoverExtractSession ──────────────────────────────────────────────────────
+
+ReaderActivity::CoverExtractSession::~CoverExtractSession() {
+  if (buf_) {
+    free(buf_);
+    buf_ = nullptr;
+  }
+  if (dst_.isOpen()) dst_.close();
+  // reader_ destructor closes entry; zip_ destructor is harmless
+}
+
+bool ReaderActivity::CoverExtractSession::begin(const std::string& epubPath, const std::string& zipEntryPath,
+                                                const std::string& destPath) {
+  destPath_ = destPath;
+  zip_ = std::unique_ptr<ZipFile>(new ZipFile(epubPath));
+  reader_ = std::unique_ptr<ZipFile::EntryReader>(new ZipFile::EntryReader(*zip_));
+  if (!reader_->open(zipEntryPath.c_str())) {
+    LOG_ERR("CEX", "Failed to open ZIP entry %s in %s", zipEntryPath.c_str(), epubPath.c_str());
+    return false;
+  }
+  if (!Storage.openFileForWrite("CEX", destPath_, dst_)) {
+    LOG_ERR("CEX", "Failed to open dest %s for write", destPath_.c_str());
+    return false;
+  }
+  LOG_DBG("CEX", "Extracting %s -> %s (%zu bytes)", zipEntryPath.c_str(), destPath_.c_str(), reader_->inflatedSize());
+  return true;
+}
+
+ReaderActivity::CoverExtractSession::Status ReaderActivity::CoverExtractSession::continueStep(size_t chunkBytes) {
+  if (!reader_ || !reader_->isOpen()) return Status::Error;
+
+  if (!buf_ || chunkBytes_ != chunkBytes) {
+    free(buf_);
+    buf_ = static_cast<uint8_t*>(malloc(chunkBytes));
+    if (!buf_) {
+      LOG_ERR("CEX", "OOM allocating %zu byte chunk buffer", chunkBytes);
+      return Status::Error;
+    }
+    chunkBytes_ = chunkBytes;
+  }
+
+  size_t produced = 0;
+  bool done = false;
+  if (!reader_->step(buf_, chunkBytes, &produced, &done)) {
+    LOG_ERR("CEX", "ZIP inflate error at %zu/%zu bytes", reader_->bytesProduced(), reader_->inflatedSize());
+    dst_.close();
+    Storage.remove(destPath_.c_str());
+    return Status::Error;
+  }
+  if (produced > 0) dst_.write(buf_, produced);
+
+  if (done) {
+    dst_.close();
+    LOG_DBG("CEX", "Extraction complete: %zu bytes -> %s", reader_->bytesProduced(), destPath_.c_str());
+    return Status::Done;
+  }
+  return Status::Running;
+}
+
+size_t ReaderActivity::CoverExtractSession::bytesProduced() const { return reader_ ? reader_->bytesProduced() : 0; }
+
+size_t ReaderActivity::CoverExtractSession::totalBytes() const { return reader_ ? reader_->inflatedSize() : 0; }
+
+std::unique_ptr<ReaderActivity::CoverExtractSession> ReaderActivity::beginCoverExtractSession(
+    const std::string& bookPath) {
+  if (!FsHelpers::hasEpubExtension(bookPath)) return nullptr;
+  if (!sidecarCoverPath(bookPath).empty()) return nullptr;  // sidecar takes priority; no extract needed
+
+  Epub epub(bookPath, "/.crosspoint");
+  if (!epub.load(true, true)) return nullptr;
+
+  // If cover.img already exists and is valid, no extraction needed.
+  const std::string coverImgPath = epub.getCoverImageCachePath();
+  if (Storage.exists(coverImgPath.c_str())) {
+    FsFile existing;
+    if (Storage.openFileForRead("CEX", coverImgPath, existing)) {
+      const bool valid = existing.size() > 0;
+      existing.close();
+      if (valid) return nullptr;  // already cached
+    }
+  }
+
+  const std::string coverHref = epub.getCoverItemHref();
+  if (coverHref.empty()) {
+    LOG_DBG("CEX", "No cover item href for %s", bookPath.c_str());
+    return nullptr;
+  }
+
+  const std::string normHref = FsHelpers::normalisePath(coverHref);
+  const std::string dir = epub.getCachePath();
+  if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+
+  auto session = std::unique_ptr<CoverExtractSession>(new CoverExtractSession());
+  if (!session->begin(bookPath, normHref, coverImgPath)) return nullptr;
+
+  return session;
+}
+
+// ── end CoverExtractSession ──────────────────────────────────────────────────
 
 std::string ReaderActivity::extractFolderPath(const std::string& filePath) {
   const auto lastSlash = filePath.find_last_of('/');
@@ -141,11 +242,13 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int width, in
   const std::string name = "thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
   const std::string file = dir + "/" + name;
   if (thumbFileValid(file)) return true;
-  if (Storage.exists(file.c_str())) Storage.remove(file.c_str());  // clear sentinel before retry
 
   // Source preference: a sidecar image beside the book wins over the embedded cover.
   const std::string sidecar = sidecarCoverPath(bookPath);
   if (!sidecar.empty()) {
+    // A sidecar may have changed since the sentinel was written — clear it so the
+    // sidecar conversion runs fresh.
+    if (Storage.exists(file.c_str())) Storage.remove(file.c_str());
     const std::string result = convertSidecarToBmp(dir, sidecar, width, height, name);
     LOG_DBG("COVER", "convertSidecarToBmp(%dx%d) sidecar=%s result=%s", width, height, sidecar.c_str(),
             result.empty() ? "FAILED" : result.c_str());
@@ -154,6 +257,8 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int width, in
 
   // No usable sidecar — fall back to the embedded cover (deferred load: a sidecar hit never
   // pays for a full book parse).
+  // Note: embedded-cover failures write a 0-byte sentinel via generateThumbBmp; we leave
+  // it in place here so repeated homescreen loads don't re-attempt a known-failing decode.
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
     return epub.load(true, true) && epub.generateThumbBmp(width, height);
@@ -174,11 +279,12 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int height) {
   const std::string name = "thumb_" + std::to_string(height) + ".bmp";
   const std::string file = dir + "/" + name;
   if (thumbFileValid(file)) return true;
-  if (Storage.exists(file.c_str())) Storage.remove(file.c_str());  // clear sentinel before retry
 
   // Embedded single-height thumbnails scale to height*0.6 wide; mirror that for the sidecar.
   const std::string sidecar = sidecarCoverPath(bookPath);
   if (!sidecar.empty()) {
+    // Sidecar may have changed — clear sentinel so conversion runs fresh.
+    if (Storage.exists(file.c_str())) Storage.remove(file.c_str());
     const std::string result = convertSidecarToBmp(dir, sidecar, height * 6 / 10, height, name);
     LOG_DBG("COVER", "convertSidecarToBmp(h=%d) sidecar=%s result=%s", height, sidecar.c_str(),
             result.empty() ? "FAILED" : result.c_str());
@@ -198,6 +304,70 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int height) {
     return txt.generateThumbBmp(height);
   }
   return false;
+}
+
+std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std::string& bookPath, int width,
+                                                                       int height, PngThumbFiles& filesOut) {
+  const std::string dir = bookCacheDir(bookPath);
+  const std::string name = "thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
+  const std::string bmpPath = dir + "/" + name;
+
+  // Already cached (valid) — caller should have checked, but be safe.
+  if (thumbFileValid(bmpPath)) return nullptr;
+
+  // Sidecar PNG takes priority over embedded cover.
+  std::string srcPath;
+  const std::string sidecar = sidecarCoverPath(bookPath);
+  bool isSidecar = false;
+  if (!sidecar.empty() && FsHelpers::hasPngExtension(sidecar)) {
+    srcPath = sidecar;
+    isSidecar = true;
+    // Clear any stale sentinel so the write can proceed.
+    if (Storage.exists(bmpPath.c_str())) Storage.remove(bmpPath.c_str());
+  } else if (sidecar.empty() && FsHelpers::hasEpubExtension(bookPath)) {
+    // Check if the embedded cover.img is a PNG.
+    Epub epub(bookPath, "/.crosspoint");
+    if (!epub.load(true, true) || !epub.ensureCoverImageCached()) return nullptr;
+    srcPath = epub.getCoverImageCachePath();
+    // ensureCoverImageCached validates format — peek format to confirm PNG.
+    FsFile peek;
+    if (!Storage.openFileForRead("PNG", srcPath, peek)) return nullptr;
+    uint8_t magic[8];
+    const bool isPng = peek.read(magic, 8) == 8 && magic[0] == 0x89 && magic[1] == 0x50;
+    peek.close();
+    if (!isPng) return nullptr;
+  } else {
+    return nullptr;
+  }
+
+  if (!Storage.exists(dir.c_str())) Storage.mkdir(dir.c_str());
+
+  if (!Storage.openFileForRead("PNG", srcPath, filesOut.src)) {
+    LOG_ERR("PNG", "beginPngThumbSession: failed to open src %s", srcPath.c_str());
+    return nullptr;
+  }
+  if (!Storage.openFileForWrite("PNG", bmpPath, filesOut.dst)) {
+    LOG_ERR("PNG", "beginPngThumbSession: failed to open dst %s", bmpPath.c_str());
+    filesOut.src.close();
+    return nullptr;
+  }
+
+  auto session = std::unique_ptr<PngDecodeSession>(new PngDecodeSession());
+  if (!session->begin(filesOut.src, filesOut.dst, width, height)) {
+    filesOut.src.close();
+    filesOut.dst.close();
+    // Leave 0-byte sentinel so we don't retry if the failure is permanent (e.g. PNG too large).
+    if (!isSidecar) {
+      LOG_DBG("PNG", "beginPngThumbSession: begin() failed, leaving sentinel for %s", bmpPath.c_str());
+    } else {
+      Storage.remove(bmpPath.c_str());
+    }
+    return nullptr;
+  }
+
+  LOG_DBG("PNG", "beginPngThumbSession: started sliced decode for %s -> %s (%dx%d)", srcPath.c_str(), bmpPath.c_str(),
+          width, height);
+  return session;
 }
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
