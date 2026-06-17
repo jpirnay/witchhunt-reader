@@ -4,7 +4,7 @@
 class EpdFontFamily {
  public:
   // Bitmask of text style flags carried per-word through layout and serialized in page cache.
-  // Bits 0-1 select the font variant (BOLD/ITALIC); bits 2-5 are decoration/positioning overlays
+  // Bits 0-1 select the font variant (BOLD/ITALIC); bits 2-6 are decoration/positioning overlays
   // applied at render time without changing the underlying font.  getFont() ignores all bits
   // above bit 1 so decorations compose freely with bold/italic (e.g. BOLD | UNDERLINE | SUP).
   enum Style : uint8_t {
@@ -16,6 +16,8 @@ class EpdFontFamily {
     STRIKETHROUGH = 8,  // drawn as a line through midline by TextBlock::render()
     SUP = 16,           // superscript: glyph scaled 50%, raised ~40% of ascender
     SUB = 32,           // subscript:   glyph scaled 50%, lowered ~25% of ascender
+    SMALL_CAPS = 64,    // font-variant: small-caps — lowercase letters folded to uppercase glyphs
+                        // and rendered at reduced scale; non-lowercase chars render full-size
   };
 
   explicit EpdFontFamily(const EpdFont* regular, const EpdFont* bold = nullptr, const EpdFont* italic = nullptr,

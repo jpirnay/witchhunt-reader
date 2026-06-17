@@ -88,6 +88,7 @@ struct CssPropertyFlags {
   uint32_t lineHeight : 1;
   uint32_t fontSizeMultiplier : 1;
   uint32_t cssFloat : 1;
+  uint32_t smallCaps : 1;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -112,13 +113,14 @@ struct CssPropertyFlags {
         pageBreakAfter(0),
         lineHeight(0),
         fontSizeMultiplier(0),
-        cssFloat(0) {}
+        cssFloat(0),
+        smallCaps(0) {}
 
   [[nodiscard]] bool anySet() const {
     return textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom ||
            marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight ||
            imageWidth || display || verticalAlign || listStyleNone || pageBreakBefore || pageBreakAfter || lineHeight ||
-           fontSizeMultiplier || cssFloat;
+           fontSizeMultiplier || cssFloat || smallCaps;
   }
 
   void clearAll() {
@@ -127,6 +129,7 @@ struct CssPropertyFlags {
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = verticalAlign = 0;
     listStyleNone = pageBreakBefore = pageBreakAfter = lineHeight = fontSizeMultiplier = cssFloat = 0;
+    smallCaps = 0;
   }
 };
 
@@ -159,6 +162,7 @@ struct CssStyle {
   float lineHeightMultiplier = 1.0f;   // normalised line-height multiplier (relative to default y_advance)
   float fontSizeMultiplier = 1.0f;     // font-size multiplier relative to body em size
   CssFloat cssFloat = CssFloat::None;  // float: left/right — signals inline image context
+  bool smallCaps = false;              // font-variant: small-caps
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
@@ -257,6 +261,10 @@ struct CssStyle {
       cssFloat = base.cssFloat;
       defined.cssFloat = 1;
     }
+    if (base.hasSmallCaps()) {
+      smallCaps = base.smallCaps;
+      defined.smallCaps = 1;
+    }
   }
 
   [[nodiscard]] bool hasTextAlign() const { return defined.textAlign; }
@@ -278,6 +286,7 @@ struct CssStyle {
   [[nodiscard]] bool hasVerticalAlign() const { return defined.verticalAlign; }
   [[nodiscard]] bool hasListStyleNone() const { return defined.listStyleNone; }
   [[nodiscard]] bool hasCssFloat() const { return defined.cssFloat; }
+  [[nodiscard]] bool hasSmallCaps() const { return defined.smallCaps; }
   [[nodiscard]] bool hasPageBreakBefore() const { return defined.pageBreakBefore; }
   [[nodiscard]] bool hasPageBreakAfter() const { return defined.pageBreakAfter; }
   [[nodiscard]] bool hasLineHeight() const { return defined.lineHeight; }
@@ -300,6 +309,7 @@ struct CssStyle {
     lineHeightMultiplier = 1.0f;
     fontSizeMultiplier = 1.0f;
     cssFloat = CssFloat::None;
+    smallCaps = false;
     defined.clearAll();
   }
 };
