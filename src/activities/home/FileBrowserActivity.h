@@ -47,6 +47,7 @@ class FileBrowserActivity final : public Activity {
   uint32_t getFileDateTime(const std::string& filePath) const;
   uint32_t getFileSize(const std::string& filePath) const;
   std::string getFileExtension(const std::string& name) const;
+  void showBrowserOptionsMenu();
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",

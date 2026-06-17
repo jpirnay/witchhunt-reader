@@ -4,13 +4,20 @@
 
 #include "../MenuListActivity.h"
 
-// Context menu shown when the user long-presses the info button on a file in the file browser.
-// The available actions depend on file type.  The selected action is returned via MenuResult::action.
+// Context menu for file browser: displays display options (sort, hidden files, extensions)
+// and file-specific actions (Open, Info, Delete, etc.) based on file type.
+// When filePath is empty, acts as a browser options menu (display options only).
 class FileContextMenuActivity final : public MenuListActivity {
  public:
   enum class Action {
     None = -1,
-    Open = 0,
+    // Display options (shared)
+    ChangeSortMode = 0,
+    ChangeSortDirection,
+    ToggleHiddenFiles,
+    ToggleExtensions,
+    // File-specific actions
+    Open = 10,
     FetchAndOpen,
     MarkAsRead,
     Info,
@@ -20,12 +27,14 @@ class FileContextMenuActivity final : public MenuListActivity {
     Remove,
   };
 
-  explicit FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& filePath);
+  explicit FileContextMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                   const std::string& filePath = "");
 
   void render(RenderLock&&) override;
 
  private:
-  std::string filePath;
+  std::string filePath;  // Empty string = browser options mode
+  bool isBrowserMode;
 
   void onActionSelected(int index) override;
   void onBackPressed() override;

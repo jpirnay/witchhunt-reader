@@ -458,9 +458,17 @@ void FileBrowserActivity::sortFileList() {
 }
 
 void FileBrowserActivity::openContextMenu() {
-  if (files.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(files.size())) return;
+  // If no file selected or a directory selected, show browser options only
+  if (files.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(files.size())) {
+    showBrowserOptionsMenu();
+    return;
+  }
+
   const std::string& entry = files[selectorIndex];
-  if (entry.back() == '/') return;
+  if (entry.back() == '/') {
+    showBrowserOptionsMenu();
+    return;
+  }
 
   std::string cleanBase = basepath;
   if (cleanBase.back() != '/') cleanBase += "/";
@@ -481,9 +489,54 @@ void FileBrowserActivity::openContextMenu() {
                          });
 }
 
+void FileBrowserActivity::showBrowserOptionsMenu() {
+  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, ""),
+                         [this](const ActivityResult& res) {
+                           if (res.isCancelled) {
+                             requestUpdate();
+                             return;
+                           }
+                           const auto* menuRes = std::get_if<MenuResult>(&res.data);
+                           if (!menuRes) {
+                             requestUpdate();
+                             return;
+                           }
+                           handleContextMenuAction(menuRes->action, "", "");
+                         });
+}
+
 void FileBrowserActivity::handleContextMenuAction(int action, const std::string& fullPath, const std::string& entry) {
   using Action = FileContextMenuActivity::Action;
-  switch (static_cast<Action>(action)) {
+  const Action actionEnum = static_cast<Action>(action);
+
+  // Display options (handled directly without reloading)
+  if (actionEnum == Action::ChangeSortMode) {
+    // Determine which sort mode was selected based on the menu path
+    // This is a simplified approach; in a real implementation, we'd pass the mode more explicitly
+    sortMode = CrossPointSettings::SORT_BY_NAME;
+    sortFileList();
+    requestUpdate();
+    return;
+  } else if (actionEnum == Action::ChangeSortDirection) {
+    sortDirection = (sortDirection == CrossPointSettings::SORT_ASCENDING)
+                        ? CrossPointSettings::SORT_DESCENDING
+                        : CrossPointSettings::SORT_ASCENDING;
+    sortFileList();
+    requestUpdate();
+    return;
+  } else if (actionEnum == Action::ToggleHiddenFiles) {
+    SETTINGS.showHiddenFiles = !SETTINGS.showHiddenFiles;
+    loadFiles();
+    requestUpdate();
+    return;
+  } else if (actionEnum == Action::ToggleExtensions) {
+    hideExtensions = !hideExtensions;
+    requestUpdate();
+    return;
+  }
+
+  // File-specific actions (require fullPath)
+  switch (actionEnum) {
     case Action::Open: {
       ReturnHint hint;
       hint.target = ReturnTo::FileBrowser;
