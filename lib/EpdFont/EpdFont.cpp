@@ -4,8 +4,15 @@
 
 #include <algorithm>
 
+#include "SmallCaps.h"
+
+// Scale a 12.4 fixed-point advance by the small-caps factor, rounding to nearest.
+static inline int32_t scaleAdvanceFP(const int32_t advanceFP) {
+  return static_cast<int32_t>(advanceFP * smallCaps::SCALE + 0.5f);
+}
+
 void EpdFont::getTextBounds(const char* string, const int startX, const int startY, int* minX, int* minY, int* maxX,
-                            int* maxY) const {
+                            int* maxY, const bool useSmallCaps) const {
   *minX = startX;
   *minY = startY;
   *maxX = startX;
@@ -30,6 +37,9 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       cp = applyLigatures(cp, string);
     }
 
+    // Small-caps: fold lowercase to uppercase and mark this glyph for scaled metrics.
+    const bool folded = useSmallCaps && !isCombining && smallCaps::fold(cp);
+
     const EpdGlyph* glyph = getGlyph(cp);
     if (!glyph) {
       lastBaseX += fp4::toPixel(prevAdvanceFP);  // flush pending advance before resetting
@@ -38,38 +48,45 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       continue;
     }
 
-    const int raiseBy = isCombining ? combiningMark::raiseAboveBase(glyph->top, glyph->height, lastBaseTop) : 0;
+    // Folded glyphs are drawn at smallCaps::SCALE, so all their metrics scale to match.
+    const int glyphLeft = folded ? static_cast<int>(glyph->left * smallCaps::SCALE) : glyph->left;
+    const int glyphWidth = folded ? static_cast<int>(glyph->width * smallCaps::SCALE + 0.5f) : glyph->width;
+    const int glyphTop = folded ? static_cast<int>(glyph->top * smallCaps::SCALE) : glyph->top;
+    const int glyphHeight = folded ? static_cast<int>(glyph->height * smallCaps::SCALE + 0.5f) : glyph->height;
+
+    const int raiseBy = isCombining ? combiningMark::raiseAboveBase(glyphTop, glyphHeight, lastBaseTop) : 0;
 
     if (!isCombining && prevCp != 0) {
-      const auto kernFP = getKerning(prevCp, cp);  // 4.4 fixed-point kern
+      auto kernFP = static_cast<int32_t>(getKerning(prevCp, cp));  // 4.4 fixed-point kern
+      if (folded) kernFP = scaleAdvanceFP(kernFP);
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
     }
 
     const int glyphBaseX =
-        isCombining ? combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, glyph->left, glyph->width)
+        isCombining ? combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, glyphLeft, glyphWidth)
                     : lastBaseX;
     const int glyphBaseY = startY - raiseBy;
 
-    *minX = std::min(*minX, glyphBaseX + glyph->left);
-    *maxX = std::max(*maxX, glyphBaseX + glyph->left + glyph->width);
-    *minY = std::min(*minY, glyphBaseY + glyph->top - glyph->height);
-    *maxY = std::max(*maxY, glyphBaseY + glyph->top);
+    *minX = std::min(*minX, glyphBaseX + glyphLeft);
+    *maxX = std::max(*maxX, glyphBaseX + glyphLeft + glyphWidth);
+    *minY = std::min(*minY, glyphBaseY + glyphTop - glyphHeight);
+    *maxY = std::max(*maxY, glyphBaseY + glyphTop);
 
     if (!isCombining) {
-      lastBaseLeft = glyph->left;
-      lastBaseWidth = glyph->width;
-      lastBaseAdvanceFP = glyph->advanceX;  // 12.4 fixed-point
-      lastBaseTop = glyph->top;
+      lastBaseLeft = glyphLeft;
+      lastBaseWidth = glyphWidth;
+      lastBaseAdvanceFP = folded ? scaleAdvanceFP(glyph->advanceX) : glyph->advanceX;  // 12.4 fixed-point
+      lastBaseTop = glyphTop;
       prevAdvanceFP = lastBaseAdvanceFP;
       prevCp = cp;
     }
   }
 }
 
-void EpdFont::getTextDimensions(const char* string, int* w, int* h) const {
+void EpdFont::getTextDimensions(const char* string, int* w, int* h, const bool useSmallCaps) const {
   int minX = 0, minY = 0, maxX = 0, maxY = 0;
 
-  getTextBounds(string, 0, 0, &minX, &minY, &maxX, &maxY);
+  getTextBounds(string, 0, 0, &minX, &minY, &maxX, &maxY, useSmallCaps);
 
   *w = maxX - minX;
   *h = maxY - minY;

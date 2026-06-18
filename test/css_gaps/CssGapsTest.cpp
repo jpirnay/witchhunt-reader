@@ -222,6 +222,51 @@ void testFontSizeSmaller() {
 }
 
 // ============================================================================
+// font-variant: small-caps
+// ============================================================================
+
+void testFontVariantSmallCaps() {
+  printf("testFontVariantSmallCaps...\n");
+  const CssStyle style = CssParser::parseInlineStyle("font-variant: small-caps");
+  ASSERT_TRUE(style.hasSmallCaps());
+  ASSERT_TRUE(style.smallCaps);
+  PASS();
+}
+
+void testFontVariantCapsLonghand() {
+  printf("testFontVariantCapsLonghand...\n");
+  const CssStyle style = CssParser::parseInlineStyle("font-variant-caps: small-caps");
+  ASSERT_TRUE(style.hasSmallCaps());
+  ASSERT_TRUE(style.smallCaps);
+  PASS();
+}
+
+void testFontVariantNormalCancels() {
+  printf("testFontVariantNormalCancels...\n");
+  const CssStyle style = CssParser::parseInlineStyle("font-variant: normal");
+  // "normal" is an explicit value so it can cancel inherited small-caps.
+  ASSERT_TRUE(style.hasSmallCaps());
+  ASSERT_FALSE(style.smallCaps);
+  PASS();
+}
+
+void testFontVariantUnknown_notSet() {
+  printf("testFontVariantUnknown_notSet...\n");
+  const CssStyle style = CssParser::parseInlineStyle("font-variant: oldstyle-nums");
+  // Unrecognised value: leave the property undefined so inheritance is unaffected.
+  ASSERT_FALSE(style.hasSmallCaps());
+  PASS();
+}
+
+void testFontVariantCaseInsensitive() {
+  printf("testFontVariantCaseInsensitive...\n");
+  const CssStyle style = CssParser::parseInlineStyle("FONT-VARIANT : SMALL-CAPS ;");
+  ASSERT_TRUE(style.hasSmallCaps());
+  ASSERT_TRUE(style.smallCaps);
+  PASS();
+}
+
+// ============================================================================
 // main
 // ============================================================================
 
@@ -254,6 +299,13 @@ int main() {
   testFontSizePercent160();
   testFontSizeEm();
   testFontSizeSmaller();
+
+  printf("\n--- font-variant: small-caps ---\n");
+  testFontVariantSmallCaps();
+  testFontVariantCapsLonghand();
+  testFontVariantNormalCancels();
+  testFontVariantUnknown_notSet();
+  testFontVariantCaseInsensitive();
 
   printf("\n=== Results: %d passed, %d failed ===\n", testsPassed, testsFailed);
   return testsFailed > 0 ? 1 : 0;

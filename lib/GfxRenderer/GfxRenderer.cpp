@@ -4,6 +4,7 @@
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <SdCardFont.h>
+#include <SmallCaps.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 
@@ -977,7 +978,8 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
 // renderCharScaled() above is used for SUP/SUB (kept separate for clarity).
 static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                               const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                              const bool pixelState, const EpdFontFamily::Style style, const float scale) {
+                              const bool pixelState, const EpdFontFamily::Style style, const float scale,
+                              const uint8_t minRaw2Bit = 1) {
   const EpdGlyph* glyph = fontFamily.getGlyph(cp, style);
   if (!glyph) return;
 
@@ -1010,8 +1012,9 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
         // path (drawMask 0x0E). Headings are *upscaled*, so dropping the light-gray (raw==1)
         // pixels here erased glyph edges and thin horizontal strokes, which showed up as
         // thinned glyphs and "every other line" stripes. (The SUP/SUB *downscaler* keeps the
-        // raw>=2 threshold on purpose, to stay crisp when shrinking.)
-        if (raw >= 1) {
+        // raw>=2 threshold on purpose, to stay crisp when shrinking.)  Callers that downscale
+        // (e.g. small-caps) pass minRaw2Bit=2 to drop light-gray and stay crisp.
+        if (raw >= minRaw2Bit) {
           renderer.drawPixel(baseX + dstX, baseY + dstY, pixelState);
         }
       }
@@ -1157,12 +1160,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
 
     cp = font.applyLigatures(cp, text, style);
 
+    // Small-caps: fold lowercase to its uppercase glyph and draw it scaled.  Decided
+    // per glyph so already-uppercase letters, digits and punctuation stay full-size.
+    const bool smallCapsStyle = (style & EpdFontFamily::SMALL_CAPS) != 0;
+    const bool folded = smallCapsStyle && smallCaps::fold(cp);
+
     // Differential rounding: snap (previous advance + current kern) as one unit so
     // identical character pairs always produce the same pixel step regardless of
     // where they fall on the line.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+      auto kernFP = static_cast<int32_t>(font.getKerning(prevCp, cp, style));  // 4.4 fixed-point kern
+      if (folded) kernFP = static_cast<int32_t>(kernFP * smallCaps::SCALE + 0.5f);
+      lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
     const EpdGlyph* glyph = font.getGlyph(cp, style);
@@ -1177,9 +1186,15 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       continue;
     }
 
-    lastBaseLeft = glyph->left;
-    lastBaseWidth = glyph->width;
-    lastBaseTop = glyph->top;
+    // Folded glyphs render at smallCaps::SCALE, so layout metrics scale to match.
+    const int effLeft = folded ? static_cast<int>(glyph->left * smallCaps::SCALE) : glyph->left;
+    const int effWidth = folded ? static_cast<int>(glyph->width * smallCaps::SCALE + 0.5f) : glyph->width;
+    const int effHeight = folded ? static_cast<int>(glyph->height * smallCaps::SCALE + 0.5f) : glyph->height;
+    const int effTop = folded ? static_cast<int>(glyph->top * smallCaps::SCALE) : glyph->top;
+
+    lastBaseLeft = effLeft;
+    lastBaseWidth = effWidth;
+    lastBaseTop = effTop;
     lastBaseAdvanceFP = glyph->advanceX;
 
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
@@ -1187,16 +1202,18 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       // Halve the advance so the cursor advances by the same amount the scaled glyph
       // actually occupies, keeping spacing correct without needing a separate smaller font.
       lastBaseAdvanceFP = (lastBaseAdvanceFP + 1) / 2;
+    } else if (folded) {
+      lastBaseAdvanceFP = static_cast<int>(lastBaseAdvanceFP * smallCaps::SCALE + 0.5f);
     }
     prevAdvanceFP = lastBaseAdvanceFP;
 
     // Skip rasterization for glyphs fully outside the logical viewport.
     // This avoids expensive per-pixel bounds checks and noisy OOB logs when
     // long lines overflow past the right edge.
-    const int glyphX = lastBaseX + glyph->left;
-    const int glyphY = yPos - glyph->top;
-    const bool glyphOffscreen = (glyph->width <= 0 || glyph->height <= 0 || glyphX >= screenWidth ||
-                                 glyphY >= screenHeight || glyphX + glyph->width <= 0 || glyphY + glyph->height <= 0);
+    const int glyphX = lastBaseX + effLeft;
+    const int glyphY = yPos - effTop;
+    const bool glyphOffscreen = (effWidth <= 0 || effHeight <= 0 || glyphX >= screenWidth || glyphY >= screenHeight ||
+                                 glyphX + effWidth <= 0 || glyphY + effHeight <= 0);
     if (glyphOffscreen) {
       prevCp = cp;
       continue;
@@ -1205,6 +1222,9 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     if (isSupSub) {
       // yPos already carries the vertical offset applied by TextBlock::render().
       renderCharScaled(*this, renderModeSnapshot, font, cp, lastBaseX, yPos, black, style);
+    } else if (folded) {
+      renderCharAtScale(*this, renderModeSnapshot, font, cp, lastBaseX, yPos, black, style, smallCaps::SCALE,
+                        /*minRaw2Bit=*/2);
     } else {
       renderCharImpl<TextRotation::None>(*this, renderModeSnapshot, font, cp, lastBaseX, yPos, black, style);
     }
@@ -1234,10 +1254,15 @@ void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, con
   const int yPos = y + static_cast<int>(getFontAscenderSize(fontId) * scale + 0.5f);
   int32_t cursorFP = x << 4;  // 12.4 fixed-point
 
+  const bool smallCapsStyle = (style & EpdFontFamily::SMALL_CAPS) != 0;
   uint32_t cp;
   uint32_t prevCp = 0;
   const char* p = text;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&p)))) {
+    // Small-caps composes with the heading scale: folded glyphs render at scale*SCALE.
+    const bool folded = smallCapsStyle && smallCaps::fold(cp);
+    const float effScale = folded ? scale * smallCaps::SCALE : scale;
+
     const EpdGlyph* glyph = font.getGlyph(cp, style);
     if (!glyph) {
       prevCp = cp;
@@ -1247,13 +1272,14 @@ void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, con
     // Apply kerning scaled
     if (prevCp) {
       int kern = font.getKerning(prevCp, cp, style);
-      cursorFP += static_cast<int>(kern * scale + 0.5f);
+      cursorFP += static_cast<int>(kern * effScale + 0.5f);
     }
 
     const int cursorX = (cursorFP + 8) >> 4;
-    renderCharAtScale(*this, renderModeSnapshot, font, cp, cursorX, yPos, black, style, scale);
+    renderCharAtScale(*this, renderModeSnapshot, font, cp, cursorX, yPos, black, style, effScale,
+                      /*minRaw2Bit=*/folded ? 2 : 1);
 
-    const int scaledAdvanceFP = static_cast<int>(glyph->advanceX * scale + 0.5f);
+    const int scaledAdvanceFP = static_cast<int>(glyph->advanceX * effScale + 0.5f);
     cursorFP += scaledAdvanceFP;
     prevCp = cp;
   }
@@ -2659,11 +2685,15 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     }
     cp = font.applyLigatures(cp, text, style);
 
+    // Small-caps fold — mirror drawText so measurement and rendering agree exactly.
+    const bool folded = (style & EpdFontFamily::SMALL_CAPS) != 0 && smallCaps::fold(cp);
+
     // Differential rounding: snap (previous advance + current kern) together,
     // matching drawText so measurement and rendering agree exactly.
     if (prevCp != 0) {
-      const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
-      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);         // snap 12.4 fixed-point to nearest pixel
+      auto kernFP = static_cast<int32_t>(font.getKerning(prevCp, cp, style));  // 4.4 fixed-point kern
+      if (folded) kernFP = static_cast<int32_t>(kernFP * smallCaps::SCALE + 0.5f);
+      widthPx += fp4::toPixel(prevAdvanceFP + kernFP);  // snap 12.4 fixed-point to nearest pixel
     }
 
     const EpdGlyph* glyph = font.getGlyph(cp, style);
@@ -2676,6 +2706,8 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     prevAdvanceFP = glyph->advanceX;
     if ((style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
       prevAdvanceFP = (prevAdvanceFP + 1) / 2;
+    } else if (folded) {
+      prevAdvanceFP = static_cast<int>(prevAdvanceFP * smallCaps::SCALE + 0.5f);
     }
     prevCp = cp;
   }

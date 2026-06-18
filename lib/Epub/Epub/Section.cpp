@@ -18,8 +18,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION =
-    53;  // bumped: table cells can now embed an image (TableCell gains a serialized ImageBlock);
-         // discards v52 caches whose table fragments predate the per-cell image field
+    54;  // bumped: font-variant: small-caps adds the SMALL_CAPS word-style bit, baked into the
+         // per-word style byte at parse time; discards v53 caches so small-caps re-parses cleanly
 
 namespace header {
 constexpr uint32_t kVersion = 0;

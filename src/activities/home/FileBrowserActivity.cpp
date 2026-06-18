@@ -135,6 +135,22 @@ bool FileBrowserActivity::useFileIndexForEntry(size_t displayIndex, FileIndex::E
   return fileIndex->entryAt(displayIndex, desc, out);
 }
 
+size_t FileBrowserActivity::entryCount() const { return getDisplayEntryCount(); }
+
+// Returns the row's name in the canonical browser form: a trailing '/' marks a
+// directory. For the in-RAM backend `files` already stores this form; for the SD
+// index we reconstruct it from the Entry. Out-of-range / index-read failure → "".
+std::string FileBrowserActivity::entryName(size_t displayIndex) {
+  FileIndex::Entry e;
+  if (useFileIndexForEntry(displayIndex, e)) {
+    std::string name(e.name);
+    if (e.isDir) name += '/';
+    return name;
+  }
+  if (fileIndex || displayIndex >= files.size()) return "";  // index read failed, or OOR
+  return files[displayIndex];
+}
+
 void FileBrowserActivity::onEnter() {
   Activity::onEnter();
 
@@ -143,7 +159,7 @@ void FileBrowserActivity::onEnter() {
 
   if (!focusName.empty()) {
     const size_t idx = findEntry(focusName);
-    if (idx < files.size()) {
+    if (idx < entryCount()) {
       selectorIndex = static_cast<int>(idx);
     }
     focusName.clear();
@@ -259,7 +275,7 @@ void FileBrowserActivity::loop() {
           const auto pos = oldPath.find_last_of('/');
           const std::string dirName = oldPath.substr(pos + 1) + "/";
           const size_t idx = findEntry(dirName);
-          selectorIndex = (idx < files.size()) ? static_cast<int>(idx) : 0;
+          selectorIndex = (idx < entryCount()) ? static_cast<int>(idx) : 0;
           requestUpdate();
         } else if (mode == Mode::PickFirmware) {
           // At root in PickFirmware: cancel back to caller.
@@ -276,9 +292,10 @@ void FileBrowserActivity::loop() {
 
     if (ev.button == MappedInputManager::Button::Confirm &&
         (ev.type == ButtonEventManager::PressType::Short || ev.type == ButtonEventManager::PressType::Long)) {
-      if (files.empty()) return;
+      if (entryCount() == 0) return;
 
-      const std::string& entry = files[selectorIndex];
+      const std::string entry = entryName(selectorIndex);
+      if (entry.empty()) return;
       const bool isDirectory = (entry.back() == '/');
       const bool longPress = (ev.type == ButtonEventManager::PressType::Long);
 
@@ -321,18 +338,19 @@ void FileBrowserActivity::loop() {
     }
 
     if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Long) {
-      if (files.empty()) {
+      if (entryCount() == 0) {
         return;
       }
 
-      const std::string& entry = files[selectorIndex];
+      const std::string entry = entryName(selectorIndex);
+      if (entry.empty()) return;
       const bool isDirectory = (entry.back() == '/');
-      std::string entryName = entry;
-      if (isDirectory) entryName.pop_back();
+      std::string bareName = entry;
+      if (isDirectory) bareName.pop_back();
 
       std::string cleanBase = basepath;
       if (cleanBase.back() != '/') cleanBase += "/";
-      const std::string fullPath = cleanBase + entryName;
+      const std::string fullPath = cleanBase + bareName;
 
       doRemove(fullPath, entry, isDirectory);
       return;
@@ -348,7 +366,7 @@ void FileBrowserActivity::loop() {
   }
 
   // Up/Down side buttons navigate the list (Left/Right are reserved for Back/Info actions)
-  const int listSize = static_cast<int>(files.size());
+  const int listSize = static_cast<int>(entryCount());
   buttonNavigator.onNextList({MappedInputManager::Button::Down}, selectorIndex, listSize, [this] { requestUpdate(); });
   buttonNavigator.onPreviousList({MappedInputManager::Button::Up}, selectorIndex, listSize,
                                  [this] { requestUpdate(); });
@@ -384,14 +402,14 @@ void FileBrowserActivity::render(RenderLock&&) {
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
-  if (files.empty()) {
+  if (entryCount() == 0) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else {
     GUI.drawList(
-        renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, files.size(), selectorIndex,
-        [this](int index) { return getFileName(files[index]); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(files[index]); });
+        renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(entryCount()),
+        selectorIndex, [this](int index) { return getFileName(entryName(index)); }, nullptr,
+        [this](int index) { return UITheme::getFileIcon(entryName(index)); });
   }
 
   // Side buttons (Up/Down) navigate; show their hints on the side
@@ -399,19 +417,28 @@ void FileBrowserActivity::render(RenderLock&&) {
 
   // Front buttons
   const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
-  const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
-  const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
+  const bool hasEntries = entryCount() > 0;
+  const bool selectingFirmwareFile = mode == Mode::PickFirmware && hasEntries && entryName(selectorIndex).back() != '/';
+  const char* confirmLabel = !hasEntries ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
   // The Options menu is available for every entry in Books mode. The menu always
   // offers the browser display options (sort + visibility); supported files get
   // extra file-specific actions appended. So the hint shows for files and dirs alike.
-  const bool showOptionsHint = mode == Mode::Books && !files.empty();
+  const bool showOptionsHint = mode == Mode::Books && hasEntries;
   const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, "", showOptionsHint ? tr(STR_OPTIONS) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
 }
 
-size_t FileBrowserActivity::findEntry(const std::string& name) const {
+size_t FileBrowserActivity::findEntry(const std::string& name) {
+  if (fileIndex) {
+    // The index stores names without the trailing '/'; strip it for the lookup.
+    std::string bare = name;
+    if (!bare.empty() && bare.back() == '/') bare.pop_back();
+    const bool desc = (sortDirection == CrossPointSettings::SORT_DESCENDING);
+    const size_t row = fileIndex->findRowByName(bare.c_str(), desc);
+    return (row == SIZE_MAX) ? entryCount() : row;
+  }
   for (size_t i = 0; i < files.size(); i++)
     if (files[i] == name) return i;
   return files.size();
@@ -423,24 +450,6 @@ std::string FileBrowserActivity::getFileExtension(const std::string& name) const
     return "";  // directory, no extension, or dot-file
   }
   return std::string(dot + 1);
-}
-
-uint32_t FileBrowserActivity::getFileSize(const std::string& filePath) const {
-  auto file = Storage.open(filePath.c_str());
-  if (!file) return 0;
-  uint32_t size = static_cast<uint32_t>(file.fileSize());
-  file.close();
-  return size;
-}
-
-uint32_t FileBrowserActivity::getFileDateTime(const std::string& filePath) const {
-  auto file = Storage.open(filePath.c_str());
-  if (!file) return 0;
-  uint16_t date = 0, time = 0;
-  file.getModifyDateTime(&date, &time);
-  // Pack into 32-bit: (date << 16) | time (matching FAT format used by HalStorage)
-  file.close();
-  return (static_cast<uint32_t>(date) << 16) | time;
 }
 
 void FileBrowserActivity::sortFileList() {
@@ -538,13 +547,13 @@ void FileBrowserActivity::sortFileList() {
 
 void FileBrowserActivity::openContextMenu() {
   // If no file selected or a directory selected, show browser options only
-  if (files.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(files.size())) {
+  if (entryCount() == 0 || selectorIndex < 0 || selectorIndex >= static_cast<int>(entryCount())) {
     showBrowserOptionsMenu();
     return;
   }
 
-  const std::string& entry = files[selectorIndex];
-  if (entry.back() == '/') {
+  const std::string entry = entryName(selectorIndex);
+  if (entry.empty() || entry.back() == '/') {
     showBrowserOptionsMenu();
     return;
   }
@@ -605,10 +614,18 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
     SETTINGS.showFileExtensions = menuRes->showFileExtensions;
     SETTINGS.saveToFile();
 
-    if (hiddenChanged) {
-      loadFiles();  // re-enumerate (also re-sorts with current mode)
+    // Re-apply ordering. The SD index is built for a specific sort mode, so when it's
+    // active any sort change must re-open it (open() rebuilds on a mode mismatch);
+    // loadFiles() does that. Hidden-files visibility changes the entry set, so it also
+    // needs a full reload. Only the in-RAM small-folder case can re-sort in place.
+    if (hiddenChanged || fileIndex) {
+      loadFiles();  // re-enumerate + (for the index) rebuild/reopen with the new mode
     } else {
       sortFileList();
+    }
+    // Keep the selection in range after a reorder/reload.
+    if (selectorIndex >= static_cast<int>(entryCount())) {
+      selectorIndex = (entryCount() == 0) ? 0 : static_cast<int>(entryCount()) - 1;
     }
     requestUpdate();
     return;
@@ -746,8 +763,8 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
                              RECENT_BOOKS.removeBook(fullPath);
                            }
                            loadFiles();
-                           if (selectorIndex >= static_cast<int>(files.size())) {
-                             selectorIndex = files.empty() ? 0 : static_cast<int>(files.size()) - 1;
+                           if (selectorIndex >= static_cast<int>(entryCount())) {
+                             selectorIndex = (entryCount() == 0) ? 0 : static_cast<int>(entryCount()) - 1;
                            }
                            requestUpdate(true);
                          });
@@ -769,7 +786,7 @@ void FileBrowserActivity::doSetAsSleepCover(const std::string& fullPath) {
     ReturnHint hint;
     hint.target = ReturnTo::FileBrowser;
     hint.path = basepath;
-    hint.selectName = files[selectorIndex];
+    hint.selectName = entryName(selectorIndex);
     activityManager.replaceWithReader(std::string(fullPath), std::move(hint));
   }
 }
@@ -802,10 +819,10 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
           if (deleted) {
             LOG_DBG("FBR", "Deleted successfully");
             loadFiles();
-            if (files.empty()) {
+            if (entryCount() == 0) {
               selectorIndex = 0;
-            } else if (selectorIndex >= static_cast<int>(files.size())) {
-              selectorIndex = static_cast<int>(files.size()) - 1;
+            } else if (selectorIndex >= static_cast<int>(entryCount())) {
+              selectorIndex = static_cast<int>(entryCount()) - 1;
             }
             requestUpdate(true);
           } else {

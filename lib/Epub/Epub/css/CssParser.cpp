@@ -69,9 +69,11 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
+//         + smallCaps byte
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 65,
+                                         sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
+                                         sizeof(uint8_t);
+static_assert(CSS_FIXED_STYLE_BYTES == 66,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 
 // Cache file name (version is CssParser::CSS_CACHE_VERSION)
@@ -448,6 +450,15 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
     } else if (va == "baseline") {
       style.verticalAlign = CssVerticalAlign::Baseline;
       style.defined.verticalAlign = 1;
+    }
+  } else if (propNameBuf == "font-variant" || propNameBuf == "font-variant-caps") {
+    const std::string_view val = stripTrailingImportant(propValueBuf);
+    if (val == "small-caps" || val == "all-small-caps") {
+      style.smallCaps = true;
+      style.defined.smallCaps = 1;
+    } else if (val == "normal" || val == "none") {
+      style.smallCaps = false;
+      style.defined.smallCaps = 1;
     }
   } else if (propNameBuf == "float") {
     const std::string_view val = stripTrailingImportant(propValueBuf);
@@ -1077,6 +1088,13 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
   style.cssFloat = static_cast<CssFloat>(cssFloatVal);
   style.defined.cssFloat = (cssFloatVal != static_cast<uint8_t>(CssFloat::None)) ? 1 : 0;
+  uint8_t smallCapsVal = 0;
+  if (file.read(&smallCapsVal, 1) != 1) {
+    return false;
+  }
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  style.smallCaps = (smallCapsVal & 0x1) != 0;
+  style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
   return true;
 }
 
@@ -1125,6 +1143,9 @@ void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
   file.write(static_cast<uint8_t>(style.verticalAlign));
   file.write(static_cast<uint8_t>(style.defined.verticalAlign));
   file.write(static_cast<uint8_t>(style.cssFloat));
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  uint8_t smallCapsVal = (style.smallCaps ? 0x1 : 0x0) | (style.defined.smallCaps ? 0x2 : 0x0);
+  file.write(smallCapsVal);
 }
 
 void CssParser::touchHotRule(const std::string& selector) const {
