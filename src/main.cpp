@@ -930,12 +930,44 @@ void loop() {
       }
       return BA::BTN_DEFAULT;
     };
+    // Reader-scoped actions are only meaningful inside the reader (they funnel through
+    // dispatchButtonAction(), a no-op elsewhere). When such an action is configured on a
+    // button but we are NOT in the reader, intercepting it would silently SWALLOW the
+    // event — shadowing the current activity's own built-in handling for that button
+    // (e.g. RecentBooks long-Left=remove / long-Right=info, which defaulted to
+    // BTN_PREV_SECTION / BTN_NEXT_SECTION). Outside the reader we must let the original
+    // (button, pressType) event fall through to the activity instead.
+    auto isReaderScopedAction = [](uint8_t a) {
+      switch (static_cast<BA>(a)) {
+        case BA::BTN_PAGE_FORWARD:
+        case BA::BTN_PAGE_BACK:
+        case BA::BTN_PAGE_FORWARD_10:
+        case BA::BTN_PAGE_BACK_10:
+        case BA::BTN_OPEN_TOC:
+        case BA::BTN_STAR_PAGE:
+        case BA::BTN_FOOTNOTES:
+        case BA::BTN_NEXT_SECTION:
+        case BA::BTN_PREV_SECTION:
+        case BA::BTN_EXIT_READER:
+        case BA::BTN_READER_MENU:
+        case BA::BTN_TOGGLE_BIONIC_READING:
+        case BA::BTN_KOREADER_SYNC:
+        case BA::BTN_CYCLE_FONT_SIZE:
+        case BA::BTN_CYCLE_ORIENTATION:
+        case BA::BTN_QUICK_OVERRIDES:
+          return true;
+        default:  // BTN_GO_HOME / BTN_SLEEP / BTN_FORCE_*_REFRESH / BTN_OPEN_BOOKMARKS / BTN_IGNORE are global
+          return false;
+      }
+    };
     ButtonEventManager::ButtonEvent ev;
     std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
     defaultEvents.reserve(8);
     while (buttonEventManager.consumeEvent(ev)) {
       const uint8_t action = actionFor(ev);
-      if (action == BA::BTN_DEFAULT) {
+      // Fall through to the activity when the event has no global effect here: either an
+      // explicit Default mapping, or a reader-scoped action while not in the reader.
+      if (action == BA::BTN_DEFAULT || (isReaderScopedAction(action) && !activityManager.isReaderActivity())) {
         defaultEvents.push_back(ev);
         continue;
       }
