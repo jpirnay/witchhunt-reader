@@ -2225,53 +2225,90 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
   const int displayHeight = getDisplayHeight();
   const int widthBytes = getDisplayWidthBytes();
 
-  for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
-    // Read rows sequentially using readNextRow
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
-      LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
-      free(outputRow);
-      free(rowBytes);
-      return;
-    }
-
-    // Calculate screen Y based on whether BMP is top-down or bottom-up
-    const int bmpYOffset = bitmap.isTopDown() ? bmpY : bitmap.getHeight() - 1 - bmpY;
-    int screenY = y + (isScaled ? static_cast<int>(std::floor(bmpYOffset * scale)) : bmpYOffset);
-    if (screenY >= getScreenHeight()) {
-      continue;  // Continue reading to keep row counter in sync
-    }
-    if (screenY < 0) {
-      continue;
-    }
-
-    if (!isScaled) {
-      // Fast path: BW only (1-bit images are never rendered in grayscale passes)
+  // ── Unscaled fast path (scale == 1.0): draw each source row 1:1. ──────────────
+  if (!isScaled) {
+    for (int bmpY = 0; bmpY < bitmap.getHeight(); bmpY++) {
+      if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+        LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
+        free(outputRow);
+        free(rowBytes);
+        return;
+      }
+      const int bmpYOffset = bitmap.isTopDown() ? bmpY : bitmap.getHeight() - 1 - bmpY;
+      const int screenY = y + bmpYOffset;
+      if (screenY < 0 || screenY >= getScreenHeight()) continue;
+      // BW only (1-bit images are never rendered in grayscale passes)
       bitmapFastRow<0x07>(frameBuffer, outputRow, 0, bitmap.getWidth(), x, screenY, orientation, true, displayWidth,
                           displayHeight, widthBytes);
-      continue;
     }
-
-    for (int bmpX = 0; bmpX < bitmap.getWidth(); bmpX++) {
-      int screenX = x + (isScaled ? static_cast<int>(std::floor(bmpX * scale)) : bmpX);
-      if (screenX >= getScreenWidth()) {
-        break;
-      }
-      if (screenX < 0) {
-        continue;
-      }
-
-      // Get 2-bit value (result of readNextRow quantization)
-      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
-
-      // For 1-bit source: 0 or 1 -> map to black (0,1,2) or white (3)
-      // val < 3 means black pixel (draw it)
-      if (val < 3) {
-        drawPixel(screenX, screenY, true);
-      }
-      // White pixels (val == 3) are not drawn (leave background)
-    }
+    free(outputRow);
+    free(rowBytes);
+    return;
   }
 
+  // ── Downscale path: AREA-MAJORITY sampling. ──────────────────────────────────
+  // The previous implementation drew a destination pixel black if ANY source pixel
+  // mapping to it was black ("OR-to-black"). For a dithered 1-bit cover that scatters
+  // black dots through gray regions, downscaling then made almost every destination
+  // pixel catch a dot, collapsing the whole image toward black. Instead, for each
+  // destination pixel count how many of the covered source pixels are black and draw
+  // black only when they are the majority — i.e. resample by coverage, not by presence.
+  const int srcW = bitmap.getWidth();
+  const int srcH = bitmap.getHeight();
+  const int dstW = std::max(1, static_cast<int>(std::floor(srcW * scale)));
+
+  // Per-destination-column accumulators for the destination row currently being built.
+  auto* blackCount = static_cast<uint16_t*>(calloc(dstW, sizeof(uint16_t)));
+  auto* totalCount = static_cast<uint16_t*>(calloc(dstW, sizeof(uint16_t)));
+  if (!blackCount || !totalCount) {
+    LOG_ERR("GFX", "!! Failed to allocate 1-bit downscale accumulators");
+    free(blackCount);
+    free(totalCount);
+    free(outputRow);
+    free(rowBytes);
+    return;
+  }
+
+  // Flushes the accumulated destination row to the framebuffer, then clears it.
+  auto flushDstRow = [&](int dstScreenY) {
+    if (dstScreenY >= 0 && dstScreenY < getScreenHeight()) {
+      for (int dx = 0; dx < dstW; dx++) {
+        // Majority vote: black wins ties (>= half) so thin dark strokes survive.
+        if (totalCount[dx] > 0 && blackCount[dx] * 2 >= totalCount[dx]) {
+          const int screenX = x + dx;
+          if (screenX >= 0 && screenX < getScreenWidth()) drawPixel(screenX, dstScreenY, true);
+        }
+      }
+    }
+    memset(blackCount, 0, dstW * sizeof(uint16_t));
+    memset(totalCount, 0, dstW * sizeof(uint16_t));
+  };
+
+  int curDstY = -1;  // destination row currently accumulating (in screen coords)
+  for (int bmpY = 0; bmpY < srcH; bmpY++) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read row %d from 1-bit bitmap", bmpY);
+      break;
+    }
+    const int bmpYOffset = bitmap.isTopDown() ? bmpY : srcH - 1 - bmpY;
+    const int dstScreenY = y + static_cast<int>(std::floor(bmpYOffset * scale));
+    if (dstScreenY != curDstY) {
+      if (curDstY != -1) flushDstRow(curDstY);
+      curDstY = dstScreenY;
+    }
+    // Accumulate this source row's pixels into their destination columns.
+    for (int bmpX = 0; bmpX < srcW; bmpX++) {
+      int dx = static_cast<int>(std::floor(bmpX * scale));
+      if (dx >= dstW) dx = dstW - 1;  // guard fp rounding at the right edge
+      const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
+      totalCount[dx]++;
+      if (val < 3) blackCount[dx]++;  // 0,1,2 = black; 3 = white
+    }
+  }
+  if (curDstY != -1) flushDstRow(curDstY);  // final row
+
+  free(blackCount);
+  free(totalCount);
   free(outputRow);
   free(rowBytes);
 }
