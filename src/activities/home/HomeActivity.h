@@ -79,7 +79,7 @@ class HomeActivity final : public Activity {
   bool storeCoverBuffer();
   bool restoreCoverBuffer();
   void freeCoverBuffer();
-  void restoreSecondaryBuffer();
+  void restoreSecondaryBuffer(bool callerHoldsRenderLock = false);
   void loadRecentBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
 
