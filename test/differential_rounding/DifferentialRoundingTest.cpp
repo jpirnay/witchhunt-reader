@@ -5,6 +5,7 @@
 
 #include "lib/EpdFont/EpdFont.h"
 #include "lib/EpdFont/EpdFontData.h"
+#include "lib/EpdFont/SmallCaps.h"
 
 // ============================================================================
 // Synthetic test font
@@ -35,6 +36,7 @@ const EpdUnicodeInterval kIntervals[] = {
   { 0x54, 0x54, 0 },  // 'T' -> glyph[0]
   { 0x61, 0x61, 1 },  // 'a' -> glyph[1]
   { 0x6F, 0x6F, 2 },  // 'o' -> glyph[2]
+  { 0x74, 0x74, 0 },  // 't' -> glyph[0] ('T'): lets small-caps fold t->T to a real glyph
   { 0x78, 0x78, 3 },  // 'x' -> glyph[3]
 };
 
@@ -56,7 +58,7 @@ const EpdFontData kTestFontData = {
   .bitmap            = nullptr,
   .glyph             = kGlyphs,
   .intervals         = kIntervals,
-  .intervalCount     = 4,
+  .intervalCount     = 5,
   .advanceY          = 16,
   .ascender          = 12,
   .descender         = 0,
@@ -93,6 +95,12 @@ int textHeight(const char* str) {
   int w = 0, h = 0;
   testFont().getTextDimensions(str, &w, &h);
   return h;
+}
+
+int textWidthSC(const char* str) {
+  int w = 0, h = 0;
+  testFont().getTextDimensions(str, &w, &h, /*useSmallCaps=*/true);
+  return w;
 }
 
 // Simulate the old absolute-snap gap for comparison
@@ -270,4 +278,79 @@ TEST(EpdFont, HeightCalculation) {
   EXPECT_EQ(textHeight("T"), 12);
   EXPECT_EQ(textHeight("To"), 12);
   EXPECT_EQ(textHeight("oo"), 8);
+}
+
+// ============================================================================
+// Part 3: small-caps fold + scaled-width measurement
+// ============================================================================
+
+TEST(SmallCapsFold, AsciiLowercaseFolds) {
+  uint32_t cp = 'a';
+  EXPECT_TRUE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, static_cast<uint32_t>('A'));
+
+  cp = 'z';
+  EXPECT_TRUE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, static_cast<uint32_t>('Z'));
+}
+
+TEST(SmallCapsFold, NonLowercaseUnchanged) {
+  for (uint32_t cp : {static_cast<uint32_t>('A'), static_cast<uint32_t>('Z'), static_cast<uint32_t>('5'),
+                      static_cast<uint32_t>('.'), static_cast<uint32_t>(' ')}) {
+    uint32_t v = cp;
+    EXPECT_FALSE(smallCaps::fold(v));
+    EXPECT_EQ(v, cp);
+  }
+}
+
+TEST(SmallCapsFold, Latin1LowercaseFolds) {
+  uint32_t cp = 0x00E9;  // é
+  EXPECT_TRUE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, 0x00C9u);  // É
+
+  cp = 0x00FC;  // ü
+  EXPECT_TRUE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, 0x00DCu);  // Ü
+}
+
+TEST(SmallCapsFold, Latin1NonLetterExclusions) {
+  uint32_t cp = 0x00F7;  // ÷ division sign — not a letter
+  EXPECT_FALSE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, 0x00F7u);
+
+  cp = 0x00DF;  // ß — no single-codepoint uppercase
+  EXPECT_FALSE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, 0x00DFu);
+}
+
+TEST(SmallCapsFold, LatinExtendedAPairs) {
+  uint32_t cp = 0x0101;  // ā
+  EXPECT_TRUE(smallCaps::fold(cp));
+  EXPECT_EQ(cp, 0x0100u);  // Ā
+
+  cp = 0x0131;  // ı dotless i — intentionally not folded
+  EXPECT_FALSE(smallCaps::fold(cp));
+}
+
+// Uppercase letters render full-size even under small-caps, so width is unchanged.
+TEST(SmallCaps, UppercaseWidthUnchanged) { EXPECT_EQ(textWidthSC("T"), textWidth("T")); }
+
+// 't' folds to the 'T' glyph (width 8) drawn at SCALE=0.75 -> round(8*0.75)=6.
+// Single glyph at x=0 with left=0, so width == scaled glyph width.
+TEST(SmallCaps, FoldedGlyphScaledWidth) {
+  const int expected = static_cast<int>(8 * smallCaps::SCALE + 0.5f);  // 6
+  EXPECT_EQ(textWidthSC("t"), expected);
+  // Sanity: the folded small-cap is narrower than the full-size capital.
+  EXPECT_LT(textWidthSC("t"), textWidth("T"));
+}
+
+// A folded run advances by the scaled advance between glyphs.
+// "tt": glyph 'T' advance=137 FP. No kern (T has no right class, T has no left class
+// in the matrix for T->T -> 0). Folded step = toPixel(round(137*0.75)) = toPixel(103) = 6.
+// t1 scaled-width 6 at x=0; t2 at x=6, scaled width 6 -> w = 6 + 6 = 12.
+TEST(SmallCaps, FoldedRunAdvance) {
+  const int32_t scaledAdvFP = static_cast<int32_t>(137 * smallCaps::SCALE + 0.5f);  // 103
+  const int step = fp4::toPixel(scaledAdvFP);                                       // 6
+  const int scaledWidth = static_cast<int>(8 * smallCaps::SCALE + 0.5f);            // 6
+  EXPECT_EQ(textWidthSC("tt"), step + scaledWidth);
 }

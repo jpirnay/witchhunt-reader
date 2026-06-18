@@ -223,6 +223,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
                                               static_cast<uint8_t>(CssTextDecoration::LineThrough)) != 0;
   effectiveSup = false;
   effectiveSub = false;
+  effectiveSmallCaps = currentCssStyle.hasSmallCaps() && currentCssStyle.smallCaps;
   effectiveInlineMarginLeft = 0;
 
   // Apply inline style stack in order
@@ -246,6 +247,9 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     if (entry.hasSub) {
       effectiveSub = entry.sub;
       if (entry.sub) effectiveSup = false;
+    }
+    if (entry.hasSmallCaps) {
+      effectiveSmallCaps = entry.smallCaps;
     }
     if (entry.hasMarginLeft) {
       effectiveInlineMarginLeft = entry.marginLeftPx;
@@ -312,6 +316,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
   } else if (effectiveSub) {
     fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
+  }
+  if (effectiveSmallCaps) {
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
   }
 
   // flush the buffer — route to table cell text when inside a <td>/<th>
@@ -1547,7 +1554,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Handle span and other inline elements for CSS styling
     if (cssStyle.hasFontWeight() || cssStyle.hasFontStyle() || cssStyle.hasTextDecoration() ||
-        cssStyle.hasVerticalAlign() || cssStyle.hasMarginLeft()) {
+        cssStyle.hasVerticalAlign() || cssStyle.hasSmallCaps() || cssStyle.hasMarginLeft()) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordBufferIndex > 0) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
@@ -1598,6 +1605,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           entry.hasSub = true;
           entry.sub = false;
         }
+      }
+      if (cssStyle.hasSmallCaps()) {
+        entry.hasSmallCaps = true;
+        entry.smallCaps = cssStyle.smallCaps;
       }
       if (cssStyle.hasMarginLeft()) {
         // margin-left on an inline span acts as a per-line indent (poem stanza pattern).

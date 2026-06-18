@@ -111,6 +111,7 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasStrikethrough = false, strikethrough = false;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
+    bool hasSmallCaps = false, smallCaps = false;
     bool hasMarginLeft = false;
     int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
   };
@@ -122,6 +123,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveStrikethrough = false;
   bool effectiveSup = false;
   bool effectiveSub = false;
+  bool effectiveSmallCaps = false;
   int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Buffered table model — populated while inside <table>, emitted on </table>
   struct BufferedTableCell {
