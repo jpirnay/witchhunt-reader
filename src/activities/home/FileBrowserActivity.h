@@ -52,12 +52,18 @@ class FileBrowserActivity final : public Activity {
 
   // Data loading
   void loadFiles();
-  size_t findEntry(const std::string& name) const;
+  size_t findEntry(const std::string& name);
   void sortFileList();
-  uint32_t getFileDateTime(const std::string& filePath) const;
-  uint32_t getFileSize(const std::string& filePath) const;
   std::string getFileExtension(const std::string& name) const;
   void showBrowserOptionsMenu();
+
+  // Backend-agnostic list access. Both backends present the same entry-name form
+  // (a trailing '/' marks a directory) so render/navigation/selection code is
+  // identical whether the folder is small (in-RAM `files`) or large (SD FileIndex).
+  // displayIndex is the row as currently shown (already reflects sortDirection).
+  // Non-const: the SD-index backend streams from the open index file (I/O + cache).
+  size_t entryCount() const;
+  std::string entryName(size_t displayIndex);
 
   // FileIndex backend: filter for index scanning/building
   static bool acceptFileForBrowser(const char* name, bool isDir);
