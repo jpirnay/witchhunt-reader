@@ -1,5 +1,6 @@
 #include "Epub.h"
 
+#include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -847,6 +848,28 @@ std::string Epub::getCoverItemHref() const {
   return bookMetadataCache->coreMetadata.coverItemHref;
 }
 
+bool Epub::coverImageCachedValidOnly() const {
+  const auto coverCachePath = getCoverImageCachePath();
+  if (!Storage.exists(coverCachePath.c_str())) return false;
+  FsFile existing;
+  if (!Storage.openFileForRead("EBP", coverCachePath, existing)) {
+    existing.close();
+    return true;  // can't open to validate — assume valid, let the decode fail if needed
+  }
+  const bool nonEmpty = existing.size() > 0;
+  const CoverImageFormat fmt = detectCoverImageFormat(existing);
+  existing.close();
+  return nonEmpty && fmt != CoverImageFormat::Unknown;
+}
+
+bool Epub::coverImageCachedAndValid(bool allowExtract) const {
+  // Fast path: already-extracted and valid — no inflate needed in either mode.
+  if (coverImageCachedValidOnly()) return true;
+  // Not cached. Only the extracting mode may inflate it now; the non-extracting mode
+  // defers to a sliced extractor so a multi-MB inflate never runs in one loop() tick.
+  return allowExtract && ensureCoverImageCached();
+}
+
 bool Epub::ensureCoverImageCached() const {
   const auto coverCachePath = getCoverImageCachePath();
   if (Storage.exists(coverCachePath.c_str())) {
@@ -983,7 +1006,7 @@ std::string Epub::getThumbBmpPath(int width, int height) const {
   return cachePath + "/thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
 }
 
-bool Epub::generateThumbBmp(int height) const {
+bool Epub::generateThumbBmp(int height, bool allowExtract) const {
   {
     FsFile existing;
     if (Storage.openFileForRead("EBP", getThumbBmpPath(height), existing)) {
@@ -995,7 +1018,12 @@ bool Epub::generateThumbBmp(int height) const {
     }
   }
 
-  if (!ensureCoverImageCached()) {
+  if (!coverImageCachedAndValid(allowExtract)) {
+    if (!allowExtract) {
+      // cover.img not yet extracted — no sentinel, let the sliced extractor produce it.
+      LOG_DBG("EBP", "cover.img not cached for h=%d (no extract) — deferring to sliced extractor", height);
+      return false;
+    }
     // Write an empty sentinel so we don't retry on every call
     FsFile thumbBmp;
     Storage.openFileForWrite("EBP", getThumbBmpPath(height), thumbBmp);
@@ -1032,13 +1060,21 @@ bool Epub::generateThumbBmp(int height) const {
   coverImage.close();
   thumbBmp.close();
 
+  // A decode that bailed mid-loop for pending input is not a real failure — drop the
+  // partial thumb (no sentinel) so it's retried once input is serviced.
+  if (!success && CooperativeAbort::wasAborted()) {
+    LOG_DBG("EBP", "Thumb decode aborted for input — removing partial, will retry");
+    Storage.remove(getThumbBmpPath(height).c_str());
+    return false;
+  }
+
   // Leave 0-byte sentinel on failure so we don't retry a known-failing decode.
   if (!success) LOG_DBG("EBP", "Leaving 0-byte sentinel for h=%d — will not retry", height);
   LOG_DBG("EBP", "Generated thumb BMP from cover image, success: %s", success ? "yes" : "no");
   return success;
 }
 
-bool Epub::generateThumbBmp(int width, int height) const {
+bool Epub::generateThumbBmp(int width, int height, bool allowExtract) const {
   {
     FsFile existing;
     if (Storage.openFileForRead("EBP", getThumbBmpPath(width, height), existing)) {
@@ -1051,7 +1087,12 @@ bool Epub::generateThumbBmp(int width, int height) const {
     }
   }
 
-  if (!ensureCoverImageCached()) {
+  if (!coverImageCachedAndValid(allowExtract)) {
+    if (!allowExtract) {
+      // cover.img not yet extracted — no sentinel, let the sliced extractor produce it.
+      LOG_DBG("EBP", "cover.img not cached for %dx%d (no extract) — deferring to sliced extractor", width, height);
+      return false;
+    }
     // Write an empty sentinel so we don't retry on every call
     FsFile thumbBmp;
     Storage.openFileForWrite("EBP", getThumbBmpPath(width, height), thumbBmp);
@@ -1086,6 +1127,17 @@ bool Epub::generateThumbBmp(int width, int height) const {
 
   coverImage.close();
   thumbBmp.close();
+
+  // A decode that genuinely bailed mid-loop for pending button input is NOT a real
+  // failure — remove the partial/empty thumb so it isn't mistaken for a permanent-
+  // failure sentinel and is retried once input is serviced. wasAborted() is true only
+  // when a decode row loop actually broke for input (markAborted), so a plain failure
+  // (e.g. an oversize image rejected before any rows) still falls through to the sentinel.
+  if (!success && CooperativeAbort::wasAborted()) {
+    LOG_DBG("EBP", "Thumb decode aborted for input — removing partial, will retry");
+    Storage.remove(getThumbBmpPath(width, height).c_str());
+    return false;
+  }
 
   // On failure, leave the 0-byte sentinel so generateThumbBmp won't be retried on every
   // homescreen load.  The sentinel is removed by ensureCoverThumb when a cache-clear or

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <CooperativeAbort.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -51,6 +52,10 @@ static BootHeapProbe s_probeMainFirst(4);
 #endif
 MappedInputManager mappedInputManager(gpio);
 ButtonEventManager buttonEventManager(mappedInputManager);
+
+// Lets lib-layer long tasks (image decoders) bail out mid-work so a queued button
+// press is serviced on the next main-loop pass. Installed once in setup().
+static bool hasPendingButtonInput() { return mappedInputManager.hasPendingInput(); }
 ButtonEventManager& globalButtonEvents() { return buttonEventManager; }
 GfxRenderer renderer(display);
 ActivityManager activityManager(renderer, mappedInputManager);
@@ -695,6 +700,9 @@ void setup() {
   // is done — hand button sampling to the background sampler so presses are caught
   // on a steady ~10ms cadence even while the loop task is busy building sections.
   gpio.startInputSampler();
+  // Now that the background sampler is live, let long lib-layer tasks (cover image
+  // decoders) poll for queued presses and yield so button input keeps priority.
+  CooperativeAbort::setLongTaskAbortPredicate(&hasPendingButtonInput);
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();

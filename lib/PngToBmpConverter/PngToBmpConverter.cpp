@@ -1,5 +1,6 @@
 #include "PngToBmpConverter.h"
 
+#include <CooperativeAbort.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -256,6 +257,16 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
 
   // Process each scanline
   for (uint32_t y = 0; y < height; y++) {
+    // Yield to pending button input: abort so the main loop can service the press.
+    // The partial BMP is discarded by the caller and regenerated later.
+    // markAborted() distinguishes this deliberate bail from a plain decode failure.
+    if (CooperativeAbort::shouldAbortLongTask()) {
+      LOG_DBG("PNG", "Aborting decode at scanline %u for pending input", y);
+      CooperativeAbort::markAborted();
+      success = false;
+      break;
+    }
+
     if (!decoder.nextRow(grayRow)) {
       LOG_ERR("PNG", "Failed to decode scanline %u", y);
       success = false;

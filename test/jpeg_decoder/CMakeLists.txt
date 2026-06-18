@@ -3,6 +3,7 @@ add_executable(JpegDecoderTest
   Stubs.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
+  ${REPO_ROOT}/lib/CooperativeAbort/CooperativeAbort.cpp
   ${REPO_ROOT}/lib/TJpgDec/src/tjpgd.c
 )
 
@@ -16,6 +17,7 @@ target_include_directories(JpegDecoderTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/GfxRenderer
   ${REPO_ROOT}/lib/JpegToBmpConverter
+  ${REPO_ROOT}/lib/CooperativeAbort
   ${REPO_ROOT}/lib/TJpgDec/src
   ${REPO_ROOT}/lib
 )

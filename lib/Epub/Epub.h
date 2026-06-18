@@ -79,12 +79,23 @@ class Epub {
   // Returns the raw ZIP entry path for the cover image (empty if none).
   std::string getCoverItemHref() const;
   bool ensureCoverImageCached() const;
+  // True if cover.img is already extracted and a supported format (no ZIP inflate).
+  bool coverImageCachedValidOnly() const;
+  // True if cover.img is usable now. allowExtract=false never inflates — it only reports
+  // whether an already-cached cover.img exists, deferring extraction to a sliced session.
+  bool coverImageCachedAndValid(bool allowExtract) const;
   bool generateCoverBmp(bool cropped = false) const;
   std::string getThumbBmpPath() const;
   std::string getThumbBmpPath(int height) const;
   std::string getThumbBmpPath(int width, int height) const;
-  bool generateThumbBmp(int height) const;
-  bool generateThumbBmp(int width, int height) const;
+  // allowExtract=true: synchronously inflate the embedded cover.img from the ZIP if it
+  // isn't cached yet (can stall for seconds on a large cover — fine for one-off callers
+  // like the book-info / finished-book screens). allowExtract=false: decode ONLY an
+  // already-cached cover.img and return false (no sentinel) if it's missing, so a sliced
+  // extractor (ReaderActivity::beginCoverExtractSession) can do the inflate off the hot
+  // loop path. The home cover loader passes false.
+  bool generateThumbBmp(int height, bool allowExtract = true) const;
+  bool generateThumbBmp(int width, int height, bool allowExtract = true) const;
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;

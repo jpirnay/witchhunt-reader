@@ -1,6 +1,7 @@
 #include "HomeActivity.h"
 
 #include <Bitmap.h>
+#include <CooperativeAbort.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -12,6 +13,7 @@
 #include <Txt.h>
 #include <Utf8.h>
 #include <Xtc.h>
+#include <esp_system.h>
 
 #include <algorithm>
 #include <cstring>
@@ -171,6 +173,29 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
 void HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoading = true;
 
+  // Cold-cache cover loading runs the JPEG/PNG decoders, the sliced ZIP inflate and
+  // an EPUB parse — together these can drive free heap to the edge of OOM (observed
+  // Min Free ~2.8 KB) while the ~48 KB secondary framebuffer sits unused. The reader
+  // releases that buffer before decoding for the same reason; do the same here for the
+  // duration of loading and reallocate it once every cover is resolved (see end of this
+  // function) or on exit. Release under the render lock so we never free it mid-render.
+  if (!secondaryBufferReleased && renderer.hasSecondaryBuffer()) {
+    RenderLock lock;
+    if (renderer.releaseSecondaryBuffer()) {
+      secondaryBufferReleased = true;
+      // Keep X4 fast-differential refresh alive while the secondary buffer is gone:
+      // the controller still holds the last home frame in RED RAM and displayBuffer()
+      // re-seeds it after every refresh (syncRedRamFromFrameBuffer), so carousel/menu
+      // navigation diffs against that baseline instead of downgrading to a full/half
+      // waveform on every press. Precondition holds: we release right after the first
+      // home render (gate requires firstRenderDone) and only issue plain BW redraws
+      // until restore. Same pattern as KOReaderSyncActivity. No-op on X3.
+      renderer.setSingleBufferFastDiff(true);
+      LOG_DBG("HOME", "Released secondary framebuffer for cover loading (free=%lu)",
+              static_cast<unsigned long>(esp_get_free_heap_size()));
+    }
+  }
+
   const auto thumbSizes = GUI.getCoverThumbSizes(coverHeight);
 
   // HomeActivity::loop runs on the main task while rendering runs on the render task.
@@ -287,14 +312,34 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         thumbFile.close();
 
         if (!validThumb) {
+          // Button input has priority: never start a fresh decode while a press is
+          // queued. Yield with this size still pending so the next pass retries it.
+          if (mappedInput.hasPendingInput()) {
+            nextThumbSizeIndex = i;
+            recentsLoading = false;
+            return;
+          }
+
           // Cover decode needs ~42 KB contiguous heap — free the frame cache first.
           invalidateFrameCacheSafely();
 
           // Try synchronous decode first (handles JPEG and cached covers).
+          CooperativeAbort::clearAborted();
           const bool ok = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second);
           LOG_DBG("HOME", "ensureCoverThumb(%dx%d) for %s: %s", sz.first, sz.second, book.path.c_str(),
                   ok ? "ok" : "FAILED");
           if (!ok) {
+            // A decode that genuinely bailed mid-loop for pending input is not a real
+            // failure: retry the same size later instead of recording an empty cover.
+            // consumeAborted() is true only when a decode row loop broke for input, so a
+            // plain failure (oversize image, missing cover) falls through to the fallbacks.
+            if (CooperativeAbort::consumeAborted()) {
+              LOG_DBG("HOME", "Cover decode for %s yielded to input — will retry size %dx%d", book.path.c_str(),
+                      sz.first, sz.second);
+              nextThumbSizeIndex = i;
+              recentsLoading = false;
+              return;
+            }
             if (!pngSessionFailed) {
               // Try sliced PNG decode (succeeds when cover.img is already cached).
               pngSession = ReaderActivity::beginPngThumbSession(book.path, sz.first, sz.second, pngSessionFiles);
@@ -369,10 +414,25 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
               book.coverBmpPath.c_str(), placeholder.c_str(), validThumb ? 0 : 1);
 
       if (!validThumb) {
+        // Button input has priority: don't start a decode while a press is queued.
+        // Yield without advancing so this book's cover is retried on a later pass.
+        if (mappedInput.hasPendingInput()) {
+          recentsLoading = false;
+          return;
+        }
+
         // Cover decode needs ~42 KB contiguous heap — free the frame cache first.
         invalidateFrameCacheSafely();
+        CooperativeAbort::clearAborted();
         const bool success = ReaderActivity::ensureCoverThumb(book.path, coverHeight);
         LOG_DBG("HOME", "ensureCoverThumb(h=%d) for %s: %s", coverHeight, book.path.c_str(), success ? "ok" : "FAILED");
+        // A decode that genuinely bailed mid-loop for pending input is not a real failure
+        // — retry this book later rather than recording an empty cover path.
+        if (!success && CooperativeAbort::consumeAborted()) {
+          LOG_DBG("HOME", "Cover decode for %s yielded to input — will retry", book.path.c_str());
+          recentsLoading = false;
+          return;
+        }
         RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, success ? placeholder : "");
         book.coverBmpPath = success ? placeholder : "";
         LOG_DBG("HOME", "After generate: stored coverBmpPath=%s", book.coverBmpPath.c_str());
@@ -392,6 +452,23 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   recentsLoaded = true;
   recentsLoading = false;
+  restoreSecondaryBuffer();
+}
+
+void HomeActivity::restoreSecondaryBuffer() {
+  // Reallocate the framebuffer we released for cover loading. Best-effort: if malloc
+  // fails (heap still tight) we stay degraded and retry on the next call — rendering
+  // tolerates a missing secondary buffer (full/half refresh instead of fast AA).
+  if (!secondaryBufferReleased) return;
+  RenderLock lock;
+  if (renderer.reallocSecondaryBuffer()) {
+    secondaryBufferReleased = false;
+    // Two-buffer differential is available again — turn off the single-buffer
+    // RED-RAM-baseline mode so normal fast refresh resumes against the secondary.
+    renderer.setSingleBufferFastDiff(false);
+    LOG_DBG("HOME", "Restored secondary framebuffer after cover loading (free=%lu)",
+            static_cast<unsigned long>(esp_get_free_heap_size()));
+  }
 }
 
 void HomeActivity::onEnter() {
@@ -410,6 +487,7 @@ void HomeActivity::onEnter() {
   pngSessionFiles.close();
   pngSessionFailed = false;
   coverRendered = false;
+  secondaryBufferReleased = false;
   freeCoverBuffer();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -449,6 +527,10 @@ void HomeActivity::onExit() {
   Activity::onExit();
   freeCoverBuffer();
   UITheme::getInstance().getMutableTheme().invalidateFrameCache();
+  // Never hand the next activity a degraded display: if we exit mid-load (e.g. the
+  // user opened a book before covers finished), put the secondary framebuffer back.
+  // The reader will release it again itself if it needs the headroom.
+  restoreSecondaryBuffer();
 }
 
 bool HomeActivity::storeCoverBuffer() {
@@ -492,8 +574,18 @@ void HomeActivity::loop() {
 
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
 
+  // A press may be in EITHER place: hasPendingInput() reads the live sampler accumulator
+  // (presses arriving this tick), while wasAnyPressed()/wasAnyReleased() read the snapshot
+  // that gpio.update() already drained the accumulator INTO at the top of the main loop —
+  // BEFORE this loop() runs. Gating cover loading on hasPendingInput() alone therefore
+  // starves the snapshot edge: the press sits unconsumed in snapPressed_ while the gate
+  // keeps diverting to loadRecentCovers() every tick, and the next update() overwrites it.
+  // Defer cover loading whenever input is waiting in either place so the handlers below run.
+  const bool inputWaiting =
+      mappedInput.hasPendingInput() || mappedInput.wasAnyPressed() || mappedInput.wasAnyReleased();
+
   if (isCarousel) {
-    if (firstRenderDone && !recentsLoaded && !recentsLoading && !mappedInput.hasPendingInput()) {
+    if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
       loadRecentCovers(UITheme::getInstance().getMetrics().homeCoverHeight);
       return;
     }
@@ -503,42 +595,45 @@ void HomeActivity::loop() {
     const bool inCarouselRow = (selectorIndex < bookCount);
     const int menuIdx = inCarouselRow ? 0 : (selectorIndex - bookCount);
 
+    // Up and Down both toggle between the carousel row and the menu row. They are
+    // handled together, and as a single else-if chain with Left/Right, so that AT MOST
+    // ONE direction acts per tick. Two row-toggle edges landing in the same drained
+    // input batch (easy when a slow cover-loading tick lets the sampler accumulate
+    // several edges) would otherwise both run against the stale `inCarouselRow` above:
+    // the first sets selectorIndex = bookCount, the second then captures THAT into
+    // lastCarouselBookIndex (= bookCount, an invalid carousel index), permanently
+    // stranding the selector in the menu row — Left/Right still move the icon highlight
+    // but Up/Down can never return to the carousel. One-direction-per-tick prevents it.
+    const bool rowToggle = mappedInput.wasPressed(MappedInputManager::Button::Up) ||
+                           mappedInput.wasPressed(MappedInputManager::Button::Down);
+
     if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + 1) % bookCount;
       else if (!inCarouselRow)
         selectorIndex = bookCount + (menuIdx + 1) % menuItemCount;
       requestUpdate();
-    }
-    if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + bookCount - 1) % bookCount;
       else if (!inCarouselRow)
         selectorIndex = bookCount + (menuIdx + menuItemCount - 1) % menuItemCount;
       requestUpdate();
-    }
-    if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+    } else if (rowToggle) {
       if (inCarouselRow) {
-        lastCarouselBookIndex = selectorIndex;
-        selectorIndex = bookCount;
+        lastCarouselBookIndex = selectorIndex;  // selectorIndex < bookCount here — always valid
+        selectorIndex = bookCount;              // jump to first menu entry
       } else {
-        selectorIndex = lastCarouselBookIndex;
-      }
-      requestUpdate();
-    }
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-      if (inCarouselRow) {
-        lastCarouselBookIndex = selectorIndex;
-        selectorIndex = bookCount;
-      } else {
-        selectorIndex = lastCarouselBookIndex;
+        // Restore the remembered carousel slot, clamped in case it was never set or
+        // the recents list shrank since it was recorded.
+        selectorIndex = (bookCount > 0) ? std::min(std::max(lastCarouselBookIndex, 0), bookCount - 1) : 0;
       }
       requestUpdate();
     }
   } else {
     const int totalItems = static_cast<int>(recentBooks.size() + menuEntries.size());
 
-    if (firstRenderDone && !recentsLoaded && !recentsLoading && !mappedInput.hasPendingInput()) {
+    if (firstRenderDone && !recentsLoaded && !recentsLoading && !inputWaiting) {
       const auto& metrics = UITheme::getInstance().getMetrics();
       const Rect contentRect = UITheme::getContentRect(renderer, true, false);
       const HomeScreenLayout layout =

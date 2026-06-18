@@ -43,6 +43,10 @@ class HomeActivity final : public Activity {
   bool hasOpdsServers = false;
   bool coverRendered = false;
   bool coverBufferStored = false;
+  // True while the ~48 KB secondary framebuffer has been released to give the
+  // cold-cache cover decode/extract pipeline headroom (mirrors the reader's pattern).
+  // Restored once all covers are loaded, and on exit. See loadRecentCovers().
+  bool secondaryBufferReleased = false;
   size_t nextRecentCoverIndex = 0;
   size_t nextThumbSizeIndex = 0;  // which thumb size within the current book is next
 
@@ -75,6 +79,7 @@ class HomeActivity final : public Activity {
   bool storeCoverBuffer();
   bool restoreCoverBuffer();
   void freeCoverBuffer();
+  void restoreSecondaryBuffer();
   void loadRecentBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
 

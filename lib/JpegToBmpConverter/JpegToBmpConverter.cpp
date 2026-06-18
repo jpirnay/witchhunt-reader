@@ -1,5 +1,6 @@
 #include "JpegToBmpConverter.h"
 
+#include <CooperativeAbort.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -344,6 +345,15 @@ static bool isProgressiveJpeg(FsFile& file) {
 int tjpgBmpOutput(JDEC* jd, void* bitmap, JRECT* rect) {
   auto* ctx = static_cast<BmpTjpgSession*>(jd->device)->ctx;
   if (!ctx || ctx->error) return 0;
+
+  // Yield to pending button input: abort the decode so the main loop can service
+  // the press. The partial BMP is discarded by the caller and regenerated later.
+  // markAborted() distinguishes this deliberate bail from a plain decode failure.
+  if (CooperativeAbort::shouldAbortLongTask()) {
+    CooperativeAbort::markAborted();
+    ctx->error = true;
+    return 0;
+  }
 
   const uint8_t* pixels = static_cast<const uint8_t*>(bitmap);
   const int validW = rect->right - rect->left + 1;

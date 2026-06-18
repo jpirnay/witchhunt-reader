@@ -1,5 +1,6 @@
 #include "ReaderActivity.h"
 
+#include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -253,15 +254,22 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int width, in
     LOG_DBG("COVER", "convertSidecarToBmp(%dx%d) sidecar=%s result=%s", width, height, sidecar.c_str(),
             result.empty() ? "FAILED" : result.c_str());
     if (!result.empty()) return true;
+    // Sidecar conversion bailed mid-decode for pending input — don't pay for an
+    // embedded-cover parse now; let the caller retry once the press is serviced.
+    if (CooperativeAbort::wasAborted()) return false;
   }
 
-  // No usable sidecar — fall back to the embedded cover (deferred load: a sidecar hit never
-  // pays for a full book parse).
-  // Note: embedded-cover failures write a 0-byte sentinel via generateThumbBmp; we leave
-  // it in place here so repeated homescreen loads don't re-attempt a known-failing decode.
+  // No usable sidecar — fall back to the embedded cover.  generateThumbBmp() only
+  // DECODES an already-extracted cover.img (abortable, ≤~1 s); it no longer inflates
+  // the cover from the ZIP itself.  If cover.img isn't cached yet it returns false
+  // without a sentinel, and the caller's sliced beginCoverExtractSession extracts it
+  // across ticks before a later pass decodes it.  This keeps the 35 s ZIP inflate off
+  // the per-tick path while still covering both embedded JPEG and PNG covers.
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
-    return epub.load(true, true) && epub.generateThumbBmp(width, height);
+    // allowExtract=false: decode only an already-cached cover.img; the sliced
+    // beginCoverExtractSession owns the (potentially multi-second) ZIP inflate.
+    return epub.load(true, true) && epub.generateThumbBmp(width, height, /*allowExtract=*/false);
   }
   if (FsHelpers::hasXtcExtension(bookPath)) {
     Xtc xtc(bookPath, "/.crosspoint");
@@ -289,11 +297,19 @@ bool ReaderActivity::ensureCoverThumb(const std::string& bookPath, int height) {
     LOG_DBG("COVER", "convertSidecarToBmp(h=%d) sidecar=%s result=%s", height, sidecar.c_str(),
             result.empty() ? "FAILED" : result.c_str());
     if (!result.empty()) return true;
+    // Sidecar conversion bailed mid-decode for pending input — don't pay for an
+    // embedded-cover parse now; let the caller retry once the press is serviced.
+    if (CooperativeAbort::wasAborted()) return false;
   }
 
+  // Embedded EPUB cover: generateThumbBmp() decodes an already-extracted cover.img only
+  // (see the width/height overload) — the sliced beginCoverExtractSession handles the
+  // ZIP inflate so the 35 s stall stays off the per-tick path.
   if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
-    return epub.load(true, true) && epub.generateThumbBmp(height);
+    // allowExtract=false: decode only an already-cached cover.img; the sliced
+    // beginCoverExtractSession owns the (potentially multi-second) ZIP inflate.
+    return epub.load(true, true) && epub.generateThumbBmp(height, /*allowExtract=*/false);
   }
   if (FsHelpers::hasXtcExtension(bookPath)) {
     Xtc xtc(bookPath, "/.crosspoint");
@@ -325,17 +341,21 @@ std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std
     // Clear any stale sentinel so the write can proceed.
     if (Storage.exists(bmpPath.c_str())) Storage.remove(bmpPath.c_str());
   } else if (sidecar.empty() && FsHelpers::hasEpubExtension(bookPath)) {
-    // Check if the embedded cover.img is a PNG.
+    // Embedded EPUB cover. Do NOT extract here — ensureCoverImageCached() would run a
+    // synchronous, possibly multi-MB ZIP inflate in one tick (observed 35 s stalls).
+    // Only proceed if cover.img is ALREADY extracted (the sliced beginCoverExtractSession
+    // runs first in the caller's ladder and produces it). Otherwise return null so the
+    // caller falls through to that sliced extraction.
     Epub epub(bookPath, "/.crosspoint");
-    if (!epub.load(true, true) || !epub.ensureCoverImageCached()) return nullptr;
+    if (!epub.load(true, true)) return nullptr;
     srcPath = epub.getCoverImageCachePath();
-    // ensureCoverImageCached validates format — peek format to confirm PNG.
     FsFile peek;
-    if (!Storage.openFileForRead("PNG", srcPath, peek)) return nullptr;
+    if (!Storage.openFileForRead("PNG", srcPath, peek)) return nullptr;  // not yet extracted
     uint8_t magic[8];
     const bool isPng = peek.read(magic, 8) == 8 && magic[0] == 0x89 && magic[1] == 0x50;
+    const bool nonEmpty = peek.size() > 0;
     peek.close();
-    if (!isPng) return nullptr;
+    if (!nonEmpty || !isPng) return nullptr;
   } else {
     return nullptr;
   }
