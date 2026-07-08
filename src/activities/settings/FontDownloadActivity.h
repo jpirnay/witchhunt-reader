@@ -113,8 +113,6 @@ class FontDownloadActivity : public Activity {
   // when a network action is confirmed while WiFi is down.
   std::function<void()> afterWifi_;
   int previousActionCount_ = 0;
-  int lastProgressPercent_ = -1;
-  unsigned long lastProgressUpdateMs_ = 0;
 
   // Phase persisted across the mid-flow silent restarts. Network work runs
   // with the framebuffer released; the restart re-arms the display and the

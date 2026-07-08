@@ -693,10 +693,7 @@ void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int family
       currentFileIndex_ = i;
       fileProgress_ = 0;
       fileTotal_ = file.size;
-      lastProgressPercent_ = -1;
-      lastProgressUpdateMs_ = 0;
     }
-    if (!framebufferReleased_) requestUpdateAndWait();
 
     std::string localFilename = file.name;
     std::string familyPrefix = family.name + "/";
@@ -744,25 +741,14 @@ void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int family
 
     std::string url = baseUrl_ + file.name;
 
+    // No rendering from here: the framebuffer is lent to the TLS stack. The
+    // callback only tracks progress for logs and polls the Back button so
+    // the user can still cancel mid-transfer.
     auto result = HttpDownloader::downloadToFile(
         httpSession_, url, stagedPath, [this](unsigned int downloaded, unsigned int total) {
           mappedInput.update();
           fileProgress_ = downloaded;
           fileTotal_ = total;
-
-          const unsigned long now = millis();
-          int percent = 0;
-          if (total > 0) {
-            percent = static_cast<int>((static_cast<unsigned long long>(downloaded) * 100ULL + total / 2) / total);
-          }
-          const bool percentChanged = percent != lastProgressPercent_;
-          const bool timeElapsed = lastProgressUpdateMs_ == 0 || now - lastProgressUpdateMs_ > 2000;
-          if (((percentChanged && timeElapsed) || downloaded == total) && !framebufferReleased_) {
-            requestUpdate(true);
-            lastProgressPercent_ = percent;
-            lastProgressUpdateMs_ = now;
-          }
-
           return !mappedInput.wasPressed(MappedInputManager::Button::Back);
         });
 
@@ -1113,26 +1099,12 @@ void FontDownloadActivity::render(RenderLock&&) {
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     }
   } else if (state_ == DOWNLOADING) {
-    // families_ is stashed to SD during downloadFamily(); read the cached
-    // name instead of indexing families_.
-    std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + downloadingFamilyName_ + " (" +
-                             std::to_string(currentFileIndex_ + 1) + "/" + std::to_string(currentFileTotal_) + ")";
+    // This screen renders exactly once: the framebuffer is released for the
+    // TLS/download work right after, so the panel holds this frame until the
+    // post-download restart. No progress bar — a bar frozen at 0% reads as a
+    // hang, a static message reads as work in progress.
+    std::string statusText = std::string(tr(STR_DOWNLOADING)) + " " + downloadingFamilyName_;
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, statusText.c_str());
-
-    float progress = 0;
-    if (fileTotal_ > 0) {
-      progress = static_cast<float>(fileProgress_) / static_cast<float>(fileTotal_);
-    }
-
-    int barY = centerY + metrics.verticalSpacing;
-    GUI.drawProgressBar(
-        renderer,
-        Rect{metrics.contentSidePadding, barY, pageWidth - metrics.contentSidePadding * 2, metrics.progressBarHeight},
-        static_cast<int>(progress * 100), 100);
-
-    int percentY = barY + metrics.progressBarHeight + metrics.verticalSpacing;
-    renderer.drawCenteredText(UI_10_FONT_ID, percentY,
-                              (std::to_string(static_cast<int>(progress * 100)) + "%").c_str());
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
