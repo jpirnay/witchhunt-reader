@@ -24,6 +24,7 @@
 #include "reader/KOReaderSyncActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/ClockSettingsActivity.h"
+#include "settings/FontDownloadActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -344,6 +345,12 @@ void ActivityManager::goToSettings() { replaceActivity(std::make_unique<Settings
 
 void ActivityManager::goToClockSettings() {
   replaceActivity(std::make_unique<ClockSettingsActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToFontManager() {
+  // Only reached via the silent-restart boot target: the freshBoot flag tells
+  // the activity it already has a pristine heap and must not restart again.
+  replaceActivity(std::make_unique<FontDownloadActivity>(renderer, mappedInput, /*freshBoot=*/true));
 }
 
 void ActivityManager::goToFileBrowser(std::string path, std::string focusName) {

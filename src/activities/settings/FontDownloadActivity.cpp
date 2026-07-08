@@ -19,13 +19,26 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 
-FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {}
+FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool freshBoot)
+    : Activity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()), freshBoot_(freshBoot) {}
 
 // --- Lifecycle ---
 
 void FontDownloadActivity::onEnter() {
   Activity::onEnter();
+  if (!freshBoot_) {
+    // Entered from settings: the session heap is too fragmented for the
+    // manifest TLS handshake (observed largest-block ~26KB vs ~36KB needed).
+    // Reboot into the dedicated boot target and re-enter with a clean heap.
+    silentRestartToFontManager();
+    return;  // unreachable after restart; guards the deepSleepInProgress no-op path
+  }
+  if (tryResumeFromMarker()) {
+    // Coming back from a network phase (manifest fetch or download) that ran
+    // with the framebuffer released — show the recorded state directly.
+    requestUpdate();
+    return;
+  }
   WiFi.mode(WIFI_STA);
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
@@ -47,29 +60,68 @@ void FontDownloadActivity::onExit() {
 }
 
 void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
+  wifiUp_ = success;
+
+  if (afterWifi_) {
+    // A list action was confirmed while WiFi was down (post-resume boot).
+    auto continuation = std::move(afterWifi_);
+    afterWifi_ = nullptr;
+    if (success) continuation();
+    // On cancel, stay on the restored family list.
+    return;
+  }
+
   if (!success) {
     finish();
     return;
   }
 
+  runManifestPhase();
+}
+
+void FontDownloadActivity::runManifestPhase() {
   {
     RenderLock lock(*this);
     state_ = LOADING_MANIFEST;
   }
   requestUpdateAndWait();
 
+  // Everything from here on runs without a framebuffer; both branches end in
+  // finishNetworkPhase(), which restarts back into this activity.
+  releaseFramebufferForNetwork();
+
   if (!fetchAndParseManifest()) {
+    downloadingFamilyIndex_ = -1;  // manifest error: nothing to retry per-family
+    pendingErrorAction_ = PendingFontAction::None;
     RenderLock lock(*this);
     state_ = ERROR;
+    finishNetworkPhase(ResumePhase::Error);
     return;
   }
 
-  {
-    RenderLock lock(*this);
-    state_ = FAMILY_LIST;
-    selectedIndex_ = 0;
-    previousActionCount_ = actionCount();
+  selectedIndex_ = 0;
+  finishNetworkPhase(ResumePhase::List);
+}
+
+void FontDownloadActivity::startNetworkAction(std::function<void()> action) {
+  if (wifiUp_) {
+    action();
+    return;
   }
+  afterWifi_ = std::move(action);
+  WiFi.mode(WIFI_STA);
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+}
+
+void FontDownloadActivity::releaseFramebufferForNetwork() {
+  if (framebufferReleased_) return;
+  // The e-ink panel physically retains the frame that displayBuffer() last
+  // committed, so the UI stays visible while the ~48KB buffer is lent to the
+  // TLS stack. No rendering allowed until the finishNetworkPhase() restart.
+  renderer.releaseFrameBuffers();
+  framebufferReleased_ = true;
+  LOG_INF("FONT", "Framebuffer released for network phase");
 }
 
 // --- Manifest fetching ---
@@ -85,6 +137,14 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Failed to fetch manifest from %s", FONT_MANIFEST_URL);
     errorMessage_ = "Failed to fetch font list";
+    // Surface the transport failure trail on screen — devices with unusable
+    // USB serial have no other way to report why the fetch failed.
+    const char* detail = HttpDownloader::lastErrorDetail();
+    if (detail[0] != '\0') {
+      errorMessage_ += " [";
+      errorMessage_ += detail;
+      errorMessage_ += "]";
+    }
     Storage.remove(MANIFEST_TMP);
     return false;
   }
@@ -345,23 +405,124 @@ bool FontDownloadActivity::restoreFamiliesFromSd() {
   return true;
 }
 
+// --- Network-phase resume marker ---
+//
+// Network phases run with the framebuffer released (TLS needs the heap) and
+// end in a silent restart back into this activity. The marker carries the UI
+// state across that reboot; families_ travel in the existing stash file.
+//
+// Format (little-endian): u32 magic 'CPFR', u8 phase, u8 pendingErrorAction,
+// u32 selectedIndex, u32 downloadingFamilyIndex, u8 hasResumable,
+// str errorMessage, str downloadingFamilyName (str = u8 len + bytes).
+
+static constexpr const char* RESUME_MARKER_PATH = "/fonts_resume.bin";
+static constexpr uint32_t RESUME_MARKER_MAGIC = 0x52465043;  // 'CPFR'
+
+void FontDownloadActivity::finishNetworkPhase(ResumePhase phase) {
+  // Persist the family list for the fresh instance. stashFamiliesToSd()
+  // clears families_, which is fine — we are about to reboot.
+  if (!families_.empty()) {
+    stashFamiliesToSd();
+  }
+
+  Storage.remove(RESUME_MARKER_PATH);
+  FsFile file;
+  if (Storage.openFileForWrite("FONT", RESUME_MARKER_PATH, file)) {
+    bool ok = writeU32(file, RESUME_MARKER_MAGIC);
+    ok = ok && writeU8(file, static_cast<uint8_t>(phase));
+    ok = ok && writeU8(file, static_cast<uint8_t>(pendingErrorAction_));
+    ok = ok && writeU32(file, static_cast<uint32_t>(selectedIndex_));
+    ok = ok && writeU32(file, static_cast<uint32_t>(downloadingFamilyIndex_));
+    ok = ok && writeU8(file, downloadingFamilyHasResumable_ ? 1 : 0);
+    // writeStr caps at 255 bytes; keep headroom for the u8 length.
+    ok = ok && writeStr(file, errorMessage_.substr(0, 200));
+    ok = ok && writeStr(file, downloadingFamilyName_);
+    // baseUrl_ comes from the manifest and must survive into the boot that
+    // runs the downloads — the file URLs are baseUrl_ + file.name.
+    ok = ok && writeStr(file, baseUrl_);
+    file.flush();
+    file.close();
+    if (!ok) Storage.remove(RESUME_MARKER_PATH);
+  }
+  // Without a marker the fresh instance falls back to the normal WiFi +
+  // manifest flow — degraded but functional, so a failed write is tolerable.
+  silentRestartToFontManager();
+}
+
+bool FontDownloadActivity::tryResumeFromMarker() {
+  FsFile file;
+  if (!Storage.openFileForRead("FONT", RESUME_MARKER_PATH, file)) return false;
+
+  uint32_t magic = 0, sel = 0, dlIdx = 0;
+  uint8_t phase = 0, pending = 0, resumable = 0;
+  std::string err, famName, baseUrl;
+  bool ok = readU32(file, magic) && magic == RESUME_MARKER_MAGIC;
+  ok = ok && readU8(file, phase) && readU8(file, pending);
+  ok = ok && readU32(file, sel) && readU32(file, dlIdx) && readU8(file, resumable);
+  ok = ok && readStr(file, err) && readStr(file, famName);
+  ok = ok && readStr(file, baseUrl);
+  file.close();
+  Storage.remove(RESUME_MARKER_PATH);  // one-shot: never resume twice
+
+  if (!ok || phase == 0 || phase > static_cast<uint8_t>(ResumePhase::Error)) return false;
+
+  // A missing/corrupt stash degrades to an empty list ("No fonts available");
+  // the marker state is still worth showing (e.g. a manifest fetch error).
+  restoreFamiliesFromSd();
+
+  selectedIndex_ = static_cast<int>(sel);
+  downloadingFamilyIndex_ = static_cast<int>(dlIdx);
+  downloadingFamilyHasResumable_ = resumable != 0;
+  pendingErrorAction_ = pending <= static_cast<uint8_t>(PendingFontAction::Delete)
+                            ? static_cast<PendingFontAction>(pending)
+                            : PendingFontAction::None;
+  errorMessage_ = std::move(err);
+  downloadingFamilyName_ = std::move(famName);
+  baseUrl_ = std::move(baseUrl);
+  previousActionCount_ = actionCount();
+  if (selectedIndex_ >= listItemCount()) selectedIndex_ = std::max(0, listItemCount() - 1);
+
+  RenderLock lock(*this);
+  switch (static_cast<ResumePhase>(phase)) {
+    case ResumePhase::List:
+      state_ = FAMILY_LIST;
+      break;
+    case ResumePhase::Complete:
+      state_ = COMPLETE;
+      break;
+    case ResumePhase::Error:
+      state_ = ERROR;
+      break;
+    default:
+      return false;
+  }
+  LOG_DBG("FONT", "Resumed post-network phase %u with %zu families", phase, families_.size());
+  return true;
+}
+
 // --- Download ---
 
 void FontDownloadActivity::downloadAll() {
   cancelRequested_ = false;
-  // Snapshot indices upfront because downloadFamily() stashes/restores
-  // families_ — indices remain valid as long as we don't sort or splice it.
   std::vector<int> targetIndices;
   for (size_t i = 0; i < families_.size(); i++) {
     if (!families_[i].installed) targetIndices.push_back(static_cast<int>(i));
   }
+  if (targetIndices.empty()) return;
+
   for (int idx : targetIndices) {
-    downloadFamily(idx);
-    if (state_ == ERROR || cancelRequested_) return;
+    if (!downloadOne(idx)) {
+      // ERROR keeps its state for the marker; cancel goes back to the list.
+      finishNetworkPhase(state_ == ERROR ? ResumePhase::Error : ResumePhase::List);
+      return;
+    }
   }
 
-  RenderLock lock(*this);
-  state_ = COMPLETE;
+  {
+    RenderLock lock(*this);
+    state_ = COMPLETE;
+  }
+  finishNetworkPhase(ResumePhase::Complete);
 }
 
 void FontDownloadActivity::updateAll() {
@@ -370,13 +531,20 @@ void FontDownloadActivity::updateAll() {
   for (size_t i = 0; i < families_.size(); i++) {
     if (families_[i].installed && families_[i].hasUpdate) targetIndices.push_back(static_cast<int>(i));
   }
+  if (targetIndices.empty()) return;
+
   for (int idx : targetIndices) {
-    downloadFamily(idx);
-    if (state_ == ERROR || cancelRequested_) return;
+    if (!downloadOne(idx)) {
+      finishNetworkPhase(state_ == ERROR ? ResumePhase::Error : ResumePhase::List);
+      return;
+    }
   }
 
-  RenderLock lock(*this);
-  state_ = COMPLETE;
+  {
+    RenderLock lock(*this);
+    state_ = COMPLETE;
+  }
+  finishNetworkPhase(ResumePhase::Complete);
 }
 
 size_t FontDownloadActivity::totalUninstalledSize() const {
@@ -431,17 +599,16 @@ bool FontDownloadActivity::hasUpdateCandidates() const {
   return false;
 }
 
-void FontDownloadActivity::downloadFamily(int familyIdx) {
+bool FontDownloadActivity::downloadOne(int familyIdx) {
   if (familyIdx < 0 || familyIdx >= static_cast<int>(families_.size())) {
-    LOG_ERR("FONT", "downloadFamily: invalid index %d (size %zu)", familyIdx, families_.size());
-    return;
+    LOG_ERR("FONT", "downloadOne: invalid index %d (size %zu)", familyIdx, families_.size());
+    return false;
   }
 
-  // Snapshot the target family by value, then stash + free families_ so the
-  // ~10 KB of scattered std::string allocations don't fragment the heap
-  // during the TLS handshake. Render-path caches (downloadingFamilyName_,
-  // downloadingFamilyHasResumable_) cover the family-name and Resume-label
-  // accesses that previously read families_ during DOWNLOADING/ERROR.
+  // Snapshot the target family by value: the impl mutates the copy and the
+  // results are merged back below. With the framebuffer released there is no
+  // need to stash families_ for heap headroom — the freed ~48KB dwarfs the
+  // ~10KB the list occupies.
   ManifestFamily family = families_[familyIdx];
   downloadingFamilyName_ = family.name;
   downloadingFamilyHasResumable_ = family.hasResumableDownload;
@@ -456,42 +623,43 @@ void FontDownloadActivity::downloadFamily(int familyIdx) {
     fileProgress_ = 0;
     fileTotal_ = 0;
   }
-  requestUpdateAndWait();
+  // The last render before the buffer is lent to TLS: the progress screen
+  // stays on the panel for the whole download (e-ink retains it for free).
+  if (!framebufferReleased_) requestUpdateAndWait();
+  releaseFramebufferForNetwork();
 
-  if (!stashFamiliesToSd()) {
-    RenderLock lock(*this);
-    state_ = ERROR;
-    pendingErrorAction_ = PendingFontAction::Download;
-    errorMessage_ = "Failed to stash manifest";
-    return;
-  }
-
-  // Run the actual download with families_ empty (defragmented heap).
   downloadFamilyImpl(family, familyIdx);
 
-  // Update cached render state from the impl's mutations.
   downloadingFamilyHasResumable_ = family.hasResumableDownload;
+  families_[familyIdx].installed = family.installed;
+  families_[familyIdx].hasUpdate = family.hasUpdate;
+  families_[familyIdx].hasResumableDownload = family.hasResumableDownload;
+  syncSelectedIndexForNewActionCount();
 
-  // Restore families_ regardless of success/error/abort outcome, then merge
-  // back the mutations the impl made on the local family copy. Without the
-  // restored manifest the activity can't render the family list, so a failed
-  // restore is fatal — drop to ERROR rather than continuing with empty state.
-  if (!restoreFamiliesFromSd()) {
-    RenderLock lock(*this);
-    state_ = ERROR;
-    pendingErrorAction_ = PendingFontAction::Download;
-    errorMessage_ = "Failed to restore manifest";
+  return state_ != ERROR && !cancelRequested_;
+}
+
+void FontDownloadActivity::downloadFamily(int familyIdx) {
+  if (!downloadOne(familyIdx)) {
+    finishNetworkPhase(state_ == ERROR ? ResumePhase::Error : ResumePhase::List);
     return;
   }
-  if (familyIdx >= 0 && familyIdx < static_cast<int>(families_.size())) {
-    families_[familyIdx].installed = family.installed;
-    families_[familyIdx].hasUpdate = family.hasUpdate;
-    families_[familyIdx].hasResumableDownload = family.hasResumableDownload;
-  }
-  syncSelectedIndexForNewActionCount();
+  // impl leaves state_ == COMPLETE on success.
+  finishNetworkPhase(state_ == COMPLETE ? ResumePhase::Complete : ResumePhase::List);
 }
 
 void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int familyIdx) {
+  if (baseUrl_.empty()) {
+    // Guards a resume marker written before baseUrl_ was persisted (or a
+    // corrupt one): without the prefix every file URL would be relative junk.
+    LOG_ERR("FONT", "downloadFamilyImpl: empty baseUrl");
+    RenderLock lock(*this);
+    state_ = ERROR;
+    pendingErrorAction_ = PendingFontAction::Download;
+    downloadingFamilyIndex_ = familyIdx;
+    errorMessage_ = "Missing base URL - reopen font manager";
+    return;
+  }
   // httpSession_ does the TLS handshake on its first downloadToFile call;
   // subsequent files reuse the open keep-alive connection. If the server
   // dropped the connection during the idle gap (user browsing the family
@@ -528,7 +696,7 @@ void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int family
       lastProgressPercent_ = -1;
       lastProgressUpdateMs_ = 0;
     }
-    requestUpdateAndWait();
+    if (!framebufferReleased_) requestUpdateAndWait();
 
     std::string localFilename = file.name;
     std::string familyPrefix = family.name + "/";
@@ -589,7 +757,7 @@ void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int family
           }
           const bool percentChanged = percent != lastProgressPercent_;
           const bool timeElapsed = lastProgressUpdateMs_ == 0 || now - lastProgressUpdateMs_ > 2000;
-          if ((percentChanged && timeElapsed) || downloaded == total) {
+          if (((percentChanged && timeElapsed) || downloaded == total) && !framebufferReleased_) {
             requestUpdate(true);
             lastProgressPercent_ = percent;
             lastProgressUpdateMs_ = now;
@@ -620,6 +788,12 @@ void FontDownloadActivity::downloadFamilyImpl(ManifestFamily& family, int family
       pendingErrorAction_ = PendingFontAction::Download;
       downloadingFamilyIndex_ = familyIdx;
       errorMessage_ = "Download failed: " + file.name;
+      const char* detail = HttpDownloader::lastErrorDetail();
+      if (detail[0] != '\0') {
+        errorMessage_ += " [";
+        errorMessage_ += detail;
+        errorMessage_ += "]";
+      }
       return;
     }
 
@@ -776,6 +950,28 @@ std::string FontDownloadActivity::confirmButtonLabel() const {
 
 // --- Input handling ---
 
+void FontDownloadActivity::onConfirmFromList() {
+  if (families_.empty()) return;
+
+  if (isDownloadAllSelected()) {
+    startNetworkAction([this] { downloadAll(); });
+    return;
+  }
+  if (isUpdateAllSelected()) {
+    startNetworkAction([this] { updateAll(); });
+    return;
+  }
+
+  const int familyIndex = familyIndexFromList(selectedIndex_);
+  const auto& family = families_[familyIndex];
+  if (family.installed && !family.hasUpdate) {
+    // Deleting is SD-only — no WiFi, no framebuffer gymnastics.
+    promptDeleteFamily(familyIndex);
+    return;
+  }
+  startNetworkAction([this, familyIndex] { downloadFamily(familyIndex); });
+}
+
 void FontDownloadActivity::loop() {
   if (state_ == FAMILY_LIST) {
     syncSelectedIndexForNewActionCount();
@@ -788,24 +984,7 @@ void FontDownloadActivity::loop() {
     buttonNavigator_.onPreviousList(selectedIndex_, listItemCount(), [this] { requestUpdate(); });
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      if (!families_.empty()) {
-        if (isDownloadAllSelected()) {
-          downloadAll();
-          requestUpdateAndWait();
-        } else if (isUpdateAllSelected()) {
-          updateAll();
-          requestUpdateAndWait();
-        } else {
-          const int familyIndex = familyIndexFromList(selectedIndex_);
-          const auto& family = families_[familyIndex];
-          if (family.installed && !family.hasUpdate) {
-            promptDeleteFamily(familyIndex);
-          } else {
-            downloadFamily(familyIndex);
-            requestUpdateAndWait();
-          }
-        }
-      }
+      onConfirmFromList();
     }
   } else if (state_ == COMPLETE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
@@ -827,10 +1006,14 @@ void FontDownloadActivity::loop() {
       if (downloadingFamilyIndex_ >= 0 && downloadingFamilyIndex_ < static_cast<int>(families_.size())) {
         if (pendingErrorAction_ == PendingFontAction::Delete) {
           deleteFamilyAtIndex(downloadingFamilyIndex_);
+          requestUpdateAndWait();
         } else {
-          downloadFamily(downloadingFamilyIndex_);
+          const int retryIndex = downloadingFamilyIndex_;
+          startNetworkAction([this, retryIndex] { downloadFamily(retryIndex); });
         }
-        requestUpdateAndWait();
+      } else if (families_.empty() && pendingErrorAction_ == PendingFontAction::None) {
+        // Manifest fetch failed: retry the whole fetch (reconnecting WiFi first).
+        startNetworkAction([this] { runManifestPhase(); });
       } else {
         {
           RenderLock lock(*this);
@@ -857,6 +1040,11 @@ std::string FontDownloadActivity::formatSize(size_t bytes) {
 }
 
 void FontDownloadActivity::render(RenderLock&&) {
+  // The framebuffer is lent to the TLS stack during network phases; any
+  // render attempt would dereference a null buffer. Phases end in a restart,
+  // so this can only trigger on a stray update request — drop it.
+  if (framebufferReleased_) return;
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -956,7 +1144,30 @@ void FontDownloadActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
                               EpdFontFamily::BOLD);
     if (!errorMessage_.empty()) {
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, errorMessage_.c_str());
+      // Greedy word-wrap: the message can carry a transport-failure trail
+      // (see HttpDownloader::lastErrorDetail) that overflows one line, and a
+      // truncated error code is useless for remote diagnosis.
+      const int maxWidth = pageWidth - metrics.contentSidePadding * 2;
+      int y = centerY + metrics.verticalSpacing;
+      std::string line;
+      size_t pos = 0;
+      while (pos < errorMessage_.size()) {
+        size_t space = errorMessage_.find(' ', pos);
+        if (space == std::string::npos) space = errorMessage_.size();
+        const std::string word = errorMessage_.substr(pos, space - pos);
+        const std::string candidate = line.empty() ? word : line + " " + word;
+        if (!line.empty() && renderer.getTextWidth(UI_10_FONT_ID, candidate.c_str()) > maxWidth) {
+          renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+          y += lineHeight;
+          line = word;
+        } else {
+          line = candidate;
+        }
+        pos = space + 1;
+      }
+      if (!line.empty()) {
+        renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+      }
     }
     // Use the cached value: families_ may have just been restored (post-impl)
     // or still empty (if the failure was in the stash itself); either way the

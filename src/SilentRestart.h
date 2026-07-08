@@ -9,6 +9,7 @@
 void silentRestart();                 // home screen
 void silentRestartToReader();         // currently-open EPUB (APP_STATE.openEpubPath)
 void silentRestartToClockSettings();  // clock / time settings screen
+void silentRestartToFontManager();    // font download manager (needs pristine heap for TLS)
 
 // One-shot guarded variant for heap-fragmentation recovery: allows only one
 // restart attempt across consecutive silent boots until a non-silent boot

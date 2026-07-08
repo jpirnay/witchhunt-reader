@@ -92,4 +92,13 @@ class HttpDownloader {
   static DownloadError downloadToFile(Session& session, const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
                                       const std::string& password = "");
+
+  /**
+   * Short failure trail of the most recent download call, e.g.
+   * "open:0x7002 tls=-0x2700 f=0x0 H=54k L=47k" (one segment per failed
+   * attempt, including retries). Empty string if the last call succeeded.
+   * Static storage — valid until the next download call. Lets activities
+   * surface a diagnosable code on screen when serial logs aren't reachable.
+   */
+  static const char* lastErrorDetail();
 };

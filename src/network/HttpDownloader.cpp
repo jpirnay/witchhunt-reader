@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
 
+#include <cstdarg>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -84,6 +85,26 @@ constexpr const char SECTIGO_GITHUB_DV_E36_PEM[] =
     "zzuqQhFkoJ2UOQIReVx7Hfpkue4WQrO/isIJxOzksU0CMQDpKmFHjFJKS04YcPbW\n"
     "RNZu9YO6bVi9JNlWSOrvxKJGgYhqOkbRqZtNyWHa0V1Xahg=\n"
     "-----END CERTIFICATE-----\n";
+
+// Short failure trail for the most recent one-shot/session download, e.g.
+// "open:0x7002 tls=-0x2700 f=0x0 H=54k L=47k". Static buffer: no heap, safe
+// to read from UI code after a failed call. Reset per download, appended to
+// by each failed attempt (primary + retries). Exists because some devices
+// have unusable USB serial — the on-screen trail is the only diagnostics.
+char s_lastErrorDetail[96] = {0};
+void resetLastErrorDetail() { s_lastErrorDetail[0] = '\0'; }
+void appendLastErrorDetail(const char* fmt, ...) {
+  size_t used = strlen(s_lastErrorDetail);
+  if (used > 0 && used < sizeof(s_lastErrorDetail) - 2) {
+    s_lastErrorDetail[used++] = ' ';
+    s_lastErrorDetail[used] = '\0';
+  }
+  if (used >= sizeof(s_lastErrorDetail) - 1) return;
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(s_lastErrorDetail + used, sizeof(s_lastErrorDetail) - used, fmt, args);
+  va_end(args);
+}
 
 std::string extractHostFromUrl(const std::string& url) {
   size_t schemeEnd = url.find("://");
@@ -263,6 +284,8 @@ HttpDownloader::DownloadError performGet(esp_http_client_handle_t client, Sink& 
         "open failed: %s (tls_code=-0x%04x, tls_flags=0x%08x, t=%lums, heap=%u, largest=%u, minHeap=%u, minLargest=%u)",
         esp_err_to_name(err), -tlsCode, tlsFlags, millis() - startMs, esp_get_free_heap_size(),
         heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT), minFree, minLargest);
+    appendLastErrorDetail("open:0x%x tls=-0x%04x f=0x%x H=%uk L=%uk", err, -tlsCode, tlsFlags,
+                          static_cast<unsigned>(minFree / 1024), static_cast<unsigned>(minLargest / 1024));
     return HttpDownloader::HTTP_ERROR;
   }
   logPhase("open_ok");
@@ -276,6 +299,7 @@ HttpDownloader::DownloadError performGet(esp_http_client_handle_t client, Sink& 
     err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
       LOG_ERR("HTTP", "redirect open failed: %s", esp_err_to_name(err));
+      appendLastErrorDetail("redir:0x%x", err);
       return HttpDownloader::HTTP_ERROR;
     }
     contentLength = esp_http_client_fetch_headers(client);
@@ -284,6 +308,7 @@ HttpDownloader::DownloadError performGet(esp_http_client_handle_t client, Sink& 
 
   if (status != 200) {
     LOG_ERR("HTTP", "unexpected status: %d", status);
+    appendLastErrorDetail("status:%d", status);
     return HttpDownloader::HTTP_ERROR;
   }
 
@@ -301,6 +326,7 @@ HttpDownloader::DownloadError performGet(esp_http_client_handle_t client, Sink& 
     sampleHeap();
     if (read < 0) {
       LOG_ERR("HTTP", "read error after %zu bytes", sink.downloaded);
+      appendLastErrorDetail("read@%u", static_cast<unsigned>(sink.downloaded));
       return HttpDownloader::HTTP_ERROR;
     }
     if (read == 0) break;  // all data received
@@ -345,6 +371,7 @@ void logPreCallContext(const std::string& url) {
 // the reusable variant that keeps the TLS handshake alive across files.
 HttpDownloader::DownloadError runGet(const std::string& url, const std::string& username, const std::string& password,
                                      Sink& sink) {
+  resetLastErrorDetail();
   logPreCallContext(url);
 
   if (needsGithubComPin(url)) {
@@ -471,6 +498,7 @@ bool initSessionClient(HttpDownloader::Session::Impl* impl, const std::string& u
 
 HttpDownloader::DownloadError runGetOnSession(HttpDownloader::Session& session, const std::string& url,
                                               const std::string& username, const std::string& password, Sink& sink) {
+  resetLastErrorDetail();
   auto* impl = session.impl();
 
   if (impl->client == nullptr) {
@@ -622,3 +650,5 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(Session& session, c
   const DownloadError result = runGetOnSession(session, url, username, password, sink);
   return finishFileDownload(result, destPath, file, sink.downloaded);
 }
+
+const char* HttpDownloader::lastErrorDetail() { return s_lastErrorDetail; }
