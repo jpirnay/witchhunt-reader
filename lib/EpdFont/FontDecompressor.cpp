@@ -402,7 +402,9 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
   // Step 3: Allocate page buffer and lookup table for this slot
   slot.buffer = static_cast<uint8_t*>(malloc(totalBytes));
-  slot.glyphs = static_cast<PageGlyphEntry*>(malloc(glyphCount * sizeof(PageGlyphEntry)));
+  slot.glyphs = glyphCount <= SIZE_MAX / sizeof(PageGlyphEntry)
+    ? static_cast<PageGlyphEntry*>(malloc(glyphCount * sizeof(PageGlyphEntry)))
+    : nullptr;
   if (!slot.buffer || !slot.glyphs) {
     LOG_ERR("FDC", "Failed to allocate page buffer (%u bytes, %u glyphs)", totalBytes, glyphCount);
     free(slot.buffer);
