@@ -319,11 +319,13 @@ TEST(ContentOpfParser, ResolvesSpineIdrefsUsingIndexedLookupForLargeManifest) {
   EXPECT_EQ(capturedSpineHrefs[2], "book/OEBPS/text/ch0.xhtml");
 }
 
-// A manifest past MAX_INDEX_ENTRIES (the King's Avatar case: 1732 items) must NOT build the in-RAM
-// fast index — on the -fno-exceptions device build that grows until a deque chunk alloc aborts the
-// firmware. It must still OPEN and resolve every spine idref via the exact linear scan. This is the
-// regression guard for "a huge book crashes the device": the book opens, just with linear lookups.
-TEST(ContentOpfParser, HugeManifestResolvesViaLinearScanWithoutIndex) {
+// A huge manifest (the King's Avatar case: 1732 items) must parse without aborting and resolve every
+// spine idref. The in-RAM index grows with NOTHROW allocation — kept when memory allows (the common
+// case, and what the host has), dropped for the exact linear scan only on genuine OOM. Either way the
+// book OPENS and resolves correctly. This is the regression guard for "a huge book crashes the device"
+// (it used to abort building the index on -fno-exceptions) AND for "the fallback is O(N^2) slow" (the
+// index is kept when there's memory, so a big book stays fast).
+TEST(ContentOpfParser, HugeManifestResolvesCorrectly) {
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   TempDirGuard dirGuard(cacheDir);

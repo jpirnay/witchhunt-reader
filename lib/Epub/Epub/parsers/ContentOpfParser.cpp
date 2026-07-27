@@ -552,23 +552,20 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
     // hash-trusted lookups seek straight to the href and never re-read the id.
     self->itemWriter_->writeString(itemId);
     if (self->tempItemStore && !self->indexDisabled_) {
-      // A huge manifest (e.g. a 1732-spine book) would grow this in-RAM index until a deque chunk
-      // allocation fails — and the device build is -fno-exceptions, so a throwing operator new aborts
-      // the firmware (observed: bad_alloc -> terminate on King's Avatar). CAP the index: past
-      // MAX_INDEX_ENTRIES, abandon it (drop what we have, latch disabled) and let idref lookups use
-      // the exact linear scan over .items.bin. The index is a pure speed optimisation; correctness is
-      // unaffected. The cap is well above normal books and far below the point of heap trouble.
-      if (self->itemIndex.size() >= MAX_INDEX_ENTRIES) {
+      ItemIndexEntry entry;
+      entry.idHash = fnvHash(itemId);
+      entry.idLen = static_cast<uint16_t>(itemId.size());
+      entry.hrefOffset = self->itemWriter_->position();
+      // Grow the in-RAM index with NOTHROW allocation. It keeps growing as long as the heap can hold
+      // it (~12 bytes/item), so even a 1732-spine book keeps the fast binary-search index whenever
+      // memory allows. Only if a growth genuinely can't be satisfied (OOM / fragmentation) do we
+      // abandon the index and fall back to the exact linear scan over .items.bin — never abort (the
+      // device is -fno-exceptions). No arbitrary item-count cap: memory is the only limit.
+      if (!self->itemIndex.push_back(entry)) {
         self->indexDisabled_ = true;
-        self->itemIndex.clear();
-        self->itemIndex.shrink_to_fit();
-        LOG_INF("COF", "manifest exceeds %u items; using linear idref lookup (no fast index)", MAX_INDEX_ENTRIES);
-      } else {
-        ItemIndexEntry entry;
-        entry.idHash = fnvHash(itemId);
-        entry.idLen = static_cast<uint16_t>(itemId.size());
-        entry.hrefOffset = self->itemWriter_->position();
-        self->itemIndex.push_back(entry);
+        LOG_INF("COF", "manifest index OOM at %zu items; using linear idref lookup for this book",
+                self->itemIndex.size());
+        self->itemIndex.clear();  // free the partial index; lookups use the linear scan
       }
     }
     self->itemWriter_->writeString(href);

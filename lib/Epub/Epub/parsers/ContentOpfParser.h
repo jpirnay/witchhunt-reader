@@ -1,11 +1,15 @@
 #pragma once
 #include <BufferedFileIO.h>
+#include <Memory.h>  // makeUniqueNoThrow — nothrow growth (device is -fno-exceptions)
 #include <Print.h>
 #include <SaxParser/SaxParser.h>
 
 #include <algorithm>
-#include <deque>
+#include <cstddef>
+#include <cstring>
+#include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "Epub.h"
@@ -56,15 +60,38 @@ class ContentOpfParser final : public Print {
     uint16_t idLen;       // length for collision reduction
     uint32_t hrefOffset;  // offset of the href string in .items.bin (record's id skipped)
   };
-  std::deque<ItemIndexEntry> itemIndex;
+  // In-RAM manifest fast index (sorted by (idHash,idLen) for binary-search idref lookup). Grown with
+  // NOTHROW allocation (device is -fno-exceptions, so a throwing container abort()s on a fragmented
+  // heap — observed on a 1732-spine book). It grows as long as memory allows; the FIRST growth that
+  // can't be satisfied latches indexDisabled_ and idref lookups fall back to the exact linear scan
+  // over .items.bin. So a big book keeps the fast index whenever the heap can hold it (~12 bytes/item),
+  // and only genuinely-out-of-memory books degrade — no arbitrary item-count cap. The index is a pure
+  // speed optimisation, never correctness. push_back returns false on OOM (never throws).
+  struct ItemIndexVec {
+    std::unique_ptr<ItemIndexEntry[]> data_;
+    size_t size_ = 0;
+    size_t cap_ = 0;
+    bool push_back(const ItemIndexEntry& e) {
+      if (size_ == cap_) {
+        const size_t newCap = cap_ == 0 ? 64 : cap_ * 2;
+        auto next = makeUniqueNoThrow<ItemIndexEntry[]>(newCap);
+        if (!next) return false;  // OOM — caller disables the index, falls back to linear scan
+        if (size_ > 0) std::memcpy(next.get(), data_.get(), size_ * sizeof(ItemIndexEntry));
+        data_ = std::move(next);
+        cap_ = newCap;
+      }
+      data_[size_++] = e;
+      return true;
+    }
+    void clear() { data_.reset(); size_ = 0; cap_ = 0; }
+    size_t size() const { return size_; }
+    ItemIndexEntry* begin() { return data_.get(); }
+    ItemIndexEntry* end() { return data_.get() + size_; }
+    const ItemIndexEntry& operator[](size_t i) const { return data_[i]; }
+  };
+  ItemIndexVec itemIndex;
   bool useItemIndex = false;
-  // Latched when the manifest exceeds MAX_INDEX_ENTRIES: the in-RAM fast index is abandoned for this
-  // book (dropped) and idref lookups use the exact linear scan over .items.bin. The device build is
-  // -fno-exceptions, so letting the deque grow until a chunk alloc fails would ABORT the firmware
-  // (observed on a 1732-spine book); the cap prevents that. The index is a pure speed optimisation,
-  // never correctness. Chosen well above normal books (~hundreds of items) and far below heap trouble.
-  bool indexDisabled_ = false;
-  static constexpr size_t MAX_INDEX_ENTRIES = 1200;
+  bool indexDisabled_ = false;  // latched when an index growth hit OOM → linear-scan fallback
 
   // Memo of the last manifest item's media-type and its classification (MediaClass enum in the
   // .cpp, stored as its uint8_t value here). Manifest items overwhelmingly repeat one media type
