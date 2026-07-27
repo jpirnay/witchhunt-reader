@@ -143,4 +143,9 @@ class BookMetadataCache {
   int getTocCount() const { return tocCount; }
   bool isTocReliable() const { return tocReliable; }
   bool isLoaded() const { return loaded; }
+  // Mark the cache "loaded" after a COVER-ONLY OPF parse populated coreMetadata (coverItemHref etc.)
+  // without building the spine/TOC book.bin. Lets cover extraction proceed (isLoaded() gate) while
+  // spineCount/tocCount stay 0 — the caller must NOT use the spine/TOC accessors in this state.
+  // See Epub::loadForCover(). This avoids the full 1732-spine book.bin build just to show a thumbnail.
+  void markCoverMetadataLoaded() { loaded = true; }
 };

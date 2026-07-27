@@ -770,6 +770,34 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   return true;
 }
 
+bool Epub::loadForCover() {
+  // Cover-only load: get coverItemHref WITHOUT building the spine/TOC book.bin (which, on a huge
+  // book, is both slow and the site of the large manifest-index build). Used by RecentBooks / Home
+  // cover thumbnails so showing a thumbnail never triggers a full-book parse.
+  bookMetadataCache.reset(new BookMetadataCache(cachePath));
+  cssParser.reset(new CssParser(cachePath));  // constructed for API symmetry; not parsed here
+
+  // Fast path: a book.bin already exists — it carries coverItemHref, no OPF parse needed.
+  if (bookMetadataCache->load()) {
+    return true;
+  }
+
+  // No cache: metadata-only OPF parse. OpfCacheMode::Disabled passes a null cache to ContentOpfParser,
+  // so NO manifest item index / .items.bin / spine cache is built — only title/author/coverItemHref
+  // are extracted. This is the whole point: a 1732-spine book contributes no giant index here.
+  if (!parseContentOpf(bookMetadataCache->coreMetadata, OpfCacheMode::Disabled)) {
+    LOG_INF("EBP", "loadForCover: content.opf parse failed for %s", filepath.c_str());
+    return false;
+  }
+  if (bookMetadataCache->coreMetadata.coverItemHref.empty()) {
+    return false;  // no discoverable cover — caller shows a placeholder
+  }
+  // Mark loaded so ensureCoverImageCached()'s isLoaded() gate passes. Spine/TOC stay empty — the
+  // caller uses only the cover path (documented on loadForCover / markCoverMetadataLoaded).
+  bookMetadataCache->markCoverMetadataLoaded();
+  return true;
+}
+
 bool Epub::clearCache(const bool preserveThumbs) const {
   if (!Storage.exists(cachePath.c_str())) {
     LOG_DBG("EPB", "Cache does not exist, no action needed");
