@@ -58,6 +58,13 @@ class ContentOpfParser final : public Print {
   };
   std::deque<ItemIndexEntry> itemIndex;
   bool useItemIndex = false;
+  // Latched when the manifest exceeds MAX_INDEX_ENTRIES: the in-RAM fast index is abandoned for this
+  // book (dropped) and idref lookups use the exact linear scan over .items.bin. The device build is
+  // -fno-exceptions, so letting the deque grow until a chunk alloc fails would ABORT the firmware
+  // (observed on a 1732-spine book); the cap prevents that. The index is a pure speed optimisation,
+  // never correctness. Chosen well above normal books (~hundreds of items) and far below heap trouble.
+  bool indexDisabled_ = false;
+  static constexpr size_t MAX_INDEX_ENTRIES = 1200;
 
   // Memo of the last manifest item's media-type and its classification (MediaClass enum in the
   // .cpp, stored as its uint8_t value here). Manifest items overwhelmingly repeat one media type
