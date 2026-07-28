@@ -195,7 +195,10 @@ void LayoutSink::makePages() {
   const BlockStyle& blockStyle = currentTextBlock_->getBlockStyle();
   const int lineHeight = effectiveLineHeight(blockStyle);
 
-  if (!currentTextBlock_->isContinuation()) {
+  // CSS fragmentation: the FIRST box on a page contributes no top spacing (a top margin/padding is
+  // truncated at a page break). Only a non-first, non-continuation block applies its top margin.
+  const bool firstOnPage = currentPage_ && currentPage_->elements.empty();
+  if (!currentTextBlock_->isContinuation() && !firstOnPage) {
     if (blockStyle.marginTop > 0) {
       const int16_t collapse = std::min(lastBlockMarginBottom_, blockStyle.marginTop);
       currentPageNextY_ += static_cast<int16_t>(blockStyle.marginTop - collapse);
