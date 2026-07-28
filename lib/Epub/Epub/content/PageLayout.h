@@ -39,6 +39,10 @@ struct PagePosition {
   int imageCounter = 0;     // carried spine-scoped image-cache-path counter
 
   bool atSpineStart() const { return blockIndex == 0 && offset == 0; }
+  // Positional equality (the layout-relevant fields — the carried scalars/charOffset are derived).
+  bool samePosition(const PagePosition& o) const {
+    return spineIndex == o.spineIndex && blockIndex == o.blockIndex && offset == o.offset;
+  }
 };
 
 // The laid-out page plus the cursors that bound it. `page` is the standard Page the renderer already
@@ -59,5 +63,15 @@ struct LaidOutPage {
 // seekToBlock; the caller owns the reader and must keep it alive.
 LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const LayoutParams& params,
                        const PagePosition& start);
+
+// Lay out the page that ENDS at `endCursor` (its one-past-end == endCursor), for prev-page
+// navigation. `endCursor` is a page-boundary cursor within `endCursor.spineIndex` (typically the
+// `start` of the page the reader is currently on). Returns that previous page + its own start cursor
+// in `LaidOutPage.start` (what the reader navigates to). Guaranteed byte-identical to the forward
+// page with the same boundaries: it finds the start by a bounded backward scan and then FORWARD-
+// renders, reusing layoutPage. Returns ok=false at spine start (endCursor.atSpineStart(), no prior
+// page in this spine — the caller crosses to the previous spine) or on error.
+LaidOutPage layoutPageBackward(BlockStreamReader& reader, GfxRenderer& renderer, const LayoutParams& params,
+                               const PagePosition& endCursor);
 
 }  // namespace compiled

@@ -723,4 +723,29 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
   return out;
 }
 
+LaidOutPage layoutPageBackward(BlockStreamReader& reader, GfxRenderer& renderer, const LayoutParams& params,
+                               const PagePosition& endCursor) {
+  LaidOutPage out;
+  if (endCursor.atSpineStart()) return out;  // no previous page in this spine
+
+  // Forward-render the spine from its start, following the real page-boundary chain, and return the
+  // page whose end lands exactly on endCursor. Forward pagination is deterministic from a REAL boundary
+  // (spine start is one), so this reproduces the exact previous page — a backward collect from an
+  // arbitrary block does NOT, because the page-boundary SEQUENCE depends on where the walk started.
+  //
+  // Cost: O(pages before endCursor). During normal reading the reader tracks its forward cursor chain
+  // and steps back in O(1) without this call; layoutPageBackward is the standalone reconstruction used
+  // after a jump (percent/anchor), where the O(pages) walk is acceptable (see G5).
+  PagePosition cursor;
+  cursor.spineIndex = endCursor.spineIndex;  // blockIndex/offset default to spine start (0,0)
+  for (int guard = 0; guard < 8192; ++guard) {
+    LaidOutPage lp = layoutPage(reader, renderer, params, cursor);
+    if (!lp.ok || !lp.page) return out;
+    if (lp.end.samePosition(endCursor)) return lp;  // this page ends exactly where asked
+    if (lp.atSpineEnd) return out;                   // endCursor not a real boundary — no such page
+    cursor = lp.end;
+  }
+  return out;
+}
+
 }  // namespace compiled

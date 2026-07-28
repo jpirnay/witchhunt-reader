@@ -227,6 +227,60 @@ TEST_P(PageLayoutMatrix, ForwardChainMatchesAllGoldenPages) {
   binFile.close();
 }
 
+// P5b: BACKWARD layout (prev-page). Forward-chain a spine to collect each page's start cursor, then
+// for every page K>=1, layoutPageBackward(startCursor[K]) must reproduce golden page K-1 exactly (the
+// page that ENDS where page K begins) and report that page's own start cursor. Restricted to
+// pull-owned books (text/image/HR); float + table spines are scaffold-served.
+TEST_P(PageLayoutMatrix, BackwardMatchesGoldenPages) {
+  const BookProfile& bp = GetParam();
+  if (!pullOwnsAllPages(bp.book)) GTEST_SKIP() << bp.book << " has float/table spines (scaffold-served)";
+  const std::string epub = bp.dir + "/" + bp.book;
+  const std::string cacheDir = freshDir(bp.book + "_" + bp.profile.name + "_bwd");
+
+  std::ostringstream compileLog;
+  ASSERT_TRUE(pipeline_harness::compileToContentBin(epub, cacheDir, bp.profile, compileLog)) << compileLog.str();
+
+  FsFile binFile;
+  ASSERT_TRUE(binFile.openForRead(cacheDir + "/content.bin"));
+  compiled::BlockStreamReader reader;
+  ASSERT_TRUE(reader.open(binFile));
+
+  GfxRenderer renderer;
+  for (uint32_t si = 0; si < reader.spineCount(); ++si) {
+    if (!reader.spineAvailable(si)) continue;
+    const compiled::LayoutParams params = paramsFor(bp.profile, epub, cacheDir, static_cast<int>(si));
+
+    const std::vector<std::string> golden = goldenAllPages(reader, renderer, params, si, cacheDir);
+    if (golden.size() < 2) continue;  // need at least 2 pages to step backward
+
+    // Collect each page's start cursor by forward-chaining.
+    std::vector<compiled::PagePosition> starts;
+    compiled::PagePosition cursor;
+    cursor.spineIndex = static_cast<uint16_t>(si);
+    for (size_t pageIdx = 0; pageIdx < golden.size(); ++pageIdx) {
+      const compiled::LaidOutPage lp = compiled::layoutPage(reader, renderer, params, cursor);
+      ASSERT_TRUE(lp.ok && lp.page);
+      starts.push_back(lp.start);
+      cursor = lp.end;
+    }
+
+    // For each page K>=1, backward from page K's start yields page K-1.
+    for (size_t k = 1; k < golden.size(); ++k) {
+      const compiled::LaidOutPage bwd = compiled::layoutPageBackward(reader, renderer, params, starts[k]);
+      ASSERT_TRUE(bwd.ok && bwd.page) << "layoutPageBackward failed spine " << si << " from page " << k;
+      std::ostringstream bwdOut;
+      pipeline_harness::dumpOnePage(bwdOut, *bwd.page, 0, cacheDir);
+      ASSERT_EQ(golden[k - 1], bwdOut.str())
+          << "backward page diverges spine " << si << " (backward from page " << k << " should be page " << (k - 1)
+          << ")";
+      // The backward page's own start cursor must equal the forward page K-1's start.
+      ASSERT_TRUE(bwd.start.samePosition(starts[k - 1]))
+          << "backward start cursor mismatch spine " << si << " page " << (k - 1);
+    }
+  }
+  binFile.close();
+}
+
 INSTANTIATE_TEST_SUITE_P(Matrix, PageLayoutMatrix, testing::ValuesIn(bookProfileMatrix()),
                          [](const testing::TestParamInfo<BookProfile>& info) {
                            std::string n = info.param.book + "_" + info.param.profile.name;
