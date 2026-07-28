@@ -54,11 +54,15 @@ struct LaidOutBlock {
   std::vector<uint16_t> lineWordCounts;
 
   // --- Image (kind == Image): a centered block image, placed whole (mirrors placeBlockImage) ---
-  std::shared_ptr<ImageBlock> image;  // pre-built with the display size + resolved cache path
-  int16_t imageX = 0;                 // centered x
-  int16_t imageHeight = 0;            // display height (Y advance for the image itself)
-  int16_t imageSpacingTop = 0;        // wrapper (pending-merge) spacing consumed above the image
-  int16_t imageSpacingBottom = 0;     // wrapper spacing consumed below the image
+  // The ImageBlock (and its per-spine cache path) is built at PLACEMENT time, not prepare, so an
+  // over-read image that spills to the next page does not consume an image-counter slot.
+  std::string imageEntryPath;  // EPUB-internal image path; the cache path is resolved at placement
+  std::string imageAlt;
+  int16_t imageWidth = 0;      // display width
+  int16_t imageX = 0;          // centered x
+  int16_t imageHeight = 0;     // display height (Y advance for the image itself)
+  int16_t imageSpacingTop = 0;     // wrapper (pending-merge) spacing consumed above the image
+  int16_t imageSpacingBottom = 0;  // wrapper spacing consumed below the image
 
   // --- Hr (kind == Hr): a centered rule (mirrors placeHr) ---
   int16_t hrX = 0;

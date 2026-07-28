@@ -80,7 +80,8 @@ class PullDriver {
         imageBasePath_(params.imageBasePath),
         epubFilePath_(params.epubFilePath),
         auxFontId_(auxFontIdSeed),
-        imageCounter_(imageCounterSeed) {}
+        imageCounter_(imageCounterSeed),
+        imageCounterSeed_(imageCounterSeed) {}
 
   int32_t auxFontId() const { return auxFontId_; }
   int imageCounter() const { return imageCounter_; }
@@ -171,6 +172,9 @@ class PullDriver {
     currentPage_.reset(new Page());
     currentPageNextY_ = 0;
     lastBlockMarginBottom_ = 0;
+    // Reset the image counter to the page's seed so a re-collect (window grow) or re-run advances it
+    // from the same base — it ends at seed + images placed on THIS page, the value carried forward.
+    imageCounter_ = imageCounterSeed_;
     pageDone_ = false;
 
     for (size_t bi = 0; bi < blocks.size() && !pageDone_; ++bi) {
@@ -358,10 +362,9 @@ class PullDriver {
     hasPendingMerge_ = false;
     pendingMergeFromBr_ = false;
 
-    const std::string cachePath = nextImageCachePath(block.entryPath);
-    out.image = std::make_shared<ImageBlock>(cachePath, static_cast<int16_t>(ds.width),
-                                             static_cast<int16_t>(ds.height), block.alt, epubFilePath_,
-                                             block.entryPath);
+    out.imageEntryPath = block.entryPath;
+    out.imageAlt = block.alt;
+    out.imageWidth = static_cast<int16_t>(ds.width);
     out.imageX = static_cast<int16_t>((viewportWidth_ - ds.width) / 2);
     out.imageHeight = static_cast<int16_t>(ds.height);
     out.imageSpacingTop = static_cast<int16_t>(spacingTop);
@@ -393,7 +396,12 @@ class PullDriver {
         return false;
       }
       currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + lb.imageSpacingTop);
-      currentPage_->elements.push_back(std::make_shared<PageImage>(lb.image, lb.imageX, currentPageNextY_));
+      // Assign the image-cache-path counter HERE (at placement, in document order), so an over-read
+      // image that never lands on a page does not consume a counter slot — matching LayoutSink, which
+      // places each image exactly once as it walks.
+      auto imageBlock = std::make_shared<ImageBlock>(nextImageCachePath(lb.imageEntryPath), lb.imageWidth,
+                                                     lb.imageHeight, lb.imageAlt, epubFilePath_, lb.imageEntryPath);
+      currentPage_->elements.push_back(std::make_shared<PageImage>(imageBlock, lb.imageX, currentPageNextY_));
       currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + lb.imageHeight + lb.imageSpacingBottom);
       lastBlockMarginBottom_ = 0;
       brokeAt = 1;
@@ -427,7 +435,12 @@ class PullDriver {
     // trigger a >96-word mid-block flush — mirrors makePages (which applies marginTop/paddingTop once
     // at the block's first makePages call) AND its interaction with layoutTextBlock's flush, which
     // consumes the block's early lines marginless and leaves makePages a continuation.
-    if (firstLine == 0 && !lb.isContinuation && !lb.flushedMidBlock) {
+    // CSS fragmentation rule (microreader collect_page_items:1269; crengine/CSS spec): the FIRST box on
+    // a page contributes NO top spacing — a top margin/padding is truncated at a page break. Only a
+    // block that is NOT the page's first, and is a fresh block (not a continuation / >96-word flush /
+    // mid-block resume), applies its top margin (collapsed against the previous block's marginBottom).
+    const bool firstOnPage = currentPage_->elements.empty();
+    if (firstLine == 0 && !lb.isContinuation && !lb.flushedMidBlock && !firstOnPage) {
       if (bs.marginTop > 0) {
         const int16_t collapse = std::min(lastBlockMarginBottom_, bs.marginTop);
         currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + (bs.marginTop - collapse));
@@ -512,6 +525,7 @@ class PullDriver {
   const std::string epubFilePath_;
   int32_t auxFontId_ = 0;
   int imageCounter_ = 0;  // per-spine image-cache-path counter (carried in the cursor, like auxFontId_)
+  const int imageCounterSeed_ = 0;  // the counter's page-start value; collectPageForward resets to it
 
   bool hasPendingMerge_ = false;
   BlockStyle pendingMergeStyle_;
@@ -634,56 +648,63 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
   // sees the overflow and reports the break (rather than fitting everything and claiming spine end).
   // Over-reading is harmless — collectPageForward stops at the first line that doesn't fit and never
   // touches later blocks.
+  // Grow the window and re-collect until the page BREAKS within it (more content follows, reported by
+  // collectPageForward as !hitEnd) or the spine is genuinely exhausted. A height ESTIMATE can't
+  // reliably tell "page full" from "spine ends" at the boundary, so instead of guessing we let
+  // collectPageForward — which does the exact Y math — be the authority, and only read more blocks when
+  // it claims the spine ended while blocks remain unread. blockPlacedHeight seeds a first read chunk so
+  // the common case collects in one pass.
   int accumulatedHeight = 0;
   const int pageBudget = params.viewportHeight;
-  bool budgetExceeded = false;
-
-  Block lb;
-  while (reader.nextLogicalBlock(lb)) {
-    const uint32_t bi = reader.currentFirstRecordIndex();
-    if (needsScaffold(lb)) {
-      scaffoldFallback = true;
-      break;
-    }
-    const bool atOrPastCursor = bi >= cursorBlock;
-    LaidOutBlock prepared;
-    std::vector<FootnoteRef> fns = lb.footnotes;
-    const CssStyle& style = (lb.styleId < stylePool.size()) ? stylePool[lb.styleId] : kEmptyStyle;
-    const bool hasContent = driver.prepareBlock(std::move(lb), style, prepared);
-    if (!hasContent) continue;  // empty block folded into the pending merge
-
-    // The cursor's mid-block line offset applies to the first CONTENT block at/after the cursor.
-    if (!startLineCaptured && atOrPastCursor) {
-      startLine = start.offset;
-      startLineCaptured = true;
-    }
-
-    // The resumed block (window entry 0 when the cursor is mid-block) contributes only its
-    // remaining lines to this page's height.
-    const size_t fromLine = window.empty() ? startLine : 0;
-    accumulatedHeight += driver.blockPlacedHeight(prepared, fromLine);
-    window.push_back(std::move(prepared));
-    windowFootnotes.push_back(std::move(fns));
-    windowBlockIndex.push_back(bi);
-
-    // Stop one block AFTER first exceeding the budget: the extra block lets collectPageForward
-    // distinguish "page full, more follows" from "spine ends here".
-    if (budgetExceeded) break;
-    if (accumulatedHeight > pageBudget) budgetExceeded = true;
-  }
-  if (!reader.ok()) return out;
-
-  if (scaffoldFallback) {
-    // A non-text block fell in the window — lay this page out via the trusted scaffold (P2-P4 replace).
-    if (!reader.openSpine(start.spineIndex)) return out;
-    return scaffoldOnePage(reader, renderer, params, start);
-  }
-  if (window.empty()) return out;  // no content (empty spine tail)
 
   size_t endOffset = 0, endLine = 0;
   bool hitEnd = false;
-  std::unique_ptr<Page> page =
-      driver.collectPageForward(window, windowFootnotes, startLine, endOffset, endLine, hitEnd);
+  std::unique_ptr<Page> page;
+  Block lb;
+  bool spineExhausted = false;
+  while (true) {
+    // Read blocks until the running estimate covers a page (fast common case) — then collect and, if
+    // the collect says "spine ended" but more blocks remain, loop to read another chunk.
+    while (accumulatedHeight <= pageBudget && reader.nextLogicalBlock(lb)) {
+      const uint32_t bi = reader.currentFirstRecordIndex();
+      if (needsScaffold(lb)) {
+        scaffoldFallback = true;
+        break;
+      }
+      const bool atOrPastCursor = bi >= cursorBlock;
+      LaidOutBlock prepared;
+      std::vector<FootnoteRef> fns = lb.footnotes;
+      const CssStyle& style = (lb.styleId < stylePool.size()) ? stylePool[lb.styleId] : kEmptyStyle;
+      const bool hasContent = driver.prepareBlock(std::move(lb), style, prepared);
+      if (!hasContent) continue;  // empty block folded into the pending merge
+
+      if (!startLineCaptured && atOrPastCursor) {
+        startLine = start.offset;
+        startLineCaptured = true;
+      }
+      const size_t fromLine = window.empty() ? startLine : 0;
+      accumulatedHeight += driver.blockPlacedHeight(prepared, fromLine);
+      window.push_back(std::move(prepared));
+      windowFootnotes.push_back(std::move(fns));
+      windowBlockIndex.push_back(bi);
+    }
+    if (!reader.ok()) return out;
+    if (scaffoldFallback) {
+      if (!reader.openSpine(start.spineIndex)) return out;
+      return scaffoldOnePage(reader, renderer, params, start);
+    }
+    if (window.empty()) return out;  // no content (empty spine tail)
+
+    // Did the inner read stop because the spine ran out (vs. the budget)? If so, no more blocks exist.
+    spineExhausted = accumulatedHeight <= pageBudget;
+
+    page = driver.collectPageForward(window, windowFootnotes, startLine, endOffset, endLine, hitEnd);
+    // If the page filled and content remains within the window, we're done. If it claims the spine
+    // ended but more blocks are unread, grow the window (bump the budget so the inner loop reads on)
+    // and re-collect — the estimate under-counted.
+    if (!hitEnd || spineExhausted) break;
+    accumulatedHeight = 0;  // force the inner loop to pull the next chunk
+  }
   if (!page || page->elements.empty()) return out;
 
   out.page = std::move(page);
