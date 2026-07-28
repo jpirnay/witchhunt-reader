@@ -626,10 +626,14 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
   bool scaffoldFallback = false;
 
   // Accumulate content height as blocks are prepared; stop once the window is tall enough to
-  // guarantee this page breaks inside it (or the spine ends). Over-reading one block is harmless —
-  // collectPageForward stops at the first line that doesn't fit and never touches later blocks.
+  // guarantee this page breaks inside it (or the spine ends). We read ONE block PAST the budget: a
+  // block that exactly completes the page must be followed by the next block so collectPageForward
+  // sees the overflow and reports the break (rather than fitting everything and claiming spine end).
+  // Over-reading is harmless — collectPageForward stops at the first line that doesn't fit and never
+  // touches later blocks.
   int accumulatedHeight = 0;
   const int pageBudget = params.viewportHeight;
+  bool budgetExceeded = false;
 
   Block lb;
   while (reader.nextLogicalBlock(lb)) {
@@ -656,7 +660,10 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
     windowFootnotes.push_back(std::move(fns));
     windowBlockIndex.push_back(bi);
 
-    if (accumulatedHeight > pageBudget) break;  // enough to fill a page from the cursor
+    // Stop one block AFTER first exceeding the budget: the extra block lets collectPageForward
+    // distinguish "page full, more follows" from "spine ends here".
+    if (budgetExceeded) break;
+    if (accumulatedHeight > pageBudget) budgetExceeded = true;
   }
   if (!reader.ok()) return out;
 
