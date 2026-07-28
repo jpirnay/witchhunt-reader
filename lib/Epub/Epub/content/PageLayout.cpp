@@ -214,16 +214,19 @@ class PullDriver {
   // Upper-bound placed height of a prepared block (top spacing + every line + bottom spacing), for the
   // window-gathering stop condition only. Not used for placement — collectPageForward does the exact
   // Y math — so a slight over-estimate just reads one extra block, which is harmless.
-  int blockPlacedHeight(const LaidOutBlock& lb) const {
+  // `fromLine` skips the lines already consumed by earlier pages (a mid-block resume), so the window
+  // estimate counts only what this page can place — otherwise the resumed block's off-page lines
+  // inflate the estimate and the window stops early, dropping a block that would still fit.
+  int blockPlacedHeight(const LaidOutBlock& lb, size_t fromLine = 0) const {
     if (lb.kind == LaidOutBlock::Kind::Image)
       return lb.imageSpacingTop + lb.imageHeight + lb.imageSpacingBottom;
     if (lb.kind == LaidOutBlock::Kind::Hr) return 2 * lb.hrMarginV + 1;
     const BlockStyle& bs = lb.style;
     const int lineHeight = effectiveLineHeight(bs);
     int h = 0;
-    if (!lb.isContinuation) h += std::max<int>(0, bs.marginTop) + std::max<int>(0, bs.paddingTop);
-    for (const auto& line : lb.lines) {
-      const uint8_t maxPct = line->maxSizePct();
+    if (fromLine == 0 && !lb.isContinuation) h += std::max<int>(0, bs.marginTop) + std::max<int>(0, bs.paddingTop);
+    for (size_t li = fromLine; li < lb.lines.size(); ++li) {
+      const uint8_t maxPct = lb.lines[li]->maxSizePct();
       h += (maxPct != 100) ? lineHeight * maxPct / 100 : lineHeight;
     }
     h += std::max<int>(0, bs.marginBottom) + std::max<int>(0, bs.paddingBottom);
@@ -655,7 +658,10 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
       startLineCaptured = true;
     }
 
-    accumulatedHeight += driver.blockPlacedHeight(prepared);
+    // The resumed block (window entry 0 when the cursor is mid-block) contributes only its
+    // remaining lines to this page's height.
+    const size_t fromLine = window.empty() ? startLine : 0;
+    accumulatedHeight += driver.blockPlacedHeight(prepared, fromLine);
     window.push_back(std::move(prepared));
     windowFootnotes.push_back(std::move(fns));
     windowBlockIndex.push_back(bi);
