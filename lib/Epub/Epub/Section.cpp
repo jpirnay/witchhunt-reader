@@ -639,7 +639,10 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // Reset build state — createSectionFile may be called on a Section that previously
   // loaded a cache (e.g. fallback no-CSS file). pageCount must start at 0 so that
   // onPageComplete() numbering and paragraphLutPerPage stay in lockstep.
-  file.close();
+  // Guard the close: on a cold build (no pre-existing section cache to load) `file` was never
+  // opened, and HalFile::close() asserts on a null impl. Only reached via the whole-book
+  // compileBookToContentBin path — the reader's incremental path always has an open file here.
+  if (file.isOpen()) file.close();
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;

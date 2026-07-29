@@ -21,7 +21,10 @@
 #include <Arduino.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
+#include <HalTiltSensor.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 
@@ -38,9 +41,21 @@
 #include "Epub/content/PageLayout.h"
 #include "fontIds.h"
 
-// The book to measure. Point this at a real book on the SD card.
+// Logging.h (pulled in transitively) does `#define Serial MySerialImpl::instance`, whose methods are
+// defined in a src/ file this standalone bench doesn't compile. Logging.h also exposes the REAL
+// HWCDC as `logSerial` (a reference to the underlying USB-CDC). Route the bench's prints through a
+// local alias to that, so we get plain serial printf without the MySerialImpl/LOG_* machinery.
+#ifdef Serial
+#undef Serial
+#endif
+#include <Logging.h>  // for logSerial (HWCDC&)
+static HWCDC& BSerial = logSerial;
+
+// The book to measure. If BENCH_BOOK is left empty the bench auto-discovers the first .epub on the
+// SD card (searching common locations) — so you don't have to know the exact filename. To pin a
+// specific book, set -DBENCH_BOOK=\"/books/small-gods.epub\" in the env.
 #ifndef BENCH_BOOK
-#define BENCH_BOOK "/books/kings-avatar.epub"
+#define BENCH_BOOK ""
 #endif
 
 // Layout profile to measure at (mirrors the reader's defaults; keep in sync with a typical setting).
@@ -68,6 +83,29 @@ static void setupRendererAndFonts() {
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
   renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);
+}
+
+// Return the first .epub found under a few common SD locations, or "" if none. Handles listFiles
+// returning either bare names or full paths. Prints each candidate dir it scans.
+static std::string findFirstEpub() {
+  const char* dirs[] = {"/books", "/Books", "/"};
+  for (const char* dir : dirs) {
+    const std::vector<String> entries = Storage.listFiles(dir, 200);
+    BSerial.printf("BENCH scan dir=%s entries=%d\n", dir, (int)entries.size());
+    for (const String& e : entries) {
+      std::string name(e.c_str());
+      if (name.size() < 5) continue;
+      std::string lower = name;
+      for (char& c : lower) c = static_cast<char>(tolower(c));
+      if (lower.rfind(".epub") != lower.size() - 5) continue;
+      // Build a full path if the entry is a bare name.
+      if (name.front() == '/') return name;
+      std::string base(dir);
+      if (base.back() != '/') base += '/';
+      return base + name;
+    }
+  }
+  return "";
 }
 
 static uint32_t freeHeap() { return esp_get_free_heap_size(); }
@@ -99,7 +137,7 @@ static bool benchCompile(const std::shared_ptr<Epub>& epub) {
   const int64_t us = esp_timer_get_time() - t0;
   const uint32_t f1 = freeHeap(), c1 = contigHeap();
 
-  Serial.printf("BENCH compile ok=%d spines=%d total=%lldms per_spine=%lldms free=%lu->%lu contig=%lu->%lu\n",
+  BSerial.printf("BENCH compile ok=%d spines=%d total=%lldms per_spine=%lldms free=%lu->%lu contig=%lu->%lu\n",
                 ok ? 1 : 0, spineCount, us / 1000, spineCount > 0 ? (us / 1000) / spineCount : 0,
                 (unsigned long)f0, (unsigned long)f1, (unsigned long)c0, (unsigned long)c1);
   return ok;
@@ -111,12 +149,12 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
   const std::string binPath = epub->getCachePath() + "/content.bin";
   FsFile bin;
   if (!Storage.openFileForRead("BNC", binPath, bin)) {
-    Serial.println("BENCH layout ERROR content.bin open failed");
+    BSerial.println("BENCH layout ERROR content.bin open failed");
     return;
   }
   compiled::BlockStreamReader reader;
   if (!reader.open(bin)) {
-    Serial.println("BENCH layout ERROR content.bin read failed");
+    BSerial.println("BENCH layout ERROR content.bin read failed");
     bin.close();
     return;
   }
@@ -152,7 +190,7 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
     lastSpine = si;
   }
 
-  Serial.printf("BENCH layout_fwd pages=%d avg=%lldus max=%lldus min_contig=%lu\n", fwdPages,
+  BSerial.printf("BENCH layout_fwd pages=%d avg=%lldus max=%lldus min_contig=%lu\n", fwdPages,
                 fwdPages > 0 ? fwdTotalUs / fwdPages : 0, fwdMaxUs, (unsigned long)fwdMinContig);
 
   // BACKWARD: prev-page across the last spine's page starts, timing each standalone layoutPageBackward.
@@ -169,40 +207,55 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
     if (us > bwdMaxUs) bwdMaxUs = us;
     ++bwdPages;
   }
-  Serial.printf("BENCH layout_bwd spine=%lu pages=%d avg=%lldus max=%lldus (standalone O(pages) worst case)\n",
+  BSerial.printf("BENCH layout_bwd spine=%lu pages=%d avg=%lldus max=%lldus (standalone O(pages) worst case)\n",
                 (unsigned long)lastSpine, bwdPages, bwdPages > 0 ? bwdTotalUs / bwdPages : 0, bwdMaxUs);
 
   bin.close();
 }
 
 void setup() {
-  Serial.begin(115200);
+  BSerial.begin(115200);
   delay(2000);
-  Serial.println("\n=== PageLayout G4 benchmark (compile throughput + live-read latency) ===");
-  Serial.printf("CPU %u MHz  free %lu  contig %lu\n", (unsigned)getCpuFrequencyMhz(), (unsigned long)freeHeap(),
+  BSerial.println("\n=== PageLayout G4 benchmark (compile throughput + live-read latency) ===");
+  BSerial.printf("CPU %u MHz  free %lu  contig %lu\n", (unsigned)getCpuFrequencyMhz(), (unsigned long)freeHeap(),
                 (unsigned long)contigHeap());
 
+  // Minimum hardware bringup, in main.cpp's order: GPIO + power + tilt BEFORE display/SD, or the
+  // display/SD peripherals fault (the bench was rebooting in a loop without this).
+  gpio.begin();
+  powerManager.begin();
+  halTiltSensor.begin();
+
   if (!Storage.begin()) {
-    Serial.println("BENCH ERROR SD begin failed");
+    BSerial.println("BENCH ERROR SD begin failed");
     return;
   }
   setupRendererAndFonts();
 
-  auto epub = std::make_shared<Epub>(BENCH_BOOK, "/.crosspoint");
+  std::string bookPath = BENCH_BOOK;
+  if (bookPath.empty()) {
+    bookPath = findFirstEpub();
+    if (bookPath.empty()) {
+      BSerial.println("BENCH ERROR no .epub found on SD (looked in /books, /Books, /)");
+      return;
+    }
+  }
+
+  auto epub = std::make_shared<Epub>(bookPath.c_str(), "/.crosspoint");
   const int64_t lt = esp_timer_get_time();
   if (!epub->load(true, false)) {
-    Serial.println("BENCH ERROR epub load failed: " BENCH_BOOK);
+    BSerial.printf("BENCH ERROR epub load failed: %s\n", bookPath.c_str());
     return;
   }
   epub->loadImageManifest();
-  Serial.printf("BENCH open book=%s spines=%d load=%lldms\n", BENCH_BOOK, epub->getSpineItemsCount(),
+  BSerial.printf("BENCH open book=%s spines=%d load=%lldms\n", bookPath.c_str(), epub->getSpineItemsCount(),
                 (esp_timer_get_time() - lt) / 1000);
 
   if (benchCompile(epub)) benchLayout(epub);
 
-  Serial.printf("\nfree after %lu  min-ever %lu\n", (unsigned long)freeHeap(),
+  BSerial.printf("\nfree after %lu  min-ever %lu\n", (unsigned long)freeHeap(),
                 (unsigned long)esp_get_minimum_free_heap_size());
-  Serial.println("=== done ===");
+  BSerial.println("=== done ===");
 }
 
 void loop() {}
