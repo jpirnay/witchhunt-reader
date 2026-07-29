@@ -130,6 +130,15 @@ static bool benchCompile(const std::shared_ptr<Epub>& epub) {
   bp.viewportHeight = kViewportH;
   bp.embeddedStyle = true;
 
+#ifdef BENCH_COLD
+  // Force a COLD compile: wipe the book's section HTML cache + content.bin so the inflate/extract
+  // phase runs (and EXTRACTPROF fires). Without this a prior run's book-keyed HTML cache makes the
+  // compile parse-only (~340ms) instead of cold (~885ms w/ inflate).
+  Storage.removeDir((epub->getCachePath() + "/sections").c_str());
+  Storage.remove((epub->getCachePath() + "/content.bin").c_str());
+  BSerial.printf("BENCH cold: wiped sections/ + content.bin\n");
+#endif
+
   const int spineCount = epub->getSpineItemsCount();
   const uint32_t f0 = freeHeap(), c0 = contigHeap();
   const int64_t t0 = esp_timer_get_time();

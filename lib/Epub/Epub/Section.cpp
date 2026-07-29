@@ -9,6 +9,9 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_task_wdt.h>
+#ifdef BENCH_EXTRACT_PROFILE
+#include <esp_timer.h>
+#endif
 
 // The build's scratch buffers are carved from a preallocated BuildArena
 // (docs/compiled-book-pipeline-plan.md Phase 2), device-validated 2026-07-18
@@ -453,6 +456,11 @@ struct Section::BuildState {
   std::string contentBase;
   std::string imageBasePath;
   size_t inflatedSize = 0;
+  // The spine entry's ZIP central-directory stat, resolved once in setup via Epub's per-book
+  // cache (one central-dir walk for the whole book) so the parse's EntryReader::open skips the
+  // per-spine linear central-directory scan that dominated the compile. Valid when statValid.
+  ZipFile::FileStatSlim spineStat = {};
+  bool statValid = false;
   CssParser* cssParser = nullptr;
   std::vector<uint32_t> lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
@@ -628,10 +636,17 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     Storage.mkdir(sectionsDir.c_str());
   }
 
-  // Get inflated size up-front so the parser can choose progress granularity.
+  // Get inflated size up-front so the parser can choose progress granularity. Resolve the
+  // spine's ZIP stat once here (via Epub's per-book cache) and reuse it for the parse's
+  // EntryReader::open, so we scan the central directory once per book instead of once per
+  // spine open (the compile's dominant cost, measured). uncompressedSize doubles as the
+  // inflated size — no separate getSpineItemInflatedSize scan.
   const uint32_t phaseSetupStart = millis();
   st.inflatedSize = 0;
-  if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
+  st.statValid = epub->getSpineItemStat(spineIndex, &st.spineStat);
+  if (st.statValid) {
+    st.inflatedSize = st.spineStat.uncompressedSize;
+  } else if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
     LOG_ERR("SCT", "Failed to get inflated size for %s", st.localPath.c_str());
     return BuildPhaseResult::Failed;
   }
@@ -841,8 +856,11 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
                 static_cast<uint32_t>(PARSE_CHUNK_BYTES), esp_get_free_heap_size());
         streamFailed = true;
       } else {
-        const std::string entryPath = FsHelpers::normalisePath(st.localPath);
-        if (!st.reader->open(entryPath.c_str())) {
+        // Prefer the stat resolved in setup (skips the per-spine central-directory scan);
+        // fall back to the by-name open when the cache was unavailable for this spine.
+        const bool opened = st.statValid ? st.reader->open(st.spineStat)
+                                         : st.reader->open(FsHelpers::normalisePath(st.localPath).c_str());
+        if (!opened) {
           streamFailed = true;  // EntryReader::open already logged the cause
         } else {
           // The inflate ring is now allocated (open() took its ~32 KB contiguous block first). Only
@@ -866,21 +884,40 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   // ZIP state. Keeps the ring and the parser's layout working set temporally disjoint.
   if (!streamFailed && st.useTempExtract && !st.extractDone) {
     bool done = false;
+#ifdef BENCH_EXTRACT_PROFILE
+    LOG_INF("SCT", "spine=%d EXTRACTPROF prelude=%ums (zip open + entry seek + file open)", spineIndex,
+            static_cast<uint32_t>(millis() - sliceStart));
+    uint32_t inflateUs = 0, writeUs = 0;
+#endif
     while (!done) {
       size_t produced = 0;
+#ifdef BENCH_EXTRACT_PROFILE
+      const int64_t ti = esp_timer_get_time();
+#endif
       if (!st.reader->step(st.chunkBuf, st.extractCap, &produced, &done)) {
         streamFailed = true;
         break;
       }
+#ifdef BENCH_EXTRACT_PROFILE
+      inflateUs += static_cast<uint32_t>(esp_timer_get_time() - ti);
+      const int64_t tw = esp_timer_get_time();
+#endif
       if (produced > 0 && st.tempFile.write(st.chunkBuf, produced) != produced) {
         LOG_ERR("SCT", "Failed to write extracted XHTML to %s", st.tempPath.c_str());
         streamFailed = true;
         break;
       }
+#ifdef BENCH_EXTRACT_PROFILE
+      writeUs += static_cast<uint32_t>(esp_timer_get_time() - tw);
+#endif
       if (!done && overBudget()) {
         return yieldSlice();
       }
     }
+#ifdef BENCH_EXTRACT_PROFILE
+    LOG_INF("SCT", "spine=%d EXTRACTPROF inflate=%ums sd_write=%ums", spineIndex, inflateUs / 1000, writeUs / 1000);
+    const int64_t tClose = esp_timer_get_time();
+#endif
     if (!streamFailed && st.reader->bytesProduced() != st.inflatedSize) {
       LOG_ERR("SCT", "Decompressed size mismatch (expected %u, got %u)", static_cast<uint32_t>(st.inflatedSize),
               static_cast<uint32_t>(st.reader->bytesProduced()));
@@ -902,6 +939,10 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
       if (!Storage.openFileForRead("SCT", st.tempPath, st.tempFile)) {
         streamFailed = true;
       } else {
+#ifdef BENCH_EXTRACT_PROFILE
+        LOG_INF("SCT", "spine=%d EXTRACTPROF fileops=%ums (flush/close/reopen)", spineIndex,
+                static_cast<uint32_t>((esp_timer_get_time() - tClose) / 1000));
+#endif
         LOG_INF("SCT", "createSectionFile spine=%d extracted %u bytes to temp (free=%lu)", spineIndex,
                 static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
         if (overBudget()) {
@@ -917,8 +958,17 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   // lookup opened in runBuildSetup.
   if (!streamFailed) {
     if (st.useTempExtract) {
+#ifdef BENCH_EXTRACT_PROFILE
+      uint32_t sdReadUs = 0, visitorUs = 0;
+#endif
       while (true) {
+#ifdef BENCH_EXTRACT_PROFILE
+        const int64_t tr = esp_timer_get_time();
+#endif
         const int n = st.tempFile.read(st.chunkBuf, PARSE_CHUNK_BYTES);
+#ifdef BENCH_EXTRACT_PROFILE
+        sdReadUs += static_cast<uint32_t>(esp_timer_get_time() - tr);
+#endif
         if (n < 0) {
           LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
           streamFailed = true;
@@ -930,7 +980,14 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         st.tempBytesFed += static_cast<size_t>(n);
         // A short write means the parser failed mid-stream (it returns 0 after an
         // internal error) — same abort the one-shot readFileToStream path performed.
-        if (st.visitor->write(st.chunkBuf, static_cast<size_t>(n)) != static_cast<size_t>(n)) {
+#ifdef BENCH_EXTRACT_PROFILE
+        const int64_t tv = esp_timer_get_time();
+#endif
+        const size_t wrote = st.visitor->write(st.chunkBuf, static_cast<size_t>(n));
+#ifdef BENCH_EXTRACT_PROFILE
+        visitorUs += static_cast<uint32_t>(esp_timer_get_time() - tv);
+#endif
+        if (wrote != static_cast<size_t>(n)) {
           streamFailed = true;
           break;
         }
@@ -938,6 +995,9 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
           return yieldSlice();
         }
       }
+#ifdef BENCH_EXTRACT_PROFILE
+      LOG_INF("SCT", "spine=%d PARSEPROF sd_read=%ums visitor=%ums", spineIndex, sdReadUs / 1000, visitorUs / 1000);
+#endif
       if (!streamFailed && st.tempBytesFed != st.inflatedSize) {
         LOG_ERR("SCT", "Extracted size mismatch (expected %u, fed %u)", static_cast<uint32_t>(st.inflatedSize),
                 static_cast<uint32_t>(st.tempBytesFed));
@@ -986,7 +1046,14 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     st.tempPath.clear();
   }
   st.streamOk = !streamFailed;
+#ifdef BENCH_EXTRACT_PROFILE
+  const int64_t tFin = esp_timer_get_time();
+#endif
   st.finalizeOk = st.visitor->finalize();
+#ifdef BENCH_EXTRACT_PROFILE
+  LOG_INF("SCT", "spine=%d EXTRACTPROF finalize=%ums", spineIndex,
+          static_cast<uint32_t>((esp_timer_get_time() - tFin) / 1000));
+#endif
   st.parserStreamOk = st.visitor->streamSucceeded();
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
