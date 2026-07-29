@@ -83,6 +83,33 @@ class BufferedFileReader {
     return true;
   }
 
+  // Read up to `max` bytes (like FsFile::read): returns the count actually copied, 0 at EOF, and
+  // may return a short count without failing. Underlying SD reads are batched to the buffer size,
+  // so a caller pulling small logical chunks over a large file does far fewer physical reads.
+  // (read() above insists on exact-n and reports a short tail as failure — wrong for a stream feed.)
+  size_t readSome(void* dst, size_t max) {
+    if (max == 0) return 0;
+    const size_t avail = fill_ - pos_;
+    if (avail == 0) {
+      windowStart_ += static_cast<uint32_t>(fill_);
+      pos_ = 0;
+      fill_ = 0;
+      // Big requests bypass the buffer; small ones refill it. Degraded (cap_==0) always direct.
+      if (max >= cap_) {
+        const int got = file_.read(static_cast<uint8_t*>(dst), max);
+        if (got > 0) windowStart_ += static_cast<uint32_t>(got);
+        return got > 0 ? static_cast<size_t>(got) : 0;
+      }
+      const int got = file_.read(buf_.get(), cap_);
+      if (got <= 0) return 0;
+      fill_ = static_cast<size_t>(got);
+    }
+    const size_t take = max < (fill_ - pos_) ? max : (fill_ - pos_);
+    memcpy(dst, buf_.get() + pos_, take);
+    pos_ += take;
+    return take;
+  }
+
   template <typename T>
   bool readPod(T& value) {
     return read(&value, sizeof(T));

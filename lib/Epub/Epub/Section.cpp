@@ -17,11 +17,13 @@
 // (docs/compiled-book-pipeline-plan.md Phase 2), device-validated 2026-07-18
 // (X3: highWater=9216/10240, failedAlloc=0, build time neutral). The former
 // per-site new/realloc path has been removed.
+#include <BufferedFileIO.h>
 #include <BuildArena.h>
 #include <InflateReader.h>
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
@@ -110,6 +112,12 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
 // Visitor-feed chunk for phase (b): the granularity at which runBuildParse checks its time budget
 // between visitor writes. Kept small so a build slice yields promptly and input stays responsive.
 constexpr size_t PARSE_CHUNK_BYTES = 1024;
+
+// Physical SD read buffer for phase (b): the temp XHTML is read through a BufferedFileReader sized
+// here, so pulling PARSE_CHUNK_BYTES logical chunks costs one SD read per this many bytes, not per
+// chunk. A 570 KB single spine (Small Gods) otherwise spent ~1.1 s in 570×1 KB reads. Heap-backed
+// (nothrow, degrades to direct reads on OOM), independent of the 10 KB build arena.
+constexpr size_t PARSE_READ_BUFFER_BYTES = 8192;
 
 // Output chunk for phase (a) extraction (inflate -> temp SD file). Extraction is SD-write bound with
 // no layout between writes, so a larger buffer means far fewer, larger (multi-sector) SD writes for a
@@ -576,6 +584,13 @@ struct Section::BuildState {
   FsFile tempFile;
   std::string tempPath;
   size_t tempBytesFed = 0;
+  // Phase (b) buffers the temp-file reads: the parser is fed in small logical chunks, but pulling
+  // them straight off SdFat is one physical read per chunk — a 570 KB single spine (Small Gods)
+  // spent ~1.1 s in 570×1 KB reads. This batches the underlying SD reads to the buffer size while
+  // the parser still gets small chunks. Lazily constructed on the first phase-(b) read and lives in
+  // BuildState so a sliced parse keeps its window across yields. Heap-backed + nothrow (degrades to
+  // pass-through on OOM), independent of the 10 KB build arena.
+  std::optional<serialization::BufferedFileReader> tempReader;
   // Disk-backed book-level footnote preview lookup (footnotes.bin), opened at setup when
   // the build wants inline previews. Owned here so the visitor's non-owning pointer stays
   // valid across build slices.
@@ -958,6 +973,12 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   // lookup opened in runBuildSetup.
   if (!streamFailed) {
     if (st.useTempExtract) {
+      // Batch the physical SD reads (8 KB) while still feeding the parser PARSE_CHUNK_BYTES at a
+      // time — cuts a giant spine's per-1 KB-read cost by ~8x. Lazily built + owned in BuildState so
+      // the window survives parse slices. On OOM the reader degrades to pass-through (direct reads).
+      if (!st.tempReader) {
+        st.tempReader.emplace(st.tempFile, PARSE_READ_BUFFER_BYTES);
+      }
 #ifdef BENCH_EXTRACT_PROFILE
       uint32_t sdReadUs = 0, visitorUs = 0;
 #endif
@@ -965,29 +986,24 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
 #ifdef BENCH_EXTRACT_PROFILE
         const int64_t tr = esp_timer_get_time();
 #endif
-        const int n = st.tempFile.read(st.chunkBuf, PARSE_CHUNK_BYTES);
+        const size_t n = st.tempReader->readSome(st.chunkBuf, PARSE_CHUNK_BYTES);
 #ifdef BENCH_EXTRACT_PROFILE
         sdReadUs += static_cast<uint32_t>(esp_timer_get_time() - tr);
 #endif
-        if (n < 0) {
-          LOG_ERR("SCT", "Failed to read extracted XHTML from %s", st.tempPath.c_str());
-          streamFailed = true;
-          break;
-        }
         if (n == 0) {
           break;
         }
-        st.tempBytesFed += static_cast<size_t>(n);
+        st.tempBytesFed += n;
         // A short write means the parser failed mid-stream (it returns 0 after an
         // internal error) — same abort the one-shot readFileToStream path performed.
 #ifdef BENCH_EXTRACT_PROFILE
         const int64_t tv = esp_timer_get_time();
 #endif
-        const size_t wrote = st.visitor->write(st.chunkBuf, static_cast<size_t>(n));
+        const size_t wrote = st.visitor->write(st.chunkBuf, n);
 #ifdef BENCH_EXTRACT_PROFILE
         visitorUs += static_cast<uint32_t>(esp_timer_get_time() - tv);
 #endif
-        if (wrote != static_cast<size_t>(n)) {
+        if (wrote != n) {
           streamFailed = true;
           break;
         }
@@ -1032,6 +1048,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   st.zip.reset();
   st.dropZipArena();
   st.dropChunk();
+  // Drop the buffered reader before closing tempFile — it holds a reference to it.
+  st.tempReader.reset();
   if (st.tempFile) {
     st.tempFile.close();
   }
