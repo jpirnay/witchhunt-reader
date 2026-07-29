@@ -60,12 +60,22 @@ churn to one rewritten region.
 - **Backward within a partial spine**: `layoutPageBackward` forward-renders from spine start; that
   works within [0..N) unchanged (start is always ≤ frontier). Prev never needs unread blocks.
 
-### Writer side
+### Writer side — ADAPTIVE checkpoint cadence (revised 2026-07-29, user)
 
-- `ContentBinWriter` gains `checkpoint()` — call every K blocks or every ~T ms of compile: flush the
-  block data, write the rolling checkpoint (partial aux + frontier), two-phase-update the header
-  pointer. K/T tuned so the reader rarely stalls (a page is ~a few dozen blocks; checkpoint every
-  ~64 blocks or ~250 ms is ample). The background compile pass drives it.
+`ContentBinWriter` gains `checkpoint()`, but the cadence is **adaptive to how far the frontier is
+ahead of the reader**, not a fixed interval. The writer is told the reader's current position (block
+index) and:
+
+- **Frontier barely ahead of the reader** (gap small, e.g. < a page): checkpoint **every block**, so
+  the reader can start rendering ASAP and never stalls waiting for a coarse interval. This is what
+  makes page 1 appear quickly — no separate first-page path needed (see §4).
+- **Frontier well ahead of the reader** (gap large): checkpoint **every X blocks** (coarse), to
+  amortize the SD write latency of the rolling checkpoint once the reader is comfortably behind.
+
+So the checkpoint write frequency scales inversely with the read/compile gap: aggressive when it
+matters (cold start / reader catching up), cheap when it doesn't (reader far behind the compile).
+The background compile pass drives `checkpoint(readerBlockIndex)`; the writer picks per-block vs
+every-X based on `frontier - readerBlockIndex`. X and the gap threshold tune at G4/G5.
 
 ## 3. The progress indicator (safe-to-render signal)
 
@@ -81,13 +91,27 @@ are all readable). If not, `refreshFrontier()`; if still short, the compile hasn
 show a brief "preparing…" and retry next loop tick. In practice the compile runs ahead of reading
 (one-time upfront cost is front-loaded), so this stalls only at the very first pages of a cold book.
 
-## 4. Interaction with fast-first-page
+## 4. Fast first page — NO separate path (revised 2026-07-29, user)
 
-Fast-first-page (the direct parse of the current spine → page 1 now) is UNCHANGED and independent:
-it serves the first page while content.bin (and its checkpoints) are still being written. Once the
-frontier passes the reading position, the reader switches that spine to the content.bin path
-(fast + settings-changes-free). For a giant single spine, the frontier makes this switch happen
-*within* the spine rather than only at its (distant) end — which is the whole point.
+The earlier plan had a SEPARATE "direct parse the current spine → page 1 now" path that ran in
+parallel with content.bin, then a handoff once the spine committed. **We drop that entirely.** It
+was extra machinery (a dual-mode reader + a handoff — the exact kind of parallel-path complexity
+that made Increment E/F fragile) born from assuming the compiler is too slow to produce page 1
+quickly.
+
+Instead the ASSUMPTION/TARGET is: **the compiler is fast enough that, with per-block checkpoints
+near the reading position (§ Writer side), the frontier reaches page 1 almost immediately.** So
+there is ONE read path — content.bin via the frontier — for page 1 and every page after:
+
+1. Open the book → kick off the background compile (writing content.bin + adaptive checkpoints).
+2. The reader polls `spineFrontier`; as soon as it covers page 1's blocks, render page 1. With
+   per-block checkpointing at the front, that is ~immediate for a normal book.
+3. Every subsequent turn is the same: render if the frontier covers the page, else briefly wait.
+
+No direct parse, no dual mode, no handoff. If G4 shows the compiler is NOT fast enough to hit page 1
+acceptably even with per-block front checkpointing, we revisit — but the target is to make the
+compiler fast, not to carry a parallel first-page engine. This is the single-conclusive-source
+principle taken to its conclusion: the compiled source is the ONLY thing the reader ever reads.
 
 ## 5. Format-version impact
 

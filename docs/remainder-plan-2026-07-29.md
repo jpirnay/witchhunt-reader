@@ -52,18 +52,23 @@ Two independent subsystems, meeting only at content.bin + the `spineAvailable` f
   │  source: content.bin if spine committed, else the direct parse     │
   └────────────────────────────────────────────────────────────────────┘
                       ▲ reads                    ▲ frontier check
-                      │                          │ (spineAvailable / refreshIndex)
-  ┌─ COMPILE PATH (isolated, background, cold) ─────────────────────────┐
-  │  first open: direct parse of the current spine -> page 1 NOW        │
-  │  background: sliced ContentBinWriter pass, spine-by-spine, arena    │
-  │  commits each spine's index slot when done (no tee, content-only)   │
+                      │                          │ (spineFrontier / refreshFrontier)
+  ┌─ COMPILE PATH (isolated, background) ───────────────────────────────┐
+  │  on open: kick off the sliced ContentBinWriter pass (no tee,        │
+  │  content-only), writing content.bin + ADAPTIVE checkpoints          │
+  │  (per-block near the reader, every-X far ahead) — the intra-spine   │
+  │  frontier. arena-backed. No separate first-page engine.             │
   └────────────────────────────────────────────────────────────────────┘
 ```
 
-The read path NEVER blocks on the compile path. A spine not yet committed is served by a direct
-one-page parse (today's fast path, already in the scaffold); once committed, the read path switches
-to content.bin for that spine (fast, and settings-changes become free). This is the v2 plan's
-Option 2, kept minimal.
+The read path NEVER blocks on the compile path, but there is only ONE read path — content.bin via
+the frontier — for page 1 and every page after (revised 2026-07-29, user; see
+`intra-spine-frontier-2026-07-29.md` §4). We DROPPED the separate direct-parse-first-page path (a
+dual-mode reader + handoff, the parallel-path complexity that made E/F fragile). Instead the target
+is a compiler fast enough that per-block checkpointing near the read position brings the frontier to
+page 1 almost immediately. The reader polls `spineFrontier`, renders a page once the frontier covers
+its blocks, else briefly waits. Settings changes are free (re-lay-out). G4 tells us if the compiler
+is fast enough to make this work; if not, we make the compiler faster, not add a parallel engine.
 
 ## 4. Sequenced plan for the remainder
 
@@ -90,10 +95,12 @@ Option 2, kept minimal.
     live cursor. `next/prev/jump` update the cursor; a cursor stack gives O(1) prev.
   - Reading progress = the `PagePosition` (+ charOffset for re-sync), saved on each turn — no page
     numbers persisted.
-  - Wire the background compile pass (Option-2 shape: fast first-page direct parse + sliced
-    ContentBinWriter, NO tee, content-only `setStage1Sink`) + the frontier handoff
-    (`spineAvailable`/`refreshIndex`). This is the ONE complex piece; fence it hard from the read
-    loop. Behind `EPUB_STAGE1`.
+  - Wire the background compile pass (sliced ContentBinWriter, NO tee, content-only `setStage1Sink`)
+    + the intra-spine frontier (adaptive checkpoints; `spineFrontier`/`refreshFrontier`). SINGLE read
+    path — content.bin via the frontier — for page 1 and every page after; NO separate direct-parse
+    first-page path, NO handoff (dropped 2026-07-29; see intra-spine-frontier §4). The reader renders
+    a page once the frontier covers it, else briefly waits ("compiling %"). Fence the compile pass
+    hard from the read loop. Behind `EPUB_STAGE1`.
   - Settings change: just re-`layoutPage` at the current cursor with new params. Free.
 
 - **G6 — Delete section files + flip the flag.** Remove the per-settings section page store,
