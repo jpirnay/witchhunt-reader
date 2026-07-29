@@ -103,7 +103,8 @@ bool BlockStreamReader::openSpine(uint32_t i) {
   spineLabels_.clear();
   spineStylePool_.clear();
   spineChapters_.clear();
-  spineBlockOffsets_.clear();
+  spineBlockOffsetsFileStart_ = 0;
+  spineBlockOffsetCount_ = 0;
   if (auxOffset != 0) {
     if (auxOffset > static_cast<uint32_t>(file_->fileSize())) return false;
     if (!file_->seekSet(auxOffset)) return false;
@@ -111,7 +112,14 @@ bool BlockStreamReader::openSpine(uint32_t i) {
     if (!readLabels(*file_, spineLabels_)) return false;
     if (!readStylePool(*file_, spineStylePool_)) return false;
     if (!compiled::readChapters(*file_, spineChapters_)) return false;
-    if (!readBlockOffsets(*file_, spineBlockOffsets_)) return false;  // v7 baked seek table
+    // v7 baked seek table: read only its u32 count and record where the entries start; the entries
+    // themselves stay on disk (blockOffsetAt reads one on demand). A giant single spine has thousands
+    // of entries — loading them into a std::vector aborted on the fragmented heap.
+    uint32_t offCount = 0;
+    readPod(*file_, offCount);
+    if (!*file_) return false;
+    spineBlockOffsetCount_ = offCount;
+    spineBlockOffsetsFileStart_ = static_cast<uint32_t>(file_->position());
   }
   // Rewind to the first block to begin streaming.
   if (!file_->seekSet(firstBlockOffset)) return false;
@@ -121,10 +129,22 @@ bool BlockStreamReader::openSpine(uint32_t i) {
   return static_cast<bool>(*file_);
 }
 
+bool BlockStreamReader::blockOffsetAt(uint32_t i, BlockOffset* out) const {
+  if (!ok_ || !file_ || !out || i >= spineBlockOffsetCount_) return false;
+  // Entries are fixed 12 bytes (fileOffset, charOffset, recordIndex), laid out contiguously from
+  // spineBlockOffsetsFileStart_ — index by arithmetic, read the one entry.
+  const uint32_t entrySize = 3 * static_cast<uint32_t>(sizeof(uint32_t));
+  if (!file_->seekSet(spineBlockOffsetsFileStart_ + i * entrySize)) return false;
+  readPod(*file_, out->fileOffset);
+  readPod(*file_, out->charOffset);
+  readPod(*file_, out->recordIndex);
+  return static_cast<bool>(*file_);
+}
+
 bool BlockStreamReader::seekToBlock(uint32_t blockIndex) {
   if (!ok_ || !file_) return false;
-  if (blockIndex >= spineBlockOffsets_.size()) return false;
-  const BlockOffset& bo = spineBlockOffsets_[blockIndex];
+  BlockOffset bo;
+  if (!blockOffsetAt(blockIndex, &bo)) return false;
   if (!file_->seekSet(bo.fileOffset)) return false;
   // Restore the record-stream state as if we had read forward to this logical block's first record.
   // recordIndex is that first record's index; currentFirstRecordIndex_ is derived as

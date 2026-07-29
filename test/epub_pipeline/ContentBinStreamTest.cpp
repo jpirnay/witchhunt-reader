@@ -184,8 +184,10 @@ TEST(ContentBinStream, SeekToBlockMatchesSequentialRead) {
     // The baked table has exactly one entry per logical block.
     ASSERT_EQ(r.spineLogicalBlockCount(), seq.size()) << "spine " << si << " logical-block count";
     for (size_t i = 0; i < seq.size(); ++i) {
-      EXPECT_EQ(r.spineBlockOffsets()[i].recordIndex, seq[i].firstRecord) << "spine " << si << " table recordIndex " << i;
-      EXPECT_EQ(r.spineBlockOffsets()[i].charOffset, seq[i].charOffset) << "spine " << si << " table charOffset " << i;
+      compiled::BlockOffset bo;
+      ASSERT_TRUE(r.blockOffsetAt(static_cast<uint32_t>(i), &bo)) << "spine " << si << " blockOffsetAt " << i;
+      EXPECT_EQ(bo.recordIndex, seq[i].firstRecord) << "spine " << si << " table recordIndex " << i;
+      EXPECT_EQ(bo.charOffset, seq[i].charOffset) << "spine " << si << " table charOffset " << i;
     }
 
     // (b) For every start block N, seekToBlock(N) then a forward read must reproduce seq[N..].

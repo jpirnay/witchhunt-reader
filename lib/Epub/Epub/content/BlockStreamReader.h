@@ -80,11 +80,17 @@ class BlockStreamReader {
   const std::vector<Anchor>& spineAnchors() const { return spineAnchors_; }
   const std::vector<PageBreakLabel>& spineLabels() const { return spineLabels_; }
 
-  // v7: the current spine's baked per-LOGICAL-block offset table (loaded by openSpine). One entry per
-  // logical block: index i is the i-th block nextLogicalBlock() returns. Empty for a v6 file (none
-  // ship) or a spine with no blocks. Enables O(1) seekToBlock without scanning.
-  const std::vector<BlockOffset>& spineBlockOffsets() const { return spineBlockOffsets_; }
-  uint32_t spineLogicalBlockCount() const { return static_cast<uint32_t>(spineBlockOffsets_.size()); }
+  // v7: the current spine's baked per-LOGICAL-block offset table. Index i is the i-th block
+  // nextLogicalBlock() returns. The table is NOT loaded resident (a whole-novel single spine has
+  // thousands of entries — a std::vector<BlockOffset> resize aborted on the fragmented heap under
+  // -fno-exceptions, the same class as the writer's chunked-index fix). openSpine records only its
+  // file offset + count; blockOffsetAt() reads one 12-byte entry on demand. 0 for a v6 file (none
+  // ship) or a spine with no blocks.
+  uint32_t spineLogicalBlockCount() const { return spineBlockOffsetCount_; }
+  // Read logical block i's baked offset entry on demand (one seek + 12-byte read). False if i is out
+  // of range or on I/O error. Leaves the file cursor at the entry's end — callers that need the block
+  // stream position must reseek (seekToBlock does).
+  bool blockOffsetAt(uint32_t i, BlockOffset* out) const;
 
   // Reposition the block stream to LOGICAL block `blockIndex` of the current spine (0-based, as
   // reported by currentFirstRecordIndex()/the block-offset table). The next nextLogicalBlock() returns
@@ -129,7 +135,10 @@ class BlockStreamReader {
   std::vector<PageBreakLabel> spineLabels_;
   std::vector<CssStyle> spineStylePool_;   // this spine's local style table
   std::vector<Chapter> spineChapters_;     // this spine's chapter entries
-  std::vector<BlockOffset> spineBlockOffsets_;  // v7: baked per-logical-block offset table (seek)
+  // v7 baked per-logical-block offset table: kept on disk, not resident (see blockOffsetAt). The
+  // file offset is of the FIRST entry (just past the u32 count writeBlockOffsets wrote).
+  uint32_t spineBlockOffsetsFileStart_ = 0;
+  uint32_t spineBlockOffsetCount_ = 0;
 
   // One-record lookahead so nextLogicalBlock can peek whether the following record is a
   // continuation of the base it just read.

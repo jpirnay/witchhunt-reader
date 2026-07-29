@@ -31,6 +31,7 @@
 // spine (Increment E producer). No device shipped v5 → clean break, no migration.
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -135,9 +136,30 @@ class ContentBinWriter : public BlockSink {
   std::vector<Anchor> anchors_;                  // this spine only
   std::vector<PageBreakLabel> pageBreakLabels_;  // this spine only
   std::vector<Chapter> spineChapters_;           // this spine's chapter entries only
+
   // v7: one entry per LOGICAL block (captured at the start of each onBlock, before its records are
   // written), baked into the aux region at onSpineEnd for O(1) seekToBlock in the reader.
-  std::vector<BlockOffset> blockOffsets_;
+  //
+  // A whole-novel single spine (e.g. Small Gods, ~570 KB / thousands of blocks) made a
+  // std::vector<BlockOffset> here grow until push_back's doubling contiguous realloc aborted on the
+  // fragmented heap (bad_alloc under -fno-exceptions). Mirror FreeInk's PageCache: accumulate the
+  // index as a linked list of fixed-size chunks allocated on demand — no contiguous block ever
+  // exceeds one chunk, so the abort class is gone; a typical short chapter still costs one chunk.
+  // Streamed out (count + entries) at onSpineEnd, then released.
+  struct BlockOffsetChunk {
+    static constexpr uint32_t kEntries = 128;  // ~1.5 KB/chunk at sizeof(BlockOffset)=12
+    BlockOffset entries[kEntries];
+    std::unique_ptr<BlockOffsetChunk> next;
+  };
+  std::unique_ptr<BlockOffsetChunk> blockOffsetHead_;
+  BlockOffsetChunk* blockOffsetTail_ = nullptr;
+  uint32_t blockOffsetCount_ = 0;
+  // Append one entry; false only on OOM (chunk alloc failed) — caller sets ok_=false.
+  bool appendBlockOffset(const BlockOffset& bo);
+  // Stream count + every entry to `out` (the aux region), mirroring writeBlockOffsets' format.
+  bool writeBlockOffsetChunks(FsFile& out) const;
+  // Drop all chunks (LIFO via unique_ptr chain) and reset the count. Called at each beginSpine.
+  void clearBlockOffsets();
 
   // Footnotes/xpath arrive DURING a block's build (before its onBlock). Buffered, attached at onBlock.
   std::vector<FootnoteRef> pendingFootnotes_;

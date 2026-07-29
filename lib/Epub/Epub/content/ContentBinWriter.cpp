@@ -1,5 +1,8 @@
 #include "ContentBinWriter.h"
 
+#include <Logging.h>
+#include <Memory.h>
+
 #include <utility>
 
 #include "BlockSerialization.h"
@@ -125,7 +128,7 @@ void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
   anchors_.clear();
   pageBreakLabels_.clear();
   spineChapters_.clear();
-  blockOffsets_.clear();
+  clearBlockOffsets();
   spineOpen_ = true;
   spineHasBlock_ = false;
   // Placeholder spine header: firstCharOffset + blockCount + auxOffset, all patched at onSpineEnd
@@ -137,6 +140,54 @@ void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
   writePod(*file_, static_cast<uint32_t>(0));  // blockCount
   writePod(*file_, static_cast<uint32_t>(0));  // auxOffset (of the per-spine aux region)
   ok_ = static_cast<bool>(*file_);
+}
+
+bool ContentBinWriter::appendBlockOffset(const BlockOffset& bo) {
+  const uint32_t slot = blockOffsetCount_ % BlockOffsetChunk::kEntries;
+  if (slot == 0) {
+    // Current chunk full (or none yet): allocate the next. makeUniqueNoThrow — a failed alloc
+    // returns null (never throws) under -fno-exceptions, so the caller aborts the build cleanly.
+    auto chunk = makeUniqueNoThrow<BlockOffsetChunk>();
+    if (!chunk) return false;
+    BlockOffsetChunk* raw = chunk.get();
+    if (blockOffsetTail_) {
+      blockOffsetTail_->next = std::move(chunk);
+    } else {
+      blockOffsetHead_ = std::move(chunk);
+    }
+    blockOffsetTail_ = raw;
+  }
+  blockOffsetTail_->entries[slot] = bo;
+  ++blockOffsetCount_;
+  return true;
+}
+
+bool ContentBinWriter::writeBlockOffsetChunks(FsFile& out) const {
+  // Same on-disk format as writeBlockOffsets(): u32 count, then count x {fileOffset,charOffset,
+  // recordIndex}. Walk the chunk list in order, emitting the live entries of each.
+  writePod(out, blockOffsetCount_);
+  uint32_t remaining = blockOffsetCount_;
+  for (const BlockOffsetChunk* c = blockOffsetHead_.get(); c && remaining > 0; c = c->next.get()) {
+    const uint32_t n = remaining < BlockOffsetChunk::kEntries ? remaining : BlockOffsetChunk::kEntries;
+    for (uint32_t i = 0; i < n; ++i) {
+      writePod(out, c->entries[i].fileOffset);
+      writePod(out, c->entries[i].charOffset);
+      writePod(out, c->entries[i].recordIndex);
+    }
+    remaining -= n;
+  }
+  return static_cast<bool>(out);
+}
+
+void ContentBinWriter::clearBlockOffsets() {
+  // Release LIFO: unique_ptr chain would recurse-destroy on a long list (stack depth = chunk count),
+  // so unlink head-first iteratively. Each reset frees one chunk; its `next` is already detached.
+  while (blockOffsetHead_) {
+    std::unique_ptr<BlockOffsetChunk> head = std::move(blockOffsetHead_);
+    blockOffsetHead_ = std::move(head->next);
+  }
+  blockOffsetTail_ = nullptr;
+  blockOffsetCount_ = 0;
 }
 
 bool ContentBinWriter::writeOneRecord(const Block& rec) {
@@ -180,8 +231,11 @@ void ContentBinWriter::onBlock(Block&& block, const CssStyle& style) {
   // block-offset table. One entry per onBlock — the kContinuation split records that flushBlock may
   // append all belong to this same logical block, so they share this entry. recordIndex lets the
   // reader's seekToBlock restore currentFirstRecordIndex_ (anchors/labels/chapters key on it).
-  blockOffsets_.push_back(
-      BlockOffset{static_cast<uint32_t>(file_->position()), block.charOffset, blockCount_});
+  if (!appendBlockOffset(BlockOffset{static_cast<uint32_t>(file_->position()), block.charOffset, blockCount_})) {
+    LOG_ERR("CBW", "OOM growing block-offset index (block %lu) — aborting spine", static_cast<unsigned long>(blockCount_));
+    ok_ = false;
+    return;
+  }
 
   if (block.type == BlockType::Text) {
     flushBlock(std::move(block));  // may emit multiple continuation records
@@ -239,7 +293,7 @@ void ContentBinWriter::onSpineEnd() {
   writeLabels(*file_, pageBreakLabels_);
   writeStylePool(*file_, spineStyles_);
   writeChapters(*file_, spineChapters_);
-  writeBlockOffsets(*file_, blockOffsets_);  // v7: baked per-block offset table (after chapters)
+  writeBlockOffsetChunks(*file_);  // v7: baked per-block offset table (after chapters), from chunk list
   // Back-patch the spine header (firstCharOffset + blockCount + auxOffset).
   const uint32_t here = static_cast<uint32_t>(file_->position());
   if (!file_->seekSet(spineStartOffset_)) {
