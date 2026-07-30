@@ -48,6 +48,9 @@ bool ContentBinWriter::begin(FsFile& file, uint32_t spineCount, uint64_t fingerp
   writeHeader(*file_, fingerprint_, spineCount_);
   for (uint32_t i = 0; i < spineCount_; ++i) writePod(*file_, static_cast<uint32_t>(0));
   ok_ = static_cast<bool>(*file_);
+  // Buffer the append stream from here (EOF, past the header + index). Back-patches into the header
+  // region flush + rebase around their raw seeks.
+  bw_.emplace(*file_);
   return ok_;
 }
 
@@ -100,11 +103,18 @@ bool ContentBinWriter::openExisting(FsFile& file, uint32_t spineCount, uint64_t 
   // Append new spine sections at EOF; committed slots + their data are left intact.
   if (!file.seekSet(fileSize)) return false;
   ok_ = static_cast<bool>(file);
+  bw_.emplace(file);  // buffer appends from EOF (see begin())
   return ok_;
 }
 
 void ContentBinWriter::commitSpineOffset(uint32_t spineIndex, uint32_t offset) {
   if (!ok_ || !file_ || spineIndex >= spineCount_) return;
+  // Drain the buffered append stream so the file cursor is the true append point, patch the index
+  // slot directly, then restore the cursor + rebase the buffer to keep appending.
+  if (bw_ && !bw_->flush()) {
+    ok_ = false;
+    return;
+  }
   const uint32_t here = static_cast<uint32_t>(file_->position());
   if (!file_->seekSet(kHeaderSize + spineIndex * sizeof(uint32_t))) {
     ok_ = false;
@@ -112,6 +122,7 @@ void ContentBinWriter::commitSpineOffset(uint32_t spineIndex, uint32_t offset) {
   }
   writePod(*file_, offset);
   file_->seekSet(here);  // resume appending
+  if (bw_) bw_->rebase();
   ok_ = static_cast<bool>(*file_);
   if (ok_ && spineIndex < committed_.size()) committed_[spineIndex] = true;
 }
@@ -119,9 +130,10 @@ void ContentBinWriter::commitSpineOffset(uint32_t spineIndex, uint32_t offset) {
 void ContentBinWriter::beginSpine() { beginSpineAt(nextSpineIndex_++); }
 
 void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
-  if (!ok_ || !file_) return;
+  if (!ok_ || !file_ || !bw_) return;
   spineIndexBeingWritten_ = spineIndex;
-  spineStartOffset_ = static_cast<uint32_t>(file_->position());
+  // Append offset = the buffered writer's flush-aware position (bytes not yet flushed count).
+  spineStartOffset_ = bw_->position();
   spineFirstCharOffset_ = 0;
   blockCount_ = 0;
   spineStyles_.clear();
@@ -136,10 +148,10 @@ void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
   // (anchors + labels + style table + chapters) and load it BEFORE streaming the blocks, so
   // onAnchor/onPageBreakLabel can fire ahead of the block they introduce and styleId resolves
   // against this spine's own pool. Reserve the slots now so blocks follow.
-  writePod(*file_, static_cast<uint32_t>(0));  // firstCharOffset
-  writePod(*file_, static_cast<uint32_t>(0));  // blockCount
-  writePod(*file_, static_cast<uint32_t>(0));  // auxOffset (of the per-spine aux region)
-  ok_ = static_cast<bool>(*file_);
+  bw_->writePod(static_cast<uint32_t>(0));  // firstCharOffset
+  bw_->writePod(static_cast<uint32_t>(0));  // blockCount
+  bw_->writePod(static_cast<uint32_t>(0));  // auxOffset (of the per-spine aux region)
+  ok_ = static_cast<bool>(*bw_);
 }
 
 bool ContentBinWriter::appendBlockOffset(const BlockOffset& bo) {
@@ -162,17 +174,17 @@ bool ContentBinWriter::appendBlockOffset(const BlockOffset& bo) {
   return true;
 }
 
-bool ContentBinWriter::writeBlockOffsetChunks(FsFile& out) const {
+bool ContentBinWriter::writeBlockOffsetChunks(serialization::BufferedFileWriter& out) const {
   // Same on-disk format as writeBlockOffsets(): u32 count, then count x {fileOffset,charOffset,
   // recordIndex}. Walk the chunk list in order, emitting the live entries of each.
-  writePod(out, blockOffsetCount_);
+  out.writePod(blockOffsetCount_);
   uint32_t remaining = blockOffsetCount_;
   for (const BlockOffsetChunk* c = blockOffsetHead_.get(); c && remaining > 0; c = c->next.get()) {
     const uint32_t n = remaining < BlockOffsetChunk::kEntries ? remaining : BlockOffsetChunk::kEntries;
     for (uint32_t i = 0; i < n; ++i) {
-      writePod(out, c->entries[i].fileOffset);
-      writePod(out, c->entries[i].charOffset);
-      writePod(out, c->entries[i].recordIndex);
+      out.writePod(c->entries[i].fileOffset);
+      out.writePod(c->entries[i].charOffset);
+      out.writePod(c->entries[i].recordIndex);
     }
     remaining -= n;
   }
@@ -191,8 +203,8 @@ void ContentBinWriter::clearBlockOffsets() {
 }
 
 bool ContentBinWriter::writeOneRecord(const Block& rec) {
-  if (!ok_ || !file_) return false;
-  if (!writeBlock(*file_, rec)) {
+  if (!ok_ || !bw_) return false;
+  if (!writeBlock(*bw_, rec)) {
     ok_ = false;
     return false;
   }
@@ -231,7 +243,7 @@ void ContentBinWriter::onBlock(Block&& block, const CssStyle& style) {
   // block-offset table. One entry per onBlock — the kContinuation split records that flushBlock may
   // append all belong to this same logical block, so they share this entry. recordIndex lets the
   // reader's seekToBlock restore currentFirstRecordIndex_ (anchors/labels/chapters key on it).
-  if (!appendBlockOffset(BlockOffset{static_cast<uint32_t>(file_->position()), block.charOffset, blockCount_})) {
+  if (!appendBlockOffset(BlockOffset{bw_ ? bw_->position() : 0, block.charOffset, blockCount_})) {
     LOG_ERR("CBW", "OOM growing block-offset index (block %lu) — aborting spine", static_cast<unsigned long>(blockCount_));
     ok_ = false;
     return;
@@ -288,13 +300,22 @@ void ContentBinWriter::onSpineEnd() {
   // spine's own style table + the spine's own chapters. Remember where it starts (auxOffset). The
   // reader loads all of it up front in openSpine so styleId/anchors/labels/chapters resolve before
   // the blocks stream. Order here MUST match BlockStreamReader::openSpine's read order.
-  const uint32_t auxOffset = static_cast<uint32_t>(file_->position());
-  writeAnchors(*file_, anchors_);
-  writeLabels(*file_, pageBreakLabels_);
-  writeStylePool(*file_, spineStyles_);
-  writeChapters(*file_, spineChapters_);
-  writeBlockOffsetChunks(*file_);  // v7: baked per-block offset table (after chapters), from chunk list
-  // Back-patch the spine header (firstCharOffset + blockCount + auxOffset).
+  if (!bw_) {
+    ok_ = false;
+    return;
+  }
+  const uint32_t auxOffset = bw_->position();  // flush-aware append offset
+  writeAnchors(*bw_, anchors_);
+  writeLabels(*bw_, pageBreakLabels_);
+  writeStylePool(*bw_, spineStyles_);
+  writeChapters(*bw_, spineChapters_);
+  writeBlockOffsetChunks(*bw_);  // v7: baked per-block offset table (after chapters), from chunk list
+  // Back-patch the spine header (firstCharOffset + blockCount + auxOffset). Drain the buffer first so
+  // the file cursor is the true append end, patch directly, restore + rebase to keep appending.
+  if (!bw_->flush()) {
+    ok_ = false;
+    return;
+  }
   const uint32_t here = static_cast<uint32_t>(file_->position());
   if (!file_->seekSet(spineStartOffset_)) {
     ok_ = false;
@@ -304,6 +325,7 @@ void ContentBinWriter::onSpineEnd() {
   writePod(*file_, blockCount_);
   writePod(*file_, auxOffset);
   file_->seekSet(here);  // resume appending at end
+  bw_->rebase();
   ok_ = static_cast<bool>(*file_);
   if (!ok_) return;
 
@@ -342,6 +364,9 @@ bool ContentBinWriter::finish() {
   // non-autoCommit mode a spine whose data was written but never explicitly committed stays
   // uncommitted (slot 0) — correct: the caller chose not to publish it.
   if (spineOpen_) onSpineEnd();
+  // Backstop: every onSpineEnd already flushes bw_, but drain it once more so no buffered tail is
+  // left unwritten if a caller finishes without a trailing spine.
+  if (bw_ && !bw_->flush()) ok_ = false;
   ok_ = ok_ && static_cast<bool>(*file_);
   return ok_;
 }

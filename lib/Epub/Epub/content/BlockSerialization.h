@@ -10,7 +10,8 @@
 
 #include <functional>
 
-#include <HalStorage.h>  // FsFile
+#include <BufferedFileIO.h>  // serialization::BufferedFileWriter (buffered compile-path sink)
+#include <HalStorage.h>      // FsFile
 
 #include "CompiledContent.h"
 
@@ -26,32 +27,41 @@ namespace compiled {
 void splitTextBlock(Block&& block, const std::function<void(Block&&)>& emit);
 
 // Serialize one Block record (all fields; type-dispatched body + shared tail). Returns false on I/O
-// error. Mirrors readBlock exactly.
-bool writeBlock(FsFile& out, const Block& b);
+// error. Mirrors readBlock exactly. Templated on the sink so the compile path can pass a
+// serialization::BufferedFileWriter (batches the thousands of tiny per-word writes into few SD
+// writes — the giant-spine parse's dominant cost) while the whole-book path passes an FsFile. Only
+// FsFile and BufferedFileWriter are instantiated (see the explicit instantiations in the .cpp).
+template <typename Sink>
+bool writeBlock(Sink& out, const Block& b);
 
 // Read one Block record written by writeBlock. Returns false on I/O error or an unknown block type
 // (which would desync the stream). Mirrors writeBlock exactly.
 bool readBlock(FsFile& in, Block& b);
 
 // Serialize a spine's anchor table (count + entries). Mirrors readAnchors.
-bool writeAnchors(FsFile& out, const std::vector<Anchor>& anchors);
+template <typename Sink>
+bool writeAnchors(Sink& out, const std::vector<Anchor>& anchors);
 bool readAnchors(FsFile& in, std::vector<Anchor>& anchors);
 
 // Serialize a spine's page-break-label table (count + entries). Mirrors readLabels.
-bool writeLabels(FsFile& out, const std::vector<PageBreakLabel>& labels);
+template <typename Sink>
+bool writeLabels(Sink& out, const std::vector<PageBreakLabel>& labels);
 bool readLabels(FsFile& in, std::vector<PageBreakLabel>& labels);
 
 // Serialize the deduped block-style pool (count + entries). Book-level; written once.
-bool writeStylePool(FsFile& out, const std::vector<CssStyle>& pool);
+template <typename Sink>
+bool writeStylePool(Sink& out, const std::vector<CssStyle>& pool);
 bool readStylePool(FsFile& in, std::vector<CssStyle>& pool);
 
 // Serialize the book-level chapter table (count + entries).
-bool writeChapters(FsFile& out, const std::vector<Chapter>& chapters);
+template <typename Sink>
+bool writeChapters(Sink& out, const std::vector<Chapter>& chapters);
 bool readChapters(FsFile& in, std::vector<Chapter>& chapters);
 
 // Serialize a spine's per-logical-block offset table (v7: count + entries). Baked into the aux region
 // so a reader can seek to any block in O(1). Mirrors readBlockOffsets.
-bool writeBlockOffsets(FsFile& out, const std::vector<BlockOffset>& offsets);
+template <typename Sink>
+bool writeBlockOffsets(Sink& out, const std::vector<BlockOffset>& offsets);
 bool readBlockOffsets(FsFile& in, std::vector<BlockOffset>& offsets);
 
 // Pack the 24 explicit-set CSS flags into one u32 (used for style equality/dedup, and by the

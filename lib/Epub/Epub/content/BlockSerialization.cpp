@@ -28,7 +28,8 @@ uint32_t countCodepoints(const char* s) {
   return n;
 }
 
-void writeLength(FsFile& f, const CssLength& len) {
+template <typename Sink>
+void writeLength(Sink& f, const CssLength& len) {
   writePod(f, len.value);
   writePod(f, static_cast<uint8_t>(len.unit));
 }
@@ -41,7 +42,8 @@ void readLength(FsFile& f, CssLength& len) {
 }
 
 // Word run + its backing text — shared by text blocks and table cells.
-void writeWords(FsFile& f, const std::vector<Word>& words, const std::string& text) {
+template <typename Sink>
+void writeWords(Sink& f, const std::vector<Word>& words, const std::string& text) {
   writePod(f, static_cast<uint32_t>(words.size()));
   for (const Word& w : words) {
     writePod(f, w.textOff);
@@ -94,7 +96,8 @@ void unpackDefined(uint32_t b, CssPropertyFlags& d) {
   d.smallCaps = get();
 }
 
-void writeStyle(FsFile& f, const CssStyle& s) {
+template <typename Sink>
+void writeStyle(Sink& f, const CssStyle& s) {
   writePod(f, static_cast<uint8_t>(s.textAlign));
   writePod(f, static_cast<uint8_t>(s.fontStyle));
   writePod(f, static_cast<uint8_t>(s.fontWeight));
@@ -279,7 +282,8 @@ void splitTextBlock(Block&& block, const std::function<void(Block&&)>& emit) {
   }
 }
 
-bool writeBlock(FsFile& out, const Block& b) {
+template <typename Sink>
+bool writeBlock(Sink& out, const Block& b) {
   if (!out) return false;
   writePod(out, static_cast<uint8_t>(b.type));
   writePod(out, b.styleId);
@@ -428,7 +432,8 @@ bool readBlock(FsFile& in, Block& b) {
   return static_cast<bool>(in);
 }
 
-bool writeAnchors(FsFile& out, const std::vector<Anchor>& anchors) {
+template <typename Sink>
+bool writeAnchors(Sink& out, const std::vector<Anchor>& anchors) {
   writePod(out, static_cast<uint32_t>(anchors.size()));
   for (const Anchor& a : anchors) {
     writeString(out, a.id);
@@ -450,7 +455,8 @@ bool readAnchors(FsFile& in, std::vector<Anchor>& anchors) {
   return static_cast<bool>(in);
 }
 
-bool writeLabels(FsFile& out, const std::vector<PageBreakLabel>& labels) {
+template <typename Sink>
+bool writeLabels(Sink& out, const std::vector<PageBreakLabel>& labels) {
   writePod(out, static_cast<uint32_t>(labels.size()));
   for (const PageBreakLabel& pl : labels) {
     writeString(out, pl.label);
@@ -470,7 +476,8 @@ bool readLabels(FsFile& in, std::vector<PageBreakLabel>& labels) {
   return static_cast<bool>(in);
 }
 
-bool writeStylePool(FsFile& out, const std::vector<CssStyle>& pool) {
+template <typename Sink>
+bool writeStylePool(Sink& out, const std::vector<CssStyle>& pool) {
   writePod(out, static_cast<uint32_t>(pool.size()));
   for (const CssStyle& s : pool) writeStyle(out, s);
   return static_cast<bool>(out);
@@ -484,7 +491,8 @@ bool readStylePool(FsFile& in, std::vector<CssStyle>& pool) {
   return static_cast<bool>(in);
 }
 
-bool writeChapters(FsFile& out, const std::vector<Chapter>& chapters) {
+template <typename Sink>
+bool writeChapters(Sink& out, const std::vector<Chapter>& chapters) {
   writePod(out, static_cast<uint32_t>(chapters.size()));
   for (const Chapter& c : chapters) {
     writePod(out, c.spineIndex);
@@ -508,7 +516,8 @@ bool readChapters(FsFile& in, std::vector<Chapter>& chapters) {
   return static_cast<bool>(in);
 }
 
-bool writeBlockOffsets(FsFile& out, const std::vector<BlockOffset>& offsets) {
+template <typename Sink>
+bool writeBlockOffsets(Sink& out, const std::vector<BlockOffset>& offsets) {
   writePod(out, static_cast<uint32_t>(offsets.size()));
   for (const BlockOffset& bo : offsets) {
     writePod(out, bo.fileOffset);
@@ -529,5 +538,26 @@ bool readBlockOffsets(FsFile& in, std::vector<BlockOffset>& offsets) {
   }
   return static_cast<bool>(in);
 }
+
+// Explicit instantiations of the write serializers: FsFile (whole-book writeContentBin path) and
+// serialization::BufferedFileWriter (the streaming ContentBinWriter compile path, which batches the
+// thousands of tiny per-word writes). Both must stay in lockstep — same code, one instantiation each.
+template bool writeBlock<FsFile>(FsFile&, const Block&);
+template bool writeBlock<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&, const Block&);
+template bool writeAnchors<FsFile>(FsFile&, const std::vector<Anchor>&);
+template bool writeAnchors<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
+                                                              const std::vector<Anchor>&);
+template bool writeLabels<FsFile>(FsFile&, const std::vector<PageBreakLabel>&);
+template bool writeLabels<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
+                                                             const std::vector<PageBreakLabel>&);
+template bool writeStylePool<FsFile>(FsFile&, const std::vector<CssStyle>&);
+template bool writeStylePool<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
+                                                                const std::vector<CssStyle>&);
+template bool writeChapters<FsFile>(FsFile&, const std::vector<Chapter>&);
+template bool writeChapters<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
+                                                              const std::vector<Chapter>&);
+template bool writeBlockOffsets<FsFile>(FsFile&, const std::vector<BlockOffset>&);
+template bool writeBlockOffsets<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
+                                                                   const std::vector<BlockOffset>&);
 
 }  // namespace compiled

@@ -22,6 +22,18 @@
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
 
+#ifdef BENCH_EXTRACT_PROFILE
+#include <esp_timer.h>
+// Visitor sub-phase accumulators (us), reset + logged per spine by finalize(). Split the ~10 s
+// giant-spine visitor into CSS-resolve vs block-emit(serialize) vs the remainder (SAX+walk).
+namespace {
+uint64_t g_cssResolveUs = 0;
+uint32_t g_cssResolveCalls = 0;
+uint64_t g_onBlockUs = 0;
+uint32_t g_onBlockCalls = 0;
+}  // namespace
+#endif
+
 const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 
@@ -401,7 +413,14 @@ void ChapterHtmlSlimParser::stage1FlushBlock() {
   // any page break the sink takes while laying out THIS block uses these values (the same the
   // fused emitPage would read, since the walk sets them before emitting the block).
   sink->onXPathAdvance(xpathParagraphIndex, xpathListItemIndex, lastBodyChildByteOffset);
+#ifdef BENCH_EXTRACT_PROFILE
+  const int64_t tblk = esp_timer_get_time();
+#endif
   sink->onBlock(std::move(*stage1Block_), stage1BlockCssStyle_);
+#ifdef BENCH_EXTRACT_PROFILE
+  g_onBlockUs += static_cast<uint64_t>(esp_timer_get_time() - tblk);
+  ++g_onBlockCalls;
+#endif
   stage1Block_.reset();
   stage1BlockHeadingLevel_ = 0;
   // A heading block is a chapter/heading boundary: report it against the block just emitted.
@@ -742,7 +761,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       if (it != self->cssStyleCache_.end()) {
         cssStyle = it->second;
       } else {
+#ifdef BENCH_EXTRACT_PROFILE
+        const int64_t tcss = esp_timer_get_time();
+#endif
         CssStyle resolved = self->cssParser->resolveStyle(name, classAttr, idAttr);
+#ifdef BENCH_EXTRACT_PROFILE
+        g_cssResolveUs += static_cast<uint64_t>(esp_timer_get_time() - tcss);
+        ++g_cssResolveCalls;
+#endif
         if (resolved.defined.anySet())
           cssStyle = self->cssStyleCache_.emplace(cacheKey, resolved).first->second;
         else
@@ -2199,6 +2225,19 @@ bool ChapterHtmlSlimParser::finalize() {
 
   const uint32_t totalTimeMs = millis() - streamStartTimeMs;
   LOG_DBG("EHP", "Time to parse and build pages: %lu ms", totalTimeMs);
+
+#ifdef BENCH_EXTRACT_PROFILE
+  // Split the visitor: cssResolve + onBlock(serialize) are measured; the remainder of the visitor
+  // time (SAX-feed + walk callbacks) is total - these. Logged before the final stage1FlushBlock so
+  // the counts cover the spine body (the trailing flush adds one onBlock, negligible).
+  LOG_INF("EHP", "VISITORPROF cssResolve=%llums/%lucalls onBlock=%llums/%lucalls",
+          static_cast<unsigned long long>(g_cssResolveUs / 1000), static_cast<unsigned long>(g_cssResolveCalls),
+          static_cast<unsigned long long>(g_onBlockUs / 1000), static_cast<unsigned long>(g_onBlockCalls));
+  g_cssResolveUs = 0;
+  g_cssResolveCalls = 0;
+  g_onBlockUs = 0;
+  g_onBlockCalls = 0;
+#endif
 
   // The yxml SaxParser backend uses fixed-capacity buffers sized from measured
   // real-world maxima; if this chapter exceeded any of them the parser silently

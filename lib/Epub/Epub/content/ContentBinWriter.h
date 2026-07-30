@@ -32,10 +32,12 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include <HalStorage.h>  // FsFile
+#include <BufferedFileIO.h>  // serialization::BufferedFileWriter
+#include <HalStorage.h>       // FsFile
 
 #include "BlockSink.h"
 #include "CompiledContent.h"
@@ -110,6 +112,13 @@ class ContentBinWriter : public BlockSink {
   void commitSpineOffset(uint32_t spineIndex, uint32_t offset);  // back-patch index slot spineIndex
 
   FsFile* file_ = nullptr;  // caller-owned
+  // Buffered append sink over *file_. The per-block record stream and per-spine aux tables are
+  // thousands of tiny writes (~4 writePod per word); unbuffered that dominated the compile
+  // (~6 s / 4097 blocks on a 570 KB spine, device-measured). All appends go through bw_; the rare
+  // seek back-patches (spine header at onSpineEnd, index slot at commitSpineOffset) flush bw_, seek
+  // *file_ directly, then bw_.rebase(). bw_.position() is the flush-aware append offset onBlock
+  // records into the block-offset table. Reset (rebound to *file_) in begin()/openExisting().
+  std::optional<serialization::BufferedFileWriter> bw_;
   bool ok_ = false;
   uint32_t spineCount_ = 0;
   uint64_t fingerprint_ = 0;
@@ -157,7 +166,7 @@ class ContentBinWriter : public BlockSink {
   // Append one entry; false only on OOM (chunk alloc failed) — caller sets ok_=false.
   bool appendBlockOffset(const BlockOffset& bo);
   // Stream count + every entry to `out` (the aux region), mirroring writeBlockOffsets' format.
-  bool writeBlockOffsetChunks(FsFile& out) const;
+  bool writeBlockOffsetChunks(serialization::BufferedFileWriter& out) const;
   // Drop all chunks (LIFO via unique_ptr chain) and reset the count. Called at each beginSpine.
   void clearBlockOffsets();
 

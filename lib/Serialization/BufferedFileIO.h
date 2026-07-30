@@ -155,6 +155,11 @@ class BufferedFileWriter {
   // Logical write position (== what FsFile::position() would report after a flush).
   uint32_t position() const { return base_ + static_cast<uint32_t>(fill_); }
 
+  // Sticky success state — true until a write/flush hits a short SD write. Lets code written for
+  // FsFile's `if (!out) ... static_cast<bool>(out)` validity idiom target this writer unchanged
+  // (the block serializers do). Cleared by no one — a failed writer stays failed.
+  explicit operator bool() const { return !failed_; }
+
   bool write(const void* src, size_t n) {
     const auto* in = static_cast<const uint8_t*>(src);
     // Large payloads (or degraded mode) go straight to the file, after draining the buffer
@@ -163,6 +168,7 @@ class BufferedFileWriter {
       if (!flush()) return false;
       const size_t wrote = file_.write(in, n);
       base_ += static_cast<uint32_t>(wrote);
+      if (wrote != n) failed_ = true;
       return wrote == n;
     }
     if (fill_ + n > cap_ && !flush()) return false;
@@ -187,9 +193,17 @@ class BufferedFileWriter {
     const size_t wrote = file_.write(buf_.get(), fill_);
     base_ += static_cast<uint32_t>(wrote);
     const bool ok = wrote == fill_;
+    if (!ok) failed_ = true;
     fill_ = 0;
     return ok;
   }
+
+  // Re-anchor the buffer to the file's CURRENT position. Use after code seeks the underlying FsFile
+  // directly (e.g. a back-patch of an earlier header) and returns the cursor to the append point:
+  // flush() first (so no buffered bytes are lost), do the external seek/write/seek-back on the file,
+  // then rebase() so position() and the next write() line up with the file again. Requires an empty
+  // buffer (call flush() before the external seeks).
+  void rebase() { base_ = static_cast<uint32_t>(file_.position()); }
 
  private:
   FsFile& file_;
@@ -197,6 +211,18 @@ class BufferedFileWriter {
   size_t cap_ = 0;
   size_t fill_ = 0;
   uint32_t base_ = 0;  // file offset the buffer starts at
+  bool failed_ = false;
 };
+
+// Free-function forwarders so code written against the serialization::writePod(sink, value) /
+// writeString(sink, s) style (see Serialization.h's FsFile overloads) can target a BufferedFileWriter
+// too — this lets the block serializers be templated over the sink type and pick the buffered sink on
+// the compile path (thousands of tiny writes) while the whole-book path keeps writing straight to
+// FsFile. Return void to match the FsFile overloads (errors surface via the writer's later flush()).
+template <typename T>
+[[maybe_unused]] static void writePod(BufferedFileWriter& w, const T& value) {
+  w.writePod(value);
+}
+[[maybe_unused]] static void writeString(BufferedFileWriter& w, const std::string& s) { w.writeString(s); }
 
 }  // namespace serialization
