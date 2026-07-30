@@ -88,6 +88,11 @@ class Section {
   // beginSpineAt at each build (re)start, commitSpine on a clean Done. Null = disabled.
   compiled::ContentBinWriter* contentBinTeeWriter_ = nullptr;
   uint32_t contentBinTeeSpine_ = 0;
+  // When true (setContentBinContentOnly), the tee writer is the ONLY sink and NO section-cache pages
+  // are produced (stage1SinkTee_ stays false) — the fresh reader's dedicated background content.bin
+  // compiler, which never writes per-settings section files. Keeps the same commit-on-clean-Done
+  // lifecycle as the tee. When false (setContentBinTee), the build tees pages + content.bin.
+  bool contentBinContentOnly_ = false;
   // Outcome of one phase method. Mostly maps to BuildStep: More means the phase yielded
   // mid-way after spending its time budget; RetryNoCss asks the entry function to tear the
   // state down and restart from setup with embeddedStyle=false.
@@ -130,6 +135,11 @@ class Section {
   void evictOldVariants() const;
 
  public:
+  // Delete this spine's book-keyed unzipped-HTML temp (content.bin's transient input). Call once the
+  // spine is durably in content.bin so a big book's cache dir doesn't accumulate per-spine temps.
+  // Best-effort; no-op if absent.
+  void removeHtmlCache() const;
+
   uint16_t pageCount = 0;
   int currentPage = 0;
 
@@ -250,6 +260,14 @@ class Section {
   void setContentBinTee(compiled::ContentBinWriter* writer, uint32_t spineIndex) {
     contentBinTeeWriter_ = writer;
     contentBinTeeSpine_ = spineIndex;
+    contentBinContentOnly_ = false;
+  }
+  // Like setContentBinTee but CONTENT-ONLY: emit this spine to content.bin with NO section-cache
+  // pages (the fresh reader's dedicated background compiler). Same commit-on-clean-Done lifecycle.
+  void setContentBinContentOnly(compiled::ContentBinWriter* writer, uint32_t spineIndex) {
+    contentBinTeeWriter_ = writer;
+    contentBinTeeSpine_ = spineIndex;
+    contentBinContentOnly_ = true;
   }
   // Percent of the spine XHTML consumed by the in-flight build (0–100; 100 once the
   // stream is exhausted and only Finalize remains). 0 when no build is live. Feeds the

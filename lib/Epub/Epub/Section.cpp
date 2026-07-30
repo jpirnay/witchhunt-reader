@@ -187,6 +187,11 @@ std::string Section::getSectionHtmlCachePath() const {
   return epub->getCachePath() + "/sections/" + buf + ".bin";
 }
 
+void Section::removeHtmlCache() const {
+  const std::string p = getSectionHtmlCachePath();
+  if (!p.empty() && Storage.exists(p.c_str())) Storage.remove(p.c_str());
+}
+
 std::string Section::getImageBasePath(uint32_t propertyHash) const {
   char buf[32];
   snprintf(buf, sizeof(buf), "img_%d_%08x_", spineIndex, propertyHash);
@@ -677,12 +682,18 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   this->lut.clear();
   cssLowHeapDegraded_ = false;
 
-  if (!Storage.openFileForWrite("SCT", filePath, file)) {
-    return BuildPhaseResult::Failed;
+  // Content-only compile (fresh reader's background content.bin compiler): produce NO section-cache
+  // file at all — the parser tees blocks straight to content.bin and emits no pages, so a section
+  // file would be an empty 0-page artifact that clutters the cache (thousands for a big book). Skip
+  // opening + header; writeSectionTail is likewise skipped in finalize.
+  if (!contentBinContentOnly_) {
+    if (!Storage.openFileForWrite("SCT", filePath, file)) {
+      return BuildPhaseResult::Failed;
+    }
+    writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
+                           p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
+                           p.imageRendering);
   }
-  writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
-                         p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
-                         p.imageRendering);
   st.lut.clear();
 
   // Derive the content base directory and image cache path prefix for the parser
@@ -1184,7 +1195,7 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
               "Parse failed with embedded CSS enabled; retrying section creation with embeddedStyle=0 "
               "(stream=%d finalize=%d parser=%d)",
               st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0);
-      file.close();
+      if (file.isOpen()) file.close();  // content-only mode never opened it
       Storage.remove(filePath.c_str());
       if (st.cssParser) {
         st.cssParser->clear();
@@ -1194,7 +1205,7 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     } else {
       LOG_ERR("SCT", "Failed to parse XML and build pages (stream=%d finalize=%d parser=%d)", st.streamOk ? 1 : 0,
               st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0);
-      file.close();
+      if (file.isOpen()) file.close();  // content-only mode never opened it
       Storage.remove(filePath.c_str());
       if (st.cssParser) {
         st.cssParser->clear();
@@ -1204,9 +1215,11 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   }
   const uint32_t fileSize = static_cast<uint32_t>(st.inflatedSize);
 
-  // The section-file tail + header patch — shared with the content.bin read-back build.
+  // The section-file tail + header patch — shared with the content.bin read-back build. Skipped in
+  // content-only mode: no section file was opened (see runBuildSetup), so there is nothing to tail.
   const auto& anchors = visitor.getAnchors();
-  if (!writeSectionTail(st.lut, anchors, visitor.getPageBreakLabels(), visitor.getParagraphLutPerPage(),
+  if (!contentBinContentOnly_ &&
+      !writeSectionTail(st.lut, anchors, visitor.getPageBreakLabels(), visitor.getParagraphLutPerPage(),
                         static_cast<uint16_t>(pageCount), parseComplete)) {
     return BuildPhaseResult::Failed;  // writeSectionTail already closed+removed the file
   }
@@ -1225,13 +1238,17 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     this->pageBreakLabels.emplace_back(entry.first, entry.second);
   }
 
-  file.close();
-
-  // Cache the LUT in memory and open the file for reading so that
-  // subsequent loadPageFromSectionFile() calls can seek directly without re-opening.
-  if (!Storage.openFileForRead("SCT", filePath, file)) {
-    LOG_ERR("SCT", "Failed to open section file for reading after creation");
-    return BuildPhaseResult::Failed;
+  // Content-only mode has no section file: skip the close + reopen-for-read entirely (the LUT is
+  // empty, there are no pages to serve). content.bin was written via the tee; commit happens in the
+  // caller on a clean Done.
+  if (!contentBinContentOnly_) {
+    file.close();
+    // Cache the LUT in memory and open the file for reading so that
+    // subsequent loadPageFromSectionFile() calls can seek directly without re-opening.
+    if (!Storage.openFileForRead("SCT", filePath, file)) {
+      LOG_ERR("SCT", "Failed to open section file for reading after creation");
+      return BuildPhaseResult::Failed;
+    }
   }
   truncatedCache = !parseComplete;
   this->lut = std::move(st.lut);
@@ -1543,7 +1560,9 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
   if (contentBinTeeWriter_) {
     contentBinTeeWriter_->beginSpineAt(contentBinTeeSpine_);
     stage1Sink_ = contentBinTeeWriter_;
-    stage1SinkTee_ = true;
+    // TEE mode (default): section pages + content.bin from one walk. CONTENT-ONLY
+    // (setContentBinContentOnly): content.bin only, no section-cache pages.
+    stage1SinkTee_ = !contentBinContentOnly_;
   }
 
   if (runBuildSetup(*buildState_) != BuildPhaseResult::Ok) {

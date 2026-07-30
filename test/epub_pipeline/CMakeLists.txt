@@ -17,6 +17,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub/content/BlockSerialization.cpp
   ${REPO_ROOT}/lib/Epub/Epub/content/BlockStreamReader.cpp
   ${REPO_ROOT}/lib/Epub/Epub/content/ContentBinWriter.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/content/ContentBinCompiler.cpp
   ${REPO_ROOT}/lib/Epub/Epub/content/ContentSink.cpp
   ${REPO_ROOT}/lib/Epub/Epub/content/LayoutSink.cpp
   ${REPO_ROOT}/lib/Epub/Epub/content/PageLayout.cpp
@@ -98,6 +99,7 @@ add_executable(EpubPipelineTest
   Stage1ProducerTest.cpp
   ContentSinkTest.cpp
   ContentBinStreamTest.cpp
+  ContentBinCompilerTest.cpp
   LayoutSinkTest.cpp
   PageLayoutTest.cpp
   ${PIPELINE_SOURCES}
