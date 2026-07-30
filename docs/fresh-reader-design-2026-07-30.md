@@ -60,11 +60,18 @@ Concretely, ranked by how much they hurt:
 Kept strictly separate — the weaving of these is what sank the earlier attempts.
 
 ### A. The background compiler (producer)
-- Drives `Section::compileBookToContentBin` **incrementally**, one spine (or one block-run of a giant
-  spine) per idle slice, from the **last known good state**: reopen content.bin, read the committed
-  slot index, skip committed spines, continue from the first uncommitted one until EOF (all spines
-  committed). This is the resume machinery (per-spine two-phase commit — a committed slot is durable
-  truth) but driven a slice at a time, not blocking.
+- **RETARGET master's proven driver, do not invent one.** Master already runs memory-safe BACKGROUND
+  section indexing WHILE rendering (Background-B/-C: `Section::stepSectionBuild` sliced with a
+  `budgetMs`, the framebuffer release/borrow discipline, heap-gated refusal). That machinery already
+  handles both book shapes in production. The background CONTENT.BIN compiler is the SAME sliced,
+  budgeted, memory-managed driver, just emitting content.bin (`setStage1Sink` + `ContentBinWriter`)
+  instead of a per-settings section cache. The whole-book BLOCKING compile that kept OOMing was the
+  mistake — not background compile being hard.
+- Drives an **incremental** compile, one spine (or one block-run of a giant spine) per idle slice,
+  from the **last known good state**: reopen content.bin, read the committed slot index, skip
+  committed spines, continue from the first uncommitted one until EOF (all spines committed). This is
+  the resume machinery (per-spine two-phase commit — a committed slot is durable truth) but driven a
+  slice at a time, exactly like Background-C drives stepSectionBuild.
 - Runs in the reader's idle time (like the existing Background-B/-C), gated on heap headroom (R4/R5),
   borrowing the framebuffer arena for its one ring (R2) while it holds a slice.
 - Advertises progress via the committed-slot index (whole-spine) and — for a giant single spine — a
@@ -105,6 +112,38 @@ pattern (`estimatedTotalPages`, `pageCount==0` sentinel) to borrow from.
   Avatar (thousands of spines) and Small Gods (one multi-MB spine).
 - **Later (explicitly deferred):** context menu, TOC, bookmarks, KOReader sync, footnote popups,
   per-book font overrides, images beyond the cover (extract-to-SD generalizes to all).
+
+## 4b. The retarget is ~80% pre-built (2026-07-30 map)
+
+Master's background section build ALREADY tees content.bin through the exact sliced, memory-safe,
+RenderLock-guarded driver we need:
+- `Section::setContentBinTee(writer, spineIndex)` / `setStage1TeeSink` — the section build emits
+  content.bin AS IT PARSES, driven by the same `stepSectionBuild(budgetMs)` slices.
+- `commitSpine()` fires ONLY on a clean `Done` (`!cssLowHeapDegraded_ && !truncatedCache`) — a bad
+  parse never publishes a bad content.bin spine (two-phase commit safety, already wired).
+- The driver: `serviceBackgroundWork()` on the loop task, `BG_BUILD_BUDGET_MS=40` slices, yields at
+  the 1 KB feed boundary, gates every tick on `isRefreshPending() || RenderLock::peek() ||
+  imageProcessingActive_` (skip, don't block), takes a RenderLock for the slice, PREFERS BORROWING
+  the secondary framebuffer as the build arena (`borrowSecondaryBuffer` + `BuildArena` +
+  `setExternalBuildScratch`) over freeing it, gates start on per-spine heap floors that ADD the
+  inflate ring, and aborts-to-released mid-build below `RESIDENT_BUILD_ABORT_*`.
+- Two-temporal-phase memory: extract (inflate ring live) → release ALL zip state → parse (parser
+  working set live). Ring and parser set never coresident. THIS is why builds fit in ~68 KB.
+
+So the background CONTENT.BIN compiler is: adopt this driver, run it across ALL spines (not just the
+read-ahead runway), resume from the committed-slot index to EOF. The whole-book BLOCKING compile I
+built ignored ALL of this — that was the error.
+
+## 4c. Cache hygiene (user requirement 2026-07-30)
+
+Temporary per-spine artifacts must NOT clutter the book's cache dir — King's Avatar has thousands of
+spines. Once a spine's content is folded into content.bin (its slot committed), its transient inputs
+(the book-keyed unzipped-HTML temp, any per-spine scratch) are no longer needed and must be removed.
+Master already does some of this (`~Section` deletes a partial cache file). The fresh reader keeps the
+cache dir to ~O(1) files: content.bin + its progress sidecar + images (extracted once, R3) + book.bin
+— NOT thousands of per-settings section files (which the cursor-native reader does not produce at
+all — see G6). Any temp (HTML extract, block-offset sidecar) is deleted as soon as its data lands in
+content.bin.
 
 ## 5. Additional things noticed (worth deciding)
 
