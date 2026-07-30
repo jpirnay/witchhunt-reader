@@ -202,8 +202,13 @@ class Section {
   // buildSectionFromContentBin can serve any spine. One-time (like book.bin); the walk streams so
   // RAM stays ~one block. `renderer` is needed to construct the per-spine parser. Returns false on
   // any error. Behind EPUB_STAGE1. (Per-spine-on-first-visit + background-lazy write are follow-ups.)
+  // externalScratch (optional): a caller-owned BuildArena to lend each per-spine build as its
+  // scratch + inflate-ring region — pass a BuildArena wrapping the borrowed secondary framebuffer so
+  // a giant single spine's ~33 KB CONTIGUOUS inflate ring comes from the framebuffer, not the
+  // (fragmented, ~40 KB) reader-context heap where it fails to allocate. Null → each build uses its
+  // own heap arena (the bench / bare-context path, where heap is ample).
   static bool compileBookToContentBin(const std::shared_ptr<Epub>& epub, GfxRenderer& renderer,
-                                      const BuildParams& params);
+                                      const BuildParams& params, BuildArena* externalScratch = nullptr);
 
   // Incremental section-cache build. Advances the build by at most ~budgetMs of work
   // (budgetMs == 0 means no budget: run to a terminal state in one call) and returns More
