@@ -38,6 +38,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "Epub/content/BlockStreamReader.h"
+#include "Epub/content/ContentBinCompiler.h"
 #include "Epub/content/PageLayout.h"
 #include "fontIds.h"
 
@@ -149,6 +150,74 @@ static bool benchCompile(const std::shared_ptr<Epub>& epub) {
   BSerial.printf("BENCH compile ok=%d spines=%d total=%lldms per_spine=%lldms free=%lu->%lu contig=%lu->%lu\n",
                 ok ? 1 : 0, spineCount, us / 1000, spineCount > 0 ? (us / 1000) / spineCount : 0,
                 (unsigned long)f0, (unsigned long)f1, (unsigned long)c0, (unsigned long)c1);
+  return ok;
+}
+
+// --- (1b) INCREMENTAL background-style compile: drive ContentBinCompiler slice-by-slice (like the
+// reader's idle ticks) and PROVE the memory regime holds — track min-ever free/contig across the
+// WHOLE compile (the earlier whole-book-blocking approach OOM'd by draining heap; this must not).
+// Also exercises RESUME: run half, drop the compiler, resume to completion. No reader UI. ---
+static bool benchIncrementalCompile(const std::shared_ptr<Epub>& epub) {
+  Section::BuildParams bp;
+  bp.fontId = kFontId;
+  bp.viewportWidth = kViewportW;
+  bp.viewportHeight = kViewportH;
+  bp.embeddedStyle = true;
+
+  // Cold start: wipe content.bin (+ its transient inputs) so this measures a full fresh compile.
+  Storage.removeDir((epub->getCachePath() + "/sections").c_str());
+  Storage.remove((epub->getCachePath() + "/content.bin").c_str());
+
+  const uint32_t fullSpineCount = static_cast<uint32_t>(epub->getSpineItemsCount());
+  // A thousands-of-spines book (King's Avatar) takes minutes to fully compile; for the memory-regime
+  // probe (does heap RELAX between spines?) a bounded prefix is enough. 0 = no cap (giant-spine case).
+#ifdef BENCH_INCR_MAX_SPINES
+  const uint32_t spineCount = std::min<uint32_t>(fullSpineCount, BENCH_INCR_MAX_SPINES);
+#else
+  const uint32_t spineCount = fullSpineCount;
+#endif
+  uint32_t minFree = freeHeap(), minContig = contigHeap();
+  uint32_t slices = 0;
+  const int64_t t0 = esp_timer_get_time();
+
+  // Phase 1: run to ~half the spines, then DROP the compiler (simulate crash/exit).
+  uint32_t committedAtDrop = 0;
+  {
+    compiled::ContentBinCompiler comp(epub, renderer, bp);
+    while (!comp.done() && comp.committedSpines() < spineCount / 2) {
+      comp.step(/*budgetMs=*/40);  // the reader's BG_BUILD_BUDGET_MS
+      ++slices;
+      const uint32_t f = freeHeap(), c = contigHeap();
+      if (f < minFree) minFree = f;
+      if (c < minContig) minContig = c;
+    }
+    committedAtDrop = comp.committedSpines();
+  }  // comp destructs mid-compile — content.bin has a committed prefix
+
+  BSerial.printf("BENCH incr phase1: dropped at committed=%lu/%lu after %lu slices\n",
+                (unsigned long)committedAtDrop, (unsigned long)spineCount, (unsigned long)slices);
+
+  // Phase 2: fresh compiler RESUMES from the committed prefix. Stop at the capped spine count (for a
+  // huge book we only probe a prefix) or at true completion.
+  bool ok = false;
+  {
+    compiled::ContentBinCompiler comp(epub, renderer, bp);
+    compiled::ContentBinCompiler::Step s = compiled::ContentBinCompiler::Step::More;
+    while (s == compiled::ContentBinCompiler::Step::More && comp.committedSpines() < spineCount) {
+      s = comp.step(/*budgetMs=*/40);
+      ++slices;
+      const uint32_t f = freeHeap(), c = contigHeap();
+      if (f < minFree) minFree = f;
+      if (c < minContig) minContig = c;
+    }
+    ok = (s == compiled::ContentBinCompiler::Step::Done) || comp.committedSpines() >= spineCount;
+  }
+  const int64_t us = esp_timer_get_time() - t0;
+
+  BSerial.printf(
+      "BENCH incr compile ok=%d spines=%lu slices=%lu total=%lldms MIN-EVER free=%lu contig=%lu (start free=%lu)\n",
+      ok ? 1 : 0, (unsigned long)spineCount, (unsigned long)slices, us / 1000, (unsigned long)minFree,
+      (unsigned long)minContig, (unsigned long)freeHeap());
   return ok;
 }
 
@@ -359,8 +428,10 @@ void setup() {
   BSerial.printf("BENCH open book=%s spines=%d load=%lldms\n", bookPath.c_str(), epub->getSpineItemsCount(),
                 (esp_timer_get_time() - lt) / 1000);
 
-  if (benchCompile(epub)) {
-    benchReaderFlow(epub);  // (3) per-page cursor read-loop latency (first-page-of-spine focus) — FIRST
+  // (1b) FIRST: the incremental background-style compile + memory-regime proof (min-ever heap across
+  // the whole compile) + resume. This is the fresh-reader compiler; it leaves a complete content.bin.
+  if (benchIncrementalCompile(epub)) {
+    benchReaderFlow(epub);  // (3) per-page cursor read-loop latency (first-page-of-spine focus)
     benchLayout(epub);      // (2) aggregate sweep last (its O(pages) backward sweep is slow on a giant spine)
   }
 
