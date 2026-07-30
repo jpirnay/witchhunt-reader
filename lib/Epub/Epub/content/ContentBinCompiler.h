@@ -40,7 +40,7 @@ class ContentBinCompiler {
 
   ContentBinCompiler(std::shared_ptr<Epub> epub, GfxRenderer& renderer, const Section::BuildParams& params)
       : epub_(std::move(epub)), renderer_(renderer), params_(params) {}
-  ~ContentBinCompiler() = default;
+  ~ContentBinCompiler();
   ContentBinCompiler(const ContentBinCompiler&) = delete;
   ContentBinCompiler& operator=(const ContentBinCompiler&) = delete;
 
@@ -66,6 +66,7 @@ class ContentBinCompiler {
   bool ensureOpen();          // lazy: open/resume content.bin, set the cursor to the first uncommitted spine
   void advanceToUncommitted();  // move spineCursor_ to the next spine whose slot is not committed
   void deleteSpineTransients(uint32_t spineIndex);  // drop the unzipped-HTML temp once a spine is committed
+  void removeBlockOffsetSidecar();  // delete <cachePath>/blockoff.tmp (spliced into content.bin already)
 
   std::shared_ptr<Epub> epub_;
   GfxRenderer& renderer_;

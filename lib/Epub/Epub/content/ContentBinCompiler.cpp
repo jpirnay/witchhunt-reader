@@ -12,6 +12,17 @@ namespace {
 constexpr char kTag[] = "CBC";
 }
 
+ContentBinCompiler::~ContentBinCompiler() {
+  // The sidecar is transient scratch — never leave it behind (it was spliced into content.bin at each
+  // spine end). On an incomplete/dropped compile the next run re-opens it truncating anyway.
+  removeBlockOffsetSidecar();
+}
+
+void ContentBinCompiler::removeBlockOffsetSidecar() {
+  const std::string p = epub_->getCachePath() + "/blockoff.tmp";
+  if (Storage.exists(p.c_str())) Storage.remove(p.c_str());
+}
+
 bool ContentBinCompiler::ensureOpen() {
   const std::string binPath = epub_->getCachePath() + "/content.bin";
   { const std::string dir = epub_->getCachePath(); Storage.mkdir(dir.c_str()); }
@@ -45,6 +56,9 @@ bool ContentBinCompiler::ensureOpen() {
   // The reader publishes each spine explicitly on a clean Done (the content-only tee lifecycle calls
   // commitSpine only when the parse was not degraded/truncated) — so a bad parse never publishes.
   writer_.setAutoCommit(false);
+  // R1: stream the per-block offset table to a sidecar (O(1) resident) so a giant single spine never
+  // accumulates ~48 KB of offsets in RAM — the reader-context OOM this prevents.
+  writer_.setBlockOffsetTempPath(epub_->getCachePath() + "/blockoff.tmp");
 
   spineCursor_ = 0;
   advanceToUncommitted();
@@ -83,6 +97,7 @@ ContentBinCompiler::Step ContentBinCompiler::step(uint32_t budgetMs) {
   if (spineCursor_ >= spineCount_) {
     writer_.finish();
     binFile_.close();
+    removeBlockOffsetSidecar();
     state_ = State::Done;
     LOG_INF(kTag, "content.bin complete (%u spines)", spineCount_);
     return Step::Done;
@@ -121,6 +136,7 @@ ContentBinCompiler::Step ContentBinCompiler::step(uint32_t budgetMs) {
       if (spineCursor_ >= spineCount_) {
         writer_.finish();
         binFile_.close();
+        removeBlockOffsetSidecar();
         state_ = State::Done;
         LOG_INF(kTag, "content.bin complete (%u spines, free=%lu)", spineCount_,
                 static_cast<unsigned long>(esp_get_free_heap_size()));

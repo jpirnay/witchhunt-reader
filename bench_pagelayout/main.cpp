@@ -52,6 +52,16 @@
 #include <Logging.h>  // for logSerial (HWCDC&)
 static HWCDC& BSerial = logSerial;
 
+// The C3's native USB-CDC re-enumerates on reset, so a monitor attached AFTER boot misses setup()'s
+// early prints (the INCR memory-regime line especially). Stash the summary lines here and re-emit them
+// from loop() every few seconds, so we can attach anytime and read the persisted result.
+static String gBenchSummary;
+static void benchLog(const char* line) {
+  BSerial.println(line);
+  gBenchSummary += line;
+  gBenchSummary += '\n';
+}
+
 // The book to measure. If BENCH_BOOK is left empty the bench auto-discovers the first .epub on the
 // SD card (searching common locations) — so you don't have to know the exact filename. To pin a
 // specific book, set -DBENCH_BOOK=\"/books/small-gods.epub\" in the env.
@@ -194,8 +204,12 @@ static bool benchIncrementalCompile(const std::shared_ptr<Epub>& epub) {
     committedAtDrop = comp.committedSpines();
   }  // comp destructs mid-compile — content.bin has a committed prefix
 
-  BSerial.printf("BENCH incr phase1: dropped at committed=%lu/%lu after %lu slices\n",
-                (unsigned long)committedAtDrop, (unsigned long)spineCount, (unsigned long)slices);
+  {
+    char pbuf[128];
+    snprintf(pbuf, sizeof(pbuf), "BENCH incr phase1: dropped at committed=%lu/%lu after %lu slices",
+             (unsigned long)committedAtDrop, (unsigned long)spineCount, (unsigned long)slices);
+    benchLog(pbuf);
+  }
 
   // Phase 2: fresh compiler RESUMES from the committed prefix. Stop at the capped spine count (for a
   // huge book we only probe a prefix) or at true completion.
@@ -214,10 +228,12 @@ static bool benchIncrementalCompile(const std::shared_ptr<Epub>& epub) {
   }
   const int64_t us = esp_timer_get_time() - t0;
 
-  BSerial.printf(
-      "BENCH incr compile ok=%d spines=%lu slices=%lu total=%lldms MIN-EVER free=%lu contig=%lu (start free=%lu)\n",
-      ok ? 1 : 0, (unsigned long)spineCount, (unsigned long)slices, us / 1000, (unsigned long)minFree,
-      (unsigned long)minContig, (unsigned long)freeHeap());
+  char buf[192];
+  snprintf(buf, sizeof(buf),
+           "BENCH incr compile ok=%d spines=%lu slices=%lu total=%lldms MIN-EVER free=%lu contig=%lu (start free=%lu)",
+           ok ? 1 : 0, (unsigned long)spineCount, (unsigned long)slices, (long long)(us / 1000),
+           (unsigned long)minFree, (unsigned long)minContig, (unsigned long)freeHeap());
+  benchLog(buf);
   return ok;
 }
 
@@ -440,4 +456,12 @@ void setup() {
   BSerial.println("=== done ===");
 }
 
-void loop() {}
+void loop() {
+  // Re-emit the persisted summary so a monitor attached after the reset-induced USB drop still sees it.
+  if (gBenchSummary.length()) {
+    BSerial.println("\n--- BENCH SUMMARY (persisted) ---");
+    BSerial.print(gBenchSummary);
+    BSerial.println("--- end summary ---");
+  }
+  delay(3000);
+}
