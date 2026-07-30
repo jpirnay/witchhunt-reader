@@ -222,6 +222,105 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
   bin.close();
 }
 
+// --- (3) reader-flow simulation: what the ACTUAL cursor read-loop the reader will use costs, per page ---
+//
+// The layout sweep above measures aggregate throughput. This mode instead mimics how the reader
+// turns pages: open content.bin once, then for the first few spines OPEN the spine and time each of
+// the first N pages INDIVIDUALLY from a page-boundary cursor (page 1 = the first layoutPage from
+// {spine, block 0}; page 2 = layoutPage from page 1's end cursor; ...). This answers "when does the
+// first page of a spine appear, when the second" directly, and separates the openSpine (seek + aux
+// load) cost from the per-page layout cost. It also exercises the O(1) prev via a cursor stack (what
+// the reader uses instead of the O(pages) standalone layoutPageBackward). No frontier / bg-compile —
+// content.bin is fully compiled here (benchCompile ran first).
+static void benchReaderFlow(const std::shared_ptr<Epub>& epub) {
+  const std::string binPath = epub->getCachePath() + "/content.bin";
+  FsFile bin;
+  if (!Storage.openFileForRead("BNC", binPath, bin)) {
+    BSerial.println("BENCH readerflow ERROR content.bin open failed");
+    return;
+  }
+  compiled::BlockStreamReader reader;
+  if (!reader.open(bin)) {
+    BSerial.println("BENCH readerflow ERROR content.bin read failed");
+    bin.close();
+    return;
+  }
+  const compiled::LayoutParams params = makeParams(epub);
+
+  // How many spines to probe, and how many leading pages of each to time individually. First-page
+  // latency is the headline number the frontier design cares about (docs/intra-spine-frontier §4).
+  constexpr uint32_t kMaxSpinesToProbe = 6;
+  constexpr int kPagesPerSpine = 4;
+
+  BSerial.println("BENCH readerflow: per-page latency from the cursor read-loop (openSpine + first pages)");
+
+  uint32_t probed = 0;
+  for (uint32_t si = 0; si < reader.spineCount() && probed < kMaxSpinesToProbe; ++si) {
+    if (!reader.spineAvailable(si)) continue;
+
+    // openSpine = "seek to the start of this spine": reads the spine header + loads its self-contained
+    // aux (style pool + anchors/labels/chapters + block-offset table location). This is the fixed
+    // cost the reader pays when crossing into a spine. Measured standalone here to see what fraction
+    // of page-1 latency it is — NOTE layoutPage() calls openSpine internally too, so page-1's `layout`
+    // timing below ALREADY includes an openSpine; this is just to attribute it.
+    const int64_t tOpen = esp_timer_get_time();
+    const bool opened = reader.openSpine(si);
+    const int64_t openUs = esp_timer_get_time() - tOpen;
+    if (!opened) {
+      BSerial.printf("BENCH readerflow spine=%lu openSpine FAILED\n", (unsigned long)si);
+      continue;
+    }
+
+    // Walk the leading pages, timing each. Cursor starts at the spine's first block; each page's end
+    // cursor is the next page's start (exactly the reader's `cursor = lp.end`).
+    compiled::PagePosition cursor;
+    cursor.spineIndex = static_cast<uint16_t>(si);
+    std::vector<compiled::PagePosition> starts;  // page-start cursors, for the prev-stack timing
+    int64_t firstPageUs = 0, secondPageUs = 0;
+    bool spineEnded = false;
+    for (int p = 0; p < kPagesPerSpine; ++p) {
+      const int64_t t = esp_timer_get_time();
+      compiled::LaidOutPage lp = compiled::layoutPage(reader, renderer, params, cursor);
+      const int64_t us = esp_timer_get_time() - t;
+      if (!lp.ok || !lp.page) {
+        BSerial.printf("BENCH readerflow spine=%lu page=%d layout FAILED (ok=%d page=%d)\n", (unsigned long)si, p,
+                      lp.ok ? 1 : 0, lp.page ? 1 : 0);
+        break;
+      }
+      starts.push_back(lp.start);
+      // page 1 latency = openSpine + this first layoutPage (what the user waits for on entering a spine).
+      if (p == 0) firstPageUs = us;
+      if (p == 1) secondPageUs = us;
+      BSerial.printf("BENCH readerflow spine=%lu page=%d layout=%lldus%s contig=%lu\n", (unsigned long)si, p, us,
+                    p == 0 ? " (FIRST)" : "", (unsigned long)contigHeap());
+      if (lp.atSpineEnd) {
+        spineEnded = true;
+        break;
+      }
+      cursor = lp.end;
+    }
+    // page1 (FIRST-page latency the user waits for entering a spine) ALREADY includes openSpine.
+    BSerial.printf("BENCH readerflow spine=%lu SUMMARY page1=%lldus (of which openSpine~%lldus) page2=%lldus%s\n",
+                  (unsigned long)si, firstPageUs, openUs, secondPageUs,
+                  spineEnded ? " [spine<=probe pages]" : "");
+
+    // O(1) prev via the cursor stack: from the last page we reached, "prev" is just popping the
+    // previous page-start cursor and re-laying it out — no backward scan. Time that re-layout so we
+    // have the reader's real prev-page cost (vs the standalone O(pages) layoutPageBackward above).
+    if (starts.size() >= 2) {
+      const compiled::PagePosition prevStart = starts[starts.size() - 2];
+      const int64_t t = esp_timer_get_time();
+      compiled::LaidOutPage pv = compiled::layoutPage(reader, renderer, params, prevStart);
+      const int64_t us = esp_timer_get_time() - t;
+      BSerial.printf("BENCH readerflow spine=%lu prev(stack)=%lldus ok=%d\n", (unsigned long)si, us,
+                    (pv.ok && pv.page) ? 1 : 0);
+    }
+    ++probed;
+  }
+
+  bin.close();
+}
+
 void setup() {
   BSerial.begin(115200);
   delay(2000);
@@ -260,7 +359,10 @@ void setup() {
   BSerial.printf("BENCH open book=%s spines=%d load=%lldms\n", bookPath.c_str(), epub->getSpineItemsCount(),
                 (esp_timer_get_time() - lt) / 1000);
 
-  if (benchCompile(epub)) benchLayout(epub);
+  if (benchCompile(epub)) {
+    benchReaderFlow(epub);  // (3) per-page cursor read-loop latency (first-page-of-spine focus) — FIRST
+    benchLayout(epub);      // (2) aggregate sweep last (its O(pages) backward sweep is slow on a giant spine)
+  }
 
   BSerial.printf("\nfree after %lu  min-ever %lu\n", (unsigned long)freeHeap(),
                 (unsigned long)esp_get_minimum_free_heap_size());
