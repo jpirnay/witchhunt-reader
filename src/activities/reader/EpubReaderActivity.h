@@ -512,13 +512,6 @@ class EpubReaderActivity final : public Activity {
   // eagerly and reallocates the buffer (arming a half-refresh); the in-place path defers images
   // to lazy per-page decode and leaves the baseline intact for a normal fast refresh.
   BuildOutcome compileSectionCache(const RenderLayout& layout, bool embeddedStyle, uint8_t imageRendering);
-#if EPUB_STAGE1 && defined(EPUB_STAGE1_READER)
-  // G5-A: ensure <cachePath>/content.bin exists + matches the book, compiling the whole book once
-  // (blocking, borrowing the secondary framebuffer as the compile arena) if absent/stale. After this,
-  // every section (re)build serves from content.bin (compileSectionCache's fast path) instead of
-  // re-parsing XHTML. One-time like book.bin. No-op when a valid content.bin already exists.
-  void ensureContentBinCompiled();
-#endif
   // True when heap is ample enough to build the current section WITHOUT releasing the secondary
   // buffer (the in-place path). Reuses Section::heapAllowsEmbeddedStyle for CSS books.
   // inflatedSize is the spine's uncompressed size: the extraction phase holds an inflate ring

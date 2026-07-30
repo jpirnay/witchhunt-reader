@@ -20,11 +20,6 @@
 #include <Epub/FootnotePreviews.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
-#if EPUB_STAGE1 && defined(EPUB_STAGE1_READER)
-#include <BuildArena.h>
-#include <Epub/content/BlockStreamReader.h>
-#include <Memory.h>
-#endif
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <FsHelpers.h>
@@ -315,11 +310,6 @@ void EpubReaderActivity::onEnter() {
 
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
-
-#if EPUB_STAGE1 && defined(EPUB_STAGE1_READER)
-  // G5-A: compile content.bin up front (once) so every section build this session serves from it.
-  ensureContentBinCompiled();
-#endif
 
   if (getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
     // Just loads images.bin (or starts an empty cache) — no whole-ZIP scan. Image
@@ -2474,60 +2464,6 @@ EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(
                                                              : SectionBuildMode::IncrementalReleased;
 }
 
-#if EPUB_STAGE1 && defined(EPUB_STAGE1_READER)
-void EpubReaderActivity::ensureContentBinCompiled() {
-  if (!epub) return;
-  const std::string binPath = epub->getCachePath() + "/content.bin";
-
-  uint64_t bookFp = 0;
-  const bool haveFp = epub->zipContentFingerprint(&bookFp);
-  const uint32_t spineCount = static_cast<uint32_t>(epub->getSpineItemsCount());
-  if (Storage.exists(binPath.c_str())) {
-    FsFile probe;
-    if (Storage.openFileForRead("ERS", binPath, probe)) {
-      compiled::BlockStreamReader r;
-      const bool opened = r.open(probe) && (!haveFp || r.fingerprint() == bookFp);
-      // COMPLETE (all spines committed) → reuse as-is. PARTIAL (a prior interrupted compile) → keep
-      // it and let compileBookToContentBin RESUME (append the missing spines). Stale/foreign → drop.
-      const bool complete = opened && r.committedSpines() == spineCount;
-      const bool partial = opened && !complete;
-      probe.close();
-      if (complete) return;
-      if (!opened) Storage.remove(binPath.c_str());  // stale/foreign; partial is kept for resume
-      if (partial) LOG_INF("ERS", "content.bin partial (%u/%u spines) — resuming", r.committedSpines(), spineCount);
-    }
-  }
-
-  // Compile the whole book once (blocking — like book.bin). Show the indexing popup, and BORROW the
-  // secondary framebuffer as the compile arena so a giant single spine's ~33 KB contiguous inflate
-  // ring comes from the framebuffer, not the fragmented reader-context heap (device-observed OOM).
-  LOG_INF("ERS", "content.bin absent/stale — compiling whole book (borrowing framebuffer)");
-  GUI.drawPopup(renderer, tr(STR_INDEXING));
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-
-  Section::BuildParams bp = makeSectionBuildParams();
-
-  // BORROW the ~52 KB secondary framebuffer as the compile's bounded arena (arena discipline: fixed,
-  // predictable working set rather than "hope the heap is big enough"). The per-spine inflate ring is
-  // carved from the framebuffer region; the parser's per-block accumulation is bounded by the
-  // continuation-flush cap (stage1AddWord) so no single block can grow the heap without limit.
-  size_t borrowedSize = 0;
-  uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
-  std::unique_ptr<BuildArena> scratch;
-  if (borrowed) {
-    scratch = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
-    if (scratch && !scratch->valid()) scratch.reset();
-  }
-  std::shared_ptr<Epub> shared(epub.get(), [](Epub*) {});  // non-owning; the activity keeps ownership
-  const uint32_t t0 = millis();
-  const bool ok = Section::compileBookToContentBin(shared, renderer, bp, scratch.get());
-  scratch.reset();
-  if (borrowed) renderer.reallocSecondaryBuffer();
-  LOG_INF("ERS", "compileBookToContentBin %s in %ums (free=%lu)", ok ? "OK" : "FAILED", millis() - t0,
-          esp_get_free_heap_size());
-}
-#endif
-
 EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const RenderLayout& layout,
                                                                          const bool embeddedStyle,
                                                                          const uint8_t imageRendering) {
@@ -2599,34 +2535,6 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   };
 
   const auto runCreate = [&]() -> bool { return runParse(); };
-
-#if EPUB_STAGE1 && defined(EPUB_STAGE1_READER)
-  // G5-A: prefer to build this section's cache by REPLAYING content.bin (skips ZIP inflate + XML +
-  // CSS — the settings-change fast path) over re-parsing the XHTML. buildSectionFromContentBin writes
-  // the SAME section file createSectionFile would, so the whole page-index reader is unchanged; it
-  // returns false when content.bin is absent/stale or doesn't have this spine, and we fall through to
-  // the parse. content.bin itself is produced once on reader entry (see onEnter). Runs on the
-  // released-buffer path (the replay's inflate ring wants the headroom, same as the parse).
-  const uint32_t rbStart = millis();
-  const bool fromBin = section->buildSectionFromContentBin(buildParams, /*skipEviction=*/false);
-  LOG_INF("ERS", "buildSectionFromContentBin returned %d in %ums (free=%lu)", fromBin ? 1 : 0, millis() - rbStart,
-          esp_get_free_heap_size());
-  if (fromBin) {
-    // Section cache built from content.bin — skip the XHTML parse entirely.
-    if (released) {
-      const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-      section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
-      renderer.clearScreen();
-    }
-    if (released && !reallocSecondaryEvictingCaches()) {
-      secondaryBufferDegraded_ = true;
-    } else if (released) {
-      secondaryBufferDegraded_ = false;
-      renderer.setSingleBufferFastDiff(false);
-    }
-    return BuildOutcome::Built;
-  }
-#endif
 
   const uint32_t createStart = millis();
   bool createOk = runCreate();
