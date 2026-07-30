@@ -49,24 +49,14 @@ inline constexpr char kMagic[4] = {'W', 'B', 'C', '1'};
 // mid-spine and lay out backward (docs/stage1-single-source-live-pagination-2026-07-27.md). It is
 // microreader's baked-descriptor-table approach (MrbChapterSource bulk-reads its offsets at open).
 // content.bin is a rebuildable cache; a v6 file just fails the version check and is recompiled.
-// v8 extends the header with two O(1) "how far did we get" fields, so a resumed compile knows the
-// progress without scanning the spine index, and the intra-spine frontier has a home:
-//   - committedCount: number of spine slots committed so far. == spineCount means the whole book is
-//     compiled (a cheap "is it complete?" check); < spineCount means a partial/in-progress file that
-//     openExisting() resumes (skip committed spines, compile the rest). Bumped in the SAME two-phase
-//     commit as the slot it counts, so it is never ahead of the durable slots.
-//   - checkpointOffset: reserved for the intra-spine rolling checkpoint (frontier of a spine still
-//     being written); 0 until that lands. See docs/intra-spine-frontier-2026-07-29.md.
-// content.bin is a rebuildable cache, so a v7 file just fails the version check and is recompiled.
-inline constexpr uint8_t kVersion = 8;
+inline constexpr uint8_t kVersion = 7;
 
-// v8 fixed header: magic(4) + version(1) + fingerprint(8) + spineCount(4) + committedCount(4) +
-// checkpointOffset(4). Immediately followed by the pre-allocated spine-offset index: spineCount ×
-// u32, all 0 at begin(), each committed as its spine finishes. A reader validates magic+version,
-// reads spineCount (+ committedCount/checkpointOffset), then reads the index that starts at
-// kHeaderSize; a 0 offset = spine not yet available. Per-spine style tables + chapters live inside
-// each spine's section (self-contained), so there are no book-level pool/chapter offsets.
-inline constexpr uint32_t kHeaderSize = 4 + 1 + 8 + 4 + 4 + 4;  // = 25 bytes; spine index begins here
+// v6 fixed header: magic(4) + version(1) + fingerprint(8) + spineCount(4). Immediately followed by
+// the pre-allocated spine-offset index: spineCount × u32, all 0 at begin(), each committed as its
+// spine finishes. A reader validates magic+version, reads spineCount, then reads the index that
+// starts at kHeaderSize; a 0 offset = spine not yet available. Per-spine style tables + chapters
+// live inside each spine's section (self-contained), so there are no book-level pool/chapter offsets.
+inline constexpr uint32_t kHeaderSize = 4 + 1 + 8 + 4;  // = 17 bytes; spine index begins here
 
 // Word::styleSpan bits. Bits 0-6 = inline font style (the EpdFontFamily::Style set,
 // remapped to a stable on-disk layout); bit 7 = word attaches to the previous word

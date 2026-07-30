@@ -49,11 +49,6 @@ class BlockStreamReader {
 
   uint64_t fingerprint() const { return fingerprint_; }
   uint32_t spineCount() const { return static_cast<uint32_t>(spineOffsets_.size()); }
-  // v8 header progress fields (O(1), read at open()): committedSpines() == spineCount() means the
-  // whole book is compiled; fewer means a partial/resumable file. checkpointOffset() is the
-  // intra-spine frontier checkpoint (0 until that lands). Advisory — the durable truth is the slots.
-  uint32_t committedSpines() const { return committedCount_; }
-  uint32_t checkpointOffset() const { return checkpointOffset_; }
   // The CURRENT spine's local style table (v6), loaded by openSpine. Empty until openSpine succeeds.
   const std::vector<CssStyle>& spineStylePool() const { return spineStylePool_; }
   // True if spine i's index slot is committed (offset != 0) — i.e. the spine is fully written and
@@ -129,8 +124,6 @@ class BlockStreamReader {
   FsFile* file_ = nullptr;
   bool ok_ = false;
   uint64_t fingerprint_ = 0;
-  uint32_t committedCount_ = 0;    // v8 header field (advisory progress count)
-  uint32_t checkpointOffset_ = 0;  // v8 header field (frontier; 0 until it lands)
   std::vector<uint32_t> spineOffsets_;  // fixed index right after the header; 0 slot = not available
 
   // Current spine cursor (v6: style pool + chapters are per-spine, loaded by openSpine).

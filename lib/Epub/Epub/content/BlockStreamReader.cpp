@@ -53,8 +53,6 @@ bool BlockStreamReader::open(FsFile& file) {
   readPod(file, fingerprint_);
   uint32_t spineCount = 0;
   readPod(file, spineCount);
-  readPod(file, committedCount_);    // v8: O(1) "how far" (== spineCount when the whole book is done)
-  readPod(file, checkpointOffset_);  // v8: intra-spine frontier checkpoint (0 until it lands)
 
   const uint32_t fileSize = static_cast<uint32_t>(file.fileSize());
   // The spine-offset index is fixed right after the header (spineCount × u32). A 0 slot = spine not

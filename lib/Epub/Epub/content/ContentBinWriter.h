@@ -131,9 +131,6 @@ class ContentBinWriter : public BlockSink {
   // Committed slots (populated by openExisting + each commitSpineOffset). Empty after a fresh begin()
   // — nothing committed yet — so spineCommitted() is false for all, which is correct. See openExisting.
   std::vector<bool> committed_;
-  // v8: number of committed spines, mirrored into the header (kCommittedCountOffset) so a resumed or
-  // inspecting reader gets "how far / is it complete" in O(1). Kept in lockstep with committed_.
-  uint32_t committedCount_ = 0;
 
   // Current spine state (all small; RESET at each spine — never a whole spine of blocks). v6: the
   // style pool + chapters are PER-SPINE (written into the spine's aux region at onSpineEnd), so a
@@ -152,34 +149,26 @@ class ContentBinWriter : public BlockSink {
   // v7: one entry per LOGICAL block (captured at the start of each onBlock, before its records are
   // written), baked into the aux region at onSpineEnd for O(1) seekToBlock in the reader.
   //
-  // MEMORY DISCIPLINE (2026-07-30): the table grows one 12 B entry PER BLOCK, so a whole-novel single
-  // spine (Small Gods, ~4097 blocks) accumulates ~48 KB held resident until onSpineEnd — device OOM
-  // at the reader's tight heap (measured: free bled 16 KB→abort as the table grew). A prior chunked
-  // linked list only removed the contiguous-realloc abort, NOT the O(blocks) total. So when a temp
-  // path is set (the device compile), STREAM each entry to a temp file (O(1) resident, arena
-  // discipline / FreeInk's fixed-working-set principle) and splice it into the aux region at
-  // onSpineEnd. When no temp path is set (host tests: small spines), fall back to a small in-RAM
-  // vector.
-  std::string blockOffsetTmpPath_;  // set via setBlockOffsetTempPath; empty → in-RAM fallback
-  FsFile blockOffsetTmp_;           // open on first append when a temp path is set
-  std::optional<serialization::BufferedFileWriter> blockOffsetTmpWriter_;  // batches the 12 B appends
-  std::vector<BlockOffset> blockOffsetMem_;  // in-RAM fallback (temp path unset)
+  // A whole-novel single spine (e.g. Small Gods, ~570 KB / thousands of blocks) made a
+  // std::vector<BlockOffset> here grow until push_back's doubling contiguous realloc aborted on the
+  // fragmented heap (bad_alloc under -fno-exceptions). Mirror FreeInk's PageCache: accumulate the
+  // index as a linked list of fixed-size chunks allocated on demand — no contiguous block ever
+  // exceeds one chunk, so the abort class is gone; a typical short chapter still costs one chunk.
+  // Streamed out (count + entries) at onSpineEnd, then released.
+  struct BlockOffsetChunk {
+    static constexpr uint32_t kEntries = 128;  // ~1.5 KB/chunk at sizeof(BlockOffset)=12
+    BlockOffset entries[kEntries];
+    std::unique_ptr<BlockOffsetChunk> next;
+  };
+  std::unique_ptr<BlockOffsetChunk> blockOffsetHead_;
+  BlockOffsetChunk* blockOffsetTail_ = nullptr;
   uint32_t blockOffsetCount_ = 0;
-  // Append one entry (temp file when a path is set, else in-RAM vector). False on I/O/OOM → ok_=false.
+  // Append one entry; false only on OOM (chunk alloc failed) — caller sets ok_=false.
   bool appendBlockOffset(const BlockOffset& bo);
-  // Write count + every entry to `out` (the aux region): from the temp file (bounded copy) or the
-  // in-RAM vector. Mirrors writeBlockOffsets' on-disk format.
-  bool spliceBlockOffsets(serialization::BufferedFileWriter& out);
-  // Reset the table (truncate the temp file / clear the vector + zero the count). Called at beginSpine.
+  // Stream count + every entry to `out` (the aux region), mirroring writeBlockOffsets' format.
+  bool writeBlockOffsetChunks(serialization::BufferedFileWriter& out) const;
+  // Drop all chunks (LIFO via unique_ptr chain) and reset the count. Called at each beginSpine.
   void clearBlockOffsets();
-
- public:
-  // Set the sidecar path the per-block offset table streams to during compile (e.g.
-  // <cachePath>/blockoff.tmp). When set, the offset table never accumulates in RAM (bounded working
-  // set for arbitrarily large spines). Optional — unset keeps the small in-RAM fallback (host tests).
-  void setBlockOffsetTempPath(const std::string& path) { blockOffsetTmpPath_ = path; }
-
- private:
 
   // Footnotes/xpath arrive DURING a block's build (before its onBlock). Buffered, attached at onBlock.
   std::vector<FootnoteRef> pendingFootnotes_;
