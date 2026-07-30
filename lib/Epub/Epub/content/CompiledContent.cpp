@@ -29,6 +29,10 @@ bool writeContentBin(FsFile& out, const CompiledContent& content) {
   writePod(out, kVersion);
   writePod(out, content.sourceFingerprint);
   writePod(out, spineCount);
+  // v8: the whole-book writer produces a COMPLETE file, so committedCount == spineCount ("done").
+  // checkpointOffset is 0 (no intra-spine frontier — the file is fully written).
+  writePod(out, spineCount);               // committedCount
+  writePod(out, static_cast<uint32_t>(0));  // checkpointOffset
   const uint32_t indexPos = static_cast<uint32_t>(out.position());  // == kHeaderSize
   for (uint32_t i = 0; i < spineCount; ++i) writePod(out, static_cast<uint32_t>(0));  // zeroed index
 

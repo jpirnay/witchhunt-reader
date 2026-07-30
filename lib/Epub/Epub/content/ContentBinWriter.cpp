@@ -1,8 +1,8 @@
 #include "ContentBinWriter.h"
 
 #include <Logging.h>
-#include <Memory.h>
 
+#include <algorithm>
 #include <utility>
 
 #include "BlockSerialization.h"
@@ -15,14 +15,22 @@ namespace {
 using serialization::readPod;
 using serialization::writePod;
 
-// Write the v6 fixed header: magic + version + fingerprint + spineCount. The spine-offset index
-// (spineCount × u32) follows immediately and is written separately by begin().
+// Write the v8 fixed header: magic + version + fingerprint + spineCount + committedCount +
+// checkpointOffset. committedCount/checkpointOffset start at 0 on a fresh begin(); committedCount is
+// back-patched by commitSpineOffset. The spine-offset index (spineCount × u32) follows immediately
+// and is written separately by begin().
 void writeHeader(FsFile& f, uint64_t fingerprint, uint32_t spineCount) {
   f.write(reinterpret_cast<const uint8_t*>(kMagic), 4);
   writePod(f, kVersion);
   writePod(f, fingerprint);
   writePod(f, spineCount);
+  writePod(f, static_cast<uint32_t>(0));  // committedCount
+  writePod(f, static_cast<uint32_t>(0));  // checkpointOffset (reserved; frontier)
 }
+
+// Byte offset of the committedCount field within the header (after magic+version+fingerprint+
+// spineCount). Used to back-patch it as spines commit.
+constexpr uint32_t kCommittedCountOffset = 4 + 1 + 8 + 4;  // = 17
 
 }  // namespace
 
@@ -32,6 +40,7 @@ bool ContentBinWriter::begin(FsFile& file, uint32_t spineCount, uint64_t fingerp
   spineCount_ = spineCount;
   fingerprint_ = fingerprint;
   nextSpineIndex_ = 0;
+  committedCount_ = 0;
   spineStyles_.clear();
   spineChapters_.clear();
   spineOpen_ = false;
@@ -61,6 +70,7 @@ bool ContentBinWriter::openExisting(FsFile& file, uint32_t spineCount, uint64_t 
   fingerprint_ = fingerprint;
   nextSpineIndex_ = 0;
   committed_.assign(spineCount, false);
+  committedCount_ = 0;
   spineStyles_.clear();
   spineChapters_.clear();
   spineOpen_ = false;
@@ -98,7 +108,10 @@ bool ContentBinWriter::openExisting(FsFile& file, uint32_t spineCount, uint64_t 
     uint32_t off = 0;
     readPod(file, off);
     if (off > fileSize) return false;  // committed offset past EOF → corrupt; caller truncates
-    if (off != 0) committed_[i] = true;
+    if (off != 0) {
+      committed_[i] = true;
+      ++committedCount_;  // rebuild the count from the durable slots (header field is advisory)
+    }
   }
   // Append new spine sections at EOF; committed slots + their data are left intact.
   if (!file.seekSet(fileSize)) return false;
@@ -121,6 +134,14 @@ void ContentBinWriter::commitSpineOffset(uint32_t spineIndex, uint32_t offset) {
     return;
   }
   writePod(*file_, offset);
+  // Bump the header committedCount AFTER the slot write (only for a not-yet-committed spine), so the
+  // count is never ahead of the durable slots: a crash between the two leaves count one behind (a
+  // safe lower bound), never one ahead. Track it live so resumed sessions keep it accurate.
+  const bool firstCommitOfSlot = spineIndex >= committed_.size() || !committed_[spineIndex];
+  if (firstCommitOfSlot) {
+    ++committedCount_;
+    if (file_->seekSet(kCommittedCountOffset)) writePod(*file_, committedCount_);
+  }
   file_->seekSet(here);  // resume appending
   if (bw_) bw_->rebase();
   ok_ = static_cast<bool>(*file_);
@@ -155,50 +176,77 @@ void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
 }
 
 bool ContentBinWriter::appendBlockOffset(const BlockOffset& bo) {
-  const uint32_t slot = blockOffsetCount_ % BlockOffsetChunk::kEntries;
-  if (slot == 0) {
-    // Current chunk full (or none yet): allocate the next. makeUniqueNoThrow — a failed alloc
-    // returns null (never throws) under -fno-exceptions, so the caller aborts the build cleanly.
-    auto chunk = makeUniqueNoThrow<BlockOffsetChunk>();
-    if (!chunk) return false;
-    BlockOffsetChunk* raw = chunk.get();
-    if (blockOffsetTail_) {
-      blockOffsetTail_->next = std::move(chunk);
-    } else {
-      blockOffsetHead_ = std::move(chunk);
+  // Temp-file path (device compile): stream the 12 B entry to disk so the table is O(1) resident
+  // regardless of block count. Open the temp file (truncating) on the first append of the spine.
+  if (!blockOffsetTmpPath_.empty()) {
+    if (!blockOffsetTmpWriter_) {
+      if (!Storage.openFileForWrite("CBW", blockOffsetTmpPath_, blockOffsetTmp_)) return false;
+      blockOffsetTmpWriter_.emplace(blockOffsetTmp_);
     }
-    blockOffsetTail_ = raw;
+    blockOffsetTmpWriter_->writePod(bo.fileOffset);
+    blockOffsetTmpWriter_->writePod(bo.charOffset);
+    blockOffsetTmpWriter_->writePod(bo.recordIndex);
+    if (!static_cast<bool>(*blockOffsetTmpWriter_)) return false;
+    ++blockOffsetCount_;
+    return true;
   }
-  blockOffsetTail_->entries[slot] = bo;
+  // In-RAM fallback (no temp path — host tests, small spines). A push_back that throws under
+  // -fno-exceptions aborts; acceptable here because host has ample heap and spines are tiny.
+  blockOffsetMem_.push_back(bo);
   ++blockOffsetCount_;
   return true;
 }
 
-bool ContentBinWriter::writeBlockOffsetChunks(serialization::BufferedFileWriter& out) const {
-  // Same on-disk format as writeBlockOffsets(): u32 count, then count x {fileOffset,charOffset,
-  // recordIndex}. Walk the chunk list in order, emitting the live entries of each.
+bool ContentBinWriter::spliceBlockOffsets(serialization::BufferedFileWriter& out) {
+  // Same on-disk format as writeBlockOffsets(): u32 count, then count × {fileOffset,charOffset,
+  // recordIndex}. From the temp file (bounded copy) when streaming, else the in-RAM vector.
   out.writePod(blockOffsetCount_);
-  uint32_t remaining = blockOffsetCount_;
-  for (const BlockOffsetChunk* c = blockOffsetHead_.get(); c && remaining > 0; c = c->next.get()) {
-    const uint32_t n = remaining < BlockOffsetChunk::kEntries ? remaining : BlockOffsetChunk::kEntries;
-    for (uint32_t i = 0; i < n; ++i) {
-      out.writePod(c->entries[i].fileOffset);
-      out.writePod(c->entries[i].charOffset);
-      out.writePod(c->entries[i].recordIndex);
+  if (!blockOffsetTmpPath_.empty()) {
+    if (blockOffsetCount_ == 0) return static_cast<bool>(out);  // nothing streamed
+    if (!blockOffsetTmpWriter_) return false;                   // count>0 but no writer → inconsistent
+    if (!blockOffsetTmpWriter_->flush()) return false;          // land all buffered entries on SD
+    // Close the write handle before reopening for read: SdFat does not like the same path open for
+    // write and read at once. (clearBlockOffsets at the next beginSpine also drops these; safe.)
+    blockOffsetTmpWriter_.reset();
+    if (blockOffsetTmp_) blockOffsetTmp_.close();
+    // Copy the temp file's bytes into the aux region through a bounded stack buffer (fixed working
+    // set — never the whole table in RAM). Open the temp file for read at offset 0.
+    FsFile in;
+    if (!Storage.openFileForRead("CBW", blockOffsetTmpPath_, in)) return false;
+    const uint32_t total = blockOffsetCount_ * 3u * static_cast<uint32_t>(sizeof(uint32_t));
+    uint8_t buf[512];
+    uint32_t copied = 0;
+    while (copied < total) {
+      const uint32_t want = std::min<uint32_t>(sizeof(buf), total - copied);
+      const int got = in.read(buf, want);
+      if (got <= 0) {
+        in.close();
+        return false;
+      }
+      if (!out.write(buf, static_cast<size_t>(got))) {
+        in.close();
+        return false;
+      }
+      copied += static_cast<uint32_t>(got);
     }
-    remaining -= n;
+    in.close();
+    return static_cast<bool>(out);
+  }
+  for (const BlockOffset& bo : blockOffsetMem_) {
+    out.writePod(bo.fileOffset);
+    out.writePod(bo.charOffset);
+    out.writePod(bo.recordIndex);
   }
   return static_cast<bool>(out);
 }
 
 void ContentBinWriter::clearBlockOffsets() {
-  // Release LIFO: unique_ptr chain would recurse-destroy on a long list (stack depth = chunk count),
-  // so unlink head-first iteratively. Each reset frees one chunk; its `next` is already detached.
-  while (blockOffsetHead_) {
-    std::unique_ptr<BlockOffsetChunk> head = std::move(blockOffsetHead_);
-    blockOffsetHead_ = std::move(head->next);
-  }
-  blockOffsetTail_ = nullptr;
+  // Streaming path: close + truncate the temp file so the next spine starts empty (openFileForWrite
+  // in appendBlockOffset truncates, so just drop the writer + handle here). In-RAM path: clear.
+  blockOffsetTmpWriter_.reset();
+  if (blockOffsetTmp_) blockOffsetTmp_.close();
+  blockOffsetMem_.clear();
+  blockOffsetMem_.shrink_to_fit();
   blockOffsetCount_ = 0;
 }
 
@@ -309,7 +357,7 @@ void ContentBinWriter::onSpineEnd() {
   writeLabels(*bw_, pageBreakLabels_);
   writeStylePool(*bw_, spineStyles_);
   writeChapters(*bw_, spineChapters_);
-  writeBlockOffsetChunks(*bw_);  // v7: baked per-block offset table (after chapters), from chunk list
+  spliceBlockOffsets(*bw_);  // v7: baked per-block offset table (after chapters); streamed from temp file
   // Back-patch the spine header (firstCharOffset + blockCount + auxOffset). Drain the buffer first so
   // the file cursor is the true append end, patch directly, restore + rebase to keep appending.
   if (!bw_->flush()) {
