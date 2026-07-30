@@ -1443,12 +1443,11 @@ Section::ReadBackStep Section::stepReadBackFromContentBin(const BuildParams& p, 
 }
 
 bool Section::compileBookToContentBin(const std::shared_ptr<Epub>& epub, GfxRenderer& renderer,
-                                      const BuildParams& params, BuildArena* externalScratch) {
+                                      const BuildParams& params) {
 #if !EPUB_STAGE1
   (void)epub;
   (void)renderer;
   (void)params;
-  (void)externalScratch;
   return false;
 #else
   const uint32_t t0 = millis();
@@ -1459,49 +1458,23 @@ bool Section::compileBookToContentBin(const std::shared_ptr<Epub>& epub, GfxRend
   uint64_t fingerprint = 0;
   epub->zipContentFingerprint(&fingerprint);
 
-  compiled::ContentBinWriter writer;
   FsFile binFile;
-
-  // RESUME: if a fingerprint-matching content.bin already exists, reopen it and append only the
-  // spines whose index slot is not yet committed (a crash/exit/sleep mid-compile — likely on a
-  // minutes-long book — then picks up where it left off instead of recompiling from spine 0). The
-  // two-phase commit guarantees a committed slot's data is durable, so skipping it is always safe.
-  bool resumed = false;
-  if (Storage.exists(binPath.c_str()) && Storage.openFileForReadWrite("SCT", binPath, binFile)) {
-    if (writer.openExisting(binFile, static_cast<uint32_t>(spineCount), fingerprint)) {
-      resumed = true;
-      LOG_INF("SCT", "compileBookToContentBin: resuming existing content.bin");
-    } else {
-      binFile.close();  // stale/foreign/corrupt — fall through to a fresh truncating begin()
-    }
+  if (!Storage.openFileForWrite("SCT", binPath, binFile)) {
+    LOG_ERR("SCT", "compileBookToContentBin: cannot open %s for write", binPath.c_str());
+    return false;
   }
-  if (!resumed) {
-    if (!Storage.openFileForWrite("SCT", binPath, binFile)) {
-      LOG_ERR("SCT", "compileBookToContentBin: cannot open %s for write", binPath.c_str());
-      return false;
-    }
-    if (!writer.begin(binFile, static_cast<uint32_t>(spineCount), fingerprint)) {
-      binFile.close();
-      Storage.remove(binPath.c_str());
-      return false;
-    }
+  compiled::ContentBinWriter writer;
+  if (!writer.begin(binFile, static_cast<uint32_t>(spineCount), fingerprint)) {
+    binFile.close();
+    Storage.remove(binPath.c_str());
+    return false;
   }
-
-  // Stream the per-block offset table to a sidecar temp file (O(1) resident) so a giant single spine
-  // never accumulates ~48 KB of offsets in RAM — the reader-context OOM this fixes (see
-  // ContentBinWriter's block-offset comment). Reused/truncated per spine; removed at the end.
-  const std::string blockOffTmp = epub->getCachePath() + "/blockoff.tmp";
-  writer.setBlockOffsetTempPath(blockOffTmp);
 
   bool ok = true;
   for (int i = 0; i < spineCount && ok; ++i) {
-    if (writer.spineCommitted(static_cast<uint32_t>(i))) continue;  // resume: already durable, skip
-    writer.beginSpineAt(static_cast<uint32_t>(i));  // append at EOF, commit into slot i (any order)
+    writer.beginSpine();
     Section section(epub, i, renderer);
     section.setStage1Sink(&writer);  // content-only compile: parser drives the writer, no pages
-    // Lend the borrowed-framebuffer arena (if any) so a giant spine's inflate ring is carved from it
-    // rather than demanding a big contiguous heap block the reader context can't spare.
-    section.setExternalBuildScratch(externalScratch);
     // Run-to-completion (budgetMs=0). skipEviction: we are not touching the section variant cache.
     if (!section.createSectionFile(params.fontId, params.lineCompression, params.extraParagraphSpacing,
                                    params.paragraphAlignment, params.viewportWidth, params.viewportHeight,
@@ -1514,7 +1487,6 @@ bool Section::compileBookToContentBin(const std::shared_ptr<Epub>& epub, GfxRend
   }
   ok = ok && writer.finish();
   binFile.close();
-  Storage.remove(blockOffTmp.c_str());  // sidecar no longer needed once spliced into content.bin
   if (!ok) {
     Storage.remove(binPath.c_str());
     return false;
