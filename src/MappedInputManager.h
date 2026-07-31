@@ -56,8 +56,9 @@ class MappedInputManager {
   HalGPIO& gpio;
   static bool (*stripReversedPredicate)();
 
-  // Left/Right (and their PageBack/PageForward aliases) swap when the front-button strip
-  // runs bottom-to-top on screen, so "previous" always sits above "next".
+  // Left/Right swap when the front-button strip runs bottom-to-top on screen, so
+  // "previous" always sits above "next". The side buttons (Up/Down and their
+  // PageBack/PageForward aliases) are on a different edge and never swap.
   static Button applyStripOrder(Button button);
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
