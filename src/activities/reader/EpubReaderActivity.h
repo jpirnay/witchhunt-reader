@@ -735,7 +735,16 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
-  bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
+  bool preventAutoSleep() override {
+    if (section && section->hasActiveBuild()) return true;
+#if READER_FRESH_ENABLED
+    // Keep the CPU at full speed while the content.bin producer is compiling — exactly like master
+    // stays awake during a section build. Otherwise the framework drops to 10 MHz between waveforms
+    // and the producer crawls (a ~10 s giant-spine parse became ~124 s in-reader vs the bench).
+    if (freshReader_ && producer_ && !producer_->done()) return true;
+#endif
+    return false;
+  }
   // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
   // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
   void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
