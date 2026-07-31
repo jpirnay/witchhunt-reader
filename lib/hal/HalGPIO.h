@@ -29,8 +29,13 @@
 #define BQ27220_SOC_REG 0x2C     // StateOfCharge() command code (%)
 #define BQ27220_CUR_REG 0x0C     // Current() command code (signed mA)
 #define BQ27220_VOLT_REG 0x08    // Voltage() command code (mV)
-#define BQ27220_FLAGS_REG 0x0A   // BatteryStatus() / Flags() command code (bit0=DSG)
-#define BQ27220_FLAG_DSG 0x0001  // DSG bit: 1 = discharging, 0 = charging or at rest
+#define BQ27220_FLAGS_REG 0x0A   // BatteryStatus() / Flags() command code (bit0=DSG, bit9=FC)
+#define BQ27220_FLAG_DSG 0x0001  // DSG bit: 1 = discharging, 0 = charging OR merely at rest
+#define BQ27220_FLAG_FC 0x0200   // FC bit: 1 = fully charged (only latches while on the charger)
+// Minimum Current() reading (mA, positive = into the battery) that counts as
+// "on the charger". A small guard band above 0 keeps gauge noise around rest
+// from being read as charging.
+#define USB_CHARGE_CURRENT_MIN_MA 5
 
 // Analog DS3231 RTC I2C
 #define I2C_ADDR_DS3231 0x68  // RTC I2C address

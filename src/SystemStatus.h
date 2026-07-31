@@ -74,7 +74,10 @@ struct SystemStatus {
     const esp_partition_t* running = esp_ota_get_running_partition();
     s.flashAppPartitionSize = running ? static_cast<uint64_t>(running->size) : 0;
     s.batteryPercent = powerManager.getBatteryPercentage();
-    s.charging = digitalRead(UART0_RXD) == HIGH;
+    // Route through the HAL rather than reading UART0_RXD directly: that pin is
+    // the X4-only USB detect, and on X3 it is repurposed as I2C SDA, where the
+    // bus pull-ups made this read HIGH (= "charging") permanently.
+    s.charging = gpio.isUsbConnected();
     s.uptimeSeconds = millis() / 1000;
     s.macAddress = WiFi.macAddress().c_str();
     s.sdTotalBytes = 0;
