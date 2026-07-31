@@ -15,6 +15,19 @@ class MappedInputManager {
 
   explicit MappedInputManager(HalGPIO& gpio) : gpio(gpio) {}
 
+  // Landscape CCW renders the front-button strip bottom-to-top, so the button that is
+  // physically *above* the other is the one portrait treats as "next/down". Without a
+  // swap the on-screen hints read "Down" above "Up" and pressing the upper button moves
+  // the selection down (issue #87). Both the logical Left/Right roles and their hint text
+  // follow the strip order — logical buttons survive orientation, raw indices do not.
+  //
+  // The predicate is installed once at startup (main.cpp) and queried live, so the flag
+  // can never go stale against a renderer whose orientation changed. It must answer for
+  // the orientation the *user* is holding, which is why the themes' transient flip to
+  // Portrait while drawing the hint strip is not allowed to feed it.
+  static void setStripReversedPredicate(bool (*predicate)());
+  static bool isVerticalStripReversed();
+
   void update() const { gpio.update(); }
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
@@ -41,6 +54,11 @@ class MappedInputManager {
 
  private:
   HalGPIO& gpio;
+  static bool (*stripReversedPredicate)();
+
+  // Left/Right (and their PageBack/PageForward aliases) swap when the front-button strip
+  // runs bottom-to-top on screen, so "previous" always sits above "next".
+  static Button applyStripOrder(Button button);
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
 };
