@@ -1,6 +1,7 @@
 #include "HalPowerManager.h"
 
 #include <Logging.h>
+#include <PowerManager.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
 
@@ -112,23 +113,38 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // Perform all hardware preparation immediately (while the button may still be held)
   // so the user gets instant visual feedback (display already off). Only block for
   // button release at the very end, right before entering sleep.
-  // GPIO13 is connected to the battery latch MOSFET.
+  // GPIO13 on X4 is the battery latch MOSFET.
   // When keepClockAlive is false (default): GPIO13 goes LOW, the MCU is
   // completely powered off during sleep (including the LP timer / RTC memory).
   // When keepClockAlive is true: GPIO13 stays HIGH, the MCU remains powered
   // at ~3-4 mA so the LP timer keeps running and RTC memory is preserved.
   // This allows HalClock to accurately compute elapsed sleep time on wake.
-  constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
-  // Release any GPIO hold from a previous sleep cycle (keepClockAlive=true leaves GPIO13 held after wake).
-  // Without this, gpio_set_level() below silently fails and GPIO13 is stuck in its prior state,
-  // causing the device to enter a sleep/wake loop that requires a hardware reset to escape.
-  gpio_hold_dis(GPIO_SPIWP);
-  gpio_deep_sleep_hold_dis();
-  gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_SPIWP, keepClockAlive ? 1 : 0);
-  esp_sleep_config_gpio_isolate();
-  gpio_deep_sleep_hold_en();
-  gpio_hold_en(GPIO_SPIWP);
+  //
+  // X3 does NOT share this meaning: there GPIO13 is the SD rail's power enable
+  // (active-high), declared as sd.powerEnable in the XTEINK_X3 board profiles.
+  // X3 keeps time on a battery-backed DS3231 (I2C 0x68), so it never needs the
+  // LP timer held alive across sleep — main.cpp forces keepLpAlive=false on X3
+  // for exactly that reason. So on X3 we hand the pin to the SDK's rail teardown
+  // (which cuts the card's power and latches it off) instead of treating it as a
+  // latch; SDCardManager::begin() releases that hold and re-powers on the next
+  // boot. Doing both would make us a second, independent writer of the pin.
+  if (gpio.deviceIsX3()) {
+    freeink::PowerManager::powerDownRailsForSleep();
+    esp_sleep_config_gpio_isolate();
+    gpio_deep_sleep_hold_en();
+  } else {
+    constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
+    // Release any GPIO hold from a previous sleep cycle (keepClockAlive=true leaves GPIO13 held after wake).
+    // Without this, gpio_set_level() below silently fails and GPIO13 is stuck in its prior state,
+    // causing the device to enter a sleep/wake loop that requires a hardware reset to escape.
+    gpio_hold_dis(GPIO_SPIWP);
+    gpio_deep_sleep_hold_dis();
+    gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_SPIWP, keepClockAlive ? 1 : 0);
+    esp_sleep_config_gpio_isolate();
+    gpio_deep_sleep_hold_en();
+    gpio_hold_en(GPIO_SPIWP);
+  }
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
 
   // Now wait for the power button to be fully released before arming the wakeup
