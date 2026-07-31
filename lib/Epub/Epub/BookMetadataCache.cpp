@@ -59,7 +59,18 @@ bool BookMetadataCache::beginTocPass() {
   }
   tocWriter_.emplace(tocFile);
 
-  if (spineCount >= LARGE_SPINE_THRESHOLD) {
+  // Past MAX_ADDRESSABLE_SPINES the index's int16_t spineIndex would wrap and resolve TOC entries
+  // to wrong (or negative) spines. The linear scan has no such limit, so fall back to it rather
+  // than build a silently-corrupt index. No known EPUB comes close; this is a correctness guard,
+  // not a memory one.
+  if (spineCount > MAX_ADDRESSABLE_SPINES) {
+    LOG_INF("BMC", "Spine count %d exceeds indexable %d; using linear TOC lookup", spineCount, MAX_ADDRESSABLE_SPINES);
+    useSpineHrefIndex = false;
+  } else if (spineCount >= LARGE_SPINE_THRESHOLD) {
+    // The index is ~12 B/spine — 21 KB at 1732 spines (King's Avatar, the largest real book we
+    // know of), against ~122 KB free here. Exhausting that would take ~10,000 spines, past the
+    // addressable ceiling handled above, so there is no OOM fallback: deque's chunking already
+    // removes the contiguous-block failure that was actually observed.
     spineHrefIndex.clear();
     spineHrefIndex.resize(spineCount);
     spineFile.seek(0);
@@ -222,7 +233,12 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   // Also count distinct spines referenced by the TOC so tocReliable can be persisted in the
   // header below — without this, every first-page load on a large book pays an O(tocCount)
   // seek-heavy scan in Epub::hasReliableToc().
-  std::vector<int16_t> spineToTocIndex(spineCount, -1);
+  //
+  // Deque, not vector: only ~3.5 KB at 1732 spines, but a vector demands it as ONE contiguous
+  // block, and bare operator new abort()s under -fno-exceptions on a fragmented heap — the same
+  // failure class the targets/spineSizes deques below were introduced to avoid. This was the one
+  // spine-sized table here that never got that treatment.
+  std::deque<int16_t> spineToTocIndex(spineCount, -1);
   int distinctSpinesReferenced = 0;
   tocReader.seek(0);
   for (int j = 0; j < tocCount; j++) {
@@ -262,12 +278,27 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
 
   // Deques, not vectors: at 1732 spines `targets` alone is ~28 KB, and a vector demands that as
   // one contiguous block — observed aborting here at 51 KB free / 30 KB contig before the
-  // first-open framebuffer release widened the headroom. Chunked storage removes the failure
-  // class outright instead of relying on the released buffer's headroom.
+  // first-open framebuffer release widened the headroom. Chunked storage removes the CONTIGUITY
+  // failure class, but deque still allocates through the throwing path, so total exhaustion would
+  // abort() under -fno-exceptions — which is what the heap probe below guards.
   std::deque<uint32_t> spineSizes;
   bool useBatchSizes = false;
 
-  if (spineCount >= LARGE_SPINE_THRESHOLD) {
+  // Batch tables cost ~20 B/spine (16 B SizeTarget + 4 B size): 35 KB at 1732 spines, against
+  // ~122 KB free here (device-measured on King's Avatar). Skip the batch path only when the heap
+  // genuinely cannot hold them, leaving 32 KB for the ZIP scan and the rest of the build.
+  //
+  // Sized against what ACTUALLY allocates, deliberately: an earlier 2x-plus-16KB version demanded
+  // 216 KB at 5000 spines — more than this device ever has free — so it would have silently
+  // dropped plausible ~3000-spine books to the per-item ZIP lookup, i.e. one central-directory
+  // scan PER SPINE. That is the O(n) cost the per-book spine-stat cache exists to eliminate, so an
+  // over-eager probe here is a performance regression, not a safety net. The fallback is correct
+  // (it is the small-book path), just slow — it should trigger only when the alternative is death.
+  const size_t batchTableBytes = static_cast<size_t>(spineCount) * (sizeof(ZipFile::SizeTarget) + sizeof(uint32_t));
+  const size_t freeHeap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  const bool heapAllowsBatchSizes = freeHeap > batchTableBytes + 32 * 1024;
+
+  if (spineCount >= LARGE_SPINE_THRESHOLD && heapAllowsBatchSizes) {
     LOG_DBG("BMC", "Using batch size lookup for %d spine items", spineCount);
 
     std::deque<ZipFile::SizeTarget> targets;
@@ -293,13 +324,19 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     });
 
     spineSizes.resize(spineCount, 0);
-    int matched = zip.fillUncompressedSizes(targets, spineSizes);
+    const int matched = zip.fillUncompressedSizes(targets, spineSizes);
     LOG_DBG("BMC", "Batch lookup matched %d/%d spine items", matched, spineCount);
+    (void)matched;  // only read by LOG_DBG, which compiles out at lower log levels
 
     targets.clear();
     targets.shrink_to_fit();
 
     useBatchSizes = true;
+  } else if (spineCount >= LARGE_SPINE_THRESHOLD) {
+    // Should be rare — see the sizing note above. If this shows up on an ordinary book, the
+    // threshold is too conservative and is costing a central-directory scan per spine.
+    LOG_INF("BMC", "Skipping batch size lookup for %d spine items (free %u < %u needed); using per-item lookup",
+            spineCount, static_cast<unsigned>(freeHeap), static_cast<unsigned>(batchTableBytes + 32 * 1024));
   }
 
   uint32_t cumSize = 0;

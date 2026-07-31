@@ -71,15 +71,21 @@ class BookMetadataCache {
   std::optional<serialization::BufferedFileWriter> tocWriter_;
 
   // Index for fast href→spineIndex lookup (used only for large EPUBs).
-  // Deque, not vector: ~21 KB at 1732 spines, and a vector would demand that as one contiguous
-  // block on a possibly-fragmented heap (bare operator new aborts under -fno-exceptions).
-  // Deque's ~512-byte chunks remove the contiguity demand; its random-access iterators keep
-  // std::sort / lower_bound working.
+  // Deque, not vector: ~12 B/spine, so ~21 KB at 1732 spines (King's Avatar). A vector demands
+  // that as ONE contiguous block, which was observed aborting at 51 KB free / 30 KB contig on a
+  // fragmented heap (bare operator new abort()s under -fno-exceptions). Deque's ~512-byte chunks
+  // remove the contiguity demand; its random-access iterators keep std::sort / lower_bound
+  // working. Total-heap exhaustion would take ~10,000 spines — past the addressable ceiling
+  // below — so the remaining throwing-allocation risk is not reachable by a real book.
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
     uint16_t hrefLen;   // length for collision reduction
     int16_t spineIndex;
   };
+  // spineIndex is int16_t (-1 means "no match"), so spine indices must fit in a positive int16_t.
+  // spineCount is uint16_t and would silently wrap past this; no real EPUB approaches it, but the
+  // limit should be stated rather than latent.
+  static constexpr int MAX_ADDRESSABLE_SPINES = 32767;
   std::deque<SpineHrefIndexEntry> spineHrefIndex;
   bool useSpineHrefIndex = false;
 
