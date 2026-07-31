@@ -3119,7 +3119,17 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
 
 #if READER_FRESH_ENABLED
 void EpubReaderActivity::stepContentProducer() {
-  if (!producer_ || producer_->done()) return;
+  if (!producer_) return;
+  if (producer_->done()) {
+    // Compile finished. If the reader is still on the "preparing" popup (the cursor's spine committed
+    // while we were mid-compile, so the render was deferred), trigger the render NOW — otherwise the
+    // popup would stay forever (the early-return below never reaches the requestUpdate). One-shot:
+    // freshPreparing_ is cleared by the render that follows.
+    if (freshPreparing_ && cursor_.spineIndex < producer_->committedSpines()) {
+      requestUpdate();
+    }
+    return;
+  }
   // Gate exactly like Background-C: skip (don't block) while the display bus is busy, a render is in
   // flight, or an image warm pass owns the heap — a blocked loop task can't service input.
   if (renderer.isRefreshPending() || RenderLock::peek() || imageProcessingActive_) return;
@@ -3182,6 +3192,9 @@ void EpubReaderActivity::stepContentProducer() {
 void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayout& layout) {
   if (!producer_) return;
   const int spineCount = epub->getSpineItemsCount();
+  LOG_INF("ERS", "FRESH renderFromContentBin cursor spine=%u committed=%u done=%d inflight=%d prep=%d",
+          cursor_.spineIndex, producer_->committedSpines(), producer_->done() ? 1 : 0,
+          producer_->spineInFlight() ? 1 : 0, freshPreparing_ ? 1 : 0);
   if (cursor_.spineIndex >= spineCount) return;  // out of range (finished-book handoff is M3)
 
   // Frontier wait: the cursor's spine isn't committed yet (cold open / reading ahead of the compile).
@@ -3202,11 +3215,15 @@ void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayo
   freshPreparing_ = false;
 
   compiled::LaidOutPage lp = producer_->readPageAt(cursor_, makeLayoutParams(), renderer);
+  LOG_INF("ERS", "FRESH render spine=%u block=%lu committed=%u ok=%d hasPage=%d atEnd=%d",
+          cursor_.spineIndex, static_cast<unsigned long>(cursor_.blockIndex), producer_->committedSpines(),
+          lp.ok ? 1 : 0, lp.page ? 1 : 0, lp.atSpineEnd ? 1 : 0);
   if (!lp.ok || !lp.page) {
     // Image-only / empty / unreadable spine: advance to the next spine's first page (bounded).
     if (cursor_.spineIndex + 1 < spineCount) {
       cursor_ = {};
       cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);
+      LOG_INF("ERS", "FRESH spine unreadable -> advance to spine %u", cursor_.spineIndex);
       requestUpdate();
     }
     return;
@@ -3229,6 +3246,8 @@ void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayo
 void EpubReaderActivity::freshPageTurn(bool isForwardTurn) {
   if (!producer_) return;
   const int spineCount = epub->getSpineItemsCount();
+  LOG_INF("ERS", "FRESH pageTurn fwd=%d from spine=%u atSpineEnd=%d stack=%u", isForwardTurn ? 1 : 0,
+          cursor_.spineIndex, freshAtSpineEnd_ ? 1 : 0, static_cast<unsigned>(cursorStack_.size()));
   if (isForwardTurn) {
     // Push the current page's start so back is O(1). Bounded FIFO (drop oldest at cap).
     if (cursorStack_.size() >= kCursorStackCap) cursorStack_.erase(cursorStack_.begin());
