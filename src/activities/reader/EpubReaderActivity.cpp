@@ -3184,7 +3184,10 @@ void EpubReaderActivity::stepContentProducer() {
   }
 
   // If the frontier now covers the page we're waiting on, re-render to replace the "preparing" popup.
-  if (freshPreparing_ && cursor_.spineIndex < producer_->committedSpines() && !producer_->spineInFlight()) {
+  // Gate on the cursor's spine being committed — NOT !spineInFlight() (the producer is normally mid a
+  // LATER spine; reading a committed spine mid-compile is safe, so don't wait for the whole producer to
+  // go idle or the popup would never clear on a big book).
+  if (freshPreparing_ && cursor_.spineIndex < producer_->committedSpines()) {
     requestUpdate();
   }
 }
@@ -3197,14 +3200,15 @@ void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayo
           producer_->spineInFlight() ? 1 : 0, freshPreparing_ ? 1 : 0);
   if (cursor_.spineIndex >= spineCount) return;  // out of range (finished-book handoff is M3)
 
-  // Frontier wait: the cursor's spine isn't committed yet (cold open / reading ahead of the compile).
-  // Draw a brief "preparing" popup ONCE, then let the loop go idle so stepContentProducer() runs — do
-  // NOT requestUpdate() here. Re-drawing the popup every render (and its displayBuffer waveform) keeps
-  // renderer.isRefreshPending() asserted on X3 for the whole multi-second waveform, which gates
-  // stepContentProducer OUT so the frontier never advances — a deadlock (M1 had no display so missed
-  // it). stepContentProducer() itself requestUpdate()s the instant the frontier covers the cursor,
-  // which re-enters render and falls through to the real page below.
-  if (cursor_.spineIndex >= producer_->committedSpines() || producer_->spineInFlight()) {
+  // Frontier wait: show the "preparing" popup ONLY when the CURSOR'S OWN spine isn't committed yet
+  // (cold open / reading ahead of the compile). Do NOT gate on producer_->spineInFlight() — the
+  // producer is almost always compiling SOME later spine on a big book (King's Avatar: 1732 spines), and
+  // reading a COMMITTED spine through withReadableFile is safe mid-compile (cooperative flush/restore).
+  // Gating on spineInFlight made the popup flash on EVERY in-chapter page turn while later spines
+  // compiled — the bug this fixes. Draw the popup once, then idle so stepContentProducer() advances the
+  // frontier; it requestUpdate()s us back when the cursor's spine commits. (Not requestUpdate()-ing here
+  // avoids keeping isRefreshPending() asserted on X3, which would gate the producer out — a deadlock.)
+  if (cursor_.spineIndex >= producer_->committedSpines()) {
     if (!freshPreparing_) {  // draw the popup only on the first preparing render, not every tick
       GUI.drawPopup(renderer, tr(STR_INDEXING));
       renderer.displayBuffer();
@@ -3272,9 +3276,10 @@ void EpubReaderActivity::freshPageTurn(bool isForwardTurn) {
     if (cursorStack_.size() >= kCursorStackCap) cursorStack_.erase(cursorStack_.begin());
     cursorStack_.push_back(cursor_);
     if (freshAtSpineEnd_) {
-      if (cursor_.spineIndex + 1 < spineCount) {
-        cursor_ = {};
-        cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);
+      const uint16_t nextSpine = static_cast<uint16_t>(cursor_.spineIndex + 1);  // capture BEFORE zeroing!
+      if (nextSpine < spineCount) {
+        cursor_ = {};  // this zeroes cursor_.spineIndex — so nextSpine was captured above
+        cursor_.spineIndex = nextSpine;
       } else {
         cursorStack_.pop_back();  // last page of last spine — stay put (finished-book handoff is M3)
         return;
