@@ -2,8 +2,33 @@
 
 #include "CrossPointSettings.h"
 
-bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
+bool (*MappedInputManager::stripReversedPredicate)() = nullptr;
+
+void MappedInputManager::setStripReversedPredicate(bool (*predicate)()) { stripReversedPredicate = predicate; }
+
+bool MappedInputManager::isVerticalStripReversed() {
+  return stripReversedPredicate != nullptr && stripReversedPredicate();
+}
+
+MappedInputManager::Button MappedInputManager::applyStripOrder(const Button button) {
+  if (!isVerticalStripReversed()) {
+    return button;
+  }
+  // Only the four front buttons sit on the reversed strip. Up/Down (and their
+  // PageBack/PageForward aliases) are the side buttons on a different edge — their
+  // physical order is unchanged by rotation, so they must not swap.
   switch (button) {
+    case Button::Left:
+      return Button::Right;
+    case Button::Right:
+      return Button::Left;
+    default:
+      return button;
+  }
+}
+
+bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint8_t) const) const {
+  switch (applyStripOrder(button)) {
     case Button::Back:
       return (gpio.*fn)(SETTINGS.frontButtonBack);
     case Button::Confirm:
@@ -27,7 +52,7 @@ bool MappedInputManager::mapButton(const Button button, bool (HalGPIO::*fn)(uint
 }
 
 uint8_t MappedInputManager::rawIndex(const Button button) const {
-  switch (button) {
+  switch (applyStripOrder(button)) {
     case Button::Back:
       return SETTINGS.frontButtonBack;
     case Button::Confirm:
@@ -64,6 +89,12 @@ unsigned long MappedInputManager::getHeldTime() const { return gpio.getHeldTime(
 
 MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const char* confirm, const char* previous,
                                                          const char* next) const {
+  // On a reversed strip the Left/Right roles are swapped (see applyStripOrder), so the
+  // hint text has to follow — otherwise the label would contradict what the button does.
+  const bool reversed = isVerticalStripReversed();
+  const char* previousLabel = reversed ? next : previous;
+  const char* nextLabel = reversed ? previous : next;
+
   // Build the label order based on the configured hardware mapping.
   auto labelForHardware = [&](uint8_t hw) -> const char* {
     // Compare against configured logical roles and return the matching label.
@@ -74,10 +105,10 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const
       return confirm;
     }
     if (hw == SETTINGS.frontButtonLeft) {
-      return previous;
+      return previousLabel;
     }
     if (hw == SETTINGS.frontButtonRight) {
-      return next;
+      return nextLabel;
     }
     return "";
   };

@@ -702,6 +702,11 @@ void setup() {
   WEATHER_SETTINGS.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+  // In LandscapeCounterClockwise the front-button strip runs bottom-to-top on screen, so the
+  // logical Left/Right roles (and their hints) swap to keep "previous/Up" above "next/Down".
+  // See MappedInputManager::setStripReversedPredicate and issue #87.
+  MappedInputManager::setStripReversedPredicate(
+      [] { return renderer.getOrientation() == GfxRenderer::Orientation::LandscapeCounterClockwise; });
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
