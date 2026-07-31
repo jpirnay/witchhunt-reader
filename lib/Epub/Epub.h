@@ -113,6 +113,14 @@ class Epub {
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
 
+  // Lightweight load for COVER thumbnails only: populate the cover image reference WITHOUT building
+  // the spine/TOC book.bin. Uses book.bin if it already exists; otherwise does a metadata-only OPF
+  // parse (OpfCacheMode::Disabled — no manifest item index, no .items.bin), which for a huge book
+  // (e.g. 1732 spines) avoids both the cost and the fragile large-index build of a full load(). After
+  // this, only the cover path is valid (getCoverImageCachePath / generateThumbBmp / cover extraction)
+  // — the spine/TOC accessors are NOT populated. Returns false if the cover reference can't be found.
+  bool loadForCover();
+
   // True when opening the book will trigger the (multi-second) first-open index
   // build inside load(): the spine/TOC cache (book.bin) or the compiled CSS rules
   // cache is missing. Cheap (only file-existence checks) so callers can decide

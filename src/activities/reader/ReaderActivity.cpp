@@ -112,7 +112,7 @@ std::unique_ptr<ReaderActivity::CoverExtractSession> ReaderActivity::beginCoverE
   if (!sidecarCoverPath(bookPath).empty()) return nullptr;  // sidecar takes priority; no extract needed
 
   Epub epub(bookPath, "/.crosspoint");
-  if (!epub.load(true, true)) return nullptr;
+  if (!epub.loadForCover()) return nullptr;  // cover ref only, no full book.bin build
 
   // If cover.img already exists and is a recognized image format, no extraction
   // needed. Must match the decode side's validity check (coverImageCachedValidOnly,
@@ -366,9 +366,10 @@ void healStaleEpubSentinel(const std::string& bookPath, const std::string& thumb
   if (!isSentinel) return;
 
   // coverImageCachedValidOnly() checks cover.img exists + non-empty + a known image format,
-  // without triggering any extraction — exactly the "sentinel is stale" condition.
+  // without triggering any extraction — exactly the "sentinel is stale" condition. loadForCover()
+  // gets the cover ref without a full book.bin build.
   Epub epub(bookPath, "/.crosspoint");
-  if (epub.load(true, true) && epub.coverImageCachedValidOnly()) {
+  if (epub.loadForCover() && epub.coverImageCachedValidOnly()) {
     LOG_DBG("COVER", "Healing stale sentinel %s (cover.img present & valid)", thumbFile.c_str());
     Storage.remove(thumbFile.c_str());
   }
@@ -408,9 +409,11 @@ ThumbResult ReaderActivity::ensureCoverThumb(const std::string& bookPath, int wi
     // so a book whose cover.img is actually present & valid gets decoded instead of skipped.
     healStaleEpubSentinel(bookPath, file);
     Epub epub(bookPath, "/.crosspoint");
-    // allowExtract=false: decode only an already-cached cover.img; the sliced
+    // loadForCover(): get the cover reference WITHOUT building the spine/TOC book.bin — showing a
+    // thumbnail must never trigger a full-book parse (a 1732-spine book's index build is slow and was
+    // a crash site). allowExtract=false: decode only an already-cached cover.img; the sliced
     // beginCoverExtractSession owns the (potentially multi-second) ZIP inflate.
-    if (!epub.load(true, true)) return ThumbResult::TransientFail;
+    if (!epub.loadForCover()) return ThumbResult::TransientFail;
     return epub.generateThumbBmp(width, height, /*allowExtract=*/false);
   }
   if (FsHelpers::hasXtcExtension(bookPath)) {
@@ -452,9 +455,10 @@ ThumbResult ReaderActivity::ensureCoverThumb(const std::string& bookPath, int he
     // Clear any sentinel left permanent by an older build for what was only a transient failure.
     healStaleEpubSentinel(bookPath, file);
     Epub epub(bookPath, "/.crosspoint");
+    // loadForCover(): cover reference only, no full book.bin build (see the width/height overload).
     // allowExtract=false: decode only an already-cached cover.img; the sliced
     // beginCoverExtractSession owns the (potentially multi-second) ZIP inflate.
-    if (!epub.load(true, true)) return ThumbResult::TransientFail;
+    if (!epub.loadForCover()) return ThumbResult::TransientFail;
     return epub.generateThumbBmp(height, /*allowExtract=*/false);
   }
   if (FsHelpers::hasXtcExtension(bookPath)) {
@@ -497,7 +501,7 @@ std::unique_ptr<PngDecodeSession> beginPngThumbSessionImpl(const std::string& bo
     // runs first in the caller's ladder and produces it). Otherwise return null so the
     // caller falls through to that sliced extraction.
     Epub epub(bookPath, "/.crosspoint");
-    if (!epub.load(true, true)) return nullptr;
+    if (!epub.loadForCover()) return nullptr;  // cover ref only, no full book.bin build
     srcPath = epub.getCoverImageCachePath();
     FsFile peek;
     if (!Storage.openFileForRead("PNG", srcPath, peek)) return nullptr;  // not yet extracted

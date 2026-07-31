@@ -437,6 +437,9 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
         self->useItemIndex = true;
         LOG_DBG("COF", "Using fast index for %zu manifest items", self->itemIndex.size());
       }
+      // (A manifest past MAX_INDEX_ENTRIES latched indexDisabled_ and CLEARED itemIndex above, so its
+      // size is now < LARGE_SPINE_THRESHOLD and this whole block is skipped → linear scan. No branch
+      // needed here.)
     }
     return;
   }
@@ -548,12 +551,22 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
     // full FsFile call each). The index entry records the position AFTER the id string:
     // hash-trusted lookups seek straight to the href and never re-read the id.
     self->itemWriter_->writeString(itemId);
-    if (self->tempItemStore) {
+    if (self->tempItemStore && !self->indexDisabled_) {
       ItemIndexEntry entry;
       entry.idHash = fnvHash(itemId);
       entry.idLen = static_cast<uint16_t>(itemId.size());
       entry.hrefOffset = self->itemWriter_->position();
-      self->itemIndex.push_back(entry);
+      // Grow the in-RAM index with NOTHROW allocation. It keeps growing as long as the heap can hold
+      // it (~12 bytes/item), so even a 1732-spine book keeps the fast binary-search index whenever
+      // memory allows. Only if a growth genuinely can't be satisfied (OOM / fragmentation) do we
+      // abandon the index and fall back to the exact linear scan over .items.bin — never abort (the
+      // device is -fno-exceptions). No arbitrary item-count cap: memory is the only limit.
+      if (!self->itemIndex.push_back(entry)) {
+        self->indexDisabled_ = true;
+        LOG_INF("COF", "manifest index OOM at %zu items; using linear idref lookup for this book",
+                self->itemIndex.size());
+        self->itemIndex.clear();  // free the partial index; lookups use the linear scan
+      }
     }
     self->itemWriter_->writeString(href);
 

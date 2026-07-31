@@ -319,6 +319,47 @@ TEST(ContentOpfParser, ResolvesSpineIdrefsUsingIndexedLookupForLargeManifest) {
   EXPECT_EQ(capturedSpineHrefs[2], "book/OEBPS/text/ch0.xhtml");
 }
 
+// A huge manifest (the King's Avatar case: 1732 items) must parse without aborting and resolve every
+// spine idref. The in-RAM index grows with NOTHROW allocation — kept when memory allows (the common
+// case, and what the host has), dropped for the exact linear scan only on genuine OOM. Either way the
+// book OPENS and resolves correctly. This is the regression guard for "a huge book crashes the device"
+// (it used to abort building the index on -fno-exceptions) AND for "the fallback is O(N^2) slow" (the
+// index is kept when there's memory, so a big book stays fast).
+TEST(ContentOpfParser, HugeManifestResolvesCorrectly) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  TempDirGuard dirGuard(cacheDir);
+
+  std::vector<std::string> capturedSpineHrefs;
+  ScopedSpineHrefSink sinkGuard(&capturedSpineHrefs);
+
+  constexpr int kItemCount = 1500;  // > MAX_INDEX_ENTRIES (1200) → index capped/disabled, linear scan
+  const std::string base = "/book/OEBPS/";
+  const std::string xml =
+      "<?xml version='1.0' encoding='utf-8'?>"
+      "<package xmlns:opf='http://www.idpf.org/2007/opf' xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+      "<metadata><dc:title>Huge</dc:title></metadata>"
+      "<manifest>" +
+      buildManifestItems(kItemCount) +
+      "</manifest>"
+      "<spine>"
+      "<itemref idref='ch1499'/>"  // last item — resolvable only if the whole manifest was stored
+      "<itemref idref='ch750'/>"   // middle
+      "<itemref idref='missing'/>"
+      "<itemref idref='ch0'/>"  // first
+      "</spine>"
+      "</package>";
+
+  BookMetadataCache cache(cacheDir);
+  ContentOpfParser parser(cacheDir, base, xml.size(), &cache);
+  ASSERT_TRUE(parseOpfXml(parser, xml)) << "a 1500-item manifest must parse without aborting";
+
+  ASSERT_EQ(capturedSpineHrefs.size(), 3u);
+  EXPECT_EQ(capturedSpineHrefs[0], "book/OEBPS/text/ch1499.xhtml");
+  EXPECT_EQ(capturedSpineHrefs[1], "book/OEBPS/text/ch750.xhtml");
+  EXPECT_EQ(capturedSpineHrefs[2], "book/OEBPS/text/ch0.xhtml");
+}
+
 TEST(ContentOpfParser, DisablesHashTrustedIndexOnDuplicateIdsAndStillResolves) {
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
