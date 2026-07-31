@@ -208,8 +208,15 @@ LaidOutPage ContentBinCompiler::readPageAt(const PagePosition& cursor, const Lay
   if (!binFile_) return result;
   writer_.withReadableFile([&](FsFile& f) {
     BlockStreamReader reader;
-    if (!reader.open(f)) return;
-    if (cursor.spineIndex >= reader.spineCount() || !reader.spineAvailable(cursor.spineIndex)) return;
+    if (!reader.open(f)) { LOG_ERR(kTag, "readPageAt: reader.open failed"); return; }
+    if (cursor.spineIndex >= reader.spineCount() || !reader.spineAvailable(cursor.spineIndex)) {
+      LOG_ERR(kTag, "readPageAt spine=%u NOT available (spineCount=%u)", cursor.spineIndex, reader.spineCount());
+      return;
+    }
+    const bool opened = reader.openSpine(cursor.spineIndex);
+    LOG_INF(kTag, "readPageAt spine=%u block=%lu openSpine=%d blocks=%lu", cursor.spineIndex,
+            static_cast<unsigned long>(cursor.blockIndex), opened ? 1 : 0,
+            static_cast<unsigned long>(reader.spineBlockCount()));
     result = layoutPage(reader, renderer, params, cursor);
   });
   return result;

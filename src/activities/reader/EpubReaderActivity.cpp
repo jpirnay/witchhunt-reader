@@ -3219,12 +3219,31 @@ void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayo
           cursor_.spineIndex, static_cast<unsigned long>(cursor_.blockIndex), producer_->committedSpines(),
           lp.ok ? 1 : 0, lp.page ? 1 : 0, lp.atSpineEnd ? 1 : 0);
   if (!lp.ok || !lp.page) {
-    // Image-only / empty / unreadable spine: advance to the next spine's first page (bounded).
+    // The cursor's page couldn't be laid out. Two cases:
+    //  - block 0: the spine is genuinely empty/image-only/unreadable → skip to the next spine's page 0.
+    //  - mid-spine (blockIndex > 0): the pull core can't chain THIS page. The only spines that produce
+    //    a page-0 but no later page are TABLE / FLOAT spines — the pull core serves their FIRST page via
+    //    the scaffold but does not chain subsequent pages (documented boundary; PageLayoutTest excludes
+    //    them from the forward-chain gate). Treat it as SPINE END: land on the next spine's first page,
+    //    so a table jacket page (King's Avatar spine 1) doesn't trap navigation in a block-0<->block-N
+    //    loop. (Full table/float pagination is deferred P4 work.)
+    const bool atSpineStart = cursor_.blockIndex == 0 && cursor_.offset == 0;
     if (cursor_.spineIndex + 1 < spineCount) {
+      const uint16_t nextSpine = static_cast<uint16_t>(cursor_.spineIndex + 1);
       cursor_ = {};
-      cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);
-      LOG_INF("ERS", "FRESH spine unreadable -> advance to spine %u", cursor_.spineIndex);
+      cursor_.spineIndex = nextSpine;
+      LOG_INF("ERS", "FRESH %s spine %u -> advance to spine %u", atSpineStart ? "empty" : "unchainable(table/float)",
+              static_cast<unsigned>(nextSpine - 1), nextSpine);
       requestUpdate();
+    } else {
+      // Last spine and it couldn't lay out this page — clamp to its first page so we show SOMETHING
+      // rather than a blank loop (finished-book handoff is M3).
+      if (!atSpineStart) {
+        cursor_ = {};
+        cursor_.spineIndex = static_cast<uint16_t>(spineCount - 1);
+        LOG_INF("ERS", "FRESH last-spine unchainable -> clamp to its first page");
+        requestUpdate();
+      }
     }
     return;
   }

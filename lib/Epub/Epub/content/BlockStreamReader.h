@@ -70,6 +70,8 @@ class BlockStreamReader {
   // available (slot 0).
   bool openSpine(uint32_t i);
   uint32_t spineFirstCharOffset() const { return spineFirstCharOffset_; }
+  // Total on-disk records in the current spine (valid after openSpine). Diagnostic / bounds check.
+  uint32_t spineBlockCount() const { return spineBlockCount_; }
 
   // NOTE (v6): the book-level readChapters() is gone — chapters are per-spine (spineChapters()),
   // loaded by openSpine, so a self-contained spine replays without any book-global table.
