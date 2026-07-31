@@ -2278,6 +2278,16 @@ void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
   if (section && section->hasActiveBuild()) {
     return;
   }
+#if READER_FRESH_ENABLED
+  // Same for the content.bin producer: while it is still compiling it HOLDS the borrowed framebuffer as
+  // its build arena (stepContentProducer). Leave it — returning/reallocating the buffer here would drop
+  // the arena the producer is mid-build against (the dangling-arena corruption). stepContentProducer
+  // returns it itself when the compile ends. A page renders single-buffered (BW) meanwhile, exactly
+  // like master's mid-build page display.
+  if (freshReader_ && producer_ && !producer_->done() && secondaryBorrowed_) {
+    return;
+  }
+#endif
   // Borrowed-buffer path: the build ran inside the LENT secondary framebuffer, so return it
   // instead of reallocating. The region never entered the heap, so returnSecondaryBuffer()
   // cannot fail — no realloc/eviction/forensics/heap-recovery needed here. Drop the section's
@@ -3116,32 +3126,51 @@ void EpubReaderActivity::stepContentProducer() {
   RenderLock lock(*this);
   if (renderer.isRefreshPending()) return;  // re-check under the lock
 
-  // The producer builds FROM THE HEAP (its own owned arena), but the reader's resident heap is only
-  // ~38 KB free — the giant single spine's ~34 KB CONTIGUOUS inflate ring does not fit there ("Failed
-  // to allocate ZIP arena", device-observed; the bench had ~48 KB free with no UI). So RELEASE the
-  // secondary framebuffer while a spine compiles: freeing its ~48 KB back to the heap gives the ring
-  // room, and — unlike BORROWING it as the build arena — the memory is REAL heap, so the section build's
-  // strict-LIFO arena release works normally (borrowing broke that: "Failed to release extraction buffer
-  // block"). This is master's proven IncrementalReleased discipline. Realloc at the spine boundary so
-  // the reader gets AA/dual-buffer back between spines. Single builder, so nothing else needs the
-  // buffer meanwhile; a mid-compile page render (frontier just reached the cursor) reallocs first.
-  if (renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
+  // BORROW the secondary framebuffer as the producer's build arena — REPLICATING master's
+  // IncrementalReleased borrow lifecycle VERBATIM (buildSection ~:2824-2841). The reader's resident heap
+  // is only ~38 KB free, too tight for the giant spine's ~32 KB inflate ring; the ~52 KB framebuffer is
+  // exactly what the ring needs. Master's rules we now match EXACTLY (our earlier failures came from
+  // NOT matching them):
+  //   1. Borrow ONCE, up front, and set it on the builder BEFORE the first slice creates the Section
+  //      (ContentBinCompiler forwards externalScratch_ to each new per-spine Section via
+  //      setExternalBuildScratch). We had set/reset the scratch AROUND every step(); on the 2nd tick the
+  //      Section already existed so the re-forward was skipped, leaving it pointing at the arena we'd
+  //      just reset — the dangling-arena "Failed to release extraction buffer block" LIFO corruption.
+  //   2. HOLD buildScratch_ (and the setExternalScratch pointer) UNTOUCHED across ALL slices/spines of
+  //      the whole compile. Never reset the arena or return the buffer mid-compile.
+  //   3. Return only when the compile is DONE (below) or on teardown (onExit) — like master returns only
+  //      when hasActiveBuild() goes false. The borrowed block never enters the heap so the return can't
+  //      fail; on X3 the single-buffer baseline lives in the controller so there's no display cost.
+  if (!secondaryBorrowed_) {
     if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
-    if (renderer.releaseSecondaryBuffer()) {
+    size_t borrowedSize = 0;
+    uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
+    if (borrowed) {
+      buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+      producer_->setExternalScratch(buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr);
+      secondaryBorrowed_ = true;
       secondaryBufferDegraded_ = true;
       renderer.setSingleBufferFastDiff(true);
+      LOG_INF("ERS", "content.bin producer: BORROWED secondary buffer as build arena (free=%lu)",
+              static_cast<unsigned long>(esp_get_free_heap_size()));
     }
+    // No buffer to lend (already released elsewhere): step from heap this tick; retry the borrow later.
   }
 
   renderer.clearFontAccumulation();  // re-wire flash-resident metric tables for the content walk
-  producer_->step(BG_BUILD_BUDGET_MS);
+  const compiled::ContentBinCompiler::Step s = producer_->step(BG_BUILD_BUDGET_MS);
 
-  // Spine boundary: no build in flight → restore the secondary buffer (AA/dual-buffer) for reading.
-  if (secondaryBufferDegraded_ && !producer_->spineInFlight() && !renderer.hasSecondaryBuffer()) {
-    if (reallocSecondaryEvictingCaches()) {
-      secondaryBufferDegraded_ = false;
-      renderer.setSingleBufferFastDiff(false);
-    }
+  // Return the borrowed buffer ONLY when the whole compile ends (matches master returning at
+  // hasActiveBuild()==false). Drop the compiler's scratch pointer first, then the arena, then the buffer.
+  if (secondaryBorrowed_ &&
+      (s == compiled::ContentBinCompiler::Step::Done || s == compiled::ContentBinCompiler::Step::Failed)) {
+    producer_->setExternalScratch(nullptr);
+    buildScratch_.reset();
+    renderer.returnSecondaryBuffer();
+    secondaryBorrowed_ = false;
+    secondaryBufferDegraded_ = false;
+    renderer.setSingleBufferFastDiff(false);
+    LOG_INF("ERS", "content.bin producer: returned borrowed secondary buffer (compile ended)");
   }
 
   // If the frontier now covers the page we're waiting on, re-render to replace the "preparing" popup.
