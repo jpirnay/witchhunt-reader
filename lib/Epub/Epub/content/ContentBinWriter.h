@@ -31,6 +31,7 @@
 // spine (Increment E producer). No device shipped v5 → clean break, no migration.
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -103,6 +104,15 @@ class ContentBinWriter : public BlockSink {
   // Flush the file. v6 writes no book-level index/pool/chapters (they are per-spine), so this only
   // closes out any open spine and syncs. Returns false on any I/O error.
   bool finish();
+
+  // Cooperative in-place READ of committed spines through the writer's own open handle. Flushes the
+  // buffered append stream so the file cursor is the true append end, saves it, invokes `reader` with
+  // the file (which may seek/read committed regions freely — e.g. open a BlockStreamReader on it), then
+  // restores the append cursor + rebases the buffer so the next write lands correctly. The producer and
+  // consumer run cooperatively (never concurrently), so no locking is needed; `reader` MUST NOT write.
+  // This is how the reader renders a page from content.bin WHILE the producer still holds it open —
+  // SdFat permits only one handle per file. Returns ok().
+  bool withReadableFile(const std::function<void(FsFile&)>& reader);
 
   bool ok() const { return ok_; }
 

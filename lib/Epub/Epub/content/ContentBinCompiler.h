@@ -21,7 +21,9 @@
 
 #include <Epub.h>
 #include <Epub/Section.h>
+#include <Epub/content/BlockStreamReader.h>
 #include <Epub/content/ContentBinWriter.h>
+#include <Epub/content/PageLayout.h>
 
 #include <memory>
 
@@ -66,6 +68,17 @@ class ContentBinCompiler {
   // false, so the reader can reclaim the buffer between spines. False at Init/Done/Failed and at every
   // inter-spine gap.
   bool spineInFlight() const { return spine_ && spine_->hasActiveBuild(); }
+
+  // Render ONE page from content.bin at `cursor`, reading THROUGH the producer's own open handle
+  // (SdFat allows only one handle per file; the producer holds content.bin open the whole compile).
+  // Safe because reader + producer run cooperatively: this flushes the writer, seeks+reads the
+  // committed spine via a BlockStreamReader + compiled::layoutPage, then restores the writer's append
+  // cursor (ContentBinWriter::withReadableFile). The cursor's spine MUST be committed
+  // (spineAvailable / cursor.spineIndex < committedSpines()) — check before calling. Returns a
+  // LaidOutPage with ok=false if the spine isn't readable or a read error occurs. This is the reader's
+  // content.bin read primitive (M4): the reader asks the producer for a page, never touching the file.
+  compiled::LaidOutPage readPageAt(const compiled::PagePosition& cursor, const compiled::LayoutParams& params,
+                                   GfxRenderer& renderer);
 
  private:
   enum class State : uint8_t { Init, Compiling, Done, Failed };

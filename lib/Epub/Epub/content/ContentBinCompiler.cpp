@@ -1,5 +1,6 @@
 #include "ContentBinCompiler.h"
 
+#include <Epub/Page.h>  // full Page type for LaidOutPage's unique_ptr<Page> (returned by value)
 #include <HalStorage.h>
 #include <Logging.h>
 #include <esp_system.h>
@@ -193,6 +194,22 @@ ContentBinCompiler::Step ContentBinCompiler::step(uint32_t budgetMs) {
     }
   }
   return Step::More;
+}
+
+LaidOutPage ContentBinCompiler::readPageAt(const PagePosition& cursor, const LayoutParams& params,
+                                           GfxRenderer& renderer) {
+  LaidOutPage result;  // ok=false by default
+  // The producer must have content.bin open (it does from the first step through Done). Read the page
+  // THROUGH that handle under withReadableFile, which flushes the writer, lets us seek/read, then
+  // restores the append cursor — so this never disturbs the in-progress compile.
+  if (!binFile_) return result;
+  writer_.withReadableFile([&](FsFile& f) {
+    BlockStreamReader reader;
+    if (!reader.open(f)) return;
+    if (cursor.spineIndex >= reader.spineCount() || !reader.spineAvailable(cursor.spineIndex)) return;
+    result = layoutPage(reader, renderer, params, cursor);
+  });
+  return result;
 }
 
 }  // namespace compiled

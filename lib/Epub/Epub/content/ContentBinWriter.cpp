@@ -127,6 +127,26 @@ void ContentBinWriter::commitSpineOffset(uint32_t spineIndex, uint32_t offset) {
   if (ok_ && spineIndex < committed_.size()) committed_[spineIndex] = true;
 }
 
+bool ContentBinWriter::withReadableFile(const std::function<void(FsFile&)>& reader) {
+  // Cooperative in-place read: the consumer reads committed spines THROUGH the writer's own open handle
+  // (SdFat allows only ONE handle per file, and the producer holds it open the whole compile). Reader
+  // and producer never run concurrently (one stepped loop), so the only hazard is the shared file
+  // CURSOR + the buffered writer's logical append point. Mirror the back-patch discipline: flush bw_ so
+  // the file cursor is the true append end, save it, let the reader seek/read freely, then restore the
+  // cursor + rebase bw_ so the next append lands correctly. `reader` must NOT write. Returns ok().
+  if (!ok_ || !file_) return false;
+  if (bw_ && !bw_->flush()) {
+    ok_ = false;
+    return false;
+  }
+  const uint32_t here = static_cast<uint32_t>(file_->position());
+  reader(*file_);
+  file_->seekSet(here);  // restore the append cursor
+  if (bw_) bw_->rebase();
+  ok_ = static_cast<bool>(*file_);
+  return ok_;
+}
+
 void ContentBinWriter::beginSpine() { beginSpineAt(nextSpineIndex_++); }
 
 void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
