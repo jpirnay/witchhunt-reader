@@ -83,7 +83,11 @@ class ContentOpfParser final : public Print {
       data_[size_++] = e;
       return true;
     }
-    void clear() { data_.reset(); size_ = 0; cap_ = 0; }
+    void clear() {
+      data_.reset();
+      size_ = 0;
+      cap_ = 0;
+    }
     size_t size() const { return size_; }
     ItemIndexEntry* begin() { return data_.get(); }
     ItemIndexEntry* end() { return data_.get() + size_; }
