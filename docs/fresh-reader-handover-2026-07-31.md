@@ -313,3 +313,97 @@ This is the single most important unresolved finding; it kills reading on single
 - Cover spine 0 renders `ok=0` on reopen (image decode wants the ZIP ring; auto-advances past it). R3.
 - Status bar shows "page X / 0" — the fresh `renderStatusBar` has no page total (M3 charOffset estimate).
 - Table/float spines only serve their first page (documented pull-core boundary; P4 pagination deferred).
+
+---
+
+## 9. Salvage review — 2026-07-31 (later): what actually made it to master
+
+A post-pause pass over this branch asking only "what is worth picking up?". The answer changed the
+picture enough to record it, because **§6 and `docs/master-cherry-picks-2026-07-31.md` are now stale and
+should not be followed as written.**
+
+### 9.1 Three of the four §6 picks were ALREADY on master
+
+Verified against `master` at `e1d7ef58`, by inspecting the current source, not the commit log:
+
+| §6 item | Claimed status | Actual master state |
+|---|---|---|
+| `9f4ca076` tjpgd `_WIN32` guard | "pick this" | **already there** — `tjpgd.h:15` is `_MSC_VER < 1600` |
+| `e44655f4` ZipFile spine-stat cache | "pick this" | **already there** — `FileStatSlim` / `fillFileStats` in `ZipFile.h` |
+| `ab641e50` img/svg explicit dims | "pick this" | **already there** — the full 3-step ring-free dims ladder is at `ChapterHtmlSlimParser.cpp:996-1021` |
+| `BufferedFileIO.h` | "spin-off for master" | **already there** — `lib/Serialization/BufferedFileIO.h` exists |
+
+Lesson for the next salvage pass: **the cherry-pick doc was written from the branch's own commit list, so
+it could not see what master had gained independently.** Always re-verify a pick list against the target's
+*source*, not against the branch's memory of what the target lacked.
+
+### 9.2 What §6 MISSED — the actually-valuable set (now PR #99)
+
+The handover was written with a Stage-1 lens, so it never listed the OPF/cover fixes that predate the
+fresh-reader work on this branch. They are unconditional master fixes for a **crash class still live on
+master**, and they were the real salvage:
+
+- `6e899b4e` + `14ce6dee` — the manifest fast-index. Master still had `std::deque<ItemIndexEntry>`
+  (`ContentOpfParser.h:59`). Device is `-fno-exceptions`, so a failed deque chunk alloc on a fragmented
+  heap becomes a direct `abort()`; a 1732-item manifest (King's Avatar) reproduces it just by drawing a
+  RecentBooks thumbnail. `14ce6dee`'s `ItemIndexVec` (nothrow doubling array) supersedes `6e899b4e`'s
+  coarse 1200-item cap — keep both in sequence, because the cap is what made the OPF parse O(N²)
+  (measured 110 s on King's Avatar) and the second commit is unintelligible without it.
+- `5c45bc52` — `Epub::loadForCover()`. Master still called `epub.load(true, true)` on **five** cover
+  entry points in `ReaderActivity.cpp` (`:115`, `:371`, `:413`, `:457`, `:501`), building the whole
+  spine/TOC `book.bin` just to render a thumbnail.
+- `f1bb1db7` — FootnoteEntry memset. Real, but on master the padding is never serialized, so it is
+  hygiene, not a bugfix. **Retitled `fix(stage1):` → `fix(epub):`** when picked: a `stage1` prefix on
+  master is misleading, since master does not compile the Stage-1 pipeline.
+
+**Cherry-pick mechanics (verified by actually doing it):** the three OPF/cover commits apply clean except
+`Epub.h`, which conflicts as a *pure addition*. Resolution: keep `loadForCover()`, **drop the
+`zipContentFingerprint()` accessor** — that one is Stage-1-only (it exists to key content.bin) and would
+drag the fingerprint machinery onto master for no reason.
+
+**Do NOT pick** the `freeink-sdk` submodule pointer. The cherry-picks try to drag it forward
+(`fe5ad8d1` → `566fce3d`) as a side effect; revert it every time. It is unrelated to these fixes.
+
+### 9.3 Testing gotcha that cost real time — compare failing test SETS, by name
+
+Running `ctest` on this branch shows ~17 failures, all `_NOT_BUILT`. They are **not regressions**: the
+build aborts at `EpubCssPerformanceTest` (`#include <dlfcn.h>`, absent on MinGW — reproduces on untouched
+master), so every downstream binary is simply never linked and ctest reports "Not Run" as a failure.
+
+Two traps when checking this:
+1. **A raw pass/fail count is meaningless here** — master in a clean worktree registered only 27 tests to
+   the branch's 187, because its build got even less far. Comparing totals suggests a catastrophe that
+   does not exist.
+2. **Diff the failing test NAMES, not ctest's line numbers.** A first attempt sed'd the ctest output
+   without stripping the leading index, so `comm` compared `11 - Foo` against `35 - Bar` and invented
+   phantom regressions. With names extracted properly, master's failing set is a strict *superset* of the
+   branch's — i.e. this branch builds and passes strictly more than master does.
+
+Recipe that works:
+```
+ctest --test-dir build -j 4 2>&1 | grep -oP '^\s+\d+ - \K.*?(?= \(Not Run\)|$)' | sed 's/ *$//' | sort -u
+```
+Run it on both, `comm -13 master.txt branch.txt`; empty output = no new failures.
+
+Other environment facts: host tests configure with **Ninja** (a `-G "MinGW Makefiles"` attempt fails
+against the existing cache); `pio` is not on PATH — use
+`~/.platformio/penv/Scripts/pio.exe`; `pio run -e default` takes **~12.5 min** (RAM 16.6%, Flash 95.9% —
+flash is nearly full, worth knowing before adding code); formatting is
+`bin/clang-format-fix.ps1 -g`, since bare `clang-format` is not on PATH either.
+
+### 9.4 What this does NOT change
+
+The fresh reader stays paused, and nothing in §0-§7 is superseded. Specifically still true and still the
+starting point if it resumes:
+- §0 / §5.1 — **the borrow failure was our lifecycle, not master's mechanism.** Master borrows the
+  secondary framebuffer successfully every day; we borrowed/reset per-slice and broke `Section.cpp`'s
+  strict-LIFO release. Copy `buildSection()`'s sequence verbatim rather than re-deriving it.
+- §5.5 — **the pre-reader indexing pass deserves a real evaluation before a fourth in-reader attempt.**
+  Compiling with the framebuffer free (~110 KB heap) so the reader only ever *reads* content.bin
+  sidesteps the entire borrow/release problem that killed three tries. The cost is a cold-open wait.
+- §8.2 — the Small Gods 8-block device truncation is still the blocking unknown, and §8.3's advice to
+  **build the host harness that forces the sliced tempExtract path first** still stands. Note this also
+  gates B2 in the cherry-pick doc: that buffering change sits on the exact code path under suspicion, so
+  it must not be ported until the truncation is understood.
+
+Group B (B2/B3/B4) remains inert on master — correctly left on this branch.

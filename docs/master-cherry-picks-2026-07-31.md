@@ -1,5 +1,20 @@
 # Master cherry-picks — standalone-merit fixes from the Stage-1 / fresh-reader effort (2026-07-31)
 
+> ## ⚠️ SUPERSEDED — do not follow Group A as written
+>
+> A later salvage pass (same day) verified this list against master's actual **source** and found that
+> **all of Group A (A1 tjpgd, A2 ZipFile spine-stat cache, A3 img/svg dims) plus `BufferedFileIO.h` were
+> ALREADY on master.** This document was written from the branch's commit list and could not see what
+> master had gained independently.
+>
+> It also **missed** the picks that mattered — the OPF manifest-index abort fix (`6e899b4e` + `14ce6dee`)
+> and `Epub::loadForCover()` (`5c45bc52`), which fixed a crash class still live on master. Those shipped
+> as **PR #99**.
+>
+> **Read `docs/fresh-reader-handover-2026-07-31.md` §9 instead.** Group B below is still accurate
+> (inert on master, correctly left on this branch) — but see §9.4 on B2, which sits on the code path
+> implicated in the unresolved Small Gods truncation.
+
 The fresh-reader (content.bin single-source) work is **PAUSED** (see
 `docs/fresh-reader-handover-2026-07-31.md`). This document collects the fixes made during that effort
 that have **standalone value on `master`**, independent of whether the fresh reader ever ships. Each is
