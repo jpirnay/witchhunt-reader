@@ -243,3 +243,73 @@ These carry the concrete wins out of this effort even if the fresh reader is she
 - **X3 keeps `isRefreshPending()` asserted for the whole waveform** — anything gated on it (the producer)
   starves if the reader re-renders in a tight loop. Draw popups once.
 - `platformio.ini`: `[env:default_fresh]` = the fresh reader; `[env:default]` = untouched master reader.
+
+---
+
+## 8. Session log — 2026-07-31 (evening): two nav fixes landed, then PAUSED
+
+**Development on the fresh reader is PAUSED here** (user decision: "burning resources without results").
+The commits below are on `feat-stage1-extraction`. Everything is resumable; nothing is half-applied.
+
+### 8.1 Two real nav fixes committed (worth keeping regardless)
+Commit `fix(stage1): fresh reader nav — popup only on cursor's uncommitted spine; spine-boundary turn off-by-cursor-zero`:
+
+1. **Preparing popup flashed on EVERY in-chapter page turn** (King's Avatar). The frontier-wait gate was
+   `cursor.spine >= committed || producer->spineInFlight()`. `spineInFlight()` is true whenever ANY later
+   spine is compiling — the normal state on a big book — so the popup showed even when the cursor's own
+   committed spine was perfectly readable. Fix: gate on the cursor's spine alone (`cursor.spineIndex >=
+   committedSpines()`); reading a committed spine mid-compile is safe via `withReadableFile`. Same one-line
+   fix applied to the re-render trigger in `stepContentProducer()`.
+
+2. **Spine-boundary forward turn always landed on spine 1** (regardless of where you were). In
+   `freshPageTurn()` the forward-at-spine-end branch did:
+   ```cpp
+   cursor_ = {};                                                   // zeroes spineIndex to 0
+   cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);  // reads the ZEROED value → 0+1 = 1
+   ```
+   The `cursor_ = {}` reset `spineIndex` to 0 *before* the `+1`. Fix: capture `nextSpine` before zeroing.
+   This is the "from spine 2 atSpineEnd → went to spine 1" bug in the logs.
+
+### 8.2 Small Gods "8 blocks" mystery — ISOLATED to a device-only sliced-build truncation
+This is the single most important unresolved finding; it kills reading on single-file books.
+
+- **Small Gods = 2-spine book**: spine 0 = titlepage (cover), spine 1 = `index.xhtml` = **584 KB, 4095
+  `<p>` blocks — the ENTIRE book in one xhtml file.** (`.idea/small-gods.epub`.)
+- **Host ground truth (`content_stage1_dump`)**: compiling `.idea/small-gods.epub` on the host produces
+  **SPINE 1 blocks=4098** — correct. Command:
+  ```
+  test/build/epub_pipeline/content_stage1_dump.exe .idea/small-gods.epub <out>/content.bin <out>/cache
+  ```
+  So the ContentBinCompiler / writer / parser are **correct** — the whole-book (blocking) path is fine.
+- **Device reality**: spine 1 commits *clean* (block 0 renders `ok=1`, no error logged) but the spine
+  header reports **`blocks=8`**. `BlockStreamReader::spineBlockCount_` is read straight from the spine
+  header (`openSpine`, BlockStreamReader.cpp:94), so the spine genuinely committed with only 8 records.
+- **Therefore the bug is in the DEVICE-ONLY sliced build path**, not the compiler. Host uses the blocking
+  whole-book parse; device uses `Section::stepSectionBuild` with the **tempExtract path** (inflate → temp
+  SD file → re-read in `PARSE_CHUNK_BYTES` slices → feed Expat), yielding every `overBudget()`.
+  `Section.cpp:996–1032`. The giant single-file spine is exactly the case that path exists for.
+- **Prime suspect**: `parseComplete` is set from `st.streamOk && st.finalizeOk && st.parserStreamOk`
+  (`Section.cpp:1180`), and `truncatedCache = !parseComplete` (`Section.cpp:1255`). If Expat silently
+  stops emitting after ~8 blocks but the byte-fed count still equals `inflatedSize` (no "Extracted size
+  mismatch"), the build reports a clean Done with a truncated block set → commits 8 blocks. Need to
+  confirm whether: (a) `st.visitor->write()` is returning short somewhere without tripping `streamFailed`,
+  (b) the visitor has an element/word cap it hits, or (c) the tempExtract re-read is truncating the temp
+  file (partial temp write, then a size check that passes because both sides are the same truncated size).
+- **NOTE on the confusing logs**: the earlier `committed=23…34` device logs were **King's Avatar, not
+  Small Gods** — KA has 47+ spines and its spine 1 jacket is an 8-block table. Do not conflate them.
+  The KA `blocks=8` at spine 1 is *correct* (real table). The Small-Gods `blocks=8` at spine 1 is the bug.
+
+### 8.3 Where to look first when resuming the Small Gods bug
+1. Instrument `Section.cpp` tempExtract loop (`~996`): log `st.tempBytesFed`, `st.inflatedSize`, and the
+   running block count each slice. Confirm whether all 584 KB is fed and Expat just stops emitting, or the
+   temp file / feed truncates.
+2. Reproduce on host by forcing the **sliced tempExtract path** (the host currently exercises the blocking
+   path, which is why host shows 4098). A host harness that drives `stepSectionBuild` with a tiny budget
+   over Small Gods would reproduce it without a device flash — build that first; it's the fast loop.
+3. Check the visitor (`ChapterHtmlSlimParser` / ContentSink) for any per-slice state that resets across a
+   `yieldSlice()` and drops emitted blocks (an accumulator not surviving the pause).
+
+### 8.4 Fresh-reader open items still outstanding (all secondary to 8.2)
+- Cover spine 0 renders `ok=0` on reopen (image decode wants the ZIP ring; auto-advances past it). R3.
+- Status bar shows "page X / 0" — the fresh `renderStatusBar` has no page total (M3 charOffset estimate).
+- Table/float spines only serve their first page (documented pull-core boundary; P4 pagination deferred).
