@@ -2,6 +2,15 @@
 
 This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) for the XTEINK X3/X4, a great piece of software by Dave Allie and others.
 
+# Installation
+
+Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera); Firefox and Safari do not support WebSerial.
+
+1. Download `firmware.bin` for your device from the [latest release](../../releases/latest).
+2. Open the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools).
+3. Pick your device (X3 or X4).
+4. Choose **Custom .bin** and upload the `firmware.bin` you downloaded in step 1.
+5. Connect the device via USB and start the flash — pick the device's serial port when the browser asks.
 
 # What this reader does differently
 - Speed - rendering should be *fast*
