@@ -869,6 +869,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS)) {
     std::string src;
     std::string alt;
+    // Explicit width/height from the markup (e.g. an SVG cover: <image width="455" height="751" .../>,
+    // or <img width= height=>). When both are present and numeric they are the intrinsic dimensions the
+    // publisher declared, so we can size the image WITHOUT reading the JPEG/PNG header from the ZIP — a
+    // ring-hungry inflate that OOMs on the reader's tight heap (the "Failed to read image dimensions:
+    // cover.jpeg" that left the titlepage blank). 0 = attribute absent/non-numeric → fall back.
+    int attrWidth = 0, attrHeight = 0;
     if (atts != nullptr) {
       for (int i = 0; atts[i]; i += 2) {
         if (strcmp(atts[i], "src") == 0 || strcmp(atts[i], "href") == 0 || strcmp(atts[i], "xlink:href") == 0) {
@@ -880,6 +886,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           }
         } else if (strcmp(atts[i], "alt") == 0) {
           alt = atts[i + 1];
+        } else if (strcmp(atts[i], "width") == 0) {
+          attrWidth = atoi(atts[i + 1]);  // ignores a trailing "%"/"px"; 0 for non-leading-digit values
+        } else if (strcmp(atts[i], "height") == 0) {
+          attrHeight = atoi(atts[i + 1]);
         }
       }
 
@@ -983,11 +993,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
             if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
             std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
 
-            // Get dimensions from the pre-built manifest (fast, heap-safe) or fall back to
-            // reading the ZIP entry header directly (safe outside a streaming inflate context).
+            // Get dimensions, cheapest ring-free source first:
+            //  1. explicit width/height on the tag (an SVG cover / sized <img>) — no ZIP read at all;
+            //  2. the pre-built image manifest (each header read at most once ever);
+            //  3. fall back to reading the ZIP entry header directly — a ~32 KB inflate ring that can
+            //     OOM on the reader's tight heap (this is what left the cover.jpeg titlepage blank).
             ImageDimensions dims = {0, 0};
             bool dimsOk = false;
-            if (self->imageManifest) {
+            if (attrWidth > 0 && attrHeight > 0) {
+              dims.width = attrWidth;
+              dims.height = attrHeight;
+              dimsOk = true;
+            }
+            if (!dimsOk && self->imageManifest) {
               // Resolve + cache on a miss: each image's header is read at most once ever.
               const ImageManifestEntry* entry =
                   self->imageManifest->ensureResolved(self->epub->getPath(), resolvedPath);
