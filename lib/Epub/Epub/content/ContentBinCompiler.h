@@ -60,6 +60,13 @@ class ContentBinCompiler {
   uint32_t spineCount() const { return spineCount_; }
   bool done() const { return state_ == State::Done; }
 
+  // True while a per-spine Section build is in flight (between the first slice that opens a spine and
+  // the slice that finishes it). The reader uses this to bound a borrowed-framebuffer arena to a
+  // single spine: borrow before a spine's first slice, return at the spine boundary when this goes
+  // false, so the reader can reclaim the buffer between spines. False at Init/Done/Failed and at every
+  // inter-spine gap.
+  bool spineInFlight() const { return spine_ && spine_->hasActiveBuild(); }
+
  private:
   enum class State : uint8_t { Init, Compiling, Done, Failed };
 
@@ -80,6 +87,11 @@ class ContentBinCompiler {
   uint32_t spineCount_ = 0;
   uint32_t spineCursor_ = 0;        // spine currently being (or about to be) compiled
   uint32_t committedFrontier_ = 0;  // count of committed spines (== lowest uncommitted index)
+  // A spine that finishes DEGRADED (CSS-skipped / truncated → not committed) is RETRIED rather than
+  // skipped (CSS completion has precedence — a gap would render wrong). Bounded so a spine that can
+  // never build clean doesn't stall the compile: after the cap it's skipped (uncommitted gap).
+  uint32_t degradedRetries_ = 0;
+  static constexpr uint32_t kMaxDegradedRetriesPerSpine = 5;
 };
 
 }  // namespace compiled

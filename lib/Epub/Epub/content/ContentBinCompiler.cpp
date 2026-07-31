@@ -126,10 +126,27 @@ ContentBinCompiler::Step ContentBinCompiler::step(uint32_t budgetMs) {
       return Step::More;  // this spine still has work
 
     case Section::BuildStep::Done: {
-      // The spine committed (or not, if degraded — but content-only + clean parse commits). Drop the
-      // per-spine Section (frees its build state), clean its transient input, advance the cursor.
       const uint32_t justDone = spineCursor_;
+      // CSS COMPLETION HAS PRECEDENCE: a spine that finished DEGRADED (CSS lookups skipped mid-build
+      // because heap dipped) or TRUNCATED has blocks missing their resolved styles — it must NOT become
+      // a permanent content.bin gap. Read the Section's own degraded flags (before reset()); a clean
+      // build has neither set and commits normally (byte-identical to the whole-book compile — the host
+      // contract). A degraded build: DON'T advance the cursor — retry the SAME spine on a later slice,
+      // when the reader's borrowed-arena + CSS heap-floor gate lets it build clean. Bound the retries so
+      // a spine that can NEVER build clean (malformed, not a heap transient) doesn't stall forever —
+      // after the cap, skip it (uncommitted gap) and move on.
+      const bool degraded = spine_ && (spine_->isCssLowHeapDegraded() || spine_->isTruncatedCache());
       spine_.reset();
+      if (degraded) {
+        if (++degradedRetries_ < kMaxDegradedRetriesPerSpine) {
+          LOG_INF(kTag, "spine %u degraded; retry %u/%u (free=%lu)", justDone, degradedRetries_,
+                  kMaxDegradedRetriesPerSpine, static_cast<unsigned long>(esp_get_free_heap_size()));
+          return Step::More;  // same spineCursor_ — the next step() rebuilds this spine
+        }
+        LOG_ERR(kTag, "spine %u still degraded after %u retries; skipping (content.bin gap)", justDone,
+                kMaxDegradedRetriesPerSpine);
+      }
+      degradedRetries_ = 0;  // reset for the next spine (clean, or skipped after the cap)
       if (writer_.spineCommitted(justDone)) deleteSpineTransients(justDone);
       spineCursor_ = justDone + 1;
       advanceToUncommitted();
@@ -145,11 +162,35 @@ ContentBinCompiler::Step ContentBinCompiler::step(uint32_t budgetMs) {
       return Step::More;
     }
 
-    case Section::BuildStep::Failed:
-      LOG_ERR(kTag, "spine %u compile failed", spineCursor_);
+    case Section::BuildStep::Failed: {
+      // A single spine's build failed (transient: heap/arena state at that moment — the reader's own
+      // rebuild of the same spine often succeeds right after). Do NOT terminate the whole compile:
+      // RETRY the spine a bounded number of times, then SKIP it (uncommitted gap) and continue to the
+      // next — the same discipline as a degraded Done. Terminating on one failure stranded content.bin
+      // at a tiny committed prefix (device-observed: spine 4 failed → CBC gave up on a 1732-spine book).
+      const uint32_t justFailed = spineCursor_;
       spine_.reset();
-      state_ = State::Failed;
-      return Step::Failed;
+      if (++degradedRetries_ < kMaxDegradedRetriesPerSpine) {
+        LOG_INF(kTag, "spine %u compile failed; retry %u/%u (free=%lu)", justFailed, degradedRetries_,
+                kMaxDegradedRetriesPerSpine, static_cast<unsigned long>(esp_get_free_heap_size()));
+        return Step::More;  // same spineCursor_ — rebuild this spine next slice
+      }
+      LOG_ERR(kTag, "spine %u failed after %u retries; skipping (content.bin gap)", justFailed,
+              kMaxDegradedRetriesPerSpine);
+      degradedRetries_ = 0;
+      spineCursor_ = justFailed + 1;
+      advanceToUncommitted();
+      if (spineCursor_ >= spineCount_) {
+        writer_.finish();
+        binFile_.close();
+        removeBlockOffsetSidecar();
+        state_ = State::Done;
+        LOG_INF(kTag, "content.bin complete (%u spines, free=%lu)", spineCount_,
+                static_cast<unsigned long>(esp_get_free_heap_size()));
+        return Step::Done;
+      }
+      return Step::More;
+    }
   }
   return Step::More;
 }

@@ -157,19 +157,33 @@ void ContentBinWriter::beginSpineAt(uint32_t spineIndex) {
 bool ContentBinWriter::appendBlockOffset(const BlockOffset& bo) {
   // Temp-file path (device compile): stream the 12 B entry to disk so the table is O(1) resident
   // regardless of block count. Open the temp file (truncating) on the first append of the spine.
-  if (!blockOffsetTmpPath_.empty()) {
-    if (!blockOffsetTmpWriter_) {
-      if (!Storage.openFileForWrite("CBW", blockOffsetTmpPath_, blockOffsetTmp_)) return false;
-      blockOffsetTmpWriter_.emplace(blockOffsetTmp_);
+  // If the temp open FAILS (e.g. an SD handle is momentarily unavailable in the reader context),
+  // DON'T fail the whole spine — fall back to the in-RAM vector for this spine (blockOffsetStreaming_
+  // stays false so spliceBlockOffsets writes from RAM). Every spine's table is small except a giant
+  // single spine; the RAM fallback only risks the O(blocks) footprint in that rare case, and only when
+  // the sidecar couldn't open — far better than aborting the spine outright (the King's Avatar
+  // 1732-tiny-spine "OOM growing block-offset index (block 0)" that was really a temp-open failure).
+  if (!blockOffsetTmpPath_.empty() && !blockOffsetStreamFailed_) {
+    if (!blockOffsetStreaming_) {
+      if (Storage.openFileForWrite("CBW", blockOffsetTmpPath_, blockOffsetTmp_)) {
+        blockOffsetTmpWriter_.emplace(blockOffsetTmp_);
+        blockOffsetStreaming_ = true;
+      } else {
+        // Couldn't open the sidecar this spine — degrade to RAM for it (logged once).
+        LOG_INF("CBW", "block-offset sidecar open failed; using in-RAM table this spine");
+        blockOffsetStreamFailed_ = true;
+      }
     }
-    blockOffsetTmpWriter_->writePod(bo.fileOffset);
-    blockOffsetTmpWriter_->writePod(bo.charOffset);
-    blockOffsetTmpWriter_->writePod(bo.recordIndex);
-    if (!static_cast<bool>(*blockOffsetTmpWriter_)) return false;
-    ++blockOffsetCount_;
-    return true;
+    if (blockOffsetStreaming_) {
+      blockOffsetTmpWriter_->writePod(bo.fileOffset);
+      blockOffsetTmpWriter_->writePod(bo.charOffset);
+      blockOffsetTmpWriter_->writePod(bo.recordIndex);
+      if (!static_cast<bool>(*blockOffsetTmpWriter_)) return false;  // a mid-stream WRITE error is real
+      ++blockOffsetCount_;
+      return true;
+    }
   }
-  // In-RAM fallback (no temp path — host tests, small spines).
+  // In-RAM path (no temp path — host tests / small spines — or a sidecar-open fallback this spine).
   blockOffsetMem_.push_back(bo);
   ++blockOffsetCount_;
   return true;
@@ -179,7 +193,7 @@ bool ContentBinWriter::spliceBlockOffsets(serialization::BufferedFileWriter& out
   // Same on-disk format as writeBlockOffsets(): u32 count, then count × {fileOffset,charOffset,
   // recordIndex}. From the temp file (bounded copy) when streaming, else the in-RAM vector.
   out.writePod(blockOffsetCount_);
-  if (!blockOffsetTmpPath_.empty()) {
+  if (blockOffsetStreaming_) {
     if (blockOffsetCount_ == 0) return static_cast<bool>(out);  // nothing streamed
     if (!blockOffsetTmpWriter_) return false;                   // count>0 but no writer → inconsistent
     if (!blockOffsetTmpWriter_->flush()) return false;          // land all buffered entries on SD
@@ -220,12 +234,16 @@ bool ContentBinWriter::spliceBlockOffsets(serialization::BufferedFileWriter& out
 
 void ContentBinWriter::clearBlockOffsets() {
   // Streaming path: drop the writer + close the handle (appendBlockOffset re-opens truncating for the
-  // next spine). In-RAM path: clear + release.
+  // next spine). In-RAM path: clear + release. Reset the per-spine streaming flags so the NEXT spine
+  // re-attempts the sidecar (a transient open failure on one spine must not disable streaming for the
+  // rest of the book).
   blockOffsetTmpWriter_.reset();
   if (blockOffsetTmp_) blockOffsetTmp_.close();
   blockOffsetMem_.clear();
   blockOffsetMem_.shrink_to_fit();
   blockOffsetCount_ = 0;
+  blockOffsetStreaming_ = false;
+  blockOffsetStreamFailed_ = false;
 }
 
 bool ContentBinWriter::writeOneRecord(const Block& rec) {

@@ -159,8 +159,14 @@ class ContentBinWriter : public BlockSink {
   std::string blockOffsetTmpPath_;  // set via setBlockOffsetTempPath; empty → in-RAM fallback
   FsFile blockOffsetTmp_;           // open on first append when a temp path is set
   std::optional<serialization::BufferedFileWriter> blockOffsetTmpWriter_;  // batches the 12 B appends
-  std::vector<BlockOffset> blockOffsetMem_;  // in-RAM fallback (temp path unset)
+  std::vector<BlockOffset> blockOffsetMem_;  // in-RAM fallback (temp path unset OR sidecar-open failed)
   uint32_t blockOffsetCount_ = 0;
+  // Per-spine streaming state (reset in clearBlockOffsets). streaming_ = the sidecar is open and in use
+  // for THIS spine; streamFailed_ = the sidecar open failed this spine so we degraded to the RAM vector
+  // (don't keep retrying the open mid-spine). Both drive spliceBlockOffsets' path choice — NOT the mere
+  // presence of blockOffsetTmpPath_ (which stays set across spines).
+  bool blockOffsetStreaming_ = false;
+  bool blockOffsetStreamFailed_ = false;
   // Append one entry (temp file when a path is set, else in-RAM vector). False on I/O/OOM → ok_=false.
   bool appendBlockOffset(const BlockOffset& bo);
   // Write count + every entry to `out` (the aux region): from the temp file (bounded copy) or the
