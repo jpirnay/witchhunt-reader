@@ -105,6 +105,51 @@ Chrome that needs a total (status bar "N of M") shows an **estimate** (chars-bas
 the compiler finishes the spine — the mature reader already has this exact "unknown while building"
 pattern (`estimatedTotalPages`, `pageCount==0` sentinel) to borrow from.
 
+## 3c. One-producer collapse — the concrete migration (2026-07-31, after the CBC-in-reader failure)
+
+The device proved that running the content.bin compiler as a SECOND builder alongside the reader's own
+section builds (Background-C) is fatal: two builders fighting the one framebuffer + one loop task →
+6.7 s build starvation, a Store-access-fault crash on spine entry, half-refresh every page, freeze.
+FreeInkBook (freeink-sdk/libs/book/FreeInkBook) settles the model: NO tasks, ONE cooperative loop; the
+producer is a `step()` pumped from the loop (`while(!s.done()){ s.step(4); render; input; }`), and the
+reader reads that ONE producer's PARTIAL output mid-build (`PageCacheWriter::readPage`/`pageForChar`).
+
+**Reader-map finding (2026-07-31):** the pull core (`compiled::layoutPage`/`PagePosition`) is NOT wired
+into the reader at all — zero refs in `src/`. The reader is 100% "build a per-settings section file, read
+pages by LUT index" (`section->pageCount`/`currentPage`/`loadPageFromSectionFile`). So the reader MUST
+build section files today because that is the only thing it can read. Therefore the one-producer collapse
+and the cursor-native reader (§3, old "Step 4") are THE SAME WORK — you cannot remove the section builder
+without giving the reader a content.bin read path, and vice-versa.
+
+**Target end state (exactly two roles):**
+1. ONE PRODUCER — `ContentBinCompiler::step(budgetMs)` pumped from the reader loop; the ONLY code that
+   opens the epub/ZIP + inflates + parses. Resumes from committed slots; exposes the frontier
+   (`committedSpines()`, `spineInFlight()`), and — for the current spine — a partial/mid-build read.
+2. CONSUMER (reader) — renders pages PURELY from content.bin via `compiled::layoutPage(reader, params,
+   cursor)`. Position is a `PagePosition` cursor (block/offset/**charOffset**), NOT a page index. NEVER
+   opens the epub. NO `Section` builds, NO section files.
+
+**What each `Section`/reader dependency maps to (from the map):**
+- `section->loadPageFromSectionFile()` → `compiled::layoutPage(BlockStreamReader&, params, cursor)`.
+- `section->currentPage`/`pageCount` (page-index nav) → a `PagePosition` cursor + forward/back page
+  turns via `layoutPage`/`layoutPageBackward`; "N of M" is an ESTIMATE from `charOffset/totalChars`.
+- `resolveInto` (TOC/anchor/paragraph/percent jumps) → `BlockStreamReader::spineAnchors/Labels/Chapters`
+  + `charOffset` (the anchors/labels/chapters are already baked per-spine in content.bin).
+- `progress.bin` (spine+page+pageCount) → char-offset / the full `PagePosition` cursor (settings-independent).
+
+**Migration order (each host-tested then device-verified, one concern per commit):**
+- M1. Prove the one-producer + read-from-partial-frontier loop in `bench_pagelayout` (no reader UI) on
+  King's Avatar + Small Gods: step the producer, render the current page via `layoutPage` from the
+  committed/partial frontier, page forward/back by cursor, memory + latency green. (De-risk before the
+  reader surgery — this is the whole model in isolation.)
+- M2. Give the reader a cursor + a content.bin read path ALONGSIDE the section path (feature-flagged), so
+  it can render a page via `layoutPage` when content.bin covers the cursor. No removal yet.
+- M3. Route navigation (page turn, TOC, anchor, percent, resume) through the cursor; progress → charOffset.
+- M4. Make the producer the reader's single builder (pumped from the loop); the reader waits on the
+  frontier for the page it needs, renders it, pre-renders next. DELETE Background-C, `createSectionFile`,
+  section files, the framebuffer-borrow-in-reader, Background-B remnants, the CBC-specific borrow churn.
+- M5. Cache hygiene: only content.bin (+ sidecars) remain; delete section-file machinery + variant cache.
+
 ## 4. What lands first vs later
 
 - **First (must work minute one):** open → background compile from last-good-state → cursor read loop

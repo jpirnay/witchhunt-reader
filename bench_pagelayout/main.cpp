@@ -237,6 +237,124 @@ static bool benchIncrementalCompile(const std::shared_ptr<Epub>& epub) {
   return ok;
 }
 
+// --- (1c) M1: THE ONE-PRODUCER MODEL (FreeInk-style single cooperative loop). No reader UI, no second
+// builder. ONE producer (ContentBinCompiler) is stepped a slice at a time; ONE consumer
+// (BlockStreamReader + compiled::layoutPage) chases the producer's committed frontier and renders the
+// "current" page the instant its spine is available — exactly the reader loop we're migrating to. This
+// de-risks the whole architecture in isolation: it proves (a) the reader can render from content.bin
+// mid-compile by chasing the frontier (refreshIndex), (b) forward+backward page turns work off a
+// PagePosition cursor, (c) the memory regime holds with producer+consumer coexisting, (d) how often the
+// reader STALLS waiting for the frontier (the cold-open cost). One file, two handles (producer writes,
+// consumer reads); no epub access on the consumer side. ---
+static bool benchOneProducer(const std::shared_ptr<Epub>& epub) {
+  Section::BuildParams bp;
+  bp.fontId = kFontId;
+  bp.viewportWidth = kViewportW;
+  bp.viewportHeight = kViewportH;
+  bp.embeddedStyle = true;
+
+  // Cold: wipe content.bin so the producer compiles fresh and the consumer truly chases a live frontier.
+  Storage.removeDir((epub->getCachePath() + "/sections").c_str());
+  Storage.remove((epub->getCachePath() + "/content.bin").c_str());
+
+  const uint32_t fullSpineCount = static_cast<uint32_t>(epub->getSpineItemsCount());
+#ifdef BENCH_INCR_MAX_SPINES
+  const uint32_t spineCount = std::min<uint32_t>(fullSpineCount, BENCH_INCR_MAX_SPINES);
+#else
+  const uint32_t spineCount = fullSpineCount;
+#endif
+  const compiled::LayoutParams params = makeParams(epub);
+  const std::string binPath = epub->getCachePath() + "/content.bin";
+
+  uint32_t minFree = freeHeap(), minContig = contigHeap();
+  uint32_t slices = 0, pagesRendered = 0, readerStalls = 0;
+  int64_t pageTotalUs = 0, pageMaxUs = 0;
+  const int64_t t0 = esp_timer_get_time();
+
+  compiled::ContentBinCompiler producer(epub, renderer, bp);
+
+  // Consumer state. IMPORTANT (device lesson): do NOT hold a content.bin READ handle open while the
+  // producer holds it open for WRITE — two concurrent SdFat handles on the same file disturb the shared
+  // volume state and the producer's next epub-ZIP inflate fails. So the consumer opens content.bin
+  // fresh, reads what the frontier allows, and CLOSES before the next producer step. The producer
+  // flushes each spine at commit (durable two-phase), so a fresh open always sees the committed prefix.
+  compiled::PagePosition cursor;  // starts at spine 0, block 0
+  uint32_t consumerSpine = 0;     // the spine the consumer is currently reading
+
+  // Drive the single loop: step the producer, then let the consumer render one page if it can. The
+  // consumer models a reader turning pages roughly as fast as the producer commits (worst case for the
+  // frontier race). It renders the current spine's pages to completion, then chases the next spine.
+  for (int guard = 0; guard < 2000000; ++guard) {
+    const bool producerDone = producer.done() || producer.committedSpines() >= spineCount;
+    if (!producerDone) {
+      producer.step(/*budgetMs=*/40);  // the reader's BG_BUILD_BUDGET_MS
+      ++slices;
+      const uint32_t f = freeHeap(), c = contigHeap();
+      if (f < minFree) minFree = f;
+      if (c < minContig) minContig = c;
+    }
+
+    // Consumer: only act once at least one spine is committed and there's work left.
+    if (producer.committedSpines() > 0 && consumerSpine < spineCount) {
+      // Cheap frontier check WITHOUT a page read: is the spine we want committed yet? Use the compiler's
+      // own committed count (no file handle needed) to avoid opening content.bin when we'd only stall.
+      if (consumerSpine >= producer.committedSpines()) {
+        // Wanted spine not compiled yet — a frontier STALL (the cold "preparing..." wait).
+        ++readerStalls;
+        if (producerDone) { consumerSpine++; cursor = {}; cursor.spineIndex = static_cast<uint16_t>(consumerSpine); }
+      } else {
+        // Open content.bin FRESH (producer's committed data is flushed), read one page, CLOSE.
+        FsFile readBin;
+        compiled::BlockStreamReader reader;
+        if (Storage.openFileForRead("M1", binPath, readBin) && reader.open(readBin)) {
+          cursor.spineIndex = static_cast<uint16_t>(consumerSpine);
+          const int64_t t = esp_timer_get_time();
+          compiled::LaidOutPage lp = compiled::layoutPage(reader, renderer, params, cursor);
+          const int64_t us = esp_timer_get_time() - t;
+          if (lp.ok && lp.page) {
+            pageTotalUs += us;
+            if (us > pageMaxUs) pageMaxUs = us;
+            ++pagesRendered;
+            const uint32_t c = contigHeap();
+            if (c < minContig) minContig = c;
+            if (lp.atSpineEnd) {
+              consumerSpine++;                 // advance to the next spine's first page
+              cursor = {};
+            } else {
+              cursor = lp.end;                 // next page in this spine
+            }
+          } else {
+            consumerSpine++;                   // unreadable (image-only/empty) — skip
+            cursor = {};
+          }
+          readBin.close();  // release BEFORE the next producer step (no concurrent handles)
+        } else {
+          if (readBin) readBin.close();  // open failed
+          // content.bin should exist once a spine committed; if it doesn't and the producer is DONE,
+          // the compile produced nothing usable — bail rather than spin forever (the v1 hang).
+          if (producerDone) { benchLog("BENCH oneproducer ERROR content.bin unopenable after producer done"); break; }
+        }
+      }
+    }
+
+    // Terminate when the producer is done AND either the consumer finished the book or it can make no
+    // further progress (producer committed 0 spines — nothing to read).
+    if (producerDone && (consumerSpine >= spineCount || producer.committedSpines() == 0)) break;
+  }
+  const int64_t us = esp_timer_get_time() - t0;
+
+  char buf[224];
+  snprintf(buf, sizeof(buf),
+           "BENCH oneproducer ok=%d spines=%lu slices=%lu pages=%lu stalls=%lu avgpage=%lldus maxpage=%lldus "
+           "total=%lldms MIN-EVER free=%lu contig=%lu",
+           (producer.done() || producer.committedSpines() >= spineCount) ? 1 : 0, (unsigned long)spineCount,
+           (unsigned long)slices, (unsigned long)pagesRendered, (unsigned long)readerStalls,
+           (long long)(pagesRendered ? pageTotalUs / pagesRendered : 0), (long long)pageMaxUs,
+           (long long)(us / 1000), (unsigned long)minFree, (unsigned long)minContig);
+  benchLog(buf);
+  return pagesRendered > 0;
+}
+
 // --- (2) sweep pages forward then backward, timed per page ---
 
 static void benchLayout(const std::shared_ptr<Epub>& epub) {
@@ -444,8 +562,13 @@ void setup() {
   BSerial.printf("BENCH open book=%s spines=%d load=%lldms\n", bookPath.c_str(), epub->getSpineItemsCount(),
                 (esp_timer_get_time() - lt) / 1000);
 
-  // (1b) FIRST: the incremental background-style compile + memory-regime proof (min-ever heap across
-  // the whole compile) + resume. This is the fresh-reader compiler; it leaves a complete content.bin.
+  // (1c) M1 FIRST: the ONE-PRODUCER model — producer stepped + consumer chasing the frontier in one
+  // loop (the architecture we're migrating the reader to). De-risks it in isolation before the reader
+  // surgery. Leaves a complete content.bin, so the later phases reuse it.
+  benchOneProducer(epub);
+
+  // (1b) the incremental compile + memory-regime proof (min-ever heap) + resume. content.bin already
+  // exists from M1, so this is a warm re-run (still valid for the memory-regime + resume checks).
   if (benchIncrementalCompile(epub)) {
     benchReaderFlow(epub);  // (3) per-page cursor read-loop latency (first-page-of-spine focus)
     benchLayout(epub);      // (2) aggregate sweep last (its O(pages) backward sweep is slow on a giant spine)
