@@ -54,7 +54,7 @@ EpdFontFamily::Style spanToFontStyle(uint8_t span) {
 // block Images + HRs; Tables (P4) and float images (P3, an inline image on a Text block) still fall
 // back. Text blocks with footnote previews / footnotes / xpath are handled by the pull core.
 bool needsScaffold(const Block& b) {
-  if (b.type == BlockType::Table) return true;                    // P4
+  if (b.type == BlockType::Table) return true;                                    // P4
   if (b.type == BlockType::Text && !b.inlineImageEntryPath.empty()) return true;  // float image — P3
   return false;
 }
@@ -222,8 +222,7 @@ class PullDriver {
   // estimate counts only what this page can place — otherwise the resumed block's off-page lines
   // inflate the estimate and the window stops early, dropping a block that would still fit.
   int blockPlacedHeight(const LaidOutBlock& lb, size_t fromLine = 0) const {
-    if (lb.kind == LaidOutBlock::Kind::Image)
-      return lb.imageSpacingTop + lb.imageHeight + lb.imageSpacingBottom;
+    if (lb.kind == LaidOutBlock::Kind::Image) return lb.imageSpacingTop + lb.imageHeight + lb.imageSpacingBottom;
     if (lb.kind == LaidOutBlock::Kind::Hr) return 2 * lb.hrMarginV + 1;
     const BlockStyle& bs = lb.style;
     const int lineHeight = effectiveLineHeight(bs);
@@ -242,8 +241,7 @@ class PullDriver {
   // Port of LayoutSink::buildBlockStyle.
   BlockStyle buildBlockStyle(const CssStyle& style, bool isHeading) const {
     const float emSize = static_cast<float>(renderer_.getFontAscenderSize(fontId_));
-    const CssTextAlign defaultAlign =
-        isHeading ? CssTextAlign::Center : static_cast<CssTextAlign>(paragraphAlignment_);
+    const CssTextAlign defaultAlign = isHeading ? CssTextAlign::Center : static_cast<CssTextAlign>(paragraphAlignment_);
     BlockStyle bs = BlockStyle::fromCssStyle(style, emSize, defaultAlign, viewportWidth_);
     if (isHeading) bs.textAlignDefined = true;
     if (embeddedStyle_ && style.hasTextAlign() && paragraphAlignment_ == static_cast<uint8_t>(CssTextAlign::None)) {
@@ -274,9 +272,7 @@ class PullDriver {
     return static_cast<int>(renderer_.getLineHeight(effectiveFontId(bs)) * lineCompression_ * bs.fontSizeMultiplier +
                             0.5f);
   }
-  int16_t lineGapPx() const {
-    return static_cast<int16_t>(renderer_.getLineHeight(fontId_) * lineCompression_ + 0.5f);
-  }
+  int16_t lineGapPx() const { return static_cast<int16_t>(renderer_.getLineHeight(fontId_) * lineCompression_ + 0.5f); }
 
   // Produce the block's page-independent lines through the SAME ParsedText path LayoutSink uses:
   // abbreviate inline footnote previews to the viewport (the one settings-dependent block mutation,
@@ -493,7 +489,8 @@ class PullDriver {
       lastBlockMarginBottom_ = 0;
     }
     if (bs.paddingBottom > 0) currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + bs.paddingBottom);
-    if (extraParagraphSpacing_ && !lb.preformatted) currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + lineHeight / 2);
+    if (extraParagraphSpacing_ && !lb.preformatted)
+      currentPageNextY_ = static_cast<int16_t>(currentPageNextY_ + lineHeight / 2);
 
     brokeAt = lb.lines.size();
     return true;
@@ -524,7 +521,7 @@ class PullDriver {
   const std::string imageBasePath_;
   const std::string epubFilePath_;
   int32_t auxFontId_ = 0;
-  int imageCounter_ = 0;  // per-spine image-cache-path counter (carried in the cursor, like auxFontId_)
+  int imageCounter_ = 0;            // per-spine image-cache-path counter (carried in the cursor, like auxFontId_)
   const int imageCounterSeed_ = 0;  // the counter's page-start value; collectPageForward resets to it
 
   bool hasPendingMerge_ = false;
@@ -577,8 +574,7 @@ LaidOutPage scaffoldOnePage(BlockStreamReader& reader, GfxRenderer& renderer, co
     for (const auto& pl : labels)
       if (pl.blockIndex == bi) sink.onPageBreakLabel(pl.label);
     for (const auto& fn : lb.footnotes) sink.onFootnote(static_cast<int>(fn.wordIndex), fn.entry);
-    if (lb.hasXPath)
-      sink.onXPathAdvance(lb.xpath.paragraphIndex, lb.xpath.listItemIndex, lb.xpath.bodyChildByteOffset);
+    if (lb.hasXPath) sink.onXPathAdvance(lb.xpath.paragraphIndex, lb.xpath.listItemIndex, lb.xpath.bodyChildByteOffset);
     const CssStyle& style = (lb.styleId < stylePool.size()) ? stylePool[lb.styleId] : kEmptyStyle;
     sink.onBlock(std::move(lb), style);
     for (const auto& ch : chapters)
@@ -635,7 +631,7 @@ LaidOutPage layoutPage(BlockStreamReader& reader, GfxRenderer& renderer, const L
 
   PullDriver driver(renderer, params, start.auxFontId, start.imageCounter);
 
-  std::vector<LaidOutBlock> window;        // content blocks only (empty blocks fold into the merge)
+  std::vector<LaidOutBlock> window;  // content blocks only (empty blocks fold into the merge)
   std::vector<std::vector<FootnoteRef>> windowFootnotes;
   std::vector<uint32_t> windowBlockIndex;  // logical block index per window entry
   size_t startLine = 0;                    // mid-block line offset within the first content block
@@ -742,7 +738,7 @@ LaidOutPage layoutPageBackward(BlockStreamReader& reader, GfxRenderer& renderer,
     LaidOutPage lp = layoutPage(reader, renderer, params, cursor);
     if (!lp.ok || !lp.page) return out;
     if (lp.end.samePosition(endCursor)) return lp;  // this page ends exactly where asked
-    if (lp.atSpineEnd) return out;                   // endCursor not a real boundary — no such page
+    if (lp.atSpineEnd) return out;                  // endCursor not a real boundary — no such page
     cursor = lp.end;
   }
   return out;

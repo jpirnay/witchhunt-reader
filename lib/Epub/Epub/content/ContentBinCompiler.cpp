@@ -26,7 +26,10 @@ void ContentBinCompiler::removeBlockOffsetSidecar() {
 
 bool ContentBinCompiler::ensureOpen() {
   const std::string binPath = epub_->getCachePath() + "/content.bin";
-  { const std::string dir = epub_->getCachePath(); Storage.mkdir(dir.c_str()); }
+  {
+    const std::string dir = epub_->getCachePath();
+    Storage.mkdir(dir.c_str());
+  }
   spineCount_ = static_cast<uint32_t>(epub_->getSpineItemsCount());
   if (spineCount_ == 0) return false;
 

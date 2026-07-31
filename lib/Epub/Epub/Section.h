@@ -47,8 +47,7 @@ class Section {
   // LayoutLutEntry: same fields xhtmlByteOffset/paragraphIndex/listItemIndex). Defined in the .cpp
   // via explicit instantiation for both entry types.
   template <typename LutEntry>
-  bool writeSectionTail(const std::vector<uint32_t>& lut,
-                        const std::vector<std::pair<std::string, uint16_t>>& anchors,
+  bool writeSectionTail(const std::vector<uint32_t>& lut, const std::vector<std::pair<std::string, uint16_t>>& anchors,
                         const std::vector<std::pair<uint16_t, std::string>>& pageBreakLabelsIn,
                         const std::vector<LutEntry>& paragraphLut, uint16_t pageCountIn, bool parseComplete);
 

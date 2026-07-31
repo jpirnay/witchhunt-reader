@@ -35,12 +35,12 @@ struct TableLayoutRow {
 // currentPageNextY / emitPage so the packing math is identical on both sides.
 struct TablePageContext {
   virtual ~TablePageContext() = default;
-  virtual int currentY() const = 0;                 // currentPageNextY
-  virtual void ensurePage() = 0;                    // create currentPage if null (nextY=0)
-  virtual void emitPageAndReset() = 0;              // emit currentPage, fresh page, nextY=0
-  virtual void advanceY(int delta) = 0;             // currentPageNextY += delta
-  virtual void pushFragment(uint8_t cols, uint16_t totalWidth, uint16_t totalHeight,
-                            std::vector<::TableRow>&& rows, int16_t yPos, bool hasBorder) = 0;
+  virtual int currentY() const = 0;      // currentPageNextY
+  virtual void ensurePage() = 0;         // create currentPage if null (nextY=0)
+  virtual void emitPageAndReset() = 0;   // emit currentPage, fresh page, nextY=0
+  virtual void advanceY(int delta) = 0;  // currentPageNextY += delta
+  virtual void pushFragment(uint8_t cols, uint16_t totalWidth, uint16_t totalHeight, std::vector<::TableRow>&& rows,
+                            int16_t yPos, bool hasBorder) = 0;
   // An over-tall row (height > viewportHeight) can't go in a grid fragment: the caller flattens
   // it to paragraphs. The helper flushes the pending fragment before invoking this so document
   // order is preserved.

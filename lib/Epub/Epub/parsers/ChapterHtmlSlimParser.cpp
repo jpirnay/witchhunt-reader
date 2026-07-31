@@ -150,7 +150,6 @@ const char* getAttribute(const char** atts, const char* attrName) {
   return nullptr;
 }
 
-
 bool isInternalEpubLink(const char* href) {
   if (!href || href[0] == '\0') return false;
   if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) return false;
@@ -352,7 +351,6 @@ void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<st
   }
 }
 
-
 // start a new text block if needed
 // --- Stage-1 producer tap ---------------------------------------------------
 // No-ops when stage1Sink_ is null, so the shipping fused path is byte-identical.
@@ -438,8 +436,8 @@ void ChapterHtmlSlimParser::stage1EmitPendingAnchor() {
 }
 
 void ChapterHtmlSlimParser::stage1EmitImageBlock(const std::string& entryPath, const int16_t width,
-                                                 const int16_t height, const uint8_t floatSide,
-                                                 const std::string& alt, const CssStyle& imgStyle) {
+                                                 const int16_t height, const uint8_t floatSide, const std::string& alt,
+                                                 const CssStyle& imgStyle) {
   compiled::BlockSink* sink = effectiveSink();
   if (!sink) return;
   stage1FlushBlock();         // emit any pending text block first (document order)
@@ -619,7 +617,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // Record deferred anchor after the previous block is flushed.
   if (!pendingAnchorId.empty()) {
     if (effectiveSink()) {
-      stage1PendingAnchor_ = pendingAnchorId;  // Stage-1: stash before the move
+      stage1PendingAnchor_ = pendingAnchorId;           // Stage-1: stash before the move
       if (tocBoundary) stage1PendingPageBreak_ = true;  // -> kPageBreakBefore on the introduced block
     }
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
@@ -627,8 +625,8 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   }
   // Reset the walk's current text block to a fresh accumulator for this element. It is no longer
   // laid out here (Stage-2 owns layout); the walk still reads its style/emptiness/word count.
-  currentTextBlock.reset(
-      new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyle, bionicReadingEnabled));
+  currentTextBlock.reset(new (std::nothrow)
+                             ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyle, bionicReadingEnabled));
   // Stage-1: open a matching compiled block, carrying the block's pre-px CssStyle
   // (currentCssStyle was set to this block's resolved style just before the call).
   stage1OpenBlock(currentCssStyle);
@@ -1056,9 +1054,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 // Display-dimension math lives in the shared helper so LayoutSink reproduces it
                 // byte-for-byte (docs/parser-stage1-step5-design.md). Keep both in lockstep.
                 {
-                  const compiled::ImageDisplaySize ds = compiled::computeImageDisplaySize(
-                      dims.width, dims.height, imgStyle, self->viewportWidth, self->viewportHeight, containerWidth,
-                      emSize);
+                  const compiled::ImageDisplaySize ds =
+                      compiled::computeImageDisplaySize(dims.width, dims.height, imgStyle, self->viewportWidth,
+                                                        self->viewportHeight, containerWidth, emSize);
                   displayWidth = ds.width;
                   displayHeight = ds.height;
                   LOG_DBG("EHP", "Display size: %dx%d", displayWidth, displayHeight);

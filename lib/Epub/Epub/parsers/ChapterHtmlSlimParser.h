@@ -19,7 +19,7 @@
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../content/CompiledContent.h"  // compiled::Block (unique_ptr member needs the complete type)
-#include "../content/TeeBlockSink.h"      // compiled::TeeBlockSink (unique_ptr member; header-only)
+#include "../content/TeeBlockSink.h"     // compiled::TeeBlockSink (unique_ptr member; header-only)
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
 

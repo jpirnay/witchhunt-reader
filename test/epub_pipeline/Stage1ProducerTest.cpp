@@ -5,11 +5,11 @@
 
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
+#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
-#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 #include <memory>
 #include <string>
 #include <vector>

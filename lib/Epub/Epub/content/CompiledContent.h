@@ -219,11 +219,11 @@ struct PageBreakLabel {
 // paragraph, bulk-read at chapter open). One entry per LOGICAL block (kContinuation split records
 // share their base block's entry), so index i here == the i-th block nextLogicalBlock() returns.
 struct BlockOffset {
-  uint32_t fileOffset = 0;    // absolute content.bin offset of this logical block's FIRST record
-  uint32_t charOffset = 0;    // absolute char offset of this block's first char (reading progress)
-  uint32_t recordIndex = 0;   // RECORD index of this logical block's first record (anchors/labels/
-                              // chapters are keyed on record index; seekToBlock restores it so the
-                              // replay cross-reference in LayoutSink keeps resolving after a seek).
+  uint32_t fileOffset = 0;   // absolute content.bin offset of this logical block's FIRST record
+  uint32_t charOffset = 0;   // absolute char offset of this block's first char (reading progress)
+  uint32_t recordIndex = 0;  // RECORD index of this logical block's first record (anchors/labels/
+                             // chapters are keyed on record index; seekToBlock restores it so the
+                             // replay cross-reference in LayoutSink keeps resolving after a seek).
 };
 
 // Per-spine content, in document order.

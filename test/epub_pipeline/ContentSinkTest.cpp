@@ -9,18 +9,18 @@
 
 #include <HalStorage.h>
 #include <gtest/gtest.h>
+#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 
 #include <cstdio>
 #include <filesystem>
-#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "Epub/content/CompiledContent.h"
-#include "Serialization.h"
 #include "Epub/content/ContentSink.h"
 #include "PipelineRunner.h"
+#include "Serialization.h"
 
 namespace fs = std::filesystem;
 

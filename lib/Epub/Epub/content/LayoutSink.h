@@ -46,7 +46,7 @@ struct LayoutParams {
   uint16_t viewportHeight = 0;
   bool hyphenationEnabled = false;
   bool bionicReadingEnabled = false;
-  bool embeddedStyle = true;  // honor publisher CSS text-align (see the alignment resolution)
+  bool embeddedStyle = true;      // honor publisher CSS text-align (see the alignment resolution)
   FontSizeLadder fontSizeLadder;  // body-font sibling-size ladder (see resolveBlockFont)
   // Cache-path prefix for extracted images: <cache>/img_<spine>_<hash>_. The sink appends a
   // per-image counter + source extension, mirroring Section::getImageBasePath + imageCounter.
@@ -66,8 +66,7 @@ struct LayoutLutEntry {
 
 class LayoutSink : public BlockSink {
  public:
-  LayoutSink(GfxRenderer& renderer, LayoutParams params,
-             std::function<void(std::unique_ptr<Page>)> completePageFn);
+  LayoutSink(GfxRenderer& renderer, LayoutParams params, std::function<void(std::unique_ptr<Page>)> completePageFn);
   ~LayoutSink() override;
 
   // BlockSink — driven by the walk during a Section build.

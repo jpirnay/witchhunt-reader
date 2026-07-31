@@ -29,7 +29,7 @@ bool writeContentBin(FsFile& out, const CompiledContent& content) {
   writePod(out, kVersion);
   writePod(out, content.sourceFingerprint);
   writePod(out, spineCount);
-  const uint32_t indexPos = static_cast<uint32_t>(out.position());  // == kHeaderSize
+  const uint32_t indexPos = static_cast<uint32_t>(out.position());                    // == kHeaderSize
   for (uint32_t i = 0; i < spineCount; ++i) writePod(out, static_cast<uint32_t>(0));  // zeroed index
 
   for (uint32_t si = 0; si < spineCount; ++si) {
@@ -48,8 +48,7 @@ bool writeContentBin(FsFile& out, const CompiledContent& content) {
     std::vector<BlockOffset> blockOffsets;
     uint32_t recordIndex = 0;
     for (Block b : spine.blocks) {
-      const CssStyle& s =
-          (b.styleId < content.stylePool.size()) ? content.stylePool[b.styleId] : CssStyle{};
+      const CssStyle& s = (b.styleId < content.stylePool.size()) ? content.stylePool[b.styleId] : CssStyle{};
       b.styleId = internStyle(spineStyles, s);
       const bool isContinuation = (b.flags & kContinuation) != 0 && b.type == BlockType::Text;
       if (!isContinuation) {
@@ -72,7 +71,7 @@ bool writeContentBin(FsFile& out, const CompiledContent& content) {
     const uint32_t afterAux = static_cast<uint32_t>(out.position());
     if (!out.seekSet(spineStart + 2 * sizeof(uint32_t))) return false;  // skip firstCharOffset+blockCount
     writePod(out, auxOffset);
-    if (!out.seekSet(indexPos + si * sizeof(uint32_t))) return false;   // commit index slot si
+    if (!out.seekSet(indexPos + si * sizeof(uint32_t))) return false;  // commit index slot si
     writePod(out, spineStart);
     out.seekSet(afterAux);
   }
@@ -142,8 +141,6 @@ uint16_t internStyle(std::vector<CssStyle>& pool, const CssStyle& style) {
   return static_cast<uint16_t>(pool.size() - 1);
 }
 
-uint16_t internStyle(CompiledContent& content, const CssStyle& style) {
-  return internStyle(content.stylePool, style);
-}
+uint16_t internStyle(CompiledContent& content, const CssStyle& style) { return internStyle(content.stylePool, style); }
 
 }  // namespace compiled

@@ -15,9 +15,8 @@ using serialization::writeString;
 // Serialized size of one word record (textOff u32 + styleSpan u8 + sizePct u8 + bidiLevel u8) and
 // the fixed per-TEXT-record overhead — used to bound a run against the 8 KB record cap.
 constexpr size_t kWordRecordBytes = sizeof(uint32_t) + 3 * sizeof(uint8_t);
-constexpr size_t kTextRecordOverhead =
-    sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-    sizeof(uint8_t);
+constexpr size_t kTextRecordOverhead = sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint8_t) + sizeof(uint32_t) +
+                                       sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint8_t);
 
 // Codepoints (non-continuation bytes) in a NUL-terminated word — for continuation-record charOffset.
 uint32_t countCodepoints(const char* s) {
@@ -555,7 +554,7 @@ template bool writeStylePool<serialization::BufferedFileWriter>(serialization::B
                                                                 const std::vector<CssStyle>&);
 template bool writeChapters<FsFile>(FsFile&, const std::vector<Chapter>&);
 template bool writeChapters<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
-                                                              const std::vector<Chapter>&);
+                                                               const std::vector<Chapter>&);
 template bool writeBlockOffsets<FsFile>(FsFile&, const std::vector<BlockOffset>&);
 template bool writeBlockOffsets<serialization::BufferedFileWriter>(serialization::BufferedFileWriter&,
                                                                    const std::vector<BlockOffset>&);

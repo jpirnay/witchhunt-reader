@@ -88,7 +88,6 @@ class Epub {
   // matched in the batch walk. Returns false only if the entry can't be found at all.
   bool getSpineItemStat(int spineIndex, ZipFile::FileStatSlim* out) const;
 
-
   // Seed a fresh ZipFile over this book with the cached EOCD details (no-op
   // until the first adopt). Public so Section's EntryReader benefits too.
   void primeZip(ZipFile& zip) const;

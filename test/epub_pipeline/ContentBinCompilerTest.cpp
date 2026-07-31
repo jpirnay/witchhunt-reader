@@ -6,11 +6,11 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <gtest/gtest.h>
+#include <process.h>
 
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <process.h>
 #include <string>
 #include <vector>
 

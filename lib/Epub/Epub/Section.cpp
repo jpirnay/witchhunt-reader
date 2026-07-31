@@ -620,12 +620,12 @@ struct Section::BuildState {
 // the page-offset LUT, the replay cursor, and the property hash so a variant change can be detected.
 // The section file is `Section::file` (opened at setup, streamed to by the sink's completePageFn).
 struct Section::ReadBackState {
-  compiled::SpineReplayCursor cursor;          // per-spine replay position
-  FsFile binFile;                             // content.bin, kept open (reader points into it)
+  compiled::SpineReplayCursor cursor;  // per-spine replay position
+  FsFile binFile;                      // content.bin, kept open (reader points into it)
   compiled::BlockStreamReader reader;
   std::unique_ptr<compiled::LayoutSink> sink;  // heap-owned: its completePageFn captures &lut
-  std::vector<uint32_t> lut;                    // page byte-offsets, grown as pages complete
-  uint32_t propertyHash = 0;                    // variant key; a change discards the partial
+  std::vector<uint32_t> lut;                   // page byte-offsets, grown as pages complete
+  uint32_t propertyHash = 0;                   // variant key; a change discards the partial
   uint32_t startMs = 0;
 };
 
@@ -1167,11 +1167,13 @@ bool Section::writeSectionTail(const std::vector<uint32_t>& lut,
 // paragraphIndex / listItemIndex.
 template bool Section::writeSectionTail<ChapterHtmlSlimParser::ParagraphLutEntry>(
     const std::vector<uint32_t>&, const std::vector<std::pair<std::string, uint16_t>>&,
-    const std::vector<std::pair<uint16_t, std::string>>&,
-    const std::vector<ChapterHtmlSlimParser::ParagraphLutEntry>&, uint16_t, bool);
-template bool Section::writeSectionTail<compiled::LayoutLutEntry>(
-    const std::vector<uint32_t>&, const std::vector<std::pair<std::string, uint16_t>>&,
-    const std::vector<std::pair<uint16_t, std::string>>&, const std::vector<compiled::LayoutLutEntry>&, uint16_t, bool);
+    const std::vector<std::pair<uint16_t, std::string>>&, const std::vector<ChapterHtmlSlimParser::ParagraphLutEntry>&,
+    uint16_t, bool);
+template bool Section::writeSectionTail<compiled::LayoutLutEntry>(const std::vector<uint32_t>&,
+                                                                  const std::vector<std::pair<std::string, uint16_t>>&,
+                                                                  const std::vector<std::pair<uint16_t, std::string>>&,
+                                                                  const std::vector<compiled::LayoutLutEntry>&,
+                                                                  uint16_t, bool);
 
 Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   ChapterHtmlSlimParser& visitor = *st.visitor;
@@ -1344,7 +1346,7 @@ bool Section::buildSectionFromContentBin(const BuildParams& p, const bool skipEv
 static constexpr uint32_t kReadBackBlocksPerSlice = 8;
 
 Section::ReadBackStep Section::stepReadBackFromContentBin(const BuildParams& p, const uint32_t budgetMs,
-                                                         const bool skipEviction) {
+                                                          const bool skipEviction) {
 #if !EPUB_STAGE1
   (void)p;
   (void)budgetMs;
@@ -1370,8 +1372,7 @@ Section::ReadBackStep Section::stepReadBackFromContentBin(const BuildParams& p, 
       return ReadBackStep::NotAvailable;
     }
     uint64_t bookFp = 0;
-    if (st->reader.fingerprint() != 0 && epub->zipContentFingerprint(&bookFp) &&
-        bookFp != st->reader.fingerprint()) {
+    if (st->reader.fingerprint() != 0 && epub->zipContentFingerprint(&bookFp) && bookFp != st->reader.fingerprint()) {
       LOG_INF("SCT", "content.bin fingerprint mismatch for spine %d; falling back to parse", spineIndex);
       return ReadBackStep::NotAvailable;
     }
@@ -1382,7 +1383,10 @@ Section::ReadBackStep Section::stepReadBackFromContentBin(const BuildParams& p, 
     if (!skipEviction) evictOldVariants();
 
     filePath = getSectionFilePath(propertyHash);
-    { const auto sectionsDir = epub->getCachePath() + "/sections"; Storage.mkdir(sectionsDir.c_str()); }
+    {
+      const auto sectionsDir = epub->getCachePath() + "/sections";
+      Storage.mkdir(sectionsDir.c_str());
+    }
     file.close();
     pageCount = 0;
     this->lut.clear();
@@ -1409,9 +1413,9 @@ Section::ReadBackStep Section::stepReadBackFromContentBin(const BuildParams& p, 
     Hyphenator::setPreferredLanguage(epub->getLanguage());
 
     ReadBackState* raw = st.get();  // stable across ticks (heap-owned); the sink captures raw->lut
-    st->sink = std::make_unique<compiled::LayoutSink>(
-        renderer, std::move(lp),
-        [this, raw](std::unique_ptr<Page> page) { raw->lut.emplace_back(onPageComplete(std::move(page))); });
+    st->sink = std::make_unique<compiled::LayoutSink>(renderer, std::move(lp), [this, raw](std::unique_ptr<Page> page) {
+      raw->lut.emplace_back(onPageComplete(std::move(page)));
+    });
     if (!compiled::replaySpineBegin(st->reader, static_cast<uint32_t>(spineIndex), st->cursor)) {
       LOG_ERR("SCT", "content.bin openSpine failed for spine %d; falling back to parse", spineIndex);
       file.close();
@@ -1470,7 +1474,10 @@ bool Section::compileBookToContentBin(const std::shared_ptr<Epub>& epub, GfxRend
   const uint32_t t0 = millis();
   const int spineCount = epub->getSpineItemsCount();
   const std::string binPath = epub->getCachePath() + "/content.bin";
-  { const auto sectionsDir = epub->getCachePath(); Storage.mkdir(sectionsDir.c_str()); }
+  {
+    const auto sectionsDir = epub->getCachePath();
+    Storage.mkdir(sectionsDir.c_str());
+  }
 
   uint64_t fingerprint = 0;
   epub->zipContentFingerprint(&fingerprint);

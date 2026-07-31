@@ -308,7 +308,8 @@ void ContentBinWriter::onBlock(Block&& block, const CssStyle& style) {
   // append all belong to this same logical block, so they share this entry. recordIndex lets the
   // reader's seekToBlock restore currentFirstRecordIndex_ (anchors/labels/chapters key on it).
   if (!appendBlockOffset(BlockOffset{bw_ ? bw_->position() : 0, block.charOffset, blockCount_})) {
-    LOG_ERR("CBW", "OOM growing block-offset index (block %lu) — aborting spine", static_cast<unsigned long>(blockCount_));
+    LOG_ERR("CBW", "OOM growing block-offset index (block %lu) — aborting spine",
+            static_cast<unsigned long>(blockCount_));
     ok_ = false;
     return;
   }

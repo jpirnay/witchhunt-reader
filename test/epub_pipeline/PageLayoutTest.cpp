@@ -8,14 +8,13 @@
 // matrix. (Mid-spine cursors + precise end-cursors + backward layout are G2b; this scaffold pins the
 // cursor type, seekToBlock, and the position-identical oracle rig with zero layout-behavior risk.)
 
-#include <gtest/gtest.h>
-
 #include <GfxRenderer.h>
+#include <gtest/gtest.h>
+#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 
 #include <algorithm>
 #include <filesystem>
 #include <memory>
-#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 #include <sstream>
 #include <string>
 #include <vector>
@@ -270,9 +269,8 @@ TEST_P(PageLayoutMatrix, BackwardMatchesGoldenPages) {
       ASSERT_TRUE(bwd.ok && bwd.page) << "layoutPageBackward failed spine " << si << " from page " << k;
       std::ostringstream bwdOut;
       pipeline_harness::dumpOnePage(bwdOut, *bwd.page, 0, cacheDir);
-      ASSERT_EQ(golden[k - 1], bwdOut.str())
-          << "backward page diverges spine " << si << " (backward from page " << k << " should be page " << (k - 1)
-          << ")";
+      ASSERT_EQ(golden[k - 1], bwdOut.str()) << "backward page diverges spine " << si << " (backward from page " << k
+                                             << " should be page " << (k - 1) << ")";
       // The backward page's own start cursor must equal the forward page K-1's start.
       ASSERT_TRUE(bwd.start.samePosition(starts[k - 1]))
           << "backward start cursor mismatch spine " << si << " page " << (k - 1);

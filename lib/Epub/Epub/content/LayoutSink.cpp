@@ -101,8 +101,7 @@ BlockStyle LayoutSink::buildBlockStyle(const CssStyle& style, const bool isHeadi
   if (isHeading) bs.textAlignDefined = true;
   // Publisher text-align overrides the default when embedded CSS is honored and the user left
   // alignment at None (same condition for headings and blocks).
-  if (embeddedStyle_ && style.hasTextAlign() &&
-      paragraphAlignment_ == static_cast<uint8_t>(CssTextAlign::None)) {
+  if (embeddedStyle_ && style.hasTextAlign() && paragraphAlignment_ == static_cast<uint8_t>(CssTextAlign::None)) {
     bs.alignment = style.textAlign;
     bs.textAlignDefined = true;
   }
@@ -129,8 +128,8 @@ int LayoutSink::addLineToPage(const std::shared_ptr<TextBlock>& line, const bool
     emitPage(lastBodyChildByteOffset_);
   }
 
-  const bool noRoomForAnotherLine = currentPageNextY_ + lineHeight <= viewportHeight_ &&
-                                    currentPageNextY_ + (lineHeight * 2) > viewportHeight_;
+  const bool noRoomForAnotherLine =
+      currentPageNextY_ + lineHeight <= viewportHeight_ && currentPageNextY_ + (lineHeight * 2) > viewportHeight_;
   if (lineEndsWithHyphenatedWord && !suppressHyphenationRetry && noRoomForAnotherLine) {
     return static_cast<int>(ParsedText::LineProcessResult::RetryWithoutHyphenation);
   }
@@ -292,8 +291,8 @@ void LayoutSink::abbreviatePreviewRuns(Block& block) const {
 void LayoutSink::layoutTextBlock(Block&& block, const BlockStyle& blockStyle) {
   abbreviatePreviewRuns(block);
   currentBlockPreformatted_ = (block.flags & kPreformatted) != 0;
-  currentTextBlock_.reset(new (std::nothrow) ParsedText(extraParagraphSpacing_, hyphenationEnabled_, blockStyle,
-                                                        bionicReadingEnabled_));
+  currentTextBlock_.reset(
+      new (std::nothrow) ParsedText(extraParagraphSpacing_, hyphenationEnabled_, blockStyle, bionicReadingEnabled_));
   if (!currentTextBlock_) return;
   wordsExtractedInBlock_ = 0;
 
@@ -317,9 +316,8 @@ void LayoutSink::layoutTextBlock(Block&& block, const BlockStyle& blockStyle) {
       auto& splitBlockStyle = currentTextBlock_->getBlockStyle();
       resolveBlockFont(splitBlockStyle);
       const int horizontalInset = splitBlockStyle.totalHorizontalInset();
-      const uint16_t effectiveWidth = (horizontalInset < viewportWidth_)
-                                          ? static_cast<uint16_t>(viewportWidth_ - horizontalInset)
-                                          : viewportWidth_;
+      const uint16_t effectiveWidth =
+          (horizontalInset < viewportWidth_) ? static_cast<uint16_t>(viewportWidth_ - horizontalInset) : viewportWidth_;
       currentTextBlock_->layoutAndExtractLines(
           renderer_, fontId_, effectiveWidth,
           [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
@@ -351,9 +349,8 @@ void LayoutSink::placeBlockImage(const Block& block, const CssStyle& imgStyle) {
     if (inset > 0 && inset < viewportWidth_) containerWidth = viewportWidth_ - inset;
   }
   const float emSize = static_cast<float>(renderer_.getFontAscenderSize(fontId_));
-  const ImageDisplaySize ds =
-      computeImageDisplaySize(block.width, block.height, imgStyle, viewportWidth_, viewportHeight_, containerWidth,
-                              emSize);
+  const ImageDisplaySize ds = computeImageDisplaySize(block.width, block.height, imgStyle, viewportWidth_,
+                                                      viewportHeight_, containerWidth, emSize);
 
   // Spacing from the pending empty-block wrapper style.
   int spacingTop = 0;
@@ -380,9 +377,9 @@ void LayoutSink::placeBlockImage(const Block& block, const CssStyle& imgStyle) {
   currentPageNextY_ += static_cast<int16_t>(spacingTop);
 
   const std::string cachePath = nextImageCachePath(block.entryPath);
-  auto imageBlock = std::make_shared<ImageBlock>(cachePath, static_cast<int16_t>(ds.width),
-                                                 static_cast<int16_t>(ds.height), block.alt, epubFilePath_,
-                                                 block.entryPath);
+  auto imageBlock =
+      std::make_shared<ImageBlock>(cachePath, static_cast<int16_t>(ds.width), static_cast<int16_t>(ds.height),
+                                   block.alt, epubFilePath_, block.entryPath);
   const int16_t xPos = static_cast<int16_t>((viewportWidth_ - ds.width) / 2);
   currentPage_->elements.push_back(std::make_shared<PageImage>(imageBlock, xPos, currentPageNextY_));
   currentPageNextY_ += static_cast<int16_t>(ds.height);
@@ -415,11 +412,10 @@ void LayoutSink::placeTableAsParagraphs(const Block& block) {
       // wordsExtractedInBlock resets per cell.
       wordsExtractedInBlock_ = 0;
       auto cellText = buildCellText(cell);
-      cellText->layoutAndExtractLines(
-          renderer_, fontId_, viewportWidth_,
-          [this](const std::shared_ptr<TextBlock>& tb, const bool h, const bool s) {
-            return static_cast<ParsedText::LineProcessResult>(addLineToPage(tb, h, s));
-          });
+      cellText->layoutAndExtractLines(renderer_, fontId_, viewportWidth_,
+                                      [this](const std::shared_ptr<TextBlock>& tb, const bool h, const bool s) {
+                                        return static_cast<ParsedText::LineProcessResult>(addLineToPage(tb, h, s));
+                                      });
     }
   }
 }
@@ -521,7 +517,9 @@ void LayoutSink::placeTable(const Block& block) {
       }
     }
     void emitPageAndReset() override { self->emitPage(self->lastBodyChildByteOffset_); }
-    void advanceY(int delta) override { self->currentPageNextY_ = static_cast<int16_t>(self->currentPageNextY_ + delta); }
+    void advanceY(int delta) override {
+      self->currentPageNextY_ = static_cast<int16_t>(self->currentPageNextY_ + delta);
+    }
     void pushFragment(uint8_t cols, uint16_t tw, uint16_t th, std::vector<::TableRow>&& rows, int16_t yPos,
                       bool border) override {
       self->currentPage_->elements.push_back(
@@ -630,8 +628,8 @@ void LayoutSink::attachFloatImage(const Block& block, const CssStyle& imgStyle, 
   const int16_t top = static_cast<int16_t>(currentPageNextY_);
 
   const std::string cachePath = nextImageCachePath(block.inlineImageEntryPath);
-  auto fullImageBlock =
-      std::make_shared<ImageBlock>(cachePath, imgW, imgH, block.inlineImageAlt, epubFilePath_, block.inlineImageEntryPath);
+  auto fullImageBlock = std::make_shared<ImageBlock>(cachePath, imgW, imgH, block.inlineImageAlt, epubFilePath_,
+                                                     block.inlineImageEntryPath);
   deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, top);
   currentPage_->elements.push_back(deferredPageImage_);
 

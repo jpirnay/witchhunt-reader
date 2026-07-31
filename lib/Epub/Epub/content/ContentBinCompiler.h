@@ -90,7 +90,7 @@ class ContentBinCompiler {
  private:
   enum class State : uint8_t { Init, Compiling, Done, Failed };
 
-  bool ensureOpen();          // lazy: open/resume content.bin, set the cursor to the first uncommitted spine
+  bool ensureOpen();            // lazy: open/resume content.bin, set the cursor to the first uncommitted spine
   void advanceToUncommitted();  // move spineCursor_ to the next spine whose slot is not committed
   void deleteSpineTransients(uint32_t spineIndex);  // drop the unzipped-HTML temp once a spine is committed
   void removeBlockOffsetSidecar();  // delete <cachePath>/blockoff.tmp (spliced into content.bin already)
@@ -101,8 +101,8 @@ class ContentBinCompiler {
   BuildArena* externalScratch_ = nullptr;
 
   State state_ = State::Init;
-  FsFile binFile_;                 // content.bin, kept open across ticks
-  ContentBinWriter writer_;        // book-scoped; setAutoCommit(false) — commit is per clean spine Done
+  FsFile binFile_;                  // content.bin, kept open across ticks
+  ContentBinWriter writer_;         // book-scoped; setAutoCommit(false) — commit is per clean spine Done
   std::unique_ptr<Section> spine_;  // the current spine's in-flight build (owns its BuildState)
   uint32_t spineCount_ = 0;
   uint32_t spineCursor_ = 0;        // spine currently being (or about to be) compiled

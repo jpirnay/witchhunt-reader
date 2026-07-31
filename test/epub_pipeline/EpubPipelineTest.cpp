@@ -6,6 +6,7 @@
 //     synthetic corpus book. Regenerate intentionally changed goldens with:
 //     UPDATE_GOLDENS=1 ctest -R EpubPipeline
 #include <gtest/gtest.h>
+#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 
 #include <algorithm>
 #include <cstdlib>
@@ -13,8 +14,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-
-#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 
 #include "PipelineRunner.h"
 
@@ -27,8 +26,7 @@ namespace {
 // parallel processes from ever touching the same path (freshCacheDir's remove_all would otherwise
 // race a sibling process's build).
 std::string freshCacheDir(const std::string& tag) {
-  const auto dir =
-      fs::temp_directory_path() / ("epub_pipeline_test_" + std::to_string(_getpid())) / tag;
+  const auto dir = fs::temp_directory_path() / ("epub_pipeline_test_" + std::to_string(_getpid())) / tag;
   fs::remove_all(dir);
   fs::create_directories(dir);
   return dir.string();

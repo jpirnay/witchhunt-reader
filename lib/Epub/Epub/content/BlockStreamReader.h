@@ -25,11 +25,11 @@
 // nextLogicalBlock reassembles 8 KB kContinuation splits into one logical block incrementally
 // (bounded to one logical block), so the caller sees the same block stream the walk produced.
 
+#include <HalStorage.h>  // FsFile
+
 #include <cstdint>
 #include <string>
 #include <vector>
-
-#include <HalStorage.h>  // FsFile
 
 #include "CompiledContent.h"
 
@@ -133,8 +133,8 @@ class BlockStreamReader {
   uint32_t currentFirstRecordIndex_ = 0;  // first-record index of the last logical block returned
   std::vector<Anchor> spineAnchors_;
   std::vector<PageBreakLabel> spineLabels_;
-  std::vector<CssStyle> spineStylePool_;   // this spine's local style table
-  std::vector<Chapter> spineChapters_;     // this spine's chapter entries
+  std::vector<CssStyle> spineStylePool_;  // this spine's local style table
+  std::vector<Chapter> spineChapters_;    // this spine's chapter entries
   // v7 baked per-logical-block offset table: kept on disk, not resident (see blockOffsetAt). The
   // file offset is of the FIRST entry (just past the u32 count writeBlockOffsets wrote).
   uint32_t spineBlockOffsetsFileStart_ = 0;

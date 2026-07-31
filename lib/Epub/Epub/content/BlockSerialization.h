@@ -8,10 +8,10 @@
 // charOffset + the type-specific body + the shared footnote/xpath tail. No spine framing — the
 // caller owns spine headers, anchor/label sections, style pool, index, and chapters.
 
-#include <functional>
-
 #include <BufferedFileIO.h>  // serialization::BufferedFileWriter (buffered compile-path sink)
 #include <HalStorage.h>      // FsFile
+
+#include <functional>
 
 #include "CompiledContent.h"
 

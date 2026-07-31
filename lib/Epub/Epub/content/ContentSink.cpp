@@ -59,8 +59,7 @@ void ContentSink::onChapter(uint8_t level, const std::string& title) {
   // The heading block was emitted immediately before this call (stage1FlushBlock order):
   // point at the last block. An empty run would be a producer bug, but guard anyway.
   const uint32_t blockIndex = spine.blocks.empty() ? 0 : static_cast<uint32_t>(spine.blocks.size() - 1);
-  content_.chapters.push_back(
-      Chapter{static_cast<uint16_t>(content_.spines.size() - 1), blockIndex, level, title});
+  content_.chapters.push_back(Chapter{static_cast<uint16_t>(content_.spines.size() - 1), blockIndex, level, title});
 }
 
 void ContentSink::onPageBreakLabel(const std::string& label) {

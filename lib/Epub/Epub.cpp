@@ -20,7 +20,6 @@
 #include <optional>
 
 #include "Epub/HashUtils.h"
-
 #include "Epub/ImageFormatDetector.h"
 #include "Epub/parsers/ContainerParser.h"
 #include "Epub/parsers/ContentOpfParser.h"

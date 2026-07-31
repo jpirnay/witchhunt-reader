@@ -346,7 +346,7 @@ TEST(ContentOpfParser, HugeManifestResolvesCorrectly) {
       "<itemref idref='ch1499'/>"  // last item — resolvable only if the whole manifest was stored
       "<itemref idref='ch750'/>"   // middle
       "<itemref idref='missing'/>"
-      "<itemref idref='ch0'/>"     // first
+      "<itemref idref='ch0'/>"  // first
       "</spine>"
       "</package>";
 

@@ -5,10 +5,10 @@
 
 #include <HalStorage.h>
 #include <gtest/gtest.h>
+#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 
 #include <algorithm>
 #include <filesystem>
-#include <process.h>  // _getpid - per-process temp isolation under parallel ctest
 #include <sstream>
 #include <string>
 #include <vector>
@@ -173,7 +173,11 @@ TEST(ContentBinStream, SeekToBlockMatchesSequentialRead) {
 
     // (a) Sequentially read all LOGICAL blocks (text + first-record index + char offset), which also
     // establishes the ground truth we seek against.
-    struct Ref { std::string text; uint32_t firstRecord; uint32_t charOffset; };
+    struct Ref {
+      std::string text;
+      uint32_t firstRecord;
+      uint32_t charOffset;
+    };
     std::vector<Ref> seq;
     Block b;
     while (r.nextLogicalBlock(b)) {
@@ -261,8 +265,7 @@ TEST(ContentBinStream, PartialFileOpensButSpinesUnavailable) {
     fclose(fp);
     // Chop just past the header + spine index so spine 0's own data is guaranteed truncated,
     // regardless of book size (a /2 chop could leave a small book's spines fully intact).
-    const size_t cut = compiled::kHeaderSize +
-                       static_cast<size_t>(sink.content().spines.size()) * sizeof(uint32_t) + 8;
+    const size_t cut = compiled::kHeaderSize + static_cast<size_t>(sink.content().spines.size()) * sizeof(uint32_t) + 8;
     bytes.resize(std::min<size_t>(bytes.size(), cut));
     FILE* out = fopen(truncated.c_str(), "wb");
     ASSERT_TRUE(out);
@@ -281,13 +284,18 @@ TEST(ContentBinStream, PartialFileOpensButSpinesUnavailable) {
       // error before completing (a spine's blocks/aux were chopped off).
       for (uint32_t si = 0; si < r.spineCount() && !cleanlyDetected; ++si) {
         if (!r.spineAvailable(si)) continue;
-        if (!r.openSpine(si)) { cleanlyDetected = true; break; }
+        if (!r.openSpine(si)) {
+          cleanlyDetected = true;
+          break;
+        }
         Block b;
-        while (r.nextLogicalBlock(b)) { /* drain */ }
+        while (r.nextLogicalBlock(b)) { /* drain */
+        }
         if (!r.ok()) cleanlyDetected = true;
       }
     }
-    EXPECT_TRUE(cleanlyDetected) << "a truncated file must be detected at open or while reading, not silently replayed whole";
+    EXPECT_TRUE(cleanlyDetected)
+        << "a truncated file must be detected at open or while reading, not silently replayed whole";
     in.close();
   }
 }
@@ -323,7 +331,7 @@ TEST(ContentBinStream, DeferredCommitGatesAvailability) {
       }
       for (const auto& a : spine.anchors) w.onAnchor(a.id);
       for (const auto& pl : spine.pageBreakLabels) w.onPageBreakLabel(pl.label);
-      w.onSpineEnd();  // writes DATA; does NOT commit (autoCommit off)
+      w.onSpineEnd();                 // writes DATA; does NOT commit (autoCommit off)
       if (si == 0) w.commitSpine(0);  // publish ONLY spine 0
       // spine 1+ data is written but deliberately left uncommitted
     }
@@ -402,9 +410,19 @@ TEST(ContentBinStream, OpenExistingAppendsKeepingCommittedSpines) {
   EXPECT_TRUE(r.spineAvailable(0)) << "spine 0 survived the append";
   EXPECT_TRUE(r.spineAvailable(1)) << "spine 1 was appended + committed";
   EXPECT_TRUE(r.openSpine(0));
-  { Block b; size_t n = 0; while (r.nextRawRecord(b)) ++n; EXPECT_GT(n, 0u); }
+  {
+    Block b;
+    size_t n = 0;
+    while (r.nextRawRecord(b)) ++n;
+    EXPECT_GT(n, 0u);
+  }
   EXPECT_TRUE(r.openSpine(1));
-  { Block b; size_t n = 0; while (r.nextRawRecord(b)) ++n; EXPECT_GT(n, 0u); }
+  {
+    Block b;
+    size_t n = 0;
+    while (r.nextRawRecord(b)) ++n;
+    EXPECT_GT(n, 0u);
+  }
   EXPECT_TRUE(r.ok());
   in.close();
 

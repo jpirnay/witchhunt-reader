@@ -42,12 +42,12 @@ struct LaidOutBlock {
   // baked), so a placed PageLine is byte-identical to LayoutSink's.
   std::vector<std::shared_ptr<TextBlock>> lines;
 
-  bool isEmptyBlock = false;      // <br>/empty wrapper: no lines, spacing-only (folded into next)
-  bool isContinuation = false;    // kContinuation split record: makePages skips top-margin/fold
-  bool preformatted = false;      // inside <pre>: suppress extra-paragraph spacing
-  bool pageBreakBefore = false;   // kPageBreakBefore: forces a fresh page when the page has content
-  bool flushedMidBlock = false;   // >96-word mid-block flush fired: LayoutSink drops this block's top
-                                  // spacing (flush bypasses makePages' margin; tail is a continuation)
+  bool isEmptyBlock = false;     // <br>/empty wrapper: no lines, spacing-only (folded into next)
+  bool isContinuation = false;   // kContinuation split record: makePages skips top-margin/fold
+  bool preformatted = false;     // inside <pre>: suppress extra-paragraph spacing
+  bool pageBreakBefore = false;  // kPageBreakBefore: forces a fresh page when the page has content
+  bool flushedMidBlock = false;  // >96-word mid-block flush fired: LayoutSink drops this block's top
+                                 // spacing (flush bypasses makePages' margin; tail is a continuation)
 
   // Word count per emitted line (prefix-summable), for reproducing addLineToPage's footnote
   // assignment (a footnote lands on the page whose lines have covered its anchor word index).
@@ -58,9 +58,9 @@ struct LaidOutBlock {
   // over-read image that spills to the next page does not consume an image-counter slot.
   std::string imageEntryPath;  // EPUB-internal image path; the cache path is resolved at placement
   std::string imageAlt;
-  int16_t imageWidth = 0;      // display width
-  int16_t imageX = 0;          // centered x
-  int16_t imageHeight = 0;     // display height (Y advance for the image itself)
+  int16_t imageWidth = 0;          // display width
+  int16_t imageX = 0;              // centered x
+  int16_t imageHeight = 0;         // display height (Y advance for the image itself)
   int16_t imageSpacingTop = 0;     // wrapper (pending-merge) spacing consumed above the image
   int16_t imageSpacingBottom = 0;  // wrapper spacing consumed below the image
 

@@ -71,8 +71,8 @@ bool sectionEquivalence(const std::string& epubPath, const std::string& cacheDir
 // tee section file is byte-identical to a plain parse (pages unaffected by the fan-out) AND that a
 // read-back from the tee-emitted content.bin is byte-identical to the parse (content.bin correctly
 // emitted). Returns false on any mismatch (logged to out).
-bool teeEquivalence(const std::string& epubPath, const std::string& cacheDir, int spineIndex,
-                    const Profile& profile, std::ostream& out);
+bool teeEquivalence(const std::string& epubPath, const std::string& cacheDir, int spineIndex, const Profile& profile,
+                    std::ostream& out);
 
 // Step 5 equivalence driver: build every spine of `epubPath` driving a compiled::LayoutSink
 // (attached via Section::setStage1Sink) instead of reading the fused section cache, and dump

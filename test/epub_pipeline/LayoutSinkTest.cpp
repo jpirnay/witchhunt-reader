@@ -5,9 +5,9 @@
 // over the WHOLE synthetic corpus (text, headings, images, floats, HR, tables, footnotes, covers)
 // at the default Profile. Commit 6 expands it across the settings-Profile matrix.
 
-#include <gtest/gtest.h>
-
 #include <GfxRenderer.h>
+#include <gtest/gtest.h>
+#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 
 #include <algorithm>
 #include <chrono>
@@ -18,8 +18,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include <process.h>  // _getpid — per-process temp isolation under parallel ctest
 
 #include "Epub/Page.h"
 #include "Epub/blocks/BlockStyle.h"
@@ -69,8 +67,7 @@ TEST(LayoutSink, SkeletonConstructsAndHasEmptyOutputs) {
   params.viewportHeight = 600;
 
   int pagesEmitted = 0;
-  compiled::LayoutSink sink(renderer, params,
-                            [&](std::unique_ptr<Page>) { ++pagesEmitted; });
+  compiled::LayoutSink sink(renderer, params, [&](std::unique_ptr<Page>) { ++pagesEmitted; });
 
   EXPECT_TRUE(sink.anchors().empty());
   EXPECT_TRUE(sink.pageBreakLabels().empty());
@@ -87,8 +84,8 @@ TEST(LayoutSink, RecordsLabelsAndDropsEmpty) {
   compiled::LayoutParams params;
   compiled::LayoutSink sink(renderer, params, [](std::unique_ptr<Page>) {});
 
-  sink.onPageBreakLabel("");      // dropped
-  sink.onPageBreakLabel("iv");    // recorded at page 0
+  sink.onPageBreakLabel("");    // dropped
+  sink.onPageBreakLabel("iv");  // recorded at page 0
   ASSERT_EQ(sink.pageBreakLabels().size(), 1u);
   EXPECT_EQ(sink.pageBreakLabels()[0].first, 0u);
   EXPECT_EQ(sink.pageBreakLabels()[0].second, "iv");
@@ -423,8 +420,7 @@ TEST_P(SectionEquivalenceMatrix, ReadBackSectionEqualsParse) {
   const SectionEqCase& c = GetParam();
   const std::string epub = c.dir + "/" + c.book;
   std::ostringstream diag;
-  const bool eq =
-      pipeline_harness::sectionEquivalence(epub, freshDir(c.name), c.spineIndex, c.profile, diag, c.sliced);
+  const bool eq = pipeline_harness::sectionEquivalence(epub, freshDir(c.name), c.spineIndex, c.profile, diag, c.sliced);
   EXPECT_TRUE(eq) << "read-back section cache differs from parse for " << c.name << "\n" << diag.str();
 }
 

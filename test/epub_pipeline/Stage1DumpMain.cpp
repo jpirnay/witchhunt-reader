@@ -40,7 +40,8 @@ void dumpBlock(std::ostream& out, const compiled::Block& b) {
       << " char=" << b.charOffset;
   if (b.type == compiled::BlockType::Text) {
     out << " words=" << b.words.size();
-    if (!b.inlineImageEntryPath.empty()) out << " inlineImg=" << b.inlineImageEntryPath << " side=" << static_cast<int>(b.inlineImageSide);
+    if (!b.inlineImageEntryPath.empty())
+      out << " inlineImg=" << b.inlineImageEntryPath << " side=" << static_cast<int>(b.inlineImageSide);
     out << "\n";
     for (const auto& w : b.words) {
       out << "   W s=" << static_cast<int>(w.styleSpan) << " z=" << static_cast<int>(w.sizePct)
@@ -55,7 +56,8 @@ void dumpBlock(std::ostream& out, const compiled::Block& b) {
       const auto& r = b.rows[ri];
       out << "   ROW " << ri << (r.isHeaderRow ? " header" : "") << " cells=" << r.cells.size() << "\n";
       for (const auto& c : r.cells) {
-        out << "    CELL span=" << static_cast<int>(c.colSpan) << (c.isHeader ? " th" : "") << " words=" << c.words.size();
+        out << "    CELL span=" << static_cast<int>(c.colSpan) << (c.isHeader ? " th" : "")
+            << " words=" << c.words.size();
         for (const auto& w : c.words) out << " " << wordAt(c.text, w.textOff);
         if (!c.imageEntryPath.empty()) out << " img=" << c.imageEntryPath;
         out << "\n";

@@ -30,15 +30,15 @@
 // index slots commit in order; a producer that reorders which spine to compile reopens/reseeks per
 // spine (Increment E producer). No device shipped v5 → clean break, no migration.
 
+#include <BufferedFileIO.h>  // serialization::BufferedFileWriter
+#include <HalStorage.h>      // FsFile
+
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
-
-#include <BufferedFileIO.h>  // serialization::BufferedFileWriter
-#include <HalStorage.h>       // FsFile
 
 #include "BlockSink.h"
 #include "CompiledContent.h"
@@ -132,7 +132,7 @@ class ContentBinWriter : public BlockSink {
   bool ok_ = false;
   uint32_t spineCount_ = 0;
   uint64_t fingerprint_ = 0;
-  uint32_t nextSpineIndex_ = 0;  // which index slot the NEXT beginSpine() commits (monotonic)
+  uint32_t nextSpineIndex_ = 0;   // which index slot the NEXT beginSpine() commits (monotonic)
   bool autoCommitSpines_ = true;  // see setAutoCommit
   // Last spine whose DATA onSpineEnd wrote (for a deferred commitSpine in non-autoCommit mode).
   bool lastSpineDataWritten_ = false;
@@ -148,9 +148,9 @@ class ContentBinWriter : public BlockSink {
   bool spineOpen_ = false;
   bool spineHasBlock_ = false;
   uint32_t spineIndexBeingWritten_ = 0;  // index slot this open spine will commit at onSpineEnd
-  uint32_t spineStartOffset_ = 0;   // where this spine's [firstCharOffset|blockCount|auxOffset] sits
+  uint32_t spineStartOffset_ = 0;        // where this spine's [firstCharOffset|blockCount|auxOffset] sits
   uint32_t spineFirstCharOffset_ = 0;
-  uint32_t blockCount_ = 0;         // running count; back-patched into the spine header at onSpineEnd
+  uint32_t blockCount_ = 0;                      // running count; back-patched into the spine header at onSpineEnd
   std::vector<CssStyle> spineStyles_;            // this spine's local, deduped style pool
   std::vector<Anchor> anchors_;                  // this spine only
   std::vector<PageBreakLabel> pageBreakLabels_;  // this spine only

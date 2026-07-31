@@ -19,20 +19,19 @@
 // heavy cases named in the plan). The book's cache dir is derived like the reader's.
 
 #include <Arduino.h>
+#include <FontCacheManager.h>
+#include <FontDecompressor.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalTiltSensor.h>
+#include <builtinFonts/all.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 
 #include <memory>
-
-#include <FontCacheManager.h>
-#include <FontDecompressor.h>
-#include <builtinFonts/all.h>
 
 #include "Epub.h"
 #include "Epub/Page.h"
@@ -158,8 +157,8 @@ static bool benchCompile(const std::shared_ptr<Epub>& epub) {
   const uint32_t f1 = freeHeap(), c1 = contigHeap();
 
   BSerial.printf("BENCH compile ok=%d spines=%d total=%lldms per_spine=%lldms free=%lu->%lu contig=%lu->%lu\n",
-                ok ? 1 : 0, spineCount, us / 1000, spineCount > 0 ? (us / 1000) / spineCount : 0,
-                (unsigned long)f0, (unsigned long)f1, (unsigned long)c0, (unsigned long)c1);
+                 ok ? 1 : 0, spineCount, us / 1000, spineCount > 0 ? (us / 1000) / spineCount : 0, (unsigned long)f0,
+                 (unsigned long)f1, (unsigned long)c0, (unsigned long)c1);
   return ok;
 }
 
@@ -231,8 +230,8 @@ static bool benchIncrementalCompile(const std::shared_ptr<Epub>& epub) {
   char buf[192];
   snprintf(buf, sizeof(buf),
            "BENCH incr compile ok=%d spines=%lu slices=%lu total=%lldms MIN-EVER free=%lu contig=%lu (start free=%lu)",
-           ok ? 1 : 0, (unsigned long)spineCount, (unsigned long)slices, (long long)(us / 1000),
-           (unsigned long)minFree, (unsigned long)minContig, (unsigned long)freeHeap());
+           ok ? 1 : 0, (unsigned long)spineCount, (unsigned long)slices, (long long)(us / 1000), (unsigned long)minFree,
+           (unsigned long)minContig, (unsigned long)freeHeap());
   benchLog(buf);
   return ok;
 }
@@ -301,7 +300,11 @@ static bool benchOneProducer(const std::shared_ptr<Epub>& epub) {
       if (consumerSpine >= producer.committedSpines()) {
         // Wanted spine not compiled yet — a frontier STALL (the cold "preparing..." wait).
         ++readerStalls;
-        if (producerDone) { consumerSpine++; cursor = {}; cursor.spineIndex = static_cast<uint16_t>(consumerSpine); }
+        if (producerDone) {
+          consumerSpine++;
+          cursor = {};
+          cursor.spineIndex = static_cast<uint16_t>(consumerSpine);
+        }
       } else {
         // Ask the PRODUCER for the page — it reads through its own open handle under withReadableFile
         // (flush/save/read/restore/rebase), so the bench never touches the raw file cursor. This IS the
@@ -316,10 +319,15 @@ static bool benchOneProducer(const std::shared_ptr<Epub>& epub) {
           ++pagesRendered;
           const uint32_t c = contigHeap();
           if (c < minContig) minContig = c;
-          if (lp.atSpineEnd) { consumerSpine++; cursor = {}; }  // next spine's first page
-          else { cursor = lp.end; }                            // next page in this spine
+          if (lp.atSpineEnd) {
+            consumerSpine++;
+            cursor = {};
+          }  // next spine's first page
+          else {
+            cursor = lp.end;
+          }  // next page in this spine
         } else {
-          consumerSpine++;                                     // unreadable (image-only/empty) — skip
+          consumerSpine++;  // unreadable (image-only/empty) — skip
           cursor = {};
         }
       }
@@ -337,8 +345,8 @@ static bool benchOneProducer(const std::shared_ptr<Epub>& epub) {
            "total=%lldms MIN-EVER free=%lu contig=%lu",
            (producer.done() || producer.committedSpines() >= spineCount) ? 1 : 0, (unsigned long)spineCount,
            (unsigned long)slices, (unsigned long)pagesRendered, (unsigned long)readerStalls,
-           (long long)(pagesRendered ? pageTotalUs / pagesRendered : 0), (long long)pageMaxUs,
-           (long long)(us / 1000), (unsigned long)minFree, (unsigned long)minContig);
+           (long long)(pagesRendered ? pageTotalUs / pagesRendered : 0), (long long)pageMaxUs, (long long)(us / 1000),
+           (unsigned long)minFree, (unsigned long)minContig);
   benchLog(buf);
   return pagesRendered > 0;
 }
@@ -391,7 +399,7 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
   }
 
   BSerial.printf("BENCH layout_fwd pages=%d avg=%lldus max=%lldus min_contig=%lu\n", fwdPages,
-                fwdPages > 0 ? fwdTotalUs / fwdPages : 0, fwdMaxUs, (unsigned long)fwdMinContig);
+                 fwdPages > 0 ? fwdTotalUs / fwdPages : 0, fwdMaxUs, (unsigned long)fwdMinContig);
 
   // BACKWARD: prev-page across the last spine's page starts, timing each standalone layoutPageBackward.
   // (This is the O(pages) standalone path — the reader will use an O(1) cursor stack in G5; measuring
@@ -408,7 +416,7 @@ static void benchLayout(const std::shared_ptr<Epub>& epub) {
     ++bwdPages;
   }
   BSerial.printf("BENCH layout_bwd spine=%lu pages=%d avg=%lldus max=%lldus (standalone O(pages) worst case)\n",
-                (unsigned long)lastSpine, bwdPages, bwdPages > 0 ? bwdTotalUs / bwdPages : 0, bwdMaxUs);
+                 (unsigned long)lastSpine, bwdPages, bwdPages > 0 ? bwdTotalUs / bwdPages : 0, bwdMaxUs);
 
   bin.close();
 }
@@ -475,7 +483,7 @@ static void benchReaderFlow(const std::shared_ptr<Epub>& epub) {
       const int64_t us = esp_timer_get_time() - t;
       if (!lp.ok || !lp.page) {
         BSerial.printf("BENCH readerflow spine=%lu page=%d layout FAILED (ok=%d page=%d)\n", (unsigned long)si, p,
-                      lp.ok ? 1 : 0, lp.page ? 1 : 0);
+                       lp.ok ? 1 : 0, lp.page ? 1 : 0);
         break;
       }
       starts.push_back(lp.start);
@@ -483,7 +491,7 @@ static void benchReaderFlow(const std::shared_ptr<Epub>& epub) {
       if (p == 0) firstPageUs = us;
       if (p == 1) secondPageUs = us;
       BSerial.printf("BENCH readerflow spine=%lu page=%d layout=%lldus%s contig=%lu\n", (unsigned long)si, p, us,
-                    p == 0 ? " (FIRST)" : "", (unsigned long)contigHeap());
+                     p == 0 ? " (FIRST)" : "", (unsigned long)contigHeap());
       if (lp.atSpineEnd) {
         spineEnded = true;
         break;
@@ -492,8 +500,7 @@ static void benchReaderFlow(const std::shared_ptr<Epub>& epub) {
     }
     // page1 (FIRST-page latency the user waits for entering a spine) ALREADY includes openSpine.
     BSerial.printf("BENCH readerflow spine=%lu SUMMARY page1=%lldus (of which openSpine~%lldus) page2=%lldus%s\n",
-                  (unsigned long)si, firstPageUs, openUs, secondPageUs,
-                  spineEnded ? " [spine<=probe pages]" : "");
+                   (unsigned long)si, firstPageUs, openUs, secondPageUs, spineEnded ? " [spine<=probe pages]" : "");
 
     // O(1) prev via the cursor stack: from the last page we reached, "prev" is just popping the
     // previous page-start cursor and re-laying it out — no backward scan. Time that re-layout so we
@@ -504,7 +511,7 @@ static void benchReaderFlow(const std::shared_ptr<Epub>& epub) {
       compiled::LaidOutPage pv = compiled::layoutPage(reader, renderer, params, prevStart);
       const int64_t us = esp_timer_get_time() - t;
       BSerial.printf("BENCH readerflow spine=%lu prev(stack)=%lldus ok=%d\n", (unsigned long)si, us,
-                    (pv.ok && pv.page) ? 1 : 0);
+                     (pv.ok && pv.page) ? 1 : 0);
     }
     ++probed;
   }
@@ -517,7 +524,7 @@ void setup() {
   delay(2000);
   BSerial.println("\n=== PageLayout G4 benchmark (compile throughput + live-read latency) ===");
   BSerial.printf("CPU %u MHz  free %lu  contig %lu\n", (unsigned)getCpuFrequencyMhz(), (unsigned long)freeHeap(),
-                (unsigned long)contigHeap());
+                 (unsigned long)contigHeap());
 
   // Minimum hardware bringup, in main.cpp's order: GPIO + power + tilt BEFORE display/SD, or the
   // display/SD peripherals fault (the bench was rebooting in a loop without this).
@@ -548,7 +555,7 @@ void setup() {
   }
   epub->loadImageManifest();
   BSerial.printf("BENCH open book=%s spines=%d load=%lldms\n", bookPath.c_str(), epub->getSpineItemsCount(),
-                (esp_timer_get_time() - lt) / 1000);
+                 (esp_timer_get_time() - lt) / 1000);
 
   // (1c) M1 FIRST: the ONE-PRODUCER model — producer stepped + consumer chasing the frontier in one
   // loop (the architecture we're migrating the reader to). De-risks it in isolation before the reader
@@ -563,7 +570,7 @@ void setup() {
   }
 
   BSerial.printf("\nfree after %lu  min-ever %lu\n", (unsigned long)freeHeap(),
-                (unsigned long)esp_get_minimum_free_heap_size());
+                 (unsigned long)esp_get_minimum_free_heap_size());
   BSerial.println("=== done ===");
 }
 

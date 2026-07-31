@@ -28,7 +28,7 @@ struct ImageDisplaySize {
 // intrinsicW/H are the image's real pixel dims. containerWidth is viewportWidth minus the
 // current block's horizontal inset (or viewportWidth when no inset). emSize is the body font
 // ascender size (for em-unit CSS lengths).
-ImageDisplaySize computeImageDisplaySize(int intrinsicW, int intrinsicH, const CssStyle& imgStyle,
-                                         int viewportWidth, int viewportHeight, int containerWidth, float emSize);
+ImageDisplaySize computeImageDisplaySize(int intrinsicW, int intrinsicH, const CssStyle& imgStyle, int viewportWidth,
+                                         int viewportHeight, int containerWidth, float emSize);
 
 }  // namespace compiled
