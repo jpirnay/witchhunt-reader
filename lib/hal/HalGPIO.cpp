@@ -445,19 +445,27 @@ bool HalGPIO::isUsbConnected() const {
   if (deviceIsX3()) {
     // X3: GPIO20 is repurposed as I2C SDA, so the X4 pin-level USB detect is
     // unusable here — the I2C pull-ups would always report HIGH. Probe the
-    // BQ27220 fuel gauge instead. Using just Current() mis-reports "not
-    // connected" when the battery is full (current ~= 0 mA); combine it with
-    // the Flags() DSG bit so we report true whenever the charger is present
-    // (DSG=0 means charging or fully charged, not discharging).
+    // BQ27220 fuel gauge instead.
+    //
+    // Current() is the primary signal: it is signed, and current flowing INTO
+    // the battery (positive, above a noise floor) only happens on a charger.
+    // DSG alone must NOT be trusted as "charger present": the gauge clears DSG
+    // whenever the pack isn't actively discharging above its detection
+    // threshold, which includes plain idle/relaxation on battery. Treating
+    // DSG=0 as connected made the UI latch to the charging bolt shortly after
+    // unplugging and never recover (issue #86). FC (fully charged) is the one
+    // resting state that does imply a charger, since it only latches while
+    // topped off on the charger, so it stays as a secondary signal.
     for (uint8_t attempt = 0; attempt < 2; ++attempt) {
       uint16_t flags = 0;
       if (X3GPIO::readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_FLAGS_REG, &flags)) {
-        if ((flags & BQ27220_FLAG_DSG) == 0) {
-          return true;
+        const bool discharging = (flags & BQ27220_FLAG_DSG) != 0;
+        if (!discharging && (flags & BQ27220_FLAG_FC) != 0) {
+          return true;  // topped off on the charger
         }
         int16_t currentMa = 0;
-        if (X3GPIO::readBQ27220CurrentMA(&currentMa) && currentMa > 0) {
-          return true;
+        if (X3GPIO::readBQ27220CurrentMA(&currentMa) && currentMa > USB_CHARGE_CURRENT_MIN_MA) {
+          return true;  // measurable current into the battery
         }
         return false;
       }
