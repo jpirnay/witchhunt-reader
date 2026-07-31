@@ -83,6 +83,11 @@ class ZipFile {
   // operator new under -fno-exceptions) — deque's ~512-byte chunks drop the contiguity
   // requirement while keeping the random-access iterators lower_bound needs.
   int fillUncompressedSizes(const std::deque<SizeTarget>& targets, std::deque<uint32_t>& sizes);
+  // Batch lookup of FULL entry stats in ONE central-directory walk (vs one linear scan per
+  // loadFileStatSlim call). targets must be sorted by (hash, len) like fillUncompressedSizes;
+  // stats[target.index] receives the entry's FileStatSlim. Returns number matched. Same deque
+  // rationale as fillUncompressedSizes (avoid a big contiguous block on a fragmented heap).
+  int fillFileStats(const std::deque<SizeTarget>& targets, std::deque<FileStatSlim>& stats);
   // Due to the memory required to run each of these, it is recommended to not preopen the zip file for multiple
   // These functions will open and close the zip as needed
   uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
@@ -131,6 +136,12 @@ class ZipFile {
     // to the data start. Returns false if the entry is not found or on I/O error.
     // Closes any previously open entry first.
     bool open(const char* filename);
+
+    // Same, but for a caller that already holds the entry's central-dir stat
+    // (e.g. from Epub's cached per-spine stat table) — skips the linear
+    // central-directory scan loadFileStatSlim performs. Closes any previously
+    // open entry first.
+    bool open(const FileStatSlim& fileStat);
 
     // Decompress up to `cap` bytes into `out`. Sets `*produced` to the number
     // of bytes written and `*done` to true when the entry is exhausted.

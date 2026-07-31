@@ -2,6 +2,7 @@
 
 #include <Print.h>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -65,7 +66,28 @@ class Epub {
   mutable uint16_t zipTotalEntries_ = 0;
   mutable bool zipDetailsCached_ = false;
 
+  // Per-book cache of each spine entry's ZIP central-directory stat, resolved in ONE
+  // central-directory walk (fillFileStats) the first time any spine stat is requested.
+  // Without it, every spine open re-runs a linear central-directory scan — on a book that
+  // interleaves ~1600 image entries with the XHTML spines (e.g. King's Avatar) that scan
+  // walks hundreds-to-thousands of entries and dominated the compile (~215 ms/spine,
+  // measured). Deque (not vector): ~14 B/spine, ~24 KB at 1732 spines — a vector would demand
+  // that as one contiguous block and abort on a fragmented heap under -fno-exceptions.
+  // Best-effort: on OOM the deque stays empty and getSpineItemStat falls back to a per-call
+  // linear scan (correct, just slow). In-memory only — content.bin is the durable cache, so
+  // this is cheap to rebuild and never persisted.
+  mutable std::deque<ZipFile::FileStatSlim> spineStats_;
+  mutable bool spineStatsResolved_ = false;
+  mutable bool spineStatsUsable_ = false;
+  void ensureSpineStats() const;
+
  public:
+  // Resolve a spine entry's ZIP central-directory stat via the per-book cache (one
+  // central-directory walk for the whole book, then O(1) per spine). Falls back to a single
+  // linear loadFileStatSlim scan if the cache couldn't be built (OOM) or the spine wasn't
+  // matched in the batch walk. Returns false only if the entry can't be found at all.
+  bool getSpineItemStat(int spineIndex, ZipFile::FileStatSlim* out) const;
+
   // Seed a fresh ZipFile over this book with the cached EOCD details (no-op
   // until the first adopt). Public so Section's EntryReader benefits too.
   void primeZip(ZipFile& zip) const;
