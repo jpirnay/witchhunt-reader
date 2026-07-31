@@ -12,13 +12,13 @@ extern "C" {
 
 #include "tjpgdcnf.h"
 
-#if defined(_WIN32) /* VC++ or some compiler without stdint.h */
+#if defined(_MSC_VER) && (_MSC_VER < 1600) /* Old VC++ without <stdint.h> */
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef short int16_t;
 typedef unsigned long uint32_t;
 typedef long int32_t;
-#else /* Embedded platform */
+#else /* Embedded platform, MinGW, MSVC 2010+ — all provide <stdint.h> */
 #include <stdint.h>
 #endif
 
