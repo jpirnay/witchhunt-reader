@@ -80,6 +80,13 @@ class ContentBinCompiler {
   compiled::LaidOutPage readPageAt(const compiled::PagePosition& cursor, const compiled::LayoutParams& params,
                                    GfxRenderer& renderer);
 
+  // Prev-page symmetry of readPageAt: render the page that ENDS at `endCursor` (== the start of the
+  // page the reader is currently on), for backward navigation when the cursor stack is empty (post-jump
+  // or across a page the reader never turned forward through). Same read-through-the-producer-handle
+  // discipline. Returns ok=false at spine start (caller crosses to the previous spine) or on error.
+  compiled::LaidOutPage readPageBackwardAt(const compiled::PagePosition& endCursor,
+                                           const compiled::LayoutParams& params, GfxRenderer& renderer);
+
  private:
   enum class State : uint8_t { Init, Compiling, Done, Failed };
 

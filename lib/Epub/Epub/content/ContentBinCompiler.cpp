@@ -212,6 +212,19 @@ LaidOutPage ContentBinCompiler::readPageAt(const PagePosition& cursor, const Lay
   return result;
 }
 
+LaidOutPage ContentBinCompiler::readPageBackwardAt(const PagePosition& endCursor, const LayoutParams& params,
+                                                   GfxRenderer& renderer) {
+  LaidOutPage result;  // ok=false by default
+  if (!binFile_) return result;
+  writer_.withReadableFile([&](FsFile& f) {
+    BlockStreamReader reader;
+    if (!reader.open(f)) return;
+    if (endCursor.spineIndex >= reader.spineCount() || !reader.spineAvailable(endCursor.spineIndex)) return;
+    result = layoutPageBackward(reader, renderer, params, endCursor);
+  });
+  return result;
+}
+
 }  // namespace compiled
 
 #endif  // EPUB_STAGE1

@@ -11,3 +11,12 @@
 #ifndef EPUB_STAGE1
 #define EPUB_STAGE1 0
 #endif
+
+// FRESH_READER_CONTENTBIN gates the CURSOR-NATIVE reader path (M2+): the EpubReaderActivity renders
+// pages PURELY from content.bin via ContentBinCompiler::readPageAt + a PagePosition cursor, with the
+// producer stepped cooperatively from the reader loop — the "one-producer" model. Opt-in per build
+// (-DFRESH_READER_CONTENTBIN=1); only meaningful under EPUB_STAGE1 (ContentBinCompiler compiles only
+// then). Default 0 → the reader behaves exactly as today (section-file + page-index path).
+#ifndef FRESH_READER_CONTENTBIN
+#define FRESH_READER_CONTENTBIN 0
+#endif

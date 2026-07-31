@@ -281,6 +281,9 @@ void EpubReaderActivity::onEnter() {
   // the long-standing "heap may be corrupt after image decode failures" note below).
   checkHeapIntegrity("reader_onEnter");
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
+#if READER_FRESH_ENABLED
+  freshReader_ = true;  // compile-time gated; the whole fresh path activates for this session
+#endif
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
   // previous reader session was abandoned mid-build.
@@ -365,6 +368,21 @@ void EpubReaderActivity::onEnter() {
   }
   logReaderMemSnapshot("onEnter_after_progress_load");
 
+#if READER_FRESH_ENABLED
+  if (freshReader_) {
+    // Create THE one producer (steps content.bin cooperatively from the loop) and seed the cursor to
+    // the resolved spine (first-open text reference or the saved spine), block 0. charOffset restore
+    // within a spine is M3; for M2 we land at the spine's first page.
+    producer_ = makeUniqueNoThrow<compiled::ContentBinCompiler>(epub, renderer, makeProducerParams());
+    cursor_ = {};
+    cursor_.spineIndex = static_cast<uint16_t>(std::max(0, currentSpineIndex));
+    cursorStack_.clear();
+    freshPreparing_ = false;
+    freshAtSpineEnd_ = false;
+    freshCurrentEnd_ = {};
+  }
+#endif
+
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_bookmarks_loaded");
@@ -439,6 +457,17 @@ void EpubReaderActivity::onExit() {
   // Abort any in-flight Background-B build (deletes its partial cache file) before the
   // epub it references goes away.
   resetBackgroundBuild();
+#if READER_FRESH_ENABLED
+  if (producer_) {
+    // Tear down the producer before its epub/handle references go away. A partial compile is safe to
+    // drop — committed spines are durable (two-phase commit) and a reopen resumes from the frontier.
+    // Its destructor closes content.bin + removes the block-offset sidecar.
+    producer_->setExternalScratch(nullptr);
+    producer_.reset();
+  }
+  cursorStack_.clear();
+  cursorStack_.shrink_to_fit();
+#endif
   section.reset();  // also aborts an in-flight Background-C build of the current section
   // Background-C may have BORROWED the secondary buffer for headroom (lent, not freed); the
   // build is now aborted (section.reset above released into the arena), so hand the block back.
@@ -614,6 +643,14 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+#if READER_FRESH_ENABLED
+  if (freshReader_) {
+    // Cursor-native page turns (no `section`, no page index). Finished-book handoff via cursor is M3.
+    freshPageTurn(/*isForwardTurn=*/nextTriggered);
+    return;
+  }
+#endif
+
   // At end of the book, forward button opens the finished-book flow and back returns to last page
   if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
     if (nextTriggered) {
@@ -650,6 +687,15 @@ void EpubReaderActivity::loop() {
 }
 
 void EpubReaderActivity::serviceBackgroundWork() {
+#if READER_FRESH_ENABLED
+  if (freshReader_) {
+    // Single builder: step the content.bin producer only. NO Background-B/-C section builds run when
+    // the fresh path is on (serviceBackgroundWork is the sole dispatcher of those), so there is exactly
+    // one thing touching the epub — the one-producer invariant.
+    stepContentProducer();
+    return;
+  }
+#endif
   // Priority order, highest first. Each routine self-gates on its own pending state and
   // is expected to do a bounded amount of work and return so the next loop tick can
   // service input. Background A is already scheduled inside render() via pendingPreRender
@@ -754,6 +800,43 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   return p;
 }
+
+#if READER_FRESH_ENABLED
+compiled::LayoutParams EpubReaderActivity::makeLayoutParams() const {
+  // Read-side layout profile for content.bin pages: mirrors makeSectionBuildParams' inputs but uses the
+  // getEffective* accessors directly (they don't depend on a live render's lastRenderStats, which is
+  // unset at onEnter / between renders). imageBasePath empty for M2 (images beyond cover deferred).
+  const RenderLayout layout = computeRenderLayout();
+  compiled::LayoutParams p;
+  p.fontId = getEffectiveReaderFontId();
+  p.lineCompression = getEffectiveReaderLineCompression();
+  p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
+  p.paragraphAlignment = getEffectiveParagraphAlignment();
+  p.viewportWidth = layout.viewportWidth;
+  p.viewportHeight = layout.viewportHeight;
+  p.hyphenationEnabled = getEffectiveHyphenation();
+  p.bionicReadingEnabled = getEffectiveBionicReading();
+  p.embeddedStyle = getEffectiveEmbeddedStyle();
+  p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
+  p.epubFilePath = epub->getPath();
+  p.imageBasePath = "";  // M2: no image extract-to-SD yet (R3)
+  return p;
+}
+
+Section::BuildParams EpubReaderActivity::makeProducerParams() const {
+  // The producer compiles content.bin content-only. content.bin is settings-independent for block
+  // content, so build from the getEffective* accessors (NOT lastRenderStats, which is zero at onEnter).
+  // embeddedStyle on = honor the book's own CSS (a content property; resolves off-heap via the arena).
+  const RenderLayout layout = computeRenderLayout();
+  Section::BuildParams p;
+  p.fontId = getEffectiveReaderFontId();
+  p.viewportWidth = layout.viewportWidth;
+  p.viewportHeight = layout.viewportHeight;
+  p.embeddedStyle = getEffectiveEmbeddedStyle();
+  p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
+  return p;
+}
+#endif  // READER_FRESH_ENABLED
 
 void EpubReaderActivity::resetBackgroundBuild() {
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
@@ -3024,6 +3107,141 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   }
 }
 
+#if READER_FRESH_ENABLED
+void EpubReaderActivity::stepContentProducer() {
+  if (!producer_ || producer_->done()) return;
+  // Gate exactly like Background-C: skip (don't block) while the display bus is busy, a render is in
+  // flight, or an image warm pass owns the heap — a blocked loop task can't service input.
+  if (renderer.isRefreshPending() || RenderLock::peek() || imageProcessingActive_) return;
+  RenderLock lock(*this);
+  if (renderer.isRefreshPending()) return;  // re-check under the lock
+
+  // The producer builds FROM THE HEAP (its own owned arena), but the reader's resident heap is only
+  // ~38 KB free — the giant single spine's ~34 KB CONTIGUOUS inflate ring does not fit there ("Failed
+  // to allocate ZIP arena", device-observed; the bench had ~48 KB free with no UI). So RELEASE the
+  // secondary framebuffer while a spine compiles: freeing its ~48 KB back to the heap gives the ring
+  // room, and — unlike BORROWING it as the build arena — the memory is REAL heap, so the section build's
+  // strict-LIFO arena release works normally (borrowing broke that: "Failed to release extraction buffer
+  // block"). This is master's proven IncrementalReleased discipline. Realloc at the spine boundary so
+  // the reader gets AA/dual-buffer back between spines. Single builder, so nothing else needs the
+  // buffer meanwhile; a mid-compile page render (frontier just reached the cursor) reallocs first.
+  if (renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
+    if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+    if (renderer.releaseSecondaryBuffer()) {
+      secondaryBufferDegraded_ = true;
+      renderer.setSingleBufferFastDiff(true);
+    }
+  }
+
+  renderer.clearFontAccumulation();  // re-wire flash-resident metric tables for the content walk
+  producer_->step(BG_BUILD_BUDGET_MS);
+
+  // Spine boundary: no build in flight → restore the secondary buffer (AA/dual-buffer) for reading.
+  if (secondaryBufferDegraded_ && !producer_->spineInFlight() && !renderer.hasSecondaryBuffer()) {
+    if (reallocSecondaryEvictingCaches()) {
+      secondaryBufferDegraded_ = false;
+      renderer.setSingleBufferFastDiff(false);
+    }
+  }
+
+  // If the frontier now covers the page we're waiting on, re-render to replace the "preparing" popup.
+  if (freshPreparing_ && cursor_.spineIndex < producer_->committedSpines() && !producer_->spineInFlight()) {
+    requestUpdate();
+  }
+}
+
+void EpubReaderActivity::renderFromContentBin(RenderLock& lock, const RenderLayout& layout) {
+  if (!producer_) return;
+  const int spineCount = epub->getSpineItemsCount();
+  if (cursor_.spineIndex >= spineCount) return;  // out of range (finished-book handoff is M3)
+
+  // Frontier wait: the cursor's spine isn't committed yet (cold open / reading ahead of the compile).
+  // Draw a brief "preparing" popup ONCE, then let the loop go idle so stepContentProducer() runs — do
+  // NOT requestUpdate() here. Re-drawing the popup every render (and its displayBuffer waveform) keeps
+  // renderer.isRefreshPending() asserted on X3 for the whole multi-second waveform, which gates
+  // stepContentProducer OUT so the frontier never advances — a deadlock (M1 had no display so missed
+  // it). stepContentProducer() itself requestUpdate()s the instant the frontier covers the cursor,
+  // which re-enters render and falls through to the real page below.
+  if (cursor_.spineIndex >= producer_->committedSpines() || producer_->spineInFlight()) {
+    if (!freshPreparing_) {  // draw the popup only on the first preparing render, not every tick
+      GUI.drawPopup(renderer, tr(STR_INDEXING));
+      renderer.displayBuffer();
+      freshPreparing_ = true;
+    }
+    return;  // loop idles -> stepContentProducer advances the frontier -> it requestUpdate()s us back
+  }
+  freshPreparing_ = false;
+
+  compiled::LaidOutPage lp = producer_->readPageAt(cursor_, makeLayoutParams(), renderer);
+  if (!lp.ok || !lp.page) {
+    // Image-only / empty / unreadable spine: advance to the next spine's first page (bounded).
+    if (cursor_.spineIndex + 1 < spineCount) {
+      cursor_ = {};
+      cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);
+      requestUpdate();
+    }
+    return;
+  }
+
+  freshCurrentEnd_ = lp.end;
+  freshAtSpineEnd_ = lp.atSpineEnd;
+  currentPageFootnotes = std::move(lp.page->footnotes);
+  renderContents(lock, std::move(lp.page), layout.marginTop, layout.marginRight, layout.marginBottom,
+                 layout.marginLeft);
+
+  // Progress: cursor-native charOffset persistence is M3; for M2 record the spine so a reopen lands on
+  // the right spine (page 0). Reuse the async save mechanism (pageCount 0 → percent suppressed).
+  pendingProgressSave.spineIndex = cursor_.spineIndex;
+  pendingProgressSave.page = 0;
+  pendingProgressSave.pageCount = 0;
+  pendingProgressSave.pending.store(true, std::memory_order_release);
+}
+
+void EpubReaderActivity::freshPageTurn(bool isForwardTurn) {
+  if (!producer_) return;
+  const int spineCount = epub->getSpineItemsCount();
+  if (isForwardTurn) {
+    // Push the current page's start so back is O(1). Bounded FIFO (drop oldest at cap).
+    if (cursorStack_.size() >= kCursorStackCap) cursorStack_.erase(cursorStack_.begin());
+    cursorStack_.push_back(cursor_);
+    if (freshAtSpineEnd_) {
+      if (cursor_.spineIndex + 1 < spineCount) {
+        cursor_ = {};
+        cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex + 1);
+      } else {
+        cursorStack_.pop_back();  // last page of last spine — stay put (finished-book handoff is M3)
+        return;
+      }
+    } else {
+      cursor_ = freshCurrentEnd_;  // one-past-end == next page start
+    }
+  } else {
+    if (!cursorStack_.empty()) {
+      cursor_ = cursorStack_.back();
+      cursorStack_.pop_back();  // O(1) prev
+    } else if (!cursor_.atSpineStart()) {
+      // Empty stack (post-jump / never turned forward here): lay out the page ENDING at the cursor.
+      compiled::LaidOutPage bwd = producer_->readPageBackwardAt(cursor_, makeLayoutParams(), renderer);
+      if (bwd.ok) {
+        cursor_ = bwd.start;
+      } else if (cursor_.spineIndex > 0) {
+        cursor_ = {};
+        cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex - 1);  // lands at prev spine start (M2)
+      } else {
+        return;  // at book start
+      }
+    } else if (cursor_.spineIndex > 0) {
+      cursor_ = {};
+      cursor_.spineIndex = static_cast<uint16_t>(cursor_.spineIndex - 1);  // prev spine start (last-page seek is M3)
+    } else {
+      return;  // at book start
+    }
+  }
+  freshPreparing_ = false;
+  requestUpdate();
+}
+#endif  // READER_FRESH_ENABLED
+
 // TODO: Failure handling
 void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
@@ -3069,6 +3287,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // Avoid heap walk in the hot render path; largest free block is sampled in index lifecycle logs.
   lastRenderStats.largestFreeBlockBefore = 0;
   showTruncatedSectionHintThisRender = false;
+
+#if READER_FRESH_ENABLED
+  if (freshReader_) {
+    // Cursor-native content.bin path: lay out + draw the page at cursor_. The old section render passes
+    // below (classifyRenderPass switch) are simply not reached. `layout`, guide-dots, and lastRenderStats
+    // are already set above so AA/margins behave identically.
+    renderFromContentBin(lock, layout);
+    return;
+  }
+#endif
 
   // Hold off a pure pre-render while a deferred AA pass is still owed for the
   // CURRENT page. The pre-render writes the next page into frameBuffer, but the
@@ -3629,6 +3857,26 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
 }
 
 void EpubReaderActivity::renderStatusBar() const {
+#if READER_FRESH_ENABLED
+  if (freshReader_) {
+    // Cursor-native: there is no per-spine page index. Show a spine-based book-progress estimate (the
+    // charOffset/totalChars-based percentage is M3). No page fraction yet (pageCount 0 → suppressed).
+    const int spineCount = std::max(1, epub->getSpineItemsCount());
+    const float spineProg = 0.0f;  // within-spine char progress is M3
+    const float bookProgress = epub->calculateProgress(cursor_.spineIndex, spineProg) * 100;
+    std::string title;
+    if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
+      title = epub->getTitle();
+    } else {
+      const int tocIndex = epub->getTocIndexForSpineIndex(cursor_.spineIndex);
+      title = (tocIndex == -1) ? std::string(tr(STR_UNNAMED)) : epub->getTocItem(tocIndex).title;
+    }
+    GUI.drawStatusBar(renderer, bookProgress, /*currentPage=*/0, /*pageCount=*/0, title, 0, /*isStarred=*/false,
+                      /*printedPageLabel=*/"", /*fillMargin=*/true, /*pageCountApproximate=*/true);
+    (void)spineCount;
+    return;
+  }
+#endif
   // Calculate progress in book. During an active section build pageCount only reflects pages
   // built so far, not the final chapter length, so show a byte-based estimate ("page X of ~Y")
   // instead of the misleading watermark. estimatedTotalPages() returns 0 while it's still too

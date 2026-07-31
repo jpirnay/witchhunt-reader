@@ -12,9 +12,21 @@
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
+#include <Epub/content/ContentBinCompiler.h>
+#include <Epub/content/PageLayout.h>
+#include <Epub/content/Stage1Config.h>
 
 #include <atomic>
 #include <memory>
+
+// Cursor-native content.bin reader (M2+): active only when BOTH the content.bin persistence side
+// (EPUB_STAGE1) and the fresh-reader opt-in (FRESH_READER_CONTENTBIN) are compiled in. Otherwise the
+// whole fresh path (members + branches) compiles out and the reader is exactly the section-file reader.
+#if EPUB_STAGE1 && FRESH_READER_CONTENTBIN
+#define READER_FRESH_ENABLED 1
+#else
+#define READER_FRESH_ENABLED 0
+#endif
 
 #include "BookmarkStore.h"
 #include "EpubReaderMenuActivity.h"
@@ -373,6 +385,30 @@ class EpubReaderActivity final : public Activity {
   // the release solves, not a parse failure, so it must not collapse to the blocking path
   // (which indexes the whole section before showing anything). -1 = no such latch.
   int forceReleasedBuildSpine_ = -1;
+
+#if READER_FRESH_ENABLED
+  // --- Fresh reader (content.bin cursor path, M2) -------------------------------------------------
+  // Runtime latch mirroring the compile-time flag, sampled once in onEnter(). render()/loop() early-
+  // branch on it; when false every fresh branch is skipped and the reader behaves exactly as today.
+  bool freshReader_ = false;
+  // THE one producer: steps content.bin compilation cooperatively from the loop. Created in onEnter,
+  // torn down in onExit. The ONLY code touching the epub/ZIP when freshReader_ is on.
+  std::unique_ptr<compiled::ContentBinCompiler> producer_;
+  // Reading cursor into content.bin (spine/block/offset/charOffset), NOT a page index.
+  compiled::PagePosition cursor_;
+  // Bounded prev-page cursor stack: each forward turn pushes the current page's start; back pops it
+  // (O(1)) and falls back to readPageBackwardAt when empty. Capped to bound RAM.
+  std::vector<compiled::PagePosition> cursorStack_;
+  static constexpr size_t kCursorStackCap = 64;
+  // True while the cursor's spine is not yet committed: render() shows a brief "preparing" popup and
+  // loop() keeps stepping the producer (M1's zero-stall frontier chase).
+  bool freshPreparing_ = false;
+  // End cursor of the page currently on screen (== start of next page). Cached so a forward turn is
+  // O(1) without re-laying-out the current page. freshAtSpineEnd_: that page is the spine's last.
+  compiled::PagePosition freshCurrentEnd_;
+  bool freshAtSpineEnd_ = false;
+#endif
+
   // Debug-only Background A glyph for the status-bar overlay. The transient flags
   // (pendingPreRender / preRenderedPage.ready) are cleared at the top of render()
   // before the status bar is drawn, so the overlay could never sample a non-idle
@@ -525,6 +561,26 @@ class EpubReaderActivity final : public Activity {
   // page from the in-progress LUT once it's been written (text-only pages only), or an
   // "Indexing" popup until then. Does no build work itself — that's stepCurrentSectionBuild().
   void renderSectionBuildingPass(RenderLock& lock, const RenderLayout& layout);
+
+#if READER_FRESH_ENABLED
+  // --- Fresh reader (content.bin cursor path, M2) methods ---
+  // Lay out + draw the page at cursor_ from content.bin (via producer_->readPageAt). If the cursor's
+  // spine isn't committed yet, draw a "preparing" popup + set freshPreparing_ so the loop keeps
+  // stepping the producer. Reuses renderContents() for the draw. Consumes the lock.
+  void renderFromContentBin(RenderLock& lock, const RenderLayout& layout);
+  // Advance the producer by one budgeted slice, borrowing/returning the framebuffer arena PER SLICE
+  // (never held across a render) and gating on the render task exactly like Background-C. The single
+  // builder — no Section builds run when freshReader_ is on.
+  void stepContentProducer();
+  // Cursor page turn: forward = freshCurrentEnd_ (cross to spine+1 at freshAtSpineEnd_); back = pop
+  // cursorStack_, else producer_->readPageBackwardAt, else cross to prev spine. Requests an update.
+  void freshPageTurn(bool isForwardTurn);
+  // Canonical, settings-derived LayoutParams for reading pages (mirrors the producer's build profile).
+  compiled::LayoutParams makeLayoutParams() const;
+  // Canonical, settings-independent BuildParams for the producer (mirrors makeContentBinParams intent
+  // + the bench: fontId/viewport/embeddedStyle from getEffective*, no lastRenderStats coupling).
+  Section::BuildParams makeProducerParams() const;
+#endif
 
   // --- idle-time background work ---
   // Called by loop() when input is idle and no page turn is pending. Dispatches the
