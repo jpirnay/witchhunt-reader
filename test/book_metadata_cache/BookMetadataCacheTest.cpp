@@ -14,8 +14,6 @@
 // serialization helpers the production reader uses. No test hooks in production
 // code, and no dependency on buildBookBin (which would need a real ZIP archive).
 
-#include "BookMetadataCache.h"
-
 #include <HalStorage.h>
 #include <Serialization.h>
 #include <gtest/gtest.h>
@@ -23,6 +21,8 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#include "BookMetadataCache.h"
 
 namespace fs = std::filesystem;
 
