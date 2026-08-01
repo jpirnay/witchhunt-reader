@@ -8,6 +8,7 @@
 #include <Xtc.h>
 #include <esp_task_wdt.h>
 
+#include "ChunkedResponse.h"
 #include "HttpFileStreamer.h"
 
 namespace {
@@ -192,12 +193,13 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
       // Root should always work — send minimal response
       s.setContentLength(CONTENT_LENGTH_UNKNOWN);
       s.send(207, "application/xml; charset=\"utf-8\"", "");
-      s.sendContent(
+      ChunkedResponse out(&s);
+      out.append(
           "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
           "<D:multistatus xmlns:D=\"DAV:\">\n");
-      sendPropEntry(s, "/", true, 0, FIXED_DATE);
-      s.sendContent("</D:multistatus>\n");
-      s.sendContent("");
+      sendPropEntry(out, "/", true, 0, FIXED_DATE);
+      out.append("</D:multistatus>\n");
+      out.finish();
       return;
     }
     s.send(500, "text/plain", "Failed to open");
@@ -208,18 +210,19 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
   s.setContentLength(CONTENT_LENGTH_UNKNOWN);
   s.send(207, "application/xml; charset=\"utf-8\"", "");
-  s.sendContent(
+  ChunkedResponse out(&s);
+  out.append(
       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
       "<D:multistatus xmlns:D=\"DAV:\">\n");
 
   // Entry for the resource itself
   if (isDir) {
-    sendPropEntry(s, path, true, 0, FIXED_DATE);
+    sendPropEntry(out, path, true, 0, FIXED_DATE);
   } else {
-    sendPropEntry(s, path, false, root.size(), FIXED_DATE);
+    sendPropEntry(out, path, false, root.size(), FIXED_DATE);
     root.close();
-    s.sendContent("</D:multistatus>\n");
-    s.sendContent("");
+    out.append("</D:multistatus>\n");
+    out.finish();
     return;
   }
 
@@ -248,9 +251,9 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
         childPath += fileName;
 
         if (file.isDirectory()) {
-          sendPropEntry(s, childPath, true, 0, FIXED_DATE);
+          sendPropEntry(out, childPath, true, 0, FIXED_DATE);
         } else {
-          sendPropEntry(s, childPath, false, file.size(), FIXED_DATE);
+          sendPropEntry(out, childPath, false, file.size(), FIXED_DATE);
         }
       }
 
@@ -262,41 +265,41 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
   }
 
   root.close();
-  s.sendContent("</D:multistatus>\n");
-  s.sendContent("");
+  out.append("</D:multistatus>\n");
+  out.finish();
 }
 
-void WebDAVHandler::sendPropEntry(WebServer& s, const String& path, bool isDir, size_t size,
+void WebDAVHandler::sendPropEntry(ChunkedResponse& out, const String& path, bool isDir, size_t size,
                                   const String& lastModified) const {
   String href;
   urlEncodePath(path, href);
   // Ensure directory hrefs end with /
   if (isDir && !href.endsWith("/")) href += "/";
 
-  String xml = "<D:response><D:href>";
-  xml += href;
-  xml += "</D:href><D:propstat><D:prop>";
+  // Append the pieces straight into the batch buffer. Assembling an
+  // intermediate String here would add a realloc-and-copy chain plus a
+  // temporary for every directory entry, and the buffer already coalesces.
+  out.append("<D:response><D:href>");
+  out.append(href.c_str(), href.length());
+  out.append("</D:href><D:propstat><D:prop>");
 
   if (isDir) {
-    xml += "<D:resourcetype><D:collection/></D:resourcetype>";
+    out.append("<D:resourcetype><D:collection/></D:resourcetype>");
   } else {
-    xml += "<D:resourcetype/>";
-    xml += "<D:getcontentlength>";
-    xml += String(size);
-    xml += "</D:getcontentlength>";
-    String mime = getMimeType(path);
-    xml += "<D:getcontenttype>";
-    xml += mime;
-    xml += "</D:getcontenttype>";
+    char sizeBuf[24];
+    const int written = snprintf(sizeBuf, sizeof(sizeBuf), "%lu", (unsigned long)size);
+    const String mime = getMimeType(path);
+    out.append("<D:resourcetype/><D:getcontentlength>");
+    out.append(sizeBuf, written < 0 ? 0 : (size_t)written);
+    out.append("</D:getcontentlength><D:getcontenttype>");
+    out.append(mime.c_str(), mime.length());
+    out.append("</D:getcontenttype>");
   }
 
-  xml += "<D:getlastmodified>";
-  xml += lastModified;
-  xml += "</D:getlastmodified>";
-
-  xml += "</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n";
-
-  s.sendContent(xml);
+  out.append("<D:getlastmodified>");
+  out.append(lastModified.c_str(), lastModified.length());
+  out.append("</D:getlastmodified>");
+  out.append("</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>\n");
 }
 
 // ── GET ──────────────────────────────────────────────────────────────────────
