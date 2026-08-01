@@ -121,6 +121,19 @@ class Epub {
   // — the spine/TOC accessors are NOT populated. Returns false if the cover reference can't be found.
   bool loadForCover();
 
+  // Lightweight load for CATALOGUE METADATA only (title/author/series/seriesIndex/language), WITHOUT
+  // building the spine/TOC book.bin. Same rationale and mechanism as loadForCover(): uses book.bin if
+  // it already exists, otherwise does a metadata-only OPF parse (OpfCacheMode::Disabled — no manifest
+  // item index, no .items.bin). After this, ONLY the metadata accessors above are valid; the spine/TOC
+  // accessors and the cover path are NOT populated.
+  //
+  // Exists because scanning a folder for a series sequel must read series metadata from every EPUB in
+  // it. Doing that with full load() calls meant one manifest/spine index build per candidate, run from
+  // inside the reader with its heap still committed — the finished-book reboot on a large series folder
+  // (issue #104). Cheap enough to call in a loop; still not free (one OPF parse per call), so callers
+  // scanning many books should bound the candidate set first.
+  bool loadForMetadata();
+
   // True when opening the book will trigger the (multi-second) first-open index
   // build inside load(): the spine/TOC cache (book.bin) or the compiled CSS rules
   // cache is missing. Cheap (only file-existence checks) so callers can decide
