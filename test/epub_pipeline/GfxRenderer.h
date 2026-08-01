@@ -87,6 +87,15 @@ class GfxRenderer {
   int getFontAscenderSize(int) const { return 18; }
   int getFontAscenderSizeScaled(int, float scale) const { return static_cast<int>(18 * scale); }
   int getTextHeight(int) const { return 24; }
+  // Synthetic ink model: caps span 14 px above the baseline, nothing below
+  // (matches the deterministic-metrics philosophy above; 18-14=4 px leading).
+  bool getTextInkMetrics(int, const char* text, EpdFontFamily::Style, int* aboveBaseline, int* belowBaseline) const {
+    *aboveBaseline = 0;
+    *belowBaseline = 0;
+    if (text == nullptr || *text == '\0') return false;
+    *aboveBaseline = 14;
+    return true;
+  }
 
   // --- Text drawing (no-ops) ---
   void drawText(int, int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}

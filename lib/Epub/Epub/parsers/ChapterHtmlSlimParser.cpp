@@ -421,7 +421,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       // A long paragraph (>96 words) beside a tall float lays out here, bypassing
       // makePages(). Inject the active float so it keeps wrapping in this mid-block
       // flush too — otherwise its first chunk renders full-width over the image.
-      const bool splitIsOriginating = static_cast<bool>(deferredPageImage_);
+      const bool splitIsOriginating = static_cast<bool>(deferredPageImage_) || static_cast<bool>(deferredDropCapLine_);
       if (!splitIsOriginating && activeFloatBottom_ > 0 && currentPageNextY < activeFloatBottom_ &&
           splitBlockStyle.floatZoneCount == 0) {
         auto& z = splitBlockStyle.floatZones[splitBlockStyle.floatZoneCount++];
@@ -471,7 +471,8 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
-  deferredPageImage_.reset();  // the deferred yPos update is moot on a fresh page
+  deferredPageImage_.reset();    // the deferred yPos update is moot on a fresh page
+  deferredDropCapLine_.reset();  // ditto for a drop cap — it stays on the emitted page
 
   // A floated image never crosses a page boundary, so any active float ended on the
   // page we just emitted. Clear it and drop stale float zones from the block that
@@ -559,6 +560,159 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   pendingInlineImage_.alt.clear();
 }
 
+bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
+  // Positional gates first: they are cheap member reads and reject nearly every
+  // inline element in the book, so only an element opening a still-empty paragraph
+  // reaches the style checks below.
+  if (pendingDropCap_.active || deferredDropCapLine_) return false;
+  if (currentTable || currentTableCell) return false;
+  if (!currentTextBlock || !currentTextBlock->isEmpty() || partWordBufferIndex > 0) return false;
+  if (pendingInlineImage_.active || activeFloatBottom_ > 0 || deferredPageImage_) return false;
+  if (currentTextBlock->getBlockStyle().floatZoneCount > 0) return false;
+
+  if (!cssStyle.hasCssFloat() || cssStyle.cssFloat != CssFloat::Left) return false;
+  if (!cssStyle.hasFontSizeMultiplier() || cssStyle.fontSizeMultiplier < kDropCapMinMultiplier) return false;
+
+  // Compose the cap size: span CSS (em, relative to parent) x enclosing inline spans
+  // x the paragraph block's own multiplier — all relative to the body font. Clamped so
+  // the cap stays around three text lines tall (KOReader-comparable) and never absurd.
+  float mult =
+      cssStyle.fontSizeMultiplier * (effectiveSizePct / 100.0f) * currentTextBlock->getBlockStyle().fontSizeMultiplier;
+  mult = std::min(std::max(mult, kDropCapMinMultiplier), kDropCapMaxMultiplier);
+
+  // Inherited bold/italic, overridden by the span's own CSS (drop-cap classes commonly
+  // reset font-style: normal inside an italic first phrase).
+  bool isBold = boldUntilDepth < depth || effectiveBold;
+  bool isItalic = italicUntilDepth < depth || effectiveItalic;
+  if (cssStyle.hasFontWeight()) isBold = cssStyle.fontWeight == CssFontWeight::Bold;
+  if (cssStyle.hasFontStyle()) isItalic = cssStyle.fontStyle == CssFontStyle::Italic;
+  EpdFontFamily::Style capStyle = EpdFontFamily::REGULAR;
+  if (isBold) capStyle = static_cast<EpdFontFamily::Style>(capStyle | EpdFontFamily::BOLD);
+  if (isItalic) capStyle = static_cast<EpdFontFamily::Style>(capStyle | EpdFontFamily::ITALIC);
+
+  pendingDropCap_.active = true;
+  pendingDropCap_.depth = depth;
+  pendingDropCap_.multiplier = mult;
+  pendingDropCap_.style = capStyle;
+  pendingDropCap_.textLen = 0;
+  return true;
+}
+
+void ChapterHtmlSlimParser::finalizePendingDropCap() {
+  pendingDropCap_.active = false;
+  const int textLen = pendingDropCap_.textLen;
+  pendingDropCap_.textLen = 0;
+  if (textLen == 0 || !currentTextBlock) return;
+  pendingDropCap_.text[textLen] = '\0';
+
+  // Cap font selection. Unlike resolveBlockFont (nearest rung, single aux slot), a drop
+  // cap wants the LARGEST real font available: the desired size is far beyond every rung,
+  // so every rung step taken in real glyphs cuts the residual upscale factor (and thus
+  // pixelation). If the aux slot is already claimed (chapter heading), reuse that font
+  // rather than falling back to scaling the small body font — same decompressor budget.
+  int32_t capFontId = 0;  // 0 = body font
+  float capScale = pendingDropCap_.multiplier;
+  {
+    int best = -1;
+    for (int i = 0; i < fontSizeLadder_.count; ++i) {
+      const auto& rung = fontSizeLadder_.rungs[i];
+      if (rung.sizePct <= 100) continue;
+      if (auxFontId_ != 0 && rung.fontId != auxFontId_) continue;
+      if (best < 0 || rung.sizePct > fontSizeLadder_.rungs[best].sizePct) best = i;
+    }
+    if (best >= 0) {
+      capFontId = fontSizeLadder_.rungs[best].fontId;
+      capScale = pendingDropCap_.multiplier * 100.0f / fontSizeLadder_.rungs[best].sizePct;
+      if (auxFontId_ == 0) auxFontId_ = capFontId;
+    }
+  }
+  const int capEffFontId = capFontId != 0 ? capFontId : fontId;
+
+  // Ink metrics: the ascender metric includes internal leading, which at 2-4x scale
+  // becomes half a line of blank space. Place and size the cap by actual glyph ink.
+  renderer.ensureFontReady(capEffFontId, pendingDropCap_.text);
+  int capInkTop = 0;
+  int capInkBelow = 0;
+  const bool haveInk =
+      renderer.getTextInkMetrics(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, &capInkTop, &capInkBelow);
+  const int capWidth = renderer.getTextWidthScaled(capEffFontId, pendingDropCap_.text, pendingDropCap_.style, capScale);
+
+  // Unusable cap (missing glyphs, or too wide to leave a text column): render the
+  // captured text inline at paragraph size instead so no characters are lost.
+  if (!haveInk || capInkTop <= 0 || capWidth <= 0 || capWidth + kDropCapGapPx > viewportWidth / 2) {
+    LOG_DBG("EHP", "dropcap '%s': inline fallback (haveInk=%d inkTop=%d width=%d limit=%d)", pendingDropCap_.text,
+            haveInk, capInkTop, capWidth + kDropCapGapPx, viewportWidth / 2);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    nextWordContinues = true;  // "A" + "ll" form one visual word
+    return;
+  }
+
+  // First-line ink leading of the paragraph: same string measured in the body font,
+  // scaled by the paragraph's own multiplier. The cap's ink top is aligned to this.
+  int bodyInkTop = 0;
+  int bodyInkBelow = 0;
+  renderer.ensureFontReady(fontId, pendingDropCap_.text);
+  renderer.getTextInkMetrics(fontId, pendingDropCap_.text, EpdFontFamily::REGULAR, &bodyInkTop, &bodyInkBelow);
+  const float paraMult = currentTextBlock->getBlockStyle().fontSizeMultiplier;
+  const int bodyLeading =
+      std::max(0, static_cast<int>((renderer.getFontAscenderSize(fontId) - bodyInkTop) * paraMult + 0.5f));
+
+  const int capAsc = renderer.getFontAscenderSize(capEffFontId);
+  const int capLeadScaled = static_cast<int>((capAsc - capInkTop) * capScale + 0.5f);
+  const int capInkHeightScaled = static_cast<int>((capInkTop + capInkBelow) * capScale + 0.5f);
+  // Zone spans from the line top to just below the cap's ink bottom.
+  const int zoneHeight = bodyLeading + capInkHeightScaled + 2;
+
+  if (!currentPage) {
+    currentPage.reset(new (std::nothrow) Page());
+    currentPageNextY = 0;
+  }
+  // A drop cap never crosses a page boundary — break first if it would not fit.
+  if (zoneHeight > viewportHeight - currentPageNextY && currentPage && !currentPage->elements.empty()) {
+    emitPage(lastBodyChildByteOffset);
+  }
+
+  BlockStyle capBlockStyle;
+  capBlockStyle.headingFontId = capFontId;
+  capBlockStyle.fontSizeMultiplier = capScale;
+  capBlockStyle.fontResolved = true;
+  auto capBlock = std::make_shared<TextBlock>(std::vector<std::string>{pendingDropCap_.text}, std::vector<int16_t>{0},
+                                              std::vector<EpdFontFamily::Style>{pendingDropCap_.style}, capBlockStyle,
+                                              std::vector<uint8_t>{});
+  if (!capBlock->valid()) {
+    LOG_DBG("EHP", "dropcap '%s': inline fallback (block alloc failed)", pendingDropCap_.text);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    nextWordContinues = true;
+    return;
+  }
+
+  const int16_t capX = currentTextBlock->getBlockStyle().leftInset();
+  const int16_t top = static_cast<int16_t>(currentPageNextY);
+  // The cap draws its baseline at yPos + capAsc*capScale; shifting yPos up by the scaled
+  // internal leading (offset by the first line's own small leading) puts the cap's ink
+  // top level with the first line's ink top. Provisional; re-based in addLineToPage.
+  dropCapYAdjust_ = static_cast<int16_t>(bodyLeading - capLeadScaled);
+  deferredDropCapLine_ = std::make_shared<PageLine>(capBlock, capX, static_cast<int16_t>(top + dropCapYAdjust_));
+  currentPage->elements.push_back(deferredDropCapLine_);
+
+  BlockStyle& bs = currentTextBlock->getBlockStyle();
+  if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
+    auto& z = bs.floatZones[bs.floatZoneCount++];
+    z.top = top;
+    z.bottom = static_cast<int16_t>(top + zoneHeight);
+    z.width = static_cast<int16_t>(capWidth + kDropCapGapPx);
+    z.isRight = false;
+  }
+  // Provisional active-float extent so short paragraphs hand the zone on to the next
+  // block; makePages() finalises top/bottom when the originating block is positioned.
+  activeFloatTop_ = top;
+  activeFloatBottom_ = static_cast<int16_t>(top + zoneHeight);
+  activeFloatWidth_ = static_cast<int16_t>(capWidth + kDropCapGapPx);
+  activeFloatIsRight_ = false;
+  LOG_DBG("EHP", "dropcap '%s': placed fontId=%d scale=%.2f zone=%dx%d", pendingDropCap_.text, capFontId, capScale,
+          capWidth + kDropCapGapPx, zoneHeight);
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
@@ -586,6 +740,14 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       // Preserve only whether the current empty block still represents <br> separators.
       // This lets consecutive <br> accumulate one line each without leaking the flag to real content blocks.
       merged.fromBrElement = blockStyle.fromBrElement;
+      // getCombinedBlockStyle drops float zones by design; a float attached to this
+      // still-empty block (drop cap or image) must survive the style merge so the
+      // text that eventually lands in it wraps beside the float.
+      const BlockStyle& prevStyle = currentTextBlock->getBlockStyle();
+      merged.floatZoneCount = prevStyle.floatZoneCount;
+      for (int zi = 0; zi < prevStyle.floatZoneCount; ++zi) {
+        merged.floatZones[zi] = prevStyle.floatZones[zi];
+      }
       currentTextBlock->setBlockStyle(merged);
 
       if (!pendingAnchorId.empty()) {
@@ -1652,6 +1814,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
+    // Drop cap: a left-floated span with a large font-size opening an empty paragraph.
+    // Capture its text for float-zone rendering instead of pushing an inline entry
+    // (the per-word size channel would clamp the cap to 250%).
+    if (self->tryStartDropCapCapture(cssStyle)) {
+      self->depth += 1;
+      return;
+    }
     // Handle span and other inline elements for CSS styling.
     // <small>/<big> carry UA-default sizes (80%/120%) even without any CSS rule.
     const bool isSmallTag = strcmp(name, "small") == 0;
@@ -1805,6 +1974,29 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       self->currentFootnote.number[self->currentFootnoteLinkTextLen++] = s[i];
     }
     self->currentFootnote.number[self->currentFootnoteLinkTextLen] = '\0';
+  }
+
+  // Route drop-cap span text into the capture buffer instead of the word flow.
+  if (self->pendingDropCap_.active) {
+    int i = 0;
+    bool overflow = false;
+    for (; i < len; i++) {
+      if (isWhitespace(s[i])) continue;
+      if (self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
+        overflow = true;
+        break;
+      }
+      self->pendingDropCap_.text[self->pendingDropCap_.textLen++] = s[i];
+    }
+    if (!overflow) return;
+    // Too much text for a drop cap — abandon capture and reroute everything captured
+    // so far (plus the rest of this chunk) through the normal inline word flow.
+    self->pendingDropCap_.active = false;
+    const int captured = self->pendingDropCap_.textLen;
+    self->pendingDropCap_.textLen = 0;
+    characterData(userData, self->pendingDropCap_.text, captured);
+    characterData(userData, s + i, len - i);
+    return;
   }
 
   for (int i = 0; i < len; i++) {
@@ -2021,6 +2213,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   // Decrement float depth when the floated element's scope closes.
   while (self->floatDepth_ > 0 && self->floatOpenDepths_[self->floatDepth_ - 1] >= self->depth) {
     self->floatDepth_--;
+  }
+
+  // Closing the drop-cap span — place the captured letter and its float zone.
+  if (self->pendingDropCap_.active && self->pendingDropCap_.depth == self->depth) {
+    self->finalizePendingDropCap();
   }
 
   if (strcmp(name, "svg") == 0 && self->svgDepth > 0) {
@@ -2412,6 +2609,13 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
     deferredPageImage_.reset();
   }
 
+  // Same deferred fix for a drop cap: re-base to the first line's top, keeping the
+  // ink-alignment offset computed in finalizePendingDropCap.
+  if (isFirstLineOfBlock && deferredDropCapLine_) {
+    deferredDropCapLine_->yPos = static_cast<int16_t>(currentPageNextY + dropCapYAdjust_);
+    deferredDropCapLine_.reset();
+  }
+
   currentPageNextY += lineHeight;
   return ParsedText::LineProcessResult::Accepted;
 }
@@ -2476,7 +2680,7 @@ void ChapterHtmlSlimParser::makePages() {
   // those blocks; here we re-inject the same zone into every later block that still
   // overlaps the image vertically, so they all wrap beside it — then drop it once
   // layout has passed the image bottom.
-  const bool isOriginatingBlock = static_cast<bool>(deferredPageImage_);
+  const bool isOriginatingBlock = static_cast<bool>(deferredPageImage_) || static_cast<bool>(deferredDropCapLine_);
   if (activeFloatBottom_ > 0 && currentPageNextY >= activeFloatBottom_) {
     activeFloatBottom_ = 0;  // layout has moved past the image; float no longer applies
   }
