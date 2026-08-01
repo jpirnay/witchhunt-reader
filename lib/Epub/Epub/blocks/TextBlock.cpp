@@ -40,7 +40,9 @@ void TextBlock::bindArenaPointers() {
 TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle,
                      std::vector<uint8_t> word_sizes)
-    : blockStyle(blockStyle) {
+    // Narrow the parser's full BlockStyle to the render-only slice: the spacing
+    // fields have already been consumed into word_xpos / the line's y by layout.
+    : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
   // Normalize the all-100% case to no sizes so uniform lines (the common case)
   // keep the zero-cost fast paths in render/serialize/line-height.
   if (std::all_of(word_sizes.begin(), word_sizes.end(), [](const uint8_t s) { return s == 100; })) {
@@ -130,8 +132,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   // Heading blocks may render with a taller real font (headingFontId) instead of scaling the
   // body font. In that case fontSizeMultiplier is a small residual (usually 1.0). Resolve the
   // effective (fontId, scale) pair once and use it for every measure/draw below.
-  const int effFontId = blockStyle.headingFontId != 0 ? blockStyle.headingFontId : fontId;
-  const float blockScale = blockStyle.fontSizeMultiplier;
+  const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
+  const float blockScale = renderStyle.fontSizeMultiplier;
   const int blockAscender = (blockScale == 1.0f) ? renderer.getFontAscenderSize(effFontId)
                                                  : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
   // Mixed-size lines are baseline-aligned: every word's baseline sits at y + lineAscender,
@@ -243,21 +245,15 @@ bool TextBlock::serialize(FsFile& file) const {
     }
   }
 
-  // Style (alignment + margins/padding/indent)
-  serialization::writePod(file, blockStyle.alignment);
-  serialization::writePod(file, blockStyle.textAlignDefined);
-  serialization::writePod(file, blockStyle.marginTop);
-  serialization::writePod(file, blockStyle.marginBottom);
-  serialization::writePod(file, blockStyle.marginLeft);
-  serialization::writePod(file, blockStyle.marginRight);
-  serialization::writePod(file, blockStyle.paddingTop);
-  serialization::writePod(file, blockStyle.paddingBottom);
-  serialization::writePod(file, blockStyle.paddingLeft);
-  serialization::writePod(file, blockStyle.paddingRight);
-  serialization::writePod(file, blockStyle.textIndent);
-  serialization::writePod(file, blockStyle.textIndentDefined);
-  serialization::writePod(file, blockStyle.fontSizeMultiplier);
-  serialization::writePod(file, blockStyle.headingFontId);
+  // Style: only the render slice. The spacing fields (margins, padding, indent
+  // and their "defined" flags) used to be written here, but layout consumes them
+  // into the word xpos / line y before a TextBlock exists, and nothing ever read
+  // them back -- so they were 19 dead bytes per line on disk as well as in RAM.
+  // Dropping them is a format change; SECTION_FILE_VERSION is bumped so stale
+  // caches are rejected and rebuilt.
+  serialization::writePod(file, renderStyle.alignment);
+  serialization::writePod(file, renderStyle.fontSizeMultiplier);
+  serialization::writePod(file, renderStyle.headingFontId);
 
   return true;
 }
@@ -323,22 +319,11 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
     }
   }
 
-  // Style (alignment + margins/padding/indent)
-  BlockStyle& blockStyle = block->blockStyle;
-  serialization::readPod(file, blockStyle.alignment);
-  serialization::readPod(file, blockStyle.textAlignDefined);
-  serialization::readPod(file, blockStyle.marginTop);
-  serialization::readPod(file, blockStyle.marginBottom);
-  serialization::readPod(file, blockStyle.marginLeft);
-  serialization::readPod(file, blockStyle.marginRight);
-  serialization::readPod(file, blockStyle.paddingTop);
-  serialization::readPod(file, blockStyle.paddingBottom);
-  serialization::readPod(file, blockStyle.paddingLeft);
-  serialization::readPod(file, blockStyle.paddingRight);
-  serialization::readPod(file, blockStyle.textIndent);
-  serialization::readPod(file, blockStyle.textIndentDefined);
-  serialization::readPod(file, blockStyle.fontSizeMultiplier);
-  serialization::readPod(file, blockStyle.headingFontId);
+  // Style: the render slice only (see serialize).
+  RenderStyle& renderStyle = block->renderStyle;
+  serialization::readPod(file, renderStyle.alignment);
+  serialization::readPod(file, renderStyle.fontSizeMultiplier);
+  serialization::readPod(file, renderStyle.headingFontId);
 
   return block;
 }
