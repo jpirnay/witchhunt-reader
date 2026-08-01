@@ -798,6 +798,29 @@ bool Epub::loadForCover() {
   return true;
 }
 
+bool Epub::loadForMetadata() {
+  // Metadata-only load: see the header for why this exists (issue #104 — the series-sequel scan used
+  // to full-load every EPUB in the folder). Structured exactly like loadForCover(); the only
+  // difference is which field the caller goes on to read, so neither marks the other's data valid.
+  bookMetadataCache.reset(new BookMetadataCache(cachePath));
+  cssParser.reset(new CssParser(cachePath));  // constructed for API symmetry; not parsed here
+
+  // Fast path: an existing book.bin already carries title/author/series, no OPF parse needed.
+  if (bookMetadataCache->load()) {
+    return true;
+  }
+
+  // No cache: metadata-only OPF parse. OpfCacheMode::Disabled passes a null cache to
+  // ContentOpfParser, so no manifest item index / .items.bin / spine cache is built.
+  if (!parseContentOpf(bookMetadataCache->coreMetadata, OpfCacheMode::Disabled)) {
+    LOG_INF("EBP", "loadForMetadata: content.opf parse failed for %s", filepath.c_str());
+    return false;
+  }
+  // Mark loaded for API symmetry with loadForCover(); spine/TOC stay empty and must not be used.
+  bookMetadataCache->markCoverMetadataLoaded();
+  return true;
+}
+
 bool Epub::clearCache(const bool preserveThumbs) const {
   if (!Storage.exists(cachePath.c_str())) {
     LOG_DBG("EPB", "Cache does not exist, no action needed");
