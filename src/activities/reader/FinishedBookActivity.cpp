@@ -5,13 +5,13 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
-#include <esp_task_wdt.h>
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
 #include <Txt.h>
 #include <Xtc.h>
+#include <esp_task_wdt.h>
 
 #include <algorithm>
 #include <cerrno>
