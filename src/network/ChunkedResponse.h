@@ -43,7 +43,10 @@ class ChunkedResponse {
       server->sendContent(data, len);
       return;
     }
-    memcpy(buffer.get() + used, data, len);
+    // Typed local rather than arithmetic directly on get(): cppcheck does not
+    // resolve the unique_ptr<char[]> specialisation and reads get() as void*.
+    char* const base = buffer.get();
+    memcpy(base + used, data, len);
     used += len;
   }
 
