@@ -105,9 +105,5 @@ jobs:
           body_path: ${{ env.RELEASE_NOTES_PATH }}
           prerelease: true
           files: |
-            .pio/build/gh_release_rc/bootloader.bin
             .pio/build/gh_release_rc/firmware.bin
-            .pio/build/gh_release_rc/firmware.elf
-            .pio/build/gh_release_rc/firmware.map
-            .pio/build/gh_release_rc/partitions.bin
           fail_on_unmatched_files: true
