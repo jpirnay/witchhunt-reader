@@ -863,33 +863,14 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
   jpgCheckHeap("jpg_decode_entry");
 
-  // Validate JPEG markers before handing off to the decoder. A truncated file left
-  // by a prior crashed extraction session will have valid SOF headers but no EOI,
-  // which can fault the decoder on the garbage entropy data. Delete and bail so
-  // the next ensureExtracted() re-extracts the file cleanly.
-  {
-    FsFile f;
-    if (Storage.openFileForRead("JPG", imagePath, f)) {
-      const size_t fileSize = f.size();
-      uint8_t magic[2] = {0, 0};
-      bool valid = false;
-      if (fileSize >= 4 && f.read(magic, 2) == 2 && magic[0] == 0xFF && magic[1] == 0xD8) {
-        if (f.seek(fileSize - 2)) {
-          uint8_t tail[2] = {0, 0};
-          if (f.read(tail, 2) == 2 && tail[0] == 0xFF && tail[1] == 0xD9) {
-            valid = true;
-          }
-        }
-      }
-      f.close();
-      if (!valid) {
-        LOG_ERR("JPG", "JPEG integrity check failed (truncated/corrupt): %s — deleting for re-extraction",
-                imagePath.c_str());
-        Storage.remove(imagePath.c_str());
-        return false;
-      }
-    }
-  }
+  // No pre-decode marker validation here. An EOI gate used to guard JPEGDEC, which
+  // hard-faulted on the garbage entropy data of a file truncated by a crashed
+  // extraction; TJpgDec streams instead and its input callback simply returns short
+  // at EOF, so truncation surfaces as JDR_INP and is handled below like any other
+  // decode failure. The gate outlived its decoder and was rejecting valid images —
+  // trailing NUL padding after EOI is common enough that it deleted and re-extracted
+  // a good cover on every single open. Match the cover/thumbnail path
+  // (Epub::coverImageCachedValidOnly): trust the magic bytes, let the decode fail.
 
   JpegContext ctx;
   ctx.renderer = &renderer;
