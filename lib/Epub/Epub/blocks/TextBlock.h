@@ -39,9 +39,43 @@
 // array is omitted from the arena entirely when every word is at 100% (the
 // overwhelmingly common case), so ordinary lines pay zero per-word RAM or
 // section-cache cost.
+// The slice of BlockStyle a laid-out line still needs once it is resident.
+//
+// A TextBlock is the *product* of layout: the parser has already consumed the
+// margins, padding, indent and float zones to compute each word's xpos and the
+// line's y, and baked the results into the arena. Only the font selection is
+// still needed, because rendering resolves glyphs lazily at draw time.
+// `alignment` is not read by render() either, but it is cheap and the pipeline
+// golden dump reports it, so it stays as layout provenance.
+//
+// Keeping the full 52-byte BlockStyle here cost ~1.2 KB per resident page
+// (~28 lines/page) in fields nothing on the reader path could read --
+// getBlockStyle() had no callers outside the test dump. The same fields were
+// also 19 dead bytes per line in the section cache, so they are no longer
+// serialized either. See BlockStyle for the parse-time-only fields (floatZones,
+// fromBrElement, fontResolved) that are deliberately absent.
+//
+// RTL / CJK note: this slice is not a barrier to either. CJK already works and
+// needs nothing here -- its line breaking is a parse-time concern
+// (ChapterHtmlSlimParser, "primary word-breaking mechanism" for spaceless text),
+// so a CJK line reaches TextBlock already broken and positioned like any other.
+// For RTL, the direction state the compiled-content design reserves is per-word
+// bidiLevel and a base-direction flag on the block (see CompiledContent.h), not
+// a BlockStyle field -- BlockStyle has no direction member at all. Mirroring
+// margins/padding/floats is an *input* to positioning, done upstream in the
+// parser where the full BlockStyle still lives; a resident block only ever holds
+// the resulting xpos/y. `alignment` is kept partly because RTL text is
+// right-aligned. Nothing here is lost: the dropped fields remain in BlockStyle
+// and on disk, so widening this struct later is a local change.
+struct RenderStyle {
+  float fontSizeMultiplier = 1.0f;
+  int32_t headingFontId = 0;  // 0 = body font scaled by fontSizeMultiplier
+  CssTextAlign alignment = CssTextAlign::Justify;
+};
+
 class TextBlock final : public Block {
  private:
-  BlockStyle blockStyle;
+  RenderStyle renderStyle;
   uint16_t numWords = 0;
   uint16_t textBytes = 0;  // total size of the text region, including one NUL per word
   bool sizesPresent = false;
@@ -76,7 +110,7 @@ class TextBlock final : public Block {
 
   // Effective render scale of word i: block multiplier x the word's size percent.
   float wordScale(const uint16_t i) const {
-    return sizesPresent ? blockStyle.fontSizeMultiplier * (sizesArr[i] / 100.0f) : blockStyle.fontSizeMultiplier;
+    return sizesPresent ? renderStyle.fontSizeMultiplier * (sizesArr[i] / 100.0f) : renderStyle.fontSizeMultiplier;
   }
 
  public:
@@ -91,8 +125,7 @@ class TextBlock final : public Block {
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
-  void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
-  const BlockStyle& getBlockStyle() const { return blockStyle; }
+  const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
   uint16_t wordCount() const { return numWords; }

@@ -30,9 +30,13 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 60;  // bumped: TextBlock word data now serialized as one flat arena
+constexpr uint8_t SECTION_FILE_VERSION = 61;  // bumped: TextBlock no longer serializes the block-spacing
+                                              // fields (margins/padding/indent + their defined flags);
+                                              // layout bakes them into word xpos/line y and nothing read
+                                              // them back — 19 bytes/line saved
+                                              // v60: TextBlock word data serialized as one flat arena
                                               // (offset table + NUL-terminated text blob) instead of
-                                              // length-prefixed strings and per-field arrays (v60)
+                                              // length-prefixed strings and per-field arrays
                                               // v59: FontSizeLadder residual dead zone (±3% renders native) changes
                                               // near-rung block metrics from v58
                                               // (v58: block sizes snap to the FontSizeLadder, uniform spans fold;

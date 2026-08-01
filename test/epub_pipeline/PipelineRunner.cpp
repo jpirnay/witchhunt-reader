@@ -27,7 +27,7 @@ std::string normalizePath(const std::string& path, const std::string& cacheDir) 
 
 void dumpTextLine(std::ostream& out, const PageLine& line) {
   const auto& block = *line.getBlock();
-  const auto& bs = block.getBlockStyle();
+  const auto& bs = block.getRenderStyle();
   out << "  LINE y=" << line.yPos << " x=" << line.xPos << " align=" << static_cast<int>(bs.alignment)
       << " mult=" << std::fixed << std::setprecision(3) << bs.fontSizeMultiplier << " hfid=" << bs.headingFontId
       << " words=" << block.wordCount() << "\n";

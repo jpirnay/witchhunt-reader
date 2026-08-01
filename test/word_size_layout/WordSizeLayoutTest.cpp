@@ -359,7 +359,7 @@ TEST(WordSizeFolding, UniformNonDefaultFoldsIntoBlockMultiplier) {
   const auto result = layout(text, renderer, 400);
   ASSERT_EQ(result.lines.size(), 1u);
   EXPECT_FALSE(result.lines[0]->hasWordSizes());
-  EXPECT_FLOAT_EQ(result.lines[0]->getBlockStyle().fontSizeMultiplier, 0.7f);
+  EXPECT_FLOAT_EQ(result.lines[0]->getRenderStyle().fontSizeMultiplier, 0.7f);
 }
 
 TEST(WordSizeFolding, MixedOrDefaultSizesDoNotFold) {

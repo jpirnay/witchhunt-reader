@@ -2340,9 +2340,18 @@ int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
                                                                    const bool suppressHyphenationRetry) {
+  // Spacing (insets, float zones) lives on the ParsedText that produced this line,
+  // not on the line itself: a TextBlock only keeps the render slice, because by the
+  // time a line is resident the spacing has already been baked into its xpos/y here.
+  // Every layoutAndExtractLines() call that routes into addLineToPage lays out
+  // currentTextBlock (the table-cell path moves the cell into it via
+  // startNewTextBlock first), so this is the same style the line was built from.
+  static const BlockStyle kNoBlockStyle;
+  const BlockStyle& lineStyle = currentTextBlock ? currentTextBlock->getBlockStyle() : kNoBlockStyle;
+
   // Lines carrying inline-sized words advance by the tallest word on the line
   // (microreader semantics); uniform lines keep the block line height exactly.
-  int lineHeight = effectiveLineHeight(line->getBlockStyle());
+  int lineHeight = effectiveLineHeight(lineStyle);
   const uint8_t maxPct = line->maxSizePct();
   if (maxPct != 100) {
     lineHeight = lineHeight * maxPct / 100;
@@ -2382,9 +2391,9 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   // For lines that overlap an active left float zone, also shift right by the zone
   // width so text starts after the image rather than overlapping it.
   // Right-floated zones narrow the line width (handled in widthForLine) but don't shift text left.
-  int16_t xOffset = line->getBlockStyle().leftInset();
+  int16_t xOffset = lineStyle.leftInset();
   {
-    const auto& bs = line->getBlockStyle();
+    const auto& bs = lineStyle;
     for (int zi = 0; zi < bs.floatZoneCount; ++zi) {
       const auto& z = bs.floatZones[zi];
       if (!z.isRight && currentPageNextY < z.bottom && currentPageNextY + lineHeight > z.top) {
