@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
@@ -44,6 +45,24 @@ class FinishedBookActivity : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // The menu's rows are conditional (next-book, OPDS-search and move-to-/COMPLETED each appear only
+  // when applicable), so the row count and every row's index depend on the same four booleans. Those
+  // were previously re-derived independently in onEnter(), loop() and render(); any divergence
+  // between the count handed to GUI.drawList and the vectors its callbacks index is an out-of-bounds
+  // read. Building the model once per use keeps the count, the indices and the row content in sync
+  // by construction.
+  struct RowModel {
+    enum class Action { GoHome, OpenNext, SearchOpds, ToggleMoveToCompleted, ToggleForget };
+    std::vector<Action> actions;
+    std::vector<std::string> titles;
+    std::vector<std::string> subtitles;
+    std::vector<std::string> values;
+
+    int count() const { return static_cast<int>(actions.size()); }
+  };
+
+  RowModel buildRowModel() const;
+
   std::string currentBookPath_;
   std::string nextBookPath_;
   std::string currentBookAuthor_;

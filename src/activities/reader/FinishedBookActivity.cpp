@@ -5,6 +5,7 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <esp_task_wdt.h>
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
@@ -177,7 +178,10 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
   if (FsHelpers::hasEpubExtension(nextBookPath)) {
     Epub epub(nextBookPath, "/.crosspoint");
     epub.setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
-    if (epub.load(true, true)) {
+    // loadForCover(), not load(): this preview needs metadata + the cover thumb, never the spine/TOC.
+    // A full load() here rebuilt book.bin and reparsed the CSS for a book the user may not even open,
+    // costing ~2 s inside the reader — the same waste the sequel scan used to pay per candidate.
+    if (epub.loadForCover()) {
       metadata.title = epub.getTitle();
       metadata.author = epub.getAuthor();
       metadata.series = epub.getSeries();
@@ -284,63 +288,83 @@ std::string pathWithFilename(const std::string& directory, const std::string& fi
   return directory + "/" + fileName;
 }
 
-std::string findSeriesSequel(const std::string& directory, const std::string& currentSeries,
-                             const std::string& currentSeriesIndex) {
+// Finds the next book in the series: the candidate whose series index is the SMALLEST one still
+// greater than the current book's.
+//
+// Streams the directory and keeps only the running best — one path string of state, no file list, no
+// sort. That matters more than it looks: this runs inside the reader with the secondary framebuffer
+// restored (~10.7 KB largest contiguous block, measured on X4), so materialising and sorting a vector
+// of every filename was the single largest allocation on the path. Streaming makes peak memory O(1)
+// in the folder size, which removed the need for a heap gate and a listing cap.
+//
+// Exhaustive over the folder, deliberately and without a candidate cap. Two earlier revisions tried
+// to bound the work and both were silently WRONG rather than merely incomplete:
+//   - skipping everything before the current file in sorted order breaks whenever filenames disagree
+//     with series numbering;
+//   - stopping after the first N entries breaks too, because directory order is filesystem order, so
+//     "the first N" is arbitrary — in a 30-book folder the real sequel can sit at position 25 and
+//     never be examined. That fails precisely on the large series folders this feature is for.
+// Exhaustive is affordable because each candidate is a metadata-only parse (~300 ms) rather than the
+// full load (~2 s) this used to do — see Epub::loadForMetadata(). A very large folder still costs
+// real time; the answer to that is moving the scan off the main loop, not truncating it into a wrong
+// answer. The watchdog feed below keeps a long scan from rebooting the device.
+std::string findSeriesSequel(const std::string& directory, const std::string& currentFilename,
+                             const std::string& currentSeries, const std::string& currentSeriesIndex) {
   const auto currentIndex = parseSeriesIndex(currentSeriesIndex);
   if (!currentIndex.has_value() || currentSeries.empty()) {
     return {};
   }
 
-  std::vector<std::string> files;
   auto root = Storage.open(directory.c_str());
   if (!root || !root.isDirectory()) {
     if (root) root.close();
     return {};
   }
 
+  std::string bestPath;
+  float bestIndex = std::numeric_limits<float>::infinity();
+  size_t examined = 0;
+
   root.rewindDirectory();
   char name[512];
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(name, sizeof(name));
-    if (file.isDirectory()) {
-      file.close();
-      continue;
-    }
-    std::string fileName = name;
-    if (!FsHelpers::hasEpubExtension(fileName)) {
-      file.close();
-      continue;
-    }
-    if (fileName.empty() || fileName[0] == '.') {
-      file.close();
-      continue;
-    }
-    files.push_back(fileName);
+    const bool isDir = file.isDirectory();
     file.close();
-  }
-  root.close();
-  if (files.empty()) return {};
-  std::sort(files.begin(), files.end(), naturalLess);
+    if (isDir) continue;
 
-  std::string bestPath;
-  float bestIndex = std::numeric_limits<float>::infinity();
-  for (const auto& fileName : files) {
+    const std::string fileName = name;
+    if (fileName.empty() || fileName[0] == '.' || !FsHelpers::hasEpubExtension(fileName)) {
+      continue;
+    }
+    // The current book is in this directory too; skip it rather than spending a parse on a book that
+    // can never be its own sequel.
+    if (fileName == currentFilename) {
+      continue;
+    }
+
+    ++examined;
+
+    // The scan runs synchronously in the main loop, so it blocks input and the idle task throughout,
+    // and it is unbounded in the folder size. Each candidate is a ZIP open + OPF parse, so a big
+    // folder is many seconds — feed the watchdog and let other tasks run between candidates. The
+    // pre-fix scan full-loaded every EPUB (~2 s each) with no yield at all, the suspected cause of
+    // the issue #104 reboot.
+    esp_task_wdt_reset();
+    yield();
+
     const std::string candidatePath = pathWithFilename(directory, fileName);
-    auto epub = std::unique_ptr<Epub>(new Epub(candidatePath, "/.crosspoint"));
-    epub->setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
-    if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
+    Epub epub(candidatePath, "/.crosspoint");
+    epub.setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
+    // Metadata-only: no spine/TOC book.bin build, no manifest index, no CSS parse.
+    if (!epub.loadForMetadata()) {
       continue;
     }
-    const std::string candidateSeries = epub->getSeries();
-    const std::string candidateSeriesIndex = epub->getSeriesIndex();
-    if (!caseInsensitiveEqual(candidateSeries, currentSeries)) {
+    if (!caseInsensitiveEqual(epub.getSeries(), currentSeries)) {
       continue;
     }
-    const auto candidateIndex = parseSeriesIndex(candidateSeriesIndex);
-    if (!candidateIndex.has_value()) {
-      continue;
-    }
-    if (candidateIndex.value() <= currentIndex.value()) {
+    const auto candidateIndex = parseSeriesIndex(epub.getSeriesIndex());
+    if (!candidateIndex.has_value() || candidateIndex.value() <= currentIndex.value()) {
       continue;
     }
     if (candidateIndex.value() < bestIndex) {
@@ -348,43 +372,51 @@ std::string findSeriesSequel(const std::string& directory, const std::string& cu
       bestPath = candidatePath;
     }
   }
+  root.close();
+
+  LOG_DBG("FIN", "Series-sequel scan: examined %zu candidate(s), next=%s", examined,
+          bestPath.empty() ? "(none)" : bestPath.c_str());
   return bestPath;
 }
 
+// Finds the book immediately after currentFilename in natural filename order — i.e. the SMALLEST
+// filename still greater than the current one.
+//
+// Like findSeriesSequel, this streams the directory keeping only the running best rather than listing
+// and sorting every entry, so peak memory is two short strings regardless of folder size. Opens no
+// files at all: filenames alone decide the answer.
 std::string findNextAlphabeticalBook(const std::string& directory, const std::string& currentFilename) {
-  std::vector<std::string> files;
   auto root = Storage.open(directory.c_str());
   if (!root || !root.isDirectory()) {
     if (root) root.close();
     return {};
   }
 
+  std::string best;
   root.rewindDirectory();
   char name[512];
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(name, sizeof(name));
-    if (file.isDirectory()) {
-      file.close();
-      continue;
-    }
-    std::string fileName = name;
-    if (fileName.empty() || fileName[0] == '.' || !isSupportedBookFile(fileName)) {
-      file.close();
-      continue;
-    }
-    files.push_back(fileName);
+    const bool isDir = file.isDirectory();
     file.close();
+    if (isDir) continue;
+
+    const std::string fileName = name;
+    if (fileName.empty() || fileName[0] == '.' || !isSupportedBookFile(fileName)) {
+      continue;
+    }
+    // Strictly after the current book, and the earliest such name seen so far.
+    if (!naturalLess(currentFilename, fileName)) {
+      continue;
+    }
+    if (best.empty() || naturalLess(fileName, best)) {
+      best = fileName;
+    }
   }
   root.close();
-  if (files.empty()) return {};
-  std::sort(files.begin(), files.end(), naturalLess);
 
-  for (size_t i = 0; i < files.size(); ++i) {
-    if (files[i] == currentFilename && i + 1 < files.size()) {
-      return pathWithFilename(directory, files[i + 1]);
-    }
-  }
-  return {};
+  if (best.empty()) return {};
+  return pathWithFilename(directory, best);
 }
 
 bool pathIsInCompleted(const std::string& bookPath) {
@@ -407,7 +439,7 @@ std::string findNextBookInDirectory(const std::string& currentBookPath, const st
   const std::string currentFilename = getFilename(currentBookPath);
 
   if (!currentBookSeries.empty() && !currentBookSeriesIndex.empty()) {
-    const std::string sequel = findSeriesSequel(directory, currentBookSeries, currentBookSeriesIndex);
+    const std::string sequel = findSeriesSequel(directory, currentFilename, currentBookSeries, currentBookSeriesIndex);
     if (!sequel.empty() && sequel != currentBookPath) {
       return sequel;
     }
@@ -508,14 +540,58 @@ FinishedBookActivity::FinishedBookActivity(GfxRenderer& renderer, MappedInputMan
   nextBookName_ = nextBookAvailable_ ? getFilename(nextBookPath_) : tr(STR_NOT_SET);
 }
 
+FinishedBookActivity::RowModel FinishedBookActivity::buildRowModel() const {
+  RowModel model;
+
+  model.actions.push_back(RowModel::Action::GoHome);
+  model.titles.push_back(tr(STR_GO_BACK_TO_HOME));
+  model.subtitles.push_back(tr(STR_GO_BACK_TO_HOME_DESC));
+  model.values.push_back(tr(STR_HOME));
+
+  if (nextBookAvailable_) {
+    // Subtitle prefers the loaded metadata; before loop() has loaded it, fall back to the filename so
+    // the row is never blank.
+    std::string subtitle = nextBookAuthor_;
+    if (!nextBookSeries_.empty()) {
+      if (!subtitle.empty()) subtitle += " • ";
+      subtitle += nextBookSeries_;
+    }
+    if (subtitle.empty()) {
+      subtitle = nextBookName_;
+    }
+    model.actions.push_back(RowModel::Action::OpenNext);
+    model.titles.push_back(nextBookTitle_.empty() ? tr(STR_OPEN_NEXT_BOOK) : nextBookTitle_);
+    model.subtitles.push_back(subtitle);
+    model.values.push_back(tr(STR_OPEN));
+  }
+
+  if (!currentBookAuthor_.empty() && OPDS_STORE.hasServers()) {
+    model.actions.push_back(RowModel::Action::SearchOpds);
+    model.titles.push_back(tr(STR_SEARCH_OPDS_FOR_AUTHOR));
+    model.subtitles.push_back(currentBookAuthor_);
+    model.values.push_back(tr(STR_SEARCH));
+  }
+
+  if (!pathIsInCompleted(currentBookPath_)) {
+    model.actions.push_back(RowModel::Action::ToggleMoveToCompleted);
+    model.titles.push_back(tr(STR_MOVE_FINISHED_TO_COMPLETED));
+    model.subtitles.push_back("");
+    model.values.push_back(moveFinishedBooksToCompleted_ ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+  }
+
+  model.actions.push_back(RowModel::Action::ToggleForget);
+  model.titles.push_back(tr(STR_FORGET_BOOK));
+  model.subtitles.push_back(tr(STR_FORGET_BOOK_DESC));
+  model.values.push_back(removeFinishedBooksFromRecents_ ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+
+  return model;
+}
+
 void FinishedBookActivity::onEnter() {
   Activity::onEnter();
-  const bool canMoveToCompleted = !pathIsInCompleted(currentBookPath_);
-  const bool canSearchOpds = !currentBookAuthor_.empty() && OPDS_STORE.hasServers();
-  const int optionCount = 1 + (nextBookAvailable_ ? 1 : 0) + (canSearchOpds ? 1 : 0) + (canMoveToCompleted ? 1 : 0) + 1;
-  selectedIndex_ = std::clamp(selectedIndex_, 0, optionCount - 1);
   moveFinishedBooksToCompleted_ = SETTINGS.moveFinishedBooksToCompleted;
   removeFinishedBooksFromRecents_ = SETTINGS.removeFinishedBooksFromRecents;
+  selectedIndex_ = std::clamp(selectedIndex_, 0, std::max(0, buildRowModel().count() - 1));
 
   if (nextBookAvailable_) {
     nextBookTitle_ = nextBookName_;
@@ -540,65 +616,49 @@ void FinishedBookActivity::loop() {
       continue;
     }
 
-    const bool canMoveToCompleted = !pathIsInCompleted(currentBookPath_);
-    const bool canSearchOpds = !currentBookAuthor_.empty() && OPDS_STORE.hasServers();
-    const int optionCount =
-        1 + (nextBookAvailable_ ? 1 : 0) + (canSearchOpds ? 1 : 0) + (canMoveToCompleted ? 1 : 0) + 1;
+    const RowModel model = buildRowModel();
+    const int optionCount = model.count();
+    if (optionCount <= 0) {
+      return;
+    }
+    selectedIndex_ = std::clamp(selectedIndex_, 0, optionCount - 1);
 
-    if (ev.button == MappedInputManager::Button::Back) {
+    const auto finishWith = [this](const BookFinished::FinishedBookAction action) {
       MenuResult menuResult;
-      menuResult.action = static_cast<int>(BookFinished::FinishedBookAction::GoHome);
+      menuResult.action = static_cast<int>(action);
       ActivityResult result(menuResult);
       setResult(std::move(result));
       finish();
+    };
+
+    if (ev.button == MappedInputManager::Button::Back) {
+      finishWith(BookFinished::FinishedBookAction::GoHome);
       return;
     }
 
     if (ev.button == MappedInputManager::Button::Confirm) {
-      if (selectedIndex_ == 0) {
-        MenuResult menuResult;
-        menuResult.action = static_cast<int>(BookFinished::FinishedBookAction::GoHome);
-        ActivityResult result(menuResult);
-        setResult(std::move(result));
-        finish();
-        return;
-      }
-
-      if (selectedIndex_ == 1 && nextBookAvailable_) {
-        MenuResult menuResult;
-        menuResult.action = static_cast<int>(BookFinished::FinishedBookAction::OpenNextBook);
-        ActivityResult result(menuResult);
-        setResult(std::move(result));
-        finish();
-        return;
-      }
-
-      const int opdsIndex = 1 + (nextBookAvailable_ ? 1 : 0);
-      if (selectedIndex_ == opdsIndex && canSearchOpds) {
-        MenuResult menuResult;
-        menuResult.action = static_cast<int>(BookFinished::FinishedBookAction::SearchOpdsForAuthor);
-        ActivityResult result(menuResult);
-        setResult(std::move(result));
-        finish();
-        return;
-      }
-
-      const int moveIndex = 1 + (nextBookAvailable_ ? 1 : 0) + (canSearchOpds ? 1 : 0);
-      if (selectedIndex_ == moveIndex && canMoveToCompleted) {
-        moveFinishedBooksToCompleted_ = !moveFinishedBooksToCompleted_;
-        SETTINGS.moveFinishedBooksToCompleted = moveFinishedBooksToCompleted_;
-        SETTINGS.saveToFile();
-        requestUpdate();
-        return;
-      }
-
-      const int removeIndex = 1 + (nextBookAvailable_ ? 1 : 0) + (canSearchOpds ? 1 : 0) + (canMoveToCompleted ? 1 : 0);
-      if (selectedIndex_ == removeIndex) {
-        removeFinishedBooksFromRecents_ = !removeFinishedBooksFromRecents_;
-        SETTINGS.removeFinishedBooksFromRecents = removeFinishedBooksFromRecents_;
-        SETTINGS.saveToFile();
-        requestUpdate();
-        return;
+      switch (model.actions[selectedIndex_]) {
+        case RowModel::Action::GoHome:
+          finishWith(BookFinished::FinishedBookAction::GoHome);
+          return;
+        case RowModel::Action::OpenNext:
+          finishWith(BookFinished::FinishedBookAction::OpenNextBook);
+          return;
+        case RowModel::Action::SearchOpds:
+          finishWith(BookFinished::FinishedBookAction::SearchOpdsForAuthor);
+          return;
+        case RowModel::Action::ToggleMoveToCompleted:
+          moveFinishedBooksToCompleted_ = !moveFinishedBooksToCompleted_;
+          SETTINGS.moveFinishedBooksToCompleted = moveFinishedBooksToCompleted_;
+          SETTINGS.saveToFile();
+          requestUpdate();
+          return;
+        case RowModel::Action::ToggleForget:
+          removeFinishedBooksFromRecents_ = !removeFinishedBooksFromRecents_;
+          SETTINGS.removeFinishedBooksFromRecents = removeFinishedBooksFromRecents_;
+          SETTINGS.saveToFile();
+          requestUpdate();
+          return;
       }
       return;
     }
@@ -720,57 +780,14 @@ void FinishedBookActivity::render(RenderLock&&) {
     y = std::max(y + previewHeight, infoY) + metrics.verticalSpacing;
   }
 
-  const bool currentBookIsCompleted = pathIsInCompleted(currentBookPath_);
-  const bool canMoveToCompleted = !currentBookIsCompleted;
-  const bool canSearchOpds = !currentBookAuthor_.empty() && OPDS_STORE.hasServers();
-  const int optionCount = 1 + (nextBookAvailable_ ? 1 : 0) + (canSearchOpds ? 1 : 0) + (canMoveToCompleted ? 1 : 0) + 1;
-
-  std::vector<std::string> rowTitles;
-  std::vector<std::string> rowSubtitles;
-  std::vector<std::string> rowValues;
-
-  rowTitles.push_back(tr(STR_GO_BACK_TO_HOME));
-  rowSubtitles.push_back(tr(STR_GO_BACK_TO_HOME_DESC));
-  rowValues.push_back(tr(STR_HOME));
-
-  if (nextBookAvailable_) {
-    std::string subtitle;
-    if (!nextBookAuthor_.empty()) {
-      subtitle = nextBookAuthor_;
-    }
-    if (!nextBookSeries_.empty()) {
-      if (!subtitle.empty()) subtitle += " • ";
-      subtitle += nextBookSeries_;
-    }
-    if (subtitle.empty()) {
-      subtitle = nextBookName_;
-    }
-    rowTitles.push_back(nextBookTitle_.empty() ? tr(STR_OPEN_NEXT_BOOK) : nextBookTitle_);
-    rowSubtitles.push_back(subtitle);
-    rowValues.push_back(tr(STR_OPEN));
-  }
-
-  if (canSearchOpds) {
-    rowTitles.push_back(tr(STR_SEARCH_OPDS_FOR_AUTHOR));
-    rowSubtitles.push_back(currentBookAuthor_);
-    rowValues.push_back(tr(STR_SEARCH));
-  }
-
-  if (canMoveToCompleted) {
-    rowTitles.push_back(tr(STR_MOVE_FINISHED_TO_COMPLETED));
-    rowSubtitles.push_back("");
-    rowValues.push_back(moveFinishedBooksToCompleted_ ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
-  }
-
-  rowTitles.push_back(tr(STR_FORGET_BOOK));
-  rowSubtitles.push_back(tr(STR_FORGET_BOOK_DESC));
-  rowValues.push_back(removeFinishedBooksFromRecents_ ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+  const RowModel model = buildRowModel();
+  const int selected = std::clamp(selectedIndex_, 0, std::max(0, model.count() - 1));
 
   const Rect listRect{contentRect.x, y, contentRect.width, contentBottom - y};
   GUI.drawList(
-      renderer, listRect, optionCount, selectedIndex_, [&rowTitles](int index) { return rowTitles[index]; },
-      [&rowSubtitles](int index) { return rowSubtitles[index]; }, nullptr,
-      [&rowValues](int index) { return rowValues[index]; }, true);
+      renderer, listRect, model.count(), selected, [&model](int index) { return model.titles[index]; },
+      [&model](int index) { return model.subtitles[index]; }, nullptr,
+      [&model](int index) { return model.values[index]; }, true);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
