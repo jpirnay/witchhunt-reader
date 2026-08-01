@@ -9,6 +9,18 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# On 32-bit x86 hosts (e.g. MinGW i686) GCC defaults to -mfpmath=387. The x87 FPU
+# evaluates float expressions at 80-bit extended precision and rounds only on
+# store, so a result that is exactly 460.0 under SSE can be 459.99999... here --
+# and layout truncates rather than rounds, e.g. (int)(dims.width * scale) in
+# ChapterHtmlSlimParser. That turns into off-by-one image dimensions and word
+# positions, which makes the golden dumps fail locally while CI (x86-64, SSE2)
+# passes. Pin the host tests to SSE2 so they reproduce CI bit-for-bit.
+# Firmware targets RISC-V and is unaffected either way.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "(i.86|x86|AMD64)")
+  add_compile_options(-msse2 -mfpmath=sse)
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
