@@ -89,7 +89,10 @@ class CrossPointWebServer {
   void abortWsUpload(const char* tag);
 
   // File scanning
-  void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
+  // Plain function pointer + context rather than std::function: the callback runs once per
+  // directory entry, and a std::function taking FileInfo by value copies its String each time.
+  using FileVisitor = void (*)(const FileInfo& info, void* context);
+  void scanFiles(const char* path, FileVisitor visitor, void* context) const;
   bool isEpubFile(const String& filename) const;
 
   // Request handlers

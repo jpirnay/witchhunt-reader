@@ -6,6 +6,7 @@
 #include <HalClock.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Txt.h>
 #include <WiFi.h>
 #include <Xtc.h>
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "ChunkedResponse.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "HttpFileStreamer.h"
@@ -209,7 +211,13 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
   LOG_DBG("WEB", "Creating web server on port %d...", port);
-  server.reset(new WebServer(port));
+  // Nothrow: the build is -fno-exceptions, so a bare `new` would abort() on a
+  // fragmented heap instead of letting the check below report the failure.
+  server = makeUniqueNoThrow<WebServer>(port);
+  if (!server) {
+    LOG_ERR("WEB", "Failed to create WebServer!");
+    return;
+  }
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
   // This is critical for reliable web server operation on ESP32.
@@ -219,11 +227,6 @@ void CrossPointWebServer::begin() {
   // We rely on disabling WiFi sleep for responsiveness.
 
   LOG_DBG("WEB", "[MEM] Free heap after WebServer allocation: %d bytes", ESP.getFreeHeap());
-
-  if (!server) {
-    LOG_ERR("WEB", "Failed to create WebServer!");
-    return;
-  }
 
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
@@ -285,18 +288,30 @@ void CrossPointWebServer::begin() {
   // Collect WebDAV headers and register handler
   const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
   server->collectHeaders(davHeaders, 6);
-  server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
-  LOG_DBG("WEB", "WebDAV handler initialized");
+  // Ownership passes to the WebServer, which deletes the handler when stopped.
+  // On OOM the HTTP server still comes up; only WebDAV is unavailable.
+  if (auto davHandler = makeUniqueNoThrow<WebDAVHandler>()) {
+    server->addHandler(davHandler.release());
+    LOG_DBG("WEB", "WebDAV handler initialized");
+  } else {
+    LOG_ERR("WEB", "OOM: WebDAV handler — WebDAV disabled");
+  }
 
   server->begin();
 
-  // Start WebSocket server for fast binary uploads
+  // Start WebSocket server for fast binary uploads. On OOM the rest of the
+  // server stays up; uploads fall back to the plain HTTP path. Every other
+  // wsServer use is already null-guarded.
   LOG_DBG("WEB", "Starting WebSocket server on port %d...", wsPort);
-  wsServer.reset(new WebSocketsServer(wsPort));
-  wsInstance = const_cast<CrossPointWebServer*>(this);
-  wsServer->begin();
-  wsServer->onEvent(wsEventCallback);
-  LOG_DBG("WEB", "WebSocket server started");
+  wsServer = makeUniqueNoThrow<WebSocketsServer>(wsPort);
+  if (wsServer) {
+    wsInstance = const_cast<CrossPointWebServer*>(this);
+    wsServer->begin();
+    wsServer->onEvent(wsEventCallback);
+    LOG_DBG("WEB", "WebSocket server started");
+  } else {
+    LOG_ERR("WEB", "OOM: WebSocket server — binary uploads disabled");
+  }
 
   udpActive = udp.begin(LOCAL_UDP_PORT);
   LOG_DBG("WEB", "Discovery UDP %s on port %d", udpActive ? "enabled" : "failed", LOCAL_UDP_PORT);
@@ -694,7 +709,7 @@ void CrossPointWebServer::handleStatusFast() const {
   sendJson(server.get(), 200, doc);
 }
 
-void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
+void CrossPointWebServer::scanFiles(const char* path, const FileVisitor visitor, void* context) const {
   FsFile root = Storage.open(path);
   if (!root) {
     LOG_DBG("WEB", "Failed to open directory: %s", path);
@@ -741,7 +756,7 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
         info.isEpub = isEpubFile(info.name);
       }
 
-      callback(info);
+      visitor(info, context);
     }
 
     file.close();
@@ -780,40 +795,39 @@ void CrossPointWebServer::handleFileListData() const {
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
   esp_task_wdt_reset();
-  server->sendContent("[");
-  char output[513];
-  constexpr size_t jsonOffset = 1;
-  constexpr size_t jsonSize = sizeof(output) - jsonOffset;
-  bool seenFirst = false;
+  ChunkedJsonArray out(server.get());
+  char output[512];
+  constexpr size_t outputSize = sizeof(output);
   JsonDocument doc;
 
-  scanFiles(currentPath.c_str(), [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
-    esp_task_wdt_reset();
-    doc.clear();
-    doc["name"] = info.name;
-    doc["size"] = info.size;
-    doc["isDirectory"] = info.isDirectory;
-    doc["isEpub"] = info.isEpub;
+  struct FileListContext {
+    ChunkedJsonArray* out;
+    char* output;
+    JsonDocument* doc;
+  } context{&out, output, &doc};
 
-    const size_t written = serializeJson(doc, output + jsonOffset, jsonSize);
-    if (written >= jsonSize) {
-      LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
-      return;
-    }
+  scanFiles(
+      currentPath.c_str(),
+      [](const FileInfo& info, void* rawContext) {
+        auto& ctx = *static_cast<FileListContext*>(rawContext);
+        esp_task_wdt_reset();
+        ctx.doc->clear();
+        (*ctx.doc)["name"] = info.name;
+        (*ctx.doc)["size"] = info.size;
+        (*ctx.doc)["isDirectory"] = info.isDirectory;
+        (*ctx.doc)["isEpub"] = info.isEpub;
 
-    if (seenFirst) {
-      output[0] = ',';
-      server->sendContent(output, jsonOffset + written);
-    } else {
-      seenFirst = true;
-      server->sendContent(output + jsonOffset, written);
-    }
-    esp_task_wdt_reset();
-  });
+        const size_t written = serializeJson(*ctx.doc, ctx.output, outputSize);
+        if (written >= outputSize) {
+          LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
+          return;
+        }
+        ctx.out->addEntry(ctx.output, written);
+      },
+      &context);
 
   esp_task_wdt_reset();
-  server->sendContent("]");
-  server->sendContent("");
+  out.finish();
   LOG_WEB_MEM("files_exit");
   LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
 }
@@ -1459,27 +1473,19 @@ void CrossPointWebServer::handleGetSettings() const {
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  server->sendContent("[");
+  ChunkedJsonArray out(server.get());
 
-  char output[1025];
-  constexpr size_t jsonOffset = 1;
-  constexpr size_t jsonSize = sizeof(output) - jsonOffset;
-  bool seenFirst = false;
+  char output[1024];
+  constexpr size_t outputSize = sizeof(output);
   JsonDocument doc;
 
   auto sendEntry = [&]() {
-    const size_t written = serializeJson(doc, output + jsonOffset, jsonSize);
-    if (written >= jsonSize) {
+    const size_t written = serializeJson(doc, output, outputSize);
+    if (written >= outputSize) {
       LOG_DBG("WEB", "Settings entry JSON truncated (key=%s)", doc["key"].as<const char*>());
       return;
     }
-    if (seenFirst) {
-      output[0] = ',';
-      server->sendContent(output, jsonOffset + written);
-    } else {
-      seenFirst = true;
-      server->sendContent(output + jsonOffset, written);
-    }
+    out.addEntry(output, written);
   };
 
   for (const auto& sBase : settings) {
@@ -1579,8 +1585,7 @@ void CrossPointWebServer::handleGetSettings() const {
   appendValueSetting("refreshFrequencyPages", I18N.get(StrId::STR_REFRESH_FREQ), I18N.get(StrId::STR_CAT_DISPLAY),
                      I18N.get(StrId::STR_MENU_DISP_REFRESH), SETTINGS.refreshFrequencyPages, 0, 60, 1);
 
-  server->sendContent("]");
-  server->sendContent("");
+  out.finish();
   LOG_WEB_MEM("settings_exit");
   LOG_DBG("WEB", "Served settings API");
 }
@@ -2326,7 +2331,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
   // Stream JSON array incrementally to avoid allocating the full response in memory
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  server->sendContent("[");
+  ChunkedJsonArray out(server.get());
 
   char output[320];
   constexpr size_t outputSize = sizeof(output);
@@ -2343,12 +2348,10 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
     const size_t written = serializeJson(doc, output, outputSize);
     if (written >= outputSize) continue;
 
-    if (i > 0) server->sendContent(",");
-    server->sendContent(output);
+    out.addEntry(output, written);
   }
 
-  server->sendContent("]");
-  server->sendContent("");
+  out.finish();
   LOG_DBG("WEB", "Served Wi-Fi credentials API (%zu network(s))", credentials.size());
 }
 
@@ -2459,12 +2462,11 @@ void CrossPointWebServer::handleGetOpdsServers() const {
   // Stream JSON array incrementally to avoid allocating the full response in memory
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  server->sendContent("[");
+  ChunkedJsonArray out(server.get());
 
   char output[512];
   constexpr size_t outputSize = sizeof(output);
   JsonDocument doc;
-  bool seenFirst = false;
 
   for (size_t i = 0; i < servers.size(); i++) {
     doc.clear();
@@ -2478,15 +2480,10 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     const size_t written = serializeJson(doc, output, outputSize);
     if (written >= outputSize) continue;
 
-    if (seenFirst) {
-      server->sendContent(",");
-    }
-    seenFirst = true;
-    server->sendContent(output);
+    out.addEntry(output, written);
   }
 
-  server->sendContent("]");
-  server->sendContent("");
+  out.finish();
   LOG_DBG("WEB", "Served OPDS servers API (%zu servers)", servers.size());
 }
 

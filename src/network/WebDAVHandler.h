@@ -3,6 +3,8 @@
 #include <HalStorage.h>
 #include <WebServer.h>
 
+#include "ChunkedResponse.h"
+
 class WebDAVHandler : public RequestHandler {
  public:
   // RequestHandler interface
@@ -39,6 +41,7 @@ class WebDAVHandler : public RequestHandler {
   int getDepth(WebServer& s) const;
   bool getOverwrite(WebServer& s) const;
   void clearEpubCacheIfNeeded(const String& path) const;
-  void sendPropEntry(WebServer& s, const String& href, bool isDir, size_t size, const String& lastModified) const;
+  void sendPropEntry(ChunkedResponse& out, const String& href, bool isDir, size_t size,
+                     const String& lastModified) const;
   String getMimeType(const String& path) const;
 };
