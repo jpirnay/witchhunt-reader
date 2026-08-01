@@ -2,6 +2,8 @@
 
 This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) for the XTEINK X3/X4, a great piece of software by Dave Allie and others.
 
+**Caveat: new hardware batches of the X3 / X4 from xteink seem to come with a newer display panels. These models do NOT work with Witch(hunt) Reader (yet).**
+
 # Installation
 
 Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera); Firefox and Safari do not support WebSerial.
