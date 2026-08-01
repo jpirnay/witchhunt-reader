@@ -78,7 +78,7 @@ Legend: ✅ supported · ⚠️ partial / basic · ❌ not supported.
 | Anti-aliasing toggle | ✅ (+ fast AA, max-darkness mode) | ✅ |
 | Markdown (`.md`) rendering | ✅ headings, tables, HR, code, lists, TOC | ❌ shown as raw plain text |
 | **Right-to-left / BiDi (Hebrew, Arabic)** | ❌ **not supported** | ✅ full BiDi + Hebrew font + CSS `direction` |
-| Drop caps | ❌ | ❌ |
+| Drop caps | ✅ float-zone initials, top-aligned | ❌ |
 
 ## Reading Experience, Library & Navigation
 

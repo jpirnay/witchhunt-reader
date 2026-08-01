@@ -30,7 +30,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 61;  // bumped: TextBlock no longer serializes the block-spacing
+constexpr uint8_t SECTION_FILE_VERSION = 63;  // bumped: drop-cap float zones + ink-metric cap placement
+                                              // (62 was consumed by an earlier iteration of this feature)
+                                              // v61: TextBlock no longer serializes the block-spacing
                                               // fields (margins/padding/indent + their defined flags);
                                               // layout bakes them into word xpos/line y and nothing read
                                               // them back — 19 bytes/line saved

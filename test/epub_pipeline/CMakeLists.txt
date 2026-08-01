@@ -116,3 +116,21 @@ target_link_libraries(epub_pipeline_dump PRIVATE
   crosspoint_test_common
   SaxParser
 )
+
+# Same dump tool without the process-wide malloc/free override, which deadlocks
+# under the MinGW runtime. --bench heap numbers read 0 here; everything else is
+# identical, so this is the variant to use when diagnosing layout on Windows.
+add_executable(epub_pipeline_dump_noheap
+  DumpMain.cpp
+  HeapTrackStub.cpp
+  ${PIPELINE_SOURCES}
+)
+target_include_directories(epub_pipeline_dump_noheap PRIVATE ${PIPELINE_INCLUDES})
+target_compile_definitions(epub_pipeline_dump_noheap PRIVATE
+  ENABLE_SERIAL_LOG=1
+  LOG_LEVEL=2
+)
+target_link_libraries(epub_pipeline_dump_noheap PRIVATE
+  crosspoint_test_common
+  SaxParser
+)

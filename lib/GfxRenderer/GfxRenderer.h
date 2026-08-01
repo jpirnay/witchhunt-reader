@@ -254,6 +254,13 @@ class GfxRenderer {
   // Text
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const;
+  // Ink extents of `text` relative to its baseline, from glyph bitmap metrics:
+  // aboveBaseline = tallest glyph ink top, belowBaseline = deepest ink below the
+  // baseline (0 for caps/digits). Excludes the font's internal leading, unlike
+  // getFontAscenderSize. Returns false when no glyph is found. SD fonts need
+  // ensureFontReady(fontId, text) first so glyph metrics are loaded.
+  bool getTextInkMetrics(int fontId, const char* text, EpdFontFamily::Style style, int* aboveBaseline,
+                         int* belowBaseline) const;
   int getLineHeightScaled(int fontId, float scale) const;
   int getFontAscenderSizeScaled(int fontId, float scale) const;
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,

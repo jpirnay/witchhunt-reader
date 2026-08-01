@@ -1118,6 +1118,28 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
   return w;
 }
 
+bool GfxRenderer::getTextInkMetrics(const int fontId, const char* text, const EpdFontFamily::Style style,
+                                    int* aboveBaseline, int* belowBaseline) const {
+  *aboveBaseline = 0;
+  *belowBaseline = 0;
+  if (text == nullptr || *text == '\0') return false;
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return false;
+
+  bool any = false;
+  uint32_t cp;
+  const char* p = text;
+  while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&p)))) {
+    const EpdGlyph* glyph = fontIt->second.getGlyph(cp, style);
+    if (!glyph) continue;
+    // glyph->top: baseline to bitmap top edge; ink below baseline = height - top.
+    *aboveBaseline = std::max(*aboveBaseline, static_cast<int>(glyph->top));
+    *belowBaseline = std::max(*belowBaseline, static_cast<int>(glyph->height) - static_cast<int>(glyph->top));
+    any = true;
+  }
+  return any;
+}
+
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
                                    const EpdFontFamily::Style style) const {
   const int x = (getScreenWidth() - getTextWidth(fontId, text, style)) / 2;
