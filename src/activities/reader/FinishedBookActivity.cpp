@@ -610,18 +610,24 @@ void FinishedBookActivity::onEnter() {
 }
 
 void FinishedBookActivity::loop() {
+  // Built ONCE per loop() rather than per event: the model depends only on member state, and
+  // constructing it allocates five rows of translated strings. Rebuilding it inside the event loop
+  // put that cost in front of every button press. Any handler below that changes what the rows say
+  // (the two toggles) returns immediately, so a single build stays consistent with the events it
+  // dispatches.
+  const RowModel model = buildRowModel();
+  const int optionCount = model.count();
+  if (optionCount <= 0) {
+    return;
+  }
+
+  selectedIndex_ = std::clamp(selectedIndex_, 0, optionCount - 1);
+
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
     if (ev.type != ButtonEventManager::PressType::Short) {
       continue;
     }
-
-    const RowModel model = buildRowModel();
-    const int optionCount = model.count();
-    if (optionCount <= 0) {
-      return;
-    }
-    selectedIndex_ = std::clamp(selectedIndex_, 0, optionCount - 1);
 
     const auto finishWith = [this](const BookFinished::FinishedBookAction action) {
       MenuResult menuResult;
@@ -662,19 +668,12 @@ void FinishedBookActivity::loop() {
       }
       return;
     }
-
-    if (ev.button == MappedInputManager::Button::Down || ev.button == MappedInputManager::Button::Right) {
-      selectedIndex_ = (selectedIndex_ + 1) % optionCount;
-      requestUpdate();
-      return;
-    }
-
-    if (ev.button == MappedInputManager::Button::Up || ev.button == MappedInputManager::Button::Left) {
-      selectedIndex_ = (selectedIndex_ + optionCount - 1) % optionCount;
-      requestUpdate();
-      return;
-    }
   }
+
+  // Selection movement via the navigator, not consumed events — see the buttonNavigator comment in
+  // the header for why Up/Down/Left/Right never arrive as events on this screen.
+  buttonNavigator.onNextList(selectedIndex_, optionCount, [this] { requestUpdate(); });
+  buttonNavigator.onPreviousList(selectedIndex_, optionCount, [this] { requestUpdate(); });
 
   if (nextBookAvailable_ && !nextBookMetadataLoaded_) {
     const auto metadata = loadNextBookMetadata(nextBookPath_);

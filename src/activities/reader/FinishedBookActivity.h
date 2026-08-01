@@ -45,6 +45,14 @@ class FinishedBookActivity : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // Selection movement goes through ButtonNavigator (as in StarredPagesActivity and the other
+  // child-of-reader lists), NOT through consumed button events. This activity sits on top of the
+  // reader on the activity stack, so main.cpp still sees "in the reader" and routes reader-scoped
+  // actions (Up/Down/Left/Right commonly map to PREV/NEXT_SECTION) to dispatchButtonAction()
+  // instead of delivering them here — consumeEvent() never sees them. ButtonNavigator reads the
+  // mapped input state directly and is unaffected.
+  ButtonNavigator buttonNavigator;
+
   // The menu's rows are conditional (next-book, OPDS-search and move-to-/COMPLETED each appear only
   // when applicable), so the row count and every row's index depend on the same four booleans. Those
   // were previously re-derived independently in onEnter(), loop() and render(); any divergence
