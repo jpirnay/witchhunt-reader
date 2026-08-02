@@ -1,5 +1,6 @@
 #include "Page.h"
 
+#include <CooperativeAbort.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Serialization.h>
@@ -342,15 +343,25 @@ bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages, const bool 
   return anyImage;
 }
 
-void Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) const {
+bool Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
+                          const bool abortable) const {
   for (auto& element : elements) {
     // Scan every non-image element so prewarm covers text from table fragments
     // and other composite text containers, not only plain PageLine entries.
     if (element->getTag() == TAG_PageImage) {
       continue;
     }
+    // Per-element granularity: a page is tens of elements, so the smallest uninterruptible
+    // unit becomes one line instead of a whole plane (~440 ms measured on both devices).
+    // Deliberately no markAborted() here — the grayscale pass reports its own outcome through
+    // GrayscaleTimings::aborted, and setting the shared latch would be read by the image
+    // decoders' retry logic, which this has nothing to do with.
+    if (abortable && CooperativeAbort::shouldAbortLongTask()) {
+      return false;
+    }
     element->render(renderer, fontId, xOffset, yOffset);
   }
+  return true;
 }
 
 bool Page::serialize(FsFile& file) const {

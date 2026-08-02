@@ -181,6 +181,13 @@ class EpubReaderActivity final : public Activity {
   // by the page summary so it reflects the page, not the AA pass.
   HalDisplay::RefreshMode lastPageRefreshMode_ = HalDisplay::RefreshMode::FAST_REFRESH;
   uint8_t lastPageDisplayModeByte_ = 0;
+  // Page index/count of the page a display pass actually rendered, captured when that pass
+  // begins. The page summary MUST log these rather than section->currentPage: pageTurn() runs
+  // on the loop task without the render lock, so a turn arriving mid-render advances
+  // currentPage before the summary is emitted and the render gets labelled with the page it is
+  // about to be replaced by — which reads as the same page rendering twice.
+  int lastRenderedPageIndex_ = 0;
+  int lastRenderedPageCount_ = 0;
   // True when secondary display buffer allocation failed; while set we prefer
   // conservative refresh policy and skip grayscale AA to reduce ghosting.
   bool secondaryBufferDegraded_ = false;
@@ -590,6 +597,13 @@ class EpubReaderActivity final : public Activity {
   // that was last rendered into the buffer (needed for image AA re-render).
   void displayPreRenderedPage(const Page& page, int orientedMarginTop, int orientedMarginRight,
                               int orientedMarginBottom, int orientedMarginLeft);
+  // True when the page currently being rendered is already on its way out, so its
+  // anti-aliasing touch-up (cosmetic, and uncancellable once started) should be dropped.
+  // Covers the whole gesture, not just its tail: the sampler seeing a press edge, a
+  // navigation button being held, and an update already queued by a completed turn.
+  // Advisory — call it from the render task as late as possible, and never gate anything
+  // the next frame depends on it.
+  bool aaPreemptedByNavigation() const;
   // If the frame buffer currently holds a pre-rendered next page, redraw the current page
   // into it (no status bar, no flush). Restores the invariant other activities — notably
   // SleepActivity's OVERLAY mode — rely on when transitioning out of the reader.

@@ -18,7 +18,7 @@ void LineReaderActivity::onEnter() {
   Activity::onEnter();
 
   // See ReaderUtils::InputDrainGuard — prevents wake-up power-button hold from leaking into
-  // the first detectPageTurn() call as a page turn or chapter skip.
+  // the first page-turn check as a page turn or chapter skip.
   inputDrainGuard.arm();
 
   if (!txt) {
@@ -114,7 +114,7 @@ void LineReaderActivity::loop() {
     }
   }
 
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   if (prevTriggered) {
     goToPreviousPage();
   } else if (nextTriggered) {

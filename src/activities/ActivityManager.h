@@ -187,6 +187,14 @@ class ActivityManager {
   // Trigger a render and block until it completes.
   // Must NOT be called from the render task or while holding a RenderLock.
   void requestUpdateAndWait();
+
+  // True when a further render has already been requested while the current one is still
+  // running — the frame being rendered is superseded before it is even on screen. Intended
+  // to be called FROM the render task, as late as possible, so a long but purely cosmetic
+  // tail of a render (the reader's anti-aliasing touch-up) can be dropped for a page that
+  // is about to be replaced. Never skip anything the next frame depends on: the answer is
+  // advisory and can flip to true a moment after it is read.
+  bool isUpdateSuperseded() const;
 };
 
 extern ActivityManager activityManager;  // singleton, to be defined in main.cpp

@@ -7,7 +7,6 @@
 
 #include <cstdint>
 
-#include "ButtonEventManager.h"
 #include "MappedInputManager.h"
 
 namespace ReaderUtils {
@@ -58,8 +57,8 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
 
 // Suppresses input processing on activity entry until the user has released all buttons and a
 // clean frame (no pending press/release events) has been observed. Without this, the power-button
-// hold used to wake the device leaks into detectPageTurn() and triggers a page turn or chapter
-// skip (the wake-hold easily exceeds skipChapterMs).
+// hold used to wake the device leaks into the reader's page-turn handling and triggers a page turn
+// or chapter skip (the wake-hold easily exceeds skipChapterMs).
 // Each reader holds an instance, calls arm() in onEnter(), and calls shouldDrain() at the top
 // of loop() — returning early when it returns true.
 struct InputDrainGuard {
@@ -88,13 +87,18 @@ struct PageTurnResult {
   bool next;
 };
 
-inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
-  // Only treat wasReleased as a page turn when the button's short-press action is default.
-  // Non-default short-press actions are dispatched by the global dispatcher in main.cpp;
-  // counting wasReleased as well would double-fire the action.
-  // Also suppress immediate page-turns if a double-click action is configured for the button,
-  // because the button event system delays short events until the double-click window expires.
-  using BA = CrossPointSettings::BUTTON_ACTION;
+// Tilt gestures only. Button page turns come from ButtonEventManager's Short events,
+// which every reader handles in its consumeEvent() loop.
+//
+// Buttons used to be read here from MappedInputManager::wasReleased() instead. That is a
+// per-tick bitmask (HalGPIO::accumPressed_/accumReleased_, OR-ed by the sampler and cleared
+// on every gpio.update()), so every release landing inside one slow loop iteration collapsed
+// into a single page turn and the surplus presses were dropped. The event queue replays each
+// debounced edge discretely with its own timestamp, so nothing is lost. Left/Right already
+// took the queue path (they carry a double-click action by default, which suppressed the
+// wasReleased branch) while Up/Down took the snapshot path — the two behaved visibly
+// differently under fast repeated presses. One path for all four keeps them identical.
+inline PageTurnResult detectTiltPageTurn() {
   using TA = CrossPointSettings::TILT_GESTURE_ACTION;
   const bool tiltNegative = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();
   const bool tiltPositive = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedBack();
@@ -113,27 +117,7 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   if (tiltNegative) {
     applyTiltAction(SETTINGS.tiltNegativeAction);
   }
-  const bool prevButtonReleased = (SETTINGS.btnShortPageBack == BA::BTN_DEFAULT &&
-                                   !globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageBack) &&
-                                   !globalButtonEvents().wasLongPressDispatched(MappedInputManager::Button::PageBack) &&
-                                   input.wasReleased(MappedInputManager::Button::PageBack)) ||
-                                  (SETTINGS.btnShortLeft == BA::BTN_DEFAULT &&
-                                   !globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Left) &&
-                                   !globalButtonEvents().wasLongPressDispatched(MappedInputManager::Button::Left) &&
-                                   input.wasReleased(MappedInputManager::Button::Left));
-  const bool nextButtonReleased =
-      (SETTINGS.btnShortPageForward == BA::BTN_DEFAULT &&
-       !globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageForward) &&
-       !globalButtonEvents().wasLongPressDispatched(MappedInputManager::Button::PageForward) &&
-       input.wasReleased(MappedInputManager::Button::PageForward)) ||
-      (SETTINGS.btnShortRight == BA::BTN_DEFAULT &&
-       !globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Right) &&
-       !globalButtonEvents().wasLongPressDispatched(MappedInputManager::Button::Right) &&
-       input.wasReleased(MappedInputManager::Button::Right));
-
-  const bool prev = tiltPrev || prevButtonReleased;
-  const bool next = tiltNext || nextButtonReleased;
-  return {prev, next};
+  return {tiltPrev, tiltNext};
 }
 
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {

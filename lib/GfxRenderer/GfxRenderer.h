@@ -314,7 +314,32 @@ class GfxRenderer {
     unsigned long planesMs = 0;   // LSB render+copy + MSB render+copy
     unsigned long displayMs = 0;  // displayGrayBuffer() waveform
     unsigned long restoreMs = 0;  // cleanupGrayscaleWithPreviousBuffer() SPI write
+    bool aborted = false;         // dropped at the mid-pass abort point; no gray flush happened
   };
+
+  // Both plane passes below take a shouldAbort predicate, evaluated once at the last point
+  // where the pass can still be dropped without the user seeing anything: after the LSB plane
+  // has been rendered into the framebuffer but before the first grayscale byte reaches the
+  // controller. Aborting there costs only the framebuffer reseed that the normal tail performs
+  // anyway, and gives back the MSB render, both plane writes and the gray flush — which is the
+  // whole net cost of anti-aliasing. Pass a predicate that answers "is this page already on its
+  // way out"; return false to always complete.
+
+  // Abandon a grayscale pass without flushing it, and report it as aborted. Reseeds the
+  // framebuffer and controller baseline from the previous-frame slot, exactly as a completed
+  // pass's tail does. Valid at either gate: plane data may already sit in controller RAM, but
+  // only displayGrayBuffer() runs the gray waveform, so nothing has reached the panel and the
+  // BW page stays displayed.
+  GrayscaleTimings abandonGrayscalePass(const unsigned long planesMs) {
+    GrayscaleTimings t;
+    t.planesMs = planesMs;
+    const unsigned long tAbort = millis();
+    setRenderMode(BW);
+    cleanupGrayscaleWithPreviousBuffer();
+    t.restoreMs = millis() - tAbort;
+    t.aborted = true;
+    return t;
+  }
 
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
   // each plane to the controller immediately after rendering it. No extra allocation
@@ -332,19 +357,29 @@ class GfxRenderer {
   // Returns wall-clock timings for each of the three phases.
   //
   // Signature: void renderFn(RenderMode mode)
-  template <typename RenderFn>
-  GrayscaleTimings renderGrayscalePlanesSequential(RenderFn renderFn) {
+  template <typename RenderFn, typename AbortFn>
+  GrayscaleTimings renderGrayscalePlanesSequential(RenderFn renderFn, AbortFn shouldAbort) {
     GrayscaleTimings t;
     const unsigned long t0 = millis();
 
     clearScreen(0x00);
     setRenderMode(GRAYSCALE_LSB);
     renderFn(GRAYSCALE_LSB);
+    if (shouldAbort()) {
+      return abandonGrayscalePass(millis() - t0);
+    }
     copyGrayscaleLsbBuffers();
 
     clearScreen(0x00);
     setRenderMode(GRAYSCALE_MSB);
     renderFn(GRAYSCALE_MSB);
+    // The MSB render is as long as the LSB one and can bail just as late, so it needs its own
+    // gate: without it a plane abandoned part-way was still copied and flushed, putting a
+    // half-drawn overlay on screen (seen on X3 as a COMPLETED pass with planes=545ms against a
+    // normal ~890ms). Checked before the copy so no partial plane even reaches the controller.
+    if (shouldAbort()) {
+      return abandonGrayscalePass(millis() - t0);
+    }
     copyGrayscaleMsbBuffers();
 
     const unsigned long t1 = millis();
@@ -378,8 +413,8 @@ class GfxRenderer {
   // Caller contract: an async refresh MUST be in flight, and the glyphs the
   // renderFn draws must already be prewarmed (a cache miss would issue SD reads
   // — allowed — but a display/SPI call in renderFn is not).
-  template <typename RenderFn>
-  GrayscaleTimings renderGrayscalePlanesInterleaved(RenderFn renderFn) {
+  template <typename RenderFn, typename AbortFn>
+  GrayscaleTimings renderGrayscalePlanesInterleaved(RenderFn renderFn, AbortFn shouldAbort) {
     GrayscaleTimings t;
     const unsigned long t0 = millis();
 
@@ -392,10 +427,23 @@ class GfxRenderer {
     display.finishDisplayAsync();
     const unsigned long tWaveDone = millis();
 
+    // Abort point. This is the ideal place for it on the interleaved path: the BW page is now
+    // fully on screen, and the LSB render just spent was paid for out of the waveform wait
+    // rather than out of the page-turn budget — so dropping the pass here reclaims the entire
+    // net cost of the AA and forfeits nothing that was actually charged to the user.
+    if (shouldAbort()) {
+      return abandonGrayscalePass(tLsbDone - t0);
+    }
+
     copyGrayscaleLsbBuffers();
     clearScreen(0x00);
     setRenderMode(GRAYSCALE_MSB);
     renderFn(GRAYSCALE_MSB);
+    // Second gate, same reason as in the sequential pass: an MSB render that bailed part-way
+    // must never be copied or flushed. Checked before the copy.
+    if (shouldAbort()) {
+      return abandonGrayscalePass((tLsbDone - t0) + (millis() - tWaveDone));
+    }
     copyGrayscaleMsbBuffers();
 
     const unsigned long t1 = millis();
