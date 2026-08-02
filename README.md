@@ -6,7 +6,7 @@ This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-
 
 # Installation
 
-Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera); Firefox and Safari do not support WebSerial.
+Flashing is done from the browser — no toolchain or driver install needed. Use a Chromium-based browser (Chrome, Edge, Opera) or a recent Firefox version (>151); older versions of Firefox and Safari do not support WebSerial.
 
 1. Download `firmware.bin` for your device from the [latest release](../../releases/latest).
 2. Open the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools).
