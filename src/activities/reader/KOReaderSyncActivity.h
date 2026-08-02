@@ -108,9 +108,13 @@ class KOReaderSyncActivity final : public Activity {
   // radio while user reads the result, which makes WiFi.getMode() return WIFI_MODE_NULL.
   bool wifiActivated = false;
 
-  // Captured from sync.exitToHomeAfterSync in resumeReader() so onExit can route the
-  // silent reboot to home instead of the reader when reader-close auto-sync triggered.
-  bool exitToHomeAfterSync = false;
+  // Captured from APP_STATE.koReaderSyncSession's postAction/postActionTarget in resumeReader()
+  // so onExit() can route the silent reboot even after resumeReader() has cleared the persisted
+  // session (Reader/Home/OpenBook all resolve their destination before the reboot happens, so
+  // nothing needs to survive it — only OpdsSearch leaves the persisted fields in place, since that
+  // one is resolved by HomeActivity after the reboot instead).
+  KOReaderSyncPostAction postAction_ = KOReaderSyncPostAction::Reader;
+  std::string postActionTarget_;
 
   void onWifiSelectionComplete(bool success);
   void performSync();

@@ -642,7 +642,7 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
     sync.resultHasParagraphIndex = false;
     sync.resultListItemIndex = 0;
     sync.resultHasListItemIndex = false;
-    sync.exitToHomeAfterSync = false;
+    sync.postAction = KOReaderSyncPostAction::Reader;
     APP_STATE.saveToFile();
     // Drop the loaded Epub before TLS — sync activity will reload it for remote-position
     // mapping. Holding it here would needlessly inflate the heap during WiFi/TLS work.

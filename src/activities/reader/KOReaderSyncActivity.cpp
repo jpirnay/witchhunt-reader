@@ -520,10 +520,26 @@ void KOReaderSyncActivity::onExit() {
   if (wifiActivated) {
     WiFi.disconnect(false);
     delay(30);
-    if (exitToHomeAfterSync) {
-      silentRestart();
-    } else {
-      silentRestartToReader();
+    switch (postAction_) {
+      case KOReaderSyncPostAction::Home:
+      case KOReaderSyncPostAction::OpdsSearch:
+        // OpdsSearch is resolved post-reboot by HomeActivity (see its onEnter()); the reboot
+        // itself just needs to land on Home like a plain post-sync Home would.
+        silentRestart();
+        break;
+      case KOReaderSyncPostAction::OpenBook:
+        // Repoint the "book to reopen on boot" record at the next book instead of the one that
+        // was just synced, then reuse the ordinary reader restart target.
+        if (!postActionTarget_.empty()) {
+          APP_STATE.openEpubPath = postActionTarget_;
+          APP_STATE.saveToFile();
+        }
+        silentRestartToReader();
+        break;
+      case KOReaderSyncPostAction::Reader:
+      default:
+        silentRestartToReader();
+        break;
     }
   }
 }
@@ -562,21 +578,33 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
     sync.resultListItemIndex = 0;
     sync.resultHasListItemIndex = false;
   }
-  // Honor exit-to-home flag set by reader-close auto-sync — bouncing back into the reader
-  // the user just left would be jarring. The session state is consumed and cleared by the
-  // home destination's normal flow (no reader to apply it to in this case).
-  const bool exitToHome = sync.exitToHomeAfterSync;
-  exitToHomeAfterSync = exitToHome;
-  if (exitToHome) {
+  // Capture where this session wants to land before clearing it — Reader/Home/OpenBook all
+  // resolve their destination below (and, for the real reboot path, in onExit()) using this
+  // captured copy, so nothing needs to survive past this function for them. OpdsSearch is the
+  // exception: it's resolved by HomeActivity after the reboot, so its fields are left in the
+  // persisted session instead of being cleared here.
+  postAction_ = sync.postAction;
+  postActionTarget_ = sync.postActionTarget;
+  if (postAction_ == KOReaderSyncPostAction::OpdsSearch) {
+    sync.active = false;
+  } else {
     sync.clear();
   }
   APP_STATE.saveToFile();
   logSyncMemSnapshot("before_resume_reader");
-  if (exitToHome) {
-    activityManager.goHome();
-    return;
+  switch (postAction_) {
+    case KOReaderSyncPostAction::Home:
+    case KOReaderSyncPostAction::OpdsSearch:
+      activityManager.goHome();
+      return;
+    case KOReaderSyncPostAction::OpenBook:
+      activityManager.goToReader(postActionTarget_.empty() ? epubPath : postActionTarget_);
+      return;
+    case KOReaderSyncPostAction::Reader:
+    default:
+      activityManager.goToReader(epubPath);
+      return;
   }
-  activityManager.goToReader(epubPath);
 }
 
 void KOReaderSyncActivity::render(RenderLock&&) {

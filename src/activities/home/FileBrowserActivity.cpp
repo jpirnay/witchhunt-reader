@@ -325,7 +325,7 @@ void FileBrowserActivity::loop() {
         if (longPress && KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
           auto& sync = APP_STATE.koReaderSyncSession;
           sync.autoPullEpubPath = fullPath;
-          sync.exitToHomeAfterSync = false;
+          sync.postAction = KOReaderSyncPostAction::Reader;
           APP_STATE.saveToFile();
         }
         ReturnHint hint;
@@ -645,7 +645,7 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
       if (KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
         auto& sync = APP_STATE.koReaderSyncSession;
         sync.autoPullEpubPath = fullPath;
-        sync.exitToHomeAfterSync = false;
+        sync.postAction = KOReaderSyncPostAction::Reader;
         APP_STATE.saveToFile();
       }
       ReturnHint hint;

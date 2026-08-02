@@ -106,7 +106,8 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   sync["resultHasParagraphIndex"] = s.koReaderSyncSession.resultHasParagraphIndex;
   sync["resultListItemIndex"] = s.koReaderSyncSession.resultListItemIndex;
   sync["resultHasListItemIndex"] = s.koReaderSyncSession.resultHasListItemIndex;
-  sync["exitToHomeAfterSync"] = s.koReaderSyncSession.exitToHomeAfterSync;
+  sync["postAction"] = static_cast<uint8_t>(s.koReaderSyncSession.postAction);
+  sync["postActionTarget"] = s.koReaderSyncSession.postActionTarget;
   sync["autoPullEpubPath"] = s.koReaderSyncSession.autoPullEpubPath;
   // Information about a pending bookmark jump
   JsonObject jump = doc["pendingBookmarkJump"].to<JsonObject>();
@@ -167,7 +168,9 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.koReaderSyncSession.resultHasParagraphIndex = sync["resultHasParagraphIndex"] | false;
   s.koReaderSyncSession.resultListItemIndex = sync["resultListItemIndex"] | (uint16_t)0;
   s.koReaderSyncSession.resultHasListItemIndex = sync["resultHasListItemIndex"] | false;
-  s.koReaderSyncSession.exitToHomeAfterSync = sync["exitToHomeAfterSync"] | false;
+  s.koReaderSyncSession.postAction =
+      static_cast<KOReaderSyncPostAction>(sync["postAction"] | static_cast<uint8_t>(KOReaderSyncPostAction::Reader));
+  s.koReaderSyncSession.postActionTarget = sync["postActionTarget"] | std::string("");
   s.koReaderSyncSession.autoPullEpubPath = sync["autoPullEpubPath"] | std::string("");
   if (s.koReaderSyncSession.autoPullEpubPath.empty() && (sync["autoPullOnOpen"] | false)) {
     LOG_DBG("CPS", "Legacy autoPullOnOpen state found without epubPath - ignoring");
@@ -223,6 +226,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   }
   doc["moveFinishedBooksToCompleted"] = s.moveFinishedBooksToCompleted;
   doc["removeFinishedBooksFromRecents"] = s.removeFinishedBooksFromRecents;
+  doc["syncFinishedBookToKOReader"] = s.syncFinishedBookToKOReader;
   doc["sleepTimeoutMinutes"] = s.sleepTimeoutMinutes;
   doc["refreshFrequencyPages"] = s.refreshFrequencyPages;
 
@@ -372,6 +376,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.txtSdFontFamilyName[sizeof(s.txtSdFontFamilyName) - 1] = '\0';
   s.moveFinishedBooksToCompleted = doc["moveFinishedBooksToCompleted"] | (uint8_t)0;
   s.removeFinishedBooksFromRecents = doc["removeFinishedBooksFromRecents"] | (uint8_t)0;
+  s.syncFinishedBookToKOReader = doc["syncFinishedBookToKOReader"] | (uint8_t)0;
 
   const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
   CrossPointSettings::normalizeDependentSettings(s);

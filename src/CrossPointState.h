@@ -23,6 +23,18 @@ enum class KOReaderSyncOutcomeState : uint8_t {
   APPLIED_REMOTE = 5,
 };
 
+// Where KOReaderSyncActivity lands once a sync completes (or fails/cancels) and the device has
+// rebooted to reclaim WiFi-session heap fragmentation. Reader/Home cover the two cases that
+// existed before the finished-book "sync + then continue with the picked action" flow; OpenBook
+// and OpdsSearch let that flow land on the next book / an OPDS search after syncing, instead of
+// only ever the synced book or Home.
+enum class KOReaderSyncPostAction : uint8_t {
+  Reader = 0,      // reopen APP_STATE.openEpubPath (the book that was being synced)
+  Home = 1,        // go to the home screen
+  OpenBook = 2,    // reopen a different book (postActionTarget = its path)
+  OpdsSearch = 3,  // go home, then launch an OPDS author search (postActionTarget = author)
+};
+
 struct PendingBookmarkJumpState {
   bool active = false;
   std::string bookPath;     // source file path for disambiguation
@@ -57,9 +69,13 @@ struct KOReaderSyncSessionState {
   // Preferred over resultParagraphIndex when the deepest target element is /li[N].
   uint16_t resultListItemIndex = 0;
   bool resultHasListItemIndex = false;
-  // When true (auto-push-on-close), the sync activity goes to home instead of the reader on
-  // completion. Without this, AUTO_PUSH would bounce back into the reader the user just left.
-  bool exitToHomeAfterSync = false;
+  // Where to land once this sync (and its reboot) completes. Defaults to Reader so auto-push-on-
+  // close and reader-menu-triggered syncs keep their existing behavior without every call site
+  // having to set it explicitly; AUTO_PUSH's caller sets it to Home, the finished-book flow sets
+  // it to whichever of Home / OpenBook / OpdsSearch matches the action the user picked.
+  KOReaderSyncPostAction postAction = KOReaderSyncPostAction::Reader;
+  // Book path (OpenBook) or author (OpdsSearch); unused for Reader/Home.
+  std::string postActionTarget;
   // Set by RecentBooks / FileBrowser long-press to ask the reader to perform an AUTO_PULL
   // before rendering its first page. Stored by EPUB path so the flag cannot leak across books.
   std::string autoPullEpubPath;
@@ -81,7 +97,8 @@ struct KOReaderSyncSessionState {
     resultHasParagraphIndex = false;
     resultListItemIndex = 0;
     resultHasListItemIndex = false;
-    exitToHomeAfterSync = false;
+    postAction = KOReaderSyncPostAction::Reader;
+    postActionTarget.clear();
     autoPullEpubPath.clear();
   }
 };
