@@ -45,6 +45,13 @@ class FontDecompressor {
     // LRU specific stats
     uint32_t fallbackCacheHits = 0;
     uint32_t fallbackCacheMisses = 0;
+
+    // Fallback-path OOM latch. Smallest group size (bytes) whose transient allocation
+    // failed during this pass, or 0 if none has. Lives in Stats so it is cleared by
+    // resetStats() — i.e. it lasts exactly one render phase, and the next phase retries
+    // with whatever heap is available by then. See getBitmap().
+    uint32_t fallbackOomBytes = 0;
+    uint16_t fallbackOomGlyphs = 0;  // glyphs that got no bitmap because of it
   };
   void logStats(const char* label = "FDC");
   void resetStats();

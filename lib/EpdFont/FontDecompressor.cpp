@@ -180,9 +180,27 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
 
   if (group.uncompressedSize > stats.peakTempBytes) stats.peakTempBytes = group.uncompressedSize;
 
+  // OOM latch. This is the per-glyph-occurrence path, so a page whose prewarm did not cover
+  // it calls through here hundreds of times. The heap cannot recover mid-pass (the render
+  // lock is held throughout), so once an allocation of a given size has failed, every later
+  // request at or above that size fails too — retrying is pure waste. Measured on X4
+  // (2026-08-02, a render racing a background section build): 538 failed mallocs and 538
+  // identical ERR lines in 40 ms, 147 ms of getBitmap time against ~1 ms normally, and a
+  // page render of 129 ms against 43. Only the failing size class is latched out; a smaller
+  // group may still fit and is still attempted.
+  if (stats.fallbackOomBytes != 0 && group.uncompressedSize >= stats.fallbackOomBytes) {
+    stats.fallbackOomGlyphs++;
+    stats.getBitmapTimeUs += micros() - tStart;
+    return nullptr;
+  }
+
   uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
   if (!groupBuf) {
-    LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u fallback", group.uncompressedSize, groupIndex);
+    // Logged once per size class per pass; the running total goes out in logStats().
+    LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u fallback; skipping this size and larger for the pass",
+            group.uncompressedSize, groupIndex);
+    stats.fallbackOomBytes = group.uncompressedSize;
+    stats.fallbackOomGlyphs++;
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
@@ -587,6 +605,12 @@ void FontDecompressor::logStats(const char* label) {
   if (lruTotal > 0) {
     LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
             stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+  }
+
+  // Degraded render: these glyphs drew nothing. One line per pass instead of one per glyph.
+  if (stats.fallbackOomGlyphs > 0) {
+    LOG_ERR("FDC", "[%s] fallback OOM: %u glyphs dropped (groups >=%lu bytes unavailable)", label,
+            stats.fallbackOomGlyphs, stats.fallbackOomBytes);
   }
 
   resetStats();
