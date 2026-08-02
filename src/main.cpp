@@ -496,6 +496,8 @@ static BootHeapProbe s_probeMainLast(5);
 #endif
 
 void setup() {
+  const bool powerButtonWakeVerified = gpio.verifyPowerButtonWakeup(CrossPointSettings::getPowerButtonDuration());
+
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
   // exact damaged block for THIS build so the written value can be symbolized.
@@ -644,18 +646,12 @@ void setup() {
     LOG_DBG("MAIN", "Verifying power button press duration (required=%u ms)",
             CrossPointSettings::getPowerButtonDuration());
 
-    // We only want to skip the hold verification (allowing a short press to wake) if the short
-    // press or double press actually have an action assigned, or if the clock screensaver is active.
-    // Otherwise, short presses from sleep should be ignored entirely and return to sleep.
-    //
-    // X3 always cuts all power during sleep (battery-latch MOSFET, keepClockAlive=false), so any
-    // wakeup is a full cold boot. By the time verifyPowerButtonWakeup runs the button may already
-    // be released — hardware design guarantees the press was intentional, so skip hold-verification.
-    bool allowShortPress = gpio.deviceIsX3() || (SETTINGS.useClock != 0) ||
-                           (SETTINGS.btnShortPower != CrossPointSettings::BTN_DEFAULT) ||
-                           (SETTINGS.btnDoublePower != CrossPointSettings::BTN_DEFAULT);
-
-    gpio.verifyPowerButtonWakeup(CrossPointSettings::getPowerButtonDuration(), allowShortPress);
+    if (!powerButtonWakeVerified) {
+      LOG_DBG("MAIN", "Power button released before wake threshold, returning to deep sleep");
+      halTiltSensor.deepSleep();
+      powerManager.startDeepSleep(gpio);
+      return;
+    }
     LOG_DBG("MAIN", "Power button verification passed, millis=%lu", millis());
   }
 
