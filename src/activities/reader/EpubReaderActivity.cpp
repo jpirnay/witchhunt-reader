@@ -101,11 +101,25 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
 constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 
 // Pre-render of the next page within the current chapter only runs when heap is healthy.
-// 56 KB, evidence-based (X3, 2026-06-11): normal foreground renders complete fine from
-// ~52 KB free, and post-render free heap sits at ~57-65 KB — the previous 64 KB floor
-// silently disabled Background A whenever steady free dipped to ~65 KB (e.g. right
-// after a cache rebuild), which also starved Background B behind it.
-constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 56 * 1024;
+// 44 KB, derived from what the pass actually consumes rather than from what happens to be
+// free — this floor was set the other way twice and was wrong both times:
+//   2026-06-11 (X3): 64 KB silently disabled Background A whenever steady free dipped to
+//     ~65 KB (e.g. right after a cache rebuild), which also starved Background B behind it.
+//     Lowered to 56 KB.
+//   2026-08-02 (X3): the scaled-glyph mask cache (~4.75 KB, see GfxRenderer) moved steady
+//     free down ~5 KB, so even the post-AA peak (~54.9 KB) fell under 56 KB and A stopped
+//     running for entire sessions — silently, which is why the skips below now log.
+// Measured 2026-08-02 (X3, prerender_begin/after_load/end snapshots, 4 consecutive pages):
+//   Page::deserialize      10504-10636 B  (the dominant cost, and the only one that had
+//                                          never been measured)
+//   prewarm buffers        -448..+1872 B  (net ~neutral: replaces the previous page's)
+//   deepest transient      peakTemp, up to 8467 B on this font, inside prewarm decompress
+//   => ~23 KB of headroom below the entry point, nothing retained afterwards (the Page dies
+//      with the pass; only framebuffer pixels survive).
+// 44 KB therefore troughs at ~21 KB worst case, above the ~16 KB the sliced section build
+// reserves, and leaves X3 (which enters at 53-55 KB) ~10 KB of margin instead of ~2. The
+// transient is also held under RenderLock, so no other reader work can allocate into the dip.
+constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 
 // Background B (next-section pre-build) heap gates. Unlike the foreground indexing path,
 // B runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
@@ -2380,25 +2394,44 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   const bool buildActive = section->hasActiveBuild();
   const int availablePages =
       buildActive ? static_cast<int>(section->activeBuildPageCount()) : static_cast<int>(section->pageCount);
+  // Both refusals below used to be silent, which cost a whole debugging session: an X3
+  // sitting just under the heap floor disabled Background A for every page of a run with
+  // nothing in the log to distinguish "declined" from "never scheduled". They log at DBG
+  // and fire at most once per requested pass, so they cannot spam.
   if (nextPage >= availablePages) {
+    LOG_DBG("ERS", "PreRender skipped: next=%d >= available=%d (buildActive=%d)", nextPage, availablePages,
+            buildActive ? 1 : 0);
     return;
   }
-  if (esp_get_free_heap_size() < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  if (freeHeap < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
+    LOG_DBG("ERS", "PreRender skipped: free=%lu < floor=%lu", static_cast<unsigned long>(freeHeap),
+            static_cast<unsigned long>(PRE_RENDER_MIN_FREE_HEAP_BYTES));
     return;
   }
 #if DEBUG_BACKGROUND_WORK
   bgCounters_.aRuns++;
 #endif
+  // Heap telemetry for the floor above. The three snapshots bracket the only two consumers:
+  //   begin -> after_load  = Page::deserialize (elements + TextBlock arenas), the one cost
+  //                          the floor was never set from any measurement of;
+  //   after_load -> end    = the prewarm buffers, whose own sizes the FDC "[prewarm] mem:"
+  //                          line already reports (pageBuf / pageGlyphs / peakTemp).
+  // The Page dies with `p` at the end of this function, so `end` also shows what is retained
+  // (nothing but the pixels in the framebuffer).
+  logReaderMemSnapshot("prerender_begin");
   const int savedPage = section->currentPage;
   section->currentPage = nextPage;
   auto p = buildActive ? section->loadPageFromActiveBuild(static_cast<uint16_t>(nextPage))
                        : section->loadPageFromSectionFile();
   section->currentPage = savedPage;
+  logReaderMemSnapshot("prerender_after_load");
   if (p && !p->hasImages()) {
     const unsigned long preRenderStart = millis();
     section->currentPage = nextPage;
     renderPageContentOnly(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
     section->currentPage = savedPage;
+    logReaderMemSnapshot("prerender_end");
     const unsigned long preRenderDuration = millis() - preRenderStart;
     preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis()};
 #if DEBUG_BACKGROUND_WORK
@@ -3102,6 +3135,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // refresh / RED-RAM baseline only reintroduces ghosting.
   if (renderer.isX3() && pendingGrayscale_.active && pendingPreRender && !usePreRenderedBuffer &&
       classifyRenderPass() == RenderPass::PreRender) {
+    // Logged so the pre-render chain has no silent link left: a deferred pass that is
+    // held here and then never re-kicked is otherwise indistinguishable from one that was
+    // never armed. Fires at most once or twice per page, X3 only.
+    LOG_DBG("ERS", "PreRender deferred: AA owed");
     return;
   }
 
