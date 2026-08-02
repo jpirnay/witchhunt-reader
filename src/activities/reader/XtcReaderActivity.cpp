@@ -32,7 +32,7 @@ void XtcReaderActivity::onEnter() {
   Activity::onEnter();
 
   // See ReaderUtils::InputDrainGuard — prevents wake-up power-button hold from leaking into
-  // the first detectPageTurn() call as a page turn or chapter skip.
+  // the first page-turn check as a page turn or chapter skip.
   inputDrainGuard.arm();
 
   if (!xtc) {
@@ -78,8 +78,8 @@ void XtcReaderActivity::loop() {
     return;
   }
 
-  bool delayedPrevTurn = false;
-  bool delayedNextTurn = false;
+  bool buttonPrevTurn = false;
+  bool buttonNextTurn = false;
   using BA = CrossPointSettings::BUTTON_ACTION;
 
   ButtonEventManager::ButtonEvent ev;
@@ -112,8 +112,8 @@ void XtcReaderActivity::loop() {
     }
 
     // Built-in default for a long-press on a page-turn button is chapter skip.
-    // onButtonAction() no-ops when the XTC has no chapters. markLongPressDispatched()
-    // suppresses the release-driven page turn that would otherwise also fire.
+    // onButtonAction() no-ops when the XTC has no chapters. The FSM emits no Short for a
+    // press that already produced a Long, so the release cannot also turn the page.
     // (Mirrors EpubReaderActivity; non-default long actions are dispatched by main.cpp.)
     if (ev.type == ButtonEventManager::PressType::Long) {
       const bool prevChapter =
@@ -123,37 +123,36 @@ void XtcReaderActivity::loop() {
           (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
           (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
       if (prevChapter || nextChapter) {
-        globalButtonEvents().markLongPressDispatched(ev.button);
         onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
         return;
       }
     }
 
+    // Page turns for all four navigation buttons come from the event queue (see
+    // EpubReaderActivity::loop for why). A non-default short action never arrives here —
+    // main.cpp dispatches it globally — but the setting is re-checked so a future caller
+    // that pushes events directly cannot turn a remapped button into a page turn.
     if (ev.type == ButtonEventManager::PressType::Short) {
-      if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageBack)) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Left))) {
-        delayedPrevTurn = true;
+      if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT)) {
+        buttonPrevTurn = true;
         continue;
       }
-      if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageForward)) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Right))) {
-        delayedNextTurn = true;
+      if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT)) {
+        buttonNextTurn = true;
         continue;
       }
     }
   }
 
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   if (!prevTriggered && !nextTriggered) {
-    if (!delayedPrevTurn && !delayedNextTurn) {
+    if (!buttonPrevTurn && !buttonNextTurn) {
       return;
     }
-    prevTriggered = delayedPrevTurn;
-    nextTriggered = delayedNextTurn;
+    prevTriggered = buttonPrevTurn;
+    nextTriggered = buttonNextTurn;
   }
 
   if (!prevTriggered && !nextTriggered) {

@@ -553,6 +553,22 @@ void ActivityManager::requestUpdateAndWait() {
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 }
 
+bool ActivityManager::isUpdateSuperseded() const {
+  // Requested on the loop task but not yet converted into a task notification (that happens
+  // at the end of ActivityManager::loop()).
+  if (requestedUpdate) {
+    return true;
+  }
+  if (!renderTaskHandle) {
+    return false;
+  }
+  // renderTaskLoop() takes its wake-up with ulTaskNotifyTake(pdTRUE, ...), which zeroes the
+  // notification value before render() is entered. Anything counted here was therefore posted
+  // by a requestUpdate() that landed *during* the current render. Clearing no bits (mask 0)
+  // makes this a pure read.
+  return ulTaskNotifyValueClear(renderTaskHandle, 0) > 0;
+}
+
 // RenderLock
 
 RenderLock::RenderLock() {

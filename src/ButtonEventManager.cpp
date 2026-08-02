@@ -14,8 +14,30 @@ int ButtonEventManager::buttonToIndex(const Button button) {
   return -1;
 }
 
+ButtonEventManager::Button ButtonEventManager::pairedAlias(const Button button) {
+  switch (button) {
+    case Button::Up:
+      return Button::PageBack;
+    case Button::PageBack:
+      return Button::Up;
+    case Button::Down:
+      return Button::PageForward;
+    case Button::PageForward:
+      return Button::Down;
+    default:
+      return button;
+  }
+}
+
+// Both names of an aliased pair must answer the same, because they are one physical
+// button driving two FSMs. If they disagreed, one name would fire Short immediately
+// while the other waited out the double-click window, and an activity accepting either
+// name would act on the un-delayed event — silently defeating the configured double
+// action. That is why Up/Down resolve to the PageBack/PageForward settings (there are
+// no separate btnDoubleUp/Down) and why the forced mask is tested across the pair.
 bool ButtonEventManager::hasDoubleAction(const Button button) const {
-  if (forcedDoubleMask & (1 << static_cast<int>(button))) {
+  const uint32_t pairMask = (1u << static_cast<int>(button)) | (1u << static_cast<int>(pairedAlias(button)));
+  if (forcedDoubleMask & pairMask) {
     return true;
   }
   using BA = CrossPointSettings::BUTTON_ACTION;
@@ -28,8 +50,10 @@ bool ButtonEventManager::hasDoubleAction(const Button button) const {
       return SETTINGS.btnDoubleLeft != BA::BTN_DEFAULT;
     case Button::Right:
       return SETTINGS.btnDoubleRight != BA::BTN_DEFAULT;
+    case Button::Up:
     case Button::PageBack:
       return SETTINGS.btnDoublePageBack != BA::BTN_DEFAULT;
+    case Button::Down:
     case Button::PageForward:
       return SETTINGS.btnDoublePageForward != BA::BTN_DEFAULT;
     case Button::Power:
@@ -72,7 +96,6 @@ void ButtonEventManager::drain() {
     b.releaseTime = 0;
   }
   eventHead = eventTail = 0;
-  longPressDispatchedMask = 0;
   // Drop edges the sampler queued for the outgoing activity so they don't bleed in.
   input.flushRawEdges();
 }
@@ -166,12 +189,6 @@ void ButtonEventManager::update() {
       const Button btn = ALL_BUTTONS[i];
       if (input.rawIndex(btn) != edge.button) {
         continue;
-      }
-      // A fresh press clears the long-press-dispatched suppression for this button
-      // (it survives through the release so detectPageTurn can skip the release
-      // page-turn, then resets on the next press).
-      if (edge.pressed) {
-        longPressDispatchedMask &= ~(1u << static_cast<int>(btn));
       }
       applyEdge(i, btn, edge.pressed, edge.timeMs);
     }

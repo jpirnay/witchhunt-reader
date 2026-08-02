@@ -10,6 +10,8 @@ void Activity::requestUpdate(bool immediate) { activityManager.requestUpdate(imm
 
 void Activity::requestUpdateAndWait() { activityManager.requestUpdateAndWait(); }
 
+bool Activity::isUpdateSuperseded() const { return activityManager.isUpdateSuperseded(); }
+
 // "Up and out" — return to whichever parent launched this flow. If no return hint
 // is set (typical for activities launched via a plain goTo*()), falls back to Home.
 void Activity::onGoHome() { activityManager.returnFromChild(); }

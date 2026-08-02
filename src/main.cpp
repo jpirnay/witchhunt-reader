@@ -1048,7 +1048,10 @@ void loop() {
           }
           break;
         default:
-          break;  // Up/Down have no FSMs — ButtonEventManager never emits these
+          break;  // Up/Down are the PageBack/PageForward buttons under their list-navigation
+                  // names. The FSM emits both names for one press, and the PageBack/PageForward
+                  // event above already carries the configured action — so these fall through
+                  // to the activity, which is what list-style activities match on.
       }
       return BA::BTN_DEFAULT;
     };
@@ -1092,13 +1095,6 @@ void loop() {
       if (action == BA::BTN_DEFAULT || (isReaderScopedAction(action) && !activityManager.isReaderActivity())) {
         defaultEvents.push_back(ev);
         continue;
-      }
-
-      // When a non-default Long action fires for a page-turn button, mark it so that
-      // detectPageTurn() suppresses the wasReleased-based page turn on button release.
-      if (ev.type == ButtonEventManager::PressType::Long &&
-          (ev.button == B::Left || ev.button == B::Right || ev.button == B::PageBack || ev.button == B::PageForward)) {
-        buttonEventManager.markLongPressDispatched(ev.button);
       }
 
       switch (static_cast<BA>(action)) {
@@ -1181,10 +1177,10 @@ void loop() {
           activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
           break;
         case BA::BTN_IGNORE:
-          // Explicit "do nothing": swallow the event so neither a global action nor
-          // the activity's built-in behaviour fires. For a long-press on a page-turn
-          // button the markLongPressDispatched() above also suppresses the
-          // release-driven page turn, so the press is fully inert.
+          // Explicit "do nothing": swallow the event so neither a global action nor the
+          // activity's built-in behaviour fires. A press that produced a Long emits no
+          // Short, so a long-press mapped to Ignore is fully inert — the release cannot
+          // leak through as a page turn.
           break;
         default:
           break;

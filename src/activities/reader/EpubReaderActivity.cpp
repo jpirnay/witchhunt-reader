@@ -293,7 +293,7 @@ void EpubReaderActivity::onEnter() {
   pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
-  // button hold) before they reach detectPageTurn() — see ReaderUtils::InputDrainGuard.
+  // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.
   inputDrainGuard.arm();
 
   if (!epub) {
@@ -518,8 +518,8 @@ void EpubReaderActivity::loop() {
     }
   }
 
-  bool delayedPrevTurn = false;
-  bool delayedNextTurn = false;
+  bool buttonPrevTurn = false;
+  bool buttonNextTurn = false;
   using BA = CrossPointSettings::BUTTON_ACTION;
 
   ButtonEventManager::ButtonEvent ev;
@@ -564,9 +564,8 @@ void EpubReaderActivity::loop() {
     // (prev for Left/PageBack, next for Right/PageForward). Non-default long
     // actions are dispatched by the global handler in main.cpp and never reach
     // here, so a Long event arriving for these buttons with the setting at
-    // BTN_DEFAULT is the built-in case. markLongPressDispatched() suppresses the
-    // wasReleased-based page turn that detectPageTurn() would otherwise fire when
-    // the button is released after the skip.
+    // BTN_DEFAULT is the built-in case. The FSM emits no Short for a press that
+    // already produced a Long, so the release cannot also turn the page.
     if (ev.type == ButtonEventManager::PressType::Long) {
       const bool prevChapter =
           (ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnLongPageBack == BA::BTN_DEFAULT) ||
@@ -575,40 +574,40 @@ void EpubReaderActivity::loop() {
           (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
           (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
       if (prevChapter || nextChapter) {
-        globalButtonEvents().markLongPressDispatched(ev.button);
         onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
         return;
       }
     }
 
+    // Page turns for all four navigation buttons come from the event queue, so a burst of
+    // presses during a slow slice (AA pass, pre-render, section build) is replayed press by
+    // press instead of collapsing into one. A non-default short action never arrives here —
+    // main.cpp dispatches it globally — but the setting is re-checked so a future caller
+    // that pushes events directly cannot turn a remapped button into a page turn.
     if (ev.type == ButtonEventManager::PressType::Short) {
-      if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageBack)) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Left))) {
-        delayedPrevTurn = true;
+      if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT)) {
+        buttonPrevTurn = true;
         continue;
       }
-      if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::PageForward)) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT &&
-           globalButtonEvents().hasDoubleAction(MappedInputManager::Button::Right))) {
-        delayedNextTurn = true;
+      if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT)) {
+        buttonNextTurn = true;
         continue;
       }
     }
   }
 
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   if (!prevTriggered && !nextTriggered) {
-    if (!delayedPrevTurn && !delayedNextTurn) {
+    if (!buttonPrevTurn && !buttonNextTurn) {
       // Input-idle and no page turn pending: hand the idle slice to the background
       // routines (deferred AA, then Background A pre-render, then Background B).
       serviceBackgroundWork();
       return;
     }
-    prevTriggered = delayedPrevTurn;
-    nextTriggered = delayedNextTurn;
+    prevTriggered = buttonPrevTurn;
+    nextTriggered = buttonNextTurn;
   }
   if (!prevTriggered && !nextTriggered) {
     return;
@@ -719,12 +718,23 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
   const Page* pagePtr = pendingGrayscale_.page.get();
-  const auto gt = renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) {
-    pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop);
-    pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
-  });
+  // This pass runs ON the loop task, so while it is in flight no input is sampled or
+  // dispatched at all (measured: 1237 ms max loop duration on X3). The plane render therefore
+  // aborts per element, and a bailed plane forces the pass to abort regardless of what the
+  // predicate says — never let a partially drawn plane reach the panel.
+  bool planeAborted = false;
+  const auto gt = renderer.renderGrayscalePlanesSequential(
+      [&](GfxRenderer::RenderMode) {
+        if (!pagePtr->renderTextOnly(renderer, fontId, marginLeft, contentTop, /*abortable=*/true)) {
+          planeAborted = true;
+          return;
+        }
+        pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
+      },
+      [&] { return planeAborted || aaPreemptedByNavigation(); });
   pendingGrayscale_.page.reset();
-  LOG_DBG("ERS", "Deferred AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+  LOG_DBG("ERS", "Deferred AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
+          gt.displayMs, gt.restoreMs);
   checkHeapIntegrity("after_deferred_aa");
   // The AA cleanup just reseeded frameBuffer from frameBufferActive (the current page),
   // so the buffer state is now correct for a pre-render. On X3, render() holds off the
@@ -2338,6 +2348,9 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     // Page load failed or was an image page — caller falls through to full render.
     return false;
   }
+  // Same reason as in renderContents(): pin the page identity before the pass does any work.
+  lastRenderedPageIndex_ = section->currentPage;
+  lastRenderedPageCount_ = section->pageCount;
   currentPageFootnotes = std::move(p->footnotes);
   displayPreRenderedPage(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
 
@@ -2351,7 +2364,8 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     requestUpdate();
   }
   LOG_DBG("ERS", "Page summary: spine=%d page=%d/%d prerendered=1 refresh=%s mode=0x%02X", currentSpineIndex,
-          section->currentPage, section->pageCount, refreshModeName(lastPageRefreshMode_), lastPageDisplayModeByte_);
+          lastRenderedPageIndex_, lastRenderedPageCount_, refreshModeName(lastPageRefreshMode_),
+          lastPageDisplayModeByte_);
   return true;
 }
 
@@ -2963,7 +2977,7 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
         "ERS",
         "Page summary: spine=%d page=%d/%d prerendered=0 refresh=%s mode=0x%02X renderMs=%lu "
         "prewarmMs=%lu bwMs=%lu displayMs=%lu fontHits=%lu fontMisses=%lu fontHitPct=%lu glyphCalls=%lu glyphUs=%lu",
-        currentSpineIndex, section->currentPage, section->pageCount, refreshModeName(lastPageRefreshMode_),
+        currentSpineIndex, lastRenderedPageIndex_, lastRenderedPageCount_, refreshModeName(lastPageRefreshMode_),
         lastPageDisplayModeByte_, lastRenderStats.requestRenderMs, lastRenderStats.phases.prewarmMs,
         lastRenderStats.phases.bwRenderMs, lastRenderStats.phases.displayMs, lastRenderStats.fontCacheHits,
         lastRenderStats.fontCacheMisses, fontHitRatePct, lastRenderStats.fontGetBitmapCalls,
@@ -3232,6 +3246,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
+  // Pin the page identity now, while it still describes what this pass is about to draw.
+  if (section) {
+    lastRenderedPageIndex_ = section->currentPage;
+    lastRenderedPageCount_ = section->pageCount;
+  }
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
@@ -3398,7 +3417,24 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // Inline AA is X4-only: X4 waits out the waveform inside the trigger, so the
   // async split hands that window to the plane renders. X3 returns pre-waveform
   // from its trigger already and keeps the deferred loop-task pass.
-  const bool inlineAaThisRender = aaEnabledForThisRender && !renderer.isX3();
+  //
+  // The inline pass runs under the render lock with no cancellation point, and it is not
+  // cheap: only its LSB plane render overlaps the waveform, while the plane SPI writes, the
+  // gray flush and the restore write are all additive. So drop it outright when the page is
+  // already on its way out — otherwise a burst of turns pays that in full for every
+  // intermediate page it immediately discards. Evaluated here, as late as possible, so a
+  // gesture that begins during the (long) BW render still counts.
+  //
+  // X3's deferred pass needs no equivalent gate and keeps its original arming: it is only
+  // ever run from the idle loop (which a pending turn makes unreachable) and pageTurn()
+  // clears it, so it is already cancellable by design.
+  const bool aaPreempted = aaEnabledForThisRender && !renderer.isX3() && aaPreemptedByNavigation();
+  if (aaPreempted) {
+    LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
+  }
+  const bool inlineAaThisRender = aaEnabledForThisRender && !renderer.isX3() && !aaPreempted;
+  const bool deferredAaThisRender = aaEnabledForThisRender && renderer.isX3();
+  lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
   if (inlineAaThisRender) {
     renderer.triggerDisplayAsync(pageRefreshMode);
   } else {
@@ -3431,16 +3467,31 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int aaFontId = getEffectiveReaderFontId();
     const Page* pagePtr = page.get();
-    const auto gt = renderer.renderGrayscalePlanesInterleaved([&](GfxRenderer::RenderMode) {
-      pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop);
-      pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
-    });
-    LOG_DBG("ERS", "Inline AA: planes=%lums gray=%lums restore=%lums", gt.planesMs, gt.displayMs, gt.restoreMs);
+    // The per-element abort buys no wall-clock here — this plane render is overlapped with the
+    // BW waveform, so bailing early just idles in finishDisplayAsync() for the remainder. It is
+    // still worth setting: latching planeAborted means the pass aborts even if the input signal
+    // has been drained by the loop task before the predicate below is evaluated.
+    bool planeAborted = false;
+    const auto gt = renderer.renderGrayscalePlanesInterleaved(
+        [&](GfxRenderer::RenderMode) {
+          if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+            return;
+          }
+          pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        },
+        // Re-checked here because the up-front gate can only see the gesture as it stands when
+        // the render begins; the pass itself is ~1 s long, so most presses during a burst land
+        // after that decision and would otherwise be unstoppable.
+        [&] { return planeAborted || aaPreemptedByNavigation(); });
+    LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
+            gt.displayMs, gt.restoreMs);
     checkHeapIntegrity("after_inline_aa");
-    lastRenderStats.usedGrayscale = true;
+    lastRenderStats.usedGrayscale = !gt.aborted;
+    lastRenderStats.textAntiAliasing = !gt.aborted;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, gt.planesMs, 0,
                               gt.displayMs,  gt.restoreMs,         millis() - t0};
-  } else if (aaEnabledForThisRender) {
+  } else if (deferredAaThisRender) {
     // Deferred grayscale (X3): store context before releasing the lock, so
     // loop() can run the AA pass once the waveform ends. The page is kept
     // alive via shared_ptr.
@@ -3545,6 +3596,32 @@ void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orien
   // Status bar intentionally omitted — superimposed at display time with live values.
 }
 
+bool EpubReaderActivity::aaPreemptedByNavigation() const {
+  // 1) An update is already queued — a turn has completed and its render is waiting.
+  if (isUpdateSuperseded()) {
+    return true;
+  }
+  // 2) The sampler has seen a press the loop task has not drained yet. Covers the first
+  //    ~10 ms of a gesture, before the press reaches the live-state snapshot below.
+  if (mappedInput.hasPendingInput()) {
+    return true;
+  }
+  // 3) A navigation button is down. This is the window the queued-update signal alone
+  //    misses: a page turn is only classified on RELEASE, so between press and release
+  //    nothing else indicates that the page on screen is about to be replaced — which is
+  //    exactly when the AA pass would start and then be unstoppable.
+  //
+  //    Bounded by LONG_PRESS_MS: past that threshold the Long event has already fired and
+  //    been acted on (chapter skip, or whatever the button is mapped to), so continuing to
+  //    hold no longer predicts a further turn. Without the bound, a chapter skip performed
+  //    with the button still held would suppress the AA of the page it lands on and nothing
+  //    would render it again.
+  using B = MappedInputManager::Button;
+  const bool navigationHeld = mappedInput.isPressed(B::PageForward) || mappedInput.isPressed(B::PageBack) ||
+                              mappedInput.isPressed(B::Left) || mappedInput.isPressed(B::Right);
+  return navigationHeld && mappedInput.getHeldTime() < ButtonEventManager::LONG_PRESS_MS;
+}
+
 void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orientedMarginTop,
                                                 const int orientedMarginRight, const int orientedMarginBottom,
                                                 const int orientedMarginLeft) {
@@ -3578,7 +3655,19 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   lastPageRefreshMode_ = renderer.getLastRefreshMode();
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
 
-  if (getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
+  // Same gate as renderContents(), and this is the path that matters most for it: a fast
+  // forward burst is exactly what hits the pre-render cache, and the replay below costs a
+  // glyph re-warm scan, two plane renders, the plane SPI writes and a gray flush — all on a
+  // page the next turn is about to replace. It is inline and uncancellable on both devices,
+  // so unlike renderContents() this gate applies to X3 too. The BW refresh above has already
+  // completed, so checking here also catches a gesture that began during it. Skipping leaves
+  // precisely the state the AA-disabled path leaves (no plane render means nothing for the
+  // grayscale cleanup to undo), so no buffer or RED-RAM baseline is disturbed.
+  const bool aaPreempted = aaPreemptedByNavigation();
+  if (aaPreempted) {
+    LOG_DBG("ERS", "AA replay skipped: page preempted by navigation");
+  }
+  if (!aaPreempted && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
     const int fontId = getEffectiveReaderFontId();
     // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
     // them, but background work since may have dropped or re-wired the cache (B's
@@ -3593,9 +3682,18 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
       scope.endScanAndPrewarm();
     }
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-    renderer.renderGrayscalePlanesSequential(
-        [&](GfxRenderer::RenderMode) { page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop); });
-    // timings not recorded for the pre-rendered path
+    // No waveform to hide behind on this path (displayBuffer() above already returned), so the
+    // per-element abort translates directly into saved wall-clock on both devices.
+    bool planeAborted = false;
+    const auto gt = renderer.renderGrayscalePlanesSequential(
+        [&](GfxRenderer::RenderMode) {
+          planeAborted = !page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop, /*abortable=*/true);
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); });
+    if (gt.aborted) {
+      LOG_DBG("ERS", "AA replay aborted mid-pass: page preempted by navigation");
+    }
+    // timings not otherwise recorded for the pre-rendered path
   }
   checkHeapIntegrity("after_bufferdisplay_aa");
 }

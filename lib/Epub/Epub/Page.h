@@ -144,7 +144,16 @@ class Page {
   // monochromeOutput=true: 1-bit Atkinson BW cache (AA off); false: 4-level Bayer cache (AA on)
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool forceLoadLargeImages = true,
               bool monochromeOutput = true) const;
-  void renderTextOnly(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Renders every non-image element. With abortable=true the element loop polls
+  // CooperativeAbort::shouldAbortLongTask() and stops early, returning false; otherwise it
+  // always runs to completion and returns true.
+  //
+  // Only the anti-aliasing plane renders may pass true. The prewarm SCAN passes must never
+  // abort: they exist so the following replay finds every glyph bitmap resident, and a partial
+  // scan leaves the replay dereferencing a metadata-only entry (null bitmap base). Nor may the
+  // pre-render pass abort — a half-drawn look-ahead page still gets marked ready and would be
+  // flushed to the panel by the next buffer-display turn.
+  bool renderTextOnly(GfxRenderer& renderer, int fontId, int xOffset, int yOffset, bool abortable = false) const;
   // Replay the 4-level grayscale image cache into the current renderer mode (GRAYSCALE_LSB / MSB).
   // Called by AA grayscale passes after renderTextOnly() so images get proper gray tones.
   // No-op for images without a grayscale cache (they degrade gracefully to BW-only).

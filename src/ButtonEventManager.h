@@ -25,6 +25,13 @@ ButtonEventManager& globalButtonEvents();
 //
 // Activities query consumeEvent() each loop tick to receive pending events.
 // drain() resets all state machines — call it on activity transitions.
+//
+// Aliased buttons: Up/PageBack and Down/PageForward are two logical names for the
+// SAME physical side button (see MappedInputManager::rawIndex). Each name runs its
+// own FSM, so one press emits one event per name — by design, so list-style
+// activities can match Up/Down while readers match PageBack/PageForward. An activity
+// must therefore accept only ONE name per pair in a given condition, or it will
+// handle the same press twice.
 
 class ButtonEventManager {
  public:
@@ -72,19 +79,9 @@ class ButtonEventManager {
   bool isShortPending(Button button) const;
 
   // Returns true if a double-click action is configured for this button.
-  // ButtonEventManager queries CrossPointSettings internally.
+  // ButtonEventManager queries CrossPointSettings internally. Answers identically for
+  // both names of an aliased pair, so one physical button always has one wait policy.
   bool hasDoubleAction(Button button) const;
-
-  // Called by the global dispatcher (main.cpp) when a Long event is consumed for a
-  // non-default action on a navigation button. Suppresses the release-based page turn
-  // that would otherwise fire when the button is released after the long action.
-  void markLongPressDispatched(Button button) { longPressDispatchedMask |= (1u << static_cast<int>(button)); }
-
-  // Returns true if markLongPressDispatched was called for this button since the last
-  // update(). detectPageTurn() uses this to skip wasReleased-based page turns.
-  bool wasLongPressDispatched(Button button) const {
-    return (longPressDispatchedMask & (1u << static_cast<int>(button))) != 0;
-  }
 
  private:
   static constexpr int NUM_BUTTONS = 9;
@@ -94,7 +91,6 @@ class ButtonEventManager {
   };
 
   uint32_t forcedDoubleMask = 0;
-  uint32_t longPressDispatchedMask = 0;
 
   enum class State { Idle, Pressed, ReleasedOnce, DoublePressed };
 
@@ -115,6 +111,9 @@ class ButtonEventManager {
   MappedInputManager& input;
 
   void pushEvent(Button button, PressType type);
+  // The other logical name for the same physical button (Up<->PageBack,
+  // Down<->PageForward); the button itself when it has no alias.
+  static Button pairedAlias(Button button);
   // Advance one button's FSM on a discrete press/release edge captured at time t.
   void applyEdge(int idx, Button btn, bool pressed, unsigned long t);
   // Advance one button's FSM on elapsed time (long-press-while-held, double-window

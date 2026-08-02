@@ -40,17 +40,17 @@ void EpubReaderFootnotesActivity::loop() {
       return;
     }
 
-    // Previous: Up / Left / PageBack
-    if ((ev.button == MappedInputManager::Button::Up || ev.button == MappedInputManager::Button::Left ||
-         ev.button == MappedInputManager::Button::PageBack) &&
+    // Previous: side-back button / Left. PageBack and Up are two names for the same physical
+    // button and the FSM emits an event for each, so matching both moved the selection by two
+    // per press — match only the PageBack name (see the aliasing note in ButtonEventManager.h).
+    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
         ev.type == ButtonEventManager::PressType::Short) {
       advanceSelection(-1);
       continue;
     }
 
-    // Next: Down / Right / PageForward
-    if ((ev.button == MappedInputManager::Button::Down || ev.button == MappedInputManager::Button::Right ||
-         ev.button == MappedInputManager::Button::PageForward) &&
+    // Next: side-forward button / Right (same aliasing caveat as above).
+    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
         ev.type == ButtonEventManager::PressType::Short) {
       advanceSelection(1);
       continue;

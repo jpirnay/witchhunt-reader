@@ -743,7 +743,9 @@ void MdReaderActivity::renderPage() {
     // Same AA pass as EpubReaderActivity — see TxtReaderActivity::renderPage()
     // for why the legacy store/restore helper ghosted after swapBuffers().
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); });
+    // Never aborts: the navigation-preempt gate is currently EPUB-only (see
+    // EpubReaderActivity::aaPreemptedByNavigation), so this pass keeps its previous behaviour.
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); }, [] { return false; });
   }
 }
 
