@@ -1550,7 +1550,25 @@ void CrossPointWebServer::handleGetSettings() const {
       }
       case SettingType::STRING: {
         doc["type"] = "string";
-        if (s.stringGetter) {
+        // Obfuscated settings (credentials) are write-only over the wire: the value is
+        // never disclosed to any client on the network, but the field stays editable so
+        // a new one can be typed in the browser instead of on the device keyboard.
+        // Sending it also risks invalid UTF-8 — a password may contain arbitrary bytes,
+        // which serialize fine here but make response.json() throw in the browser.
+        // "isSet" lets the UI distinguish "a password is stored" from "none stored"
+        // without revealing it; the client pairs it with an explicit clear control so
+        // an empty field can mean "leave unchanged" rather than "erase".
+        if (s.obfuscated) {
+          bool isSet = false;
+          if (s.stringGetter) {
+            isSet = !s.callStringGetter().empty();
+          } else if (s.stringMaxLen > 0) {
+            isSet = *(reinterpret_cast<const char*>(&SETTINGS) + s.stringOffset) != '\0';
+          }
+          doc["value"] = "";
+          doc["obfuscated"] = true;
+          doc["isSet"] = isSet;
+        } else if (s.stringGetter) {
           doc["value"] = s.callStringGetter();
         } else if (s.stringMaxLen > 0) {
           doc["value"] = reinterpret_cast<const char*>(&SETTINGS) + s.stringOffset;

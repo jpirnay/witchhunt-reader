@@ -129,6 +129,17 @@
     .setting-control input[type="number"] {
       width: 80px;
     }
+    .clear-cred {
+      display: block;
+      margin-top: 4px;
+      font-size: 0.8em;
+      color: var(--label-color);
+      text-align: right;
+      white-space: nowrap;
+    }
+    .clear-cred input {
+      vertical-align: middle;
+    }
     /* Toggle switch */
     .toggle-switch {
       display: inline-block;
@@ -331,6 +342,12 @@
   let allSettings = [];
   let originalValues = {};
 
+  // Global (not per-server) OPDS download settings. The firmware deliberately leaves
+  // these category-less so they stay off the device settings screen, which would park
+  // them under a card headed "None" here. They apply to every OPDS server, so they are
+  // pulled out of the settings grid and rendered once at the top of the OPDS card.
+  const OPDS_GLOBAL_KEYS = ['opdsDownloadFolder', 'opdsFilenameFormat'];
+
   function escapeHtml(unsafe) {
     return unsafe
       .replaceAll("&", "&amp;")
@@ -375,9 +392,13 @@
     }
 
     if (setting.type === 'string') {
-      const inputType = setting.name.toLowerCase().includes('password') ? 'password' : 'text';
+      // Obfuscated values are never sent to the browser, so the field always starts
+      // empty. Blank therefore means "leave unchanged" — clearing needs its own control.
+      if (setting.obfuscated) {
+        return renderPasswordField(id, setting.isSet, 'markChanged()');
+      }
       const val = setting.value || '';
-      return '<input type="' + inputType + '" id="' + id + '" value="' + escapeHtml(val) + '"' +
+      return '<input type="text" id="' + id + '" value="' + escapeHtml(val) + '"' +
         ' oninput="markChanged()">';
     }
 
@@ -398,6 +419,9 @@
       return parseInt(el.value, 10);
     }
     if (setting.type === 'string') {
+      if (setting.obfuscated) {
+        return readPasswordField('setting-' + setting.key);
+      }
       return el.value;
     }
     return undefined;
@@ -405,6 +429,36 @@
 
   function markChanged() {
     document.getElementById('saveBtn').disabled = false;
+  }
+
+  // Shared renderer for every credential field on this page (settings, Wi-Fi, OPDS).
+  // Stored passwords are never sent to the browser, so the input always starts empty
+  // and an empty field is ambiguous on its own: it could mean "nothing stored" or
+  // "stored but hidden". The placeholder states which, and the clear box makes erasing
+  // an explicit action rather than an interpretation of blankness.
+  // onInput is optional — the settings grid needs it to enable its Save button, while
+  // the Wi-Fi and OPDS cards have their own per-entry Save.
+  function renderPasswordField(id, isSet, onInput) {
+    const handler = onInput ? ' oninput="' + onInput + '"' : '';
+    const clearHandler = onInput ? ' onchange="' + onInput + '"' : '';
+    return '<input type="password" id="' + id + '" value="" autocomplete="new-password"' +
+      ' placeholder="' + (isSet ? 'unchanged — leave blank to keep' : 'not set') + '"' + handler + '>' +
+      (isSet
+        ? '<label class="clear-cred"><input type="checkbox" id="' + id + '-clear"' + clearHandler +
+          '> clear password</label>'
+        : '');
+  }
+
+  // Reads a credential field into the three states the server distinguishes:
+  //   undefined -> omit from the request, keep whatever is stored
+  //   ''        -> explicit clear
+  //   non-empty -> set this new password
+  function readPasswordField(id) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    const clear = document.getElementById(id + '-clear');
+    if (clear && clear.checked) return '';
+    return el.value === '' ? undefined : el.value;
   }
 
   async function loadSettings() {
@@ -421,9 +475,14 @@
         originalValues[s.key] = s.value;
       });
 
-      // Group by category
+      // Group by category. Category-less entries (the firmware gives them STR_NONE_OPT
+      // so they stay off the device settings screen) would otherwise collect under a
+      // heading literally named "None". The OPDS download settings are global rather
+      // than per-server, so they are rendered inside the OPDS card instead; anything
+      // else without a real category is skipped rather than shown under a junk heading.
       const groups = {};
       allSettings.forEach(function(s) {
+        if (OPDS_GLOBAL_KEYS.indexOf(s.key) !== -1) return;
         if (!groups[s.category]) groups[s.category] = [];
         groups[s.category].push(s);
       });
@@ -453,10 +512,15 @@
       container.innerHTML = html;
       document.getElementById('save-container').style.display = '';
       document.getElementById('saveBtn').disabled = true;
+
+      // The OPDS card hosts the global download settings but may have rendered before
+      // this fetch returned; redraw it now that allSettings is populated.
+      renderOpdsSection();
     } catch (e) {
       console.error(e);
       document.getElementById('settings-container').innerHTML =
-        '<div class="card"><p style="text-align:center;color:#e74c3c;">Failed to load settings</p></div>';
+        '<div class="card"><p style="text-align:center;color:#e74c3c;">Failed to load settings: ' +
+        escapeHtml(e.message || String(e)) + '</p></div>';
     }
   }
 
@@ -469,7 +533,10 @@
     const changes = {};
     allSettings.forEach(function(s) {
       const current = getValue(s);
-      if (current !== undefined && current !== originalValues[s.key]) {
+      if (current === undefined) return;
+      // Obfuscated fields have no meaningful original to diff against (the server sends
+      // ""), so any value getValue() returns is a deliberate set-or-clear and is sent.
+      if (s.obfuscated || current !== originalValues[s.key]) {
         changes[s.key] = current;
       }
     });
@@ -496,6 +563,21 @@
       for (const key in changes) {
         originalValues[key] = changes[key];
       }
+
+      // Credential fields keep nothing client-side: blank the input, drop the clear
+      // tick, and re-derive the placeholder from what was just saved.
+      allSettings.forEach(function(s) {
+        if (!s.obfuscated || !(s.key in changes)) return;
+        s.isSet = changes[s.key] !== '';
+        originalValues[s.key] = '';
+        const el = document.getElementById('setting-' + s.key);
+        if (el) {
+          el.value = '';
+          el.placeholder = s.isSet ? 'unchanged' : 'not set';
+        }
+        const clear = document.getElementById('setting-' + s.key + '-clear');
+        if (clear) clear.checked = false;
+      });
 
       showMessage('Settings saved successfully!', false);
     } catch (e) {
@@ -528,7 +610,7 @@
       '</div>' +
       '<div class="setting-row">' +
         '<span class="setting-name">Password</span>' +
-        '<span class="setting-control"><input type="password" id="wifi-pass-' + id + '" placeholder="' + (net.hasPassword ? '(unchanged)' : '') + '"></span>' +
+        '<span class="setting-control">' + renderPasswordField('wifi-pass-' + id, net.hasPassword) + '</span>' +
       '</div>' +
       lastConnected +
       '<div class="opds-actions">' +
@@ -585,10 +667,9 @@
     }
 
     const data = { ssid: ssid };
-    // Only include password when the user actually typed something; omitting it
-    // tells the server to preserve an existing password.
-    const pass = document.getElementById('wifi-pass-' + id).value;
-    if (pass) data.password = pass;
+    // undefined omits the field, preserving the stored password; '' clears it.
+    const pass = readPasswordField('wifi-pass-' + id);
+    if (pass !== undefined) data.password = pass;
     if (idx >= 0) data.index = idx;
 
     try {
@@ -646,7 +727,7 @@
       '</div>' +
       '<div class="setting-row">' +
         '<span class="setting-name">Password</span>' +
-        '<span class="setting-control"><input type="password" id="opds-pass-' + id + '" placeholder="' + (srv.hasPassword ? '(unchanged)' : '') + '"></span>' +
+        '<span class="setting-control">' + renderPasswordField('opds-pass-' + id, srv.hasPassword) + '</span>' +
       '</div>' +
       '<div class="opds-actions">' +
         '<button class="btn-small btn-save-server" onclick="saveOpdsServer(' + idx + ')">Save</button>' +
@@ -655,9 +736,30 @@
     '</div>';
   }
 
+  // The global download settings live in allSettings, which is fetched independently of
+  // the server list — whichever request lands second triggers the re-render, so this
+  // returns nothing until the settings are actually available.
+  function renderOpdsGlobalSettings() {
+    const globals = OPDS_GLOBAL_KEYS
+      .map(function(k) { return allSettings.find(function(s) { return s.key === k; }); })
+      .filter(Boolean);
+    if (globals.length === 0) return '';
+
+    let html = '<div class="section-header">Downloads</div>';
+    globals.forEach(function(s) {
+      html += '<div class="setting-row">' +
+        '<span class="setting-name">' + escapeHtml(s.name) + '</span>' +
+        '<span class="setting-control">' + renderControl(s) + '</span>' +
+        '</div>';
+    });
+    return html;
+  }
+
   function renderOpdsSection() {
     const container = document.getElementById('opds-container');
+    if (!container) return;
     let html = '<div class="card"><h2>OPDS Servers</h2>';
+    html += renderOpdsGlobalSettings();
     const canAddOpdsServer = opdsServers.length < MAX_OPDS_SERVERS;
 
     if (opdsServers.length === 0) {
@@ -704,10 +806,9 @@
       url: document.getElementById('opds-url-' + id).value,
       username: document.getElementById('opds-user-' + id).value,
     };
-    // Only include password in payload when the user actually typed something;
-    // omitting it tells the server to keep the existing password.
-    const pass = document.getElementById('opds-pass-' + id).value;
-    if (pass) data.password = pass;
+    // undefined omits the field, preserving the stored password; '' clears it.
+    const pass = readPasswordField('opds-pass-' + id);
+    if (pass !== undefined) data.password = pass;
     if (idx >= 0) data.index = idx;
 
     try {
