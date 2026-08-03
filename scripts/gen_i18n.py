@@ -878,21 +878,17 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    force: bool = False,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
     default_output_dir = "lib/I18n/"
     default_src_dirs = ["src", "lib"]
 
-    if translations_dir is None or output_dir is None:
-        if len(sys.argv) == 3:
-            translations_dir = sys.argv[1]
-            output_dir = sys.argv[2]
-        else:
-            # Default for no arguments or weird arguments (e.g. SCons)
-            translations_dir = default_translations_dir
-            output_dir = default_output_dir
-
+    if translations_dir is None:
+        translations_dir = default_translations_dir
+    if output_dir is None:
+        output_dir = default_output_dir
     if src_dirs is None:
         src_dirs = default_src_dirs
 
@@ -907,7 +903,7 @@ def main(
     out = Path(output_dir)
     targets = [out / "I18nKeys.h", out / "I18nStrings.h", out / "I18nStrings.cpp"]
     sources = list(Path(translations_dir).glob("*.yaml"))
-    if all(t.exists() for t in targets):
+    if not force and all(t.exists() for t in targets):
         oldest_target = min(t.stat().st_mtime for t in targets)
         newest_source = max(s.stat().st_mtime for s in sources)
         if oldest_target >= newest_source:
@@ -1050,6 +1046,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Print per-key INFO/WARNING messages and file generation details",
     )
+    parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Force regeneration of I18n files",
+    )
     args = parser.parse_args()
     main(
         args.translations_dir,
@@ -1057,6 +1059,7 @@ if __name__ == "__main__":
         args.src_dirs,
         args.strip_unused,
         args.verbose,
+        args.force
     )
 else:
     try:
