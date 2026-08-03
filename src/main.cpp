@@ -165,6 +165,13 @@ constexpr uint32_t SILENT_REBOOT_TARGET_CLOCK_SETTINGS = 3;
 // "Quick Resume on Timeout").
 constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP = 4;
 constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP_TIMEOUT = 5;
+// Boot into the KOReader settings screen after an auth/register WiFi session, so
+// the user lands back where they started instead of on Home.
+constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_SETTINGS = 6;
+// Upper bound for the cold-boot sanity check on silentRebootTarget (RTC_NOINIT is
+// uninitialized on power-up). Must equal the highest target above — keep it in
+// sync when adding one, or the new target silently reads as HOME.
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_KOREADER_SETTINGS;
 constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -212,6 +219,16 @@ void silentRestartToClockSettings() {
   silentRebootTarget = SILENT_REBOOT_TARGET_CLOCK_SETTINGS;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=clock-settings)");
+  delay(50);
+  ESP.restart();
+}
+
+void silentRestartToKOReaderSettings() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  silentRebootTarget = SILENT_REBOOT_TARGET_KOREADER_SETTINGS;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Silent restart (target=koreader-settings)");
   delay(50);
   ESP.restart();
 }
@@ -545,7 +562,7 @@ void setup() {
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
   const uint32_t silentRebootTargetSnapshot =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_SLEEP_TIMEOUT) ? silentRebootTarget : 0;
+      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_MAX) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   if (!isSilentReboot) {
@@ -779,6 +796,8 @@ void setup() {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_CLOCK_SETTINGS) {
     activityManager.goToClockSettings();
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_KOREADER_SETTINGS) {
+    activityManager.goToKOReaderSettings();
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale

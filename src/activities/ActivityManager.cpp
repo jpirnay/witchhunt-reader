@@ -24,6 +24,7 @@
 #include "reader/KOReaderSyncActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/ClockSettingsActivity.h"
+#include "settings/KOReaderSettingsActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
@@ -344,6 +345,10 @@ void ActivityManager::goToSettings() { replaceActivity(std::make_unique<Settings
 
 void ActivityManager::goToClockSettings() {
   replaceActivity(std::make_unique<ClockSettingsActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToKOReaderSettings() {
+  replaceActivity(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput));
 }
 
 void ActivityManager::goToFileBrowser(std::string path, std::string focusName) {
