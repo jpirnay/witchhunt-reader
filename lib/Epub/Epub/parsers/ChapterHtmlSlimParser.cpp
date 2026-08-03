@@ -1014,6 +1014,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   self->observeFontSizeBaseline(name, cssStyle);
   cssStyle = self->normalizeFontSizeForElement(name, cssStyle);
 
+  // Track an explicit CSS width on a wrapping block (e.g. <div style="width:100px">).
+  // A percentage image width inside resolves against the innermost such width, so a
+  // width:100% image in a narrow box stays small instead of filling the viewport.
+  if (cssStyle.hasImageWidth() && !matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS)) {
+    const int parentWidth =
+        self->containerWidthStack_.empty() ? self->viewportWidth : self->containerWidthStack_.back().width;
+    const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+    const int w = static_cast<int>(cssStyle.imageWidth.toPixels(emSize, static_cast<float>(parentWidth)) + 0.5f);
+    if (w >= 1 && w < parentWidth) {
+      self->containerWidthStack_.push_back({self->depth, static_cast<int16_t>(w)});
+    }
+  }
+
   // Buffered table rendering: accumulate cells in memory, emit as PageTableFragment on </table>.
   if (strcmp(name, "table") == 0) {
     if (self->currentTable) {
@@ -1275,7 +1288,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 const bool hasCssHeight = imgStyle.hasImageHeight();
                 const bool hasCssWidth = imgStyle.hasImageWidth();
                 int containerWidth = self->viewportWidth;
-                if (self->currentTextBlock) {
+                if (!self->containerWidthStack_.empty()) {
+                  // An ancestor block set an explicit width (e.g. width:100px wrapper);
+                  // percentages and fit-to-container both resolve against it.
+                  containerWidth = self->containerWidthStack_.back().width;
+                } else if (self->currentTextBlock) {
                   const int inset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
                   if (inset > 0 && inset < self->viewportWidth) {
                     containerWidth = self->viewportWidth - inset;
@@ -2299,6 +2316,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   // Pop list entries whose ul/ol is now out of scope
   while (!self->listStack.empty() && self->listStack.back().depth >= self->depth) {
     self->listStack.pop_back();
+  }
+
+  // Pop explicit-width container entries whose block is now out of scope
+  while (!self->containerWidthStack_.empty() && self->containerWidthStack_.back().depth >= self->depth) {
+    self->containerWidthStack_.pop_back();
   }
 
   // Closing a footnote link — create entry from collected text and href

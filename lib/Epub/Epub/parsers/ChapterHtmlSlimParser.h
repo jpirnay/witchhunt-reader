@@ -203,6 +203,17 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::vector<ListEntry> listStack;
 
+  // Ancestor block widths set via an explicit CSS `width` (e.g. a
+  // <div style="width:100px"> wrapper). A percentage image width resolves against the
+  // innermost such width, so a width:100% image inside a narrow box stays small
+  // (matches KOReader) instead of filling the viewport. depth = parser depth at push
+  // (pre-increment); popped in endElement when that scope closes.
+  struct ContainerWidthEntry {
+    int depth;
+    int16_t width;
+  };
+  std::vector<ContainerWidthEntry> containerWidthStack_;
+
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
   int completedPageCount = 0;
   std::vector<std::pair<std::string, uint16_t>> anchorData;
