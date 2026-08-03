@@ -15,7 +15,8 @@ QuickOverridesActivity::QuickOverridesActivity(
     const std::string& initialSdFontFamilyOverride, const int8_t initialFontSizeOverride,
     const int8_t initialBionicReadingOverride, const int8_t initialGuideDotsOverride,
     const int8_t initialParagraphAlignmentOverride, const int8_t initialTextAntiAliasingOverride,
-    const int8_t initialHyphenationOverride, const int8_t initialInlineFootnotePreviewsOverride)
+    const int8_t initialHyphenationOverride, const int8_t initialFontSizeNormalizationOverride,
+    const int8_t initialInlineFootnotePreviewsOverride)
     : MenuListActivity("QuickOverrides", renderer, mappedInput),
       pendingEmbeddedStyleOverride(initialEmbeddedStyleOverride),
       pendingImageRenderingOverride(initialImageRenderingOverride),
@@ -27,6 +28,7 @@ QuickOverridesActivity::QuickOverridesActivity(
       pendingParagraphAlignmentOverride(initialParagraphAlignmentOverride),
       pendingTextAntiAliasingOverride(initialTextAntiAliasingOverride),
       pendingHyphenationOverride(initialHyphenationOverride),
+      pendingFontSizeNormalizationOverride(initialFontSizeNormalizationOverride),
       pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride) {
   buildMenuItems();
 }
@@ -173,6 +175,17 @@ void QuickOverridesActivity::buildMenuItems() {
         static_cast<QuickOverridesActivity*>(ctx)->pendingHyphenationOverride = threeStateOverrideFromSlot(v);
       }));
 
+  // Font size normalization: default / on / off
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_FONT_SIZE_NORMALIZATION, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+      [](const void* ctx) -> uint8_t {
+        return threeStateSlotFromOverride(
+            static_cast<const QuickOverridesActivity*>(ctx)->pendingFontSizeNormalizationOverride);
+      },
+      [](void* ctx, uint8_t v) {
+        static_cast<QuickOverridesActivity*>(ctx)->pendingFontSizeNormalizationOverride = threeStateOverrideFromSlot(v);
+      }));
+
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_INLINE_FOOTNOTE_PREVIEWS, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
       [](const void* ctx) -> uint8_t {
@@ -217,6 +230,7 @@ void QuickOverridesActivity::finishWithResult(bool cancelled) {
   payload.paragraphAlignmentOverride = pendingParagraphAlignmentOverride;
   payload.textAntiAliasingOverride = pendingTextAntiAliasingOverride;
   payload.hyphenationOverride = pendingHyphenationOverride;
+  payload.fontSizeNormalizationOverride = pendingFontSizeNormalizationOverride;
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
   result.data = std::move(payload);
   setResult(std::move(result));

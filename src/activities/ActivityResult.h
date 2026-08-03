@@ -33,6 +33,7 @@ struct MenuResult {
   int8_t paragraphAlignmentOverride = -1;
   int8_t textAntiAliasingOverride = -1;
   int8_t hyphenationOverride = -1;
+  int8_t fontSizeNormalizationOverride = -1;
   // File browser display options carried back from FileContextMenuActivity.
   // Appended at the end so positional MenuResult initialisers elsewhere
   // (e.g. EpubReaderMenuActivity) are unaffected.

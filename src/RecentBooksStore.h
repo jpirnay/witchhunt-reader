@@ -28,6 +28,8 @@ struct RecentBook {
   // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
   int8_t hyphenationOverride = -1;
   // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
+  int8_t fontSizeNormalizationOverride = -1;
+  // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
   int8_t guideDotsOverride = -1;
   // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
   int8_t inlineFootnotePreviewsOverride = -1;
@@ -102,7 +104,8 @@ class RecentBooksStore {
   bool setReaderOverrides(const std::string& path, int8_t embeddedStyleOverride, int8_t imageRenderingOverride,
                           int8_t fontFamilyOverride, const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                           int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
-                          int8_t textAntiAliasingOverride, int8_t hyphenationOverride, int8_t guideDotsOverride,
+                          int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
+                          int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
                           int8_t inlineFootnotePreviewsOverride);
 };
 

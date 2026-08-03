@@ -277,6 +277,9 @@ class CrossPointSettings {
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
   uint8_t hyphenationEnabled = 0;
+  // Snap near-body font sizes (within ±10% of the body size) to plain body text, so publisher
+  // wrappers like <span style="font-size:0.92em"> around whole paragraphs render native. Default on.
+  uint8_t fontSizeNormalization = 1;
 
   // Reader screen margin settings
   uint8_t screenMargin = 5;

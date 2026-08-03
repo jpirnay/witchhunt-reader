@@ -15,6 +15,11 @@ class CssParser;
 class BuildArena;
 
 class Section {
+ public:
+  // Forward-declared so the by-reference build/hash API below can name it; defined fully below.
+  struct BuildParams;
+
+ private:
   std::shared_ptr<Epub> epub;
   const int spineIndex;
   GfxRenderer& renderer;
@@ -78,12 +83,9 @@ class Section {
   // Caller is responsible for closing `outFile`. Returns false on any I/O or validation error.
   bool readParagraphLutHeader(FsFile& outFile, uint16_t& outCount, uint32_t& outLutStart) const;
 
-  // Calculates a stable hash for a given set of rendering properties.
+  // Calculates a stable hash for the render properties in a BuildParams (the cache-variant key).
   // Used to suffix cache files so multiple variants can coexist safely without constant recompilation.
-  static uint32_t calculatePropertyHash(int fontId, float lineCompression, bool extraParagraphSpacing,
-                                        uint8_t paragraphAlignment, uint16_t viewportWidth, uint16_t viewportHeight,
-                                        bool hyphenationEnabled, bool embeddedStyle, bool bionicReadingEnabled,
-                                        bool inlineFootnotePreviews, uint8_t imageRendering);
+  static uint32_t calculatePropertyHash(const BuildParams& p);
 
   // Computes the active file path for this section based on rendering properties
   std::string getSectionFilePath(uint32_t propertyHash) const;
@@ -111,6 +113,7 @@ class Section {
     uint16_t viewportWidth = 0;
     uint16_t viewportHeight = 0;
     bool hyphenationEnabled = false;
+    bool fontSizeNormalization = true;
     bool embeddedStyle = false;
     bool bionicReadingEnabled = false;
     bool inlineFootnotePreviews = false;
@@ -132,15 +135,9 @@ class Section {
   // in-flight incremental build so its partially written cache file doesn't survive.
   explicit Section(const std::shared_ptr<Epub>& epub, int spineIndex, GfxRenderer& renderer);
   ~Section();
-  bool loadSectionFile(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
-                       uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
-                       bool bionicReadingEnabled, bool inlineFootnotePreviews, uint8_t imageRendering);
+  bool loadSectionFile(const BuildParams& p);
   bool clearCache();
-  bool createSectionFile(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
-                         uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
-                         bool bionicReadingEnabled, bool inlineFootnotePreviews, uint8_t imageRendering,
-                         const std::function<void(int)>& progressFn, bool skipEviction,
-                         const FontSizeLadder& fontSizeLadder);
+  bool createSectionFile(const BuildParams& p, const std::function<void(int)>& progressFn, bool skipEviction);
 
   // Incremental section-cache build. Advances the build by at most ~budgetMs of work
   // (budgetMs == 0 means no budget: run to a terminal state in one call) and returns More

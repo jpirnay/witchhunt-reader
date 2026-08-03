@@ -210,6 +210,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                          StrId::STR_CAT_READER));
   settings.push_back(SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled,
                                          "hyphenationEnabled", StrId::STR_CAT_READER));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_FONT_SIZE_NORMALIZATION, &CrossPointSettings::fontSizeNormalization,
+                                         "fontSizeNormalization", StrId::STR_CAT_READER));
   settings.push_back(
       SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},

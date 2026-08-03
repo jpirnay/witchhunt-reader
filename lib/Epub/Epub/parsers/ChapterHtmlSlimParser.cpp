@@ -301,10 +301,18 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
       sizePct = sizePct * entry.fontSizePct / 100;
     }
   }
-  // Mirror FontSizeLadder::kResidualDeadZone at the word level: composed sizes within
-  // 3% of 100 render as plain body text — imperceptible size-wise, and it keeps such
-  // lines on the zero-cost uniform paths (no per-word size array, no scaled draws).
-  if (sizePct >= 97 && sizePct <= 103) {
+  // Snap composed word sizes near body to plain body text. When font-size normalization is
+  // enabled the band is wide (±10%): publishers routinely wrap whole paragraphs in a
+  // <span style="font-size:0.92em"> (etc.), where the per-glyph shrink is below the size
+  // just-noticeable threshold yet tiring across a page and forces per-glyph resampling.
+  // Snapping here — before any block split — keeps such text native regardless of length,
+  // and keeps these lines on the zero-cost uniform paths (no per-word size array, no
+  // scaled draws). Genuinely distinct sizes (footnotes ~0.8, captions, sup/sub) fall
+  // outside the band and survive. Deliberate <10% per-word gradients lose their faintest
+  // steps, an accepted trade for body-text comfort. When disabled, only a tight ±3% band
+  // is applied (float-rounding cleanup), so publisher near-body wrappers are preserved.
+  const int deadZone = fontSizeNormalization ? 10 : 3;
+  if (sizePct >= 100 - deadZone && sizePct <= 100 + deadZone) {
     sizePct = 100;
   }
   effectiveSizePct = static_cast<uint8_t>(
@@ -326,6 +334,75 @@ void ChapterHtmlSlimParser::applySupSubDefaultSize(StyleStackEntry& entry) {
   }
 }
 
+namespace {
+bool isRootFontSizeElement(const char* tagName) { return strcmp(tagName, "html") == 0 || strcmp(tagName, "body") == 0; }
+
+float saneFontSizeBaseline(float value) {
+  if (value < 0.25f || value > 4.0f) return 1.0f;
+  return value;
+}
+}  // namespace
+
+void ChapterHtmlSlimParser::initializeFontSizeBaseline() {
+  if (!cssParser) return;
+
+  if (!hasRootFontSizeBaseline_) {
+    const CssStyle bodyStyle = cssParser->resolveStyle("body", "");
+    if (bodyStyle.hasFontSizeMultiplier() && bodyStyle.fontSizeMultiplier != 1.0f) {
+      rootFontSizeBaseline_ = saneFontSizeBaseline(bodyStyle.fontSizeMultiplier);
+      hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+    } else {
+      const CssStyle htmlStyle = cssParser->resolveStyle("html", "");
+      if (htmlStyle.hasFontSizeMultiplier() && htmlStyle.fontSizeMultiplier != 1.0f) {
+        rootFontSizeBaseline_ = saneFontSizeBaseline(htmlStyle.fontSizeMultiplier);
+        hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+      }
+    }
+  }
+
+  if (!hasMainTextFontSizeBaseline_) {
+    const CssStyle paragraphStyle = cssParser->resolveStyle("p", "");
+    if (paragraphStyle.hasFontSizeMultiplier() && paragraphStyle.fontSizeMultiplier != 1.0f) {
+      mainTextFontSizeBaseline_ = saneFontSizeBaseline(paragraphStyle.fontSizeMultiplier);
+      hasMainTextFontSizeBaseline_ = mainTextFontSizeBaseline_ != 1.0f;
+      return;
+    }
+
+    const CssStyle listStyle = cssParser->resolveStyle("li", "");
+    if (listStyle.hasFontSizeMultiplier() && listStyle.fontSizeMultiplier != 1.0f) {
+      mainTextFontSizeBaseline_ = saneFontSizeBaseline(listStyle.fontSizeMultiplier);
+      hasMainTextFontSizeBaseline_ = mainTextFontSizeBaseline_ != 1.0f;
+    }
+  }
+}
+
+void ChapterHtmlSlimParser::observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle) {
+  if (!cssStyle.hasFontSizeMultiplier()) return;
+
+  // Only the root context (html/body, including class/inline sizing such as the
+  // Calibre `body.calibreN { font-size: … }` wrapper) is observed live. The
+  // main-text baseline stays tag-level (see initializeFontSizeBaseline): a
+  // class-styled paragraph like a decorative opener is indistinguishable here
+  // from ordinary prose, so treating the first sized <p> as the baseline would
+  // wrongly shrink/grow the real body text.
+  if (!hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName) && cssStyle.fontSizeMultiplier != 1.0f) {
+    rootFontSizeBaseline_ = saneFontSizeBaseline(cssStyle.fontSizeMultiplier);
+    hasRootFontSizeBaseline_ = rootFontSizeBaseline_ != 1.0f;
+  }
+}
+
+CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const {
+  if (!cssStyle.hasFontSizeMultiplier()) return cssStyle;
+
+  CssStyle normalized = cssStyle;
+  if (hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName)) {
+    normalized.fontSizeMultiplier = 1.0f;
+  }
+  if (hasMainTextFontSizeBaseline_ && isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0) {
+    normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+  }
+  return normalized;
+}
 bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   if (streamFailed) {
     return false;
@@ -942,6 +1019,22 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     return;
   }
 
+  self->observeFontSizeBaseline(name, cssStyle);
+  cssStyle = self->normalizeFontSizeForElement(name, cssStyle);
+
+  // Track an explicit CSS width on a wrapping block (e.g. <div style="width:100px">).
+  // A percentage image width inside resolves against the innermost such width, so a
+  // width:100% image in a narrow box stays small instead of filling the viewport.
+  if (cssStyle.hasImageWidth() && !matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS)) {
+    const int parentWidth =
+        self->containerWidthStack_.empty() ? self->viewportWidth : self->containerWidthStack_.back().width;
+    const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+    const int w = static_cast<int>(cssStyle.imageWidth.toPixels(emSize, static_cast<float>(parentWidth)) + 0.5f);
+    if (w >= 1 && w < parentWidth) {
+      self->containerWidthStack_.push_back({self->depth, static_cast<int16_t>(w)});
+    }
+  }
+
   // Buffered table rendering: accumulate cells in memory, emit as PageTableFragment on </table>.
   if (strcmp(name, "table") == 0) {
     if (self->currentTable) {
@@ -1203,7 +1296,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 const bool hasCssHeight = imgStyle.hasImageHeight();
                 const bool hasCssWidth = imgStyle.hasImageWidth();
                 int containerWidth = self->viewportWidth;
-                if (self->currentTextBlock) {
+                if (!self->containerWidthStack_.empty()) {
+                  // An ancestor block set an explicit width (e.g. width:100px wrapper);
+                  // percentages and fit-to-container both resolve against it.
+                  containerWidth = self->containerWidthStack_.back().width;
+                } else if (self->currentTextBlock) {
                   const int inset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
                   if (inset > 0 && inset < self->viewportWidth) {
                     containerWidth = self->viewportWidth - inset;
@@ -2229,6 +2326,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     self->listStack.pop_back();
   }
 
+  // Pop explicit-width container entries whose block is now out of scope
+  while (!self->containerWidthStack_.empty() && self->containerWidthStack_.back().depth >= self->depth) {
+    self->containerWidthStack_.pop_back();
+  }
+
   // Closing a footnote link — create entry from collected text and href
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
     if (self->currentFootnote.number[0] != '\0' && self->currentFootnote.href[0] != '\0') {
@@ -2375,6 +2477,8 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
 
 bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
+  initializeFontSizeBaseline();
+
   auto paragraphAlignmentBlockStyle = BlockStyle();
   paragraphAlignmentBlockStyle.textAlignDefined = true;
   // Resolve None sentinel to Justify for initial block (no CSS context yet)

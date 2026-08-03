@@ -495,6 +495,7 @@ class EpubReaderActivity final : public Activity {
   int8_t bookParagraphAlignmentOverride = -1;
   int8_t bookTextAntiAliasingOverride = -1;
   int8_t bookHyphenationOverride = -1;
+  int8_t bookFontSizeNormalizationOverride = -1;
   int8_t bookGuideDotsOverride = -1;
   int8_t bookInlineFootnotePreviewsOverride = -1;
 
@@ -704,7 +705,8 @@ class EpubReaderActivity final : public Activity {
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
-                                int8_t textAntiAliasingOverride, int8_t hyphenationOverride, int8_t guideDotsOverride,
+                                int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
+                                int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
                                 int8_t inlineFootnotePreviewsOverride);
   void openReaderMenu();
   void openQuickOverrides();
@@ -714,6 +716,7 @@ class EpubReaderActivity final : public Activity {
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
   bool getEffectiveHyphenation() const;
+  bool getEffectiveFontSizeNormalization() const;
   bool getEffectiveGuideDots() const;
   bool getEffectiveInlineFootnotePreviews() const;
   int getEffectiveReaderFontId() const;

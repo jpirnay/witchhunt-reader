@@ -6,9 +6,10 @@
 // teardown scatters long-lived allocations across the heap, leaving ~50KB of
 // contiguous space unrecoverable without a reboot.
 
-void silentRestart();                 // home screen
-void silentRestartToReader();         // currently-open EPUB (APP_STATE.openEpubPath)
-void silentRestartToClockSettings();  // clock / time settings screen
+void silentRestart();                    // home screen
+void silentRestartToReader();            // currently-open EPUB (APP_STATE.openEpubPath)
+void silentRestartToClockSettings();     // clock / time settings screen
+void silentRestartToKOReaderSettings();  // KOReader sync settings screen
 
 // One-shot guarded variant for heap-fragmentation recovery: allows only one
 // restart attempt across consecutive silent boots until a non-silent boot

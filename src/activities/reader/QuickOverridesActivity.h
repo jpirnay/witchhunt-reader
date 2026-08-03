@@ -18,7 +18,8 @@ class QuickOverridesActivity final : public MenuListActivity {
                          const std::string& initialSdFontFamilyOverride, int8_t initialFontSizeOverride,
                          int8_t initialBionicReadingOverride, int8_t initialGuideDotsOverride,
                          int8_t initialParagraphAlignmentOverride, int8_t initialTextAntiAliasingOverride,
-                         int8_t initialHyphenationOverride, int8_t initialInlineFootnotePreviewsOverride);
+                         int8_t initialHyphenationOverride, int8_t initialFontSizeNormalizationOverride,
+                         int8_t initialInlineFootnotePreviewsOverride);
 
   void onEnter() override;
   void render(RenderLock&&) override;
@@ -40,5 +41,6 @@ class QuickOverridesActivity final : public MenuListActivity {
   int8_t pendingParagraphAlignmentOverride = -1;
   int8_t pendingTextAntiAliasingOverride = -1;
   int8_t pendingHyphenationOverride = -1;
+  int8_t pendingFontSizeNormalizationOverride = -1;
   int8_t pendingInlineFootnotePreviewsOverride = -1;
 };

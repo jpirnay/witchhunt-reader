@@ -165,6 +165,13 @@ constexpr uint32_t SILENT_REBOOT_TARGET_CLOCK_SETTINGS = 3;
 // "Quick Resume on Timeout").
 constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP = 4;
 constexpr uint32_t SILENT_REBOOT_TARGET_SLEEP_TIMEOUT = 5;
+// Boot into the KOReader settings screen after an auth/register WiFi session, so
+// the user lands back where they started instead of on Home.
+constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_SETTINGS = 6;
+// Upper bound for the cold-boot sanity check on silentRebootTarget (RTC_NOINIT is
+// uninitialized on power-up). Must equal the highest target above — keep it in
+// sync when adding one, or the new target silently reads as HOME.
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_KOREADER_SETTINGS;
 constexpr uint32_t HEAP_RECOVERY_RESTART_LATCH_MAGIC = 0x48EA9C01;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -212,6 +219,16 @@ void silentRestartToClockSettings() {
   silentRebootTarget = SILENT_REBOOT_TARGET_CLOCK_SETTINGS;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=clock-settings)");
+  delay(50);
+  ESP.restart();
+}
+
+void silentRestartToKOReaderSettings() {
+  if (deepSleepInProgress) return;
+  globalReadingSessionTracker().end();
+  silentRebootTarget = SILENT_REBOOT_TARGET_KOREADER_SETTINGS;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Silent restart (target=koreader-settings)");
   delay(50);
   ESP.restart();
 }
@@ -496,6 +513,8 @@ static BootHeapProbe s_probeMainLast(5);
 #endif
 
 void setup() {
+  const bool powerButtonWakeVerified = gpio.verifyPowerButtonWakeup(CrossPointSettings::getPowerButtonDuration());
+
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
   // exact damaged block for THIS build so the written value can be symbolized.
@@ -543,7 +562,7 @@ void setup() {
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
   const uint32_t silentRebootTargetSnapshot =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_SLEEP_TIMEOUT) ? silentRebootTarget : 0;
+      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_MAX) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   if (!isSilentReboot) {
@@ -644,18 +663,12 @@ void setup() {
     LOG_DBG("MAIN", "Verifying power button press duration (required=%u ms)",
             CrossPointSettings::getPowerButtonDuration());
 
-    // We only want to skip the hold verification (allowing a short press to wake) if the short
-    // press or double press actually have an action assigned, or if the clock screensaver is active.
-    // Otherwise, short presses from sleep should be ignored entirely and return to sleep.
-    //
-    // X3 always cuts all power during sleep (battery-latch MOSFET, keepClockAlive=false), so any
-    // wakeup is a full cold boot. By the time verifyPowerButtonWakeup runs the button may already
-    // be released — hardware design guarantees the press was intentional, so skip hold-verification.
-    bool allowShortPress = gpio.deviceIsX3() || (SETTINGS.useClock != 0) ||
-                           (SETTINGS.btnShortPower != CrossPointSettings::BTN_DEFAULT) ||
-                           (SETTINGS.btnDoublePower != CrossPointSettings::BTN_DEFAULT);
-
-    gpio.verifyPowerButtonWakeup(CrossPointSettings::getPowerButtonDuration(), allowShortPress);
+    if (!powerButtonWakeVerified) {
+      LOG_DBG("MAIN", "Power button released before wake threshold, returning to deep sleep");
+      halTiltSensor.deepSleep();
+      powerManager.startDeepSleep(gpio);
+      return;
+    }
     LOG_DBG("MAIN", "Power button verification passed, millis=%lu", millis());
   }
 
@@ -783,6 +796,8 @@ void setup() {
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_CLOCK_SETTINGS) {
     activityManager.goToClockSettings();
+  } else if (resume == BootResume::Silent && silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_KOREADER_SETTINGS) {
+    activityManager.goToKOReaderSettings();
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale

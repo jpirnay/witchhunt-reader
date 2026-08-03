@@ -1,0 +1,348 @@
+BOOK title=Font Size Normalization Test lang=en spine=1 toc=1 reliableToc=1
+SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=8 s=1 z=100 t=Font
+   W x=87 s=1 z=100 t=Size
+   W x=161 s=1 z=100 t=Normalization
+   W x=390 s=1 z=100 t=Test
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=CONTROL:
+   W x=94 s=0 z=100 t=This
+   W x=133 s=0 z=100 t=whole
+   W x=187 s=0 z=100 t=paragraph
+   W x=280 s=0 z=100 t=is
+   W x=301 s=0 z=100 t=plain
+   W x=351 s=0 z=100 t=body
+   W x=391 s=0 z=100 t=text
+   W x=433 s=0 z=100 t=at
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=one
+   W x=41 s=0 z=100 t=hundred
+   W x=117 s=0 z=100 t=percent.
+   W x=196 s=0 z=100 t=Every
+   W x=254 s=0 z=100 t=other
+   W x=314 s=0 z=100 t=section
+   W x=387 s=0 z=100 t=on
+   W x=419 s=0 z=100 t=this
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=page
+   W x=44 s=0 z=100 t=is
+   W x=65 s=0 z=100 t=judged
+   W x=125 s=0 z=100 t=against
+   W x=202 s=0 z=100 t=this
+   W x=245 s=0 z=100 t=line.
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=1.
+   W x=45 s=0 z=100 t=PUBLISHER
+   W x=145 s=0 z=100 t=WRAPPERS
+   W x=237 s=0 z=100 t=(the
+   W x=290 s=0 z=100 t=real-world
+   W x=391 s=0 z=100 t=case:
+   W x=447 s=0 z=100 t=a
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=whole
+   W x=64 s=0 z=100 t=paragraph
+   W x=167 s=0 z=100 t=wrapped
+   W x=238 s=0 z=100 t=in
+   W x=271 s=0 z=100 t=a
+   W x=299 s=0 z=100 t=near-body
+   W x=398 s=0 z=100 t=span).
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=Under
+   W x=51 s=0 z=100 t=OFF
+   W x=79 s=0 z=100 t=each
+   W x=127 s=0 z=100 t=keeps
+   W x=176 s=0 z=100 t=its
+   W x=209 s=0 z=100 t=own
+   W x=246 s=0 z=100 t=size;
+   W x=296 s=0 z=100 t=under
+   W x=351 s=0 z=100 t=ON
+   W x=374 s=0 z=100 t=all
+   W x=412 s=0 z=100 t=three
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=snap
+   W x=44 s=0 z=100 t=to
+   W x=72 s=0 z=100 t=body.
+  LINE y=206 x=0 align=0 mult=0.920 hfid=0 words=7
+   W x=17 s=0 z=100 t=This
+   W x=61 s=0 z=100 t=entire
+   W x=124 s=0 z=100 t=paragraph
+   W x=218 s=0 z=100 t=sits
+   W x=263 s=0 z=100 t=at
+   W x=297 s=0 z=100 t=ninety-two
+   W x=396 s=0 z=100 t=percent,
+  LINE y=228 x=0 align=0 mult=0.920 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=43 s=0 z=100 t=classic
+   W x=111 s=0 z=100 t=publisher
+   W x=195 s=0 z=100 t=body
+   W x=240 s=0 z=100 t=wrapper.
+   W x=314 s=0 z=100 t=It
+   W x=345 s=0 z=100 t=is
+   W x=373 s=0 z=100 t=below
+   W x=426 s=0 z=100 t=the
+  LINE y=250 x=0 align=0 mult=0.920 hfid=0 words=6
+   W x=0 s=0 z=100 t=just-noticeable
+   W x=140 s=0 z=100 t=size
+   W x=184 s=0 z=100 t=threshold
+   W x=280 s=0 z=100 t=yet
+   W x=319 s=0 z=100 t=forces
+   W x=384 s=0 z=100 t=per-glyph
+  LINE y=272 x=0 align=0 mult=0.920 hfid=0 words=4
+   W x=0 s=0 z=100 t=resampling
+   W x=90 s=0 z=100 t=across
+   W x=148 s=0 z=100 t=every
+   W x=196 s=0 z=100 t=page.
+  LINE y=294 x=0 align=0 mult=0.950 hfid=0 words=8
+   W x=17 s=0 z=100 t=This
+   W x=54 s=0 z=100 t=entire
+   W x=110 s=0 z=100 t=paragraph
+   W x=199 s=0 z=100 t=sits
+   W x=237 s=0 z=100 t=at
+   W x=264 s=0 z=100 t=ninety-five
+   W x=366 s=0 z=100 t=percent
+   W x=429 s=0 z=100 t=and
+  LINE y=317 x=0 align=0 mult=0.950 hfid=0 words=10
+   W x=0 s=0 z=100 t=is
+   W x=20 s=0 z=100 t=the
+   W x=55 s=0 z=100 t=same
+   W x=99 s=0 z=100 t=story
+   W x=150 s=0 z=100 t=one
+   W x=186 s=0 z=100 t=step
+   W x=224 s=0 z=100 t=closer
+   W x=281 s=0 z=100 t=to
+   W x=308 s=0 z=100 t=body
+   W x=346 s=0 z=100 t=size.
+  LINE y=340 x=0 align=0 mult=1.080 hfid=0 words=7
+   W x=19 s=0 z=100 t=This
+   W x=69 s=0 z=100 t=entire
+   W x=140 s=0 z=100 t=paragraph
+   W x=248 s=0 z=100 t=sits
+   W x=299 s=0 z=100 t=at
+   W x=337 s=0 z=100 t=one
+   W x=386 s=0 z=100 t=hundred
+  LINE y=366 x=0 align=0 mult=1.080 hfid=0 words=9
+   W x=0 s=0 z=100 t=eight
+   W x=62 s=0 z=100 t=percent,
+   W x=145 s=0 z=100 t=the
+   W x=188 s=0 z=100 t=same
+   W x=241 s=0 z=100 t=case
+   W x=291 s=0 z=100 t=on
+   W x=326 s=0 z=100 t=the
+   W x=369 s=0 z=100 t=upper
+   W x=422 s=0 z=100 t=side
+  LINE y=392 x=0 align=0 mult=1.080 hfid=0 words=3
+   W x=0 s=0 z=100 t=of
+   W x=30 s=0 z=100 t=body
+   W x=73 s=0 z=100 t=size.
+  LINE y=418 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=2.
+   W x=52 s=0 z=100 t=BOTH
+   W x=100 s=0 z=100 t=BANDS:
+   W x=172 s=0 z=100 t=normal,
+   W x=259 s=0 z=100 t=ninety-eight
+   W x=388 s=0 z=100 t=percent
+   W x=448 s=0 z=100 t=,
+  LINE y=442 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=normal,
+   W x=83 s=0 z=100 t=one
+   W x=128 s=0 z=100 t=hundred
+   W x=208 s=0 z=100 t=two
+   W x=249 s=0 z=100 t=percent
+   W x=309 s=0 z=100 t=,
+   W x=330 s=0 z=100 t=normal.
+   W x=415 s=0 z=100 t=These
+  LINE y=466 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=snap
+   W x=44 s=0 z=100 t=to
+   W x=72 s=0 z=100 t=body
+   W x=112 s=0 z=100 t=under
+   W x=165 s=0 z=100 t=OFF
+   W x=191 s=0 z=100 t=and
+   W x=228 s=0 z=100 t=ON
+   W x=249 s=0 z=100 t=alike.
+  LINE y=490 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=3.
+   W x=55 s=0 z=100 t=NEITHER
+   W x=139 s=0 z=100 t=BAND:
+   W x=201 s=0 z=100 t=normal,
+   W x=290 s=0 z=89 t=eighty-nine
+   W x=399 s=0 z=89 t=percent
+   W x=452 s=0 z=100 t=,
+  LINE y=514 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=normal,
+   W x=83 s=0 z=111 t=one
+   W x=133 s=0 z=111 t=hundred
+   W x=221 s=0 z=111 t=eleven
+   W x=300 s=0 z=111 t=percent
+   W x=367 s=0 z=100 t=,
+   W x=388 s=0 z=100 t=normal.
+  LINE y=540 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=These
+   W x=51 s=0 z=100 t=survive
+   W x=124 s=0 z=100 t=under
+   W x=177 s=0 z=100 t=OFF
+   W x=203 s=0 z=100 t=and
+   W x=240 s=0 z=100 t=ON
+   W x=261 s=0 z=100 t=alike.
+  LINE y=564 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=4.
+   W x=50 s=0 z=100 t=DISTINCT:
+   W x=141 s=0 z=100 t=normal,
+   W x=224 s=0 z=80 t=eighty
+   W x=281 s=0 z=80 t=percent
+   W x=341 s=0 z=80 t=footnote
+   W x=422 s=0 z=80 t=size
+   W x=448 s=0 z=100 t=,
+  LINE y=588 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=normal,
+   W x=86 s=0 z=70 t=seventy
+   W x=148 s=0 z=70 t=percent
+   W x=204 s=0 z=70 t=caption
+   W x=263 s=0 z=70 t=size
+   W x=286 s=0 z=100 t=,
+   W x=310 s=0 z=100 t=normal.
+   W x=398 s=0 z=100 t=Neither
+  LINE y=612 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=setting
+   W x=72 s=0 z=100 t=may
+   W x=108 s=0 z=100 t=flatten
+   W x=185 s=0 z=100 t=these.
+  LINE y=636 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=5.
+   W x=54 s=0 z=100 t=MID-LINE:
+   W x=153 s=0 z=100 t=plain
+   W x=213 s=0 z=100 t=words,
+   W x=280 s=0 z=95 t=then
+   W x=336 s=0 z=95 t=a
+   W x=363 s=0 z=95 t=ninety-five
+  LINE y=660 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=95 t=percent
+   W x=68 s=0 z=95 t=run
+   W x=108 s=0 z=95 t=in
+   W x=135 s=0 z=95 t=the
+   W x=175 s=0 z=95 t=middle
+   W x=234 s=0 z=95 t=of
+   W x=266 s=0 z=95 t=the
+   W x=306 s=0 z=95 t=line
+   W x=339 s=0 z=100 t=,
+   W x=358 s=0 z=100 t=then
+   W x=411 s=0 z=100 t=plain
+  LINE y=684 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=words
+   W x=55 s=0 z=100 t=again
+   W x=113 s=0 z=100 t=—
+   W x=132 s=0 z=100 t=under
+   W x=191 s=0 z=100 t=ON
+   W x=218 s=0 z=100 t=the
+   W x=261 s=0 z=100 t=middle
+   W x=323 s=0 z=100 t=run
+   W x=365 s=0 z=100 t=joins
+   W x=422 s=0 z=100 t=the
+  LINE y=708 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=body
+   W x=47 s=0 z=100 t=baseline
+   W x=131 s=0 z=100 t=without
+   W x=211 s=0 z=100 t=shifting
+   W x=299 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=runs
+   W x=395 s=0 z=100 t=around
+  LINE y=732 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=it.
+ PAGE 1 elements=16 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=6.
+   W x=49 s=0 z=100 t=NESTING:
+   W x=127 s=0 z=105 t=outer
+   W x=189 s=0 z=105 t=at
+   W x=222 s=0 z=105 t=one
+   W x=266 s=0 z=105 t=hundred
+   W x=346 s=0 z=105 t=five
+   W x=395 s=0 z=105 t=percent
+  LINE y=25 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=94 t=inner
+   W x=55 s=0 z=94 t=composes
+   W x=138 s=0 z=94 t=to
+   W x=172 s=0 z=94 t=ninety-four
+   W x=284 s=0 z=94 t=and
+   W x=326 s=0 z=94 t=a
+   W x=350 s=0 z=94 t=half
+   W x=403 s=0 z=94 t=percent
+  LINE y=47 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=105 t=back
+   W x=41 s=0 z=105 t=to
+   W x=70 s=0 z=105 t=outer
+   W x=128 s=0 z=100 t=and
+   W x=165 s=0 z=100 t=normal.
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=7.
+   W x=46 s=0 z=100 t=GRADIENT
+   W x=123 s=0 z=100 t=(steps
+   W x=183 s=0 z=100 t=inside
+   W x=238 s=0 z=100 t=the
+   W x=275 s=0 z=100 t=ON
+   W x=296 s=0 z=100 t=band
+   W x=339 s=0 z=100 t=collapse,
+   W x=426 s=0 z=100 t=the
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=wide
+   W x=35 s=0 z=100 t=ones
+   W x=82 s=0 z=100 t=remain):
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=ninety-eight
+  LINE y=144 x=0 align=0 mult=0.950 hfid=0 words=1
+   W x=17 s=0 z=100 t=ninety-five
+  LINE y=167 x=0 align=0 mult=0.920 hfid=0 words=1
+   W x=17 s=0 z=100 t=ninety-two
+  LINE y=189 x=0 align=0 mult=0.890 hfid=0 words=1
+   W x=16 s=0 z=100 t=eighty-nine
+  LINE y=210 x=0 align=0 mult=0.800 hfid=0 words=1
+   W x=14 s=0 z=100 t=eighty
+  LINE y=229 x=0 align=0 mult=0.700 hfid=0 words=1
+   W x=13 s=0 z=100 t=seventy
+  LINE y=246 x=0 align=0 mult=0.920 hfid=0 words=9
+   W x=17 s=0 z=100 t=8.
+   W x=38 s=0 z=100 t=BLOCK
+   W x=90 s=0 z=100 t=LEVEL:
+   W x=155 s=0 z=100 t=the
+   W x=190 s=0 z=100 t=font-size
+   W x=274 s=0 z=100 t=sits
+   W x=311 s=0 z=100 t=on
+   W x=338 s=0 z=100 t=the
+   W x=373 s=0 z=100 t=paragraph
+  LINE y=268 x=0 align=0 mult=0.920 hfid=0 words=10
+   W x=0 s=0 z=100 t=itself
+   W x=57 s=0 z=100 t=rather
+   W x=119 s=0 z=100 t=than
+   W x=168 s=0 z=100 t=on
+   W x=197 s=0 z=100 t=an
+   W x=226 s=0 z=100 t=inner
+   W x=275 s=0 z=100 t=span,
+   W x=325 s=0 z=100 t=so
+   W x=352 s=0 z=100 t=this
+   W x=394 s=0 z=100 t=travels
+  LINE y=290 x=0 align=0 mult=0.920 hfid=0 words=3
+   W x=0 s=0 z=100 t=the
+   W x=35 s=0 z=100 t=block-style
+   W x=129 s=0 z=100 t=path.
+  LINE y=312 x=0 align=0 mult=0.800 hfid=0 words=9
+   W x=14 s=0 z=100 t=8b.
+   W x=41 s=0 z=100 t=BLOCK
+   W x=90 s=0 z=100 t=LEVEL
+   W x=144 s=0 z=100 t=DISTINCT:
+   W x=215 s=0 z=100 t=an
+   W x=242 s=0 z=100 t=eighty
+   W x=296 s=0 z=100 t=percent
+   W x=353 s=0 z=100 t=block,
+   W x=402 s=0 z=100 t=outside
+  LINE y=331 x=0 align=0 mult=0.800 hfid=0 words=9
+   W x=0 s=0 z=100 t=both
+   W x=37 s=0 z=100 t=bands,
+   W x=85 s=0 z=100 t=which
+   W x=124 s=0 z=100 t=must
+   W x=161 s=0 z=100 t=keep
+   W x=192 s=0 z=100 t=its
+   W x=217 s=0 z=100 t=size
+   W x=248 s=0 z=100 t=either
+   W x=296 s=0 z=100 t=way.

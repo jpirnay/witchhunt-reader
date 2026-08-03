@@ -15,14 +15,31 @@
 #include "fontIds.h"
 
 namespace {
-// Release secondary framebuffer + font cache before TLS to free a large
-// contiguous heap block (~36 KB needed). The activity already silentRestart()s
-// on exit so the buffer never needs to be reallocated.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
+// Release the secondary (previous-frame) framebuffer + font cache before the
+// network session. This must happen BEFORE WiFi association, not just before
+// TLS: bringing up the WiFi stack needs its own tens of KB for RX/TX buffers and
+// the WPA supplicant, and with the ~52 KB buffer still resident association
+// fails silently (esp_wifi allocations return null, surfacing as a plain
+// connect timeout with no association event).
+//
+// Only the secondary buffer goes — the primary write buffer stays so the
+// activity can keep rendering status/success/failure feedback. That is the
+// difference from the web-server session, which releases both because it never
+// draws again. Per docs/secondary-buffer-management.md Scenario 1 / Pattern 1a,
+// RED RAM is seeded first so setSingleBufferFastDiff(true) diffs against a valid
+// baseline instead of stale controller content.
+//
+// No reallocSecondaryBuffer() pairing: every exit path silently restarts back
+// into KOReader settings (see onExit), and the reboot rebuilds clean state.
+void trimMemoryForNetworkSession(const GfxRenderer& renderer) {
   if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("KOSync", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
+  if (renderer.hasSecondaryBuffer()) {
+    // Seed the controller baseline while frameBufferActive is still valid.
+    if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+    if (renderer.releaseSecondaryBuffer()) {
+      LOG_DBG("KOSync", "Released secondary framebuffer before network session (~52 KB contiguous)");
+      renderer.setSingleBufferFastDiff(true);
+    }
   }
 }
 }  // namespace
@@ -49,7 +66,6 @@ void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
     }
   }
   requestUpdateAndWait();  // show status before blocking TLS call
-  trimMemoryBeforeTls(renderer);
 
   if (mode == Mode::REGISTER) {
     performRegistration();
@@ -106,6 +122,10 @@ void KOReaderAuthActivity::performRegistration() {
 void KOReaderAuthActivity::onEnter() {
   Activity::onEnter();
 
+  // Free the heap the WiFi stack needs before it is brought up, not after —
+  // association itself is the allocation-heavy step, well ahead of TLS.
+  trimMemoryForNetworkSession(renderer);
+
   // Check if already connected
   if (WiFi.status() == WL_CONNECTED) {
     onWifiSelectionComplete(true);
@@ -123,8 +143,13 @@ void KOReaderAuthActivity::onExit() {
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
     delay(30);
-    silentRestart();
   }
+  // Unconditional: onEnter() released the secondary framebuffer for the network
+  // session and nothing reallocates it, so every exit path — including a
+  // cancelled WiFi selection that never brought the radio up — must reboot to
+  // restore double-buffered rendering. Land back in KOReader settings, where the
+  // user started, rather than on Home.
+  silentRestartToKOReaderSettings();
 }
 
 void KOReaderAuthActivity::render(RenderLock&&) {
