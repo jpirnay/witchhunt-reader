@@ -1,0 +1,488 @@
+BOOK title=Test: br Section Break lang=en spine=6 toc=6 reliableToc=1
+SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=12 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
+   W x=-6 s=1 z=100 t=Ch
+   W x=42 s=1 z=100 t=1:
+   W x=78 s=1 z=100 t=Standalone
+   W x=274 s=1 z=100 t=<br>
+   W x=348 s=1 z=100 t=Section
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=189 s=1 z=100 t=Break
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=PASS:
+   W x=82 s=0 z=100 t=A
+   W x=105 s=0 z=100 t=visible
+   W x=177 s=0 z=100 t=blank-line
+   W x=282 s=0 z=100 t=gap
+   W x=326 s=0 z=100 t=should
+   W x=402 s=0 z=100 t=appear
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=between
+   W x=66 s=0 z=100 t=the
+   W x=103 s=0 z=100 t=two
+   W x=137 s=0 z=100 t=sections
+   W x=216 s=0 z=100 t=below.
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=167 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=313 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=76 s=0 z=100 t=The
+   W x=112 s=0 z=100 t=gap
+   W x=150 s=0 z=100 t=above
+   W x=210 s=0 z=100 t=should
+   W x=280 s=0 z=100 t=be
+   W x=304 s=0 z=100 t=roughly
+   W x=384 s=0 z=100 t=one
+   W x=425 s=0 z=100 t=line
+  LINE y=337 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=tall
+   W x=46 s=0 z=100 t=(same
+   W x=103 s=0 z=100 t=as
+   W x=130 s=0 z=100 t=a
+   W x=148 s=0 z=100 t=blank
+   W x=200 s=0 z=100 t=line).
+SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=166 s=1 z=100 t=Ch
+   W x=214 s=1 z=100 t=2:
+   W x=251 s=1 z=100 t=<br
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=61 s=1 z=100 t=class="section-br"/>
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=PASS:
+   W x=82 s=0 z=100 t=A
+   W x=105 s=0 z=100 t=blank-line
+   W x=210 s=0 z=100 t=gap
+   W x=254 s=0 z=100 t=should
+   W x=330 s=0 z=100 t=appear
+   W x=398 s=0 z=100 t=between
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=43 s=0 z=100 t=two
+   W x=83 s=0 z=100 t=sections
+   W x=168 s=0 z=100 t=below,
+   W x=230 s=0 z=100 t=identical
+   W x=320 s=0 z=100 t=to
+   W x=354 s=0 z=100 t=Ch
+   W x=388 s=0 z=100 t=1,
+   W x=414 s=0 z=100 t=even
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=though
+   W x=74 s=0 z=100 t=the
+   W x=111 s=0 z=100 t=<br>
+   W x=153 s=0 z=100 t=carries
+   W x=218 s=0 z=100 t=a
+   W x=236 s=0 z=100 t=CSS
+   W x=276 s=0 z=100 t=class.
+  LINE y=167 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=215 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=17 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
+   W x=-8 s=1 z=100 t=Ch
+   W x=40 s=1 z=100 t=3:
+   W x=79 s=1 z=100 t=Multiple
+   W x=207 s=1 z=100 t=Consecutive
+   W x=404 s=1 z=100 t=<br>
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=160 s=1 z=100 t=Elements
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=PASS:
+   W x=77 s=0 z=100 t=Two
+   W x=111 s=0 z=100 t=blank
+   W x=167 s=0 z=100 t=lines
+   W x=221 s=0 z=100 t=should
+   W x=292 s=0 z=100 t=appear
+   W x=355 s=0 z=100 t=between
+   W x=425 s=0 z=100 t=the
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=sections
+   W x=79 s=0 z=100 t=(one
+   W x=128 s=0 z=100 t=per
+   W x=157 s=0 z=100 t=<br>).
+  LINE y=143 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=167 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=313 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=PASS:
+   W x=73 s=0 z=100 t=Three
+   W x=123 s=0 z=100 t=blank
+   W x=175 s=0 z=100 t=lines
+   W x=225 s=0 z=100 t=should
+   W x=292 s=0 z=100 t=appear
+   W x=351 s=0 z=100 t=below.
+  LINE y=338 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=386 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=435 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=459 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=483 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
+   W x=33 s=1 z=100 t=Ch
+   W x=81 s=1 z=100 t=4:
+   W x=121 s=1 z=100 t=Inline
+   W x=229 s=1 z=100 t=<br>
+   W x=303 s=1 z=100 t=Inside
+   W x=406 s=1 z=100 t=a
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=151 s=1 z=100 t=Paragraph
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=75 s=0 z=100 t=The
+   W x=110 s=0 z=100 t=two
+   W x=146 s=0 z=100 t=lines
+   W x=198 s=0 z=100 t=below
+   W x=248 s=0 z=100 t=should
+   W x=317 s=0 z=100 t=be
+   W x=340 s=0 z=100 t=adjacent
+   W x=424 s=0 z=100 t=with
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=NO
+   W x=26 s=0 z=100 t=extra
+   W x=83 s=0 z=100 t=gap
+   W x=123 s=0 z=100 t=between
+   W x=194 s=0 z=100 t=them.
+   W x=256 s=0 z=100 t=The
+   W x=294 s=0 z=100 t=<br>
+   W x=341 s=0 z=100 t=is
+   W x=367 s=0 z=100 t=inside
+   W x=427 s=0 z=100 t=the
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=paragraph
+   W x=93 s=0 z=100 t=and
+   W x=130 s=0 z=100 t=must
+   W x=176 s=0 z=100 t=only
+   W x=222 s=0 z=100 t=break
+   W x=271 s=0 z=100 t=the
+   W x=308 s=0 z=100 t=line.
+  LINE y=167 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=First
+   W x=63 s=0 z=100 t=line
+   W x=104 s=0 z=100 t=of
+   W x=132 s=0 z=100 t=the
+   W x=169 s=0 z=100 t=paragraph.
+  LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=Second
+   W x=85 s=0 z=100 t=line
+   W x=128 s=0 z=100 t=of
+   W x=158 s=0 z=100 t=the
+   W x=197 s=0 z=100 t=paragraph
+   W x=290 s=0 z=100 t=—
+   W x=305 s=0 z=100 t=directly
+   W x=378 s=0 z=100 t=below,
+   W x=436 s=0 z=100 t=no
+  LINE y=215 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=gap.
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=PASS:
+   W x=77 s=0 z=100 t=Above
+   W x=134 s=0 z=100 t=should
+   W x=205 s=0 z=100 t=look
+   W x=256 s=0 z=100 t=like
+   W x=298 s=0 z=100 t=two
+   W x=336 s=0 z=100 t=closely-spaced
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=lines,
+   W x=67 s=0 z=100 t=not
+   W x=115 s=0 z=100 t=like
+   W x=162 s=0 z=100 t=two
+   W x=205 s=0 z=100 t=paragraphs
+   W x=316 s=0 z=100 t=separated
+   W x=414 s=0 z=100 t=by
+   W x=443 s=0 z=100 t=a
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=blank
+   W x=52 s=0 z=100 t=line.
+SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=9 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
+   W x=30 s=1 z=100 t=Ch
+   W x=78 s=1 z=100 t=5:
+   W x=120 s=1 z=100 t=<br>
+   W x=194 s=1 z=100 t=After
+   W x=284 s=1 z=100 t=a
+   W x=315 s=1 z=100 t=Heading
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=73 s=0 z=100 t=There
+   W x=123 s=0 z=100 t=should
+   W x=190 s=0 z=100 t=be
+   W x=211 s=0 z=100 t=a
+   W x=229 s=0 z=100 t=blank-line
+   W x=325 s=0 z=100 t=gap
+   W x=360 s=0 z=100 t=between
+   W x=426 s=0 z=100 t=the
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=heading
+   W x=75 s=0 z=100 t=above
+   W x=132 s=0 z=100 t=and
+   W x=169 s=0 z=100 t=this
+   W x=212 s=0 z=100 t=paragraph.
+  LINE y=121 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=145 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=169 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.
+  LINE y=202 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=121 s=1 z=100 t=Section
+   W x=233 s=1 z=100 t=heading
+  LINE y=261 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=73 s=0 z=100 t=There
+   W x=123 s=0 z=100 t=should
+   W x=190 s=0 z=100 t=be
+   W x=211 s=0 z=100 t=a
+   W x=229 s=0 z=100 t=blank-line
+   W x=325 s=0 z=100 t=gap
+   W x=360 s=0 z=100 t=between
+   W x=426 s=0 z=100 t=the
+  LINE y=285 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=section
+   W x=70 s=0 z=100 t=heading
+   W x=145 s=0 z=100 t=and
+   W x=182 s=0 z=100 t=this
+   W x=225 s=0 z=100 t=paragraph.
+SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=0
+  LINE y=33 x=0 align=2 mult=1.600 hfid=0 words=6
+   W x=13 s=1 z=100 t=Ch
+   W x=61 s=1 z=100 t=6:
+   W x=105 s=1 z=100 t=<br>
+   W x=179 s=1 z=100 t=at
+   W x=227 s=1 z=100 t=Chapter
+   W x=355 s=1 z=100 t=Start
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=74 s=0 z=100 t=This
+   W x=114 s=0 z=100 t=heading
+   W x=190 s=0 z=100 t=should
+   W x=258 s=0 z=100 t=appear
+   W x=318 s=0 z=100 t=near
+   W x=365 s=0 z=100 t=the
+   W x=403 s=0 z=100 t=top
+   W x=438 s=0 z=100 t=of
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=the
+   W x=39 s=0 z=100 t=page
+   W x=85 s=0 z=100 t=with
+   W x=127 s=0 z=100 t=no
+   W x=158 s=0 z=100 t=large
+   W x=215 s=0 z=100 t=blank
+   W x=269 s=0 z=100 t=area
+   W x=318 s=0 z=100 t=above
+   W x=377 s=0 z=100 t=it
+   W x=401 s=0 z=100 t=despite
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=<br>
+   W x=79 s=0 z=100 t=being
+   W x=128 s=0 z=100 t=the
+   W x=165 s=0 z=100 t=very
+   W x=208 s=0 z=100 t=first
+   W x=257 s=0 z=100 t=element.
+  LINE y=153 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Lorem
+   W x=75 s=0 z=100 t=ipsum
+   W x=123 s=0 z=100 t=dolor
+   W x=178 s=0 z=100 t=sit
+   W x=209 s=0 z=100 t=amet,
+   W x=264 s=0 z=100 t=consectetur
+   W x=373 s=0 z=100 t=adipiscing
+  LINE y=177 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=elit,
+   W x=51 s=0 z=100 t=sed
+   W x=86 s=0 z=100 t=do
+   W x=115 s=0 z=100 t=eiusmod
+   W x=189 s=0 z=100 t=tempor
+   W x=253 s=0 z=100 t=incididunt
+   W x=346 s=0 z=100 t=ut
+   W x=376 s=0 z=100 t=labore
+   W x=441 s=0 z=100 t=et
+  LINE y=201 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dolore
+   W x=64 s=0 z=100 t=magna
+   W x=126 s=0 z=100 t=aliqua.

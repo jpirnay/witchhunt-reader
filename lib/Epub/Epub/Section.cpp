@@ -30,7 +30,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 64;  // bumped: main-text font-size normalization
+constexpr uint8_t SECTION_FILE_VERSION = 65;  // bumped: near-body font-size normalization (±10% snap)
+                                              // v64: main-text font-size normalization
                                               // v63: drop-cap float zones + ink-metric cap placement
                                               // (62 was consumed by an earlier iteration of this feature)
                                               // v61: TextBlock no longer serializes the block-spacing
@@ -140,10 +141,7 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 }
 }  // namespace
 
-uint32_t Section::calculatePropertyHash(int fontId, float lineCompression, bool extraParagraphSpacing,
-                                        uint8_t paragraphAlignment, uint16_t viewportWidth, uint16_t viewportHeight,
-                                        bool hyphenationEnabled, bool embeddedStyle, bool bionicReadingEnabled,
-                                        bool inlineFootnotePreviews, uint8_t imageRendering) {
+uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[64];
   size_t offset = 0;
 
@@ -152,20 +150,21 @@ uint32_t Section::calculatePropertyHash(int fontId, float lineCompression, bool 
     offset += size;
   };
 
-  append(&fontId, sizeof(fontId));
-  append(&lineCompression, sizeof(lineCompression));
-  append(&extraParagraphSpacing, sizeof(extraParagraphSpacing));
-  append(&paragraphAlignment, sizeof(paragraphAlignment));
-  append(&viewportWidth, sizeof(viewportWidth));
-  append(&viewportHeight, sizeof(viewportHeight));
-  append(&hyphenationEnabled, sizeof(hyphenationEnabled));
-  append(&embeddedStyle, sizeof(embeddedStyle));
-  append(&bionicReadingEnabled, sizeof(bionicReadingEnabled));
-  append(&inlineFootnotePreviews, sizeof(inlineFootnotePreviews));
-  if (inlineFootnotePreviews) {
+  append(&p.fontId, sizeof(p.fontId));
+  append(&p.lineCompression, sizeof(p.lineCompression));
+  append(&p.extraParagraphSpacing, sizeof(p.extraParagraphSpacing));
+  append(&p.paragraphAlignment, sizeof(p.paragraphAlignment));
+  append(&p.viewportWidth, sizeof(p.viewportWidth));
+  append(&p.viewportHeight, sizeof(p.viewportHeight));
+  append(&p.hyphenationEnabled, sizeof(p.hyphenationEnabled));
+  append(&p.fontSizeNormalization, sizeof(p.fontSizeNormalization));
+  append(&p.embeddedStyle, sizeof(p.embeddedStyle));
+  append(&p.bionicReadingEnabled, sizeof(p.bionicReadingEnabled));
+  append(&p.inlineFootnotePreviews, sizeof(p.inlineFootnotePreviews));
+  if (p.inlineFootnotePreviews) {
     append(&INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION, sizeof(INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION));
   }
-  append(&imageRendering, sizeof(imageRendering));
+  append(&p.imageRendering, sizeof(p.imageRendering));
 
   return fnv1a(buffer, offset);
 }
@@ -309,25 +308,19 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for paragraph LUT offset (patched later)
 }
 
-bool Section::loadSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
-                              const uint8_t paragraphAlignment, const uint16_t viewportWidth,
-                              const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
-                              const bool bionicReadingEnabled, const bool inlineFootnotePreviews,
-                              const uint8_t imageRendering) {
+bool Section::loadSectionFile(const BuildParams& p) {
   truncatedCache = false;
   embeddedStyleFallback = false;
-  uint32_t propertyHash = calculatePropertyHash(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment,
-                                                viewportWidth, viewportHeight, hyphenationEnabled, embeddedStyle,
-                                                bionicReadingEnabled, inlineFootnotePreviews, imageRendering);
+  uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
 
   bool usingEmbeddedStyleFallback = false;
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     // Fallback: allow loading a no-CSS cache variant when embedded CSS is enabled.
-    if (embeddedStyle) {
-      const uint32_t fallbackHash = calculatePropertyHash(
-          fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth, viewportHeight,
-          hyphenationEnabled, false, bionicReadingEnabled, inlineFootnotePreviews, imageRendering);
+    if (p.embeddedStyle) {
+      BuildParams noCss = p;
+      noCss.embeddedStyle = false;
+      const uint32_t fallbackHash = calculatePropertyHash(noCss);
       const std::string fallbackPath = getSectionFilePath(fallbackHash);
       if (Storage.openFileForRead("SCT", fallbackPath, file)) {
         filePath = fallbackPath;
@@ -375,12 +368,12 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     serialization::readPod(file, fileParseComplete);
 
     const bool embeddedStyleMatches =
-        (embeddedStyle == fileEmbeddedStyle) || (usingEmbeddedStyleFallback && !fileEmbeddedStyle);
-    if (fontId != fileFontId || lineCompression != fileLineCompression ||
-        extraParagraphSpacing != fileExtraParagraphSpacing || paragraphAlignment != fileParagraphAlignment ||
-        viewportWidth != fileViewportWidth || viewportHeight != fileViewportHeight ||
-        hyphenationEnabled != fileHyphenationEnabled || !embeddedStyleMatches ||
-        bionicReadingEnabled != fileBionicReadingEnabled || imageRendering != fileImageRendering) {
+        (p.embeddedStyle == fileEmbeddedStyle) || (usingEmbeddedStyleFallback && !fileEmbeddedStyle);
+    if (p.fontId != fileFontId || p.lineCompression != fileLineCompression ||
+        p.extraParagraphSpacing != fileExtraParagraphSpacing || p.paragraphAlignment != fileParagraphAlignment ||
+        p.viewportWidth != fileViewportWidth || p.viewportHeight != fileViewportHeight ||
+        p.hyphenationEnabled != fileHyphenationEnabled || !embeddedStyleMatches ||
+        p.bionicReadingEnabled != fileBionicReadingEnabled || p.imageRendering != fileImageRendering) {
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();  // closes file before removal
       return false;
@@ -607,9 +600,7 @@ Section::~Section() { abortSectionBuild(); }
 
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
-  st.propertyHash = calculatePropertyHash(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment,
-                                          p.viewportWidth, p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle,
-                                          p.bionicReadingEnabled, p.inlineFootnotePreviews, p.imageRendering);
+  st.propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(st.propertyHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
@@ -718,7 +709,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // so this reference is valid for the visitor's whole lifetime, including across slices.
   st.visitor = std::make_unique<ChapterHtmlSlimParser>(
       epub, renderer, p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
-      p.viewportHeight, p.hyphenationEnabled, p.bionicReadingEnabled,
+      p.viewportHeight, p.hyphenationEnabled, p.fontSizeNormalization, p.bionicReadingEnabled,
       [this, &st](std::unique_ptr<Page> page) { st.lut.emplace_back(this->onPageComplete(std::move(page))); },
       p.embeddedStyle, st.contentBase, st.imageBasePath, p.imageRendering, std::move(tocAnchors), st.progressFn,
       st.cssParser, epub->getImageManifest());
@@ -1208,36 +1199,18 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   return BuildPhaseResult::Done;
 }
 
-bool Section::createSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
-                                const uint8_t paragraphAlignment, const uint16_t viewportWidth,
-                                const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
-                                const bool bionicReadingEnabled, const bool inlineFootnotePreviews,
-                                const uint8_t imageRendering, const std::function<void(int)>& progressFn,
-                                const bool skipEviction, const FontSizeLadder& fontSizeLadder) {
+bool Section::createSectionFile(const BuildParams& p, const std::function<void(int)>& progressFn,
+                                const bool skipEviction) {
   if (!skipEviction) {
     evictOldVariants();
   }
-
-  BuildParams params;
-  params.fontId = fontId;
-  params.lineCompression = lineCompression;
-  params.extraParagraphSpacing = extraParagraphSpacing;
-  params.paragraphAlignment = paragraphAlignment;
-  params.viewportWidth = viewportWidth;
-  params.viewportHeight = viewportHeight;
-  params.hyphenationEnabled = hyphenationEnabled;
-  params.embeddedStyle = embeddedStyle;
-  params.bionicReadingEnabled = bionicReadingEnabled;
-  params.inlineFootnotePreviews = inlineFootnotePreviews;
-  params.imageRendering = imageRendering;
-  params.fontSizeLadder = fontSizeLadder;
 
   // Run-to-completion path: pump the incremental build with no time budget. budgetMs == 0
   // never yields mid-parse, so the only More this loop sees is the restart after a
   // RetryNoCss downgrade — foreground behaviour is unchanged. If a background build for
   // this exact variant is already in flight, the pump resumes it instead of starting over.
   while (true) {
-    switch (stepSectionBuild(params, /*budgetMs=*/0, progressFn, skipEviction)) {
+    switch (stepSectionBuild(p, /*budgetMs=*/0, progressFn, skipEviction)) {
       case BuildStep::Done:
         return true;
       case BuildStep::Failed:
@@ -1295,10 +1268,7 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
 
 Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const uint32_t budgetMs,
                                              const std::function<void(int)>& progressFn, const bool skipEviction) {
-  const uint32_t requestedHash = calculatePropertyHash(
-      params.fontId, params.lineCompression, params.extraParagraphSpacing, params.paragraphAlignment,
-      params.viewportWidth, params.viewportHeight, params.hyphenationEnabled, params.embeddedStyle,
-      params.bionicReadingEnabled, params.inlineFootnotePreviews, params.imageRendering);
+  const uint32_t requestedHash = calculatePropertyHash(params);
   // A live partial build is only resumable for the exact variant it was started for;
   // when the request changed (font/margins/...) the partial cache is the wrong file.
   if (buildState_ && buildState_->requestedHash != requestedHash) {

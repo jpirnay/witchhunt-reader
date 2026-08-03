@@ -23,6 +23,7 @@ struct Profile {
   uint16_t viewportWidth = 460;
   uint16_t viewportHeight = 760;
   bool hyphenationEnabled = false;
+  bool fontSizeNormalization = true;
   bool embeddedStyle = true;
   bool bionicReadingEnabled = false;
   bool inlineFootnotePreviews = true;
