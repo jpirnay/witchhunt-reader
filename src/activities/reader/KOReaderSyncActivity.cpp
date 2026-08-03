@@ -1,6 +1,5 @@
 #include "KOReaderSyncActivity.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -15,6 +14,7 @@
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -28,35 +28,6 @@ void logSyncMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
-}
-
-// Frees renderer-owned caches inside the standalone sync activity right before
-// network work. The reader activity is already gone by this point, but sync UI
-// rendering (status popups, compare screen, result screen) can repopulate font
-// caches and chip away at the largest free block needed for TLS.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
-  if (auto* cacheManager = renderer.getFontCacheManager()) {
-    cacheManager->clearCache();
-    cacheManager->resetStats();
-    LOG_DBG("KOSync", "Cleared font cache before TLS");
-  }
-  // Release the ~52 KB secondary (previous-frame) framebuffer for the duration of the sync.
-  // TLS needs a large *contiguous* block (~36 KB); the secondary buffer is a big resident
-  // allocation that fragments the heap so the largest free block can't reach that threshold
-  // even when total free looks sufficient. Sync UI (status popups) renders fine on the primary
-  // buffer alone, and the device silently reboots after a sync (see resumeReader -> silentRestart),
-  // so it never needs to be reallocated in-place — the reboot rebuilds clean state.
-  if (renderer.hasSecondaryBuffer()) {
-    if (renderer.releaseSecondaryBuffer()) {
-      LOG_DBG("KOSync", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-      // The controller still holds the last displayed frame in RED RAM, and the
-      // sync UI only ever issues plain BW full-frame redraws, so fast
-      // differential refresh can continue against that baseline instead of
-      // downgrading every status update to a half/full waveform (X4 only; X3
-      // fast differential is unaffected by the release).
-      renderer.setSingleBufferFastDiff(true);
-    }
-  }
 }
 
 bool shouldSyncNtpNow() {
@@ -105,7 +76,7 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   requestUpdate();
 
   logSyncMemSnapshot("before_performSync");
-  trimMemoryBeforeTls(renderer);
+  trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_performSync");
 
   performSync();
@@ -421,7 +392,7 @@ void KOReaderSyncActivity::performUpload() {
 
   // Sync UI rendering can repopulate glyph caches after the initial GET / compare
   // phase, so trim again right before the upload request.
-  trimMemoryBeforeTls(renderer);
+  trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_updateProgress");
 
   // Capture upload-phase memory separately from fetch phase to diagnose failures

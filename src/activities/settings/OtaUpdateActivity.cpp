@@ -1,31 +1,16 @@
 #include "OtaUpdateActivity.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <WiFi.h>
 
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
-
-namespace {
-// Ported from crosspoint-reader/crosspoint-reader: release large allocations
-// before TLS so the wolfSSL handshake can get contiguous buffers on
-// constrained heaps.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("OTA", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
-  }
-}
-}  // namespace
 
 void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -42,7 +27,9 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
 
-  trimMemoryBeforeTls(renderer);
+  // Re-trim: the status screens rendered since onEnter can have repopulated the
+  // font cache. Idempotent - the secondary buffer is already gone by now.
+  trimMemoryForNetworkSession(renderer, "OTA");
 
   const auto res = updater.checkForUpdate();
   if (res != OtaUpdater::OK) {
@@ -74,9 +61,17 @@ void OtaUpdateActivity::onWifiSelectionComplete(const bool success) {
 void OtaUpdateActivity::onEnter() {
   Activity::onEnter();
 
-  // Turn on WiFi immediately
-  LOG_DBG("OTA", "Turning on WiFi...");
-  WiFi.mode(WIFI_STA);
+  // Free the heap the WiFi stack needs before it is brought up, not after -
+  // association itself is the allocation-heavy step, well ahead of TLS. Matters
+  // most here because SettingsActivity is still on the stack below us with its
+  // per-category SettingInfo vectors resident, fragmenting the heap.
+  // WifiSelectionActivity sets WIFI_STA itself, so no radio work happens here.
+  trimMemoryForNetworkSession(renderer, "OTA");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    onWifiSelectionComplete(true);
+    return;
+  }
 
   // Launch WiFi selection subactivity
   LOG_DBG("OTA", "Launching WifiSelectionActivity...");
