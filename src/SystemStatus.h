@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <FlashFontPartition.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -8,8 +9,6 @@
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
-
-#include <BoardConfig.h>
 
 #include "HalGPIO.h"
 #include "HalPowerManager.h"
@@ -52,8 +51,8 @@ struct SystemStatus {
   const char* displaySdk;         // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
   const char* deviceType;         // "X3" or "X4"
   const char* displayController;  // panel controller silicon resolved at boot, e.g. "UC8253"
-  uint16_t displayWidth;   // Native panel width in pixels (long edge)
-  uint16_t displayHeight;  // Native panel height in pixels (short edge)
+  uint16_t displayWidth;          // Native panel width in pixels (long edge)
+  uint16_t displayHeight;         // Native panel height in pixels (short edge)
   std::string chipVersion;
   uint32_t cpuFreqMHz;
   std::string ip;
