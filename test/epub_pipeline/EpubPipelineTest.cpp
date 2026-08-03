@@ -57,8 +57,8 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   profile.fontSizeNormalization = c.fontSizeNormalization;
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
-  EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (fontSizeNormalization="
-                  << (c.fontSizeNormalization ? "on" : "off") << ")\n"
+  EXPECT_TRUE(ok) << "pipeline failed for " << c.epub
+                  << " (fontSizeNormalization=" << (c.fontSizeNormalization ? "on" : "off") << ")\n"
                   << dump.str();
   return dump.str();
 }
@@ -98,8 +98,8 @@ TEST_P(EpubPipelineTest, MatchesGolden) {
   ASSERT_TRUE(in) << "missing golden " << goldenPath << " — run with UPDATE_GOLDENS=1 to create it";
   std::stringstream golden;
   golden << in.rdbuf();
-  EXPECT_EQ(golden.str(), dump) << "layout drift vs golden for " << c.epub << " (fontSizeNormalization="
-                                << (c.fontSizeNormalization ? "on" : "off")
+  EXPECT_EQ(golden.str(), dump) << "layout drift vs golden for " << c.epub
+                                << " (fontSizeNormalization=" << (c.fontSizeNormalization ? "on" : "off")
                                 << ") — if intentional, regenerate with UPDATE_GOLDENS=1 and explain in the commit";
 }
 
