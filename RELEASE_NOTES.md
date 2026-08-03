@@ -7,6 +7,7 @@ User-facing changes only. Full commit history is in git log.
  - Fix: The webserver settings screen could be mangled if the koreader password contained special character
  - Fix: Koreader server authorisation and registration could fail under heavy memory load
  - Fix: The involuntary "wake on short power button press" has been resolved
+ - Fix: Relative image sizing recognizes outer blocks
 
 ## 2.20 — 2026-08-02
 
