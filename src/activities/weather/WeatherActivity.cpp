@@ -1,6 +1,5 @@
 #include "WeatherActivity.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -17,25 +16,12 @@
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "WeatherSettingsActivity.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
-// Frees the ~52 KB secondary framebuffer and clears the font cache before the
-// first HTTPS request. TLS needs a large contiguous block (~36 KB); the
-// secondary buffer is a resident allocation that can block it even when total
-// free heap looks sufficient. Safe because onExit() always silentRestart()s.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("WEA", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
-  }
-}
-
 inline bool getBitmapBit(const uint8_t* bitmap, const int size, const int x, const int y) {
   const int rowBytes = size / 8;
   const int idx = y * rowBytes + (x / 8);
@@ -336,7 +322,7 @@ void WeatherActivity::fetchWeather() {
     return;
   }
 
-  trimMemoryBeforeTls(renderer);
+  trimMemoryForNetworkSession(renderer, "WEA");
   LOG_DBG("WEA", "fetchWeather[3] WeatherClient::getWeather before");
   weatherData = WeatherClient::getWeather(WEATHER_SETTINGS, true);
   LOG_DBG("WEA", "fetchWeather[4] WeatherClient::getWeather after valid=%d", weatherData.valid ? 1 : 0);

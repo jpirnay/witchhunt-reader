@@ -2,7 +2,6 @@
 
 #include <ArduinoJson.h>
 #include <Epub.h>
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -22,6 +21,7 @@
 #include "MappedInputManager.h"
 #include "OpdsFormatLabel.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -33,22 +33,6 @@
 
 namespace {
 constexpr int PAGE_ITEMS = 23;
-
-// Mirrors KOReaderSyncActivity::trimMemoryBeforeTls: frees the ~52 KB secondary
-// framebuffer and clears the font cache right before the first HTTPS request.
-// TLS needs a large contiguous block (~36 KB); the secondary buffer is a
-// resident allocation that can prevent the allocator from finding it even when
-// total free heap looks sufficient. Safe here because onExit() always silentRestart()s,
-// so the secondary buffer never needs to be reallocated.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("OPDS", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
-  }
-}
 
 // Hard ceiling on entries held from a single feed. Each entry costs 4 bytes in
 // the in-RAM entryOffsets index; the bodies live on the SD cache file. Well-behaved
@@ -631,7 +615,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   // Trim memory once per session before the first TLS connection, regardless of
   // whether we arrived here via the WiFi-first path or directly from a cache hit.
   if (!memoryTrimmed) {
-    trimMemoryBeforeTls(renderer);
+    trimMemoryForNetworkSession(renderer, "OPDS");
     memoryTrimmed = true;
   }
 

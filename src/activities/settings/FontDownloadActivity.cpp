@@ -1,7 +1,6 @@
 #include "FontDownloadActivity.h"
 
 #include <ArduinoJson.h>
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -14,26 +13,12 @@
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
-
-namespace {
-// Release large allocations before TLS so the wolfSSL handshake can get
-// contiguous buffers on constrained heaps. See OtaUpdateActivity for the
-// reference pattern.
-void trimMemoryBeforeTls(const GfxRenderer& renderer) {
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("FONT", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
-  }
-}
-}  // namespace
 
 FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("FontDownload", renderer, mappedInput), fontInstaller_(sdFontSystem.registry()) {}
@@ -42,7 +27,19 @@ FontDownloadActivity::FontDownloadActivity(GfxRenderer& renderer, MappedInputMan
 
 void FontDownloadActivity::onEnter() {
   Activity::onEnter();
-  WiFi.mode(WIFI_STA);
+
+  // Free the heap the WiFi stack needs before it is brought up, not after -
+  // association itself is the allocation-heavy step, well ahead of TLS. Matters
+  // most here because SettingsActivity is still on the stack below us with its
+  // per-category SettingInfo vectors resident, fragmenting the heap.
+  // WifiSelectionActivity sets WIFI_STA itself, so no radio work happens here.
+  trimMemoryForNetworkSession(renderer, "FONT");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    onWifiSelectionComplete(true);
+    return;
+  }
+
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
@@ -74,7 +71,9 @@ void FontDownloadActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdateAndWait();
 
-  trimMemoryBeforeTls(renderer);
+  // Re-trim: the status screens rendered since onEnter can have repopulated the
+  // font cache. Idempotent - the secondary buffer is already gone by now.
+  trimMemoryForNetworkSession(renderer, "FONT");
 
   if (!fetchAndParseManifest()) {
     RenderLock lock(*this);

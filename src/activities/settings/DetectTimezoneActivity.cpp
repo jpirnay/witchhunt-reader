@@ -1,7 +1,6 @@
 #include "DetectTimezoneActivity.h"
 
 #include <ArduinoJson.h>
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -13,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -207,6 +207,12 @@ bool detectTimezoneSetting(uint8_t& outSetting, std::string& outIana, bool& outD
 void DetectTimezoneActivity::onEnter() {
   Activity::onEnter();
 
+  // Free the heap the WiFi stack needs before it is brought up, not after -
+  // association itself is the allocation-heavy step, well ahead of TLS. Matters
+  // most here because SettingsActivity is still on the stack below us with its
+  // per-category SettingInfo vectors resident, fragmenting the heap.
+  trimMemoryForNetworkSession(renderer, "CLK");
+
   if (WiFi.status() == WL_CONNECTED) {
     onWifiSelectionComplete(true);
     return;
@@ -250,13 +256,9 @@ void DetectTimezoneActivity::onWifiSelectionCancelled() { finish(); }
 
 void DetectTimezoneActivity::performDetect() {
   wifiWasUsed_ = true;
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  if (renderer.hasSecondaryBuffer() && renderer.releaseSecondaryBuffer()) {
-    LOG_DBG("CLK", "Released secondary framebuffer before TLS (~52 KB contiguous)");
-    renderer.setSingleBufferFastDiff(true);
-  }
+  // Re-trim: the status screens rendered since onEnter can have repopulated the
+  // font cache. Idempotent - the secondary buffer is already gone by now.
+  trimMemoryForNetworkSession(renderer, "CLK");
 
   uint8_t detected = SETTINGS.timeZone;
   detectedTimezone.clear();

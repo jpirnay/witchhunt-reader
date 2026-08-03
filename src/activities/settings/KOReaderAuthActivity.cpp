@@ -1,6 +1,5 @@
 #include "KOReaderAuthActivity.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -10,39 +9,10 @@
 #include "KOReaderSyncClient.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-
-namespace {
-// Release the secondary (previous-frame) framebuffer + font cache before the
-// network session. This must happen BEFORE WiFi association, not just before
-// TLS: bringing up the WiFi stack needs its own tens of KB for RX/TX buffers and
-// the WPA supplicant, and with the ~52 KB buffer still resident association
-// fails silently (esp_wifi allocations return null, surfacing as a plain
-// connect timeout with no association event).
-//
-// Only the secondary buffer goes — the primary write buffer stays so the
-// activity can keep rendering status/success/failure feedback. That is the
-// difference from the web-server session, which releases both because it never
-// draws again. Per docs/secondary-buffer-management.md Scenario 1 / Pattern 1a,
-// RED RAM is seeded first so setSingleBufferFastDiff(true) diffs against a valid
-// baseline instead of stale controller content.
-//
-// No reallocSecondaryBuffer() pairing: every exit path silently restarts back
-// into KOReader settings (see onExit), and the reboot rebuilds clean state.
-void trimMemoryForNetworkSession(const GfxRenderer& renderer) {
-  if (auto* cache = renderer.getFontCacheManager()) cache->clearCache();
-  if (renderer.hasSecondaryBuffer()) {
-    // Seed the controller baseline while frameBufferActive is still valid.
-    if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
-    if (renderer.releaseSecondaryBuffer()) {
-      LOG_DBG("KOSync", "Released secondary framebuffer before network session (~52 KB contiguous)");
-      renderer.setSingleBufferFastDiff(true);
-    }
-  }
-}
-}  // namespace
 
 void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -124,7 +94,7 @@ void KOReaderAuthActivity::onEnter() {
 
   // Free the heap the WiFi stack needs before it is brought up, not after —
   // association itself is the allocation-heavy step, well ahead of TLS.
-  trimMemoryForNetworkSession(renderer);
+  trimMemoryForNetworkSession(renderer, "KOSync");
 
   // Check if already connected
   if (WiFi.status() == WL_CONNECTED) {
