@@ -87,18 +87,24 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     const auto spineStart = std::chrono::steady_clock::now();
     Section section(epub, i, renderer);
-    if (!section.createSectionFile(profile.fontId, profile.lineCompression, profile.extraParagraphSpacing,
-                                   profile.paragraphAlignment, profile.viewportWidth, profile.viewportHeight,
-                                   profile.hyphenationEnabled, profile.embeddedStyle, profile.bionicReadingEnabled,
-                                   profile.inlineFootnotePreviews, profile.imageRendering, {}, /*skipEviction=*/true,
-                                   {})) {
+    Section::BuildParams p;
+    p.fontId = profile.fontId;
+    p.lineCompression = profile.lineCompression;
+    p.extraParagraphSpacing = profile.extraParagraphSpacing;
+    p.paragraphAlignment = profile.paragraphAlignment;
+    p.viewportWidth = profile.viewportWidth;
+    p.viewportHeight = profile.viewportHeight;
+    p.hyphenationEnabled = profile.hyphenationEnabled;
+    p.fontSizeNormalization = profile.fontSizeNormalization;
+    p.embeddedStyle = profile.embeddedStyle;
+    p.bionicReadingEnabled = profile.bionicReadingEnabled;
+    p.inlineFootnotePreviews = profile.inlineFootnotePreviews;
+    p.imageRendering = profile.imageRendering;
+    if (!section.createSectionFile(p, {}, /*skipEviction=*/true)) {
       out << "SPINE " << i << " ERROR build failed\n";
       return false;
     }
-    if (!section.loadSectionFile(profile.fontId, profile.lineCompression, profile.extraParagraphSpacing,
-                                 profile.paragraphAlignment, profile.viewportWidth, profile.viewportHeight,
-                                 profile.hyphenationEnabled, profile.embeddedStyle, profile.bionicReadingEnabled,
-                                 profile.inlineFootnotePreviews, profile.imageRendering)) {
+    if (!section.loadSectionFile(p)) {
       out << "SPINE " << i << " ERROR load failed\n";
       return false;
     }

@@ -301,10 +301,18 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
       sizePct = sizePct * entry.fontSizePct / 100;
     }
   }
-  // Mirror FontSizeLadder::kResidualDeadZone at the word level: composed sizes within
-  // 3% of 100 render as plain body text — imperceptible size-wise, and it keeps such
-  // lines on the zero-cost uniform paths (no per-word size array, no scaled draws).
-  if (sizePct >= 97 && sizePct <= 103) {
+  // Snap composed word sizes near body to plain body text. When font-size normalization is
+  // enabled the band is wide (±10%): publishers routinely wrap whole paragraphs in a
+  // <span style="font-size:0.92em"> (etc.), where the per-glyph shrink is below the size
+  // just-noticeable threshold yet tiring across a page and forces per-glyph resampling.
+  // Snapping here — before any block split — keeps such text native regardless of length,
+  // and keeps these lines on the zero-cost uniform paths (no per-word size array, no
+  // scaled draws). Genuinely distinct sizes (footnotes ~0.8, captions, sup/sub) fall
+  // outside the band and survive. Deliberate <10% per-word gradients lose their faintest
+  // steps, an accepted trade for body-text comfort. When disabled, only a tight ±3% band
+  // is applied (float-rounding cleanup), so publisher near-body wrappers are preserved.
+  const int deadZone = fontSizeNormalization ? 10 : 3;
+  if (sizePct >= 100 - deadZone && sizePct <= 100 + deadZone) {
     sizePct = 100;
   }
   effectiveSizePct = static_cast<uint8_t>(
