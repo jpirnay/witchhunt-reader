@@ -117,6 +117,15 @@ class ChapterHtmlSlimParser final : public Print {
   // exactly the FontDecompressor's four page slots. The first block to resolve off-body
   // claims the slot; blocks that would need a different font keep the scale fallback.
   int32_t auxFontId_ = 0;
+  // EPUBs often set their running prose to a nominal CSS size such as 10pt,
+  // 87%, or 0.875em. The reader's selected font size is our body size. Root
+  // (html/body) sizes are normalized as inherited context; the main-text
+  // baseline comes from tag-level paragraph/list rules so prose maps to 1.0
+  // and headings/notes remain proportional to that prose size.
+  float rootFontSizeBaseline_ = 1.0f;
+  bool hasRootFontSizeBaseline_ = false;
+  float mainTextFontSizeBaseline_ = 1.0f;
+  bool hasMainTextFontSizeBaseline_ = false;
   float lineCompression;
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
@@ -285,6 +294,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Apply kSupSubDefaultSizePct when the entry resolves to sup/sub. Call BEFORE
   // applyCssFontSizeToEntry so publisher CSS (e.g. `.sup { font-size: 0.7em }`) wins.
   static void applySupSubDefaultSize(StyleStackEntry& entry);
+  void initializeFontSizeBaseline();
+  void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
+  CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;
   bool ensureHeapForTextLayout(const char* phase);
   void startNewTextBlock(const BlockStyle& blockStyle);
   bool flushPartWordBuffer();
