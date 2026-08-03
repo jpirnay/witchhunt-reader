@@ -9,8 +9,34 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 
+#include <BoardConfig.h>
+
 #include "HalGPIO.h"
 #include "HalPowerManager.h"
+
+// Human-readable name for the panel controller silicon actually resolved at
+// boot (BoardConfig::ACTIVE.displayController) — reflects per-batch swaps
+// like UC8253 -> UC8279d or SSD1677 -> UC8179 (see HalGPIO::begin() /
+// freeink::applyXteinkDisplayController).
+inline const char* displayControllerName(BoardConfig::DisplayController controller) {
+  switch (controller) {
+    case BoardConfig::DisplayController::SSD1677:
+      return "SSD1677";
+    case BoardConfig::DisplayController::UC8253:
+      return "UC8253";
+    case BoardConfig::DisplayController::UC8279:
+      return "UC8279";
+    case BoardConfig::DisplayController::UC8179:
+      return "UC8179";
+    case BoardConfig::DisplayController::ED2208:
+      return "ED2208";
+    case BoardConfig::DisplayController::LgfxEpd:
+      return "LovyanGFX";
+    case BoardConfig::DisplayController::IT8951:
+      return "IT8951";
+  }
+  return "Unknown";
+}
 
 // Display/hardware SDK identity, injected by scripts/git_branch.py from the
 // EInkDisplay lib_dep (e.g. "FreeInk 61aa2aa"). Fallback keeps builds compiling
@@ -23,8 +49,9 @@
 // System Information activity so both surfaces show consistent data.
 struct SystemStatus {
   const char* version;
-  const char* displaySdk;  // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
-  const char* deviceType;  // "X3" or "X4"
+  const char* displaySdk;         // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
+  const char* deviceType;         // "X3" or "X4"
+  const char* displayController;  // panel controller silicon resolved at boot, e.g. "UC8253"
   uint16_t displayWidth;   // Native panel width in pixels (long edge)
   uint16_t displayHeight;  // Native panel height in pixels (short edge)
   std::string chipVersion;
@@ -60,6 +87,7 @@ struct SystemStatus {
       s.displayWidth = 800;
       s.displayHeight = 480;
     }
+    s.displayController = displayControllerName(BoardConfig::ACTIVE.displayController);
     s.chipVersion = ESP.getChipModel();
     s.chipVersion += " rev ";
     s.chipVersion += std::to_string(ESP.getChipRevision());
