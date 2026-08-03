@@ -37,10 +37,6 @@
 // from being read as charging.
 #define USB_CHARGE_CURRENT_MIN_MA 5
 
-// Analog DS3231 RTC I2C
-#define I2C_ADDR_DS3231 0x68  // RTC I2C address
-#define DS3231_SEC_REG 0x00   // Seconds command code (BCD)
-
 // QST QMI8658 IMU I2C
 #define I2C_ADDR_QMI8658 0x6B        // IMU I2C address
 #define I2C_ADDR_QMI8658_ALT 0x6A    // IMU I2C fallback address
