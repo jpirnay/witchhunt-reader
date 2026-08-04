@@ -512,8 +512,31 @@ extern "C" __attribute__((constructor(101))) void heapProbePreCppCtors() {
 static BootHeapProbe s_probeMainLast(5);
 #endif
 
+// Maps the user's configured power-button sleep gesture(s) to the matching wake
+// gesture(s), so waking mirrors however the device was put to sleep: a long hold
+// wakes from a long-hold sleep, a double click wakes from a double-click sleep, and
+// so on. Several can be configured at once (e.g. short AND long both power off), in
+// which case any one of them wakes it. Relies on SETTINGS already having been loaded
+// via loadStartupFromNvs() — btnShortPower/btnDoublePower/btnLongPower are NVS-backed
+// specifically so this decision doesn't need the full settings file loaded from SD.
+static HalGPIO::WakeGestures wakeGestureFromSettings() {
+  using BA = CrossPointSettings::BUTTON_ACTION;
+  HalGPIO::WakeGestures gestures;
+  gestures.shortAllowed = SETTINGS.btnShortPower == BA::BTN_SLEEP;
+  gestures.doubleClick = SETTINGS.btnDoublePower == BA::BTN_SLEEP;
+  // Long-press-to-sleep is not user-remappable (loop()'s power-hold timer always owns
+  // it, independent of btnLongPower's value — see the "not user-remappable" comment at
+  // its call site), so long-hold-to-wake is unconditionally enabled to match.
+  gestures.longHold = true;
+  return gestures;
+}
+
 void setup() {
-  const bool powerButtonWakeVerified = gpio.verifyPowerButtonWakeup(CrossPointSettings::getPowerButtonDuration());
+  // Load just the settings we need before any other init, so the wake gesture mirrors
+  // whichever press type(s) the user configured to put the device to sleep.
+  SETTINGS.loadStartupFromNvs();
+  const bool powerButtonWakeVerified =
+      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerButtonDuration());
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
@@ -655,9 +678,6 @@ void setup() {
   }
 #endif
   logStartupMemory("after_hw_init");
-
-  // Load just the settings we need *before* initializing the SD card to speed up and reduce power on unverified wakes
-  SETTINGS.loadStartupFromNvs();
 
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
     LOG_DBG("MAIN", "Verifying power button press duration (required=%u ms)",

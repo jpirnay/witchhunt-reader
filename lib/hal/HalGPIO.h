@@ -153,9 +153,21 @@ class HalGPIO {
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
   void waitForStablePowerRelease();
 
-  // Verify the raw power button remains held until requiredDurationMs after boot.
+  // Which power-button press pattern(s) are accepted as an intentional wake. Mirrors
+  // whichever press type(s) the user configured to put the device to sleep — several
+  // can be set at once (e.g. both short AND long press power off), in which case any
+  // one of the enabled gestures wakes it.
+  struct WakeGestures {
+    bool shortAllowed = false;  // any press/release, however brief, wakes the device
+    bool doubleClick = false;   // two presses with releases within the double-click window
+    bool longHold = true;       // sustained hold of requiredDurationMs (the safe default)
+  };
+
+  // Verify the raw power button was pressed in one of the patterns enabled by `gestures`,
+  // mirroring the press type(s) configured to put the device to sleep. requiredDurationMs
+  // is only used by the longHold gesture.
   // Call as early as possible so cold-boot initialization cannot hide a short press.
-  bool verifyPowerButtonWakeup(uint16_t requiredDurationMs);
+  bool verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs);
 
   // Check if USB is connected
   bool isUsbConnected() const;
