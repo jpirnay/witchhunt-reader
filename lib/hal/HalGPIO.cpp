@@ -305,17 +305,13 @@ void HalGPIO::waitForStablePowerRelease() {
   LOG_DBG("GPIO", "Power button stable-released after %lu ms", millis() - waitStart);
 }
 
-bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs) {
+bool HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs) {
   constexpr unsigned long BOUNCE_TOLERANCE_MS = 100;
   constexpr unsigned long POLL_INTERVAL_MS = 10;
+  // Mirrors ButtonEventManager::DOUBLE_WINDOW_MS so a double-click-to-sleep gesture
+  // wakes on the same cadence it was configured with.
+  constexpr unsigned long DOUBLE_WINDOW_MS = 300;
 
-  // requiredDurationMs is compared against millis() directly — time since app start, NOT time
-  // since this call. That is deliberate: the press that caused the wake began before setup() ran,
-  // so boot time counts toward the hold rather than being charged to the user twice. The caveat
-  // is that millis() starts at app init and so excludes the ~200-300 ms bootloader, making the
-  // real-world hold needed that much longer than the configured value. Erring long is the safe
-  // direction — the failure mode being guarded against is a stray tap waking the device.
-  //
   // Must be called before any long-running init (it is the first statement of setup()) so a short
   // press cannot be hidden by boot work: a released button is detected below and returns
   // immediately, which is also why running this on every boot costs nothing on non-button resets.
@@ -324,15 +320,43 @@ bool HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs) {
     return false;
   }
 
+  if (gestures.shortAllowed) {
+    return true;
+  }
+
+  // requiredDurationMs (longHold) is compared against millis() directly — time since app
+  // start, NOT time since this call. That is deliberate: the press that caused the wake
+  // began before setup() ran, so boot time counts toward the hold rather than being
+  // charged to the user twice. The caveat is that millis() starts at app init and so
+  // excludes the ~200-300 ms bootloader, making the real-world hold needed that much
+  // longer than the configured value. Erring long is the safe direction — the failure
+  // mode being guarded against is a stray tap waking the device.
+  //
+  // Watch the first press through to release, classifying it exactly like the awake FSM
+  // (ButtonEventManager): held past requiredDurationMs is a long press; released earlier
+  // followed by a second press within DOUBLE_WINDOW_MS is a double click; otherwise it's
+  // a short tap. Whichever it turns out to be, accept it only if that gesture is enabled.
   unsigned long lastSeenPressed = millis();
   while (true) {
     const unsigned long now = millis();
     if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
       lastSeenPressed = now;
-      if (now >= requiredDurationMs) {
+      if (gestures.longHold && now >= requiredDurationMs) {
         return true;
       }
     } else if (now - lastSeenPressed >= BOUNCE_TOLERANCE_MS) {
+      // Released before the long-hold threshold. A double-click gesture gets one more
+      // chance: a second press within the window after this release.
+      if (!gestures.doubleClick) {
+        return false;
+      }
+      const unsigned long releaseTime = now;
+      while (millis() - releaseTime < DOUBLE_WINDOW_MS) {
+        if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+          return true;
+        }
+        delay(POLL_INTERVAL_MS);
+      }
       return false;
     }
     delay(POLL_INTERVAL_MS);
