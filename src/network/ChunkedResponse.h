@@ -66,6 +66,9 @@ class ChunkedResponse {
     esp_task_wdt_reset();
     server->sendContent(buffer.get(), used);
     used = 0;
+    // Yield so WiFi and the other tasks get to run: sendContent() is a blocking
+    // network write that can stall for seconds under concurrent connections.
+    yield();
     esp_task_wdt_reset();
   }
 
