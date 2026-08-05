@@ -19,7 +19,8 @@
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
 // ============================================================================
-constexpr bool USE_8BIT_OUTPUT = false;  // true: 8-bit grayscale (no quantization), false: 2-bit (4 levels)
+// 8-bit output is now a per-call choice (see jpegFileToBmpStream's grayscale8Bit),
+// not a build-wide constant.
 // Dithering method selection (only one should be true, or all false for simple quantization):
 constexpr bool USE_ATKINSON = true;          // Atkinson dithering (cleaner than F-S, less error diffusion)
 constexpr bool USE_FLOYD_STEINBERG = false;  // Floyd-Steinberg error diffusion (can cause "worm" artifacts)
@@ -67,6 +68,9 @@ struct BmpConvertCtx {
   int outWidth;
   int outHeight;
   bool oneBit;
+  // Emit 8-bit grayscale instead of quantizing to 4 levels here. Mutually
+  // exclusive with oneBit; see jpegFileToBmpStream()'s grayscale8Bit parameter.
+  bool eightBit;
   int bytesPerRow;
   bool needsScaling;
   uint32_t scaleX_fp;  // source pixels per output pixel, 16.16 fixed-point
@@ -109,7 +113,7 @@ struct BmpConvertCtx {
 static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) {
   memset(ctx->bmpRow, 0, ctx->bytesPerRow);
 
-  if (USE_8BIT_OUTPUT && !ctx->oneBit) {
+  if (ctx->eightBit && !ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
       const int ox = x - ctx->outCropX;
       if (ox >= 0 && ox < ctx->finalW) ctx->bmpRow[ox] = adjustPixel(srcRow[x]);
@@ -152,7 +156,7 @@ static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) 
 static void flushScaledRow(BmpConvertCtx* ctx) {
   memset(ctx->bmpRow, 0, ctx->bytesPerRow);
 
-  if (USE_8BIT_OUTPUT && !ctx->oneBit) {
+  if (ctx->eightBit && !ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
       const uint8_t gray = (ctx->rowCount[x] > 0) ? (ctx->rowAccum[x] / ctx->rowCount[x]) : 0;
       const int ox = x - ctx->outCropX;
@@ -293,7 +297,7 @@ static bool progressiveBmpOutput(void* user, uint16_t y, const uint8_t* grayscal
 }
 
 static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight, bool oneBit,
-                                  bool crop, const ProgressiveJpegDc::ImageInfo& image) {
+                                  bool crop, const ProgressiveJpegDc::ImageInfo& image, bool eightBit) {
   constexpr int MAX_IMAGE_WIDTH = 2048;
   constexpr int MAX_IMAGE_HEIGHT = 3072;
   if (image.width == 0 || image.height == 0 || image.width > MAX_IMAGE_WIDTH || image.height > MAX_IMAGE_HEIGHT) {
@@ -326,7 +330,7 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
   }
 
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if (eightBit && !oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalWidth, finalHeight, 8);
   } else if (oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalWidth, finalHeight, 1);
@@ -341,6 +345,7 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
   ctx.outWidth = outWidth;
   ctx.outHeight = outHeight;
   ctx.oneBit = oneBit;
+  ctx.eightBit = eightBit;
   ctx.bytesPerRow = bytesPerRow;
   ctx.outCropX = outCropX;
   ctx.outCropY = outCropY;
@@ -356,10 +361,10 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
   if (oneBit) {
     oneBitDitherer = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
     ctx.atkinson1BitDitherer = oneBitDitherer.get();
-  } else if (!USE_8BIT_OUTPUT && USE_ATKINSON) {
+  } else if (!eightBit && USE_ATKINSON) {
     atkinsonDitherer = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
     ctx.atkinsonDitherer = atkinsonDitherer.get();
-  } else if (!USE_8BIT_OUTPUT && USE_FLOYD_STEINBERG) {
+  } else if (!eightBit && USE_FLOYD_STEINBERG) {
     fsDitherer = makeUniqueNoThrow<FloydSteinbergDitherer>(outWidth);
     ctx.fsDitherer = fsDitherer.get();
   }
@@ -382,12 +387,13 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
 
 // Internal implementation with configurable target size and bit depth
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
-                                                     bool oneBit, bool crop) {
-  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
+                                                     bool oneBit, bool crop, bool eightBit) {
+  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
+          targetWidth, targetHeight);
 
   ProgressiveJpegDc::ImageInfo image;
   if (ProgressiveJpegDc::probe(jpegFile, image) == ProgressiveJpegDc::Result::Ok) {
-    return decodeProgressiveJpeg(jpegFile, bmpOut, targetWidth, targetHeight, oneBit, crop, image);
+    return decodeProgressiveJpeg(jpegFile, bmpOut, targetWidth, targetHeight, oneBit, crop, image, eightBit);
   }
 
   if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
@@ -518,7 +524,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
 
   // Write BMP header with the emitted (cropped) dimensions
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if (eightBit && !oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalW, finalH, 8);
   } else if (oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalW, finalH, 1);
@@ -533,6 +539,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   ctx.outWidth = outWidth;
   ctx.outHeight = outHeight;
   ctx.oneBit = oneBit;
+  ctx.eightBit = eightBit;
   ctx.bytesPerRow = bytesPerRow;
   ctx.needsScaling = needsScaling;
   ctx.scaleX_fp = scaleX_fp;
@@ -583,7 +590,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
 
   if (oneBit) {
     ctx.atkinson1BitDitherer = new (std::nothrow) Atkinson1BitDitherer(outWidth);
-  } else if (!USE_8BIT_OUTPUT) {
+  } else if (!eightBit) {
     if (USE_ATKINSON) {
       ctx.atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
     } else if (USE_FLOYD_STEINBERG) {
@@ -608,12 +615,13 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   return true;
 }
 
-// Core function: Convert JPEG file to 2-bit BMP (uses default target size)
-bool JpegToBmpConverter::jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop) {
+// Core function: Convert JPEG file to a full-size cover BMP (2-bit, or 8-bit when
+// the caller asks for the extra tonal range).
+bool JpegToBmpConverter::jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop, bool grayscale8Bit) {
   // Use runtime display dimensions (swapped for portrait cover sizing)
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
-  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop);
+  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop, grayscale8Bit);
 }
 
 // Convert with custom target size (for thumbnails, 2-bit)

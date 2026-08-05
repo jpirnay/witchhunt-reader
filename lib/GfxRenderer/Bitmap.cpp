@@ -197,10 +197,11 @@ BmpReaderError Bitmap::parseHeaders() {
   //  - High-color + dithering enabled → error-diffusion dithering (Atkinson or Floyd-Steinberg)
   //  - High-color + dithering disabled → simple quantization (no error diffusion)
   // Adaptive analysis needs its own full read of the pixel data, so it has to run
-  // here (before any row is decoded) and rewind afterwards. Restricted to
-  // true-colour input: a paletted BMP has at most 256 distinct luminances, and for
-  // <=2 bpp the histogram would hold 4 bins, where percentiles mean nothing.
-  if (toneMapping == BitmapToneMapping::Adaptive && bpp >= 24) {
+  // here (before any row is decoded) and rewind afterwards. Requires at least 8 bpp:
+  // that gives 256 distinct luminances, enough for percentiles to mean something.
+  // Below that (<=4 bpp, so <=16 levels, and only 4 at 2 bpp) they do not, and such
+  // images take the nativePalette path anyway.
+  if (toneMapping == BitmapToneMapping::Adaptive && bpp >= 8) {
     analyzeAdaptiveTone();
     const BmpReaderError rewindResult = rewindToData();
     if (rewindResult != BmpReaderError::Ok) {
@@ -288,10 +289,17 @@ bool Bitmap::analyzeAdaptiveTone() {
       return false;
     }
 
-    const uint8_t* pixel = rowBuffer.get();
-    for (int x = 0; x < width; x++) {
-      histogram[(77u * pixel[2] + 150u * pixel[1] + 29u * pixel[0]) >> 8]++;
-      pixel += bytesPerPixel;
+    if (bpp == 8) {
+      // Paletted: the byte is an index, and paletteLum already holds its luminance.
+      for (int x = 0; x < width; x++) {
+        histogram[paletteLum[rowBuffer[x]]]++;
+      }
+    } else {
+      const uint8_t* pixel = rowBuffer.get();
+      for (int x = 0; x < width; x++) {
+        histogram[(77u * pixel[2] + 150u * pixel[1] + 29u * pixel[0]) >> 8]++;
+        pixel += bytesPerPixel;
+      }
     }
     sampled += static_cast<uint32_t>(width);
 

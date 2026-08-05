@@ -1067,7 +1067,11 @@ bool coverBmpComplete(const std::string& path) {
     return false;
   }
   Bitmap bmp(f);
-  const bool ok = bmp.parseHeaders() == BmpReaderError::Ok && bmp.isComplete();
+  // Also require 8 bpp: covers cached by an earlier firmware are 2-bit, which still
+  // parses fine but has already been quantized to four levels. Treating those as
+  // valid would pin every existing book to the old format forever, so reject them
+  // here and let the caller regenerate once.
+  const bool ok = bmp.parseHeaders() == BmpReaderError::Ok && bmp.isComplete() && bmp.getBpp() == 8;
   f.close();
   return ok;
 }
@@ -1101,11 +1105,15 @@ bool Epub::generateCoverBmp(bool cropped) const {
     return false;
   }
 
+  // 8-bit: this cover is drawn only by the sleep screen, which dithers at draw time
+  // and can apply the adaptive tone filter. Quantizing to 4 levels here would throw
+  // away the tonal range that filter needs. Thumbnails stay 1-bit -- they are drawn
+  // on the home screen's BW-plane path and are a different artifact entirely.
   bool success = false;
   if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
-    success = JpegToBmpConverter::jpegFileToBmpStream(coverImage, coverBmp, cropped);
+    success = JpegToBmpConverter::jpegFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
   } else {
-    success = PngToBmpConverter::pngFileToBmpStream(coverImage, coverBmp, cropped);
+    success = PngToBmpConverter::pngFileToBmpStream(coverImage, coverBmp, cropped, /*grayscale8Bit=*/true);
   }
 
   coverImage.close();

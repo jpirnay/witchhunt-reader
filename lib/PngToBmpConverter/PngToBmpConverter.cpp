@@ -17,15 +17,15 @@
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
 // ============================================================================
-constexpr bool USE_8BIT_OUTPUT = false;
 constexpr bool USE_ATKINSON = true;
 constexpr bool USE_FLOYD_STEINBERG = false;
 constexpr bool USE_PRESCALE = true;
 // ============================================================================
 
 bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight,
-                                                   bool oneBit, bool crop, bool enforceSizeCap) {
-  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
+                                                   bool oneBit, bool crop, bool enforceSizeCap, bool eightBit) {
+  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
+          targetWidth, targetHeight);
 
   // Decode with the shared uzlib-based core (no PNGdec). Scanlines arrive as
   // 8-bit grayscale, top to bottom, with alpha already composited over white.
@@ -102,7 +102,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
 
   // Write BMP header with the emitted (cropped) dimensions
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if (eightBit && !oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalW, finalH, 8);
   } else if (oneBit) {
     bytesPerRow = writeGrayscaleBmpHeader(bmpOut, finalW, finalH, 1);
@@ -123,7 +123,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
 
   if (oneBit) {
     atkinson1BitOwner = makeUniqueNoThrow<Atkinson1BitDitherer>(outWidth);
-  } else if (!USE_8BIT_OUTPUT) {
+  } else if (!eightBit) {
     if (USE_ATKINSON) {
       atkinsonOwner = makeUniqueNoThrow<AtkinsonDitherer>(outWidth);
     } else if (USE_FLOYD_STEINBERG) {
@@ -184,7 +184,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
       // vertical window are dithered-then-dropped.
       memset(rowBuffer, 0, bytesPerRow);
 
-      if (USE_8BIT_OUTPUT && !oneBit) {
+      if (eightBit && !oneBit) {
         for (int x = 0; x < outWidth; x++) {
           const int ox = x - outCropX;
           if (ox >= 0 && ox < finalW) rowBuffer[ox] = adjustPixel(grayRow[x]);
@@ -248,7 +248,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
       while (srcY_fp >= nextOutY_srcStart && currentOutY < outHeight) {
         memset(rowBuffer, 0, bytesPerRow);
 
-        if (USE_8BIT_OUTPUT && !oneBit) {
+        if (eightBit && !oneBit) {
           for (int x = 0; x < outWidth; x++) {
             const uint8_t gray = (rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0;
             const int ox = x - outCropX;
@@ -496,14 +496,14 @@ void PngDecodeSession::cleanup() {
 
 // ============================================================================
 
-bool PngToBmpConverter::pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop) {
+bool PngToBmpConverter::pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop, bool grayscale8Bit) {
   // Use runtime display dimensions (swapped for portrait cover sizing)
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
   // Full-screen cover render for one-shot screens (sleep / finished-book / OPDS): stall-tolerant
   // and with no sliced fallback, so bypass the thumbnail size cap and decode large covers directly.
   return pngFileToBmpStreamInternal(pngFile, bmpOut, targetWidth, targetHeight, /*oneBit=*/false, crop,
-                                    /*enforceSizeCap=*/false);
+                                    /*enforceSizeCap=*/false, grayscale8Bit);
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamWithSize(FsFile& pngFile, Print& bmpOut, int targetMaxWidth,

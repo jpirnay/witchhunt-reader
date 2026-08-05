@@ -683,7 +683,11 @@ void SleepActivity::renderCoverSleepScreen() const {
 
   FsFile file;
   if (Storage.openFileForRead("SLP", coverBmpPath, file)) {
-    Bitmap bitmap(file);
+    // EPUB covers are cached as 8-bit greyscale, so dithering happens here rather
+    // than at generation time, and the adaptive filter has real tonal data to work
+    // with. Covers still cached as 2-bit (or TXT/XTC covers) take the native-palette
+    // path inside Bitmap and are unaffected by either flag.
+    Bitmap bitmap(file, /*dithering=*/true, sleepImageToneMapping());
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
       const uint8_t overlayMode = SETTINGS.sleepCoverOverlay;
