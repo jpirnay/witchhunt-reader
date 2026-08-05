@@ -262,6 +262,17 @@ void SleepActivity::onEnter() {
   }
 }
 
+namespace {
+// Adaptive tone mapping applies to user-supplied sleep images only. The overlay
+// compositing path deliberately does not use it: it draws onto an already-rendered
+// screen, where a per-image level stretch would fight the image underneath.
+BitmapToneMapping sleepImageToneMapping() {
+  return SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE
+             ? BitmapToneMapping::Adaptive
+             : BitmapToneMapping::None;
+}
+}  // namespace
+
 void SleepActivity::renderCustomSleepScreen() const {
   const BookOverlayInfo overlayInfo{};
   const bool shouldLoadOverlayInfo =
@@ -270,7 +281,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   // An explicitly selected custom sleep image should override random images from /.sleep or /sleep.
   FsFile explicitSleepFile;
   if (Storage.openFileForRead("SLP", "/sleep.bmp", explicitSleepFile)) {
-    Bitmap bitmap(explicitSleepFile, true);
+    Bitmap bitmap(explicitSleepFile, true, sleepImageToneMapping());
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading explicit custom sleep image: /sleep.bmp");
       const BookOverlayInfo resolvedOverlayInfo =
@@ -310,7 +321,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       FsFile file;
       if (Storage.openFileForRead("SLP", filename, file)) {
         delay(100);
-        Bitmap bitmap(file, true);
+        Bitmap bitmap(file, true, sleepImageToneMapping());
         if (bitmap.parseHeaders() == BmpReaderError::Ok) {
           renderBitmapSleepScreen(bitmap, resolvedOverlayInfo);
           file.close();
@@ -508,8 +519,13 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   LOG_DBG("SLP", "drawing to %d x %d", x, y);
   renderer.clearScreen();
 
-  const bool hasGreyscale = bitmap.hasGreyscale() &&
-                            SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+  // ADAPTIVE_TONE is a greyscale mode too: it changes how levels are derived, not
+  // whether they exist. Omitting it here would silently drop those images to the
+  // 1-bit half-refresh path.
+  const bool hasGreyscale =
+      bitmap.hasGreyscale() &&
+      (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER ||
+       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE);
 
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
