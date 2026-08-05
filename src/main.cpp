@@ -9,6 +9,7 @@
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
+#include <HalSpiBus.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <HalTiltSensor.h>
@@ -601,6 +602,9 @@ void setup() {
   }
 
   HalSystem::begin();
+  // Create the shared-SPI-bus mutex before anything can touch the panel or the
+  // SD card, so no first-use allocation happens inside a refresh or read path.
+  HalSpiBus::begin();
   gpio.begin();
   powerManager.begin();
   halTiltSensor.begin();

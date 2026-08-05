@@ -5,6 +5,8 @@
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
+#include "HalSpiBus.h"
+
 // Global HalDisplay instance, bracketed by static-init heap probes (slots 0/1).
 static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
@@ -29,7 +31,10 @@ void HalDisplay::begin(bool seamless) {
   // just brackets the wait.
   einkDisplay.setBusyWaitHooks([] { powerManager.enterWaveformWait(); }, [] { powerManager.exitWaveformWait(); });
 
-  einkDisplay.begin();
+  {
+    HalSpiBus::Lock spiLock;
+    einkDisplay.begin();
+  }
 
   // Request resync after specific wakeup events to ensure clean display state.
   // Skip when seamless=true so the current panel content is preserved (Quick Resume).
@@ -85,6 +90,8 @@ void HalDisplay::requestResync(uint8_t settlePasses) {
 }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
@@ -99,6 +106,8 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
@@ -112,7 +121,10 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
 }
 
-void HalDisplay::deepSleep() { einkDisplay.deepSleep(); }
+void HalDisplay::deepSleep() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.deepSleep();
+}
 
 uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(); }
 
@@ -175,16 +187,31 @@ void HalDisplay::setSingleBufferFastDiff(bool enabled) {
 }
 
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }
 
-void HalDisplay::completeDisplay() { einkDisplay.completeDisplay(); }
+void HalDisplay::completeDisplay() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.completeDisplay();
+}
 
+// The async split locks each half separately rather than spanning the pair.
+// triggerDisplayAsync() returns while the waveform runs, and that gap is
+// deliberately used for CPU/RAM work (see GfxRenderer.h and the inline-AA path
+// in EpubReaderActivity) - holding the bus across it would serialize away the
+// overlap the split exists to create. It is safe to drop the lock in between:
+// during the waveform the controller scans its own RAM and the panel is not
+// driving SPI.
 void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
 
-void HalDisplay::finishDisplayAsync() { einkDisplay.finishDisplayAsync(); }
+void HalDisplay::finishDisplayAsync() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.finishDisplayAsync();
+}
 
 bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
 bool HalDisplay::isRedRamSynced() const { return einkDisplay.isRedRamSynced(); }
@@ -211,9 +238,13 @@ void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.
 
 void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
 
-void HalDisplay::displayGrayBuffer(bool turnOffScreen) { einkDisplay.displayGrayBuffer(turnOffScreen); }
+void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.displayGrayBuffer(turnOffScreen);
+}
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
   einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
 }
 

@@ -11,6 +11,8 @@
 #include <ctime>
 #include <new>
 
+#include "HalSpiBus.h"
+
 #define SDCard SDCardManager::getInstance()
 
 HalStorage HalStorage::instance;
@@ -27,7 +29,12 @@ bool HalStorage::begin() {
     storageMutex = xSemaphoreCreateMutex();
     assert(storageMutex != nullptr);
   }
-  if (!SDCard.begin()) return false;
+  {
+    // SD init drives the shared bus, so it must be serialized against the
+    // display too - the render task is already running by this point.
+    HalSpiBus::Lock spiLock;
+    if (!SDCard.begin()) return false;
+  }
   FsDateTime::setCallback([](uint16_t* date, uint16_t* time) {
     if (!HalClock::isSynced()) {
       *date = FS_DATE(1980, 1, 1);
@@ -55,6 +62,13 @@ class HalStorage::StorageLock {
  public:
   StorageLock() { xSemaphoreTake(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
   ~StorageLock() { xSemaphoreGive(HalStorage::getInstance().storageMutex); }
+
+ private:
+  // Declared first so it is acquired before storageMutex and released after it:
+  // the bus stays locked for the whole SD operation, and the lock order is
+  // always SPI-outer/storage-inner, matching display code (which takes only the
+  // SPI lock). Do not reorder this below any other member.
+  HalSpiBus::Lock spiLock;
 };
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
