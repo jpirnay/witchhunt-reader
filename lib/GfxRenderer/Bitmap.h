@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "AdaptiveTone.h"
 #include "BitmapHelpers.h"
 
 #pragma pack(push, 1)
@@ -100,9 +101,7 @@ class Bitmap {
   FsFile& file;
   bool dithering = false;
   BitmapToneMapping toneMapping = BitmapToneMapping::None;
-  bool adaptiveToneActive = false;
-  uint8_t adaptiveBlackPoint = 0;
-  uint8_t adaptiveWhitePoint = 255;
+  adaptive_tone::Points adaptiveTonePoints;
   int width = 0;
   int height = 0;
   bool topDown = false;

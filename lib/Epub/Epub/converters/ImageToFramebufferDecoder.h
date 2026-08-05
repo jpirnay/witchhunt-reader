@@ -1,4 +1,5 @@
 #pragma once
+#include <AdaptiveTone.h>
 #include <HalStorage.h>
 
 #include <memory>
@@ -66,6 +67,12 @@ struct RenderConfig {
   // pure black-and-white display (no grayscale planes). The 4-level dither path produces values 1/2
   // which the BW DirectPixelWriter collapses to black, making mid-grays render very dark.
   bool monochromeOutput = false;
+  // Adaptive tone mapping, applied to each sample before dithering. Inactive by
+  // default, in which case the pixel pipeline is untouched. The caller derives these
+  // points itself (see PngToFramebufferConverter::analyzeAdaptiveTone) because a PNG
+  // cannot be rewound -- building the histogram costs a full extra decode, and the
+  // sleep screen renders three passes that must all share one set of points.
+  adaptive_tone::Points adaptiveTone;
   std::string cachePath;  // If non-empty, decoder will write pixel cache to this path
 };
 

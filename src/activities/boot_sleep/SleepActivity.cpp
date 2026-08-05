@@ -50,6 +50,13 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   config.ditherMode = ImageDitherMode::Bayer;
   config.performanceMode = false;
   config.useExactDimensions = false;
+  // Derived once and shared by all three passes below: a PNG cannot be rewound, so
+  // this costs an extra decode, and re-deriving it per pass would triple that. All
+  // passes must use the same points anyway, or the BW carrier would disagree with
+  // the grey planes layered on top.
+  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE) {
+    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename);
+  }
 
   // Overlay drawing is shared across all three rendering passes (BW + LSB + MSB) so the
   // text appears on every plane. Captured by reference so the lambda sees the renderer.

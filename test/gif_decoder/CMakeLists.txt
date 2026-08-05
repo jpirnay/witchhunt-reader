@@ -19,6 +19,9 @@ target_include_directories(GifDecoderTest PRIVATE
   ${REPO_ROOT}/lib/CooperativeAbort
   ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Epub/Epub/converters
+  # AdaptiveTone.h, pulled in by RenderConfig. Listed after this directory so the
+  # local GfxRenderer.h stub still shadows the real one alongside it.
+  ${REPO_ROOT}/lib/GfxRenderer
   ${REPO_ROOT}/lib
 )
 
