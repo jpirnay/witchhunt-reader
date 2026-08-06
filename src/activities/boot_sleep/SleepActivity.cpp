@@ -2,8 +2,11 @@
 
 #include <Epub.h>
 #include <Epub/Section.h>
+#include <Epub/converters/DirectPixelWriter.h>
+#include <Epub/converters/PixelCache.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FsHelpers.h>
+#include <Memory.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -28,6 +31,111 @@
 
 namespace {
 
+// Sidecar cache for a rendered sleep image: "/sleep/foo.png" -> "/sleep/.foo.png.f3.pxc".
+//
+// The three render passes below all decode the same source and produce the same
+// 2-bit value per pixel -- the render mode only selects which bit-plane receives it
+// (see DirectPixelWriter::writePixel). So one cache serves all three, and a sleep
+// image is decoded once ever rather than three times per sleep (four with adaptive
+// tone analysis).
+//
+// The filter id is part of the name because tone mapping is baked into the cached
+// pixels. Keying by name rather than invalidating on change means switching filters
+// back and forth reuses both caches instead of re-decoding each time, and there is
+// no hook to miss when the setting is edited. Stale entries for filters the user
+// abandoned are a few KB and are overwritten if that filter is chosen again.
+//
+// The leading dot keeps it out of collectSleepImages(), which skips dotfiles, so a
+// cache can never be picked as a sleep image itself.
+std::string sleepPixelCachePath(const std::string& imagePath, uint8_t filter) {
+  const size_t slash = imagePath.find_last_of('/');
+  if (slash == std::string::npos) return "";
+  return imagePath.substr(0, slash + 1) + "." + imagePath.substr(slash + 1) + ".f" + std::to_string(filter) + ".pxc";
+}
+
+// Replays a cached 2-bit image into the framebuffer under the current render mode.
+// Returns false if the cache is missing, stale, or does not match the expected
+// geometry, in which case the caller decodes normally. A version or size mismatch
+// deletes the file so the next decode rewrites it.
+bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
+                               int expectedHeight) {
+  FsFile cacheFile;
+  if (!Storage.openFileForRead("SLP", cachePath, cacheFile)) return false;
+
+  uint16_t magic = 0;
+  uint16_t cachedWidth = 0;
+  uint16_t cachedHeight = 0;
+  if (cacheFile.read(&magic, 2) != 2 || cacheFile.read(&cachedWidth, 2) != 2 || cacheFile.read(&cachedHeight, 2) != 2) {
+    cacheFile.close();
+    return false;
+  }
+  if (magic != PixelCache::PXC_MAGIC) {
+    cacheFile.close();
+    LOG_INF("SLP", "Stale sleep pixel cache (0x%04X), deleting: %s", magic, cachePath.c_str());
+    Storage.remove(cachePath.c_str());
+    return false;
+  }
+  // Geometry is derived from the panel and the source image, so a mismatch means the
+  // image or the display orientation changed under a stale cache.
+  if (cachedWidth != expectedWidth || cachedHeight != expectedHeight) {
+    cacheFile.close();
+    LOG_INF("SLP", "Sleep pixel cache geometry changed (%ux%u vs %dx%d), deleting: %s", cachedWidth, cachedHeight,
+            expectedWidth, expectedHeight, cachePath.c_str());
+    Storage.remove(cachePath.c_str());
+    return false;
+  }
+
+  const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, MSB first
+  int rowsPerRead = 4096 / bytesPerRow;
+  if (rowsPerRead < 1) rowsPerRead = 1;
+  if (rowsPerRead > cachedHeight) rowsPerRead = cachedHeight;
+
+  auto readBuffer = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(rowsPerRead) * bytesPerRow);
+  if (!readBuffer) {
+    rowsPerRead = 1;
+    readBuffer = makeUniqueNoThrow<uint8_t[]>(bytesPerRow);
+  }
+  if (!readBuffer) {
+    cacheFile.close();
+    return false;
+  }
+
+  DirectPixelWriter pw;
+  pw.init(renderer);
+
+  int rowsInBuffer = 0;
+  int bufferRow = 0;
+  for (int row = 0; row < cachedHeight; row++) {
+    if (bufferRow >= rowsInBuffer) {
+      const int toRead = (cachedHeight - row < rowsPerRead) ? (cachedHeight - row) : rowsPerRead;
+      const size_t bytes = static_cast<size_t>(toRead) * bytesPerRow;
+      const int bytesRead = cacheFile.read(readBuffer.get(), bytes);
+      if (bytesRead < 0 || static_cast<size_t>(bytesRead) != bytes) {
+        LOG_ERR("SLP", "Sleep pixel cache read error at row %d", row);
+        cacheFile.close();
+        return false;
+      }
+      rowsInBuffer = toRead;
+      bufferRow = 0;
+    }
+
+    const uint8_t* rowBuffer = readBuffer.get() + static_cast<size_t>(bufferRow) * bytesPerRow;
+    bufferRow++;
+
+    pw.beginRow(y + row);
+    int colStart, colEnd;
+    pw.bandColRange(x, cachedWidth, colStart, colEnd);
+    for (int col = colStart; col < colEnd; col++) {
+      const uint8_t packed = rowBuffer[col >> 2];
+      const uint8_t value = (packed >> (6 - (col & 3) * 2)) & 0x03;
+      pw.writePixel(x + col, value);
+    }
+  }
+
+  cacheFile.close();
+  return true;
+}
+
 bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, const BookOverlayInfo& overlayInfo) {
   constexpr size_t MIN_FREE_HEAP = 60 * 1024;  // PNG decoder ~42 KB + overhead
   if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
@@ -50,13 +158,45 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   config.ditherMode = ImageDitherMode::Bayer;
   config.performanceMode = false;
   config.useExactDimensions = false;
+
+  // Mirror the decoder's own output sizing so the cache can be validated against the
+  // geometry a fresh decode would produce (see PngToFramebufferConverter: fit to the
+  // config box, never upscale).
+  const std::string cachePath = sleepPixelCachePath(filename, SETTINGS.sleepScreenCoverFilter);
+  int cacheW = 0, cacheH = 0, cacheX = 0, cacheY = 0;
+  ImageDimensions srcDims{};
+  if (!cachePath.empty() && PngToFramebufferConverter::getDimensionsStatic(filename, srcDims) && srcDims.width > 0 &&
+      srcDims.height > 0) {
+    const float scaleX = static_cast<float>(pageWidth) / srcDims.width;
+    const float scaleY = static_cast<float>(pageHeight) / srcDims.height;
+    float scale = (scaleX < scaleY) ? scaleX : scaleY;
+    if (scale > 1.0f) scale = 1.0f;
+    cacheW = std::max(1, static_cast<int>(srcDims.width * scale));
+    cacheH = std::max(1, static_cast<int>(srcDims.height * scale));
+    // The decoder draws at config.x/config.y (0,0 here) and caches with that same
+    // origin, so the replay must not re-centre or the image would shift.
+    cacheX = config.x;
+    cacheY = config.y;
+  }
+
+  // A cached image is already toned and dithered, so neither the analysis pass nor a
+  // decode is needed. Probe with the BW pass; if it hits, the other two replay too.
+  bool useCache = false;
+  if (cacheW > 0) {
+    renderer.setRenderMode(GfxRenderer::BW);
+    useCache = renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH);
+  }
+
   // Derived once and shared by all three passes below: a PNG cannot be rewound, so
   // this costs an extra decode, and re-deriving it per pass would triple that. All
   // passes must use the same points anyway, or the BW carrier would disagree with
-  // the grey planes layered on top.
-  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE) {
+  // the grey planes layered on top. Skipped entirely on a cache hit.
+  if (!useCache && SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE) {
     config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename);
   }
+  // Write the cache on the decoding pass only; the filter is already part of the
+  // cache filename, so no separate invalidation is needed.
+  if (!useCache && cacheW > 0) config.cachePath = cachePath;
 
   // Overlay drawing is shared across all three rendering passes (BW + LSB + MSB) so the
   // text appears on every plane. Captured by reference so the lambda sees the renderer.
@@ -120,11 +260,17 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
 
   // Pass 1: BW plane — mirrors SleepActivity::renderBitmapSleepScreen so the BW carrier
   // matches the 4-level quantization layered on top via the LSB/MSB planes.
+  // On a cache hit the pixels were already replayed above by the probe.
   renderer.setRenderMode(GfxRenderer::BW);
-  renderer.clearScreen();
-  if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
-    LOG_DBG("SLP", "PNG sleep image decode failed: %s", filename.c_str());
-    return false;
+  if (!useCache) {
+    renderer.clearScreen();
+    if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
+      LOG_DBG("SLP", "PNG sleep image decode failed: %s", filename.c_str());
+      return false;
+    }
+    // The decode just wrote the cache, so the remaining passes replay instead of
+    // decoding again.
+    useCache = !config.cachePath.empty() && Storage.exists(cachePath.c_str());
   }
   drawOverlay();
   // Fire the BW scrub without waiting: the waveform runs on the controller's own RAM,
@@ -132,11 +278,21 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // drains the pending finish before its SPI plane write.
   renderer.triggerDisplayAsync(HalDisplay::HALF_REFRESH);
 
-  // Pass 2: GRAYSCALE_LSB plane, decoded while the BW waveform is still running.
+  // Passes 2 and 3 replay the cache when one is available; the render mode selects
+  // which bit-plane each cached 2-bit value lands in, so no re-decode is needed.
+  const auto renderPass = [&](const char* planeName) -> bool {
+    if (useCache && renderSleepImageFromCache(renderer, cachePath, cacheX, cacheY, cacheW, cacheH)) return true;
+    if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
+      LOG_DBG("SLP", "PNG sleep image %s decode failed: %s", planeName, filename.c_str());
+      return false;
+    }
+    return true;
+  };
+
+  // Pass 2: GRAYSCALE_LSB plane, rendered while the BW waveform is still running.
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
-    LOG_DBG("SLP", "PNG sleep image LSB decode failed: %s", filename.c_str());
+  if (!renderPass("LSB")) {
     renderer.setRenderMode(GfxRenderer::BW);
     return false;
   }
@@ -146,8 +302,7 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // Pass 3: GRAYSCALE_MSB plane.
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  if (!decoder.decodeToFramebuffer(filename, renderer, config)) {
-    LOG_DBG("SLP", "PNG sleep image MSB decode failed: %s", filename.c_str());
+  if (!renderPass("MSB")) {
     renderer.setRenderMode(GfxRenderer::BW);
     return false;
   }
