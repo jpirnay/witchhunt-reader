@@ -163,6 +163,14 @@ class EpubReaderActivity final : public Activity {
   // True while the secondary framebuffer is lent to buildScratch_ (borrowed, not freed).
   // Gates the returnSecondaryBuffer() path in recoverSecondaryBufferIfNeeded()/onExit.
   bool secondaryBorrowed_ = false;
+  // True when the CURRENT holder of that borrow is Background-B rather than Background-C.
+  // The two have opposite lifetimes: C's borrow lasts until its build ends (the reader is
+  // waiting on it and has no AA to lose), while B's is pure look-ahead and must be handed
+  // back the moment the reader needs the buffer again — AA is gated on a resident secondary
+  // (see renderContents), so a borrow held across a page turn silently renders it BW.
+  // Ownership transfers to C (this clears, secondaryBorrowed_ stays) when buildSection()
+  // adopts B's in-flight section on a consecutive boundary cross.
+  bool backgroundBorrowActive_ = false;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;
   NavigationTarget navTarget;
@@ -344,6 +352,12 @@ class EpubReaderActivity final : public Activity {
   size_t backgroundBuildInflatedSize_ = 0;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
+  // Times a build of backgroundBuildSpineIndex_ was preempted (reader needed the borrowed
+  // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
+  // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
+  // writes and battery for a cache it never finishes. After BG_BUILD_MAX_PREEMPTIONS the
+  // target is abandoned to Background-C and the cursor moves on. Reset per target.
+  uint8_t backgroundPreemptCount_ = 0;
   // One-shot Background-A re-arm latch (see serviceBackgroundWork): the (spine, page)
   // whose pre-render was already retried after the deferred AA released its memory.
   // Bounds retries to one per displayed page so an image-only next page (which can
@@ -552,6 +566,21 @@ class EpubReaderActivity final : public Activity {
   // Serialises SD access against the render task via RenderLock; skips the tick instead of
   // blocking when the render task is busy.
   void stepBackgroundSectionBuild();
+  // Lend the secondary framebuffer to Background-B's build arena. Mirrors the Background-C
+  // borrow site in buildSection(): the lent block never enters the heap, so the return cannot
+  // fail on a fragmented hole, and the build's scratch — parse working set, inflate ring, CSS
+  // index — bump-allocates inside it instead of competing for the ~24 KB the reading heap has
+  // left. Sets the single-buffer display flags AA/fast-diff need while the buffer is away.
+  // Returns false (changing nothing) when there is no secondary buffer to lend or the arena
+  // could not be constructed. Requires backgroundSection_ to exist and its build not started.
+  bool beginBackgroundBorrow();
+  // Hand the borrowed buffer back to the display and restore the normal AA/fast-diff paths.
+  // Discards Background-B's in-flight build first — not optional: the build's live state
+  // (parser, inflate ring, CSS index) points into the lent region, which is about to become
+  // a framebuffer again. No-op unless Background-B currently holds the borrow. The one path
+  // that must NOT call this is the buildSection() adoption, where the borrow transfers to
+  // Background-C with the build intact; it clears backgroundBorrowActive_ directly instead.
+  void endBackgroundBorrow();
   // Background C: advance the incremental build of the CURRENT section (the one the reader is
   // looking at) by one bounded slice. Runs only while `section` has an active build, with the
   // highest reader-build priority (ahead of A and B). On a newly built target page or on
@@ -695,8 +724,9 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
-  bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
-  // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
+  bool preventAutoSleep() override {
+    return section && section->hasActiveBuild();
+  }  // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
   // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
   void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
   bool shouldSkipPeriodicUpdate() const override;
