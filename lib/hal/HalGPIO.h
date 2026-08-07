@@ -153,6 +153,16 @@ class HalGPIO {
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
   void waitForStablePowerRelease();
 
+  // "Is this button held right now?", answered from fresh hardware samples rather than
+  // the cache isPressed() reads. The six front buttons are resistor dividers on two ADC
+  // pins, so a sample is a plain analogRead plus a band lookup — no debounce state to
+  // warm up, which is what makes this usable during boot before update() has run enough
+  // times to populate the cache. Power is a digital pin and is read directly.
+  //
+  // Every sample must agree, so a transient cannot produce a false positive; a genuinely
+  // held button is stable and passes. Blocks for confirmSamples * 10 ms.
+  bool isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples = 4);
+
   // Which power-button press pattern(s) are accepted as an intentional wake. Mirrors
   // whichever press type(s) the user configured to put the device to sleep — several
   // can be set at once (e.g. both short AND long press power off), in which case any

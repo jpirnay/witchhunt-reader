@@ -305,6 +305,48 @@ void HalGPIO::waitForStablePowerRelease() {
   LOG_DBG("GPIO", "Power button stable-released after %lu ms", millis() - waitStart);
 }
 
+bool HalGPIO::isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples) {
+  constexpr unsigned long SAMPLE_GAP_MS = 10;
+  // Raw values from the deciding sample, logged below. A negative verdict on the ADC
+  // ladder has two very different causes — the button genuinely is not held, or its
+  // divider reads outside the band the firmware expects — and only the raw value tells
+  // them apart. Worth a line: the boot-time callers run before any UI exists to report a
+  // misdetected combo, so the log is the sole evidence.
+  int raw1 = -1;
+  int raw2 = -1;
+  int classified1 = -1;
+  int classified2 = -1;
+  bool held = true;
+
+  for (uint8_t i = 0; i < confirmSamples; i++) {
+    if (i > 0) delay(SAMPLE_GAP_MS);
+    if (buttonIndex == BTN_POWER) {
+      if (digitalRead(InputManager::POWER_BUTTON_PIN) != LOW) {
+        held = false;
+        break;
+      }
+      continue;
+    }
+    InputManager::ButtonAdcSample group1{};
+    InputManager::ButtonAdcSample group2{};
+    inputMgr.readButtonAdc(group1, group2);
+    raw1 = group1.raw;
+    raw2 = group2.raw;
+    classified1 = group1.button;
+    classified2 = group2.button;
+    if (group1.button != buttonIndex && group2.button != buttonIndex) {
+      held = false;
+      break;
+    }
+  }
+
+  if (buttonIndex != BTN_POWER) {
+    LOG_DBG("GPIO", "isHeldNow(btn=%u) -> %d (adc1 raw=%d btn=%d, adc2 raw=%d btn=%d)", buttonIndex, held ? 1 : 0, raw1,
+            classified1, raw2, classified2);
+  }
+  return held;
+}
+
 const char* HalGPIO::wakeVerdictName(WakeVerdict verdict) {
   switch (verdict) {
     case WakeVerdict::NotPressed:
