@@ -34,6 +34,8 @@ class CrossPointSettings {
     NO_FILTER = 0,
     BLACK_AND_WHITE = 1,
     INVERTED_BLACK_AND_WHITE = 2,
+    // Greyscale like NO_FILTER, but stretches the image's own tonal range first.
+    ADAPTIVE_TONE = 3,
     SLEEP_SCREEN_COVER_FILTER_COUNT
   };
   enum QUICK_RESUME_SLEEP_SCREEN {

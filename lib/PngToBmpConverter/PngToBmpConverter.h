@@ -93,10 +93,11 @@ class PngToBmpConverter {
   // otherwise-decodable cover still renders. The per-dimension safety bound in PngStreamDecoder
   // (2048x3072) always applies regardless.
   static bool pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight, bool oneBit,
-                                         bool crop = true, bool enforceSizeCap = true);
+                                         bool crop = true, bool enforceSizeCap = true, bool eightBit = false);
 
  public:
-  static bool pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop = true);
+  // grayscale8Bit: see JpegToBmpConverter::jpegFileToBmpStream.
+  static bool pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop = true, bool grayscale8Bit = false);
   static bool pngFileToBmpStreamWithSize(FsFile& pngFile, Print& bmpOut, int targetMaxWidth, int targetMaxHeight);
   static bool pngFileTo1BitBmpStreamWithSize(FsFile& pngFile, Print& bmpOut, int targetMaxWidth, int targetMaxHeight);
 };

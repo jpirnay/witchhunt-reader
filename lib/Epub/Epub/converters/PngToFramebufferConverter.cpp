@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <PngStreamDecoder.h>
 #include <esp_task_wdt.h>
 
@@ -42,6 +43,9 @@ struct DitherState {
 // column — including off-screen ones — so error-diffusion state stays consistent
 // across the row; only the framebuffer/cache write is bounds-guarded by the caller.
 uint8_t ditherGray(DitherState& d, uint8_t gray, int localX, int outX, int outY) {
+  // Level-correct before dithering, so the ditherer sees the stretched range.
+  // Identity when the caller supplied no points.
+  gray = adaptive_tone::apply(d.config->adaptiveTone, gray);
   if (d.atkinson1Bit) return d.atkinson1Bit->processPixel(gray, localX) ? 3 : 0;
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION
   if (d.config->useDithering) {
@@ -129,6 +133,65 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
   out.width = (int16_t)width;
   out.height = (int16_t)height;
   return true;
+}
+
+adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath) {
+  adaptive_tone::Points points;
+
+  const size_t freeHeap = ESP.getFreeHeap();
+  if (freeHeap < PNG_DECODE_HEAP_FLOOR) {
+    LOG_DBG("PNG", "Skipping adaptive tone analysis, low heap (%u free)", (unsigned)freeHeap);
+    return points;
+  }
+
+  FsFile file;
+  if (!Storage.openFileForRead("PNG", imagePath, file)) return points;
+
+  auto decoder = std::unique_ptr<PngStreamDecoder>(new (std::nothrow) PngStreamDecoder());
+  if (!decoder) {
+    file.close();
+    return points;
+  }
+  PngStreamDecoder::Info info;
+  if (!decoder->begin(file, info)) {
+    file.close();
+    return points;
+  }
+
+  auto histogram = makeUniqueNoThrow<uint32_t[]>(256);
+  auto grayLine = makeUniqueNoThrow<uint8_t[]>(info.width);
+  if (!histogram || !grayLine) {
+    file.close();
+    return points;
+  }
+
+  // Inflate is sequential, so every row must be decoded even when it is not sampled.
+  // ROW_STEP therefore only saves the per-pixel histogram work, not the decode --
+  // which is why this whole function costs a full extra decode.
+  uint64_t sampled = 0;
+  bool ok = true;
+  for (uint32_t y = 0; y < info.height; y++) {
+    const bool sample = (y % adaptive_tone::ROW_STEP) == 0;
+    if (!(sample ? decoder->nextRow(grayLine.get()) : decoder->skipRow())) {
+      ok = false;
+      break;
+    }
+    if (!sample) continue;
+    for (uint32_t x = 0; x < info.width; x++) histogram[grayLine[x]]++;
+    sampled += info.width;
+  }
+
+  file.close();
+  if (!ok || sampled == 0) return points;
+
+  points = adaptive_tone::derivePoints(histogram.get(), sampled);
+  if (points.active) {
+    LOG_DBG("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
+            (unsigned)points.whitePoint);
+  } else {
+    LOG_DBG("PNG", "Adaptive tone skipped: range too narrow");
+  }
+  return points;
 }
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,

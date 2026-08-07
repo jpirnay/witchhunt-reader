@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "AdaptiveTone.h"
 #include "BitmapHelpers.h"
 
 #pragma pack(push, 1)
@@ -60,11 +61,17 @@ enum class BmpReaderError : uint8_t {
   ShortReadRow,
 };
 
+// Adaptive: derive black/white points from the image's own luminance histogram
+// and stretch toward them before dithering, for images whose useful tonal range
+// sits in a narrow band. Implies the Native quantizer -- see analyzeAdaptiveTone().
+enum class BitmapToneMapping : uint8_t { None, Adaptive };
+
 class Bitmap {
  public:
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(FsFile& file, bool dithering = false) : file(file), dithering(dithering) {}
+  explicit Bitmap(FsFile& file, bool dithering = false, BitmapToneMapping toneMapping = BitmapToneMapping::None)
+      : file(file), dithering(dithering), toneMapping(toneMapping) {}
   ~Bitmap();
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
@@ -88,9 +95,13 @@ class Bitmap {
  private:
   static uint16_t readLE16(FsFile& f);
   static uint32_t readLE32(FsFile& f);
+  bool analyzeAdaptiveTone();
+  uint8_t applyAdaptiveTone(uint8_t luminance) const;
 
   FsFile& file;
   bool dithering = false;
+  BitmapToneMapping toneMapping = BitmapToneMapping::None;
+  adaptive_tone::Points adaptiveTonePoints;
   int width = 0;
   int height = 0;
   bool topDown = false;

@@ -10,6 +10,15 @@ class PngToFramebufferConverter final : public ImageToFramebufferDecoder {
 
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
+  // Builds a luminance histogram for adaptive tone mapping and returns the derived
+  // black/white points, or an inactive result if the image does not need (or cannot
+  // support) the correction.
+  //
+  // Costs a FULL EXTRA DECODE: unlike a BMP, a PNG cannot be rewound, so there is no
+  // cheap pre-pass -- inflate must run over every row. Call this once and reuse the
+  // result across render passes; do not call it per pass.
+  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath);
+
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {
     return getDimensionsStatic(imagePath, dims);
   }
