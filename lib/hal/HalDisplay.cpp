@@ -102,7 +102,16 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   }
   pendingX3SettlePasses = 0;
 
+  // Panel time, measured at the one place every paint funnels through. The boot trace
+  // (main.cpp) shows the splash costing seconds; without this the host-side compose and
+  // the waveform itself are indistinguishable inside that number. FAST/HALF/FULL are
+  // reported separately because promotions happen inside the driver (a FAST can be
+  // upgraded to HALF on a cold panel), so the mode asked for is not always what ran.
+  const unsigned long refreshStart = millis();
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
+  LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms",
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
+          millis() - refreshStart);
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {

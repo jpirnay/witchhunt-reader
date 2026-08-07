@@ -342,6 +342,96 @@ static void logStartupMemory(const char* stage) {
           static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(largestInternal));
 }
 
+// --- Boot phase trace ---------------------------------------------------------------
+// millis() stamp per boot phase, summarized at the end of setup() and again whenever the
+// serial link comes up. The wake gesture is only a ~400 ms gate (getPowerButtonDuration),
+// but the splash lands seconds later because the settle waits, the SD mount, the config
+// loads, the panel bring-up and the first (non-differential) waveform all sit between the
+// two. Without per-phase stamps that gap is invisible in the log — every phase before
+// Serial.begin() has no output at all — and "the power button feels unresponsive" reports
+// cannot be attributed to a phase.
+//
+// The stamps stay live in .bss for the whole session precisely so they can be re-emitted:
+// a wake from deep sleep re-enumerates USB, so a host monitor reconnecting mid-boot misses
+// the first lines, and the RTC ring buffer (16 entries) has usually rolled past them by
+// the time anyone looks.
+//
+// Cost is 2 bytes per phase of .bss plus one log line; no heap, no allocation. Stamps are
+// clamped to 16 bits (a boot that reaches 65 s is pathological and reads as 65535).
+enum class BootPhase : uint8_t {
+  SetupEntry,      // first statement of setup()
+  NvsSettings,     // startup settings read from NVS (precedes the wake gate)
+  WakeGate,        // power-button wake gesture decided
+  HwInit,          // system / SPI bus / GPIO / power / tilt brought up
+  SerialUp,        // USB-CDC opened (only when USB is connected; earlier phases log nothing)
+  RecoverySettle,  // 500 ms UP+POWER recovery-combo sample window
+  SdMount,         // Storage.begin()
+  ConfigLoad,      // settings, app state, i18n, KOReader, OPDS, weather, theme
+  DisplayFonts,    // panel init + framebuffer alloc + font registration + SD font scan
+  FirstPaint,      // splash / quick-resume frame handed to the panel (logo now visible)
+  StoreLoad,       // clock, recent books, bookmarks, reading stats
+  ActivityRoute,   // target activity entered (home / reader / recovery)
+  PowerRelease,    // wake press released (stable), input sampler about to start
+  Count,
+};
+
+static uint16_t bootPhaseMs[static_cast<uint8_t>(BootPhase::Count)] = {};
+// Which phases were reached — a stamp of 0 is a legal millis() value, so "reached" cannot
+// be inferred from the value. 13 phases fit a uint16_t mask with room to spare.
+static uint16_t bootPhaseReached = 0;
+// What the wake gate decided this boot. Kept for the whole session so it can be re-emitted
+// alongside the phase trace; 4 bytes.
+static HalGPIO::WakeCheck bootWakeCheck;
+static_assert(static_cast<uint8_t>(BootPhase::Count) <= 16, "bootPhaseReached mask is 16 bits wide");
+
+static void markBootPhase(BootPhase phase) {
+  const unsigned long ms = millis();
+  bootPhaseMs[static_cast<uint8_t>(phase)] = static_cast<uint16_t>(ms > UINT16_MAX ? UINT16_MAX : ms);
+  bootPhaseReached |= static_cast<uint16_t>(1u << static_cast<uint8_t>(phase));
+}
+
+// Short labels so the whole trace fits one 256-byte ring-buffer entry (Logging.cpp).
+static constexpr const char* BOOT_PHASE_NAMES[] = {"entry", "nvs",  "gate",  "hw",    "ser",   "recov", "sd",
+                                                   "cfg",   "disp", "paint", "store", "route", "rel"};
+static_assert(sizeof(BOOT_PHASE_NAMES) / sizeof(BOOT_PHASE_NAMES[0]) == static_cast<size_t>(BootPhase::Count),
+              "BOOT_PHASE_NAMES must stay in sync with BootPhase");
+
+// One "name+costMs" token per reached phase, then the two absolute numbers worth
+// quoting. Deltas rather than absolutes because the cost of a phase is the actionable
+// figure and absolutes are just their running sum — and because the whole line has to
+// fit one 256-byte ring-buffer entry including logPrintf's timestamp/level prefix
+// (Logging.cpp, MAX_ENTRY_LEN). Unreached phases are skipped (e.g. `ser` on battery,
+// `recov` on a non-button boot), so a short trace is itself a signal about which path
+// the boot took.
+static void logBootTrace() {
+  char line[160];
+  size_t used = 0;
+  uint16_t previous = 0;
+  for (uint8_t i = 0; i < static_cast<uint8_t>(BootPhase::Count); i++) {
+    if ((bootPhaseReached & (1u << i)) == 0) continue;
+    const int written = snprintf(line + used, sizeof(line) - used, "%s%s+%u", used ? " " : "", BOOT_PHASE_NAMES[i],
+                                 static_cast<unsigned>(bootPhaseMs[i] - previous));
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(line) - used) break;
+    used += static_cast<size_t>(written);
+    previous = bootPhaseMs[i];
+  }
+  // millis() excludes the ROM/2nd-stage bootloader (~200-300 ms), so time-to-logo as the
+  // user experiences it is that much longer than `logo` reports.
+  // Worst case (five-digit stamps throughout) still fits MAX_ENTRY_LEN: 29 prefix + 15
+  // here + 160 line + 38 tail = 242 of 256. Keep that budget in mind when editing either.
+  LOG_INF("BOOT", "phase cost ms: %s | logo=%u setup=%u (+bootloader)", line,
+          bootPhaseMs[static_cast<uint8_t>(BootPhase::FirstPaint)], previous);
+}
+
+// The whole boot story in two lines: what the power button was judged to be, and where the
+// time went. Re-emitted on every serial (re)connect — see the note above the phase table.
+static void logBootSummary() {
+  LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
+          HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
+          CrossPointSettings::getPowerButtonDuration());
+  logBootTrace();
+}
+
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
 void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
@@ -533,11 +623,13 @@ static HalGPIO::WakeGestures wakeGestureFromSettings() {
 }
 
 void setup() {
+  markBootPhase(BootPhase::SetupEntry);
   // Load just the settings we need before any other init, so the wake gesture mirrors
   // whichever press type(s) the user configured to put the device to sleep.
   SETTINGS.loadStartupFromNvs();
-  const bool powerButtonWakeVerified =
-      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerButtonDuration());
+  markBootPhase(BootPhase::NvsSettings);
+  bootWakeCheck = gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerButtonDuration());
+  markBootPhase(BootPhase::WakeGate);
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
@@ -609,6 +701,7 @@ void setup() {
   powerManager.begin();
   halTiltSensor.begin();
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
+  markBootPhase(BootPhase::HwInit);
 
   const auto wakeupReason = gpio.getWakeupReason();
 
@@ -639,10 +732,17 @@ void setup() {
     while (!Serial && (millis() - start) < 500) {
       delay(10);
     }
+    markBootPhase(BootPhase::SerialUp);
   }
 #endif
 
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  // The gate ran before Serial was open, so this is the first chance to report it. INF
+  // level: a rejected wake leaves no other trace, and release builds must be able to
+  // answer "why did nothing happen when I pressed power".
+  LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
+          HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
+          CrossPointSettings::getPowerButtonDuration());
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
@@ -683,17 +783,12 @@ void setup() {
 #endif
   logStartupMemory("after_hw_init");
 
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
-    LOG_DBG("MAIN", "Verifying power button press duration (required=%u ms)",
-            CrossPointSettings::getPowerButtonDuration());
-
-    if (!powerButtonWakeVerified) {
-      LOG_DBG("MAIN", "Power button released before wake threshold, returning to deep sleep");
-      halTiltSensor.deepSleep();
-      powerManager.startDeepSleep(gpio);
-      return;
-    }
-    LOG_DBG("MAIN", "Power button verification passed, millis=%lu", millis());
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !bootWakeCheck.accepted()) {
+    LOG_INF("BOOT", "Wake gate rejected the press (%s), returning to deep sleep",
+            HalGPIO::wakeVerdictName(bootWakeCheck.verdict));
+    halTiltSensor.deepSleep();
+    powerManager.startDeepSleep(gpio);
+    return;
   }
 
   // Recovery firmware mode: hold left side button (BTN_UP) together with the power button at
@@ -713,6 +808,7 @@ void setup() {
       recoveryFirmwareMode = true;
       LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
     }
+    markBootPhase(BootPhase::RecoverySettle);
   }
 
   // SD Card Initialization
@@ -720,9 +816,13 @@ void setup() {
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
     setupDisplayAndFonts();
+    markBootPhase(BootPhase::DisplayFonts);
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
+    markBootPhase(BootPhase::FirstPaint);
+    logBootSummary();
     return;
   }
+  markBootPhase(BootPhase::SdMount);
   logStartupMemory("after_storage_begin");
 
   SETTINGS.loadFromFile();
@@ -745,6 +845,7 @@ void setup() {
   MappedInputManager::setStripReversedPredicate(
       [] { return renderer.getOrientation() == GfxRenderer::Orientation::LandscapeCounterClockwise; });
 
+  markBootPhase(BootPhase::ConfigLoad);
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
   logStartupMemory("before_display_fonts");
@@ -762,6 +863,7 @@ void setup() {
   // host is waiting through. Safe because that activity reboots on exit.
   const bool bootToSerialTransfer = (silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SERIAL_TRANSFER);
   setupDisplayAndFonts(resume != BootResume::Splash, bootToSerialTransfer);
+  markBootPhase(BootPhase::DisplayFonts);
   logStartupMemory("after_display_fonts");
 
   switch (resume) {
@@ -792,11 +894,17 @@ void setup() {
       activityManager.goToBoot();
       break;
   }
+  // The paints above are synchronous (BootActivity::onEnter -> displayBuffer), so this
+  // stamp is the moment the panel finished the waveform — i.e. when the user actually
+  // sees the logo. On a power-button boot it is also the first visible feedback of any
+  // kind, which is what makes the gap back to `gate` the number that matters.
+  markBootPhase(BootPhase::FirstPaint);
 
   HalClock::restore();
   RECENT_BOOKS.loadFromFile();
   GLOBAL_BOOKMARKS.load();
   READING_STATS.loadFromFile();
+  markBootPhase(BootPhase::StoreLoad);
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
@@ -839,6 +947,7 @@ void setup() {
     activityManager.goToReader(path);
   }
 
+  markBootPhase(BootPhase::ActivityRoute);
   logStartupMemory("after_activity_route");
 
   // Ensure we're not still holding the power button before leaving setup.
@@ -846,6 +955,10 @@ void setup() {
   // Skip on silent reboot: the firmware triggered the restart, so the button isn't held.
   if (!isSilentReboot) {
     gpio.waitForStablePowerRelease();
+    // Stamped after the wait, so `rel` minus `route` is how long the user kept holding
+    // past the point the device was ready — the other half of the "how long should I
+    // hold this?" question.
+    markBootPhase(BootPhase::PowerRelease);
   }
   // All boot-time power-button handling (which drives inputMgr.update() directly)
   // is done — hand button sampling to the background sampler so presses are caught
@@ -862,6 +975,7 @@ void setup() {
   // the wake-press a fraction late; without this guard the loop() power-hold check would
   // immediately fire enterDeepSleep().
   allowSleepAt = millis() + 2000;
+  logBootSummary();
   logStartupMemory("setup_complete");
 }
 
@@ -879,6 +993,31 @@ void loop() {
 
   renderer.setFadingFix(SETTINGS.fadingFix);
   renderer.setTextDarkness(SETTINGS.textDarkness);
+
+  // Re-emit the boot summary when the serial link comes up. A power-up from deep sleep
+  // re-enumerates USB, so a monitor attached across the wake misses everything setup()
+  // printed — including the trace itself, which is the one line worth having.
+  //
+  // Strictly bounded, because `Serial` is not a reliable connect signal: HWCDC flips
+  // itself to "disconnected" whenever its TX ring doesn't drain within the tx timeout
+  // (see the buffer-sizing comment in setup()), which on a busy boot flaps several times
+  // a second and once produced eight copies of this summary. The cap keeps a flapping
+  // link from spamming the log while still catching a monitor attached late; anything
+  // later than that is what `CMD:BOOTLOG` is for.
+  {
+    // Seeded true because setup() just emitted the summary: if the link was already up
+    // then, this must not fire again on the first tick. A battery boot clears it on that
+    // same tick (Serial is false), so a cable plugged in later still produces the edge.
+    static bool serialWasUp = true;
+    static uint8_t bootSummaryRepeats = 0;
+    constexpr uint8_t MAX_BOOT_SUMMARY_REPEATS = 2;
+    const bool serialIsUp = static_cast<bool>(Serial);
+    if (serialIsUp && !serialWasUp && bootSummaryRepeats < MAX_BOOT_SUMMARY_REPEATS) {
+      bootSummaryRepeats++;
+      logBootSummary();
+    }
+    serialWasUp = serialIsUp;
+  }
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     // Keep runtime log lightweight: ESP.getMaxAllocHeap() walks heap metadata
@@ -929,6 +1068,10 @@ void loop() {
           // Framebuffers are released during the web server session — nothing to send.
           logSerial.printf("SCREENSHOT_ERROR:framebuffer released\n");
         }
+      } else if (cmd == "BOOTLOG") {
+        // On-demand replay of this session's boot summary, for when the monitor was
+        // attached too late to catch it and the automatic repeats are used up.
+        logBootSummary();
       }
     }
   }

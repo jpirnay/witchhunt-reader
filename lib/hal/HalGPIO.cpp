@@ -305,7 +305,25 @@ void HalGPIO::waitForStablePowerRelease() {
   LOG_DBG("GPIO", "Power button stable-released after %lu ms", millis() - waitStart);
 }
 
-bool HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs) {
+const char* HalGPIO::wakeVerdictName(WakeVerdict verdict) {
+  switch (verdict) {
+    case WakeVerdict::NotPressed:
+      return "not-pressed";
+    case WakeVerdict::ShortPress:
+      return "short";
+    case WakeVerdict::LongHold:
+      return "long-hold";
+    case WakeVerdict::DoubleClick:
+      return "double-click";
+    case WakeVerdict::ReleasedEarly:
+      return "released-early";
+    case WakeVerdict::NoSecondPress:
+      return "no-second-press";
+  }
+  return "?";
+}
+
+HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs) {
   constexpr unsigned long BOUNCE_TOLERANCE_MS = 100;
   constexpr unsigned long POLL_INTERVAL_MS = 10;
   // Mirrors ButtonEventManager::DOUBLE_WINDOW_MS so a double-click-to-sleep gesture
@@ -315,13 +333,16 @@ bool HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDu
   // Must be called before any long-running init (it is the first statement of setup()) so a short
   // press cannot be hidden by boot work: a released button is detected below and returns
   // immediately, which is also why running this on every boot costs nothing on non-button resets.
+  const unsigned long gateStart = millis();
+  const auto stamp = [](unsigned long ms) { return static_cast<uint16_t>(ms > UINT16_MAX ? UINT16_MAX : ms); };
+
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
   if (digitalRead(InputManager::POWER_BUTTON_PIN) != LOW) {
-    return false;
+    return {WakeVerdict::NotPressed, stamp(millis()), 0};
   }
 
   if (gestures.shortAllowed) {
-    return true;
+    return {WakeVerdict::ShortPress, stamp(millis()), stamp(millis() - gateStart)};
   }
 
   // requiredDurationMs (longHold) is compared against millis() directly — time since app
@@ -342,22 +363,23 @@ bool HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDu
     if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
       lastSeenPressed = now;
       if (gestures.longHold && now >= requiredDurationMs) {
-        return true;
+        return {WakeVerdict::LongHold, stamp(now), stamp(now - gateStart)};
       }
     } else if (now - lastSeenPressed >= BOUNCE_TOLERANCE_MS) {
       // Released before the long-hold threshold. A double-click gesture gets one more
       // chance: a second press within the window after this release.
+      const uint16_t heldMs = stamp(lastSeenPressed - gateStart);
       if (!gestures.doubleClick) {
-        return false;
+        return {WakeVerdict::ReleasedEarly, stamp(now), heldMs};
       }
       const unsigned long releaseTime = now;
       while (millis() - releaseTime < DOUBLE_WINDOW_MS) {
         if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
-          return true;
+          return {WakeVerdict::DoubleClick, stamp(millis()), heldMs};
         }
         delay(POLL_INTERVAL_MS);
       }
-      return false;
+      return {WakeVerdict::NoSecondPress, stamp(millis()), heldMs};
     }
     delay(POLL_INTERVAL_MS);
   }
