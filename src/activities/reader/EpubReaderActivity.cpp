@@ -757,14 +757,27 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
     return;
   }
+  // Full clock for the pass, as for the Background-B/C build slices. Usually redundant — the AA
+  // pass is normally owed within IDLE_POWER_SAVING_MS of the page turn that armed it, so the idle
+  // saver has not downclocked yet (device trace 2026-08-07: AA ran ~1.7 s after the button press,
+  // at 160 MHz). It matters in the case this pass is built around: AA self-gates on
+  // !isRefreshPending(), and on X3 that stays asserted for the whole multi-second waveform, so a
+  // HALF or full refresh can defer AA past the 3 s threshold and into low-power mode.
+  // Taken after the early returns above so the idle ticks (the overwhelmingly common case) never
+  // toggle the clock, and safe to take here because the render lock is already held, which the
+  // render task's own per-render power lock also requires. The waveform waits this pass triggers
+  // still downclock normally: they run on this same task, so enterWaveformWait() sees its own
+  // lock owner rather than a foreign one.
+  HalPowerManager::Lock powerLock;
   pendingGrayscale_.active = false;
   renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
   const Page* pagePtr = pendingGrayscale_.page.get();
-  // This pass runs ON the loop task, so while it is in flight no input is sampled or
-  // dispatched at all (measured: 1237 ms max loop duration on X3). The plane render therefore
+  // This pass runs ON the loop task, so while it is in flight no input is sampled or dispatched
+  // at all (measured: 1237 ms max loop duration on X3; a measurement at full clock on X3
+  // 2026-08-07 showed ~530 ms — planes 133 + gray 230 + restore 49). The plane render therefore
   // aborts per element, and a bailed plane forces the pass to abort regardless of what the
   // predicate says — never let a partially drawn plane reach the panel.
   bool planeAborted = false;
@@ -1093,8 +1106,23 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 #if DEBUG_BACKGROUND_WORK
       bgCounters_.bRuns++;
 #endif
-      const Section::BuildStep step =
-          backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      Section::BuildStep step;
+      {
+        // Run the slice at the normal clock. B is idle-time work by definition, so main.cpp's
+        // idle power saver has already dropped the CPU to LOW_POWER_FREQ (10 MHz) by the time it
+        // gets here — and BG_BUILD_BUDGET_MS is wall-clock, checked between ~1 KB visitor chunks.
+        // At 10 MHz a single chunk's layout can run well past the whole budget on its own: measured
+        // on device, 40 ms slices became 1220 ms loop stalls and a 57-page section took 28 s.
+        // Holding the clock for the slice restores the intended granularity, and race-to-idle also
+        // costs LESS energy than grinding at 10 MHz for 10x the wall time. Scoped to the slice
+        // rather than the whole build so the render task's own per-render power lock (and the
+        // waveform-wait downclock that depends on no foreign lock being held) still work normally;
+        // safe because B only reaches here holding the render lock, which that path also needs.
+        // Deliberately NOT taken for the Probe/WaitHeap ticks, which idle for minutes at a time
+        // and would otherwise toggle the CPU clock on every loop iteration for no work.
+        HalPowerManager::Lock powerLock;
+        step = backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      }
       checkHeapIntegrity("after_b_slice");
       if (step == Section::BuildStep::More) {
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
@@ -1219,7 +1247,17 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
 #if DEBUG_BACKGROUND_WORK
   bgCounters_.bRuns++;
 #endif
-  const Section::BuildStep step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+  Section::BuildStep step;
+  {
+    // Full clock for the slice, same reasoning as the Background-B slice: this runs on the loop
+    // task, and a build long enough to matter has already passed IDLE_POWER_SAVING_MS with no
+    // button press, so main.cpp's idle saver has dropped the CPU to LOW_POWER_FREQ. The wall-clock
+    // BG_BUILD_BUDGET_MS is only checked between ~1 KB visitor chunks, so at 10 MHz one chunk
+    // overruns the whole budget and the slice stops being a slice. Worse here than for B: this is
+    // the build the reader is actually waiting on behind the "Indexing" popup.
+    HalPowerManager::Lock powerLock;
+    step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+  }
   checkHeapIntegrity("after_c_slice");
 
   if (step == Section::BuildStep::More) {
