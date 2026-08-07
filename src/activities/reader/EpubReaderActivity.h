@@ -724,9 +724,20 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
-  bool preventAutoSleep() override {
-    return section && section->hasActiveBuild();
-  }  // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
+  bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
+  // Hold full speed while a section build is in flight. A build only ever runs during reader
+  // idle, so main.cpp's inactivity governor has passed IDLE_POWER_SAVING_MS and drops the CPU
+  // to 10 MHz between slices — the per-slice HalPowerManager::Lock then raises it right back,
+  // and the loop spent a measured ~30 clock transitions per second bouncing between the two
+  // (device trace 2026-08-07), with the build running at roughly a 50% duty cycle because every
+  // 40 ms slice was followed by a 50 ms idle delay at 10 MHz. Declaring the work makes the loop
+  // stop calling this state idle at all: slices run back to back, the build finishes sooner, and
+  // Background-B hands the borrowed framebuffer back that much earlier. Same failure and same
+  // remedy as HomeActivity's cover decoding (see its skipLoopDelay).
+  bool skipLoopDelay() override {
+    return (section && section->hasActiveBuild()) || backgroundBuildState_ == BackgroundBuildState::Building;
+  }
+  // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
   // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
   void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
   bool shouldSkipPeriodicUpdate() const override;
