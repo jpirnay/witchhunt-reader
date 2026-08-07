@@ -152,6 +152,34 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #ifndef BG_BUILD_CSS_MIN_FREE_HEAP_BYTES
 #define BG_BUILD_CSS_MIN_FREE_HEAP_BYTES (72 * 1024)
 #endif
+// Floors for the BORROWED-buffer B build (beginBackgroundBorrow). The gates above size a build
+// that allocates from the heap; a borrowed build does not — its parse working set, inflate ring
+// and CSS index all bump-allocate inside the lent ~48 KB region (see Section::runBuildParse's
+// sharedZipScope and runBuildSetup's setIndexArena/setLeanResolve). What still comes from the
+// heap is the small fixed setup (parser object, file handles, std::string paths) plus whatever
+// the CSS resolver needs above the LEAN floor it drops to in arena mode. These floors cover that
+// remainder with reserve, and are reachable from the ~57 KB reading steady state — which the
+// heap-backed floors above are not, on either device.
+#ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
+#endif
+#ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
+#endif
+// Quiet period after the last page turn before B may take the buffer. B's borrow costs a page's
+// AA if the reader turns during it, and the whole slice budget is wasted work when preempted —
+// so only start once the reader has settled into a page. Below this the reader is flipping
+// (skimming, or holding the button), which is exactly when B should stay out of the way.
+#ifndef BG_BUILD_BORROW_QUIET_MS
+#define BG_BUILD_BORROW_QUIET_MS 4000UL
+#endif
+// See backgroundPreemptCount_: give up on a target after this many preempted attempts. Two is
+// deliberate — attempt 1 banks the inflated XHTML in the book-keyed HTML cache (kept on abort,
+// see Section::abortSectionBuild), so attempt 2 skips inflation and is the one that gets a fair
+// shot at the parse. A third would just repeat attempt 2's losing race.
+#ifndef BG_BUILD_MAX_PREEMPTIONS
+#define BG_BUILD_MAX_PREEMPTIONS 2
+#endif
 // Per-slice time budget for a Background-B parse step. Conservative start (handoff plan
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
@@ -695,16 +723,18 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
   // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
   // little heap for Section::heapAllowsEmbeddedStyle()).
   static constexpr const char* kBStateNames[] = {"probe", "waitheap", "building", "settled"};
-  LOG_INF("ERS",
-          "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d | preReady=%d "
-          "buildPct=%d free=%lu contig=%lu",
-          static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
-          static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
-          kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
-          lastRenderStats.embeddedStyle ? 1 : 0,
-          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
-          static_cast<unsigned long>(esp_get_free_heap_size()),
-          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  LOG_INF(
+      "ERS",
+      "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d borrow=%d preempt=%u | "
+      "preReady=%d buildPct=%d free=%lu contig=%lu",
+      static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
+      static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
+      kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
+      lastRenderStats.embeddedStyle ? 1 : 0, backgroundBorrowActive_ ? 1 : 0,
+      static_cast<unsigned>(backgroundPreemptCount_),
+      (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
+      static_cast<unsigned long>(esp_get_free_heap_size()),
+      static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("idle_5s");
 #endif
 }
@@ -727,14 +757,27 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
     return;
   }
+  // Full clock for the pass, as for the Background-B/C build slices. Usually redundant — the AA
+  // pass is normally owed within IDLE_POWER_SAVING_MS of the page turn that armed it, so the idle
+  // saver has not downclocked yet (device trace 2026-08-07: AA ran ~1.7 s after the button press,
+  // at 160 MHz). It matters in the case this pass is built around: AA self-gates on
+  // !isRefreshPending(), and on X3 that stays asserted for the whole multi-second waveform, so a
+  // HALF or full refresh can defer AA past the 3 s threshold and into low-power mode.
+  // Taken after the early returns above so the idle ticks (the overwhelmingly common case) never
+  // toggle the clock, and safe to take here because the render lock is already held, which the
+  // render task's own per-render power lock also requires. The waveform waits this pass triggers
+  // still downclock normally: they run on this same task, so enterWaveformWait() sees its own
+  // lock owner rather than a foreign one.
+  HalPowerManager::Lock powerLock;
   pendingGrayscale_.active = false;
   renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
   const Page* pagePtr = pendingGrayscale_.page.get();
-  // This pass runs ON the loop task, so while it is in flight no input is sampled or
-  // dispatched at all (measured: 1237 ms max loop duration on X3). The plane render therefore
+  // This pass runs ON the loop task, so while it is in flight no input is sampled or dispatched
+  // at all (measured: 1237 ms max loop duration on X3; a measurement at full clock on X3
+  // 2026-08-07 showed ~530 ms — planes 133 + gray 230 + restore 49). The plane render therefore
   // aborts per element, and a bailed plane forces the pass to abort regardless of what the
   // predicate says — never let a partially drawn plane reach the panel.
   bool planeAborted = false;
@@ -782,12 +825,89 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
 }
 
 void EpubReaderActivity::resetBackgroundBuild() {
+  endBackgroundBorrow();       // returns the lent buffer (and aborts the build) if B held it
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
   backgroundBuildInflatedSize_ = 0;
   backgroundBuildGateCheckMs_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
+  backgroundPreemptCount_ = 0;
+}
+
+bool EpubReaderActivity::beginBackgroundBorrow() {
+  if (backgroundBorrowActive_ || secondaryBorrowed_ || !backgroundSection_) {
+    return false;  // already lent (to B or to C) — never two arenas over one region
+  }
+  size_t borrowedSize = 0;
+  uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
+  if (!borrowed) {
+    return false;  // no secondary buffer to lend (X3 baseline, or already released for a C build)
+  }
+  buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+  if (!buildScratch_ || !buildScratch_->valid()) {
+    buildScratch_.reset();
+    renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    return false;
+  }
+  backgroundSection_->setExternalBuildScratch(buildScratch_.get());
+  secondaryBorrowed_ = true;
+  backgroundBorrowActive_ = true;
+  // Mark AA unavailable while the block is away (renderContents gates on this as well as on
+  // hasSecondaryBuffer). Unlike the Background-C borrow this deliberately does NOT seed RED RAM
+  // or opt in to single-buffer fast differential:
+  //  - No refresh can happen during B's borrow. Every render calls recoverSecondaryBufferIfNeeded()
+  //    first, which hands the block back before the pass draws — so the single-buffer display
+  //    path would never be exercised, and if one ever did slip through, an un-opted-in FAST
+  //    downgrades to HALF (slow, correct) instead of ghosting against a bogus baseline.
+  //  - syncRedRamFromFrameBuffer() would be actively wrong here. C borrows right after drawing
+  //    its popup, so frameBuffer is what's on screen. B borrows during quiet reading, when a
+  //    completed Background-A pre-render usually leaves the NEXT page in frameBuffer — seeding
+  //    RED RAM from that makes the next page turn diff against the frame it is about to draw
+  //    and leaves the page visibly unchanged.
+  secondaryBufferDegraded_ = true;
+  LOG_INF("ERS", "Background-B: borrowed secondary buffer for spine %d build (%u bytes, free=%lu contig=%lu)",
+          backgroundBuildSpineIndex_, static_cast<uint32_t>(borrowedSize),
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  return true;
+}
+
+void EpubReaderActivity::endBackgroundBorrow() {
+  if (!backgroundBorrowActive_) {
+    return;
+  }
+  // Order matters: the build allocates INSIDE the region being handed back, so it must be torn
+  // down first. ~Section aborts the in-flight build (releasing into the arena) and deletes the
+  // partial cache file; the book-keyed inflated-HTML cache survives when phase (a) completed,
+  // so a later attempt skips re-inflation (see Section::abortSectionBuild).
+  const bool buildWasLive = backgroundSection_ && backgroundSection_->hasActiveBuild();
+  if (backgroundSection_) {
+    backgroundSection_->setExternalBuildScratch(nullptr);
+    // Only a LIVE build still points into the region. A finished one tore its state down in
+    // stepSectionBuild (buildState_.reset() before Done/Failed), so the Section is arena-free
+    // and worth keeping — buildSection() can still adopt it as a completed target.
+    if (buildWasLive) {
+      backgroundSection_.reset();
+    }
+  }
+  buildScratch_.reset();
+  renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+  backgroundBorrowActive_ = false;
+  secondaryBorrowed_ = false;
+  secondaryBufferDegraded_ = false;
+  backgroundBuildPercent_ = -1;
+  // A build that was still live has been discarded: count the preemption and re-probe the target
+  // (phase (a) may have banked the inflated HTML, so the retry can be much cheaper). The counter
+  // is deliberately NOT reset here — it is what stops this from looping forever on a spine whose
+  // parse cannot fit between two page turns.
+  if (buildWasLive) {
+    backgroundPreemptCount_++;
+    backgroundBuildState_ = BackgroundBuildState::Probe;
+    backgroundBuildGateCheckMs_ = 0;
+  }
+  LOG_INF("ERS", "Background-B: returned secondary buffer (spine %d, %s, preemptions=%u)", backgroundBuildSpineIndex_,
+          buildWasLive ? "build discarded" : "no build live", static_cast<unsigned>(backgroundPreemptCount_));
 }
 
 void EpubReaderActivity::stepBackgroundSectionBuild() {
@@ -914,6 +1034,31 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         return;
       }
       backgroundBuildGateCheckMs_ = now;
+      // Give-up latch: this target has already burned its retry budget being preempted. Leave it
+      // to Background-C (the reader gets the popup, exactly as before this feature) and move the
+      // cursor on, rather than re-losing the same race for the rest of the chapter.
+      if (backgroundPreemptCount_ >= BG_BUILD_MAX_PREEMPTIONS) {
+        LOG_INF("ERS", "Background build spine=%d abandoned after %u preemptions; leaving it to foreground",
+                targetSpine, static_cast<unsigned>(backgroundPreemptCount_));
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+        return;
+      }
+      // Preferred path: build inside the BORROWED secondary framebuffer. This is what makes B
+      // viable at all on the reading heap — the arena absorbs the parse working set, the inflate
+      // ring and the CSS index, so the heap-backed floors below (which the ~57 KB/~24 KB reading
+      // steady state cannot reach) stop being the binding constraint. Only once the reader has
+      // settled on a page: the borrow costs this page's AA if a turn lands during it.
+      // beginBackgroundBorrow() self-declines when there is no secondary buffer to lend (X3
+      // baseline, or a Background-C build already holds it), so this needs no device split.
+      if ((now - lastPageTurnTime) >= BG_BUILD_BORROW_QUIET_MS &&
+          esp_get_free_heap_size() >= BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES &&
+          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
+              BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
+          beginBackgroundBorrow()) {
+        backgroundBuildState_ = BackgroundBuildState::Building;
+        return;
+      }
       const uint32_t ringBytes =
           static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
       const uint32_t freeHeap = esp_get_free_heap_size();
@@ -932,9 +1077,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
           return;
         }
-        // B builds resident, so a CSS parse below ~68 KB free would dip under the runtime
-        // CSS-resolve floor mid-parse and come out css-degraded — seconds of work B then
-        // discards. Refuse here and let Background-C build it released (clean) on navigation.
+        // Reached only when the borrow above was unavailable, i.e. B is building RESIDENT out of
+        // the heap: a CSS parse below ~68 KB free would then dip under the runtime CSS-resolve
+        // floor mid-parse and come out css-degraded — seconds of work B discards. Refuse here and
+        // let Background-C build it released (clean) on navigation. (A borrowed build resolves CSS
+        // from the arena at the lower lean floor, so it never consults this gate.)
         if (freeHeap < BG_BUILD_CSS_MIN_FREE_HEAP_BYTES) {
           return;
         }
@@ -959,8 +1106,23 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 #if DEBUG_BACKGROUND_WORK
       bgCounters_.bRuns++;
 #endif
-      const Section::BuildStep step =
-          backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      Section::BuildStep step;
+      {
+        // Run the slice at the normal clock. B is idle-time work by definition, so main.cpp's
+        // idle power saver has already dropped the CPU to LOW_POWER_FREQ (10 MHz) by the time it
+        // gets here — and BG_BUILD_BUDGET_MS is wall-clock, checked between ~1 KB visitor chunks.
+        // At 10 MHz a single chunk's layout can run well past the whole budget on its own: measured
+        // on device, 40 ms slices became 1220 ms loop stalls and a 57-page section took 28 s.
+        // Holding the clock for the slice restores the intended granularity, and race-to-idle also
+        // costs LESS energy than grinding at 10 MHz for 10x the wall time. Scoped to the slice
+        // rather than the whole build so the render task's own per-render power lock (and the
+        // waveform-wait downclock that depends on no foreign lock being held) still work normally;
+        // safe because B only reaches here holding the render lock, which that path also needs.
+        // Deliberately NOT taken for the Probe/WaitHeap ticks, which idle for minutes at a time
+        // and would otherwise toggle the CPU clock on every loop iteration for no work.
+        HalPowerManager::Lock powerLock;
+        step = backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+      }
       checkHeapIntegrity("after_b_slice");
       if (step == Section::BuildStep::More) {
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
@@ -972,6 +1134,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
                   targetSpine);
           backgroundSection_->abortSectionBuild();
           backgroundSection_.reset();
+          endBackgroundBorrow();  // no build left to discard; just hands the block back
           backgroundBuildPercent_ = -1;
           backgroundBuildState_ = BackgroundBuildState::Settled;
           return;
@@ -1002,6 +1165,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         LOG_ERR("ERS", "Background build spine=%d failed", targetSpine);
         backgroundSection_.reset();
       }
+      // Terminal for this target: the build state is torn down either way, so give the borrowed
+      // framebuffer back at once rather than holding it across the Settled tick — AA is off for
+      // every render until it returns. A completed backgroundSection_ survives this (it no longer
+      // references the arena) so buildSection() can still adopt it.
+      endBackgroundBorrow();
       // Flush any image dimensions this background build resolved (valid regardless of the
       // build's outcome). One write per completed background section, under the render lock.
       epub->persistImageManifest();
@@ -1079,7 +1247,17 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
 #if DEBUG_BACKGROUND_WORK
   bgCounters_.bRuns++;
 #endif
-  const Section::BuildStep step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+  Section::BuildStep step;
+  {
+    // Full clock for the slice, same reasoning as the Background-B slice: this runs on the loop
+    // task, and a build long enough to matter has already passed IDLE_POWER_SAVING_MS with no
+    // button press, so main.cpp's idle saver has dropped the CPU to LOW_POWER_FREQ. The wall-clock
+    // BG_BUILD_BUDGET_MS is only checked between ~1 KB visitor chunks, so at 10 MHz one chunk
+    // overruns the whole budget and the slice stops being a slice. Worse here than for B: this is
+    // the build the reader is actually waiting on behind the "Indexing" popup.
+    HalPowerManager::Lock powerLock;
+    step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
+  }
   checkHeapIntegrity("after_c_slice");
 
   if (step == Section::BuildStep::More) {
@@ -2057,6 +2235,12 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
 
+  // NOTE: Background-B's borrowed framebuffer is deliberately NOT reclaimed here. This runs on
+  // the loop task without the render lock, and handing a framebuffer back from under the render
+  // task is not something a flag assignment's worth of racing tolerates. The reclaim belongs to
+  // recoverSecondaryBufferIfNeeded(), which render() calls before any pass draws — early enough
+  // that this page turn still renders with AA, and serialised by the lock render() already holds.
+
   // If the "Indexing..." popup is currently on screen and the user turns the page/section now, the
   // destination page replaces a dark popup box on the X4 baseline. Whether it lands via a now-built
   // page (displayBuildPage) or by abandoning the build to an adjacent cached section (renderContents
@@ -2225,6 +2409,14 @@ bool EpubReaderActivity::ensureFootnotePreviewCache() {
 }
 
 void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
+  // A render is about to draw page content, and AA is gated on a RESIDENT secondary buffer
+  // (see renderContents). If Background-B is building inside the borrowed one, take it back
+  // first — otherwise this frame silently renders BW. No-op unless B holds it, which is the
+  // normal case: page turns already hand it back in pageTurn(), so what reaches here is the
+  // occasional battery/clock-tick Normal render. Deliberately ahead of the Background-C guard
+  // below: C's borrow serves a build the reader is watching and must survive; B's is
+  // look-ahead that yields to anything the reader can see.
+  endBackgroundBorrow();
   // While Background-C is building with the buffer released for headroom, leave it released —
   // reallocating now would reclaim the ~48–52 KB the build is using. The buffer is restored here
   // on the first render after the build ends (hasActiveBuild() goes false).
@@ -2494,6 +2686,12 @@ EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(
                                                                                 const size_t inflatedSize) const {
   // A failed Background-C attempt latches the old blocking path for this spine.
   if (forceBlockingBuildSpine_ == currentSpineIndex) return SectionBuildMode::Blocking;
+  // The secondary buffer is already LENT to a build arena — either Background-B's, just adopted
+  // with its build still live, or a prior C borrow. hasSecondaryBuffer() is false in that state,
+  // so this must be tested first: falling through would pick Blocking and index the whole section
+  // behind the popup while a perfectly good partial build sits in the arena. Released is what the
+  // borrow already implements (single-buffer display semantics, headroom in the lent block).
+  if (secondaryBorrowed_) return SectionBuildMode::IncrementalReleased;
   // No secondary buffer to keep or release (already degraded): blocking path reallocs it at the end.
   if (!renderer.hasSecondaryBuffer()) return SectionBuildMode::Blocking;
   // A resident build that aborted on the low-heap guard retries released but still INCREMENTAL:
@@ -2689,6 +2887,17 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
                             : (backgroundSection_->pageCount > 0) ? "build complete"
                                                                   : "probed only, will build";
     section = std::move(backgroundSection_);
+    // Transfer, don't return: if B was building inside the borrowed secondary framebuffer, the
+    // adopted build is still live inside that arena and Background-C wants exactly the same
+    // borrow for exactly the same reason. Clearing the B-owns-it flag (leaving secondaryBorrowed_
+    // and buildScratch_ intact, now reachable through `section`) hands ownership to C, whose
+    // existing return sites — recoverSecondaryBufferIfNeeded, the C fallback paths, onExit —
+    // take it from here. Must happen BEFORE resetBackgroundBuild(), which would otherwise call
+    // endBackgroundBorrow() and yank the arena out from under the build we just adopted.
+    if (backgroundBorrowActive_) {
+      backgroundBorrowActive_ = false;
+      LOG_INF("ERS", "Background-B borrow transferred to Background-C for spine %d", currentSpineIndex);
+    }
     LOG_INF("ERS", "Adopting background section for spine %d (%s)", currentSpineIndex, adoptKind);
   } else {
     section = std::make_unique<Section>(epub, currentSpineIndex, renderer);
@@ -2787,26 +2996,44 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         // retained RED RAM copy. Symmetric setSingleBufferFastDiff(false) lives in
         // recoverSecondaryBufferIfNeeded(), the one place this released state gets cleanly restored.
         const uint32_t freeBefore = esp_get_free_heap_size();
-        if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
-        // Prefer BORROWING the secondary buffer over freeing it: the lent block never enters
-        // the heap, so a survivor can't split it into a fragmented hole and the return cannot
-        // fail (the realloc-failure / heap-recovery-restart class of bugs is impossible). The
-        // build's arena bump-allocates inside the lent region instead of the heap. Fall back to
-        // the legacy release only when there is no secondary buffer to lend.
-        size_t borrowedSize = 0;
-        uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
-        if (borrowed) {
-          buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
-          section->setExternalBuildScratch(buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr);
-          secondaryBorrowed_ = true;
+        // Already holding the borrow (transferred from Background-B with its build live): the
+        // block is lent, buildScratch_ points at it and `section` is already wired to that arena.
+        // Re-running the sequence below would re-seed RED RAM from a frame that is no longer the
+        // one on screen, and — since borrowSecondaryBuffer() returns null when already lent —
+        // fall into releaseSecondaryBuffer() on a buffer the display no longer owns. Just keep
+        // the single-buffer display flags asserted and let the adopted build carry on.
+        if (secondaryBorrowed_) {
+          // Still seed RED RAM and opt in to single-buffer fast differential: unlike B (which
+          // never refreshes while borrowing) C drives FAST refreshes for every mid-build page.
+          // drawPopup() above just painted frameBuffer with what is now on screen, so this is
+          // the correct baseline — the same frame the non-transferred branch below syncs from.
+          if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+          renderer.setSingleBufferFastDiff(true);
+          secondaryBufferDegraded_ = true;
+          LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer already BORROWED (free=%lu)",
+                  currentSpineIndex, static_cast<unsigned long>(freeBefore));
         } else {
-          renderer.releaseSecondaryBuffer();
+          if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+          // Prefer BORROWING the secondary buffer over freeing it: the lent block never enters
+          // the heap, so a survivor can't split it into a fragmented hole and the return cannot
+          // fail (the realloc-failure / heap-recovery-restart class of bugs is impossible). The
+          // build's arena bump-allocates inside the lent region instead of the heap. Fall back to
+          // the legacy release only when there is no secondary buffer to lend.
+          size_t borrowedSize = 0;
+          uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
+          if (borrowed) {
+            buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+            section->setExternalBuildScratch(buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr);
+            secondaryBorrowed_ = true;
+          } else {
+            renderer.releaseSecondaryBuffer();
+          }
+          // Display semantics are identical to a released buffer (single-buffer mode either way).
+          renderer.setSingleBufferFastDiff(true);
+          secondaryBufferDegraded_ = true;
+          LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer %s (free %lu->%lu)",
+                  currentSpineIndex, borrowed ? "BORROWED" : "RELEASED", freeBefore, esp_get_free_heap_size());
         }
-        // Display semantics are identical to a released buffer (single-buffer mode either way).
-        renderer.setSingleBufferFastDiff(true);
-        secondaryBufferDegraded_ = true;
-        LOG_INF("ERS", "Background-C: building spine %d incrementally, secondary buffer %s (free %lu->%lu)",
-                currentSpineIndex, borrowed ? "BORROWED" : "RELEASED", freeBefore, esp_get_free_heap_size());
       } else {
         LOG_INF("ERS", "Background-C: building spine %d incrementally, buffer resident (free=%lu contig=%lu)",
                 currentSpineIndex, esp_get_free_heap_size(),
