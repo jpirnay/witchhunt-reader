@@ -35,7 +35,7 @@ struct DirectPixelWriter {
   // Row-precomputed: the Y-dependent portion of the physical coords
   int rowPhyXBase, rowPhyYBase;
 
-  void init(GfxRenderer& renderer) {
+  void init(const GfxRenderer& renderer) {
     fb = renderer.getWriteTarget();
     originY = renderer.getWriteOriginY();
     clipRows = renderer.getWriteRows();

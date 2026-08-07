@@ -6,10 +6,10 @@
 #include <Epub/converters/PixelCache.h>
 #include <Epub/converters/PngToFramebufferConverter.h>
 #include <FsHelpers.h>
-#include <Memory.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <PngStreamDecoder.h>
 #include <Serialization.h>
 #include <Txt.h>
@@ -119,6 +119,8 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
       bufferRow = 0;
     }
 
+    // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+    // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
     const uint8_t* rowBuffer = readBuffer.get() + static_cast<size_t>(bufferRow) * bytesPerRow;
     bufferRow++;
 

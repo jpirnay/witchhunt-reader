@@ -11,14 +11,14 @@ class GfxRenderer {
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
   enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
 
-  uint8_t* getWriteTarget() { return nullptr; }
-  int getWriteOriginY() { return 0; }
-  int getWriteRows() { return 0; }
-  RenderMode getRenderMode() { return BW; }
-  uint16_t getDisplayWidthBytes() { return 60; }
-  int getDisplayWidth() { return 480; }
-  int getDisplayHeight() { return 800; }
-  int getScreenWidth() { return 480; }
-  int getScreenHeight() { return 800; }
-  Orientation getOrientation() { return Portrait; }
+  uint8_t* getWriteTarget() const { return nullptr; }
+  int getWriteOriginY() const { return 0; }
+  int getWriteRows() const { return 0; }
+  RenderMode getRenderMode() const { return BW; }
+  uint16_t getDisplayWidthBytes() const { return 60; }
+  int getDisplayWidth() const { return 480; }
+  int getDisplayHeight() const { return 800; }
+  int getScreenWidth() const { return 480; }
+  int getScreenHeight() const { return 800; }
+  Orientation getOrientation() const { return Portrait; }
 };

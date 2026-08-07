@@ -104,7 +104,7 @@ struct PixelCache {
     bandRows = wantRows;
 
     const size_t bufSize = (size_t)(bandRows + 1) * bytesPerRow;  // +1 spare zero row
-    buffer = (uint8_t*)malloc(bufSize);
+    buffer = static_cast<uint8_t*>(malloc(bufSize));
     if (!buffer) {
       LOG_ERR("IMG", "OOM cache band: %u bytes", (unsigned)bufSize);
       return false;
