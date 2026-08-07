@@ -153,6 +153,16 @@ class HalGPIO {
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
   void waitForStablePowerRelease();
 
+  // "Is this button held right now?", answered from fresh hardware samples rather than
+  // the cache isPressed() reads. The six front buttons are resistor dividers on two ADC
+  // pins, so a sample is a plain analogRead plus a band lookup — no debounce state to
+  // warm up, which is what makes this usable during boot before update() has run enough
+  // times to populate the cache. Power is a digital pin and is read directly.
+  //
+  // Every sample must agree, so a transient cannot produce a false positive; a genuinely
+  // held button is stable and passes. Blocks for confirmSamples * 10 ms.
+  bool isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples = 4);
+
   // Which power-button press pattern(s) are accepted as an intentional wake. Mirrors
   // whichever press type(s) the user configured to put the device to sleep — several
   // can be set at once (e.g. both short AND long press power off), in which case any
@@ -163,11 +173,40 @@ class HalGPIO {
     bool longHold = true;       // sustained hold of requiredDurationMs (the safe default)
   };
 
+  // What the boot-time wake gate actually observed on the power pin. Reported so a
+  // "the button did nothing" report can be told apart from a slow boot: the rejecting
+  // verdicts each name a different user error (let go too soon, second click missed).
+  enum class WakeVerdict : uint8_t {
+    NotPressed,     // pin already HIGH when the gate first sampled it
+    ShortPress,     // accepted: short-press-to-sleep is configured, any press wakes
+    LongHold,       // accepted: held past requiredDurationMs
+    DoubleClick,    // accepted: released early, second press inside the window
+    ReleasedEarly,  // rejected: released before the threshold, double-click not configured
+    NoSecondPress,  // rejected: released early, double-click armed, second press never came
+  };
+
+  struct WakeCheck {
+    WakeVerdict verdict = WakeVerdict::NotPressed;
+    uint16_t decidedAtMs = 0;  // millis() when the verdict was reached
+    // How long the gate itself saw the first press, NOT the user's real hold: the press
+    // began before the app did, so the bootloader and everything up to the gate is not
+    // counted. Use decidedAtMs for "when the device committed to waking".
+    uint16_t heldMs = 0;
+
+    bool accepted() const {
+      return verdict == WakeVerdict::ShortPress || verdict == WakeVerdict::LongHold ||
+             verdict == WakeVerdict::DoubleClick;
+    }
+  };
+
+  // Human-readable name of a verdict, for logging. Points at a string literal.
+  static const char* wakeVerdictName(WakeVerdict verdict);
+
   // Verify the raw power button was pressed in one of the patterns enabled by `gestures`,
   // mirroring the press type(s) configured to put the device to sleep. requiredDurationMs
   // is only used by the longHold gesture.
   // Call as early as possible so cold-boot initialization cannot hide a short press.
-  bool verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs);
+  WakeCheck verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs);
 
   // Check if USB is connected
   bool isUsbConnected() const;

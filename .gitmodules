@@ -1,4 +1,10 @@
 [submodule "freeink-sdk"]
 	path = freeink-sdk
-	url = https://github.com/Free-Ink/freeink-sdk.git
-	branch = main
+	# TEMPORARY: pointed at the jpirnay fork branch carrying the X3 single-initial-full-sync
+	# fix, which is not on upstream main yet. Revert both lines to
+	#   url = https://github.com/Free-Ink/freeink-sdk.git
+	#   branch = main
+	# once Free-Ink/freeink-sdk#31 is merged and the pointer can move to an upstream commit.
+	# Until then a --recursive clone must fetch from the fork: upstream does not have this SHA.
+	url = https://github.com/jpirnay/freeink-sdk.git
+	branch = x3-single-initial-full-sync
