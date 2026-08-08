@@ -142,7 +142,12 @@ std::string getPanicInfo(bool full) {
 
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
-  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP;
+  // Watchdog resets count as panics here: both watchdogs panic on timeout in this
+  // build (CONFIG_ESP_TASK_WDT_PANIC, CONFIG_ESP_INT_WDT), so they preserve the same
+  // panic info and deserve the same crash report. Without these a wedged task just
+  // rebooted silently to Home with no diagnostic trail.
+  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_INT_WDT ||
+         resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
 }
 
 }  // namespace HalSystem
