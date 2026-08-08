@@ -311,7 +311,7 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
   for (auto& element : elements) {
     if (element->getTag() == TAG_PageTable) {
       static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput,
-                                                                    alsoWarmGrayscale);
+                                                                     alsoWarmGrayscale);
       continue;
     }
     if (element->getTag() != TAG_PageImage) continue;

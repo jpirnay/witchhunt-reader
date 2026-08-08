@@ -188,8 +188,7 @@ class Page {
   // Used to decide whether to release the secondary frame buffer before warm.
   // alsoWarmGrayscale mirrors warmImageCaches(): a missing .bayer.pxc is decode work too,
   // so it must count here or the secondary buffer stays allocated through that decode.
-  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput,
-                         bool alsoWarmGrayscale = false) const {
+  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput, bool alsoWarmGrayscale = false) const {
     return std::any_of(elements.begin(), elements.end(), [&](const std::shared_ptr<PageElement>& el) {
       if (el->getTag() == TAG_PageTable)
         return static_cast<const PageTableFragment&>(*el).hasUncachedImages(forceLoadLargeImages, monochromeOutput,
