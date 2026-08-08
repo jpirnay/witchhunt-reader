@@ -826,8 +826,9 @@ void WifiSelectionActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
-  // Draw header
-  char countStr[32];
+  // Draw header. Sized for the longest translation in UTF-8 bytes, not the English string:
+  // Belarusian "Знойдзена сетак: %zu" is 36 bytes on its own, so a 32-byte buffer truncated it.
+  char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), networks.size());
   GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
                  tr(STR_WIFI_NETWORKS), countStr);
