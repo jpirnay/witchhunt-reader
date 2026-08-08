@@ -18,6 +18,14 @@
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
 
+namespace {
+// Upper bound on any stored credential we will decode from JSON. A WPA passphrase
+// tops out at 63 characters (or a 64-hex-char PSK); server passwords get the same
+// generous cap. Anything longer is corrupt or hand-edited, and decoding it would
+// cost contiguous heap we can't spare.
+constexpr size_t MAX_PASSWORD_LENGTH = 64;
+}  // namespace
+
 // Convert legacy settings.
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   switch (static_cast<CrossPointSettings::STATUS_BAR_MODE>(settings.statusBar)) {
@@ -311,7 +319,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       std::string val;
       if (info.obfuscated) {
         bool ok = false;
-        val = obfuscation::deobfuscateFromBase64(doc[std::string(info.key) + "_obf"] | "", &ok);
+        bool tooLong = false;
+        // The value is about to be truncated into a stringMaxLen buffer anyway, so
+        // anything longer is already garbage — reject it before it costs us heap.
+        val = obfuscation::deobfuscateFromBase64(doc[std::string(info.key) + "_obf"] | "",
+                                                 info.stringMaxLen ? info.stringMaxLen - 1 : 0, &ok, &tooLong);
+        if (tooLong) {
+          LOG_ERR("CPS", "Oversized obfuscated value for key '%s'", info.key);
+          if (needsResave) *needsResave = true;
+        }
         if (!ok || val.empty()) {
           val = doc[info.key] | fieldDefault;
           if (val != fieldDefault && needsResave) *needsResave = true;
@@ -408,10 +424,21 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
 
   store.username = doc["username"] | std::string("");
   bool ok = false;
-  store.password = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
+  bool tooLong = false;
+  store.password = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", MAX_PASSWORD_LENGTH, &ok, &tooLong);
+  if (tooLong) {
+    LOG_ERR("KRS", "Discarding oversized password for user: %s", store.username.c_str());
+    if (needsResave) *needsResave = true;
+  }
   if (!ok || store.password.empty()) {
     store.password = doc["password"] | std::string("");
-    if (!store.password.empty() && needsResave) *needsResave = true;
+    if (store.password.size() > MAX_PASSWORD_LENGTH) {
+      LOG_ERR("KRS", "Discarding oversized legacy password for user: %s", store.username.c_str());
+      store.password.clear();
+      if (needsResave) *needsResave = true;
+    } else if (!store.password.empty() && needsResave) {
+      *needsResave = true;
+    }
   }
   store.serverUrl = doc["serverUrl"] | std::string("");
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
@@ -509,10 +536,21 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
     WifiCredential cred;
     cred.ssid = obj["ssid"] | std::string("");
     bool ok = false;
-    cred.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
+    bool tooLong = false;
+    cred.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", MAX_PASSWORD_LENGTH, &ok, &tooLong);
+    if (tooLong) {
+      LOG_ERR("WCS", "Discarding oversized password for %s", cred.ssid.c_str());
+      if (needsResave) *needsResave = true;
+    }
     if (!ok || cred.password.empty()) {
       cred.password = obj["password"] | std::string("");
-      if (!cred.password.empty() && needsResave) *needsResave = true;
+      if (cred.password.size() > MAX_PASSWORD_LENGTH) {
+        LOG_ERR("WCS", "Discarding oversized legacy password for %s", cred.ssid.c_str());
+        cred.password.clear();
+        if (needsResave) *needsResave = true;
+      } else if (!cred.password.empty() && needsResave) {
+        *needsResave = true;
+      }
     }
     const std::string bssidHex = obj["bssid"] | std::string("");
     const int channel = obj["channel"] | 0;
@@ -691,10 +729,21 @@ bool JsonSettingsIO::loadOpds(OpdsServerStore& store, const char* json, bool* ne
     // Try the obfuscated key first; fall back to plaintext "password" for
     // files written before obfuscation was added (or hand-edited JSON).
     bool ok = false;
-    server.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
+    bool tooLong = false;
+    server.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", MAX_PASSWORD_LENGTH, &ok, &tooLong);
+    if (tooLong) {
+      LOG_ERR("OPS", "Discarding oversized password for server: %s", server.name.c_str());
+      if (needsResave) *needsResave = true;
+    }
     if (!ok || server.password.empty()) {
       server.password = obj["password"] | std::string("");
-      if (!server.password.empty() && needsResave) *needsResave = true;
+      if (server.password.size() > MAX_PASSWORD_LENGTH) {
+        LOG_ERR("OPS", "Discarding oversized legacy password for server: %s", server.name.c_str());
+        server.password.clear();
+        if (needsResave) *needsResave = true;
+      } else if (!server.password.empty() && needsResave) {
+        *needsResave = true;
+      }
     }
     store.servers.push_back(std::move(server));
   }

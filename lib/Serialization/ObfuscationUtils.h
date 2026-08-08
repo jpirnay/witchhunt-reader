@@ -29,6 +29,12 @@ String obfuscateToBase64(const std::string& plaintext);
 // Returns empty string on invalid base64 input; sets *ok to false if decode fails.
 std::string deobfuscateFromBase64(const char* encoded, bool* ok = nullptr);
 
+// Bounded variant. Rejects input whose decoded form would exceed maxDecodedLength
+// *before* allocating the result buffer, so a corrupt or hand-edited JSON blob
+// cannot make us reserve kilobytes of contiguous heap. Reports that case through
+// tooLong (which also sets *ok to false).
+std::string deobfuscateFromBase64(const char* encoded, size_t maxDecodedLength, bool* ok, bool* tooLong = nullptr);
+
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.
 void selfTest();
 
