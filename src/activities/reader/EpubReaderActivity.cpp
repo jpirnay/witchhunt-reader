@@ -62,6 +62,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
+#include "util/WakeTrace.h"
 
 // Defined further down (near the other font helpers); declared here because
 // buildRenderParams() above it needs the ladder.
@@ -318,6 +319,7 @@ int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
   logReaderMemSnapshot("onEnter_begin");
+  WakeTrace::mark(WakeTrace::Phase::ActivityEnter);
   // Bisect anchor: corruption already present HERE means the writer ran before the
   // reader (Home sidecar JPEG conversion / thumb generation are prime suspects — see
   // the long-standing "heap may be corrupt after image decode failures" note below).
@@ -406,6 +408,9 @@ void EpubReaderActivity::onEnter() {
     }
   }
   logReaderMemSnapshot("onEnter_after_progress_load");
+  // Covers setupCacheDir + the image manifest + progress.bin + the sync/bookmark overlays —
+  // i.e. everything needed to know WHICH page to show, before anything is read to show it.
+  WakeTrace::mark(WakeTrace::Phase::ProgressLoaded);
 
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
@@ -445,6 +450,9 @@ void EpubReaderActivity::onEnter() {
   // accumulate going forward.
   globalReadingSessionTracker().begin(KOReaderDocumentId::calculateFromFilename(epub->getPath()), epub->getTitle(),
                                       epub->getAuthor());
+  // Bookmarks + recent-books overrides + the stats session. These are the loads a wake
+  // shortcut would most plausibly skip or cache in RTC, so they get their own bucket.
+  WakeTrace::mark(WakeTrace::Phase::StoresLoaded);
 
   // Trigger first update
   logReaderMemSnapshot("onEnter_before_request_update");
@@ -2921,6 +2929,10 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   const bool cacheHit = !resumeBackgroundBuild && section->loadSectionFile(probeParams);
   const bool cssFallbackRebuild = cacheHit && section->isEmbeddedStyleFallback();
   const bool needBuild = resumeBackgroundBuild || !cacheHit || cssFallbackRebuild;
+  // The decisive fact for wake-latency work: a probe that hits means the section cost is a
+  // LUT read, a miss means a full rebuild sits between the wake and the page. Recorded as
+  // "was a build needed", not the raw probe result, so a CSS-fallback rebuild counts as a miss.
+  WakeTrace::setSectionCacheHit(!needBuild);
 
   // One grep-able line per section entry tying the cache decision to the effective
   // preview inputs — discriminates "stale variant loaded" from "effective value not
@@ -3373,6 +3385,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Classify the pass, then consume the pre-render flags.
   const RenderPass pass = classifyRenderPass();
+  // First render() to get this far after a book open. Re-marking on later renders is harmless:
+  // the summary is emitted at the first visible page and ignores everything after it.
+  WakeTrace::mark(WakeTrace::Phase::RenderStart);
   pendingPreRender = false;
   usePreRenderedBuffer = false;
   // Any other pass redraws the write framebuffer and flushes/swaps, destroying pre-rendered
@@ -3406,6 +3421,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (!buildSection(layout)) {
         return;
       }
+      WakeTrace::mark(WakeTrace::Phase::SectionReady);
       // Flush any image dimensions this build just resolved (foreground path).
       epub->persistImageManifest();
       renderNormalPass(lock, layout);
@@ -3807,6 +3823,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // on X3, conditioning passes, flag updates). SPI ownership transfers back
   // to this task only after completeDisplay() returns.
   renderer.completeDisplay();
+  // Close the wake trace only now. triggerDisplay() returns once the content is COMMITTED, not
+  // once the pixels have settled — on X3 the first post-wake refresh is a mandatory full sync
+  // whose three waveform passes run after it returns. Stamping at the trigger understated the
+  // measured wake by ~2.1 s (trace said 858 ms while the page landed at ~2.4 s), which is
+  // exactly the number this trace exists to get right.
+  WakeTrace::mark(WakeTrace::Phase::PageVisible);
+  WakeTrace::logSummary();
 }
 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout) {
@@ -3842,6 +3865,12 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // uses for Background-A.
   lock.unlock();
   renderer.completeDisplay();
+  // On a cache miss this mid-build page is what the user actually sees first, well before the
+  // build completes and renderNormalPass() runs — so the trace has to close here or a miss
+  // would report a wake latency that includes the whole rest of the build. After
+  // completeDisplay() for the same reason as renderContents(): the pixels are settled here.
+  WakeTrace::mark(WakeTrace::Phase::PageVisible);
+  WakeTrace::logSummary();
 }
 
 void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orientedMarginTop,
@@ -3917,6 +3946,12 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   } else {
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+  // A pre-rendered page can be the first one a book open puts on screen (Background-A having
+  // won the race), so this path closes the trace too. Correct to stamp here without a
+  // completeDisplay(): unlike renderContents()'s trigger/complete split, displayBuffer() is
+  // the blocking variant and has already waited out the waveform by this line.
+  WakeTrace::mark(WakeTrace::Phase::PageVisible);
+  WakeTrace::logSummary();
   // Capture before the AA replay below overwrites the renderer's last-mode (see renderContents).
   lastPageRefreshMode_ = renderer.getLastRefreshMode();
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
