@@ -26,6 +26,7 @@
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/WakeTrace.h"
 
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
@@ -680,6 +681,9 @@ void ReaderActivity::onGoToMdReader(std::unique_ptr<Txt> txt) {
 void ReaderActivity::onEnter() {
   Activity::onEnter();
   logReaderLaunchMemSnapshot("onEnter_begin");
+  // Start the wake-to-page trace. Whether this open is a deep-sleep resume was latched by
+  // setup() (WakeTrace::armResume) rather than read from APP_STATE here — see armResume().
+  WakeTrace::begin();
 
   if (initialBookPath.empty()) {
     goToLibrary();  // Start from root when entering via Browse
@@ -786,6 +790,9 @@ void ReaderActivity::onEnter() {
       onGoBack();
       return;
     }
+    // Stamped after every load path above (warm cache, first-open index build, and the
+    // drop-and-reload retry) so `book` is the true cost of getting a usable Epub.
+    WakeTrace::mark(WakeTrace::Phase::BookLoaded);
     onGoToEpubReader(std::move(epub));
   }
 }

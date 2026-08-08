@@ -45,6 +45,7 @@
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
+#include "util/WakeTrace.h"
 
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
 #include <BootHeapProbe.h>
@@ -182,6 +183,11 @@ enum class BootResume : uint8_t {
   Splash,       // cold boot, flash, panic, or plain reboot
   Silent,       // heap-defrag ESP.restart() (RTC flag; lost on power loss)
   QuickResume,  // wake from a quick-resume deep sleep (SD flag; survives power loss)
+  // Wake from a plain deep sleep that is heading straight back into the reader. Distinct from
+  // QuickResume because it paints NOTHING at boot: the X3's one mandatory post-begin() full
+  // sync (~2.3 s) is reserved for the page itself rather than spent on an interstitial. There
+  // is no saved frame on this path — enterDeepSleep() only persists one for Quick Resume.
+  ReaderResume,
 };
 
 // Latched true once enterDeepSleep() commits to sleeping, before it tears down
@@ -280,11 +286,19 @@ void disarmSerialTransferReboot() {
   }
 }
 
-// ---- Quick Resume framebuffer persistence ----
+// ---- Retained-frame persistence across deep sleep ----
 //
-// Quick Resume keeps the last reader page on screen during deep sleep (just overlaid with a moon
-// icon) and skips the boot screen on wake by restoring the saved framebuffer + a loading icon.
-// The buffer is persisted to SD only when the user actually enabled the feature.
+// Deep sleep loses the framebuffer (and the SDK's previous-frame copy) with the power domain, so
+// anything the wake path wants to composite onto must be persisted to SD first.
+//
+// Only Quick Resume saves one. It keeps the last reader page on screen during deep sleep (just
+// overlaid with a moon icon) and restores that frame on wake, so reading resumes with no visible
+// boot at all — the user is looking at their own page for the whole load.
+//
+// A plain reader resume deliberately saves NOTHING, because painting a restored frame would
+// consume the X3's one mandatory post-wake full sync on an interstitial and push the page behind
+// a second refresh (see enterDeepSleep). The presence of this file is therefore also what setup()
+// uses to tell the two resume flows apart.
 constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
 
 static void saveSleepFrameBuffer() {
@@ -465,7 +479,26 @@ void enterDeepSleep(bool fromTimeout = false) {
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
-  APP_STATE.showBootScreen = !isQuickResumeSleep;
+  // Sleeping from a book with a book still open means the next boot's destination is already
+  // known: setup() will route straight back into the reader. Paint NOTHING before that page.
+  //
+  // The reason is specific to the panel, not to taste. After begin() the X3 driver arms exactly
+  // one mandatory full sync (Uc8253X3Driver: _initialFullSyncsRemaining = 1) — the controller's
+  // DTM1 baseline was wiped to white by the power-down, so the first refresh must drive every
+  // pixel whatever mode it asks for. Measured on X3: ~2.3 s. Whichever frame paints first
+  // consumes it, and everything after it is a cheap differential.
+  //
+  // So an intermediate frame is not "a cheap extra refresh" — it spends the single expensive
+  // sync on a throwaway image and forces the page to pay a second refresh on top. Both the boot
+  // splash and a loading-icon-over-sleep-screen do exactly that (measured: wake 4.8 s, of which
+  // 2.4 s was the intermediate paint). Skipping straight to the page lets the page itself
+  // consume the mandatory sync, removing a whole refresh from the wake.
+  //
+  // The trade-off, deliberately taken: for the ~700 ms the book takes to open there is no
+  // on-screen acknowledgement of the wake press. The panel is not blank — it still physically
+  // holds the sleep screen — so this reads as "not woken yet" rather than as a fault.
+  const bool resumeIntoReader = APP_STATE.lastSleepFromReader && !APP_STATE.openEpubPath.empty();
+  APP_STATE.showBootScreen = !(isQuickResumeSleep || resumeIntoReader);
 
   APP_STATE.saveToFile();
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
@@ -480,7 +513,11 @@ void enterDeepSleep(bool fromTimeout = false) {
   deepSleepInProgress = true;
   activityManager.goToSleep(fromTimeout);
 
-  // Persist the moon-icon-overlaid framebuffer after goToSleep() has painted it.
+  // Persist the moon-icon-overlaid framebuffer after goToSleep() has painted it. Quick Resume
+  // only: it restores this frame and paints a loading icon over it, which is worth the mandatory
+  // full sync because the restored frame IS the reader page — the user is looking at their book
+  // for the whole load, not at an interstitial. A plain reader resume saves nothing and paints
+  // nothing, so the page gets that sync instead (see showBootScreen above).
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
   }
@@ -860,9 +897,16 @@ void setup() {
   // skips the panel-clearing pass and the X3 initial-full-sync arming (see
   // HalDisplay::begin), so the first paint is FAST_REFRESH (~500ms) over the
   // retained frame and input dispatches against a visible UI.
-  const BootResume resume = isSilentReboot              ? BootResume::Silent
-                            : !APP_STATE.showBootScreen ? BootResume::QuickResume
-                                                        : BootResume::Splash;
+  //
+  // Both suppressed-splash flows set showBootScreen=false, so the saved frame is what tells
+  // them apart: enterDeepSleep() persists one only for Quick Resume. Present means "restore it
+  // and paint the loading icon"; absent means a plain reader resume, which paints nothing at
+  // boot so the page gets the X3's one mandatory full sync (see BootResume::ReaderResume).
+  const bool haveSleepFrame = !APP_STATE.showBootScreen && Storage.exists(SLEEP_FRAME_FILE);
+  const BootResume resume = isSilentReboot             ? BootResume::Silent
+                            : APP_STATE.showBootScreen ? BootResume::Splash
+                            : haveSleepFrame           ? BootResume::QuickResume
+                                                       : BootResume::ReaderResume;
 
   // Booting straight into the USB serial-transfer activity? Skip SD-font
   // discovery (only built-in UI fonts are used there) to shorten the reboot the
@@ -888,13 +932,22 @@ void setup() {
       APP_STATE.showBootScreen = true;
       APP_STATE.saveToFile();
       if (loadSleepFrameBuffer()) {
-        // Frame restored: swap the sleep moon for the loading icon.
+        // Frame restored: swap the sleep moon for the loading icon. Worth the mandatory full
+        // sync here because the restored frame IS the reader page — the user reads their book
+        // while it loads rather than watching an interstitial.
         const auto pageHeight = renderer.getScreenHeight();
         renderer.drawImage(LoadingIcon, 0, pageHeight - LOADINGICON_HEIGHT, LOADINGICON_WIDTH, LOADINGICON_HEIGHT);
         renderer.displayBuffer(HalDisplay::HALF_REFRESH);
       } else {
         activityManager.goToBoot();  // frame file missing, fall back to the splash
       }
+      break;
+    case BootResume::ReaderResume:
+      // Deliberately paints nothing: the panel keeps physically showing the sleep screen until
+      // the reader's own first render lands, so the X3's single mandatory full sync is spent on
+      // the page instead of an interstitial. Still re-arms the splash for the next plain boot.
+      APP_STATE.showBootScreen = true;
+      APP_STATE.saveToFile();
       break;
     case BootResume::Splash:
       activityManager.goToBoot();
@@ -950,6 +1003,10 @@ void setup() {
     APP_STATE.openEpubPath = "";
     APP_STATE.readerActivityLoadCount++;
     APP_STATE.saveToFile();
+    // This is the wake-straight-back-into-the-book branch: tell the wake trace that the open
+    // it is about to see is a resume, so its summary line separates resume cost from the cost
+    // of an ordinary library open.
+    WakeTrace::armResume();
     activityManager.goToReader(path);
   }
 
