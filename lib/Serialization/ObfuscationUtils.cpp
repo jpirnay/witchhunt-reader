@@ -6,6 +6,7 @@
 #include <wolfssl/wolfcrypt/coding.h>
 
 #include <cstring>
+#include <limits>
 
 namespace obfuscation {
 
@@ -46,12 +47,30 @@ String obfuscateToBase64(const std::string& plaintext) {
 }
 
 std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
+  return deobfuscateFromBase64(encoded, std::numeric_limits<size_t>::max(), ok, nullptr);
+}
+
+std::string deobfuscateFromBase64(const char* encoded, const size_t maxDecodedLength, bool* ok, bool* tooLong) {
+  if (tooLong) *tooLong = false;
   if (encoded == nullptr || encoded[0] == '\0') {
     if (ok) *ok = false;
     return "";
   }
   if (ok) *ok = true;
   const size_t encodedLen = strlen(encoded);
+  // Reject oversized input before allocating: a corrupt wifi.json with a multi-KB
+  // blob would otherwise cost ~3/4 of it in contiguous heap. Test the *minimum*
+  // the encoding could decode to (4 encoded chars -> 3 bytes, minus up to 2 bytes
+  // of padding), so a value that would legitimately have fit is never rejected.
+  if (maxDecodedLength != std::numeric_limits<size_t>::max()) {
+    size_t minDecodedLen = (encodedLen / 4) * 3;
+    if (minDecodedLen >= 2) minDecodedLen -= 2;
+    if (minDecodedLen > maxDecodedLength) {
+      if (ok) *ok = false;
+      if (tooLong) *tooLong = true;
+      return "";
+    }
+  }
   // Base64 decodes to at most 3/4 of the input length; +3 for rounding slack.
   word32 decodedLen = static_cast<word32>((encodedLen / 4) * 3 + 3);
   std::string result(decodedLen, '\0');
@@ -63,6 +82,12 @@ std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
     return "";
   }
   result.resize(decodedLen);
+  // The pre-allocation check is on the minimum, so re-check the true length here.
+  if (result.size() > maxDecodedLength) {
+    if (ok) *ok = false;
+    if (tooLong) *tooLong = true;
+    return "";
+  }
   xorTransform(result);
   return result;
 }
