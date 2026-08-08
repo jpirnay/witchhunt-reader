@@ -41,6 +41,29 @@ inline constexpr int HIGHLIGHT_FLOOR = 242;
 // Sample every Nth row where the source allows skipping (see the note above).
 inline constexpr int ROW_STEP = 4;
 
+// --- Line-art rejection ------------------------------------------------------
+// The MIN_RANGE guard above is a percentile spread, so it does NOT catch line art:
+// a pure black-on-white drawing puts the 1st percentile at 0 and the 99th at 255,
+// a spread of 255, and sails through. But such an image has no tones to stretch --
+// every pixel is already ink or paper -- so the correction only moves the dither
+// threshold around and can thicken or break up strokes.
+//
+// The distinguishing property is not how many levels are occupied but WHERE the mass
+// sits: line art puts nearly every pixel at the two extremes and leaves the middle
+// empty. Measuring that directly is robust to two things a distinct-level count gets
+// wrong -- JPEG ringing around hard edges (which smears ink and paper across dozens of
+// near-black/near-white bins, so bilevel art can touch 50+ levels), and smooth tonal
+// artwork like pencil shading (where a real ramp spreads so thinly that no single
+// level looks individually significant).
+//
+// Bins within this distance of 0/255 count as ink/paper rather than tone.
+inline constexpr int EXTREME_MARGIN = 24;
+// Minimum share of pixels that must fall between those end zones for the image to be
+// treated as tonal. Measured against synthetic distributions: bilevel and screentone
+// art land at 0-42 permille, while diagrams with flat fills, engravings, pencil
+// shading and photographs all sit at 173 permille or above.
+inline constexpr uint32_t MIN_MIDTONE_PERMILLE = 60;
+
 // Black/white points derived from a luminance histogram. `active` is false when the
 // analysis declined -- too narrow a range, or the caller never ran it -- in which
 // case apply() is the identity and the caller's existing renderer is untouched.
@@ -57,6 +80,15 @@ struct Points {
 inline Points derivePoints(const uint32_t* histogram, uint64_t sampleCount) {
   Points points;
   if (!histogram || sampleCount == 0) return points;
+
+  // Line-art / bilevel rejection -- see the constants above. Runs before the
+  // percentile search because that search cannot tell an ink-and-paper drawing
+  // (0 and 255, spread 255) from a photograph using the full range.
+  uint64_t midtoneCount = 0;
+  for (int i = EXTREME_MARGIN; i <= 255 - EXTREME_MARGIN; i++) {
+    midtoneCount += histogram[i];
+  }
+  if ((midtoneCount * 1000u) / sampleCount < MIN_MIDTONE_PERMILLE) return points;
 
   const uint64_t lowTarget = (sampleCount * LOW_PERCENTILE_PERMILLE + 999u) / 1000u;
   const uint64_t highTarget = (sampleCount * HIGH_PERCENTILE_PERMILLE + 999u) / 1000u;
