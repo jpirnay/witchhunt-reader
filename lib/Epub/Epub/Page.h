@@ -117,11 +117,12 @@ class PageTableFragment final : public PageElement {
 
   // In-cell graphics participate in the Page-level image passes below.
   bool hasImages() const;
-  bool hasUncachedImages(bool forceLoad, bool monochromeOutput) const;
+  bool hasUncachedImages(bool forceLoad, bool monochromeOutput, bool alsoWarmGrayscale = false) const;
   // Decode any missing cell-image pixel caches. Position is irrelevant to the cache
   // (it is position-independent); images are warmed at the origin and the framebuffer
   // garbage is discarded by the caller's clearScreen(), mirroring the Page warm pass.
-  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput) const;
+  void warmCellImages(GfxRenderer& renderer, bool forceLoad, bool monochromeOutput,
+                      bool alsoWarmGrayscale = false) const;
 };
 
 class Page {
@@ -164,8 +165,11 @@ class Page {
   // Writes pixels to the framebuffer as a side effect (decoder requirement); callers
   // must clearScreen() afterward if the framebuffer needs to be clean.
   // monochromeOutput selects which cache variant to warm (BW or grayscale).
+  // alsoWarmGrayscale additionally warms the 4-level Bayer cache that the AA grayscale
+  // planes replay on top of the BW frame. Both variants are needed with AA on: the BW
+  // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
-                       bool monochromeOutput = true) const;
+                       bool monochromeOutput = true, bool alsoWarmGrayscale = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;
@@ -182,14 +186,18 @@ class Page {
   // Returns true if any image on this page would require a decoder allocation —
   // i.e. is not a placeholder AND does not already have a pixel cache on disk.
   // Used to decide whether to release the secondary frame buffer before warm.
-  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput) const {
+  // alsoWarmGrayscale mirrors warmImageCaches(): a missing .bayer.pxc is decode work too,
+  // so it must count here or the secondary buffer stays allocated through that decode.
+  bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput, bool alsoWarmGrayscale = false) const {
     return std::any_of(elements.begin(), elements.end(), [&](const std::shared_ptr<PageElement>& el) {
       if (el->getTag() == TAG_PageTable)
-        return static_cast<const PageTableFragment&>(*el).hasUncachedImages(forceLoadLargeImages, monochromeOutput);
+        return static_cast<const PageTableFragment&>(*el).hasUncachedImages(forceLoadLargeImages, monochromeOutput,
+                                                                            alsoWarmGrayscale);
       if (el->getTag() != TAG_PageImage) return false;
       const auto& ib = static_cast<const PageImage&>(*el).getImageBlock();
       if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) return false;
-      return !(monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache());
+      if (!(monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache())) return true;
+      return alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache();
     });
   }
 

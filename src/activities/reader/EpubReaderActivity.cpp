@@ -19,6 +19,7 @@
 
 #include <Epub/FootnotePreviews.h>
 #include <Epub/Page.h>
+#include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -335,6 +336,19 @@ void EpubReaderActivity::onEnter() {
   // syncRedRamFromFrameBuffer(). If the previous activity set a HALF_REFRESH override via
   // enforceExitFullRefresh(), consumeRefreshOverride() will honour it on the first display call.
   pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+
+  // Publish the image tone filter for lib/Epub, which must not read settings itself.
+  // Set here rather than per-render so every path that derives a pixel-cache name agrees
+  // (renderContents, the section-index warm pass, the pre-reboot warm). Reuses the sleep
+  // screen's filter setting rather than adding a second one: it is the same tone curve,
+  // and a separate inline-image toggle is display surface the reader does not need.
+  //
+  // Only ADAPTIVE_TONE carries over. The other values are sleep-screen compositing modes
+  // (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning for an
+  // image sitting inside a page of text.
+  const bool adaptiveToneImages =
+      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE;
+  image_tone::setFilterId(adaptiveToneImages ? CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE : 0);
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.
@@ -2820,7 +2834,11 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   if (createOk && released) {
     const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
     const uint32_t warmStart = millis();
-    section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true);
+    // Warm the AA grayscale variant here too: this is the released-buffer path, the point of
+    // maximum contiguous heap. Skipping it would push that decode into renderContents' own warm
+    // pass on the first image page, where headroom is worse.
+    section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true,
+                                /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing());
     LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
     renderer.clearScreen();
     checkHeapIntegrity("after_warmAllImageCaches");
@@ -3546,8 +3564,16 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   lastRenderStats.textAntiAliasing = aaEnabledForThisRender;
 
-  // Always use 1-bit Atkinson dither for images in the epub reader.
+  // The BW plane always uses 1-bit Atkinson dither. 4-level Bayer values would collapse
+  // to black here (DirectPixelWriter draws BW for any value < 3), which is what made the
+  // earlier "always Bayer" attempt look wrong.
   const bool imageMonochrome = true;
+  // With AA on, the grayscale planes replay a 4-level Bayer cache on top of that BW frame
+  // to lift levels 1 and 2 back to real greys. That replay needs its own .bayer.pxc, so
+  // warm both variants. If the grayscale pass is preempted or aborted (decided later, at
+  // aaPreempted below), the 1-bit BW frame is what stays on the panel — the same output
+  // as with AA off, never a crushed-to-black image.
+  const bool warmGrayscaleImageCache = aaEnabledForThisRender;
 
   // Warm any missing image pixel caches BEFORE font prewarm and BW backup chunks
   // reduce heap contig below the ~49 KB the PNG decoder needs. The decode
@@ -3570,13 +3596,14 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // bail on RenderLock::peek(), and this whole pass runs under the lock the render task took
   // before calling renderContents()) — this flag is a second, explicit guard against that
   // invariant silently breaking if a future change adds a yield point in here.
-  imageProcessingActive_ = page->hasUncachedImages(warmForceLoad, imageMonochrome);
+  imageProcessingActive_ = page->hasUncachedImages(warmForceLoad, imageMonochrome, warmGrayscaleImageCache);
   if (imageProcessingActive_ && renderer.hasSecondaryBuffer()) {
     renderer.releaseSecondaryBuffer();
     releasedSecondaryForWarm = true;
     LOG_DBG("ERS", "Released secondary buffer for image warm pass");
   }
-  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome);
+  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome,
+                        warmGrayscaleImageCache);
   // Image decode (JPEG/PNG) is the deepest, most heap-hungry work in a render pass
   // and the prime suspect for the lazy multi_heap poisoning assert. Check here, right
   // after the warm/decode pass, so corruption is attributed to the decode rather than

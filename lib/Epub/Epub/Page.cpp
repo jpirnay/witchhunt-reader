@@ -143,29 +143,36 @@ bool PageTableFragment::hasImages() const {
   return false;
 }
 
-bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monochromeOutput) const {
+bool PageTableFragment::hasUncachedImages(const bool forceLoad, const bool monochromeOutput,
+                                          const bool alsoWarmGrayscale) const {
   for (const auto& row : rows) {
     for (const auto& cell : row.cells) {
       if (!cell.image) continue;
       if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
       const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
       if (!cached) return true;
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) return true;
     }
   }
   return false;
 }
 
-void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput) const {
+void PageTableFragment::warmCellImages(GfxRenderer& renderer, const bool forceLoad, const bool monochromeOutput,
+                                       const bool alsoWarmGrayscale) const {
   for (const auto& row : rows) {
     for (const auto& cell : row.cells) {
       if (!cell.image) continue;
       if (cell.image->wouldShowPlaceholder(forceLoad, monochromeOutput)) continue;
       const bool cached = monochromeOutput ? cell.image->hasPixelCache() : cell.image->hasGrayscaleCache();
-      if (cached) continue;
       // The decode is the heap-hungry work; do it now (caller has freed the secondary buffer).
       // The cache is position-independent, so warm at the origin — the framebuffer write is
       // discarded by the caller's clearScreen().
-      cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
+      if (!cached) {
+        cell.image->render(renderer, 0, 0, forceLoad, monochromeOutput);
+      }
+      if (alsoWarmGrayscale && monochromeOutput && !cell.image->hasGrayscaleCache()) {
+        cell.image->render(renderer, 0, 0, forceLoad, /*monochromeOutput=*/false);
+      }
     }
   }
 }
@@ -296,14 +303,15 @@ void Page::renderImagesFromGrayscaleCache(GfxRenderer& renderer, const int xOffs
 }
 
 void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoadLargeImages,
-                           const bool monochromeOutput) const {
+                           const bool monochromeOutput, const bool alsoWarmGrayscale) const {
   // Only do the costly decode pass when there's at least one image that would
   // actually require a PNG/JPG decoder allocation. Cached and placeholder paths
   // do not need the contiguous heap headroom, so skipping the iteration entirely
   // saves the no-op overhead on text-only pages (the common case).
   for (auto& element : elements) {
     if (element->getTag() == TAG_PageTable) {
-      static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput);
+      static_cast<const PageTableFragment&>(*element).warmCellImages(renderer, forceLoadLargeImages, monochromeOutput,
+                                                                     alsoWarmGrayscale);
       continue;
     }
     if (element->getTag() != TAG_PageImage) continue;
@@ -311,9 +319,17 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
     if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
     // Check whether the appropriate cache already exists
     const bool alreadyCached = monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache();
-    if (alreadyCached) continue;
-    static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
-                                                          monochromeOutput);
+    if (!alreadyCached) {
+      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
+                                                            monochromeOutput);
+    }
+    // Second decode for the other variant when AA needs the grayscale planes on top of
+    // the BW frame. Skipped when monochromeOutput is already false — that pass wrote the
+    // grayscale cache itself.
+    if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache()) {
+      static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
+                                                            /*monochromeOutput=*/false);
+    }
   }
 }
 
