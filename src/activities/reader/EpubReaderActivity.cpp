@@ -19,6 +19,7 @@
 
 #include <Epub/FootnotePreviews.h>
 #include <Epub/Page.h>
+#include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -333,6 +334,19 @@ void EpubReaderActivity::onEnter() {
   // syncRedRamFromFrameBuffer(). If the previous activity set a HALF_REFRESH override via
   // enforceExitFullRefresh(), consumeRefreshOverride() will honour it on the first display call.
   pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+
+  // Publish the image tone filter for lib/Epub, which must not read settings itself.
+  // Set here rather than per-render so every path that derives a pixel-cache name agrees
+  // (renderContents, the section-index warm pass, the pre-reboot warm). Reuses the sleep
+  // screen's filter setting rather than adding a second one: it is the same tone curve,
+  // and a separate inline-image toggle is display surface the reader does not need.
+  //
+  // Only ADAPTIVE_TONE carries over. The other values are sleep-screen compositing modes
+  // (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning for an
+  // image sitting inside a page of text.
+  const bool adaptiveToneImages =
+      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE;
+  image_tone::setFilterId(adaptiveToneImages ? CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE : 0);
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.

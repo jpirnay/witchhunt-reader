@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+#include <stdint.h>
 
 #include <memory>
 #include <string>
@@ -10,6 +11,19 @@
 // as a placeholder until the user explicitly requests it.
 // 800x600 covers most full-page illustrations that take >1s to dither on ESP32.
 static constexpr int32_t LARGE_IMAGE_PIXEL_THRESHOLD = 800 * 600;
+
+// Tone mapping for inline images. Set once from src/ (which owns the settings) before a
+// render pass; lib/Epub must not read settings itself. Applies to every ImageBlock: the
+// filter is a global display preference, not per-image state, and threading it through
+// every cache-query and warm signature would touch a dozen call sites to carry a constant.
+//
+// filterId keys the pixel caches, because tone mapping is baked into the cached pixels —
+// see the cache-path helpers in ImageBlock.cpp. 0 means "no filter" and keeps the
+// historical unsuffixed cache names.
+namespace image_tone {
+void setFilterId(uint8_t filterId);
+uint8_t getFilterId();
+}  // namespace image_tone
 
 class ImageBlock final : public Block {
  public:
