@@ -200,7 +200,10 @@ class Section {
   // that are already cached or would show as a placeholder. The decode writes
   // pixels into the framebuffer as a side effect; call renderer.clearScreen()
   // afterward. forceLoad mirrors the effectiveForceLoad rule used at render time.
-  void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true);
+  // alsoWarmGrayscale additionally decodes the 4-level Bayer variant the AA grayscale
+  // planes replay; see Page::warmImageCaches.
+  void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true,
+                          bool alsoWarmGrayscale = false);
   bool isTruncatedCache() const { return truncatedCache; }
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
   // True when the last build's CSS resolution hit low-heap skips (styles silently

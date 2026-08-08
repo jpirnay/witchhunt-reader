@@ -1435,7 +1435,7 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
 }
 
 void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
-                                 const bool monochromeOutput) {
+                                 const bool monochromeOutput, const bool alsoWarmGrayscale) {
   if (pageCount == 0) return;
   const int savedPage = currentPage;
   int warmed = 0;
@@ -1443,7 +1443,7 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
     currentPage = p;
     auto page = loadPageFromSectionFile();
     if (!page || !page->hasImages()) continue;
-    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput);
+    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput, alsoWarmGrayscale);
     ++warmed;
     // Each image decode can take hundreds of ms; reset the WDT between pages
     // to avoid an interrupt watchdog timeout on image-heavy chapters.
