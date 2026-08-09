@@ -1059,7 +1059,16 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
     // means pages were cached with styles silently missing.
-    cssLowHeapDegraded_ = st.cssParser->getResolveStats().lowHeapSkips > 0;
+    //
+    // ...but ONLY when the resolver could actually lose a rule. An arena-RESIDENT ruleset is
+    // served entirely from arena memory: lookupRule() returns from arenaResident_ before it
+    // ever reads allowDiskLookup, so a lowHeapSkip there costs nothing and the styles are
+    // complete. Counting those as degradation threw away correct builds — measured on X3, a
+    // 14-page background build discarded after a single 960-byte dip below the lean floor,
+    // forcing the released-path foreground rebuild whose 52 KB framebuffer realloc is the
+    // failure that ends the session.
+    cssLowHeapDegraded_ =
+        !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
   SCT_TRACE_HEAP(spineIndex, "after_parse");
@@ -1449,7 +1458,14 @@ bool Section::activeBuildCssDegraded() const {
   // Read the live CSS resolver's running stats: lowHeapSkips is incremented the moment the
   // resolver drops a disk lookup under heap pressure (see CssParser), so it flags a degrading
   // build mid-parse — before runBuildParse latches cssLowHeapDegraded_ at the parse end.
-  return buildState_ && buildState_->cssParser && buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
+  //
+  // An arena-RESIDENT ruleset never loses a rule to heap pressure (see the note at the
+  // cssLowHeapDegraded_ latch in runBuildParse), so its skips must not abort the build. This
+  // is the mid-parse half of the same rule: Background-B polls this every slice and discards
+  // the whole build the first time it returns true.
+  if (!buildState_ || !buildState_->cssParser) return false;
+  if (buildState_->cssParser->isArenaResident()) return false;
+  return buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
 }
 
 std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex) {

@@ -47,6 +47,16 @@ class CssParser {
     uint32_t negativeHits = 0;
   };
 
+  // True when the whole ruleset (index + style pool) is resident in arena memory, so every
+  // lookupRule() is served without touching SD. Callers use this to tell a REAL low-heap
+  // degradation from a harmless one: under heap pressure resolveStyle() still counts a
+  // lowHeapSkip and passes allowDiskLookup=false, but the resident branch in lookupRule()
+  // returns before that flag is ever read — the styles come back complete either way.
+  // Treating those skips as degradation discards correct work (measured on X3: a 14-page
+  // background build thrown away, forcing the released-path rebuild that then fails its
+  // framebuffer realloc).
+  bool isArenaResident() const { return arenaResident_ != nullptr; }
+
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
   // v8: v7 builds wrote saveToCache() payloads without the cssFloat byte the reader
   //     expects — bump invalidates those malformed caches.

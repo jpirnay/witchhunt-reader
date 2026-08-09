@@ -1840,8 +1840,15 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
   if (lowHeapMode) {
     if (!lowHeapWarningLogged) {
       lowHeapWarningLogged = true;
-      LOG_DBG("CSS", "Warning: low heap (%u bytes) below MIN_FREE_HEAP_FOR_CSS (%u), skipping disk CSS lookups",
-              freeHeap, static_cast<unsigned>(MIN_FREE_HEAP_FOR_CSS));
+      // Report the floor that ACTUALLY applied, and whether the skip can cost anything. The
+      // old message hardcoded MIN_FREE_HEAP_FOR_CSS even in lean mode, so a 960-byte dip under
+      // the 24 KB lean floor read as "17 KB below 40960" — which misdiagnosed this exact bug
+      // once already. Resident rulesets serve every lookup from the arena, so a skip there is
+      // harmless: say so rather than warning about missing styles that cannot happen.
+      LOG_DBG("CSS", "Low heap (%u bytes) below %s floor (%u), skipping disk CSS lookups (%s)", freeHeap,
+              leanResolve_ ? "LEAN" : "full", static_cast<unsigned>(leanResolve_ ? LEAN_MIN_FREE_HEAP_FOR_CSS
+                                                                                 : MIN_FREE_HEAP_FOR_CSS),
+              arenaResident_ ? "harmless: ruleset is arena-resident" : "styles may be missing");
     }
     resolveStats_.lowHeapSkips++;
   }
