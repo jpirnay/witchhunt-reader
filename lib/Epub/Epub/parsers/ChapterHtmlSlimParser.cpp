@@ -68,6 +68,12 @@ constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_AL
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC;
 
+// Guard: minimum free heap before attempting table layout (cell wrapping allocates TextBlock
+// vectors). Checked on <td> as cells accumulate, so a table that cannot afford grid layout
+// switches to streaming before the buffer is built — and again in emitBufferedTable() to pick
+// the layout for tables that stayed within budget.
+constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
+
 const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
@@ -469,7 +475,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
 
   // flush the buffer — route to table cell text when inside a <td>/<th>
   partWordBuffer[partWordBufferIndex] = '\0';
-  if (currentTableCell) {
+  if (currentTableCell && currentTableCell->text) {
+    // text is null only for a cell already consumed by the streaming path; currentTableCell is
+    // cleared alongside that, so this is belt-and-braces against a future reordering.
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
   } else if (currentTextBlock) {
     // If a float image is pending and the block is still empty, attach it now so the
@@ -1038,9 +1046,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // Buffered table rendering: accumulate cells in memory, emit as PageTableFragment on </table>.
   if (strcmp(name, "table") == 0) {
     if (self->currentTable) {
-      // Nested table — mark unsupported and track depth
+      // Nested table — mark unsupported and track depth. Grid layout is now impossible, so
+      // stop buffering: the inner table's cells fold into the outer one's stream.
       self->currentTable->depth += 1;
       self->currentTable->unsupported = true;
+      self->beginTableStreaming("nested table");
       self->depth += 1;
       return;
     }
@@ -1065,9 +1075,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   }
 
   if (self->currentTable && self->currentTable->depth == 1 && strcmp(name, "tr") == 0) {
+    // Streaming keeps exactly one row alive as scratch for the open cell, so reuse it
+    // rather than growing the vector once per <tr>.
+    if (self->currentTable->streaming) {
+      if (self->currentTable->rows.empty()) self->currentTable->rows.emplace_back();
+      self->currentTable->rows.back().cells.clear();
+      self->currentTable->rows.back().effectiveCols = 0;
+      self->depth += 1;
+      return;
+    }
     self->currentTable->rows.emplace_back();
     if (self->currentTable->rows.size() > MAX_TABLE_ROWS) {
       self->currentTable->unsupported = true;
+      self->beginTableStreaming("row limit");
     }
     self->depth += 1;
     return;
@@ -1077,13 +1097,23 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
-    if (self->currentTable->rows.empty()) {
-      self->currentTable->rows.emplace_back();
+    // Heap gate on the BUFFERING side. The check in emitBufferedTable() can only pick a layout
+    // after the whole table is already resident; this one fires while cells are still
+    // accumulating, so a big table degrades to streaming instead of running the heap down and
+    // then discovering it has nothing left to lay out with.
+    if (!self->currentTable->streaming) {
+      if (self->currentTable->unsupported) {
+        // Deferred from a trigger that fired while a cell was open (e.g. column overflow).
+        self->beginTableStreaming("unsupported");
+      } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
+        self->currentTable->unsupported = true;
+        self->beginTableStreaming("low heap");
+      }
     }
-    BufferedTableRow& row = self->currentTable->rows.back();
-
     // Parse colspan attribute (inspired by uxjulia/CrossInk; rewritten for our codebase).
     // Any rowspan != 1 is unsupported; we ignore it and let the fallback handle those tables.
+    // Parsed BEFORE the row reference is taken: a rowspan can trigger the streaming switch,
+    // which clears `rows` and would dangle it.
     uint8_t colSpan = 1;
     if (atts != nullptr) {
       for (int i = 0; atts[i]; i += 2) {
@@ -1098,10 +1128,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           const long v = std::strtol(atts[i + 1], &end, 10);
           if (end != atts[i + 1] && v != 1) {
             self->currentTable->unsupported = true;
+            self->beginTableStreaming("rowspan");
           }
         }
       }
     }
+
+    if (self->currentTable->rows.empty()) {
+      self->currentTable->rows.emplace_back();
+    }
+    BufferedTableRow& row = self->currentTable->rows.back();
 
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
@@ -1113,6 +1149,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (row.effectiveCols > self->currentTable->maxCols) {
       self->currentTable->maxCols = row.effectiveCols;
     }
+    // Column overflow: grid layout is off the table. Not switched to streaming here — the cell
+    // just created is still open and about to receive text, and beginTableStreaming() drains
+    // and clears `rows`. The switch happens on the next <td> (or the emit falls back to
+    // paragraphs), which keeps the open-cell invariant simple.
     if (row.cells.size() > MAX_TABLE_COLS || row.effectiveCols > MAX_TABLE_COLS) {
       self->currentTable->unsupported = true;
     }
@@ -2369,6 +2409,16 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
+    // Streaming: the cell is complete, so lay it out and drop it now. isHeaderRow is only
+    // consulted by the grid layout, which this table can no longer reach.
+    if (self->currentTable->streaming) {
+      if (!self->currentTable->rows.empty()) {
+        self->streamClosedCell(self->currentTable->rows.back());
+      }
+      self->currentTableCell = nullptr;
+      self->nextWordContinues = false;
+      return;
+    }
     // Determine if the whole row consists of header cells
     if (!self->currentTable->rows.empty()) {
       auto& row = self->currentTable->rows.back();
@@ -2853,17 +2903,23 @@ void ChapterHtmlSlimParser::makePages() {
   }
 }
 
-// Guard: minimum free heap before attempting table layout (cell wrapping allocates TextBlock vectors)
-static constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
-
 void ChapterHtmlSlimParser::emitBufferedTable() {
   if (!currentTable) return;
+
+  // Streaming tables already emitted every cell (text and image) from </td>; rows is empty
+  // and there is nothing left to lay out.
+  if (currentTable->streaming) {
+    return;
+  }
 
   if (currentTable->unsupported || currentTable->rows.empty()) {
     LOG_DBG("EHP", "Table unsupported or empty — falling back to paragraph mode");
     emitTableAsParagraphs(*currentTable);
     emitCellImagesAsBlocks(*currentTable);
   } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
+    // Note this check can only choose between layouts — the buffer is already paid for by the
+    // time we get here. The heap is kept off this cliff by the streaming switch in
+    // beginTableStreaming(), which fires while cells are still accumulating.
     LOG_ERR("EHP", "Low heap (%u), falling back to paragraph mode for table", ESP.getFreeHeap());
     emitTableAsParagraphs(*currentTable);
     emitCellImagesAsBlocks(*currentTable);
@@ -2971,15 +3027,51 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
   }
 }
 
+void ChapterHtmlSlimParser::beginTableStreaming(const char* reason) {
+  if (!currentTable || currentTable->streaming) return;
+
+  LOG_DBG("EHP", "Table switched to streaming mode (%s): draining %u buffered row(s)", reason,
+          static_cast<unsigned>(currentTable->rows.size()));
+  currentTable->streaming = true;
+
+  // Drain what was buffered before the switch. Text first, then images, so the already-buffered
+  // portion keeps the batch fallback's ordering; cells that arrive after this point interleave
+  // their image with their text, which is the best streaming can do without re-buffering.
+  emitTableAsParagraphs(*currentTable);
+  emitCellImagesAsBlocks(*currentTable);
+
+  // Release the row storage itself, not just the cell contents — this is the allocation the
+  // switch exists to avoid holding. Callers only reach this while no cell is open (the <table>,
+  // <tr> and <td> handlers), so clearing currentTableCell here cannot orphan a cell mid-fill;
+  // the next <td> re-creates the single scratch row and re-points it.
+  currentTable->rows.clear();
+  currentTable->rows.shrink_to_fit();
+  currentTableCell = nullptr;
+}
+
+void ChapterHtmlSlimParser::streamClosedCell(BufferedTableRow& row) {
+  if (row.cells.empty()) return;
+  emitCellAsParagraph(row.cells.back(), /*emitImage=*/true);
+  row.cells.pop_back();  // the cell is fully consumed; never accumulates
+}
+
 void ChapterHtmlSlimParser::emitCellImagesAsBlocks(BufferedTable& table) {
   // Fallback (paragraph) path: cells are flattened to paragraphs, so any cell image is emitted
   // as a full-width block image below the table, one per line — same as any other block image.
+  // Runs after emitTableAsParagraphs, which has already released every cell's ParsedText, so the
+  // image decodes below get the heap the text was holding. Rows are dropped as they are consumed
+  // for the same reason: an image decode needs contiguous heap more than the table needs its
+  // remaining rows.
   for (auto& row : table.rows) {
     for (auto& cell : row.cells) {
       if (cell.imageSrc.empty()) continue;
       placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
     }
+    row.cells.clear();
+    row.cells.shrink_to_fit();
   }
+  table.rows.clear();
+  table.rows.shrink_to_fit();
 }
 
 void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
@@ -3173,25 +3265,63 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
   emitFragment();
 }
 
+bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const bool emitImage) {
+  // The cell's ParsedText is released before returning either way: this is the one place
+  // that consumes a buffered cell, and holding it past layout is what made the fallback
+  // path peak at buffer + emit simultaneously.
+  std::unique_ptr<ParsedText> text = std::move(cell.text);
+
+  if (text && !text->isEmpty()) {
+    // Guard here rather than once per table: in streaming mode this is the only gate the
+    // cells pass through, and layoutAndExtractLines below is the allocation that fails.
+    if (!ensureHeapForTextLayout("table cell paragraph")) {
+      return false;  // parse already stopped; cell text freed on return
+    }
+    auto cellBlockStyle = BlockStyle();
+    cellBlockStyle.textAlignDefined = true;
+    cellBlockStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                                   ? CssTextAlign::Justify
+                                   : static_cast<CssTextAlign>(paragraphAlignment);
+    // Re-use the existing paragraph pipeline by moving the cell text into currentTextBlock
+    startNewTextBlock(cellBlockStyle);
+    // Transfer words from the buffered cell text into the new currentTextBlock
+    // by re-running layout directly
+    text->layoutAndExtractLines(
+        renderer, fontId, viewportWidth,
+        [this](const std::shared_ptr<TextBlock>& tb, bool lineEndsWithHyphen, bool suppressRetry) {
+          return addLineToPage(tb, lineEndsWithHyphen, suppressRetry);
+        });
+  }
+  text.reset();  // free the words before the image decode below needs contiguous heap
+
+  // Batch callers emit images in a second pass (emitCellImagesAsBlocks) to keep all text
+  // above all images, matching the historical fallback order. Streaming has no second pass,
+  // so it emits the image inline here.
+  if (emitImage && !cell.imageSrc.empty()) {
+    placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
+    cell.imageSrc.clear();
+    cell.imageSrc.shrink_to_fit();
+    cell.imageAlt.clear();
+    cell.imageAlt.shrink_to_fit();
+  }
+  return true;
+}
+
 void ChapterHtmlSlimParser::emitTableAsParagraphs(BufferedTable& table) {
-  // Emit each cell as a sequential paragraph (content-preserving fallback)
+  // Emit each cell as a sequential paragraph (content-preserving fallback).
+  // Each cell's ParsedText is released as it is laid out (see emitCellAsParagraph), so the
+  // buffer shrinks while the emit grows instead of both peaking together. The cell shells stay
+  // until emitCellImagesAsBlocks has run — it still needs imageSrc — and are dropped there.
   for (auto& row : table.rows) {
     for (auto& cell : row.cells) {
-      if (!cell.text || cell.text->isEmpty()) continue;
-      auto cellBlockStyle = BlockStyle();
-      cellBlockStyle.textAlignDefined = true;
-      cellBlockStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                     ? CssTextAlign::Justify
-                                     : static_cast<CssTextAlign>(paragraphAlignment);
-      // Re-use the existing paragraph pipeline by moving the cell text into currentTextBlock
-      startNewTextBlock(cellBlockStyle);
-      // Transfer words from the buffered cell text into the new currentTextBlock
-      // by re-running layout directly
-      cell.text->layoutAndExtractLines(
-          renderer, fontId, viewportWidth,
-          [this](const std::shared_ptr<TextBlock>& tb, bool lineEndsWithHyphen, bool suppressRetry) {
-            return addLineToPage(tb, lineEndsWithHyphen, suppressRetry);
-          });
+      if (!emitCellAsParagraph(cell, /*emitImage=*/false)) {
+        // Heap guard stopped the parse. Drop the remaining buffered text now rather than
+        // holding it until the table is destroyed; nothing further will be laid out.
+        for (auto& r : table.rows) {
+          for (auto& c : r.cells) c.text.reset();
+        }
+        return;
+      }
     }
   }
 }

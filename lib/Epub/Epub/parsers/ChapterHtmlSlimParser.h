@@ -194,6 +194,13 @@ class ChapterHtmlSlimParser final : public Print {
     bool unsupported = false;  // true → emit as paragraphs instead of grid
     bool hasBorder = true;     // false when border="0" on the <table> element
     uint8_t maxCols = 0;       // max effectiveCols across all rows
+    // Streaming mode: once a table can no longer become a grid (unsupported) or the heap has
+    // run low, cells are emitted as paragraphs from </td> and freed immediately, so `rows`
+    // never holds more than the cell currently being filled. Buffering the whole table only
+    // exists because grid layout needs every cell measured before column widths are known;
+    // when that layout is off the table, holding the cells is pure cost. Set only via
+    // beginTableStreaming(), which first drains whatever was already buffered.
+    bool streaming = false;
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -320,6 +327,16 @@ class ChapterHtmlSlimParser final : public Print {
   void emitTableAsParagraphs(BufferedTable& table);
   // Fallback path: emit each cell's image as a full-width block image below the table.
   void emitCellImagesAsBlocks(BufferedTable& table);
+  // Emit one buffered cell as a paragraph (plus its image, when emitImage) and free the cell's
+  // ParsedText before returning. Shared by the batch fallback and the streaming path so both
+  // produce identical output. Returns false when the heap guard stopped the parse.
+  bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // Switch an in-flight table to streaming mode: emit everything buffered so far as paragraphs,
+  // free the row storage, and mark the table so later cells emit directly from </td> instead of
+  // accumulating. Grid layout is already off the table by the time this is called.
+  void beginTableStreaming(const char* reason);
+  // Called on </td> while streaming: emit and release the just-closed cell immediately.
+  void streamClosedCell(BufferedTableRow& row);
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
   // cannot be resolved. Advances imageCounter to allocate a unique cache path.
