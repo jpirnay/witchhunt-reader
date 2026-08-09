@@ -62,12 +62,27 @@ constexpr uint32_t MAX_RAW_ROW_BYTES = 16384;
 
 PngStreamDecoder::~PngStreamDecoder() { end(); }
 
+size_t PngStreamDecoder::scratchBytesFor(const size_t expectedOutputSize, const uint32_t rawRowBytes) {
+  // Ring + two scanline buffers, plus per-allocation alignment slack so a caller sizing an
+  // arena from this never comes up short by a few padding bytes.
+  constexpr size_t kAlignSlack = 3 * alignof(std::max_align_t);
+  return InflateReader::ringSizeFor(expectedOutputSize) + 2 * static_cast<size_t>(rawRowBytes) + kAlignSlack;
+}
+
 void PngStreamDecoder::end() {
-  reader_.deinit();
-  free(currentRow_);
-  free(previousRow_);
+  reader_.deinit();  // no-op on the ring when it was supplied externally (ownsRing_ == false)
+  if (!arenaOwnsBuffers_) {
+    free(currentRow_);
+    free(previousRow_);
+  }
   currentRow_ = nullptr;
   previousRow_ = nullptr;
+  // Release the whole scope in one go. Newest-first is satisfied because the decoder reserves
+  // and releases within its own lifetime and nothing else allocates from the arena in between.
+  if (scratchBlock_.valid()) {
+    scratchArena_->release(scratchBlock_);
+  }
+  arenaOwnsBuffers_ = false;
   started_ = false;
 }
 
@@ -149,12 +164,33 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
     return false;
   }
 
-  currentRow_ = static_cast<uint8_t*>(malloc(rawRowBytes_));
-  previousRow_ = static_cast<uint8_t*>(calloc(rawRowBytes_, 1));
-  if (!currentRow_ || !previousRow_) {
-    LOG_ERR("PNG", "Failed to allocate scanline buffers (%u bytes each)", rawRowBytes_);
-    end();
-    return false;
+  // Scanline buffers: from the scratch arena when one was supplied and both fit, else the heap.
+  // Both must come from the same source — a half-arena pair would make end() free an arena
+  // pointer. The ring is taken later (it needs height_, parsed below) from the same block.
+  if (scratchArena_ && scratchArena_->valid()) {
+    scratchBlock_ = scratchArena_->reserveBlock();
+    if (scratchBlock_.valid()) {
+      auto* cur = static_cast<uint8_t*>(scratchArena_->alloc(rawRowBytes_));
+      auto* prev = static_cast<uint8_t*>(scratchArena_->alloc(rawRowBytes_));
+      if (cur && prev) {
+        currentRow_ = cur;
+        previousRow_ = prev;
+        memset(previousRow_, 0, rawRowBytes_);  // calloc equivalent: the filter reads row -1
+        arenaOwnsBuffers_ = true;
+      } else {
+        // Arena too small for this image — hand the scope straight back and use the heap.
+        scratchArena_->release(scratchBlock_);
+      }
+    }
+  }
+  if (!arenaOwnsBuffers_) {
+    currentRow_ = static_cast<uint8_t*>(malloc(rawRowBytes_));
+    previousRow_ = static_cast<uint8_t*>(calloc(rawRowBytes_, 1));
+    if (!currentRow_ || !previousRow_) {
+      LOG_ERR("PNG", "Failed to allocate scanline buffers (%u bytes each)", rawRowBytes_);
+      end();
+      return false;
+    }
   }
 
   // Walk chunks collecting PLTE / tRNS until the first IDAT.
@@ -218,7 +254,20 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
   // produced so far, so cap the ring at the exact uncompressed size (filter
   // byte + raw bytes per row). Small images thus pay only a few KB.
   const size_t uncompressed = static_cast<size_t>(height_) * (rawRowBytes_ + 1);
-  if (!reader_.init(true, uncompressed)) {
+  // The ring is the largest single block on this path (up to 32 KB). Take it from the same
+  // arena scope as the scanline buffers when available — initWithExternalRing leaves ownership
+  // with us, so deinit() will not free arena memory.
+  bool ringReady = false;
+  if (arenaOwnsBuffers_) {
+    const size_t ringSize = InflateReader::ringSizeFor(uncompressed);
+    if (auto* ring = static_cast<uint8_t*>(scratchArena_->alloc(ringSize))) {
+      memset(ring, 0, ringSize);
+      ringReady = reader_.initWithExternalRing(ring, ringSize);
+    }
+    // No arena room for the ring: fall through to the heap. The scanline buffers stay in the
+    // arena — they are already live and the block is released as a whole by end().
+  }
+  if (!ringReady && !reader_.init(true, uncompressed)) {
     LOG_ERR("PNG", "Failed to init inflate reader");
     end();
     return false;

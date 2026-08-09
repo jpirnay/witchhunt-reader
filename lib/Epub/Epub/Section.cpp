@@ -26,6 +26,7 @@
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
 #include "Page.h"
+#include "blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
 
@@ -1497,9 +1498,31 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
   return page;
 }
 
+// Scratch budget for a whole warm pass: the largest per-decode working set on either path —
+// PNG's ≤32 KB inflate ring plus two scanline buffers, or JPEG's 12 KB work pool — with slack
+// for per-allocation alignment. Sized once for the pass rather than per image, because a bump
+// arena reuses the same bytes for every decode; the peak is one decode's needs, not N.
+//
+// This is the fix for the churn described in docs/memory-allocation-strategy.md rule 4: without
+// it, each of the N decodes in a pass takes and returns its own 12-32 KB block, breaking up the
+// contiguous region the caller must later hand back to the framebuffer.
+static constexpr size_t WARM_PASS_SCRATCH_BYTES = 32 * 1024 + 2 * 4096 + 256;
+
 void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
                                  const bool monochromeOutput, const bool alsoWarmGrayscale) {
   if (pageCount == 0) return;
+
+  // Best-effort: when the arena cannot be had, decoders fall back to their own heap
+  // allocations and the pass behaves exactly as before — slower to no measurable degree, just
+  // without the anti-fragmentation benefit.
+  auto scratch = makeUniqueNoThrow<BuildArena>(WARM_PASS_SCRATCH_BYTES);
+  const bool scratchOk = scratch && scratch->valid();
+  if (!scratchOk) {
+    LOG_DBG("SCT", "warmAllImageCaches: no scratch arena (%u bytes); decoding from heap",
+            static_cast<uint32_t>(WARM_PASS_SCRATCH_BYTES));
+  }
+  image_scratch::ScopedArena scratchScope(scratchOk ? scratch.get() : nullptr);
+
   const int savedPage = currentPage;
   int warmed = 0;
   for (int p = 0; p < static_cast<int>(pageCount); ++p) {
@@ -1514,7 +1537,11 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
   }
   currentPage = savedPage;
   if (warmed > 0) {
-    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images", warmed);
+    // highWater/failedAlloc tell you whether WARM_PASS_SCRATCH_BYTES is right: a non-zero
+    // failedAlloc means decodes silently fell back to the heap (i.e. the churn is still there).
+    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images (scratch highWater=%u failedAlloc=%u)", warmed,
+            scratchOk ? static_cast<uint32_t>(scratch->highWater()) : 0u,
+            scratchOk ? static_cast<uint32_t>(scratch->failedAllocSize()) : 0u);
   }
 }
 

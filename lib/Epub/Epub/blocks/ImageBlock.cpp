@@ -59,6 +59,14 @@ void setFilterId(const uint8_t filterId) { g_filterId = filterId; }
 uint8_t getFilterId() { return g_filterId; }
 }  // namespace image_tone
 
+namespace image_scratch {
+namespace {
+BuildArena* g_arena = nullptr;
+}
+BuildArena* get() { return g_arena; }
+void set(BuildArena* arena) { g_arena = arena; }
+}  // namespace image_scratch
+
 namespace {
 
 std::string withSuffix(const std::string& imagePath, const std::string& suffix) {
