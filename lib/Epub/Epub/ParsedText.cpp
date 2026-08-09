@@ -46,9 +46,8 @@ bool isClosingPunctuation(const uint32_t cp) {
   }
 }
 
-// Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
-constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
-constexpr size_t SOFT_HYPHEN_BYTES = 2;
+// SOFT_HYPHEN_UTF8 / SOFT_HYPHEN_BYTES come from TextBlock.h — the arena fill strips the same
+// pattern this file measures around, so both sides share one definition.
 
 // Returns the first rendered codepoint of a word (skipping leading soft hyphens).
 uint32_t firstCodepoint(const std::string& word) {
@@ -1171,21 +1170,19 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     }
   }
 
-  // Copy line words; keep source intact so retry paths can safely inspect/merge tokens.
-  std::vector<std::string> lineWords(words.begin() + lastBreakAt, words.begin() + lineBreak);
-  std::vector<EpdFontFamily::Style> lineWordStyles(wordStyles.begin() + lastBreakAt, wordStyles.begin() + lineBreak);
-  std::vector<uint8_t> lineWordSizes(wordSizes.begin() + lastBreakAt, wordSizes.begin() + lineBreak);
+  // Address the line's words in place. The source is left intact so retry paths can still
+  // inspect/merge tokens, and TextBlock copies straight from here into its arena — stripping
+  // soft hyphens as it goes — so a line costs one allocation instead of four.
+  TextBlock::WordRange range;
+  range.words = &words;
+  range.styles = &wordStyles;
+  range.sizes = &wordSizes;
+  range.first = lastBreakAt;
+  range.count = lineWordCount;
 
-  for (auto& word : lineWords) {
-    if (containsSoftHyphen(word)) {
-      stripSoftHyphensInPlace(word);
-    }
-  }
-
-  // TextBlock flattens the vectors into its arena on construct; on arena OOM the
+  // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = std::make_shared<TextBlock>(std::move(lineWords), std::move(lineXPos), std::move(lineWordStyles),
-                                           blockStyle, std::move(lineWordSizes));
+  auto block = std::make_shared<TextBlock>(range, std::move(lineXPos), blockStyle);
   if (!block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return LineProcessResult::Accepted;

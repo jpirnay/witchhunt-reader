@@ -73,6 +73,13 @@ struct RenderStyle {
   CssTextAlign alignment = CssTextAlign::Justify;
 };
 
+// Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD). Layout measures widths
+// with these excluded, so they must not reach the glyph stream either; TextBlock strips them
+// while filling its arena. Declared here (rather than in ParsedText.cpp, where the layout-side
+// helpers live) because both sides of that copy need the same pattern.
+inline constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
+inline constexpr size_t SOFT_HYPHEN_BYTES = 2;
+
 class TextBlock final : public Block {
  private:
   RenderStyle renderStyle;
@@ -121,6 +128,27 @@ class TextBlock final : public Block {
   explicit TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle = BlockStyle(),
                      std::vector<uint8_t> word_sizes = {});
+
+  // Slice of a laid-out block, addressed directly in the caller's storage.
+  // Layout produces lines as [first, first + count) windows over the block's word arrays;
+  // this lets the arena be filled straight from those arrays, so a line costs ONE allocation
+  // (the arena) instead of also heap-copying every word's std::string into a throwaway
+  // per-line vector first. `xpos` is the one array layout computes per line rather than per
+  // block, so it is passed separately and is indexed from 0, not from `first`.
+  // `sizes` may be empty, meaning every word is at 100%.
+  struct WordRange {
+    const std::vector<std::string>* words = nullptr;
+    const std::vector<EpdFontFamily::Style>* styles = nullptr;
+    const std::vector<uint8_t>* sizes = nullptr;  // may be null/empty => uniform 100%
+    size_t first = 0;
+    size_t count = 0;
+  };
+
+  // Range constructor: same product as the vector constructor above, without the intermediate
+  // copies. Soft hyphens are stripped during the arena copy (they must not reach the glyph
+  // stream, and the measured widths already exclude them), which is what the vector path used
+  // a mutable copy of each word for.
+  TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle);
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;

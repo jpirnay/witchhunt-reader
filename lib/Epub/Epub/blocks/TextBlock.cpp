@@ -113,6 +113,111 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   bindArenaPointers();
 }
 
+TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle)
+    : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
+  if (range.words == nullptr || range.styles == nullptr) {
+    LOG_ERR("TXB", "Construction failed: null word range");
+    isValid = false;
+    return;
+  }
+  const std::vector<std::string>& words = *range.words;
+  const std::vector<EpdFontFamily::Style>& styleSrc = *range.styles;
+  const size_t first = range.first;
+  const size_t count = range.count;
+
+  // Every source array must actually span [first, first + count); xpos is per line so it is
+  // indexed from 0 and only needs `count` entries.
+  const bool hasSizeSrc = range.sizes != nullptr && !range.sizes->empty();
+  if (count > 10000 || first + count > words.size() || first + count > styleSrc.size() ||
+      word_xpos.size() != count || (hasSizeSrc && first + count > range.sizes->size())) {
+    LOG_ERR("TXB", "Construction failed: range out of bounds (first=%u, count=%u, words=%u, xpos=%u)",
+            static_cast<uint32_t>(first), static_cast<uint32_t>(count), static_cast<uint32_t>(words.size()),
+            static_cast<uint32_t>(word_xpos.size()));
+    isValid = false;
+    return;
+  }
+
+  // Normalize the all-100% case to no sizes, matching the vector constructor so both paths
+  // produce byte-identical arenas (and therefore identical section-cache bytes).
+  bool anyNon100 = false;
+  if (hasSizeSrc) {
+    const std::vector<uint8_t>& sizeSrc = *range.sizes;
+    for (size_t i = 0; i < count && !anyNon100; i++) anyNon100 = sizeSrc[first + i] != 100;
+  }
+  sizesPresent = anyNon100;
+
+  numWords = static_cast<uint16_t>(count);
+  if (numWords == 0) {
+    return;  // valid empty block, no arena
+  }
+
+  // Pass 1: total text size, one NUL per word, soft hyphens excluded — they are stripped
+  // during the copy below, so reserving their bytes would leave a gap between words.
+  size_t totalText = 0;
+  for (size_t i = 0; i < count; i++) {
+    const std::string& w = words[first + i];
+    size_t stripped = 0;
+    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos;
+         pos = w.find(SOFT_HYPHEN_UTF8, pos + SOFT_HYPHEN_BYTES)) {
+      stripped += SOFT_HYPHEN_BYTES;
+    }
+    totalText += w.size() - stripped + 1;
+  }
+  if (totalText > UINT16_MAX) {
+    LOG_ERR("TXB", "Construction failed: text size %u exceeds arena limit", static_cast<uint32_t>(totalText));
+    numWords = 0;
+    sizesPresent = false;
+    isValid = false;
+    return;
+  }
+  textBytes = static_cast<uint16_t>(totalText);
+
+  const size_t size = arenaSize(numWords, sizesPresent, textBytes);
+  arena = makeUniqueNoThrow<uint8_t[]>(size);
+  if (!arena) {
+    LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
+    numWords = 0;
+    textBytes = 0;
+    sizesPresent = false;
+    isValid = false;
+    return;
+  }
+
+  // Pass 2: fill straight from the caller's arrays — no intermediate per-line vectors.
+  uint8_t* base = arena.get();
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent);
+  auto* textOff = reinterpret_cast<uint16_t*>(base);
+  auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
+  uint8_t* styles = base + o.styles;
+  char* text = reinterpret_cast<char*>(base + o.text);
+  uint16_t off = 0;
+  for (uint16_t i = 0; i < numWords; i++) {
+    textOff[i] = off;
+    xpos[i] = word_xpos[i];
+    styles[i] = static_cast<uint8_t>(styleSrc[first + i]);
+    // Copy the word one soft-hyphen-free run at a time.
+    const std::string& w = words[first + i];
+    size_t start = 0;
+    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos;
+         pos = w.find(SOFT_HYPHEN_UTF8, start)) {
+      const size_t run = pos - start;
+      memcpy(text + off, w.data() + start, run);
+      off += static_cast<uint16_t>(run);
+      start = pos + SOFT_HYPHEN_BYTES;
+    }
+    const size_t tail = w.size() - start;
+    memcpy(text + off, w.data() + start, tail);
+    off += static_cast<uint16_t>(tail);
+    text[off++] = '\0';
+  }
+  if (sizesPresent) {
+    uint8_t* sizes = base + o.sizes;
+    const std::vector<uint8_t>& sizeSrc = *range.sizes;
+    for (uint16_t i = 0; i < numWords; i++) sizes[i] = sizeSrc[first + i];
+  }
+  bindArenaPointers();
+}
+
 uint8_t TextBlock::maxSizePct() const {
   if (!sizesPresent) {
     return 100;
