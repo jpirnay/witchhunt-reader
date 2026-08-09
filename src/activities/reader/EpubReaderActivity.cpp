@@ -2794,10 +2794,12 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     LOG_INF("ERS", "Building section in place (secondary buffer kept): free=%lu contig=%lu", esp_get_free_heap_size(),
             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
   } else {
-    LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+    LOG_INF("ERS", "Index start mem (before fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
     released = true;
-    LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+    LOG_INF("ERS", "Index start mem (after fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   }
 
   // Blocking build (the fallback path: X3, tight heap, a failed Background-C attempt, or a
@@ -2808,8 +2810,9 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
 
   const uint32_t createStart = millis();
   bool createOk = runCreate();
-  LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
-          esp_get_free_heap_size());
+  LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu contig=%lu)", createOk ? 1 : 0,
+          millis() - createStart, esp_get_free_heap_size(),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("after_createSectionFile");
 
   if (!createOk && inPlace) {
@@ -2839,7 +2842,9 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     // pass on the first image page, where headroom is worse.
     section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true,
                                 /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing());
-    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
+    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu contig=%lu)", millis() - warmStart,
+            esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     renderer.clearScreen();
     checkHeapIntegrity("after_warmAllImageCaches");
   }

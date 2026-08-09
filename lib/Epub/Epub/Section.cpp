@@ -111,6 +111,27 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
 
+// --- Heap-analysis instrumentation (temporary; heap-analysis branch) ------------------------
+// The fragmented-heap restart fires because a 52 KB framebuffer realloc cannot find one
+// contiguous block, and the build is what leaves it that way — measured end-of-build state was
+// "50380 free, 11764 max alloc". What is NOT known is WHERE inside the build the largest block
+// collapses, which decides what to fix. Existing phase logs print free heap only; this adds the
+// contiguous number at the same points plus a per-page trace.
+//
+// SCT_HEAP_TRACE=0 compiles all of it out. Remove this block once the question is answered.
+#ifndef SCT_HEAP_TRACE
+#define SCT_HEAP_TRACE 1
+#endif
+
+#if SCT_HEAP_TRACE
+#define SCT_TRACE_HEAP(spine, label)                                                                        \
+  LOG_INF("HEAP", "spine=%d %-18s free=%lu contig=%lu", (spine), (label),                                    \
+          static_cast<unsigned long>(esp_get_free_heap_size()),                                              \
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)))
+#else
+#define SCT_TRACE_HEAP(spine, label) ((void)0)
+#endif
+
 // Visitor-feed chunk for phase (b): the granularity at which runBuildParse checks its time budget
 // between visitor writes. Kept small so a build slice yields promptly and input stays responsive.
 constexpr size_t PARSE_CHUNK_BYTES = 1024;
@@ -267,6 +288,15 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   if (pageCount % 10 == 0) {
     LOG_DBG("SCT", "Page %d processed", pageCount);
   }
+
+#if SCT_HEAP_TRACE
+  // Per-page contiguous trace: the page is serialized and destroyed here, so this samples the
+  // heap at the one point in the parse where a page's worth of transient objects has just been
+  // released. A monotonic decline across pages means the parse is the fragmenter; a flat line
+  // with a single step means something else is, and the step says where to look.
+  LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount, static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+#endif
 
   pageCount++;
   return position;
@@ -604,6 +634,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   filePath = getSectionFilePath(st.propertyHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
+  SCT_TRACE_HEAP(spineIndex, "build_start");
   LOG_INF("SCT", "createSectionFile spine=%d start: %s (free=%lu)", spineIndex, st.localPath.c_str(),
           esp_get_free_heap_size());
 
@@ -740,6 +771,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     return BuildPhaseResult::Failed;
   }
   st.setupMs = millis() - phaseSetupStart;
+  SCT_TRACE_HEAP(spineIndex, "after_setup");
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
           static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
   return BuildPhaseResult::Ok;
@@ -910,6 +942,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         LOG_INF("SCT", "spine=%d EXTRACTPROF fileops=%ums (flush/close/reopen)", spineIndex,
                 static_cast<uint32_t>((esp_timer_get_time() - tClose) / 1000));
 #endif
+        SCT_TRACE_HEAP(spineIndex, "after_extract");
         LOG_INF("SCT", "createSectionFile spine=%d extracted %u bytes to temp (free=%lu)", spineIndex,
                 static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
         if (overBudget()) {
@@ -1029,6 +1062,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     cssLowHeapDegraded_ = st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
+  SCT_TRACE_HEAP(spineIndex, "after_parse");
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
           esp_get_free_heap_size());
