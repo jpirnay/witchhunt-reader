@@ -1512,16 +1512,31 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
                                  const bool monochromeOutput, const bool alsoWarmGrayscale) {
   if (pageCount == 0) return;
 
-  // Best-effort: when the arena cannot be had, decoders fall back to their own heap
-  // allocations and the pass behaves exactly as before — slower to no measurable degree, just
-  // without the anti-fragmentation benefit.
-  auto scratch = makeUniqueNoThrow<BuildArena>(WARM_PASS_SCRATCH_BYTES);
-  const bool scratchOk = scratch && scratch->valid();
-  if (!scratchOk) {
-    LOG_DBG("SCT", "warmAllImageCaches: no scratch arena (%u bytes); decoding from heap",
-            static_cast<uint32_t>(WARM_PASS_SCRATCH_BYTES));
+  // Prefer the LENT framebuffer region (externalScratch_) over a fresh heap block. Asking the
+  // heap for ~40 KB contiguous is the very thing this pass is trying not to do — on X3 the
+  // largest free block after boot is 42996, so that allocation is both likely to fail and, when
+  // it succeeds, likely to be the one that splits the region the framebuffer needs back. The
+  // borrowed region is already ours, costs nothing to reuse, and cannot fail to be returned.
+  //
+  // Only usable when nothing else is building out of it: a live build owns the arena cursor,
+  // and a decode bump-allocating underneath it would corrupt that scope.
+  BuildArena* lent = (externalScratch_ && externalScratch_->valid() && !hasActiveBuild()) ? externalScratch_ : nullptr;
+
+  // Fall back to a heap arena only when no region is lent. Best-effort either way: with no
+  // arena at all the decoders use their own heap allocations and the pass behaves exactly as
+  // before — no correctness change, just without the anti-fragmentation benefit.
+  std::unique_ptr<BuildArena> owned;
+  if (!lent) {
+    owned = makeUniqueNoThrow<BuildArena>(WARM_PASS_SCRATCH_BYTES);
+    if (!owned || !owned->valid()) {
+      owned.reset();
+      LOG_DBG("SCT", "warmAllImageCaches: no scratch arena (%u bytes); decoding from heap",
+              static_cast<uint32_t>(WARM_PASS_SCRATCH_BYTES));
+    }
   }
-  image_scratch::ScopedArena scratchScope(scratchOk ? scratch.get() : nullptr);
+  BuildArena* scratchArena = lent ? lent : owned.get();
+  if (scratchArena) scratchArena->reset();  // the pass owns the whole cursor for its duration
+  image_scratch::ScopedArena scratchScope(scratchArena);
 
   const int savedPage = currentPage;
   int warmed = 0;
@@ -1537,11 +1552,13 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
   }
   currentPage = savedPage;
   if (warmed > 0) {
-    // highWater/failedAlloc tell you whether WARM_PASS_SCRATCH_BYTES is right: a non-zero
-    // failedAlloc means decodes silently fell back to the heap (i.e. the churn is still there).
-    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images (scratch highWater=%u failedAlloc=%u)", warmed,
-            scratchOk ? static_cast<uint32_t>(scratch->highWater()) : 0u,
-            scratchOk ? static_cast<uint32_t>(scratch->failedAllocSize()) : 0u);
+    // highWater/failedAlloc tell you whether the scratch budget is right: a non-zero failedAlloc
+    // means decodes fell back to the heap (i.e. the churn is still there). `src` says which
+    // region served the pass — "lent" is the one that costs no contiguous heap.
+    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images (scratch src=%s highWater=%u failedAlloc=%u)",
+            warmed, lent ? "lent" : (owned ? "heap" : "none"),
+            scratchArena ? static_cast<uint32_t>(scratchArena->highWater()) : 0u,
+            scratchArena ? static_cast<uint32_t>(scratchArena->failedAllocSize()) : 0u);
   }
 }
 

@@ -268,7 +268,15 @@ bool PngStreamDecoder::begin(FsFile& file, Info& info) {
     // arena — they are already live and the block is released as a whole by end().
   }
   if (!ringReady && !reader_.init(true, uncompressed)) {
-    LOG_ERR("PNG", "Failed to init inflate reader");
+    // The ring CANNOT be retried smaller: ringSizeFor's contract is "total output <= ring size
+    // guarantees no back-reference can outrun the ring", so a short ring on a large image would
+    // silently produce corrupt pixels. Failing is correct — but say why, loudly. This path is
+    // how an image disappears from a page with no user-visible explanation (observed on X3 at
+    // contig~30 KB), and "Failed to init inflate reader" gave no clue that it was a contiguous-
+    // memory problem rather than a malformed PNG.
+    LOG_ERR("PNG", "Inflate ring alloc failed: need %u contiguous bytes (scratch arena: %s); image dropped",
+            static_cast<unsigned>(InflateReader::ringSizeFor(uncompressed)),
+            arenaOwnsBuffers_ ? "present but too small" : "none supplied");
     end();
     return false;
   }

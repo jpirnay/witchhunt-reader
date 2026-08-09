@@ -84,7 +84,10 @@ add_subdirectory(layout_quality)
 add_subdirectory(memory_model)
 add_subdirectory(float_layout)
 add_subdirectory(word_size_layout)
+add_subdirectory(text_block_range)
 add_subdirectory(zip_entry_reader)
+# After zip_entry_reader: reuses its inflate_reader_host target.
+add_subdirectory(png_decoder)
 # After zip_entry_reader: reuses its inflate_reader_host target.
 add_subdirectory(book_metadata_cache)
 add_subdirectory(uzlib_lzcopy)
