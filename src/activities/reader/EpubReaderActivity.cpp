@@ -243,6 +243,38 @@ constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
 
+// --- Heap-gate instrumentation (temporary; heap/gate-rederivation branch) --------------------
+// The reader path has ~8 free/contig floors (PRE_RENDER_, BG_BUILD_*, IN_PLACE_BUILD_*,
+// RESIDENT_BUILD_ABORT_*) that predate the build arena. Several of them REJECT SILENTLY, so a
+// device trace cannot show which floor sent a build down the released path — and the released
+// path is where the X3 fragmented-heap restart happens. Device-measured example (X4):
+//
+//   heapAllowsInPlaceBuild=0 css=1 ring=15799 free=71544(floor=83383) contig=59380(floor=32768)
+//
+// contig passes with 26 KB to spare; `free` fails against a floor that is UNREACHABLE (post-font
+// free peaks at ~97 KB and is ~71 KB by reader time), because the floor adds ringBytes on top of
+// a base already sized for the working set. Meanwhile the arena serves every build with
+// failedAlloc=0 at ~30 KB high-water. One line per gate, so one trace shows every decision and
+// the arithmetic behind it. Values are NOT changed in this commit — measure first.
+//
+// HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
+#ifndef HEAP_GATE_TRACE
+#define HEAP_GATE_TRACE 1
+#endif
+
+#if HEAP_GATE_TRACE
+// `floor` of 0 means "not a numeric floor" (e.g. a delegated predicate); printed as `-`.
+void logHeapGate(const char* gate, const bool passed, const uint32_t freeHeap, const uint32_t freeFloor,
+                 const uint32_t contigHeap, const uint32_t contigFloor) {
+  LOG_INF("HEAP", "gate=%-22s %s free=%lu(floor=%lu) contig=%lu(floor=%lu)", gate, passed ? "PASS" : "REJECT",
+          static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(freeFloor),
+          static_cast<unsigned long>(contigHeap), static_cast<unsigned long>(contigFloor));
+}
+#define HEAP_GATE(gate, passed, f, ff, c, cf) logHeapGate((gate), (passed), (f), (ff), (c), (cf))
+#else
+#define HEAP_GATE(gate, passed, f, ff, c, cf) ((void)0)
+#endif
+
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
 // Temporary corruption tripwire: walks the entire heap and names the checkpoint that
 // sees damage. DANGEROUS on this platform: the ESP32-C3 startup-stack heap region
@@ -980,9 +1012,16 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // section state the render task mutates — an earlier unlocked version in
   // serviceBackgroundWork() raced buildSection's reassignment of `section`. B keeps
   // waiting behind pendingPreRender until the retry has run, preserving A's priority.
-  if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
-      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
-      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
+  const uint32_t preRenderFree = esp_get_free_heap_size();
+  // Everything except the heap floor, so the floor can be reported on its own. Pre-render is a
+  // nice-to-have (page-turn latency), not correctness — but a floor that rejects it constantly is
+  // still evidence the floors are mistuned.
+  const bool preRenderWanted = !preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
+                               (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage);
+  if (preRenderWanted && preRenderFree < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
+    HEAP_GATE("preRenderArm", false, preRenderFree, PRE_RENDER_MIN_FREE_HEAP_BYTES, 0, 0);
+  }
+  if (preRenderWanted && preRenderFree >= PRE_RENDER_MIN_FREE_HEAP_BYTES) {
     preRenderRearmSpine_ = currentSpineIndex;
     preRenderRearmPage_ = section->currentPage;
     pendingPreRender = true;
@@ -1085,9 +1124,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
       const uint32_t freeHeap = esp_get_free_heap_size();
       const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      if (freeHeap <
-              std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) ||
-          contigHeap < std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024)) {
+      const uint32_t bgFreeFloor =
+          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
+      const uint32_t bgContigFloor = std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024);
+      if (freeHeap < bgFreeFloor || contigHeap < bgContigFloor) {
+        HEAP_GATE("bgB_waitheap", false, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
         return;
       }
       // Refuse — don't let startBuild silently downgrade — when the book wants embedded
@@ -1097,6 +1138,9 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       if (lastRenderStats.embeddedStyle) {
         const CssParser* css = epub->getCssParser();
         if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+          // Delegated predicate (Section::heapAllowsEmbeddedStyle) rather than a local floor —
+          // 0 floors print as the raw heap state so the trace still shows where it stood.
+          HEAP_GATE("bgB_embeddedCss", false, freeHeap, 0, contigHeap, 0);
           return;
         }
         // Reached only when the borrow above was unavailable, i.e. B is building RESIDENT out of
@@ -1105,9 +1149,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         // let Background-C build it released (clean) on navigation. (A borrowed build resolves CSS
         // from the arena at the lower lean floor, so it never consults this gate.)
         if (freeHeap < BG_BUILD_CSS_MIN_FREE_HEAP_BYTES) {
+          HEAP_GATE("bgB_cssResident", false, freeHeap, BG_BUILD_CSS_MIN_FREE_HEAP_BYTES, contigHeap, 0);
           return;
         }
       }
+      // Log the PASS too: knowing how much margin a successful gate had is what tells us whether
+      // a floor is merely conservative or actively wrong.
+      HEAP_GATE("bgB_waitheap", true, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
       backgroundBuildState_ = BackgroundBuildState::Building;
       return;
     }
@@ -1286,9 +1334,13 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     // Proactive low-heap guard: while the build is resident (AA buffer kept), bail to the released
     // path before heap reaches the fault zone. Only meaningful when the buffer is still resident —
     // a build already running released has that headroom and should ride it out.
-    if (!secondaryBufferDegraded_ && (esp_get_free_heap_size() < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
-                                      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) <
-                                          RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES)) {
+    const uint32_t residentFree = esp_get_free_heap_size();
+    const uint32_t residentContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    const bool residentAbort = !secondaryBufferDegraded_ && (residentFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
+                                                            residentContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+    if (residentAbort) {
+      HEAP_GATE("residentAbort", false, residentFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, residentContig,
+                RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
       fallbackToReleasedRebuild("low heap mid-build", /*retryIncremental=*/true);
       return;
     }
@@ -2701,6 +2753,8 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
           embeddedStyle ? 1 : 0, static_cast<unsigned long>(ringBytes), static_cast<unsigned long>(freeHeap),
           static_cast<unsigned long>(freeFloor), static_cast<unsigned long>(contigHeap),
           static_cast<unsigned long>(contigFloor));
+  // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
+  HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", ok, freeHeap, freeFloor, contigHeap, contigFloor);
   return ok;
 }
 
