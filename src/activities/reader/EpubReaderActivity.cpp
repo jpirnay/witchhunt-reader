@@ -3028,9 +3028,12 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   // One grep-able line per section entry tying the cache decision to the effective
   // preview inputs — discriminates "stale variant loaded" from "effective value not
   // what the UI shows" from "parser gate leak" in field logs.
-  LOG_INF("ERS", "Section probe spine=%d: cacheHit=%d previews=%d (override=%d global=%u)", currentSpineIndex,
-          cacheHit ? 1 : 0, getEffectiveInlineFootnotePreviews() ? 1 : 0,
-          static_cast<int>(bookInlineFootnotePreviewsOverride), static_cast<unsigned>(SETTINGS.inlineFootnotePreviews));
+  // `previews` is the SETTING; `variant` is what actually keys the cache — they differ before the
+  // deferred gather has run, which is precisely the state this line exists to make visible.
+  LOG_INF("ERS", "Section probe spine=%d: cacheHit=%d previews=%d variant=%d (override=%d global=%u)",
+          currentSpineIndex, cacheHit ? 1 : 0, getEffectiveInlineFootnotePreviews() ? 1 : 0,
+          probeParams.inlineFootnotePreviews ? 1 : 0, static_cast<int>(bookInlineFootnotePreviewsOverride),
+          static_cast<unsigned>(SETTINGS.inlineFootnotePreviews));
 
   if (needBuild) {
     lastRenderStats.cacheRebuilt = true;
