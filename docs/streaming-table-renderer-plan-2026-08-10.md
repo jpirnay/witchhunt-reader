@@ -8,18 +8,28 @@ first, because they change what the work is.
 
 ## Corrections to the design note
 
-**1. The `MAX_CELL_LINES` truncation is already fixed.** The note and
-[docs/heap-work-handover-2026-08-10.md:31](heap-work-handover-2026-08-10.md) both list it as the
-top open correctness bug. Commit `15be06af` ("fall back to paragraphs instead of truncating an
-oversized cell") landed the fallback: the lambda at
-[ChapterHtmlSlimParser.cpp:3271-3295](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L3271-L3295)
-counts *every* produced line, and bails to `emitTableAsParagraphs` when the count exceeds 64. The
-`if (cell.lines.size() < MAX_CELL_LINES)` guard still reads like a truncation but it only bounds a
-vector that is discarded on the very next statement. Nothing is dropped.
+**1. The `MAX_CELL_LINES` truncation was not fixed — it was made worse, and is now fixed for
+real.** *(Revised after the fixtures in `f8c29d79` were built; the original reading of `15be06af`
+is below, and it was wrong.)*
 
-What survives from that item is a **quality** issue, not a correctness one: the bail is
-*table-scoped*. One oversized cell in row 40 flattens all 40 rows. Making that bail row-scoped is
-the main user-visible payoff of this rewrite.
+`15be06af` replaced the truncation with a fallback to `emitTableAsParagraphs`, which looked right
+and passed 418/418 — because no fixture reached it. Its own commit message says the guard was
+"exercised only by inspection". The fallback rested on `layoutAndExtractLines` preserving its
+source, which that commit also documented at the declaration. **It does not.**
+[ParsedText.cpp:430](../lib/Epub/Epub/ParsedText.cpp#L430) erases every word it lays out.
+
+So the call that *detected* the overflow was the call that erased the evidence, and the fallback
+emitted nothing at all: not the tail of the cell, the whole cell — plus every cell in the table laid
+out before it. Strictly worse than the truncation it replaced. Fixed in `c44f6f2d` with an opt-in
+`preserveSource` that snapshots and restores the word vectors, verified by the new ch3/ch4 fixtures
+recovering all 70 and all 40 words unsplit.
+
+What remains for this rewrite is the **quality** half: the bail is *table-scoped*. One oversized
+cell in row 40 flattens all 40 rows. Making it row-scoped is the main user-visible payoff.
+
+The general lesson, and the reason step one below is what it is: a guard with no fixture is a guess.
+Both the truncation and its broken replacement survived because the goldens could not see inside a
+table.
 
 **2. The pipeline dump cannot see table content.**
 [PipelineRunner.cpp:55-59](../test/epub_pipeline/PipelineRunner.cpp#L55-L59) emits one line per
@@ -141,6 +151,10 @@ row cap, and row-scoped fallbacks. Bump `SECTION_FILE_VERSION`
 ([Section.cpp:34](../lib/Epub/Epub/Section.cpp#L34), currently 65) — the layout changes, so cached
 sections must be rebuilt or a book will render tables two different ways depending on cache age.
 (The earlier streaming commit `55883bd2` correctly did *not* bump it: it was byte-identical.)
+
+**Landed out of sequence, because the C2 fixtures caught it:** `c44f6f2d`, the `preserveSource` fix
+above. It had to go in before C4 — the row-scoped fallback C4 introduces sits on exactly the same
+"lay it out, then decide" pattern and would have inherited the same content loss.
 
 **C5 — `fix(table): don't drop character data inside nested tables`** *(optional, separable)*
 [:2131](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L2131) early-returns for `depth > 1`, so
