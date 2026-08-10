@@ -15,15 +15,17 @@
 #include "../FontSizeLadder.h"
 #include "../FootnoteEntry.h"
 #include "../FootnotePreviews.h"
+// Page.h, not just a forward declaration: the table layout members below hold TableRow/TableCell
+// by value. Only ChapterHtmlSlimParser.cpp and Section.cpp include this header, and both already
+// pull Page.h in anyway.
+#include "../Page.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
 
-class Page;
-class PageImage;  // forward declaration — Page.h included in .cpp
-class PageLine;
+// Page, PageImage and PageLine all come from ../Page.h above.
 class GfxRenderer;
 class Epub;
 
@@ -210,6 +212,23 @@ class ChapterHtmlSlimParser final : public Print {
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
+  // One buffered row wrapped into grid cells, sized but not yet placed on a page.
+  struct LayoutRow {
+    std::vector<TableCell> cells;
+    uint16_t height = 0;        // content height + 2 x TABLE_CELL_PADDING
+    bool isHeaderRow = false;
+    uint8_t renderCols = 0;     // 1 for a full-width single-cell row, else the table's column count
+  };
+  // Rows accumulated for the PageTableFragment currently being packed. A fragment carries a single
+  // column count and must fit the viewport, so a change in either forces a flush.
+  struct TableFragmentPacker {
+    std::vector<TableRow> rows;
+    uint16_t height = 0;
+    uint8_t cols = 0;
+    uint16_t totalWidth = 0;
+    bool hasBorder = true;
+  };
+
   struct ListEntry {
     int depth;
     bool isOrdered;
@@ -331,6 +350,19 @@ class ChapterHtmlSlimParser final : public Print {
   void makePages();
   void emitBufferedTable();
   void emitTableAsFragments(BufferedTable& table);
+  // Wrap one buffered row into grid cells at `columnCount` columns. Returns false when the row
+  // cannot be a grid row at all -- an unsupported colspan, a cell needing more lines than the grid
+  // carries, or a cell taller than the viewport -- leaving `out` unusable and the row's cell text
+  // untouched, so the caller can still emit it as paragraphs. The caller chooses how far to fall
+  // back; nothing is written to a page from here.
+  bool layoutTableRow(BufferedTableRow& bufRow, uint8_t columnCount, LayoutRow& out);
+  // Emit the packed rows as one PageTableFragment, page-breaking first if it does not fit, and
+  // reset the packer. No-op when nothing is packed.
+  void flushTableFragment(TableFragmentPacker& packer);
+  // Greedily pack laid-out rows into fragments, flushing on a column-count change, on a row that
+  // would overflow the viewport, and at the end. Rows taller than the viewport bypass the grid and
+  // are emitted as paragraphs. Consumes `layoutRows`.
+  void packTableRows(std::vector<LayoutRow>& layoutRows, TableFragmentPacker& packer);
   void emitTableAsParagraphs(BufferedTable& table);
   // Fallback path: emit each cell's image as a full-width block image below the table.
   void emitCellImagesAsBlocks(BufferedTable& table);

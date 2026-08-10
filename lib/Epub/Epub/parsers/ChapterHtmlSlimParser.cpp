@@ -3214,160 +3214,158 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     return;
   }
 
-  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
-  const bool hasBorder = table.hasBorder;
-
-  // Pre-wrap all cells and compute row heights.
-  // A row whose single cell spans the full table width (colspan == maxCols) is treated as a
-  // 1-column fragment so it renders full-width inline with the surrounding grid rather than
-  // falling back to paragraph mode. Idea from uxjulia/CrossInk; rewritten for our layout model.
-  struct LayoutRow {
-    std::vector<TableCell> cells;
-    uint16_t height = 0;
-    bool isHeaderRow = false;
-    uint8_t renderCols = 0;  // 1 for full-width single-cell rows, else columnCount
-  };
   std::vector<LayoutRow> layoutRows;
   layoutRows.reserve(table.rows.size());
 
   for (auto& bufRow : table.rows) {
-    // Detect a full-width spanning row: exactly one cell whose colSpan equals the table's column count.
-    const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
-
-    const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
-    const uint16_t renderColWidth = totalWidth / renderCols;
-    const uint16_t renderInnerWidth =
-        (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
-
-    // Any other colspan structure falls back; we only handle full-span or plain cells.
-    const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
-                                           [](const BufferedTableCell& c) { return c.colSpan != 1; });
-    if (hasMergedCell && !isFullWidthSpan) {
-      LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
+    LayoutRow lr;
+    if (!layoutTableRow(bufRow, columnCount, lr)) {
       emitTableAsParagraphs(table);
       return;
     }
-
-    // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
-    // paragraph fallback and drop the image).
-    const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
-        std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
-    const uint16_t cellImageMaxWidth =
-        (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
-
-    LayoutRow lr;
-    lr.isHeaderRow = bufRow.isHeaderRow;
-    lr.renderCols = renderCols;
-    lr.cells.reserve(renderCols);
-    uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
-
-    for (auto& bufCell : bufRow.cells) {
-      TableCell cell;
-      cell.isHeader = bufCell.isHeader;
-
-      if (bufCell.text && !bufCell.text->isEmpty()) {
-        // Count past the cap rather than stopping at it: the overflow itself is the signal, and
-        // the grid cannot represent this cell either way.
-        size_t producedLines = 0;
-        bufCell.text->layoutAndExtractLines(
-            renderer, fontId, renderInnerWidth,
-            [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
-              ++producedLines;
-              // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
-              // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
-              if (cell.lines.size() < MAX_CELL_LINES) {
-                cell.lines.push_back(tb);
-              }
-              return ParsedText::LineProcessResult::Accepted;
-            },
-            /*includeLastLine=*/true, /*blockStartY=*/0, /*lineHeight=*/0, /*preserveSource=*/true);
-        // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
-        // silently, with no log and no fallback, so the tail of the cell was simply deleted from
-        // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
-        // paragraphs instead, which is what the colspan check above already does for a table the
-        // grid cannot represent.
-        //
-        // This only works because of the preserveSource argument above. Without it the layout call
-        // that DETECTS the overflow also erases the words it laid out, so the fallback would find
-        // this cell -- and every cell laid out before it in this table -- already empty, and would
-        // emit nothing at all. Nothing has been written to the page yet (every row is laid out into
-        // `layoutRows` before the second loop emits any fragment), so bailing here is clean.
-        if (producedLines > MAX_CELL_LINES) {
-          LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
-                  static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
-          emitTableAsParagraphs(table);
-          return;
-        }
-      }
-
-      if (!bufCell.imageSrc.empty()) {
-        cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
-      }
-
-      uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
-      if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
-      // A cell taller than the whole viewport can never be a grid row on any device, so the
-      // fragment packer below would emit a row that cannot be displayed. Adopted from CrossInk,
-      // which guards this case and we did not.
-      if (contentHeight + 2 * TABLE_CELL_PADDING > viewportHeight) {
-        LOG_DBG("EHP", "Table cell is %u px, taller than the %u px viewport — falling back to paragraphs",
-                static_cast<unsigned>(contentHeight), static_cast<unsigned>(viewportHeight));
-        emitTableAsParagraphs(table);
-        return;
-      }
-      if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
-      lr.cells.push_back(std::move(cell));
-    }
-
-    // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
-    if (!isFullWidthSpan) {
-      while (lr.cells.size() < columnCount) {
-        lr.cells.emplace_back();
-      }
-    }
-
-    if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
-    lr.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);
     layoutRows.push_back(std::move(lr));
   }
 
+  TableFragmentPacker packer;
+  packer.totalWidth = totalWidth;
+  packer.hasBorder = table.hasBorder;
+  packTableRows(layoutRows, packer);
+}
+
+// A row whose single cell spans the full table width (colspan == columnCount) is laid out as a
+// 1-column row so it renders full-width inline with the surrounding grid rather than forcing the
+// whole table to paragraph mode. Idea from uxjulia/CrossInk; rewritten for our layout model.
+bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8_t columnCount, LayoutRow& out) {
+  const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
+
+  const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
+  const uint16_t renderColWidth = viewportWidth / renderCols;
+  const uint16_t renderInnerWidth =
+      (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
+
+  // Any other colspan structure falls back; we only handle full-span or plain cells.
+  const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
+                                         [](const BufferedTableCell& c) { return c.colSpan != 1; });
+  if (hasMergedCell && !isFullWidthSpan) {
+    LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
+    return false;
+  }
+
+  // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
+  // paragraph fallback and drop the image).
+  const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
+      std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
+  const uint16_t cellImageMaxWidth =
+      (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
+  const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+
+  out.cells.clear();
+  out.isHeaderRow = bufRow.isHeaderRow;
+  out.renderCols = renderCols;
+  out.cells.reserve(renderCols);
+  uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
+
+  for (auto& bufCell : bufRow.cells) {
+    TableCell cell;
+    cell.isHeader = bufCell.isHeader;
+
+    if (bufCell.text && !bufCell.text->isEmpty()) {
+      // Count past the cap rather than stopping at it: the overflow itself is the signal, and
+      // the grid cannot represent this cell either way.
+      size_t producedLines = 0;
+      bufCell.text->layoutAndExtractLines(
+          renderer, fontId, renderInnerWidth,
+          [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+            ++producedLines;
+            // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
+            // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
+            if (cell.lines.size() < MAX_CELL_LINES) {
+              cell.lines.push_back(tb);
+            }
+            return ParsedText::LineProcessResult::Accepted;
+          },
+          /*includeLastLine=*/true, /*blockStartY=*/0, /*lineHeight=*/0, /*preserveSource=*/true);
+      // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
+      // silently, with no log and no fallback, so the tail of the cell was simply deleted from
+      // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
+      // paragraphs instead, which is what the colspan check above already does for a table the
+      // grid cannot represent.
+      //
+      // This only works because of the preserveSource argument above. Without it the layout call
+      // that DETECTS the overflow also erases the words it laid out, so the caller's fallback
+      // would find this cell -- and every cell laid out before it -- already empty, and would
+      // emit nothing at all. Nothing has been written to a page from here, so bailing is clean.
+      if (producedLines > MAX_CELL_LINES) {
+        LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
+                static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
+        return false;
+      }
+    }
+
+    if (!bufCell.imageSrc.empty()) {
+      cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
+    }
+
+    uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
+    if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
+    // A cell taller than the whole viewport can never be a grid row on any device, so the
+    // fragment packer would emit a row that cannot be displayed. Adopted from CrossInk,
+    // which guards this case and we did not.
+    if (contentHeight + 2 * TABLE_CELL_PADDING > viewportHeight) {
+      LOG_DBG("EHP", "Table cell is %u px, taller than the %u px viewport — falling back to paragraphs",
+              static_cast<unsigned>(contentHeight), static_cast<unsigned>(viewportHeight));
+      return false;
+    }
+    if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
+    out.cells.push_back(std::move(cell));
+  }
+
+  // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
+  if (!isFullWidthSpan) {
+    while (out.cells.size() < columnCount) {
+      out.cells.emplace_back();
+    }
+  }
+
+  if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
+  out.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);
+  return true;
+}
+
+void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
+  if (packer.rows.empty()) return;
+
+  // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
+  // in packer.height; add 1 for the bottom border. When borderless: packer.height is exact.
+  const uint16_t fragTotalHeight =
+      packer.hasBorder ? static_cast<uint16_t>(packer.height + 1) : static_cast<uint16_t>(packer.height);
+
+  if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
+    emitPage(lastBodyChildByteOffset);
+  }
+
+  currentPage->elements.push_back(std::make_shared<PageTableFragment>(
+      packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
+      /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder));
+  currentPageNextY += fragTotalHeight;
+  packer.rows.clear();
+  packer.height = 0;
+  packer.cols = 0;
+}
+
+// Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose
+// renderCols differs from the pending fragment flushes it first, since each PageTableFragment
+// carries a single fixed column count.
+void ChapterHtmlSlimParser::packTableRows(std::vector<LayoutRow>& layoutRows, TableFragmentPacker& packer) {
   // Ensure page is initialised.
   if (!currentPage) {
     currentPage.reset(new Page());
     currentPageNextY = 0;
   }
 
-  // Greedily pack rows into fragments, page-breaking between fragments.
-  // Rows with a different renderCols than the pending fragment flush it first, since each
-  // PageTableFragment has a single fixed column count.
-  std::vector<TableRow> fragmentRows;
-  uint16_t fragmentHeight = 0;
-  uint8_t fragmentCols = 0;
-
-  auto emitFragment = [&]() {
-    if (fragmentRows.empty()) return;
-
-    // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
-    // in fragmentHeight; add 1 for the bottom border. When borderless: fragmentHeight is exact.
-    const uint16_t fragTotalHeight =
-        hasBorder ? static_cast<uint16_t>(fragmentHeight + 1) : static_cast<uint16_t>(fragmentHeight);
-
-    if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
-      emitPage(lastBodyChildByteOffset);
-    }
-
-    currentPage->elements.push_back(
-        std::make_shared<PageTableFragment>(fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
-                                            /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
-    currentPageNextY += fragTotalHeight;
-    fragmentRows.clear();
-    fragmentHeight = 0;
-    fragmentCols = 0;
-  };
-
   for (auto& lr : layoutRows) {
     if (lr.height > viewportHeight) {
-      emitFragment();
+      flushTableFragment(packer);
       BufferedTable singleRowFallback;
       BufferedTableRow fbRow;
       fbRow.isHeaderRow = lr.isHeaderRow;
@@ -3392,28 +3390,28 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
     }
 
     // A change in column count requires a new fragment.
-    if (!fragmentRows.empty() && lr.renderCols != fragmentCols) {
-      emitFragment();
+    if (!packer.rows.empty() && lr.renderCols != packer.cols) {
+      flushTableFragment(packer);
     }
 
-    if (fragmentCols == 0) fragmentCols = lr.renderCols;
+    if (packer.cols == 0) packer.cols = lr.renderCols;
 
-    const uint16_t rowContrib = hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
+    const uint16_t rowContrib = packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
 
-    if (!fragmentRows.empty() && currentPageNextY + fragmentHeight + rowContrib > viewportHeight) {
-      emitFragment();
-      fragmentCols = lr.renderCols;
+    if (!packer.rows.empty() && currentPageNextY + packer.height + rowContrib > viewportHeight) {
+      flushTableFragment(packer);
+      packer.cols = lr.renderCols;
     }
 
     TableRow tr;
     tr.isHeaderRow = lr.isHeaderRow;
     tr.height = lr.height;
     tr.cells = std::move(lr.cells);
-    fragmentRows.push_back(std::move(tr));
-    fragmentHeight += rowContrib;
+    packer.rows.push_back(std::move(tr));
+    packer.height += rowContrib;
   }
 
-  emitFragment();
+  flushTableFragment(packer);
 }
 
 bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const bool emitImage) {
