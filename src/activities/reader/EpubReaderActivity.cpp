@@ -299,7 +299,17 @@ inline void checkHeapIntegrity(const char*) {}
 void logReaderMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  LOG_DBG("ERS", "Reader mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
+  // free+contig alone cannot tell "something is retaining bytes" from "the same bytes have
+  // fragmented": both show up as contig falling. The block counts separate them --
+  //   allocated rising, free bytes falling  -> a session-lifetime allocation is accumulating
+  //   allocated flat, freeBlk rising        -> pure fragmentation, the bytes came back split
+  // The X3 trace has contig decaying 49140 -> 38900 -> 15860 across one session with the
+  // secondary buffer RELEASED at each sample, so the cause is resident, not the framebuffer.
+  multi_heap_info_t info{};
+  heap_caps_get_info(&info, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  LOG_DBG("ERS", "Reader mem[%s]: free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu", stage, freeHeap,
+          contigHeap, static_cast<unsigned long>(info.allocated_blocks), static_cast<unsigned long>(info.free_blocks),
+          static_cast<unsigned long>(info.total_allocated_bytes));
 }
 #else
 inline void logReaderMemSnapshot(const char*) {}
