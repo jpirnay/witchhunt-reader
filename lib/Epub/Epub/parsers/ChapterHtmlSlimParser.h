@@ -201,6 +201,11 @@ class ChapterHtmlSlimParser final : public Print {
     // when that layout is off the table, holding the cells is pure cost. Set only via
     // beginTableStreaming(), which first drains whatever was already buffered.
     bool streaming = false;
+    // Attributed resident bytes held by the buffered cells (see MAX_TABLE_BUFFER_BYTES).
+    // Accumulated as cells and words arrive; once it passes the budget the table can no longer
+    // afford grid layout and the next <td> switches to streaming. Meaningless once streaming,
+    // where nothing accumulates.
+    size_t bufferedBytes = 0;
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -331,6 +336,11 @@ class ChapterHtmlSlimParser final : public Print {
   // ParsedText before returning. Shared by the batch fallback and the streaming path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
+  // Switch to streaming while a <td> is still open: drains the buffered rows and the open cell's
+  // accumulated words, then hands the cell back empty so parsing continues into it. Needed
+  // because beginTableStreaming() clears `rows` and so can only run between cells — which never
+  // happens in a one-cell table. Returns false when the drain stopped the parse (low heap).
+  bool beginTableStreamingAtOpenCell();
   // Switch an in-flight table to streaming mode: emit everything buffered so far as paragraphs,
   // free the row storage, and mark the table so later cells emit directly from </td> instead of
   // accumulating. Grid layout is already off the table by the time this is called.
