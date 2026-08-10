@@ -1,5 +1,10 @@
 # Streaming table renderer — implementation plan
 
+> **Status: C1–C4 landed** on `refactor/streaming-table-renderer` (`0d093a72`, `f8c29d79`,
+> `c44f6f2d`, `54d32f1a`, `48ffd6ea`). Host suite 424/424, word-stream equality verified across
+> every table book. Outstanding: the device measurement, and C5 (nested tables), which was always
+> separable. See "What actually happened" at the end.
+
 Derived 2026-08-10 from the `streaming-table-renderer-design` note, then re-grounded against the
 current source. Two of the note's premises have moved since it was written; those corrections are
 first, because they change what the work is.
@@ -225,14 +230,64 @@ tracking spans across rows is real work for a rare case. Content is preserved ei
 **The `MIN_FREE_HEAP_FOR_TABLE` gate stays table-scoped.** A heap dip at `<td>` will not have
 recovered by the next row; degrading once is more honest than re-testing per row.
 
-## Open question to settle during C4
+## What actually happened
 
-Under streaming, `flushFragment()` can call `emitPage` mid-table
-([:3350](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L3350)), so `completedPageCount`
-advances *during* the table parse rather than after it. Anchors are recorded against
-`completedPageCount` at flush time ([:906](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L906)),
-and inside a table there is no text block to trigger that flush — so `pendingAnchorId` should still
-be sitting unflushed and the behaviour should be unchanged. **Verify rather than assume**: add an
-`id` to a row in the mid-table-column-change fixture and confirm the anchor page is stable across
-the rewrite. `lastBodyChildByteOffset` is unaffected (the `<table>` is the body child, so it does
-not move during the table).
+Written after the fact. The plan held, with three deviations worth recording.
+
+**The fixtures found a live bug before any production code was touched.** C2 was written as
+scaffolding — "commit the current behaviour so the rewrite shows as a diff" — and the current
+behaviour turned out to be total deletion of an oversized cell, and of every cell laid out before it
+in the same table. That is what forced `c44f6f2d` in ahead of the rewrite. The order in this plan
+(dump → fixtures → refactor → rewrite) was chosen to make the rewrite reviewable and it paid for
+itself two commits early instead.
+
+**Two behaviour changes were added during C4 that the plan did not anticipate**, both consequences
+of tables now spanning pages as grids — a state that was previously unreachable:
+
+- A row that cannot fit in what is left of the page breaks the page *before* opening its fragment.
+  Without it the table arrived on the next page as a one-row box followed by the rest.
+- The column count is tracked per *table*, not per fragment. `packer.cols` resets on every flush,
+  so a ragged row landing just after a page break would have narrowed the table's second half.
+
+Neither is visible in a single-page table, which is why no existing fixture would have caught them;
+both were found by reading the fragment structure the new `ch5` golden produced.
+
+**The row budget is kept, against the design note's advice.** Reasoning in "Deviations" above. The
+note's claim that streaming makes the bounds unnecessary is true at table scope and false at row
+scope. `ch6` exists because after deleting the 96-word cell bound, nothing exercised the mechanism
+that replaced it.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| `ch3` cell over the 64-line cap | no grid at all, 70 words deleted | 70 words kept, other row still a grid |
+| `ch4` row over the viewport | no grid at all, 40 words deleted | 40 words kept, other row still a grid |
+| `ch5` 60-row table | 5 pages of flattened paragraphs | 4 pages, grid in 3 fragments |
+| `ch1` 2-col header on a 3-col table | one padded 3-col fragment | 2-col + 3-col fragments |
+| word stream, all table books | — | identical, same order |
+
+## Still open
+
+- **Device measurement.** Everything above is host-side. The claim to check on the X3 is that contig
+  across alice's two spine builds is no worse than the current 40948 → 32756.
+- **C5, nested tables.** Untouched, as planned.
+- **Anchors inside table rows** — see below; reasoned, not measured.
+
+## Open question, partially settled
+
+`flushTableFragment()` can call `emitPage` mid-table, so `completedPageCount` advances *during* the
+table parse rather than after it. Anchors are recorded against `completedPageCount` when
+`pendingAnchorId` is flushed ([:906](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L906)), and
+inside a grid table there is no text block to trigger that flush — so an `id` on a `<tr>` stays
+pending until the first paragraph *after* `</table>`, both before and after this change. The
+mechanism is unchanged; the resulting page number moves only because the table is now denser.
+`lastBodyChildByteOffset` is unaffected (the `<table>` is the body child, so it does not move during
+the table).
+
+**This is reasoned, not measured.** `ch5` carries `id="row-thirty"` and `id="row-fiftyfive"` for
+whoever wants to check it, but the pipeline dump has no anchor coverage at all — `runAndDump` emits
+no anchor records and `Section` only exposes `getPageForAnchor(id)`, a lookup, not an enumeration.
+Adding `ANCHOR id= page=` to the dump would touch every golden in the corpus, so it was left out of
+this branch. It is the same blind spot class as the table-content one C1 fixed, and worth its own
+commit: an anchor regression breaks TOC navigation silently.
