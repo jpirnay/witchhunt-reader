@@ -237,7 +237,7 @@ std::string CssParser::normalized(const std::string& s) {
   return result;
 }
 
-void CssParser::normalizedInto(const std::string& s, std::string& out) {
+void CssParser::normalizedInto(const std::string_view s, std::string& out) {
   out.clear();
   out.reserve(s.size());
 
@@ -259,23 +259,6 @@ void CssParser::normalizedInto(const std::string& s, std::string& out) {
   }
 }
 
-std::vector<std::string> CssParser::splitOnChar(const std::string& s, const char delimiter) {
-  std::vector<std::string> parts;
-  size_t start = 0;
-
-  for (size_t i = 0; i <= s.size(); ++i) {
-    if (i == s.size() || s[i] == delimiter) {
-      std::string part = s.substr(start, i - start);
-      std::string trimmed = normalized(part);
-      if (!trimmed.empty()) {
-        parts.push_back(trimmed);
-      }
-      start = i + 1;
-    }
-  }
-  return parts;
-}
-
 std::vector<std::string> CssParser::splitWhitespace(const std::string& s) {
   std::vector<std::string> parts;
   size_t start = 0;
@@ -295,10 +278,18 @@ std::vector<std::string> CssParser::splitWhitespace(const std::string& s) {
 }
 
 // Property value interpreters
+//
+// These take a std::string_view and do NOT normalize. Every caller already passes normalized
+// text: parseDeclarationIntoStyle fills propValueBuf via normalizedInto(), splitOnChar()
+// normalizes each part it emits, and splitWhitespace() splits an already-normalized string on
+// single spaces. normalized() is idempotent (lowercase + collapse whitespace + trim), so the
+// re-normalization these used to do was provably a no-op that cost one heap string per call.
+//
+// That waste is not free even though CSS compiles once per book: on a no-compaction heap the
+// holes a short-lived string leaves are permanent for the session, so first-open churn is still
+// there when a later chapter needs a contiguous block.
 
-CssTextAlign CssParser::interpretAlignment(const std::string& val) {
-  const std::string v = normalized(val);
-
+CssTextAlign CssParser::interpretAlignment(const std::string_view v) {
   if (v == "left" || v == "start") return CssTextAlign::Left;
   if (v == "right" || v == "end") return CssTextAlign::Right;
   if (v == "center") return CssTextAlign::Center;
@@ -307,16 +298,12 @@ CssTextAlign CssParser::interpretAlignment(const std::string& val) {
   return CssTextAlign::Left;
 }
 
-CssFontStyle CssParser::interpretFontStyle(const std::string& val) {
-  const std::string v = normalized(val);
-
+CssFontStyle CssParser::interpretFontStyle(const std::string_view v) {
   if (v == "italic" || v == "oblique") return CssFontStyle::Italic;
   return CssFontStyle::Normal;
 }
 
-CssFontWeight CssParser::interpretFontWeight(const std::string& val) {
-  const std::string v = normalized(val);
-
+CssFontWeight CssParser::interpretFontWeight(const std::string_view v) {
   // Named values
   if (v == "bold" || v == "bolder") return CssFontWeight::Bold;
   if (v == "normal" || v == "lighter") return CssFontWeight::Normal;
@@ -324,37 +311,38 @@ CssFontWeight CssParser::interpretFontWeight(const std::string& val) {
   // Numeric values: 100-900
   // CSS spec: 400 = normal, 700 = bold
   // We use: 0-400 = normal, 700+ = bold, 500-600 = normal (conservative)
-  char* endPtr = nullptr;
-  const long numericWeight = std::strtol(v.c_str(), &endPtr, 10);
-
-  // If we parsed a number and consumed the whole string
-  if (endPtr != v.c_str() && *endPtr == '\0') {
-    return numericWeight >= 700 ? CssFontWeight::Bold : CssFontWeight::Normal;
+  // Parsed digit-by-digit rather than via strtol so no NUL-terminated copy is needed; the
+  // range is 3 digits, so overflow is not a concern once the length is bounded.
+  if (v.empty() || v.size() > 4) return CssFontWeight::Normal;
+  long numericWeight = 0;
+  for (const char c : v) {
+    if (c < '0' || c > '9') return CssFontWeight::Normal;  // not a pure number (e.g. "inherit")
+    numericWeight = numericWeight * 10 + (c - '0');
   }
-
-  return CssFontWeight::Normal;
+  return numericWeight >= 700 ? CssFontWeight::Bold : CssFontWeight::Normal;
 }
 
-CssTextDecoration CssParser::interpretDecoration(const std::string& val) {
-  const std::string v = normalized(val);
-
+CssTextDecoration CssParser::interpretDecoration(const std::string_view v) {
   // text-decoration can have multiple space-separated values
-  bool underline = v.find("underline") != std::string::npos;
-  bool lineThrough = v.find("line-through") != std::string::npos;
+  const bool underline = v.find("underline") != std::string_view::npos;
+  const bool lineThrough = v.find("line-through") != std::string_view::npos;
   uint8_t result = 0;
   if (underline) result |= static_cast<uint8_t>(CssTextDecoration::Underline);
   if (lineThrough) result |= static_cast<uint8_t>(CssTextDecoration::LineThrough);
   return static_cast<CssTextDecoration>(result);
 }
 
-CssLength CssParser::interpretLength(const std::string& val) {
+CssLength CssParser::interpretLength(const std::string_view val) {
   CssLength result;
   tryInterpretLength(val, result);
   return result;
 }
 
-bool CssParser::tryInterpretLength(const std::string& val, CssLength& out) {
-  const std::string v = normalized(val);
+bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
+  // Was three heap strings per call — normalized(val) plus a substr for each of the number and
+  // unit halves — on a function invoked for every margin/padding/indent in the sheet (and four
+  // times over for each shorthand). Now zero: the input is already normalized (see the note
+  // above the interpreters) and both halves are views into it.
   if (v.empty()) {
     out = CssLength{};
     return false;
@@ -363,18 +351,29 @@ bool CssParser::tryInterpretLength(const std::string& val, CssLength& out) {
   size_t unitStart = v.size();
   for (size_t i = 0; i < v.size(); ++i) {
     const char c = v[i];
-    if (!std::isdigit(c) && c != '.' && c != '-' && c != '+') {
+    if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '+') {
       unitStart = i;
       break;
     }
   }
 
-  const std::string numPart = v.substr(0, unitStart);
-  const std::string unitPart = v.substr(unitStart);
+  const std::string_view numPart = v.substr(0, unitStart);
+  const std::string_view unitPart = v.substr(unitStart);
+
+  // strtof needs a NUL-terminated buffer and string_view gives no guarantee of one. The number
+  // half of a CSS length is short by construction, so copy it into a small stack buffer rather
+  // than heap-allocating; anything longer than the buffer is not a valid length anyway.
+  char numBuf[24];
+  if (numPart.empty() || numPart.size() >= sizeof(numBuf)) {
+    out = CssLength{};
+    return false;
+  }
+  std::memcpy(numBuf, numPart.data(), numPart.size());
+  numBuf[numPart.size()] = '\0';
 
   char* endPtr = nullptr;
-  const float numericValue = std::strtof(numPart.c_str(), &endPtr);
-  if (endPtr == numPart.c_str()) {
+  const float numericValue = std::strtof(numBuf, &endPtr);
+  if (endPtr == numBuf) {
     out = CssLength{};
     return false;  // No number parsed (e.g. auto, inherit, initial)
   }
@@ -682,21 +681,36 @@ void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, cons
     return;
   }
 
-  // Handle comma-separated selectors
-  const auto selectors = splitOnChar(selectorGroup, ',');
+  // Handle comma-separated selectors.
+  //
+  // Was splitOnChar(), which materialised a std::vector<std::string> of every selector in the
+  // group — one heap string per selector, each of them ALREADY normalized inside the split —
+  // and then normalized each one a second time into `key` below. For a 119-candidate sheet that
+  // is ~240 short-lived heap blocks whose holes outlive the parse: the heap never compacts, so
+  // first-open CSS churn is still fragmenting the address space when a later chapter needs a
+  // contiguous block.
+  //
+  // Now: walk the group in place and normalize each part straight into one reused buffer. Zero
+  // allocations per selector after the buffer's first growth.
+  size_t partStart = 0;
+  for (size_t i = 0; i <= selectorGroup.size(); ++i) {
+    if (i != selectorGroup.size() && selectorGroup[i] != ',') continue;
+    const std::string_view rawPart(selectorGroup.data() + partStart, i - partStart);
+    partStart = i + 1;
 
-  for (const auto& sel : selectors) {
+    normalizedInto(rawPart, selectorKeyBuf_);
+    if (selectorKeyBuf_.empty()) continue;  // splitOnChar dropped empties too
+
     totalSelectorCandidates_++;
     // Validate selector length before processing
-    if (sel.size() > MAX_SELECTOR_LENGTH) {
-      LOG_DBG("CSS", "Selector too long (%zu > %zu), skipping", sel.size(), MAX_SELECTOR_LENGTH);
+    if (selectorKeyBuf_.size() > MAX_SELECTOR_LENGTH) {
+      LOG_DBG("CSS", "Selector too long (%zu > %zu), skipping", selectorKeyBuf_.size(), MAX_SELECTOR_LENGTH);
       unsupportedSelectorSkips_++;
       continue;
     }
 
-    // Normalize the selector
-    std::string key = normalized(sel);
-    if (key.empty()) continue;
+    // Already normalized into selectorKeyBuf_ above — no second pass, no second allocation.
+    const std::string& key = selectorKeyBuf_;
 
     if (!isSelectorUsableByResolver(key)) {
       unsupportedSelectorSkips_++;

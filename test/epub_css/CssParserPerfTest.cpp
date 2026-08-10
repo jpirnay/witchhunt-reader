@@ -42,11 +42,16 @@ using Clock = std::chrono::steady_clock;
 
 static std::atomic<size_t> g_liveBytes{0};
 static std::atomic<size_t> g_peakBytes{0};
+// Allocation COUNT, not just bytes. Peak bytes is blind to churn: a short-lived string raises
+// peak by nothing yet still leaves a hole, and on a no-compaction heap those holes are
+// permanent for the session. Count is the number that tracks fragmentation pressure.
+static std::atomic<size_t> g_allocCount{0};
 static std::atomic<uint32_t> g_epoch{0};  // current measurement window; 0 = not measuring
 static std::atomic<bool> g_tracking{false};
 static thread_local bool g_inHook = false;
 
 static void trackAlloc(size_t sz) {
+  g_allocCount.fetch_add(1, std::memory_order_relaxed);
   size_t live = g_liveBytes.fetch_add(sz) + sz;
   size_t peak = g_peakBytes.load(std::memory_order_relaxed);
   while (live > peak && !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
@@ -185,6 +190,7 @@ static long long elapsedUs(const Clock::time_point& start) {
 static void beginMeasurement() {
   g_liveBytes.store(0);
   g_peakBytes.store(0);
+  g_allocCount.store(0);
   g_epoch.fetch_add(1);
   g_tracking.store(true);
 }
@@ -308,6 +314,7 @@ TEST(CssParserPerf, ParseLargeCssEpub) {
   ASSERT_TRUE(writeTempCssFile(cssData, cssPath));
 
   size_t parseTimeUs = 0;
+  size_t parseAllocs = 0;
   bool parseOk = false;
   size_t ruleCount = 0;
 
@@ -323,14 +330,18 @@ TEST(CssParserPerf, ParseLargeCssEpub) {
     }
     parseTimeUs = static_cast<size_t>(elapsedUs(t0));
     ruleCount = parser->ruleCount();
+    parseAllocs = g_allocCount.load();  // sample inside the window, before it is reset
     parseOk = true;
   });
 
   ASSERT_TRUE(parseOk);
   ASSERT_EQ(ruleCount, kFixtureRuleCount);
 
-  printf("BENCHMARK parse_time=%zu us heap_peak=%zu B rule_count=%zu css_bytes=%zu\n", parseTimeUs, heapPeak, ruleCount,
-         cssData.size());
+  // Allocation count alongside peak bytes: peak is blind to churn (a short-lived string raises
+  // it by nothing yet still leaves a hole, and on a no-compaction heap those holes are
+  // permanent for the session), so the count is what tracks fragmentation pressure.
+  printf("BENCHMARK parse_time=%zu us heap_peak=%zu B parse_allocs=%zu rule_count=%zu css_bytes=%zu\n", parseTimeUs,
+         heapPeak, parseAllocs, ruleCount, cssData.size());
 
   CssParser parser("");
   FsFile cssFile;
