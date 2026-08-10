@@ -68,20 +68,7 @@ the build-path trigger is unserved.
 is already latched into `Section::sawFootnote_` before `buildState_` teardown for exactly this.
 A few lines in the background tick.
 
-### 4. Shrink the font group size in `fontconvert.py`
-
-The largest *measured* fragmentation source is the per-group inflate temp in `prewarmCache` —
-3–10.5 KB, several per page, malloc'd and freed in a tight loop, and different sizes each time.
-It cannot use an arena because the render path has none (see eliminated #13).
-
-Groups are currently capped at `GROUP_MAX_UNCOMPRESSED_BYTES = 65536`, whose comment calls 64 KB
-"a comfortable transient malloc on the ESP32-C3" — untrue once contig sits near 34 KB. Making groups
-small and *uniform* (say ≤ 4 KB) turns variable-size churn into a repeatable hole the allocator can
-actually reuse. Offline change, zero runtime memory, measurable on the host.
-
-Cost to weigh: more groups means more inflate calls per page. Measure decode time before committing.
-
-### 5. Re-test the warm-pass borrow, one narrow question
+### 4. Re-test the warm-pass borrow, one narrow question
 
 Reverted, but on confounded evidence — see eliminated #14. The single question to answer:
 
@@ -92,7 +79,7 @@ arena-capable (`PngStreamDecoder::setScratchArena`, and the JPEG converter's 12 
 `image_scratch`), and `Section::warmAllImageCaches` already borrows for the whole-section pass. Only
 the reader's per-page path is unwired.
 
-### 6. Build-scoped arena candidates — measure before writing
+### 5. Build-scoped arena candidates — measure before writing
 
 Two survive scrutiny; one did not (eliminated #12).
 
@@ -105,19 +92,43 @@ Both need a custom allocator threaded through container *and* strings — materi
 "put it in the arena". And 92.3% of words fit SSO, so the win is smaller than the element count
 suggests. **Instrument first** with the `EpubCssPerformanceTest` allocation-tracking harness.
 
-### 7. Contig decay — still unexplained
+### 6. Contig decay — still unexplained
 
 Much milder now (40948 → 32756 over two builds, vs → 15860 before), but not understood. The
 `allocBlk` / `freeBlk` / `allocBytes` probe added in PR #124 is the tool: block counts oscillating
 while contig ratchets down means fragmentation, not retention.
 
-### 8. Cosmetic, but misleading in exactly the wrong moment
+### 7. Cosmetic, but misleading in exactly the wrong moment
 
 - `"Build for spine %d hit a footnote"` prints `currentSpineIndex`, not the spine being built.
   During a Background-B build those differ.
 - `[COF] Couldn't open temp items file … probably going to be a fatal error` fires three times on
   every normal first open (the book's cache dir does not exist yet). It is not fatal. Logging it as
   `ERR` on a healthy path buries real errors.
+
+---
+
+## Known and unsolved
+
+**The per-group font inflate temp is the largest measured fragmentation source, and no viable fix
+has been found.** It is malloc'd and freed per group, per prewarm call, per page, at a different
+size each time. It cannot use an arena (the render path has none — eliminated #13), a permanent
+reservation makes things worse (#8), and shrinking the groups costs flash we do not have (#15).
+
+Worse than previously recorded: the transient **scales with reading font size**, which earlier
+measurements missed because they sampled one setting.
+
+| font | largest group |
+|---|---|
+| `bookerly_10` | 13809 |
+| `bookerly_12` | 19377 |
+| `bookerly_14` | 25609 |
+| `bookerly_16` | 31875 |
+
+The device measurement this work was based on showed `peakTemp=10555`. A reader on a 16 pt font sees
+a **~32 KB** transient instead. If this is revisited, the angle left unexplored is reducing the
+*number* of allocations rather than their size — e.g. reusing one buffer across the groups of a
+single prewarm call, which is a runtime change with no flash cost and no permanent reservation.
 
 ---
 
@@ -140,6 +151,7 @@ Each was investigated and disproved. Re-proposing one costs the same time again.
 | 11 | Piggyback footnote Pass A on the section build | No whole-book parser pass exists — the `spineCount` loops are metadata only. The build *consumes* previews, so it is circular |
 | 12 | Move the section LUT into the arena | `Section.cpp:1289` moves it into the Section; it outlives the arena |
 | 13 | Give the render pass its own arena | Font path needs ~21 KB; the 52272 B framebuffer realloc must keep succeeding, and there is nothing to lend during prewarm (the buffer is being rendered into) |
+| 15 | **Shrink the font group size in `fontconvert.py`** | **Flash.** DEFLATE ratio is strongly size-dependent — <2K groups compress at 0.505, >16K at 0.260. Capping at 8192 costs **+478957 bytes (+37.7%)** of font data against **228685 bytes** of flash headroom. A 16 KB cap is the only one that builds (+175951) and changes nothing, since the transient is already 8–10.5 KB. The 64 KB cap was never binding: largest real group is 43779, and group size is set by the script ranges, not the cap |
 | 14 | Borrow the framebuffer for the image warm pass | Reverted — but **on confounded evidence**, see worth-doing #5. Not settled |
 
 ---
