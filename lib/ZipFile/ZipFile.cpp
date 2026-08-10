@@ -749,7 +749,19 @@ size_t ZipFile::readBytesFromStat(const FileStatSlim& fileStat, uint8_t* outBuf,
     ctx.readBuf = readBuf;
     ctx.readBufSize = READ_BUF;
 
-    if (ctx.reader.init(true)) {
+    // Size the ring to what the caller actually wants, not to the 32 KB default.
+    //
+    // init(true) with no size means ringSizeFor(0) -> INFLATE_DICT_SIZE, a full 32 KB ring for
+    // a call that typically reads a 4 KB image header. ringSizeFor's contract is "total output
+    // <= ring size guarantees no back-reference can outrun the ring", and wantBytes IS the
+    // total output here — the loop below stops at wantBytes — so a ring of that size is exactly
+    // as correct and up to 8x smaller.
+    //
+    // Measured cost of the old behaviour (X4 spine 1, per-page heap trace): free 51088 -> 6996
+    // and contig 42996 -> 4084 between two page emissions, recovering pages later. That is this
+    // ring, taken and released per image resolve, mid-parse — the single worst contiguous dip
+    // in a section build, and it lands exactly where a PNG decode would want its own 32 KB.
+    if (ctx.reader.init(true, wantBytes)) {
       ctx.reader.setReadCallback(zipReadCallback);
 
       size_t totalOut = 0;

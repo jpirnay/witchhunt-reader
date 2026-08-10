@@ -129,7 +129,40 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
   LOG_INF("HEAP", "spine=%d %-18s free=%lu contig=%lu", (spine), (label),                                    \
           static_cast<unsigned long>(esp_get_free_heap_size()),                                              \
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)))
-#else
+
+// Per-chunk low-water probe for the parse feed loop.
+//
+// The per-page trace showed something the page granularity cannot explain: on X4 spine 1,
+// free went 51088 -> 6996 between page 13 and page 14 (contig 42996 -> 4084) and recovered to
+// 43948 by page 18, with an 86 ms gap where the normal page interval is ~30 ms. That is a large
+// transient block held across several pages, not gradual churn — and nothing on the parse path
+// is supposed to take ~44 KB.
+//
+// The parser is fed in PARSE_CHUNK_BYTES (1 KB) slices, so sampling around each write() brackets
+// the drop to a single chunk instead of a whole page. Only the WORST dip is kept and it is
+// reported once per page, so this costs one log line per page rather than one per KB.
+struct ParseHeapLowWater {
+  uint32_t minFree = UINT32_MAX;
+  uint32_t minContig = UINT32_MAX;
+  uint32_t atByteOffset = 0;  // bytes fed into the parser when the low point was seen
+
+  void sample(const size_t bytesFedSoFar) {
+    const uint32_t f = static_cast<uint32_t>(esp_get_free_heap_size());
+    if (f < minFree) {
+      minFree = f;
+      minContig = static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+      atByteOffset = static_cast<uint32_t>(bytesFedSoFar);
+    }
+  }
+  void reset() { *this = ParseHeapLowWater{}; }
+  bool seen() const { return minFree != UINT32_MAX; }
+};
+
+// One instance: only one section build parses at a time (Background-B and C are mutually
+// exclusive over the arena), so a file-scope probe cannot interleave.
+ParseHeapLowWater g_parseLowWater;
+#endif
+#if !SCT_HEAP_TRACE
 #define SCT_TRACE_HEAP(spine, label) ((void)0)
 #endif
 
@@ -295,8 +328,23 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   // heap at the one point in the parse where a page's worth of transient objects has just been
   // released. A monotonic decline across pages means the parse is the fragmenter; a flat line
   // with a single step means something else is, and the step says where to look.
-  LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount, static_cast<unsigned long>(esp_get_free_heap_size()),
-          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  // Page-boundary state, plus the WORST heap state seen while this page was being parsed. The
+  // boundary numbers alone hid a ~44 KB transient (X4 spine 1, pages 13->14): whatever takes it
+  // is allocated and released between two page emissions, so only a low-water mark inside the
+  // feed loop can see it. lowAt is the parser byte offset where the dip occurred — feed that
+  // offset back into the chapter XHTML to identify the construct responsible.
+  if (g_parseLowWater.seen()) {
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu | page-low free=%lu contig=%lu lowAt=%lu", pageCount,
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(g_parseLowWater.minFree), static_cast<unsigned long>(g_parseLowWater.minContig),
+            static_cast<unsigned long>(g_parseLowWater.atByteOffset));
+    g_parseLowWater.reset();  // per-page window
+  } else {
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount,
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  }
 #endif
 
   pageCount++;
@@ -985,6 +1033,12 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         const int64_t tv = esp_timer_get_time();
 #endif
         const size_t wrote = st.visitor->write(st.chunkBuf, static_cast<size_t>(n));
+#if SCT_HEAP_TRACE
+        // Sample AFTER the write: the allocation we are hunting happens inside the parser while
+        // it consumes this chunk, and by here it is either still held or already released — a
+        // dip visible here is a block that outlived the chunk that created it.
+        g_parseLowWater.sample(st.tempBytesFed);
+#endif
 #ifdef BENCH_EXTRACT_PROFILE
         visitorUs += static_cast<uint32_t>(esp_timer_get_time() - tv);
 #endif
