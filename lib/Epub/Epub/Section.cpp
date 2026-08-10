@@ -128,9 +128,9 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
 #endif
 
 #if SCT_HEAP_TRACE
-#define SCT_TRACE_HEAP(spine, label)                                                                        \
-  LOG_INF("HEAP", "spine=%d %-18s free=%lu contig=%lu", (spine), (label),                                    \
-          static_cast<unsigned long>(esp_get_free_heap_size()),                                              \
+#define SCT_TRACE_HEAP(spine, label)                                      \
+  LOG_INF("HEAP", "spine=%d %-18s free=%lu contig=%lu", (spine), (label), \
+          static_cast<unsigned long>(esp_get_free_heap_size()),           \
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)))
 
 // Per-chunk low-water probe for the parse feed loop.
@@ -1126,8 +1126,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     // 14-page background build discarded after a single 960-byte dip below the lean floor,
     // forcing the released-path foreground rebuild whose 52 KB framebuffer realloc is the
     // failure that ends the session.
-    cssLowHeapDegraded_ =
-        !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
+    cssLowHeapDegraded_ = !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
   SCT_TRACE_HEAP(spineIndex, "after_parse");
@@ -1395,10 +1394,9 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
     // no-CSS section cache (different layout, different cache key), and the X3 trace showed it
     // firing on spine 2 where the arena still had ~18 KB spare. See
     // docs/memory-allocation-strategy.md — the floors predate the build arena.
-    const uint32_t requiredContig =
-        std::max<uint32_t>(EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
-                           static_cast<uint32_t>((css ? css->ruleCount() : 0) * CssParser::CSS_INDEX_BYTES_PER_RULE) +
-                               8 * 1024);
+    const uint32_t requiredContig = std::max<uint32_t>(
+        EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
+        static_cast<uint32_t>((css ? css->ruleCount() : 0) * CssParser::CSS_INDEX_BYTES_PER_RULE) + 8 * 1024);
     LOG_INF("SCT",
             "Low heap for embedded CSS (free=%lu(floor=%lu) contig=%lu(floor=%lu) rules=%u); building no-CSS section "
             "cache",

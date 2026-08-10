@@ -1030,8 +1030,9 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // Everything except the heap floor, so the floor can be reported on its own. Pre-render is a
   // nice-to-have (page-turn latency), not correctness — but a floor that rejects it constantly is
   // still evidence the floors are mistuned.
-  const bool preRenderWanted = !preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
-                               (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage);
+  const bool preRenderWanted =
+      !preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
+      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage);
   if (preRenderWanted && preRenderFree < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
     HEAP_GATE("preRenderArm", false, preRenderFree, PRE_RENDER_MIN_FREE_HEAP_BYTES, 0, 0);
   }
@@ -1367,7 +1368,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     const uint32_t residentFree = esp_get_free_heap_size();
     const uint32_t residentContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
     const bool residentAbort = !secondaryBufferDegraded_ && (residentFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
-                                                            residentContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+                                                             residentContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
     if (residentAbort) {
       HEAP_GATE("residentAbort", false, residentFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, residentContig,
                 RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
@@ -2501,8 +2502,7 @@ bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(Section* target) {
   // discover it must do all of it again. Polled between build slices, so the work discarded is
   // whatever came before the first footnote link — typically a page or two.
   footnotePreviewGatherAttempted_ = true;
-  LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now",
-          currentSpineIndex);
+  LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now", currentSpineIndex);
   if (!ensureFootnotePreviewCache()) {
     return false;  // gather failed; the latch stops us retrying, build continues preview-less
   }

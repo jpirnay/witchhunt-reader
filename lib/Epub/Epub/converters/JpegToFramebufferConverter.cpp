@@ -14,13 +14,12 @@
 #include <esp_task_wdt.h>
 #include <tjpgd.h>
 
-#include "../blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
-
 #include <cstdlib>
 #include <limits>
 #include <memory>
 #include <new>
 
+#include "../blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"

@@ -4,8 +4,8 @@
 #include <Logging.h>
 #include <Utf8.h>
 
-#include <cstdlib>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 FontDecompressor::~FontDecompressor() { deinit(); }

@@ -233,16 +233,15 @@ static std::filesystem::path uniqueTempPath(const char* suffix) {
   // per-process counter alone collides and the tests delete each other's files (seen as
   // parallel-only failures that pass when run serially). Process id + counter + clock.
   static std::atomic<unsigned> counter{0};
-  const auto stamp = static_cast<unsigned long long>(
-      std::chrono::steady_clock::now().time_since_epoch().count());
+  const auto stamp = static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count());
 #if defined(_WIN32)
   const unsigned pid = static_cast<unsigned>(GetCurrentProcessId());
 #else
   const unsigned pid = static_cast<unsigned>(getpid());
 #endif
   char name[96];
-  std::snprintf(name, sizeof(name), "cssperf-%u-%u-%llx%s", pid,
-                static_cast<unsigned>(counter.fetch_add(1)), stamp, suffix);
+  std::snprintf(name, sizeof(name), "cssperf-%u-%u-%llx%s", pid, static_cast<unsigned>(counter.fetch_add(1)), stamp,
+                suffix);
   return std::filesystem::temp_directory_path() / name;
 }
 
@@ -782,8 +781,8 @@ TEST(CssParserArena, ResidentFootprintBaseline) {
     const CssParser::ResidentFootprint fp = parser.getResidentFootprint();
     parser.clear();
     removePath(cacheDir);
-  std::error_code rmEc;
-  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
+    std::error_code rmEc;
+    std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
     return fp;
   };
 

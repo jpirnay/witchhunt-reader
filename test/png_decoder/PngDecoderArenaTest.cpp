@@ -10,11 +10,10 @@
 // See docs/memory-allocation-strategy.md: the point of the arena is to stop each decode in a
 // multi-image warm pass from taking and returning its own 32 KB ring, which fragments the
 // contiguous region the framebuffer realloc later needs.
-#include <gtest/gtest.h>
-
 #include <BuildArena.h>
 #include <HalStorage.h>
 #include <PngStreamDecoder.h>
+#include <gtest/gtest.h>
 
 #include <string>
 #include <vector>

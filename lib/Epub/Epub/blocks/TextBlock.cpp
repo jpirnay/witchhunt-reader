@@ -128,8 +128,8 @@ TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, con
   // Every source array must actually span [first, first + count); xpos is per line so it is
   // indexed from 0 and only needs `count` entries.
   const bool hasSizeSrc = range.sizes != nullptr && !range.sizes->empty();
-  if (count > 10000 || first + count > words.size() || first + count > styleSrc.size() ||
-      word_xpos.size() != count || (hasSizeSrc && first + count > range.sizes->size())) {
+  if (count > 10000 || first + count > words.size() || first + count > styleSrc.size() || word_xpos.size() != count ||
+      (hasSizeSrc && first + count > range.sizes->size())) {
     LOG_ERR("TXB", "Construction failed: range out of bounds (first=%u, count=%u, words=%u, xpos=%u)",
             static_cast<uint32_t>(first), static_cast<uint32_t>(count), static_cast<uint32_t>(words.size()),
             static_cast<uint32_t>(word_xpos.size()));
@@ -198,8 +198,7 @@ TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, con
     // Copy the word one soft-hyphen-free run at a time.
     const std::string& w = words[first + i];
     size_t start = 0;
-    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos;
-         pos = w.find(SOFT_HYPHEN_UTF8, start)) {
+    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos; pos = w.find(SOFT_HYPHEN_UTF8, start)) {
       const size_t run = pos - start;
       memcpy(text + off, w.data() + start, run);
       off += static_cast<uint16_t>(run);

@@ -1875,8 +1875,8 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
       // once already. Resident rulesets serve every lookup from the arena, so a skip there is
       // harmless: say so rather than warning about missing styles that cannot happen.
       LOG_DBG("CSS", "Low heap (%u bytes) below %s floor (%u), skipping disk CSS lookups (%s)", freeHeap,
-              leanResolve_ ? "LEAN" : "full", static_cast<unsigned>(leanResolve_ ? LEAN_MIN_FREE_HEAP_FOR_CSS
-                                                                                 : MIN_FREE_HEAP_FOR_CSS),
+              leanResolve_ ? "LEAN" : "full",
+              static_cast<unsigned>(leanResolve_ ? LEAN_MIN_FREE_HEAP_FOR_CSS : MIN_FREE_HEAP_FOR_CSS),
               arenaResident_ ? "harmless: ruleset is arena-resident" : "styles may be missing");
     }
     resolveStats_.lowHeapSkips++;
