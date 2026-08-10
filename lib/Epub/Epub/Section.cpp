@@ -1323,6 +1323,30 @@ bool Section::createSectionFile(const BuildParams& p, const std::function<void(i
   }
 }
 
+void Section::setExternalBuildScratch(BuildArena* scratch) {
+  // A build binds its arena exactly once, in initArena() at startBuild(). So if a build is
+  // already live on the small owned arena and the large external region (the borrowed
+  // framebuffer) only becomes available now, the build cannot adopt it — it keeps the small one
+  // and keeps failing to fit things the region would have held comfortably.
+  //
+  // Device-observed on Small Gods: spine 1 (one 583991-byte entry) started with no framebuffer
+  // free, so it took the 10240-byte owned arena. Background-C then borrowed the 52272-byte
+  // framebuffer, but the resumed build still had the 10240, so its 33824-byte inflate window was
+  // evicted to the heap — where 30708 contiguous was not enough. Three attempts failed and the
+  // borrow bought nothing.
+  //
+  // Restart instead. Cheap: abortSectionBuild() deliberately keeps the inflated-HTML cache, so
+  // the restart skips re-inflation and only redoes setup.
+  const bool upgradesArena = scratch != nullptr && scratch->valid() && buildState_ && buildState_->arena != nullptr &&
+                             buildState_->arena == buildState_->ownedArena.get();
+  externalScratch_ = scratch;
+  if (upgradesArena) {
+    LOG_INF("SCT", "spine=%d: build scratch arrived mid-build (%u bytes); restarting to use it", spineIndex,
+            static_cast<uint32_t>(scratch->capacity()));
+    abortSectionBuild();
+  }
+}
+
 // Live while the build runs (read straight off the parser so the reader can poll between
 // steps), latched into sawFootnote_ so it survives buildState_ teardown at Done.
 bool Section::sawFootnote() const {
