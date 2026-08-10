@@ -339,6 +339,7 @@ bool gather(Epub& epub, const std::function<void(int)>& progressFn) {
   ZipFile zip(epub.getPath());
 
   // Pass A: collect footnote-shaped link targets from every spine document.
+  int spinesScanned = 0;
   std::vector<Target> targets;
   targets.reserve(64);  // typical books have dozens of notes; grows to MAX_ENTRIES worst case
   for (int i = 0; i < spineCount; ++i) {
@@ -350,8 +351,20 @@ bool gather(Epub& epub, const std::function<void(int)>& progressFn) {
     if (!streamSpineEntry(zip, epub.getSpineItem(i).href, chunk.get(), scanner)) {
       LOG_ERR("FNP", "Failed to stream spine %d for link scan", i);
       // Unreadable entry: skip it; other chapters' notes still gather.
+    } else {
+      ++spinesScanned;
     }
     if (progressFn) progressFn((i + 1) * 60 / spineCount);
+  }
+
+  // Every spine failed to open — almost certainly transient heap exhaustion (the ZIP reader
+  // could not even get its 4 KB EOCD buffer), not a book without notes. Writing a cache here
+  // would record "0 previews" as a permanent, authoritative answer: cacheExists() would report
+  // ready on every later open, so the book's footnotes would stay dead until someone deleted
+  // the cache directory. Fail instead, so the caller can retry when there is memory again.
+  if (spineCount > 0 && spinesScanned == 0) {
+    LOG_ERR("FNP", "No spine could be read (0/%d); not writing a cache", spineCount);
+    return false;
   }
 
   // Pass B: capture the note text at each wanted anchor, one stream per target spine,

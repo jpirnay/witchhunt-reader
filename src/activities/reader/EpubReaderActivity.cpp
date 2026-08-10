@@ -162,6 +162,16 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 // the CSS resolver needs above the LEAN floor it drops to in arena mode. These floors cover that
 // remainder with reserve, and are reachable from the ~57 KB reading steady state — which the
 // heap-backed floors above are not, on either device.
+// Free heap the deferred footnote gather needs before it will start. It opens the ZIP once per
+// spine and each open takes a 4 KB contiguous EOCD buffer plus a 1 KB stream chunk; starting it
+// without room does not merely fail, it produces a cache that records "no footnotes" for the book
+// permanently (see gatherFootnotesIfBuildNeedsThem). Sized well above that so it declines and
+// retries rather than limping.
+#ifndef FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES
+#define FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES (48 * 1024)
+#endif
+constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES;
+
 #ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
 #endif
@@ -2502,6 +2512,25 @@ bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(const Section* target) 
   // one 583991-byte spine) would otherwise lay out the entire novel, render, and only then
   // discover it must do all of it again. Polled between build slices, so the work discarded is
   // whatever came before the first footnote link — typically a page or two.
+  // The gather is heap-hungry in its own right: it opens the ZIP and streams every spine, and
+  // each open needs a 4 KB contiguous EOCD buffer. Mid-build with the framebuffer lent out is
+  // the thinnest the heap ever gets, i.e. the worst possible moment to start it.
+  //
+  // Device-observed on alice: the trigger fired while Background-B held the borrow, all 15
+  // spines failed with "Failed to allocate EOCD scan buffer (4096 bytes)", and the gather then
+  // wrote a cache recording ZERO previews. That file is authoritative — cacheExists() reports
+  // ready on every subsequent open — so the book's footnotes would have stayed dead until
+  // someone deleted the cache directory by hand.
+  //
+  // Deliberately does NOT set the attempted latch when it declines: this is "not now", not
+  // "never". The next build slice re-asks, by which time the borrow is usually back.
+  if (!renderer.hasSecondaryBuffer() || secondaryBorrowed_) {
+    return false;
+  }
+  if (esp_get_free_heap_size() < FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V) {
+    return false;
+  }
+
   footnotePreviewGatherAttempted_ = true;
   LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now", currentSpineIndex);
   if (!ensureFootnotePreviewCache()) {
