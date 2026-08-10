@@ -178,12 +178,35 @@ across every page the table spans.</p>
 <p>Closing text.</p>
 """)
 
+# ---------------------------------------------------------------------------
+# Chapter 6 — a row over the buffer budget, followed by a row that recovers
+# ---------------------------------------------------------------------------
+# 8 cells x 40 words is 8 x (128 + 40*48) = 16384 attributed bytes against a
+# 12KB budget, so the budget trips partway through the row with a cell still
+# open. The row after it is deliberately ordinary: the point of scoping the
+# fallback to a row is that the NEXT row goes back into the grid.
+_fat_cells = "".join(f"<td>{long_words(40, f'Bulk{i}')}</td>" for i in range(8))
+
+ch6 = xhtml("Ch6: Row over the buffer budget", f"""
+<h1>Ch 6: Row Over the Buffer Budget</h1>
+<p>PASS: no text may be lost, and the second row must still render as a grid
+row -- a row that blows the budget costs that row, not the table.</p>
+<table>
+<tbody>
+<tr>{_fat_cells}</tr>
+<tr><td>f0</td><td>f1</td><td>f2</td><td>f3</td><td>f4</td><td>f5</td><td>f6</td><td>f7</td></tr>
+</tbody>
+</table>
+<p>Closing text.</p>
+""")
+
 CHAPTERS = [
     ("ch1", "chapter1.xhtml", "Chapter 1: Mid-table column change", ch1),
     ("ch2", "chapter2.xhtml", "Chapter 2: Full-width span row",     ch2),
     ("ch3", "chapter3.xhtml", "Chapter 3: Cell over the line cap",  ch3),
     ("ch4", "chapter4.xhtml", "Chapter 4: Row over the viewport",   ch4),
     ("ch5", "chapter5.xhtml", "Chapter 5: Sixty-row table",         ch5),
+    ("ch6", "chapter6.xhtml", "Chapter 6: Row over the budget",     ch6),
 ]
 
 

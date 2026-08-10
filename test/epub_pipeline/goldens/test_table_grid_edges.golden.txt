@@ -1,6 +1,6 @@
-BOOK title=Test: Table Grid Edges lang=en spine=5 toc=5 reliableToc=1
+BOOK title=Test: Table Grid Edges lang=en spine=6 toc=6 reliableToc=1
 SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=10 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
    W x=11 s=1 z=100 t=Ch
    W x=59 s=1 z=100 t=1:
@@ -49,8 +49,8 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=409 s=0 z=100 t=third
   LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=cell.
-  TABLE y=214 x=0 h=106 cols=3 border=1 rows=3
-   ROW h=34 hdr=0 cells=3
+  TABLE y=214 x=0 h=36 cols=2 border=1 rows=1
+   ROW h=34 hdr=0 cells=2
     CELL 0 hdr=0 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Header
@@ -59,7 +59,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
      LN words=2
       W x=18 s=0 z=100 t=Header
       W x=78 s=0 z=100 t=right
-    CELL 2 hdr=0 lines=0
+  TABLE y=250 x=0 h=71 cols=3 border=1 rows=2
    ROW h=34 hdr=0 cells=3
     CELL 0 hdr=0 lines=1
      LN words=2
@@ -86,7 +86,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=six
-  LINE y=321 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=322 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=Text
    W x=60 s=0 z=100 t=after
    W x=119 s=0 z=100 t=the
@@ -95,7 +95,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=277 s=0 z=100 t=must
    W x=327 s=0 z=100 t=resume
    W x=393 s=0 z=100 t=normal
-  LINE y=345 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=346 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=block
    W x=48 s=0 z=100 t=layout.
 SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
@@ -314,32 +314,42 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=c4
   LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c5
- PAGE 1 elements=11 footnotes=0
+ PAGE 1 elements=4 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c6
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c7
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d0
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d1
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d2
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d3
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d4
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d5
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d6
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=d7
-  LINE y=241 x=0 align=0 mult=1.000 hfid=0 words=2
+  TABLE y=48 x=0 h=36 cols=8 border=1 rows=1
+   ROW h=34 hdr=0 cells=8
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d0
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d1
+    CELL 2 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d2
+    CELL 3 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d3
+    CELL 4 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d4
+    CELL 5 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d5
+    CELL 6 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d6
+    CELL 7 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=d7
+  LINE y=85 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
-SPINE 3 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
- PAGE 0 elements=29 footnotes=0
+SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=24 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
    W x=35 s=1 z=100 t=Ch
    W x=83 s=1 z=100 t=4:
@@ -452,28 +462,37 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=c6
   LINE y=550 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c7
-  LINE y=574 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e0
-  LINE y=598 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e1
-  LINE y=622 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e2
-  LINE y=646 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e3
-  LINE y=670 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e4
-  LINE y=694 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e5
-  LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e6
- PAGE 1 elements=2 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e7
-  LINE y=25 x=0 align=0 mult=1.000 hfid=0 words=2
+  TABLE y=574 x=0 h=36 cols=8 border=1 rows=1
+   ROW h=34 hdr=0 cells=8
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e0
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e1
+    CELL 2 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e2
+    CELL 3 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e3
+    CELL 4 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e4
+    CELL 5 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e5
+    CELL 6 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e6
+    CELL 7 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=e7
+  LINE y=611 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
-SPINE 4 href=OEBPS/chapter5.xhtml pages=5 truncated=0 cssFallback=0
- PAGE 0 elements=30 footnotes=0
+SPINE 4 href=OEBPS/chapter5.xhtml pages=4 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=4
    W x=70 s=1 z=100 t=Ch
    W x=118 s=1 z=100 t=5:
@@ -503,250 +522,906 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=5 truncated=0 cssFallback=0
   LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=table
    W x=52 s=0 z=100 t=spans.
-  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left00
-  LINE y=152 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right00
-  LINE y=176 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left01
-  LINE y=200 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right01
-  LINE y=224 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left02
-  LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right02
-  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left03
-  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right03
-  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left04
-  LINE y=344 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right04
-  LINE y=368 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left05
-  LINE y=392 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right05
-  LINE y=416 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left06
-  LINE y=440 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right06
-  LINE y=464 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left07
-  LINE y=488 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right07
-  LINE y=512 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left08
-  LINE y=536 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right08
-  LINE y=560 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left09
-  LINE y=584 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right09
-  LINE y=608 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left10
-  LINE y=632 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right10
-  LINE y=656 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left11
-  LINE y=680 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right11
-  LINE y=704 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left12
-  LINE y=728 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right12
+  TABLE y=128 x=0 h=631 cols=2 border=1 rows=18
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left00
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right00
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left01
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right01
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left02
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right02
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left03
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right03
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left04
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right04
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left05
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right05
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left06
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right06
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left07
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right07
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left08
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right08
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left09
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right09
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left10
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right10
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left11
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right11
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left12
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right12
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left13
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right13
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left14
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right14
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left15
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right15
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left16
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right16
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left17
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right17
+ PAGE 1 elements=1 footnotes=0
+  TABLE y=0 x=0 h=736 cols=2 border=1 rows=21
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left18
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right18
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left19
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right19
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left20
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right20
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left21
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right21
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left22
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right22
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left23
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right23
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left24
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right24
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left25
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right25
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left26
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right26
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left27
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right27
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left28
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right28
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left29
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right29
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left30
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right30
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left31
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right31
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left32
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right32
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left33
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right33
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left34
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right34
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left35
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right35
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left36
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right36
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left37
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right37
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left38
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right38
+ PAGE 2 elements=1 footnotes=0
+  TABLE y=0 x=0 h=736 cols=2 border=1 rows=21
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left39
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right39
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left40
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right40
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left41
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right41
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left42
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right42
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left43
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right43
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left44
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right44
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left45
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right45
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left46
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right46
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left47
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right47
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left48
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right48
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left49
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right49
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left50
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right50
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left51
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right51
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left52
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right52
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left53
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right53
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left54
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right54
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left55
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right55
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left56
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right56
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left57
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right57
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left58
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right58
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left59
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right59
+ PAGE 3 elements=1 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Closing
+   W x=92 s=0 z=100 t=text.
+SPINE 5 href=OEBPS/chapter6.xhtml pages=3 truncated=0 cssFallback=0
+ PAGE 0 elements=29 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
+   W x=33 s=1 z=100 t=Ch
+   W x=81 s=1 z=100 t=6:
+   W x=125 s=1 z=100 t=Row
+   W x=186 s=1 z=100 t=Over
+   W x=262 s=1 z=100 t=the
+   W x=326 s=1 z=100 t=Buffer
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=179 s=1 z=100 t=Budget
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=PASS:
+   W x=77 s=0 z=100 t=no
+   W x=110 s=0 z=100 t=text
+   W x=156 s=0 z=100 t=may
+   W x=196 s=0 z=100 t=be
+   W x=221 s=0 z=100 t=lost,
+   W x=279 s=0 z=100 t=and
+   W x=320 s=0 z=100 t=the
+   W x=361 s=0 z=100 t=second
+   W x=427 s=0 z=100 t=row
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=must
+   W x=48 s=0 z=100 t=still
+   W x=99 s=0 z=100 t=render
+   W x=160 s=0 z=100 t=as
+   W x=189 s=0 z=100 t=a
+   W x=209 s=0 z=100 t=grid
+   W x=250 s=0 z=100 t=row
+   W x=284 s=0 z=100 t=--
+   W x=310 s=0 z=100 t=a
+   W x=330 s=0 z=100 t=row
+   W x=364 s=0 z=100 t=that
+   W x=416 s=0 z=100 t=blows
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=budget
+   W x=98 s=0 z=100 t=costs
+   W x=151 s=0 z=100 t=that
+   W x=201 s=0 z=100 t=row,
+   W x=241 s=0 z=100 t=not
+   W x=280 s=0 z=100 t=the
+   W x=317 s=0 z=100 t=table.
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk00000
+   W x=138 s=0 z=100 t=Bulk00001
+   W x=252 s=0 z=100 t=Bulk00002
+   W x=367 s=0 z=100 t=Bulk00003
+  LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00004
+   W x=120 s=0 z=100 t=Bulk00005
+   W x=241 s=0 z=100 t=Bulk00006
+   W x=363 s=0 z=100 t=Bulk00007
+  LINE y=214 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00008
+   W x=124 s=0 z=100 t=Bulk00009
+   W x=249 s=0 z=100 t=Bulk00010
+   W x=373 s=0 z=100 t=Bulk00011
+  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00012
+   W x=122 s=0 z=100 t=Bulk00013
+   W x=245 s=0 z=100 t=Bulk00014
+   W x=369 s=0 z=100 t=Bulk00015
+  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00016
+   W x=126 s=0 z=100 t=Bulk00017
+   W x=253 s=0 z=100 t=Bulk00018
+   W x=374 s=0 z=100 t=Bulk00019
+  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00020
+   W x=127 s=0 z=100 t=Bulk00021
+   W x=248 s=0 z=100 t=Bulk00022
+   W x=370 s=0 z=100 t=Bulk00023
+  LINE y=310 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00024
+   W x=121 s=0 z=100 t=Bulk00025
+   W x=243 s=0 z=100 t=Bulk00026
+   W x=366 s=0 z=100 t=Bulk00027
+  LINE y=334 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00028
+   W x=121 s=0 z=100 t=Bulk00029
+   W x=243 s=0 z=100 t=Bulk00030
+   W x=371 s=0 z=100 t=Bulk00031
+  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00032
+   W x=122 s=0 z=100 t=Bulk00033
+   W x=245 s=0 z=100 t=Bulk00034
+   W x=369 s=0 z=100 t=Bulk00035
+  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk00036
+   W x=98 s=0 z=100 t=Bulk00037
+   W x=197 s=0 z=100 t=Bulk00038
+   W x=290 s=0 z=100 t=Bulk00039
+  LINE y=406 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk10000
+   W x=140 s=0 z=100 t=Bulk10001
+   W x=256 s=0 z=100 t=Bulk10002
+   W x=373 s=0 z=100 t=Bulk10003
+  LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk10004
+   W x=122 s=0 z=100 t=Bulk10005
+   W x=245 s=0 z=100 t=Bulk10006
+   W x=369 s=0 z=100 t=Bulk10007
+  LINE y=454 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk10008
+   W x=126 s=0 z=100 t=Bulk10009
+   W x=253 s=0 z=100 t=Bulk10010
+   W x=379 s=0 z=100 t=Bulk10011
+  LINE y=478 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk10012
+   W x=92 s=0 z=100 t=Bulk10013
+   W x=185 s=0 z=100 t=Bulk10014
+   W x=279 s=0 z=100 t=Bulk10015
+   W x=374 s=0 z=100 t=Bulk10016
+  LINE y=502 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk10017
+   W x=97 s=0 z=100 t=Bulk10018
+   W x=188 s=0 z=100 t=Bulk10019
+   W x=280 s=0 z=100 t=Bulk10020
+   W x=378 s=0 z=100 t=Bulk10021
+  LINE y=526 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk10022
+   W x=92 s=0 z=100 t=Bulk10023
+   W x=185 s=0 z=100 t=Bulk10024
+   W x=279 s=0 z=100 t=Bulk10025
+   W x=374 s=0 z=100 t=Bulk10026
+  LINE y=550 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk10027
+   W x=128 s=0 z=100 t=Bulk10028
+   W x=250 s=0 z=100 t=Bulk10029
+   W x=373 s=0 z=100 t=Bulk10030
+  LINE y=574 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk10031
+   W x=92 s=0 z=100 t=Bulk10032
+   W x=185 s=0 z=100 t=Bulk10033
+   W x=279 s=0 z=100 t=Bulk10034
+   W x=374 s=0 z=100 t=Bulk10035
+  LINE y=598 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk10036
+   W x=92 s=0 z=100 t=Bulk10037
+   W x=185 s=0 z=100 t=Bulk10038
+   W x=272 s=0 z=100 t=Bulk10039
+  LINE y=622 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk20000
+   W x=139 s=0 z=100 t=Bulk20001
+   W x=254 s=0 z=100 t=Bulk20002
+   W x=370 s=0 z=100 t=Bulk20003
+  LINE y=646 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20004
+   W x=121 s=0 z=100 t=Bulk20005
+   W x=243 s=0 z=100 t=Bulk20006
+   W x=366 s=0 z=100 t=Bulk20007
+  LINE y=670 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20008
+   W x=126 s=0 z=100 t=Bulk20009
+   W x=253 s=0 z=100 t=Bulk20010
+   W x=379 s=0 z=100 t=Bulk20011
+  LINE y=694 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk20012
+   W x=92 s=0 z=100 t=Bulk20013
+   W x=185 s=0 z=100 t=Bulk20014
+   W x=279 s=0 z=100 t=Bulk20015
+   W x=374 s=0 z=100 t=Bulk20016
+  LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20017
+   W x=128 s=0 z=100 t=Bulk20018
+   W x=250 s=0 z=100 t=Bulk20019
+   W x=373 s=0 z=100 t=Bulk20020
  PAGE 1 elements=31 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left13
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right13
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left14
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right14
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left15
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right15
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left16
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right16
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left17
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right17
-  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left18
-  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right18
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left19
-  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right19
-  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left20
-  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right20
-  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left21
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right21
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left22
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right22
-  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left23
-  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right23
-  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left24
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right24
-  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left25
-  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right25
-  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left26
-  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right26
-  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left27
-  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right27
-  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left28
- PAGE 2 elements=31 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right28
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left29
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right29
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left30
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right30
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left31
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right31
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left32
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right32
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left33
-  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right33
-  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left34
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right34
-  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left35
-  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right35
-  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left36
-  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right36
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left37
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right37
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left38
-  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right38
-  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left39
-  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right39
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left40
-  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right40
-  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left41
-  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right41
-  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left42
-  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right42
-  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left43
-  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right43
- PAGE 3 elements=31 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left44
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right44
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left45
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right45
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left46
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right46
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left47
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right47
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left48
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right48
-  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left49
-  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right49
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left50
-  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right50
-  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left51
-  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right51
-  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left52
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right52
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left53
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right53
-  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left54
-  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right54
-  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left55
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right55
-  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left56
-  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right56
-  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left57
-  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right57
-  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left58
-  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right58
-  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Left59
- PAGE 4 elements=2 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=Right59
-  LINE y=25 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Bulk20021
+   W x=92 s=0 z=100 t=Bulk20022
+   W x=185 s=0 z=100 t=Bulk20023
+   W x=279 s=0 z=100 t=Bulk20024
+   W x=374 s=0 z=100 t=Bulk20025
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20026
+   W x=127 s=0 z=100 t=Bulk20027
+   W x=255 s=0 z=100 t=Bulk20028
+   W x=377 s=0 z=100 t=Bulk20029
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20030
+   W x=129 s=0 z=100 t=Bulk20031
+   W x=252 s=0 z=100 t=Bulk20032
+   W x=376 s=0 z=100 t=Bulk20033
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk20034
+   W x=123 s=0 z=100 t=Bulk20035
+   W x=247 s=0 z=100 t=Bulk20036
+   W x=372 s=0 z=100 t=Bulk20037
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Bulk20038
+   W x=88 s=0 z=100 t=Bulk20039
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk30000
+   W x=139 s=0 z=100 t=Bulk30001
+   W x=254 s=0 z=100 t=Bulk30002
+   W x=370 s=0 z=100 t=Bulk30003
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30004
+   W x=121 s=0 z=100 t=Bulk30005
+   W x=243 s=0 z=100 t=Bulk30006
+   W x=366 s=0 z=100 t=Bulk30007
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30008
+   W x=126 s=0 z=100 t=Bulk30009
+   W x=253 s=0 z=100 t=Bulk30010
+   W x=379 s=0 z=100 t=Bulk30011
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30012
+   W x=124 s=0 z=100 t=Bulk30013
+   W x=249 s=0 z=100 t=Bulk30014
+   W x=375 s=0 z=100 t=Bulk30015
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30016
+   W x=127 s=0 z=100 t=Bulk30017
+   W x=255 s=0 z=100 t=Bulk30018
+   W x=377 s=0 z=100 t=Bulk30019
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30020
+   W x=129 s=0 z=100 t=Bulk30021
+   W x=252 s=0 z=100 t=Bulk30022
+   W x=376 s=0 z=100 t=Bulk30023
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30024
+   W x=123 s=0 z=100 t=Bulk30025
+   W x=247 s=0 z=100 t=Bulk30026
+   W x=372 s=0 z=100 t=Bulk30027
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30028
+   W x=123 s=0 z=100 t=Bulk30029
+   W x=247 s=0 z=100 t=Bulk30030
+   W x=377 s=0 z=100 t=Bulk30031
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30032
+   W x=123 s=0 z=100 t=Bulk30033
+   W x=247 s=0 z=100 t=Bulk30034
+   W x=372 s=0 z=100 t=Bulk30035
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk30036
+   W x=94 s=0 z=100 t=Bulk30037
+   W x=189 s=0 z=100 t=Bulk30038
+   W x=278 s=0 z=100 t=Bulk30039
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk40000
+   W x=139 s=0 z=100 t=Bulk40001
+   W x=254 s=0 z=100 t=Bulk40002
+   W x=370 s=0 z=100 t=Bulk40003
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40004
+   W x=121 s=0 z=100 t=Bulk40005
+   W x=243 s=0 z=100 t=Bulk40006
+   W x=366 s=0 z=100 t=Bulk40007
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40008
+   W x=125 s=0 z=100 t=Bulk40009
+   W x=251 s=0 z=100 t=Bulk40010
+   W x=376 s=0 z=100 t=Bulk40011
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40012
+   W x=123 s=0 z=100 t=Bulk40013
+   W x=247 s=0 z=100 t=Bulk40014
+   W x=372 s=0 z=100 t=Bulk40015
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40016
+   W x=127 s=0 z=100 t=Bulk40017
+   W x=255 s=0 z=100 t=Bulk40018
+   W x=377 s=0 z=100 t=Bulk40019
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40020
+   W x=128 s=0 z=100 t=Bulk40021
+   W x=250 s=0 z=100 t=Bulk40022
+   W x=373 s=0 z=100 t=Bulk40023
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40024
+   W x=122 s=0 z=100 t=Bulk40025
+   W x=245 s=0 z=100 t=Bulk40026
+   W x=369 s=0 z=100 t=Bulk40027
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40028
+   W x=122 s=0 z=100 t=Bulk40029
+   W x=245 s=0 z=100 t=Bulk40030
+   W x=374 s=0 z=100 t=Bulk40031
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40032
+   W x=123 s=0 z=100 t=Bulk40033
+   W x=247 s=0 z=100 t=Bulk40034
+   W x=372 s=0 z=100 t=Bulk40035
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk40036
+   W x=95 s=0 z=100 t=Bulk40037
+   W x=191 s=0 z=100 t=Bulk40038
+   W x=281 s=0 z=100 t=Bulk40039
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk50000
+   W x=138 s=0 z=100 t=Bulk50001
+   W x=252 s=0 z=100 t=Bulk50002
+   W x=367 s=0 z=100 t=Bulk50003
+  LINE y=624 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50004
+   W x=120 s=0 z=100 t=Bulk50005
+   W x=241 s=0 z=100 t=Bulk50006
+   W x=363 s=0 z=100 t=Bulk50007
+  LINE y=648 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50008
+   W x=125 s=0 z=100 t=Bulk50009
+   W x=251 s=0 z=100 t=Bulk50010
+   W x=376 s=0 z=100 t=Bulk50011
+  LINE y=672 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50012
+   W x=123 s=0 z=100 t=Bulk50013
+   W x=247 s=0 z=100 t=Bulk50014
+   W x=372 s=0 z=100 t=Bulk50015
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50016
+   W x=126 s=0 z=100 t=Bulk50017
+   W x=253 s=0 z=100 t=Bulk50018
+   W x=374 s=0 z=100 t=Bulk50019
+  LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50020
+   W x=128 s=0 z=100 t=Bulk50021
+   W x=250 s=0 z=100 t=Bulk50022
+   W x=373 s=0 z=100 t=Bulk50023
+ PAGE 2 elements=26 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50024
+   W x=122 s=0 z=100 t=Bulk50025
+   W x=245 s=0 z=100 t=Bulk50026
+   W x=369 s=0 z=100 t=Bulk50027
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50028
+   W x=122 s=0 z=100 t=Bulk50029
+   W x=245 s=0 z=100 t=Bulk50030
+   W x=374 s=0 z=100 t=Bulk50031
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50032
+   W x=122 s=0 z=100 t=Bulk50033
+   W x=245 s=0 z=100 t=Bulk50034
+   W x=369 s=0 z=100 t=Bulk50035
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk50036
+   W x=96 s=0 z=100 t=Bulk50037
+   W x=193 s=0 z=100 t=Bulk50038
+   W x=284 s=0 z=100 t=Bulk50039
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk60000
+   W x=138 s=0 z=100 t=Bulk60001
+   W x=252 s=0 z=100 t=Bulk60002
+   W x=367 s=0 z=100 t=Bulk60003
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60004
+   W x=120 s=0 z=100 t=Bulk60005
+   W x=241 s=0 z=100 t=Bulk60006
+   W x=363 s=0 z=100 t=Bulk60007
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60008
+   W x=125 s=0 z=100 t=Bulk60009
+   W x=251 s=0 z=100 t=Bulk60010
+   W x=376 s=0 z=100 t=Bulk60011
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60012
+   W x=123 s=0 z=100 t=Bulk60013
+   W x=247 s=0 z=100 t=Bulk60014
+   W x=372 s=0 z=100 t=Bulk60015
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60016
+   W x=126 s=0 z=100 t=Bulk60017
+   W x=253 s=0 z=100 t=Bulk60018
+   W x=374 s=0 z=100 t=Bulk60019
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60020
+   W x=128 s=0 z=100 t=Bulk60021
+   W x=250 s=0 z=100 t=Bulk60022
+   W x=373 s=0 z=100 t=Bulk60023
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60024
+   W x=122 s=0 z=100 t=Bulk60025
+   W x=245 s=0 z=100 t=Bulk60026
+   W x=369 s=0 z=100 t=Bulk60027
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60028
+   W x=122 s=0 z=100 t=Bulk60029
+   W x=245 s=0 z=100 t=Bulk60030
+   W x=374 s=0 z=100 t=Bulk60031
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60032
+   W x=122 s=0 z=100 t=Bulk60033
+   W x=245 s=0 z=100 t=Bulk60034
+   W x=369 s=0 z=100 t=Bulk60035
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk60036
+   W x=97 s=0 z=100 t=Bulk60037
+   W x=195 s=0 z=100 t=Bulk60038
+   W x=287 s=0 z=100 t=Bulk60039
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Bulk70000
+   W x=138 s=0 z=100 t=Bulk70001
+   W x=252 s=0 z=100 t=Bulk70002
+   W x=367 s=0 z=100 t=Bulk70003
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70004
+   W x=120 s=0 z=100 t=Bulk70005
+   W x=241 s=0 z=100 t=Bulk70006
+   W x=363 s=0 z=100 t=Bulk70007
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70008
+   W x=124 s=0 z=100 t=Bulk70009
+   W x=249 s=0 z=100 t=Bulk70010
+   W x=373 s=0 z=100 t=Bulk70011
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70012
+   W x=122 s=0 z=100 t=Bulk70013
+   W x=245 s=0 z=100 t=Bulk70014
+   W x=369 s=0 z=100 t=Bulk70015
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70016
+   W x=126 s=0 z=100 t=Bulk70017
+   W x=253 s=0 z=100 t=Bulk70018
+   W x=374 s=0 z=100 t=Bulk70019
+  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70020
+   W x=127 s=0 z=100 t=Bulk70021
+   W x=248 s=0 z=100 t=Bulk70022
+   W x=370 s=0 z=100 t=Bulk70023
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70024
+   W x=121 s=0 z=100 t=Bulk70025
+   W x=243 s=0 z=100 t=Bulk70026
+   W x=366 s=0 z=100 t=Bulk70027
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70028
+   W x=121 s=0 z=100 t=Bulk70029
+   W x=243 s=0 z=100 t=Bulk70030
+   W x=371 s=0 z=100 t=Bulk70031
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70032
+   W x=122 s=0 z=100 t=Bulk70033
+   W x=245 s=0 z=100 t=Bulk70034
+   W x=369 s=0 z=100 t=Bulk70035
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Bulk70036
+   W x=98 s=0 z=100 t=Bulk70037
+   W x=197 s=0 z=100 t=Bulk70038
+   W x=290 s=0 z=100 t=Bulk70039
+  TABLE y=576 x=0 h=36 cols=8 border=1 rows=1
+   ROW h=34 hdr=0 cells=8
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f0
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f1
+    CELL 2 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f2
+    CELL 3 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f3
+    CELL 4 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f4
+    CELL 5 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f5
+    CELL 6 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f6
+    CELL 7 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=f7
+  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
