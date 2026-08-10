@@ -494,9 +494,10 @@ void EpubReaderActivity::onEnter() {
   bookFontSizeNormalizationOverride = currentBook.fontSizeNormalizationOverride;
   bookGuideDotsOverride = currentBook.guideDotsOverride;
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
-  // Prime the footnote-cache flag with one existence probe so Background-B is not
-  // needlessly gated on an already-gathered book (the gather itself runs lazily at
-  // the first preview-enabled foreground build).
+  // Prime the footnote-cache flag with one existence probe: an already-gathered book must
+  // report previews-available immediately, or makeSectionBuildParams() would key its sections
+  // to the previews-OFF variant and rebuild the whole book. The gather itself now runs lazily,
+  // on the first page that actually contains a footnote (see render()).
   footnotePreviewCacheReady_ = FootnotePreviews::cacheExists(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_recent_books");
 
@@ -882,7 +883,12 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
   p.bionicReadingEnabled = getEffectiveBionicReading();
-  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews();
+  // ACTUAL availability, not just the setting. This is what lets the gather be deferred: a
+  // section built before footnotes.bin exists genuinely has no previews baked in, so it must be
+  // cached under the previews-OFF hash. Once the gather runs the hash flips, the preview-less
+  // cache entry is simply not looked up, and the spine rebuilds with previews. Keying this on
+  // the setting alone is why the gather previously had to run up-front for every book.
+  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews() && footnotePreviewCacheReady_;
   p.imageRendering = lastRenderStats.imageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   return p;
@@ -978,12 +984,10 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
     return;
   }
-  // Never bake a preview-enabled section variant before footnotes.bin exists: the pages
-  // would be cached preview-less under the previews-on hash and stay that way. The gather
-  // is foreground-only (first preview-enabled build); B just waits for it.
-  if (getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_) {
-    return;
-  }
+  // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
+  // actual preview availability, so a build started before the gather is cached under the
+  // previews-OFF hash rather than masquerading as preview-enabled. Blocking B here used to stall
+  // all background building for the whole of a preview-enabled book's first open.
   // Background A keeps priority: it determines perceived page-turn speed, and its total
   // cost is small against a multi-second page-read window. Wait until its pass has run
   // (pendingPreRender clears whether or not it produced a ready page).
@@ -3000,11 +3004,11 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   resetBackgroundBuild();
   const unsigned long sectionStart = millis();
 
-  // Preview text is baked into laid-out pages. Prepare its book-level source before
-  // probing the preview-enabled section variant so a cache hit can never bypass gather.
-  if (getEffectiveInlineFootnotePreviews()) {
-    ensureFootnotePreviewCache();
-  }
+  // The gather is NOT run here any more. It is a whole-book two-pass scan (measured 2822 ms on
+  // X3 for alice-illustrated, which has no footnotes at all) and running it before every first
+  // section build charged every reader open for it, whether or not the book has notes. It now
+  // runs on the first page that actually contains a footnote -- see render(). Sections built
+  // before that are cached honestly as previews-off.
 
   // A resumed partial Background-B build has no on-disk LUT yet, so skip loadSectionFile (it
   // would clobber the live write handle); it always needs building. Otherwise probe the cache.
@@ -3292,6 +3296,25 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
     // Collect footnotes from the loaded page
     currentPageFootnotes = std::move(p->footnotes);
+
+    // Deferred gather: the first page that actually carries a footnote is the first moment we
+    // know this book needs previews at all. Doing it here instead of before every first section
+    // build means a book with no notes never pays the whole-book two-pass scan (2822 ms on X3).
+    // Latched so a failed gather is not retried on every single page turn.
+    if (!currentPageFootnotes.empty() && getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_ &&
+        !footnotePreviewGatherAttempted_) {
+      footnotePreviewGatherAttempted_ = true;
+      if (ensureFootnotePreviewCache()) {
+        // The section on disk was built as previews-OFF and is now the wrong variant:
+        // makeSectionBuildParams() yields the previews-ON hash from here on. Drop it and
+        // re-enter render(), which rebuilds this spine with the preview text baked in.
+        LOG_INF("ERS", "Footnote previews gathered on demand (spine %d); rebuilding with previews", currentSpineIndex);
+        section.reset();
+        requestUpdate();
+        automaticPageTurnActive = false;
+        return;
+      }
+    }
     lastRenderStats.hadImages = p->hasImages();
     lastRenderStats.footnoteCount = static_cast<int>(currentPageFootnotes.size());
     lastRenderStats.spineIndex = currentSpineIndex;
