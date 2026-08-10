@@ -395,11 +395,13 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
 
 // Declaration parsing
 
-void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& style, std::string& propNameBuf,
+void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle& style, std::string& propNameBuf,
                                           std::string& propValueBuf) {
   const size_t colonPos = decl.find(':');
   if (colonPos == std::string::npos || colonPos == 0) return;
 
+  // substr on a string_view is a view, not a copy: the two halves are normalized straight into
+  // the caller's scratchpad, so a declaration costs zero heap blocks once those have grown.
   normalizedInto(decl.substr(0, colonPos), propNameBuf);
   normalizedInto(decl.substr(colonPos + 1), propValueBuf);
 
@@ -644,17 +646,27 @@ void CssParser::parseDeclarationIntoStyle(const std::string& decl, CssStyle& sty
   }
 }
 
-CssStyle CssParser::parseDeclarations(const std::string& declBlock) {
-  CssStyle style;
-  std::string propNameBuf;
-  std::string propValueBuf;
+CssStyle CssParser::parseDeclarations(const std::string_view declBlock) {
+  // One scratchpad for the whole process, not two fresh std::strings per rule block. This is a
+  // static function called from two hot paths — every rule block during a compile, and every
+  // inline style="" during a render — so the buffers used to be built and destroyed thousands
+  // of times. Function-local statics keep their capacity for the life of the process: after the
+  // first few blocks these never allocate again.
+  //
+  // Safe as statics because the parser is single-threaded (parse runs on the build/render task,
+  // never both at once) and neither buffer outlives the call.
+  static std::string propNameBuf;
+  static std::string propValueBuf;
 
+  CssStyle style;
   size_t start = 0;
   for (size_t i = 0; i <= declBlock.size(); ++i) {
     if (i == declBlock.size() || declBlock[i] == ';') {
       if (i > start) {
-        const size_t len = i - start;
-        std::string decl = declBlock.substr(start, len);
+        // A view, not a substr copy — parseDeclarationIntoStyle slices it further and
+        // normalizes straight into the scratchpad, so the declaration text is never
+        // materialised on the heap at all.
+        const std::string_view decl = declBlock.substr(start, i - start);
         if (!decl.empty()) {
           parseDeclarationIntoStyle(decl, style, propNameBuf, propValueBuf);
         }
