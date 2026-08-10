@@ -15,36 +15,9 @@ bool FontDecompressor::init() {
   return true;
 }
 
-void FontDecompressor::deinit() {
-  freePageBuffer();
-  // Outlives clearCache() deliberately: reusing one block across pages is the entire point.
-  free(groupScratch_);
-  groupScratch_ = nullptr;
-}
+void FontDecompressor::deinit() { freePageBuffer(); }
 
 void FontDecompressor::clearCache() { freePageBuffer(); }
-
-uint8_t* FontDecompressor::acquireGroupBuffer(const uint32_t bytes, bool* outOwned) {
-  if (bytes <= GROUP_SCRATCH_BYTES) {
-    if (groupScratch_ == nullptr) {
-      // Allocated on first use, not in init(): a device that only ever renders uncompressed SD
-      // fonts (groupCount == 0, handled before any of this) never pays for it.
-      groupScratch_ = static_cast<uint8_t*>(malloc(GROUP_SCRATCH_BYTES));
-    }
-    if (groupScratch_ != nullptr) {
-      *outOwned = false;
-      return groupScratch_;
-    }
-    // Scratch itself could not be allocated; fall through to a right-sized malloc, which is
-    // smaller and may still succeed.
-  }
-  *outOwned = true;
-  return static_cast<uint8_t*>(malloc(bytes));
-}
-
-void FontDecompressor::releaseGroupBuffer(uint8_t* buf, const bool owned) {
-  if (owned) free(buf);
-}
 
 void FontDecompressor::freePageBuffer() {
   for (uint8_t s = 0; s < pageSlotCount; s++) {
@@ -225,8 +198,7 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
     return nullptr;
   }
 
-  bool groupBufOwned = false;
-  uint8_t* groupBuf = acquireGroupBuffer(group.uncompressedSize, &groupBufOwned);
+  uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
   if (!groupBuf) {
     // Logged once per size class per pass; the running total goes out in logStats().
     LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u fallback; skipping this size and larger for the pass",
@@ -238,7 +210,7 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
   }
 
   if (!decompressGroup(fontData, groupIndex, groupBuf, group.uncompressedSize)) {
-    releaseGroupBuffer(groupBuf, groupBufOwned);
+    free(groupBuf);
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
@@ -255,7 +227,7 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
   }
 
   compactSingleGlyph(&groupBuf[alignedOff], _fallbackCache[lruIndex].buffer, glyph->width, glyph->height);
-  releaseGroupBuffer(groupBuf, groupBufOwned);
+  free(groupBuf);
 
   _fallbackCache[lruIndex].fontData = fontData;
   _fallbackCache[lruIndex].glyphIndex = glyphIndex;
@@ -607,10 +579,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
     if (group.uncompressedSize > stats.peakTempBytes) stats.peakTempBytes = group.uncompressedSize;
 
-    // Shared fixed scratch rather than a malloc per group: this loop ran once per group per
-    // prewarm call per page, and was the dominant source of the contig ratchet.
-    bool groupBufOwned = false;
-    uint8_t* groupBuf = acquireGroupBuffer(group.uncompressedSize, &groupBufOwned);
+    uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
     if (!groupBuf) {
       LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u during prewarm", group.uncompressedSize, groupIdx);
       missed++;
@@ -618,7 +587,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     }
 
     if (!decompressGroup(fontData, groupIdx, groupBuf, group.uncompressedSize)) {
-      releaseGroupBuffer(groupBuf, groupBufOwned);
+      free(groupBuf);
       missed++;
       continue;
     }
@@ -635,7 +604,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
       writeOffset += glyph.dataLength;
     }
 
-    releaseGroupBuffer(groupBuf, groupBufOwned);
+    free(groupBuf);
   }
 
   LOG_DBG("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
