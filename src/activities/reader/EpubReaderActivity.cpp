@@ -1354,8 +1354,9 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
 
   if (gatherFootnotesIfBuildNeedsThem(section.get())) {
     // Variant hash changed under this build; drop it and re-enter, which rebuilds this spine
-    // with the preview text baked in.
-    RenderLock lock(*this);
+    // with the preview text baked in. No RenderLock here: this function already holds one for
+    // its whole body, and renderingMutex is a plain (non-recursive) mutex taken with
+    // portMAX_DELAY — a second take from this task would hang the loop task permanently.
     section.reset();
     requestUpdate();
     return;
@@ -2491,7 +2492,7 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
   return false;
 }
 
-bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(Section* target) {
+bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(const Section* target) {
   if (!target || !getEffectiveInlineFootnotePreviews() || footnotePreviewCacheReady_ ||
       footnotePreviewGatherAttempted_ || !target->sawFootnote()) {
     return false;
