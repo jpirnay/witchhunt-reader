@@ -63,8 +63,16 @@ int main(const int argc, char** argv) {
   std::fprintf(stderr, "BENCHMARK pipeline_%s time=%lldus", ok ? "ok" : "FAILED", static_cast<long long>(us.count()));
   if (bench) {
     const size_t peak = heapTrackEnd();
-    std::fprintf(stderr, " heap_peak=%zuB (%zuKB) cache_bytes=%ju", peak, peak / 1024,
-                 static_cast<uintmax_t>(dirBytes(cacheDir)));
+    std::fprintf(stderr, " heap_peak=%zuB (%zuKB) allocs=%zu cache_bytes=%ju", peak, peak / 1024,
+                 heapTrackAllocCount(), static_cast<uintmax_t>(dirBytes(cacheDir)));
+    size_t buckets[12] = {};
+    heapTrackSizeHistogram(buckets, 12);
+    std::fprintf(stderr, "\nBENCHMARK alloc_sizes");
+    const char* labels[12] = {"<=16", "<=32",  "<=64",  "<=128", "<=256", "<=512",
+                              "<=1K", "<=2K",  "<=4K",  "<=8K",  "<=16K", ">16K"};
+    for (int i = 0; i < 12; i++) {
+      if (buckets[i]) std::fprintf(stderr, " %s=%zu", labels[i], buckets[i]);
+    }
   }
   std::fprintf(stderr, "\n");
   return ok ? 0 : 1;
