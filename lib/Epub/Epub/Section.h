@@ -176,7 +176,10 @@ class Section {
   // cssRuleCount sizes the dominant contiguous allocation (the selector index,
   // ~16 B/rule) — pass CssParser::ruleCount(), or 0 when unknown. Never logs; callers
   // log refusals at whatever cadence suits them.
-  static bool heapAllowsEmbeddedStyle(size_t cssRuleCount);
+  // arenaBacked: the build will bump-allocate the ruleset from a build arena (the borrowed
+  // secondary framebuffer) instead of the heap, in which case no heap floor applies. Reader-side
+  // callers gate heap-RESIDENT builds and keep the default.
+  static bool heapAllowsEmbeddedStyle(size_t cssRuleCount, bool arenaBacked = false);
   std::unique_ptr<Page> loadPageFromSectionFile();
   // Number of pages fully written to the section file during an active build.
   // Increases monotonically as the build progresses; 0 when no build is live.

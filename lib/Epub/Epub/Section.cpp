@@ -95,6 +95,9 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 // The original 96 KB predates trusting those bounds and made background (Background-B)
 // CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
 // Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
+//
+// Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
+// ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
 #define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
@@ -1319,7 +1322,23 @@ bool Section::createSectionFile(const BuildParams& p, const std::function<void(i
   }
 }
 
-bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
+bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool arenaBacked) {
+  // An arena-backed build takes the ruleset from the BUILD ARENA, not the heap, so no heap
+  // floor applies to it. Measured X3 (alice, 94 rules): the resident ruleset costs 752 index
+  // + 1306 pool = ~2 KB out of a 52272 B arena whose whole-build high water was 28652 B.
+  // The floors below were sized for the heap-vector layout and predate the arena; leaving
+  // them in front of an arena build made the decision a coin flip on heap noise — the X3
+  // trace has spine 2 passing and spine 3 refused at free=57300 vs a 57344 floor, 44 bytes
+  // apart, in the same boot on the same book. That is not a memory decision, and it is
+  // expensive: the two outcomes write different cache variants (`N_b93d54e8` vs
+  // `N_886d5d5f`), so the reader misses the variant it wants and rebuilds the spine.
+  // The arena path also has a real fallback — every failure in the resident loader does
+  // `indexArena_->release(block); return false;` and drops back to the disk-backed index.
+  if (arenaBacked) return true;
+
+  // Heap-backed builds still need a gate: there the index is a std::vector reserve, and a
+  // failed reserve under -fno-exceptions aborts rather than falling back.
+  //
   // Contig need is dominated by the selector index vector (CSS_INDEX_BYTES_PER_RULE)
   // plus slack for file buffers; everything else (hot/negative caches) allocates in
   // small nodes. Deliberately silent: callers decide whether a refusal is worth a
@@ -1336,7 +1355,10 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
                          const uint32_t requestedHash) {
   BuildParams p = params;
   const CssParser* css = epub->getCssParser();
-  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+  // Same predicate runBuildSetup() uses to decide setIndexArena(): an external scratch region
+  // (the borrowed framebuffer) means the ruleset lands in the arena, not the heap.
+  const bool arenaBacked = externalScratch_ && externalScratch_->valid();
+  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0, arenaBacked)) {
     // Report the floors, not just the heap state: this gate silently downgrades a book to a
     // no-CSS section cache (different layout, different cache key), and the X3 trace showed it
     // firing on spine 2 where the arena still had ~18 KB spare. See
