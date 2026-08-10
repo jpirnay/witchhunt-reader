@@ -718,6 +718,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
+  sawFootnote_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1322,6 +1323,13 @@ bool Section::createSectionFile(const BuildParams& p, const std::function<void(i
   }
 }
 
+// Live while the build runs (read straight off the parser so the reader can poll between
+// steps), latched into sawFootnote_ so it survives buildState_ teardown at Done.
+bool Section::sawFootnote() const {
+  if (buildState_ && buildState_->visitor && buildState_->visitor->sawFootnote()) return true;
+  return sawFootnote_;
+}
+
 bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool arenaBacked) {
   // An arena-backed build takes the ruleset from the BUILD ARENA, not the heap, so no heap
   // floor applies to it. Measured X3 (alice, 94 rules): the resident ruleset costs 752 index
@@ -1443,6 +1451,8 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
       continue;
     }
 
+    // Latch before the parser goes away, so callers can still ask after Done.
+    if (buildState_->visitor && buildState_->visitor->sawFootnote()) sawFootnote_ = true;
     buildState_.reset();
     return fin == BuildPhaseResult::Done ? BuildStep::Done : BuildStep::Failed;
   }

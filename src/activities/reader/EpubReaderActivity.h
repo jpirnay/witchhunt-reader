@@ -501,6 +501,10 @@ class EpubReaderActivity final : public Activity {
   // with a "Gathering footnotes" popup. No-op when previews are effectively off or the
   // cache already exists. Returns true when the cache is usable.
   bool ensureFootnotePreviewCache();
+  // Polled between build slices. If `target`'s build has seen a footnote and previews are wanted
+  // but not yet gathered, gathers them and returns true — meaning the caller must discard the
+  // section, whose cache variant has just changed from previews-OFF to previews-ON.
+  bool gatherFootnotesIfBuildNeedsThem(Section* target);
   // True once footnotes.bin is known to exist for this book (primed in onEnter, set by
   // ensureFootnotePreviewCache). Feeds makeSectionBuildParams(), so it selects the section
   // cache VARIANT: sections built before the gather are keyed previews-OFF and are rebuilt

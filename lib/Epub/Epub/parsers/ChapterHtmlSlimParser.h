@@ -301,6 +301,8 @@ class ChapterHtmlSlimParser final : public Print {
   int wordsExtractedInBlock = 0;
   bool bionicReadingEnabled = false;
   bool layoutFailed = false;
+  // True once any footnote link has been seen in this chapter. Latched; see sawFootnote().
+  bool sawFootnote_ = false;
 
   // Per-chapter caches: resolveStyle and parseInlineStyle are called for every HTML element;
   // caching by (tag|classAttr) and styleAttr avoids repeated string operations and hash lookups.
@@ -422,6 +424,10 @@ class ChapterHtmlSlimParser final : public Print {
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
+  // True once this chapter has yielded at least one footnote link. Readable mid-parse, which is
+  // the point: it lets a caller abandon a build that is being laid out without previews as soon
+  // as it learns previews are needed, instead of after the whole spine is done.
+  bool sawFootnote() const { return sawFootnote_; }
 
   // Print interface — fed by Epub::readItemContentsToStream.
   size_t write(uint8_t) override;

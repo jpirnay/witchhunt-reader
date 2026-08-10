@@ -1208,6 +1208,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         step = backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
       }
       checkHeapIntegrity("after_b_slice");
+      if (gatherFootnotesIfBuildNeedsThem(backgroundSection_.get())) {
+        // Variant hash changed under this build; discard and let B start again on the
+        // previews-ON variant.
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+        return;
+      }
       if (step == Section::BuildStep::More) {
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
         // The moment the CSS resolver starts skipping lookups the result is doomed to be
@@ -1343,6 +1350,15 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
   }
   checkHeapIntegrity("after_c_slice");
+
+  if (gatherFootnotesIfBuildNeedsThem(section.get())) {
+    // Variant hash changed under this build; drop it and re-enter, which rebuilds this spine
+    // with the preview text baked in.
+    RenderLock lock(*this);
+    section.reset();
+    requestUpdate();
+    return;
+  }
 
   if (step == Section::BuildStep::More) {
     // Proactive low-heap guard: while the build is resident (AA buffer kept), bail to the released
@@ -2472,6 +2488,25 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
     return true;
   }
   return false;
+}
+
+bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(Section* target) {
+  if (!target || !getEffectiveInlineFootnotePreviews() || footnotePreviewCacheReady_ ||
+      footnotePreviewGatherAttempted_ || !target->sawFootnote()) {
+    return false;
+  }
+  // The build in progress is laying this spine out WITHOUT previews, and we now know it needs
+  // them. Stop here rather than at first render: a whole-book-in-one-spine EPUB (Small Gods is
+  // one 583991-byte spine) would otherwise lay out the entire novel, render, and only then
+  // discover it must do all of it again. Polled between build slices, so the work discarded is
+  // whatever came before the first footnote link — typically a page or two.
+  footnotePreviewGatherAttempted_ = true;
+  LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now",
+          currentSpineIndex);
+  if (!ensureFootnotePreviewCache()) {
+    return false;  // gather failed; the latch stops us retrying, build continues preview-less
+  }
+  return true;  // caller must drop the section: its variant hash just changed
 }
 
 bool EpubReaderActivity::ensureFootnotePreviewCache() {

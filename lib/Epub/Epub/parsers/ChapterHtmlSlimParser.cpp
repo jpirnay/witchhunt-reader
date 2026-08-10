@@ -2450,6 +2450,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
+      // Earliest possible signal that this book needs footnote previews. Latched (never
+      // cleared) so a caller can act on it the moment it appears rather than after the whole
+      // spine is laid out — which for a whole-book-in-one-spine EPUB is minutes of work.
+      self->sawFootnote_ = true;
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {
       // Membership in the book-level preview cache is the gate: the gatherer only
