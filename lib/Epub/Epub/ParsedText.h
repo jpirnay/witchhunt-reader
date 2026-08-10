@@ -129,7 +129,7 @@ class ParsedText {
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
       bool includeLastLine = true,
-      int16_t blockStartY = 0,   // currentPageNextY at call site — needed for float zone geometry
-      int lineHeight = 0,        // 0 = no float zones (fast path, existing callers unchanged)
+      int16_t blockStartY = 0,  // currentPageNextY at call site — needed for float zone geometry
+      int lineHeight = 0,       // 0 = no float zones (fast path, existing callers unchanged)
       bool preserveSource = false);
 };

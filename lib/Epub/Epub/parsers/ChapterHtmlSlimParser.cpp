@@ -3029,8 +3029,8 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
   // it. The viewport check below reaches it first at any realistic row height; this is the
   // invariant, not the working limit.
-  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
-                                 currentPageNextY + t.packer.height + rowContrib > viewportHeight)) {
+  if (!t.packer.rows.empty() &&
+      (t.packer.rows.size() >= MAX_TABLE_ROWS || currentPageNextY + t.packer.height + rowContrib > viewportHeight)) {
     flushTableFragment(t.packer);
     t.packer.cols = lr.renderCols;
   }
@@ -3237,7 +3237,6 @@ void ChapterHtmlSlimParser::emitRowImagesAsBlocks(BufferedTableRow& row) {
   }
 }
 
-
 bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8_t columnCount, LayoutRow& out) {
   const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
 
@@ -3247,8 +3246,8 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
 
   // Any other colspan structure falls back; we only handle full-span or plain cells.
-  const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
-                                         [](const BufferedTableCell& c) { return c.colSpan != 1; });
+  const bool hasMergedCell =
+      std::any_of(bufRow.cells.begin(), bufRow.cells.end(), [](const BufferedTableCell& c) { return c.colSpan != 1; });
   if (hasMergedCell && !isFullWidthSpan) {
     LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
     return false;
