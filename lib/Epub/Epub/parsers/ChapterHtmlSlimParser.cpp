@@ -3266,13 +3266,33 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
       cell.isHeader = bufCell.isHeader;
 
       if (bufCell.text && !bufCell.text->isEmpty()) {
+        // Count past the cap rather than stopping at it: the overflow itself is the signal, and
+        // the grid cannot represent this cell either way.
+        size_t producedLines = 0;
         bufCell.text->layoutAndExtractLines(renderer, fontId, renderInnerWidth,
-                                            [&cell](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+                                            [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+                                              ++producedLines;
                                               if (cell.lines.size() < MAX_CELL_LINES) {
                                                 cell.lines.push_back(tb);
                                               }
                                               return ParsedText::LineProcessResult::Accepted;
                                             });
+        // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
+        // silently, with no log and no fallback, so the tail of the cell was simply deleted from
+        // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
+        // paragraphs instead, which is what the colspan check above already does for a table the
+        // grid cannot represent.
+        //
+        // Safe because layoutAndExtractLines does NOT consume its source (see the note on its
+        // declaration): bufCell.text is still intact, so emitTableAsParagraphs can lay it out in
+        // full. Nothing has been written to the page yet -- every row is laid out into
+        // `layoutRows` before the second loop emits any fragment -- so bailing here is clean.
+        if (producedLines > MAX_CELL_LINES) {
+          LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
+                  static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
+          emitTableAsParagraphs(table);
+          return;
+        }
       }
 
       if (!bufCell.imageSrc.empty()) {
@@ -3281,6 +3301,15 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
 
       uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
       if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
+      // A cell taller than the whole viewport can never be a grid row on any device, so the
+      // fragment packer below would emit a row that cannot be displayed. Adopted from CrossInk,
+      // which guards this case and we did not.
+      if (contentHeight + 2 * TABLE_CELL_PADDING > viewportHeight) {
+        LOG_DBG("EHP", "Table cell is %u px, taller than the %u px viewport — falling back to paragraphs",
+                static_cast<unsigned>(contentHeight), static_cast<unsigned>(viewportHeight));
+        emitTableAsParagraphs(table);
+        return;
+      }
       if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
       lr.cells.push_back(std::move(cell));
     }

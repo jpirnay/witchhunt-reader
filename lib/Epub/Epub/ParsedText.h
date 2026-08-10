@@ -109,6 +109,16 @@ class ParsedText {
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
   bool isContinuation() const { return isContinuation_; }
+
+  // PRESERVES ITS SOURCE. Lines are emitted through the callback; `words` and the parallel
+  // per-word vectors are read, never erased or cleared. Callers rely on this: the table grid path
+  // lays a cell out to discover it needs more lines than the grid can carry, then hands the SAME
+  // ParsedText to emitTableAsParagraphs — which only works because the words are still there.
+  //
+  // The one operation that does mutate words is hyphenateWordAtIndex (it splits a word and inserts
+  // the hyphen). It is reachable from here only when hyphenationEnabled is set, and table cells are
+  // constructed with it off. If that ever changes, or a caller with hyphenation on starts depending
+  // on re-layout, this guarantee needs a real second entry point rather than an accident.
   void layoutAndExtractLines(
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
