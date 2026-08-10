@@ -43,7 +43,10 @@ struct StackBuffer {
   // Get string view of current content (zero-copy)
   std::string_view view() const { return std::string_view(data, len); }
 
-  // Convert to string for passing to functions (single allocation)
+  // Heap copy of the token. Kept for callers that genuinely need to own the bytes; the parse
+  // loop uses view() instead — its consumers take string_view, so str()'s allocation there was
+  // pure waste (one per declaration plus one per rule block, i.e. thousands of short-lived
+  // blocks per stylesheet, each leaving a hole the heap never reclaims).
   std::string str() const { return std::string(data, len); }
 };
 
@@ -680,7 +683,7 @@ CssStyle CssParser::parseDeclarations(const std::string_view declBlock) {
 
 // Rule processing
 
-void CssParser::processRuleBlockWithStyle(const std::string& selectorGroup, const CssStyle& style) {
+void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, const CssStyle& style) {
   // Inspired by crosspoint-reader#2604: a selector with no renderer-supported
   // declarations only consumes scarce rule-map and cache-index capacity.
   if (!style.defined.anySet()) {
@@ -867,10 +870,10 @@ bool CssParser::loadFromStream(FsFile& source) {
       if (bodyDepth == 0) {
         // A truncated (overflowed) trailing declaration is dropped rather than parsed as garbage.
         if (!skippingRule && !declBuffer.empty() && !declBuffer.overflowed) {
-          parseDeclarationIntoStyle(declBuffer.str(), currentStyle, propNameBuf, propValueBuf);
+          parseDeclarationIntoStyle(declBuffer.view(), currentStyle, propNameBuf, propValueBuf);
         }
         if (!skippingRule) {
-          processRuleBlockWithStyle(selector.str(), currentStyle);
+          processRuleBlockWithStyle(selector.view(), currentStyle);
         }
         selector.clear();
         declBuffer.clear();
@@ -887,7 +890,7 @@ bool CssParser::loadFromStream(FsFile& source) {
         // clear() also resets the overflow flag, so a single oversized declaration
         // is dropped without poisoning the declarations that follow it in the block.
         if (!declBuffer.empty() && !declBuffer.overflowed) {
-          parseDeclarationIntoStyle(declBuffer.str(), currentStyle, propNameBuf, propValueBuf);
+          parseDeclarationIntoStyle(declBuffer.view(), currentStyle, propNameBuf, propValueBuf);
         }
         declBuffer.clear();
       } else {

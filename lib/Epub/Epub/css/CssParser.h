@@ -294,7 +294,7 @@ class CssParser {
   std::string selectorKeyBuf_;
 
   // Internal parsing helpers
-  void processRuleBlockWithStyle(const std::string& selectorGroup, const CssStyle& style);
+  void processRuleBlockWithStyle(std::string_view selectorGroup, const CssStyle& style);
   static CssStyle parseDeclarations(std::string_view declBlock);
   static void parseDeclarationIntoStyle(std::string_view decl, CssStyle& style, std::string& propNameBuf,
                                         std::string& propValueBuf);
