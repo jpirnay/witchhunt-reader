@@ -3269,24 +3269,29 @@ void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
         // Count past the cap rather than stopping at it: the overflow itself is the signal, and
         // the grid cannot represent this cell either way.
         size_t producedLines = 0;
-        bufCell.text->layoutAndExtractLines(renderer, fontId, renderInnerWidth,
-                                            [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
-                                              ++producedLines;
-                                              if (cell.lines.size() < MAX_CELL_LINES) {
-                                                cell.lines.push_back(tb);
-                                              }
-                                              return ParsedText::LineProcessResult::Accepted;
-                                            });
+        bufCell.text->layoutAndExtractLines(
+            renderer, fontId, renderInnerWidth,
+            [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+              ++producedLines;
+              // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
+              // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
+              if (cell.lines.size() < MAX_CELL_LINES) {
+                cell.lines.push_back(tb);
+              }
+              return ParsedText::LineProcessResult::Accepted;
+            },
+            /*includeLastLine=*/true, /*blockStartY=*/0, /*lineHeight=*/0, /*preserveSource=*/true);
         // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
         // silently, with no log and no fallback, so the tail of the cell was simply deleted from
         // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
         // paragraphs instead, which is what the colspan check above already does for a table the
         // grid cannot represent.
         //
-        // Safe because layoutAndExtractLines does NOT consume its source (see the note on its
-        // declaration): bufCell.text is still intact, so emitTableAsParagraphs can lay it out in
-        // full. Nothing has been written to the page yet -- every row is laid out into
-        // `layoutRows` before the second loop emits any fragment -- so bailing here is clean.
+        // This only works because of the preserveSource argument above. Without it the layout call
+        // that DETECTS the overflow also erases the words it laid out, so the fallback would find
+        // this cell -- and every cell laid out before it in this table -- already empty, and would
+        // emit nothing at all. Nothing has been written to the page yet (every row is laid out into
+        // `layoutRows` before the second loop emits any fragment), so bailing here is clean.
         if (producedLines > MAX_CELL_LINES) {
           LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
                   static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));

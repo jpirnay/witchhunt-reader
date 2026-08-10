@@ -168,8 +168,8 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=261 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
-SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=22 footnotes=0
+SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=29 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
    W x=11 s=1 z=100 t=Ch
    W x=59 s=1 z=100 t=3:
@@ -216,41 +216,130 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=410 s=0 z=100 t=still
   LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=appear.
-  LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Wordy0000
+   W x=139 s=0 z=100 t=Wordy0001
+   W x=254 s=0 z=100 t=Wordy0002
+   W x=370 s=0 z=100 t=Wordy0003
+  LINE y=214 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0004
+   W x=121 s=0 z=100 t=Wordy0005
+   W x=243 s=0 z=100 t=Wordy0006
+   W x=366 s=0 z=100 t=Wordy0007
+  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0008
+   W x=126 s=0 z=100 t=Wordy0009
+   W x=253 s=0 z=100 t=Wordy0010
+   W x=379 s=0 z=100 t=Wordy0011
+  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0012
+   W x=124 s=0 z=100 t=Wordy0013
+   W x=249 s=0 z=100 t=Wordy0014
+   W x=375 s=0 z=100 t=Wordy0015
+  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0016
+   W x=127 s=0 z=100 t=Wordy0017
+   W x=255 s=0 z=100 t=Wordy0018
+   W x=377 s=0 z=100 t=Wordy0019
+  LINE y=310 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0020
+   W x=129 s=0 z=100 t=Wordy0021
+   W x=252 s=0 z=100 t=Wordy0022
+   W x=376 s=0 z=100 t=Wordy0023
+  LINE y=334 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0024
+   W x=123 s=0 z=100 t=Wordy0025
+   W x=247 s=0 z=100 t=Wordy0026
+   W x=372 s=0 z=100 t=Wordy0027
+  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0028
+   W x=123 s=0 z=100 t=Wordy0029
+   W x=247 s=0 z=100 t=Wordy0030
+   W x=377 s=0 z=100 t=Wordy0031
+  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0032
+   W x=123 s=0 z=100 t=Wordy0033
+   W x=247 s=0 z=100 t=Wordy0034
+   W x=372 s=0 z=100 t=Wordy0035
+  LINE y=406 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0036
+   W x=126 s=0 z=100 t=Wordy0037
+   W x=253 s=0 z=100 t=Wordy0038
+   W x=374 s=0 z=100 t=Wordy0039
+  LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0040
+   W x=128 s=0 z=100 t=Wordy0041
+   W x=250 s=0 z=100 t=Wordy0042
+   W x=373 s=0 z=100 t=Wordy0043
+  LINE y=454 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0044
+   W x=122 s=0 z=100 t=Wordy0045
+   W x=245 s=0 z=100 t=Wordy0046
+   W x=369 s=0 z=100 t=Wordy0047
+  LINE y=478 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0048
+   W x=122 s=0 z=100 t=Wordy0049
+   W x=245 s=0 z=100 t=Wordy0050
+   W x=374 s=0 z=100 t=Wordy0051
+  LINE y=502 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0052
+   W x=122 s=0 z=100 t=Wordy0053
+   W x=245 s=0 z=100 t=Wordy0054
+   W x=369 s=0 z=100 t=Wordy0055
+  LINE y=526 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0056
+   W x=126 s=0 z=100 t=Wordy0057
+   W x=253 s=0 z=100 t=Wordy0058
+   W x=374 s=0 z=100 t=Wordy0059
+  LINE y=550 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0060
+   W x=127 s=0 z=100 t=Wordy0061
+   W x=248 s=0 z=100 t=Wordy0062
+   W x=370 s=0 z=100 t=Wordy0063
+  LINE y=574 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Wordy0064
+   W x=121 s=0 z=100 t=Wordy0065
+   W x=243 s=0 z=100 t=Wordy0066
+   W x=366 s=0 z=100 t=Wordy0067
+  LINE y=598 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=Wordy0068
+   W x=92 s=0 z=100 t=Wordy0069
+  LINE y=622 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c1
-  LINE y=214 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=646 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c2
-  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=670 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c3
-  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=694 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c4
-  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c5
-  LINE y=310 x=0 align=0 mult=1.000 hfid=0 words=1
+ PAGE 1 elements=11 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c6
-  LINE y=334 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c7
-  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d0
-  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d1
-  LINE y=406 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d2
-  LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d3
-  LINE y=454 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d4
-  LINE y=478 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d5
-  LINE y=502 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d6
-  LINE y=526 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=d7
-  LINE y=551 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=241 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
-SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=22 footnotes=0
+SPINE 3 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=29 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
    W x=35 s=1 z=100 t=Ch
    W x=83 s=1 z=100 t=4:
@@ -300,37 +389,87 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=116 s=0 z=100 t=on
    W x=145 s=0 z=100 t=any
    W x=182 s=0 z=100 t=device.
-  LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c1
-  LINE y=214 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c2
-  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c3
-  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c4
-  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c5
-  LINE y=310 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c6
-  LINE y=334 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=c7
-  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e0
-  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e1
+  LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Talli0000
+   W x=140 s=0 z=100 t=Talli0001
+   W x=256 s=0 z=100 t=Talli0002
+   W x=373 s=0 z=100 t=Talli0003
+  LINE y=214 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Talli0004
+   W x=122 s=0 z=100 t=Talli0005
+   W x=245 s=0 z=100 t=Talli0006
+   W x=369 s=0 z=100 t=Talli0007
+  LINE y=238 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Talli0008
+   W x=96 s=0 z=100 t=Talli0009
+   W x=193 s=0 z=100 t=Talli0010
+   W x=289 s=0 z=100 t=Talli0011
+   W x=379 s=0 z=100 t=Talli0012
+  LINE y=262 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Talli0013
+   W x=92 s=0 z=100 t=Talli0014
+   W x=185 s=0 z=100 t=Talli0015
+   W x=279 s=0 z=100 t=Talli0016
+   W x=374 s=0 z=100 t=Talli0017
+  LINE y=286 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Talli0018
+   W x=92 s=0 z=100 t=Talli0019
+   W x=185 s=0 z=100 t=Talli0020
+   W x=284 s=0 z=100 t=Talli0021
+   W x=377 s=0 z=100 t=Talli0022
+  LINE y=310 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Talli0023
+   W x=92 s=0 z=100 t=Talli0024
+   W x=185 s=0 z=100 t=Talli0025
+   W x=279 s=0 z=100 t=Talli0026
+   W x=374 s=0 z=100 t=Talli0027
+  LINE y=334 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Talli0028
+   W x=92 s=0 z=100 t=Talli0029
+   W x=185 s=0 z=100 t=Talli0030
+   W x=284 s=0 z=100 t=Talli0031
+   W x=377 s=0 z=100 t=Talli0032
+  LINE y=358 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=Talli0033
+   W x=124 s=0 z=100 t=Talli0034
+   W x=249 s=0 z=100 t=Talli0035
+   W x=375 s=0 z=100 t=Talli0036
+  LINE y=382 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Talli0037
+   W x=92 s=0 z=100 t=Talli0038
+   W x=178 s=0 z=100 t=Talli0039
   LINE y=406 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e2
+   W x=18 s=0 z=100 t=c1
   LINE y=430 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e3
+   W x=18 s=0 z=100 t=c2
   LINE y=454 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e4
+   W x=18 s=0 z=100 t=c3
   LINE y=478 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e5
+   W x=18 s=0 z=100 t=c4
   LINE y=502 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=18 s=0 z=100 t=e6
+   W x=18 s=0 z=100 t=c5
   LINE y=526 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=c6
+  LINE y=550 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=c7
+  LINE y=574 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e0
+  LINE y=598 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e1
+  LINE y=622 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e2
+  LINE y=646 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e3
+  LINE y=670 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e4
+  LINE y=694 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e5
+  LINE y=718 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=18 s=0 z=100 t=e6
+ PAGE 1 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=e7
-  LINE y=551 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=25 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
 SPINE 4 href=OEBPS/chapter5.xhtml pages=5 truncated=0 cssFallback=0
