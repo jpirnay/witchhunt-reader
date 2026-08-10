@@ -74,6 +74,50 @@ constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_M
 // the layout for tables that stayed within budget.
 constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
 
+// Size bound on the buffered table (the gate that actually fires in time).
+//
+// MIN_FREE_HEAP_FOR_TABLE above is a POINT check at cell open, so it cannot bound a table that
+// grows into the margin: X3 alice spine 2 opened its table at ~30 KB free, passed every per-cell
+// check, and was at 9776 free / 5364 max alloc by the time </table> drained it as paragraphs --
+// 20 KB consumed in 61 ms with no switch. By construction the heap check only trips once enough
+// memory is ALREADY committed to buffers that still have to be drained; on a fragmented session
+// (contig 15860 instead of 27636) the same table hard-abort()ed instead of degrading.
+//
+// So bound the quantity we can actually measure as it accumulates -- attributed buffered bytes --
+// instead of sampling the heap. Deterministic, book-independent, and it fires BEFORE the memory
+// is committed. Exceeding it defers to the next <td> (beginTableStreaming drains and clears
+// `rows`, so it must not run with a cell open), which bounds the resident buffer to the budget
+// plus the one cell in flight.
+#ifndef EHP_TABLE_BUFFER_BUDGET_BYTES
+#define EHP_TABLE_BUFFER_BUDGET_BYTES (12 * 1024)
+#endif
+constexpr size_t MAX_TABLE_BUFFER_BYTES = EHP_TABLE_BUFFER_BUDGET_BYTES;
+
+// Attributed cost of one buffered word: the std::string header in ParsedText::words (24 B under
+// 32-bit libstdc++) plus the parallel per-word vectors (wordStyles, wordSizes, wordContinues) and
+// the geometric growth headroom all four carry. Deliberately a fixed constant rather than
+// sizeof(std::string) so host goldens and device builds make the SAME switch decision -- a
+// host-derived width (32 B) would charge more per word and trip earlier than the device.
+constexpr size_t TABLE_BUFFER_BYTES_PER_WORD = 48;
+// Words past the SSO capacity additionally allocate their own heap block.
+constexpr size_t TABLE_BUFFER_SSO_CAPACITY = 15;
+// One buffered cell: BufferedTableCell (two std::string members, colSpan/isHeader, the owning
+// pointer) plus the heap-allocated ParsedText and its four empty vectors.
+constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
+
+// Word bound on a SINGLE buffered cell, and the reason the whole-table budget above is not
+// enough on its own: the budget can only act at the next <td> (beginTableStreaming drains and
+// clears `rows`, so it cannot run with a cell open), and a one-cell table has no next <td>.
+// X3 alice spine 2 is exactly that -- <table class="rabbithole"> is ONE row, ONE cell holding a
+// whole <div> of two paragraphs, measured at 189 words / 9200 attributed bytes. Nothing bounded
+// it, so it buffered to the hard floor and aborted the parse before layout even started.
+//
+// A <td> was the only text container in the parser without a size bound: an ordinary paragraph
+// already flushes at >96 words (see the currentTextBlock->size() > 96 split in
+// flushPartWordBuffer). Reuse that same number rather than inventing one -- it makes a cell
+// behave like the paragraph it falls back to, and 96 is already the measured-safe layout chunk.
+constexpr size_t MAX_TABLE_CELL_WORDS = 96;
+
 const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
@@ -479,6 +523,24 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // text is null only for a cell already consumed by the streaming path; currentTableCell is
     // cleared alongside that, so this is belt-and-braces against a future reordering.
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
+    // Charge the word against the buffer budget. Only a buffering table accumulates — a streaming
+    // cell is drained and freed at </td>. The switch itself cannot happen here (a cell is open and
+    // beginTableStreaming clears `rows`), so the <td> handler acts on this.
+    if (currentTable && !currentTable->streaming) {
+      currentTable->bufferedBytes += TABLE_BUFFER_BYTES_PER_WORD;
+      if (partWordBufferIndex > TABLE_BUFFER_SSO_CAPACITY) {
+        currentTable->bufferedBytes += partWordBufferIndex + 1;
+      }
+      // A single cell past the paragraph-sized bound cannot wait for the next <td> — there may
+      // not be one. Drain here, with the cell still open.
+      if (currentTableCell->text->size() > MAX_TABLE_CELL_WORDS) {
+        if (!beginTableStreamingAtOpenCell()) {
+          partWordBufferIndex = 0;
+          nextWordContinues = false;
+          return false;
+        }
+      }
+    }
   } else if (currentTextBlock) {
     // If a float image is pending and the block is still empty, attach it now so the
     // first word (and all subsequent words) are laid out beside the image.
@@ -1102,7 +1164,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // accumulating, so a big table degrades to streaming instead of running the heap down and
     // then discovering it has nothing left to lay out with.
     if (!self->currentTable->streaming) {
-      if (self->currentTable->unsupported) {
+      if (self->currentTable->bufferedBytes >= MAX_TABLE_BUFFER_BYTES) {
+        // The bound that fires in time: the buffer has grown past what grid layout can afford,
+        // and this is the first point since it happened where no cell is open. Draining here
+        // keeps the resident buffer at budget + the cell just closed, instead of letting it run
+        // to </table> and discovering there is nothing left to lay out with.
+        self->currentTable->unsupported = true;
+        self->beginTableStreaming("size budget");
+      } else if (self->currentTable->unsupported) {
         // Deferred from a trigger that fired while a cell was open (e.g. column overflow).
         self->beginTableStreaming("unsupported");
       } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
@@ -1145,6 +1214,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().colSpan = colSpan;
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
+    if (!self->currentTable->streaming) {
+      self->currentTable->bufferedBytes += TABLE_BUFFER_BYTES_PER_CELL;
+    }
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
     if (row.effectiveCols > self->currentTable->maxCols) {
       self->currentTable->maxCols = row.effectiveCols;
@@ -2378,6 +2450,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
+      // Earliest possible signal that this book needs footnote previews. Latched (never
+      // cleared) so a caller can act on it the moment it appears rather than after the whole
+      // spine is laid out — which for a whole-book-in-one-spine EPUB is minutes of work.
+      self->sawFootnote_ = true;
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {
       // Membership in the book-level preview cache is the gate: the gatherer only
@@ -3030,9 +3106,11 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
 void ChapterHtmlSlimParser::beginTableStreaming(const char* reason) {
   if (!currentTable || currentTable->streaming) return;
 
-  LOG_DBG("EHP", "Table switched to streaming mode (%s): draining %u buffered row(s)", reason,
-          static_cast<unsigned>(currentTable->rows.size()));
+  LOG_DBG("EHP", "Table switched to streaming mode (%s): draining %u buffered row(s), %u buffered byte(s)", reason,
+          static_cast<unsigned>(currentTable->rows.size()), static_cast<unsigned>(currentTable->bufferedBytes));
   currentTable->streaming = true;
+  // Nothing accumulates from here on: cells are drained and freed at </td>.
+  currentTable->bufferedBytes = 0;
 
   // Drain what was buffered before the switch. Text first, then images, so the already-buffered
   // portion keeps the batch fallback's ordering; cells that arrive after this point interleave
@@ -3047,6 +3125,45 @@ void ChapterHtmlSlimParser::beginTableStreaming(const char* reason) {
   currentTable->rows.clear();
   currentTable->rows.shrink_to_fit();
   currentTableCell = nullptr;
+}
+
+bool ChapterHtmlSlimParser::beginTableStreamingAtOpenCell() {
+  if (!currentTable || currentTable->streaming || !currentTableCell) return true;
+  if (currentTable->rows.empty() || currentTable->rows.back().cells.empty()) return true;
+
+  // beginTableStreaming() cannot be used here: it drains every buffered cell and clears `rows`,
+  // which would destroy the cell we are still filling. Lift the open cell out first, drain the
+  // rest exactly as the normal switch does, then emit the open cell's accumulated words and hand
+  // it back empty so the words still arriving keep flowing into the same cell.
+  BufferedTableCell open = std::move(currentTable->rows.back().cells.back());
+  currentTable->rows.back().cells.pop_back();
+  currentTableCell = nullptr;  // nothing may route into the detached cell during the drain
+
+  LOG_DBG("EHP", "Table cell over word bound: draining %u buffered row(s), %u buffered byte(s)",
+          static_cast<unsigned>(currentTable->rows.size()), static_cast<unsigned>(currentTable->bufferedBytes));
+  currentTable->streaming = true;
+  currentTable->bufferedBytes = 0;
+  emitTableAsParagraphs(*currentTable);
+  emitCellImagesAsBlocks(*currentTable);
+  currentTable->rows.clear();
+  currentTable->rows.shrink_to_fit();
+
+  // The open cell's words come after everything buffered before it, in document order. Its image
+  // does NOT go out here — streaming emits a cell image at </td>, and `open` keeps it.
+  bool ok = true;
+  if (open.text && !open.text->isEmpty()) {
+    BufferedTableCell chunk;
+    chunk.text = std::move(open.text);
+    chunk.isHeader = open.isHeader;
+    ok = emitCellAsParagraph(chunk, /*emitImage=*/false);
+  }
+  open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
+
+  currentTable->rows.emplace_back();
+  currentTable->rows.back().cells.push_back(std::move(open));
+  currentTable->rows.back().effectiveCols = 0;
+  currentTableCell = &currentTable->rows.back().cells.back();
+  return ok;
 }
 
 void ChapterHtmlSlimParser::streamClosedCell(BufferedTableRow& row) {

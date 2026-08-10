@@ -4,3 +4,7 @@
 
 void heapTrackBegin() {}
 size_t heapTrackEnd() { return 0; }
+size_t heapTrackAllocCount() { return 0; }
+void heapTrackSizeHistogram(size_t* out, const int count) {
+  for (int i = 0; i < count; i++) out[i] = 0;
+}

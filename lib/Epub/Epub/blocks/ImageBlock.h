@@ -7,6 +7,8 @@
 
 #include "Block.h"
 
+class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch below)
+
 // Source pixel area above which an image is considered "large" and rendered
 // as a placeholder until the user explicitly requests it.
 // 800x600 covers most full-page illustrations that take >1s to dither on ESP32.
@@ -24,6 +26,38 @@ namespace image_tone {
 void setFilterId(uint8_t filterId);
 uint8_t getFilterId();
 }  // namespace image_tone
+
+// Process-wide scratch arena for image decoding, installed for the duration of a multi-image
+// pass (see Section::warmAllImageCaches).
+//
+// Each decode otherwise takes and returns its own large blocks — a 32 KB inflate ring (PNG) or
+// a 12 KB work pool (JPEG), plus scanline buffers — and nothing is reused between images. A
+// warm pass decoding N images therefore performs N rounds of that churn, which on a
+// no-compaction heap breaks up the contiguous region a later framebuffer realloc needs. See
+// docs/memory-allocation-strategy.md (rule 4) and the crash it explains.
+//
+// A global rather than a parameter because the arena has to reach decoders several layers down
+// (Section -> Page -> ImageBlock -> converter -> PngStreamDecoder) through interfaces shared
+// with callers that have no arena. Decoders fall back to the heap when none is installed, so
+// this is an optimisation, never a requirement. Mirrors image_tone above.
+namespace image_scratch {
+// The installed arena, or nullptr. Not owned.
+BuildArena* get();
+// Install/clear. The arena must outlive the scope; use ScopedArena rather than calling these.
+void set(BuildArena* arena);
+
+// RAII installer — restores the previous value, so nesting is safe.
+class ScopedArena {
+ public:
+  explicit ScopedArena(BuildArena* arena) : previous_(get()) { set(arena); }
+  ~ScopedArena() { set(previous_); }
+  ScopedArena(const ScopedArena&) = delete;
+  ScopedArena& operator=(const ScopedArena&) = delete;
+
+ private:
+  BuildArena* previous_;
+};
+}  // namespace image_scratch
 
 class ImageBlock final : public Block {
  public:

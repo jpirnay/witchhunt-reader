@@ -2,6 +2,7 @@
 
 #include <AdaptiveTone.h>
 #include <BitmapHelpers.h>
+#include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <new>
 
+#include "../blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
@@ -266,6 +268,47 @@ size_t tjpgInput(JDEC* jd, uint8_t* buff, size_t ndata) {
 // headroom and still beats JPEGDEC's ~20 KB struct. (jd_prepare returns JDR_MEM1 and
 // we fail gracefully if an unusual image needs more.)
 constexpr size_t TJPG_WORK_POOL_SIZE = 12 * 1024;
+
+// TJpgDec's work pool, drawn from the pass scratch arena when one is installed (see
+// image_scratch) and otherwise from the heap. At 12 KB it is the largest per-decode block on
+// the JPEG path, and a warm pass allocates it once per decode AND once per tone analysis — the
+// churn rule 4 in docs/memory-allocation-strategy.md exists to stop.
+//
+// RAII so every early return below releases the arena scope; the arena release is newest-first,
+// which holds because the pool is the only thing this scope allocates.
+class JpegWorkPool {
+ public:
+  JpegWorkPool() {
+    if (BuildArena* arena = image_scratch::get(); arena && arena->valid()) {
+      block_ = arena->reserveBlock();
+      if (block_.valid()) {
+        if (auto* p = static_cast<uint8_t*>(arena->alloc(TJPG_WORK_POOL_SIZE))) {
+          ptr_ = p;
+          arena_ = arena;
+          return;
+        }
+        arena->release(block_);  // too small for this pass — fall back to the heap
+      }
+    }
+    heap_ = makeUniqueNoThrow<uint8_t[]>(TJPG_WORK_POOL_SIZE);
+    ptr_ = heap_.get();
+  }
+  ~JpegWorkPool() {
+    heap_.reset();
+    if (block_.valid()) arena_->release(block_);
+  }
+  JpegWorkPool(const JpegWorkPool&) = delete;
+  JpegWorkPool& operator=(const JpegWorkPool&) = delete;
+
+  uint8_t* get() const { return ptr_; }
+  explicit operator bool() const { return ptr_ != nullptr; }
+
+ private:
+  uint8_t* ptr_ = nullptr;
+  std::unique_ptr<uint8_t[]> heap_;
+  BuildArena* arena_ = nullptr;
+  BuildArena::Block block_;
+};
 // Minimum free heap to attempt a decode: the work pool plus headroom for the
 // streaming cache band and the ditherer rows allocated further below.
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = TJPG_WORK_POOL_SIZE + 16 * 1024;
@@ -909,7 +952,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
     return points;
   }
 
-  auto pool = makeUniqueNoThrow<uint8_t[]>(TJPG_WORK_POOL_SIZE);
+  JpegWorkPool pool;
   auto histogram = makeUniqueNoThrow<uint32_t[]>(256);
   if (!pool || !histogram) {
     file.close();
@@ -992,7 +1035,10 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   TJpgSession session{&file, &ctx};
-  std::unique_ptr<uint8_t[]> pool;
+  // Declared for the whole function but only filled on the baseline branch below (the
+  // progressive path uses its own decoder and never needs the pool). Must outlive jd_decomp,
+  // which reads through it — hence function scope rather than a block-local inside the branch.
+  std::unique_ptr<JpegWorkPool> pool;
   JDEC jdec{};
   JRESULT jr = JDR_OK;
   int srcWidth = 0;
@@ -1008,13 +1054,13 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     srcWidth = info.width;
     srcHeight = info.height;
   } else {
-    pool = makeUniqueNoThrow<uint8_t[]>(TJPG_WORK_POOL_SIZE);
-    if (!pool) {
+    pool = makeUniqueNoThrow<JpegWorkPool>();
+    if (!pool || !*pool) {
       LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
       file.close();
       return false;
     }
-    jr = jd_prepare(&jdec, tjpgInput, pool.get(), TJPG_WORK_POOL_SIZE, &session);
+    jr = jd_prepare(&jdec, tjpgInput, pool->get(), TJPG_WORK_POOL_SIZE, &session);
     if (jr != JDR_OK) {
       LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d): %s", jr, imagePath.c_str());
       file.close();

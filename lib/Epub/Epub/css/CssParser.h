@@ -47,6 +47,16 @@ class CssParser {
     uint32_t negativeHits = 0;
   };
 
+  // True when the whole ruleset (index + style pool) is resident in arena memory, so every
+  // lookupRule() is served without touching SD. Callers use this to tell a REAL low-heap
+  // degradation from a harmless one: under heap pressure resolveStyle() still counts a
+  // lowHeapSkip and passes allowDiskLookup=false, but the resident branch in lookupRule()
+  // returns before that flag is ever read — the styles come back complete either way.
+  // Treating those skips as degradation discards correct work (measured on X3: a 14-page
+  // background build thrown away, forcing the released-path rebuild that then fails its
+  // framebuffer realloc).
+  bool isArenaResident() const { return arenaResident_ != nullptr; }
+
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
   // v8: v7 builds wrote saveToCache() payloads without the cssFloat byte the reader
   //     expects — bump invalidates those malformed caches.
@@ -277,25 +287,32 @@ class CssParser {
   FsFile compileTempFile_;
   std::unordered_map<std::string, uint32_t> compileSelectorOffsets_;
 
+  // Reused scratch for the selector currently being processed (processRuleBlockWithStyle).
+  // A member rather than a local so its buffer survives across selectors AND across rule
+  // blocks: the parse then costs one growth for the whole stylesheet instead of a fresh heap
+  // string per selector. Only valid inside processRuleBlockWithStyle.
+  std::string selectorKeyBuf_;
+
   // Internal parsing helpers
-  void processRuleBlockWithStyle(const std::string& selectorGroup, const CssStyle& style);
-  static CssStyle parseDeclarations(const std::string& declBlock);
-  static void parseDeclarationIntoStyle(const std::string& decl, CssStyle& style, std::string& propNameBuf,
+  void processRuleBlockWithStyle(std::string_view selectorGroup, const CssStyle& style);
+  static CssStyle parseDeclarations(std::string_view declBlock);
+  static void parseDeclarationIntoStyle(std::string_view decl, CssStyle& style, std::string& propNameBuf,
                                         std::string& propValueBuf);
 
   // Individual property value parsers
-  static CssTextAlign interpretAlignment(const std::string& val);
-  static CssFontStyle interpretFontStyle(const std::string& val);
-  static CssFontWeight interpretFontWeight(const std::string& val);
-  static CssTextDecoration interpretDecoration(const std::string& val);
-  static CssLength interpretLength(const std::string& val);
+  // Take string_view and do NOT normalize — every caller already passes normalized text, and
+  // normalized() is idempotent. See the note above the definitions in CssParser.cpp.
+  static CssTextAlign interpretAlignment(std::string_view val);
+  static CssFontStyle interpretFontStyle(std::string_view val);
+  static CssFontWeight interpretFontWeight(std::string_view val);
+  static CssTextDecoration interpretDecoration(std::string_view val);
+  static CssLength interpretLength(std::string_view val);
   /** Returns true only when a numeric length was parsed (e.g. 2em, 50%). False for auto/inherit/initial. */
-  static bool tryInterpretLength(const std::string& val, CssLength& out);
+  static bool tryInterpretLength(std::string_view val, CssLength& out);
 
   // String utilities
   static std::string normalized(const std::string& s);
-  static void normalizedInto(const std::string& s, std::string& out);
-  static std::vector<std::string> splitOnChar(const std::string& s, char delimiter);
+  static void normalizedInto(std::string_view s, std::string& out);
   static std::vector<std::string> splitWhitespace(const std::string& s);
 
   // On-demand rule loading helpers

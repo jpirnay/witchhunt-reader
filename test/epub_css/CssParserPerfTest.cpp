@@ -1,6 +1,12 @@
-#include <dlfcn.h>
 #include <gtest/gtest.h>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dlfcn.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -36,17 +42,37 @@ using Clock = std::chrono::steady_clock;
 
 static std::atomic<size_t> g_liveBytes{0};
 static std::atomic<size_t> g_peakBytes{0};
+// Allocation COUNT, not just bytes. Peak bytes is blind to churn: a short-lived string raises
+// peak by nothing yet still leaves a hole, and on a no-compaction heap those holes are
+// permanent for the session. Count is the number that tracks fragmentation pressure.
+static std::atomic<size_t> g_allocCount{0};
 static std::atomic<uint32_t> g_epoch{0};  // current measurement window; 0 = not measuring
 static std::atomic<bool> g_tracking{false};
 static thread_local bool g_inHook = false;
 
 static void trackAlloc(size_t sz) {
+  g_allocCount.fetch_add(1, std::memory_order_relaxed);
   size_t live = g_liveBytes.fetch_add(sz) + sz;
   size_t peak = g_peakBytes.load(std::memory_order_relaxed);
   while (live > peak && !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
   }
 }
 
+// Reaching the real allocator underneath our own malloc/free overrides. Same technique as
+// test/epub_pipeline/HeapTrack.cpp: on Windows go straight to the Win32 heap (there is no
+// dlsym/RTLD_NEXT, which is why this suite used to be skipped entirely on MSYS/UCRT64 and
+// showed up as a permanent EpubCssPerformanceTest_NOT_BUILT failure); elsewhere resolve the
+// next malloc in the chain, with the glibc weak symbols as a fallback.
+#if defined(_WIN32)
+static void* rawAlloc(size_t bytes) { return HeapAlloc(GetProcessHeap(), 0, bytes); }
+static void rawFree(void* p) {
+  if (p) HeapFree(GetProcessHeap(), 0, p);
+}
+static void* rawRealloc(void* p, size_t bytes) {
+  if (!p) return rawAlloc(bytes);
+  return HeapReAlloc(GetProcessHeap(), 0, p, bytes);
+}
+#else
 static void* rawAlloc(size_t bytes) {
   using malloc_fn_t = void* (*)(size_t);
   static malloc_fn_t realMalloc = nullptr;
@@ -81,6 +107,7 @@ static void* rawRealloc(void* p, size_t bytes) {
   }
   return realRealloc ? realRealloc(p, bytes) : nullptr;
 }
+#endif
 
 struct AllocHeader {
   size_t size;
@@ -163,6 +190,7 @@ static long long elapsedUs(const Clock::time_point& start) {
 static void beginMeasurement() {
   g_liveBytes.store(0);
   g_peakBytes.store(0);
+  g_allocCount.store(0);
   g_epoch.fetch_add(1);
   g_tracking.store(true);
 }
@@ -197,30 +225,48 @@ static std::vector<uint8_t> readZipEntry(const std::string& epubPath, const char
   return buffer;
 }
 
+// Temp paths via std::filesystem rather than mkdtemp/mkstemps + hardcoded "/tmp": those are
+// POSIX-only and were part of why this suite never built on Windows. A process-unique counter
+// is enough here — these tests are single-process and clean up after themselves.
+static std::filesystem::path uniqueTempPath(const char* suffix) {
+  // Must be unique ACROSS PROCESSES: ctest -j runs each test as its own process, so a
+  // per-process counter alone collides and the tests delete each other's files (seen as
+  // parallel-only failures that pass when run serially). Process id + counter + clock.
+  static std::atomic<unsigned> counter{0};
+  const auto stamp = static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count());
+#if defined(_WIN32)
+  const unsigned pid = static_cast<unsigned>(GetCurrentProcessId());
+#else
+  const unsigned pid = static_cast<unsigned>(getpid());
+#endif
+  char name[96];
+  std::snprintf(name, sizeof(name), "cssperf-%u-%u-%llx%s", pid, static_cast<unsigned>(counter.fetch_add(1)), stamp,
+                suffix);
+  return std::filesystem::temp_directory_path() / name;
+}
+
 static std::string makeTempDir() {
-  const char* tmpl = "/tmp/cssperf-XXXXXX";
-  std::string path(tmpl);
-  if (!mkdtemp(&path[0])) {
+  const std::filesystem::path dir = uniqueTempPath("");
+  std::error_code ec;
+  if (!std::filesystem::create_directories(dir, ec) || ec) {
     return {};
   }
-  return path;
+  return dir.string();
 }
 
 static bool writeTempCssFile(const std::vector<uint8_t>& data, std::string& outPath) {
-  char tmpl[] = "/tmp/cssperf-XXXXXX.css";
-  int fd = mkstemps(tmpl, 4);
-  if (fd < 0) return false;
-  outPath = tmpl;
+  outPath = uniqueTempPath(".css").string();
   std::ofstream out(outPath, std::ios::binary);
-  if (!out) {
-    close(fd);
-    return false;
-  }
+  if (!out) return false;
   out.write(reinterpret_cast<const char*>(data.data()), data.size());
-  close(fd);
+  out.close();
   return out.good();
 }
 
+// Windows refuses to delete a file another handle still has open, and several of these tests
+// let the parser's FsFile close via RAII only at end of scope — after the cleanup call. On
+// POSIX the unlink succeeds regardless. Temp-file cleanup is housekeeping, not an assertion,
+// so a failure here must not fail the test: swallow the error (the OS reclaims the temp dir).
 static bool removePath(const std::string& path) {
   std::error_code ec;
   std::filesystem::remove_all(path, ec);
@@ -252,7 +298,8 @@ TEST(CssParser, SkipsRulesWithoutSupportedDeclarations) {
   ASSERT_TRUE(parser.loadFromStream(cssFile));
   EXPECT_EQ(parser.ruleCount(), 1u);
 
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 TEST(CssParserPerf, ParseLargeCssEpub) {
@@ -266,6 +313,7 @@ TEST(CssParserPerf, ParseLargeCssEpub) {
   ASSERT_TRUE(writeTempCssFile(cssData, cssPath));
 
   size_t parseTimeUs = 0;
+  size_t parseAllocs = 0;
   bool parseOk = false;
   size_t ruleCount = 0;
 
@@ -281,14 +329,18 @@ TEST(CssParserPerf, ParseLargeCssEpub) {
     }
     parseTimeUs = static_cast<size_t>(elapsedUs(t0));
     ruleCount = parser->ruleCount();
+    parseAllocs = g_allocCount.load();  // sample inside the window, before it is reset
     parseOk = true;
   });
 
   ASSERT_TRUE(parseOk);
   ASSERT_EQ(ruleCount, kFixtureRuleCount);
 
-  printf("BENCHMARK parse_time=%zu us heap_peak=%zu B rule_count=%zu css_bytes=%zu\n", parseTimeUs, heapPeak, ruleCount,
-         cssData.size());
+  // Allocation count alongside peak bytes: peak is blind to churn (a short-lived string raises
+  // it by nothing yet still leaves a hole, and on a no-compaction heap those holes are
+  // permanent for the session), so the count is what tracks fragmentation pressure.
+  printf("BENCHMARK parse_time=%zu us heap_peak=%zu B parse_allocs=%zu rule_count=%zu css_bytes=%zu\n", parseTimeUs,
+         heapPeak, parseAllocs, ruleCount, cssData.size());
 
   CssParser parser("");
   FsFile cssFile;
@@ -310,7 +362,8 @@ TEST(CssParserPerf, ParseLargeCssEpub) {
   printf("LOOKUP_STATS resolveCalls=%u mapHits=%u hotHits=%u diskHits=%u misses=%u\n", stats.resolveCalls,
          stats.mapHits, stats.hotHits, stats.diskHits, stats.misses);
 
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 TEST(CssParserPerf, CacheSaveLoadAndLowHeapLookup) {
@@ -371,7 +424,8 @@ TEST(CssParserPerf, CacheSaveLoadAndLowHeapLookup) {
   EXPECT_EQ(lowHeapStats.diskHits, 0u);
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +533,8 @@ TEST(CssParserArena, ResidentAndIndexMatchHeapResolution) {
   }
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // INDEX-only fallback: when the ruleset is genuinely distinct (no dedup win) and too big for
@@ -537,7 +592,8 @@ TEST(CssParserArena, IndexOnlyFallbackMatchesHeapResolution) {
   parser.clear();
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // Reproduction from a real book (download.epub) reported as a visual regression: rich rules with
@@ -593,7 +649,8 @@ TEST(CssParserArena, ResidentMatchesHeapForRealRichStylesheet) {
   EXPECT_GT(parser.getResolveStats().diskHits, 0u) << "these classes should resolve (hit)";
   parser.clear();
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // The resident path must actually HIT for element, class, and combined selectors — not just
@@ -644,7 +701,8 @@ TEST(CssParserArena, ResidentHitsElementClassAndCombinedSelectors) {
   EXPECT_GT(stats.diskHits, 0u) << "resident produced zero hits for matching selectors";
   parser.clear();
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // The sparse codec must round-trip EVERY style field, not just the margins/font-size the other
@@ -696,7 +754,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   }
   parser.clear();
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // Baseline measurement of the resident CSS footprint (index + distinct-style pool) across
@@ -722,7 +781,8 @@ TEST(CssParserArena, ResidentFootprintBaseline) {
     const CssParser::ResidentFootprint fp = parser.getResidentFootprint();
     parser.clear();
     removePath(cacheDir);
-    std::filesystem::remove(cssPath);
+    std::error_code rmEc;
+    std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
     return fp;
   };
 
@@ -792,7 +852,8 @@ TEST(CssParserCache, FontSizeMultiplierSurvivesDiskCache) {
   EXPECT_FALSE(plain.hasFontSizeMultiplier());
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // Regression (cache v14): list-style-type:none and page-break-before/after from
@@ -840,7 +901,8 @@ TEST(CssParserCache, ListStyleAndPageBreaksSurviveDiskCache) {
   EXPECT_FALSE(plain.hasPageBreakAfter());
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // Regression for the failure class: a compile that hits MAX_RULES
@@ -875,7 +937,8 @@ TEST(CssParserCache, RuleCapExceededDoesNotPersistTruncatedCache) {
   EXPECT_FALSE(parser.hasCache());
 
   removePath(cacheDir);
-  std::filesystem::remove(cssPath);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
 // Font-size absolute units and keywords resolve to body-relative multipliers:

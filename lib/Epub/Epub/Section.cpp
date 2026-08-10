@@ -26,6 +26,7 @@
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
 #include "Page.h"
+#include "blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
 
@@ -94,6 +95,9 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 // The original 96 KB predates trusting those bounds and made background (Background-B)
 // CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
 // Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
+//
+// Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
+// ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
 #define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
@@ -110,6 +114,60 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
+
+// --- Heap-analysis instrumentation (temporary; heap-analysis branch) ------------------------
+// The fragmented-heap restart fires because a 52 KB framebuffer realloc cannot find one
+// contiguous block, and the build is what leaves it that way — measured end-of-build state was
+// "50380 free, 11764 max alloc". What is NOT known is WHERE inside the build the largest block
+// collapses, which decides what to fix. Existing phase logs print free heap only; this adds the
+// contiguous number at the same points plus a per-page trace.
+//
+// SCT_HEAP_TRACE=0 compiles all of it out. Remove this block once the question is answered.
+#ifndef SCT_HEAP_TRACE
+#define SCT_HEAP_TRACE 1
+#endif
+
+#if SCT_HEAP_TRACE
+#define SCT_TRACE_HEAP(spine, label)                                      \
+  LOG_INF("HEAP", "spine=%d %-18s free=%lu contig=%lu", (spine), (label), \
+          static_cast<unsigned long>(esp_get_free_heap_size()),           \
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)))
+
+// Per-chunk low-water probe for the parse feed loop.
+//
+// The per-page trace showed something the page granularity cannot explain: on X4 spine 1,
+// free went 51088 -> 6996 between page 13 and page 14 (contig 42996 -> 4084) and recovered to
+// 43948 by page 18, with an 86 ms gap where the normal page interval is ~30 ms. That is a large
+// transient block held across several pages, not gradual churn — and nothing on the parse path
+// is supposed to take ~44 KB.
+//
+// The parser is fed in PARSE_CHUNK_BYTES (1 KB) slices, so sampling around each write() brackets
+// the drop to a single chunk instead of a whole page. Only the WORST dip is kept and it is
+// reported once per page, so this costs one log line per page rather than one per KB.
+struct ParseHeapLowWater {
+  uint32_t minFree = UINT32_MAX;
+  uint32_t minContig = UINT32_MAX;
+  uint32_t atByteOffset = 0;  // bytes fed into the parser when the low point was seen
+
+  void sample(const size_t bytesFedSoFar) {
+    const uint32_t f = static_cast<uint32_t>(esp_get_free_heap_size());
+    if (f < minFree) {
+      minFree = f;
+      minContig = static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+      atByteOffset = static_cast<uint32_t>(bytesFedSoFar);
+    }
+  }
+  void reset() { *this = ParseHeapLowWater{}; }
+  bool seen() const { return minFree != UINT32_MAX; }
+};
+
+// One instance: only one section build parses at a time (Background-B and C are mutually
+// exclusive over the arena), so a file-scope probe cannot interleave.
+ParseHeapLowWater g_parseLowWater;
+#endif
+#if !SCT_HEAP_TRACE
+#define SCT_TRACE_HEAP(spine, label) ((void)0)
+#endif
 
 // Visitor-feed chunk for phase (b): the granularity at which runBuildParse checks its time budget
 // between visitor writes. Kept small so a build slice yields promptly and input stays responsive.
@@ -267,6 +325,30 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   if (pageCount % 10 == 0) {
     LOG_DBG("SCT", "Page %d processed", pageCount);
   }
+
+#if SCT_HEAP_TRACE
+  // Per-page contiguous trace: the page is serialized and destroyed here, so this samples the
+  // heap at the one point in the parse where a page's worth of transient objects has just been
+  // released. A monotonic decline across pages means the parse is the fragmenter; a flat line
+  // with a single step means something else is, and the step says where to look.
+  // Page-boundary state, plus the WORST heap state seen while this page was being parsed. The
+  // boundary numbers alone hid a ~44 KB transient (X4 spine 1, pages 13->14): whatever takes it
+  // is allocated and released between two page emissions, so only a low-water mark inside the
+  // feed loop can see it. lowAt is the parser byte offset where the dip occurred — feed that
+  // offset back into the chapter XHTML to identify the construct responsible.
+  if (g_parseLowWater.seen()) {
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu | page-low free=%lu contig=%lu lowAt=%lu", pageCount,
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(g_parseLowWater.minFree), static_cast<unsigned long>(g_parseLowWater.minContig),
+            static_cast<unsigned long>(g_parseLowWater.atByteOffset));
+    g_parseLowWater.reset();  // per-page window
+  } else {
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount,
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  }
+#endif
 
   pageCount++;
   return position;
@@ -604,6 +686,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   filePath = getSectionFilePath(st.propertyHash);
 
   st.localPath = epub->getSpineItem(spineIndex).href;
+  SCT_TRACE_HEAP(spineIndex, "build_start");
   LOG_INF("SCT", "createSectionFile spine=%d start: %s (free=%lu)", spineIndex, st.localPath.c_str(),
           esp_get_free_heap_size());
 
@@ -635,6 +718,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
+  sawFootnote_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -740,6 +824,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
     return BuildPhaseResult::Failed;
   }
   st.setupMs = millis() - phaseSetupStart;
+  SCT_TRACE_HEAP(spineIndex, "after_setup");
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
           static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
   return BuildPhaseResult::Ok;
@@ -910,6 +995,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         LOG_INF("SCT", "spine=%d EXTRACTPROF fileops=%ums (flush/close/reopen)", spineIndex,
                 static_cast<uint32_t>((esp_timer_get_time() - tClose) / 1000));
 #endif
+        SCT_TRACE_HEAP(spineIndex, "after_extract");
         LOG_INF("SCT", "createSectionFile spine=%d extracted %u bytes to temp (free=%lu)", spineIndex,
                 static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
         if (overBudget()) {
@@ -951,6 +1037,12 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         const int64_t tv = esp_timer_get_time();
 #endif
         const size_t wrote = st.visitor->write(st.chunkBuf, static_cast<size_t>(n));
+#if SCT_HEAP_TRACE
+        // Sample AFTER the write: the allocation we are hunting happens inside the parser while
+        // it consumes this chunk, and by here it is either still held or already released — a
+        // dip visible here is a block that outlived the chunk that created it.
+        g_parseLowWater.sample(st.tempBytesFed);
+#endif
 #ifdef BENCH_EXTRACT_PROFILE
         visitorUs += static_cast<uint32_t>(esp_timer_get_time() - tv);
 #endif
@@ -1026,9 +1118,18 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
     // means pages were cached with styles silently missing.
-    cssLowHeapDegraded_ = st.cssParser->getResolveStats().lowHeapSkips > 0;
+    //
+    // ...but ONLY when the resolver could actually lose a rule. An arena-RESIDENT ruleset is
+    // served entirely from arena memory: lookupRule() returns from arenaResident_ before it
+    // ever reads allowDiskLookup, so a lowHeapSkip there costs nothing and the styles are
+    // complete. Counting those as degradation threw away correct builds — measured on X3, a
+    // 14-page background build discarded after a single 960-byte dip below the lean floor,
+    // forcing the released-path foreground rebuild whose 52 KB framebuffer realloc is the
+    // failure that ends the session.
+    cssLowHeapDegraded_ = !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
+  SCT_TRACE_HEAP(spineIndex, "after_parse");
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
           esp_get_free_heap_size());
@@ -1221,7 +1322,54 @@ bool Section::createSectionFile(const BuildParams& p, const std::function<void(i
   }
 }
 
-bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount) {
+void Section::setExternalBuildScratch(BuildArena* scratch) {
+  // A build binds its arena exactly once, in initArena() at startBuild(). So if a build is
+  // already live on the small owned arena and the large external region (the borrowed
+  // framebuffer) only becomes available now, the build cannot adopt it — it keeps the small one
+  // and keeps failing to fit things the region would have held comfortably.
+  //
+  // Device-observed on Small Gods: spine 1 (one 583991-byte entry) started with no framebuffer
+  // free, so it took the 10240-byte owned arena. Background-C then borrowed the 52272-byte
+  // framebuffer, but the resumed build still had the 10240, so its 33824-byte inflate window was
+  // evicted to the heap — where 30708 contiguous was not enough. Three attempts failed and the
+  // borrow bought nothing.
+  //
+  // Restart instead. Cheap: abortSectionBuild() deliberately keeps the inflated-HTML cache, so
+  // the restart skips re-inflation and only redoes setup.
+  const bool upgradesArena = scratch != nullptr && scratch->valid() && buildState_ && buildState_->arena != nullptr &&
+                             buildState_->arena == buildState_->ownedArena.get();
+  externalScratch_ = scratch;
+  if (upgradesArena) {
+    LOG_INF("SCT", "spine=%d: build scratch arrived mid-build (%u bytes); restarting to use it", spineIndex,
+            static_cast<uint32_t>(scratch->capacity()));
+    abortSectionBuild();
+  }
+}
+
+// Live while the build runs (read straight off the parser so the reader can poll between
+// steps), latched into sawFootnote_ so it survives buildState_ teardown at Done.
+bool Section::sawFootnote() const {
+  if (buildState_ && buildState_->visitor && buildState_->visitor->sawFootnote()) return true;
+  return sawFootnote_;
+}
+
+bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool arenaBacked) {
+  // An arena-backed build takes the ruleset from the BUILD ARENA, not the heap, so no heap
+  // floor applies to it. Measured X3 (alice, 94 rules): the resident ruleset costs 752 index
+  // + 1306 pool = ~2 KB out of a 52272 B arena whose whole-build high water was 28652 B.
+  // The floors below were sized for the heap-vector layout and predate the arena; leaving
+  // them in front of an arena build made the decision a coin flip on heap noise — the X3
+  // trace has spine 2 passing and spine 3 refused at free=57300 vs a 57344 floor, 44 bytes
+  // apart, in the same boot on the same book. That is not a memory decision, and it is
+  // expensive: the two outcomes write different cache variants (`N_b93d54e8` vs
+  // `N_886d5d5f`), so the reader misses the variant it wants and rebuilds the spine.
+  // The arena path also has a real fallback — every failure in the resident loader does
+  // `indexArena_->release(block); return false;` and drops back to the disk-backed index.
+  if (arenaBacked) return true;
+
+  // Heap-backed builds still need a gate: there the index is a std::vector reserve, and a
+  // failed reserve under -fno-exceptions aborts rather than falling back.
+  //
   // Contig need is dominated by the selector index vector (CSS_INDEX_BYTES_PER_RULE)
   // plus slack for file buffers; everything else (hot/negative caches) allocates in
   // small nodes. Deliberately silent: callers decide whether a refusal is worth a
@@ -1238,9 +1386,24 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
                          const uint32_t requestedHash) {
   BuildParams p = params;
   const CssParser* css = epub->getCssParser();
-  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
-    LOG_INF("SCT", "Low heap for embedded CSS (free=%lu contig=%lu); building no-CSS section cache",
-            esp_get_free_heap_size(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  // Same predicate runBuildSetup() uses to decide setIndexArena(): an external scratch region
+  // (the borrowed framebuffer) means the ruleset lands in the arena, not the heap.
+  const bool arenaBacked = externalScratch_ && externalScratch_->valid();
+  if (p.embeddedStyle && !heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0, arenaBacked)) {
+    // Report the floors, not just the heap state: this gate silently downgrades a book to a
+    // no-CSS section cache (different layout, different cache key), and the X3 trace showed it
+    // firing on spine 2 where the arena still had ~18 KB spare. See
+    // docs/memory-allocation-strategy.md — the floors predate the build arena.
+    const uint32_t requiredContig = std::max<uint32_t>(
+        EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES,
+        static_cast<uint32_t>((css ? css->ruleCount() : 0) * CssParser::CSS_INDEX_BYTES_PER_RULE) + 8 * 1024);
+    LOG_INF("SCT",
+            "Low heap for embedded CSS (free=%lu(floor=%lu) contig=%lu(floor=%lu) rules=%u); building no-CSS section "
+            "cache",
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(requiredContig), static_cast<unsigned>(css ? css->ruleCount() : 0));
     p.embeddedStyle = false;
   }
 
@@ -1310,6 +1473,8 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
       continue;
     }
 
+    // Latch before the parser goes away, so callers can still ask after Done.
+    if (buildState_->visitor && buildState_->visitor->sawFootnote()) sawFootnote_ = true;
     buildState_.reset();
     return fin == BuildPhaseResult::Done ? BuildStep::Done : BuildStep::Failed;
   }
@@ -1402,7 +1567,14 @@ bool Section::activeBuildCssDegraded() const {
   // Read the live CSS resolver's running stats: lowHeapSkips is incremented the moment the
   // resolver drops a disk lookup under heap pressure (see CssParser), so it flags a degrading
   // build mid-parse — before runBuildParse latches cssLowHeapDegraded_ at the parse end.
-  return buildState_ && buildState_->cssParser && buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
+  //
+  // An arena-RESIDENT ruleset never loses a rule to heap pressure (see the note at the
+  // cssLowHeapDegraded_ latch in runBuildParse), so its skips must not abort the build. This
+  // is the mid-parse half of the same rule: Background-B polls this every slice and discards
+  // the whole build the first time it returns true.
+  if (!buildState_ || !buildState_->cssParser) return false;
+  if (buildState_->cssParser->isArenaResident()) return false;
+  return buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
 }
 
 std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex) {
@@ -1434,9 +1606,46 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
   return page;
 }
 
+// Scratch budget for a whole warm pass: the largest per-decode working set on either path —
+// PNG's ≤32 KB inflate ring plus two scanline buffers, or JPEG's 12 KB work pool — with slack
+// for per-allocation alignment. Sized once for the pass rather than per image, because a bump
+// arena reuses the same bytes for every decode; the peak is one decode's needs, not N.
+//
+// This is the fix for the churn described in docs/memory-allocation-strategy.md rule 4: without
+// it, each of the N decodes in a pass takes and returns its own 12-32 KB block, breaking up the
+// contiguous region the caller must later hand back to the framebuffer.
+static constexpr size_t WARM_PASS_SCRATCH_BYTES = 32 * 1024 + 2 * 4096 + 256;
+
 void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
                                  const bool monochromeOutput, const bool alsoWarmGrayscale) {
   if (pageCount == 0) return;
+
+  // Prefer the LENT framebuffer region (externalScratch_) over a fresh heap block. Asking the
+  // heap for ~40 KB contiguous is the very thing this pass is trying not to do — on X3 the
+  // largest free block after boot is 42996, so that allocation is both likely to fail and, when
+  // it succeeds, likely to be the one that splits the region the framebuffer needs back. The
+  // borrowed region is already ours, costs nothing to reuse, and cannot fail to be returned.
+  //
+  // Only usable when nothing else is building out of it: a live build owns the arena cursor,
+  // and a decode bump-allocating underneath it would corrupt that scope.
+  BuildArena* lent = (externalScratch_ && externalScratch_->valid() && !hasActiveBuild()) ? externalScratch_ : nullptr;
+
+  // Fall back to a heap arena only when no region is lent. Best-effort either way: with no
+  // arena at all the decoders use their own heap allocations and the pass behaves exactly as
+  // before — no correctness change, just without the anti-fragmentation benefit.
+  std::unique_ptr<BuildArena> owned;
+  if (!lent) {
+    owned = makeUniqueNoThrow<BuildArena>(WARM_PASS_SCRATCH_BYTES);
+    if (!owned || !owned->valid()) {
+      owned.reset();
+      LOG_DBG("SCT", "warmAllImageCaches: no scratch arena (%u bytes); decoding from heap",
+              static_cast<uint32_t>(WARM_PASS_SCRATCH_BYTES));
+    }
+  }
+  BuildArena* scratchArena = lent ? lent : owned.get();
+  if (scratchArena) scratchArena->reset();  // the pass owns the whole cursor for its duration
+  image_scratch::ScopedArena scratchScope(scratchArena);
+
   const int savedPage = currentPage;
   int warmed = 0;
   for (int p = 0; p < static_cast<int>(pageCount); ++p) {
@@ -1451,7 +1660,13 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
   }
   currentPage = savedPage;
   if (warmed > 0) {
-    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images", warmed);
+    // highWater/failedAlloc tell you whether the scratch budget is right: a non-zero failedAlloc
+    // means decodes fell back to the heap (i.e. the churn is still there). `src` says which
+    // region served the pass — "lent" is the one that costs no contiguous heap.
+    LOG_DBG("SCT", "warmAllImageCaches: warmed %d page(s) with images (scratch src=%s highWater=%u failedAlloc=%u)",
+            warmed, lent ? "lent" : (owned ? "heap" : "none"),
+            scratchArena ? static_cast<uint32_t>(scratchArena->highWater()) : 0u,
+            scratchArena ? static_cast<uint32_t>(scratchArena->failedAllocSize()) : 0u);
   }
 }
 

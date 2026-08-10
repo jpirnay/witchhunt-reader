@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Utf8.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -123,9 +124,10 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
     return &fontData->bitmap[glyph->dataOffset];
   }
 
-  // Check page buffer slots (populated by prewarmCache — one slot per font style)
+  // Check page buffer slots (populated by prewarmCache — one slot per distinct EpdFontData,
+  // i.e. per style AND size)
   for (uint8_t s = 0; s < pageSlotCount; s++) {
-    const auto& slot = pageSlots[s];
+    auto& slot = pageSlots[s];
     if (slot.fontData != fontData || slot.glyphCount == 0) continue;
 
     int left = 0, right = slot.glyphCount - 1;
@@ -133,6 +135,8 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
       int mid = left + (right - left) / 2;
       if (slot.glyphs[mid].glyphIndex == glyphIndex) {
         if (slot.glyphs[mid].bufferOffset != UINT32_MAX) {
+          // Actual render use, not just prewarm order, is what should keep a slot alive.
+          slot.lastUsedTick = ++pageSlotTick_;
           stats.cacheHits++;
           stats.getBitmapTimeUs += micros() - tStart;
           return &slot.buffer[slot.glyphs[mid].bufferOffset];
@@ -363,12 +367,40 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
   if (glyphCount == 0) return 0;
 
-  // Allocate the next available slot
+  // Allocate the next available slot, evicting the least-recently-used one when full.
+  // Refusing instead (the old behaviour) sent every glyph of the refused font down the
+  // per-glyph fallback for the rest of the page — measured at 7562 us per glyph.
+  uint8_t slotIndex = pageSlotCount;
   if (pageSlotCount >= MAX_PAGE_SLOTS) {
-    LOG_ERR("FDC", "All %u page buffer slots full, cannot prewarm fontData=%p", MAX_PAGE_SLOTS, (void*)fontData);
-    return -1;
+    slotIndex = 0;
+    uint32_t oldestTick = UINT32_MAX;
+    for (uint8_t s = 0; s < MAX_PAGE_SLOTS; s++) {
+      if (pageSlots[s].lastUsedTick < oldestTick) {
+        oldestTick = pageSlots[s].lastUsedTick;
+        slotIndex = s;
+      }
+    }
+    LOG_DBG("FDC", "Page slots full; evicting LRU slot %u (fontData=%p) for fontData=%p", slotIndex,
+            (void*)pageSlots[slotIndex].fontData, (void*)fontData);
+    // Callers must not hold a getBitmap() pointer across this — the documented contract is that
+    // a returned bitmap is valid only until the next getBitmap call or a cache eviction.
+    // Clamped: resetStats() can zero these between the prewarm that added them and this
+    // eviction, and an unsigned underflow would report a nonsense footprint.
+    const uint32_t evictedGlyphBytes = pageSlots[slotIndex].glyphCount * sizeof(PageGlyphEntry);
+    stats.pageBufferBytes -= std::min(stats.pageBufferBytes, pageSlots[slotIndex].bufferBytes);
+    stats.pageGlyphsBytes -= std::min(stats.pageGlyphsBytes, evictedGlyphBytes);
+    free(pageSlots[slotIndex].buffer);
+    free(pageSlots[slotIndex].glyphs);
+    pageSlots[slotIndex] = {};
+    pageSlotCount--;
+    // Keep the live slots contiguous in [0, pageSlotCount): the scan loops rely on it.
+    for (uint8_t s = slotIndex; s < pageSlotCount; s++) {
+      pageSlots[s] = pageSlots[s + 1];
+    }
+    pageSlots[pageSlotCount] = {};
+    slotIndex = pageSlotCount;
   }
-  PageSlot& slot = pageSlots[pageSlotCount];
+  PageSlot& slot = pageSlots[slotIndex];
 
   // Step 2: Compute total buffer size and collect unique groups
   uint32_t totalBytes = 0;
@@ -433,6 +465,8 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
   slot.fontData = fontData;
   slot.glyphCount = glyphCount;
+  slot.bufferBytes = totalBytes;
+  slot.lastUsedTick = ++pageSlotTick_;
   pageSlotCount++;
 
   // Initialize lookup entries (bufferOffset = UINT32_MAX means not yet extracted)

@@ -501,10 +501,18 @@ class EpubReaderActivity final : public Activity {
   // with a "Gathering footnotes" popup. No-op when previews are effectively off or the
   // cache already exists. Returns true when the cache is usable.
   bool ensureFootnotePreviewCache();
+  // Polled between build slices. If `target`'s build has seen a footnote and previews are wanted
+  // but not yet gathered, gathers them and returns true — meaning the caller must discard the
+  // section, whose cache variant has just changed from previews-OFF to previews-ON.
+  bool gatherFootnotesIfBuildNeedsThem(const Section* target);
   // True once footnotes.bin is known to exist for this book (primed in onEnter, set by
-  // ensureFootnotePreviewCache). Gates Background-B so it never bakes a preview-enabled
-  // section variant before the cache is gathered.
+  // ensureFootnotePreviewCache). Feeds makeSectionBuildParams(), so it selects the section
+  // cache VARIANT: sections built before the gather are keyed previews-OFF and are rebuilt
+  // once it flips. Background-B is no longer gated on it.
   bool footnotePreviewCacheReady_ = false;
+  // One gather attempt per reader session. Without this a book whose gather fails would retry
+  // the whole-book scan on every page turn that shows a footnote.
+  bool footnotePreviewGatherAttempted_ = false;
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.

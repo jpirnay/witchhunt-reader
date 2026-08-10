@@ -7,7 +7,12 @@
 class FontDecompressor {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
-  static constexpr uint8_t MAX_PAGE_SLOTS = 4;  // One per font style (R/B/I/BI)
+  // Slots are keyed by EpdFontData POINTER, and every SIZE is a distinct EpdFontData -- so these
+  // are shared across style x size, not "one per style" as long assumed. A page using R/B/I at
+  // two sizes wants six. Exhaustion evicts the least-recently-used slot rather than refusing the
+  // prewarm outright; a refused font used to send every one of its glyphs down the per-glyph
+  // fallback for the whole page.
+  static constexpr uint8_t MAX_PAGE_SLOTS = 4;
 
   FontDecompressor() = default;
   ~FontDecompressor();
@@ -74,12 +79,24 @@ class FontDecompressor {
     const EpdFontData* fontData = nullptr;
     PageGlyphEntry* glyphs = nullptr;
     uint16_t glyphCount = 0;
+    uint32_t bufferBytes = 0;   // size of `buffer`, so eviction can unwind the stats it added
+    uint32_t lastUsedTick = 0;  // bumped on prewarm and on every getBitmap hit; drives eviction
   };
   PageSlot pageSlots[MAX_PAGE_SLOTS] = {};
   uint8_t pageSlotCount = 0;
+  uint32_t pageSlotTick_ = 0;
 
   static constexpr uint16_t HOT_GLYPH_BUF_SIZE = 512;  // largest packed single glyph
-  static constexpr uint8_t FALLBACK_CACHE_SLOTS = 1;
+  // A 1-slot LRU is pathological: consecutive distinct glyphs evict each other every time, so
+  // the fallback degenerates to a full group inflate per glyph. Measured X3 on a page whose
+  // prewarm missed its heading size: 16 getBitmap calls, 121007 us total (7562 us/call),
+  // fallback hits=1 misses=12.
+  //
+  // Sized 4, not 8. These slots live in .bss, so each one is permanently off the heap CEILING
+  // rather than merely occupying heap: going to 8 measurably dropped total heap from 266864 to
+  // 263152 (7 x ~530 B), and on a device already reading at ~30 KB free that is not free.
+  // 4 keeps the 4x reduction in eviction thrash for a third of the standing cost.
+  static constexpr uint8_t FALLBACK_CACHE_SLOTS = 4;
 
   struct FallbackSlot {
     const EpdFontData* fontData;

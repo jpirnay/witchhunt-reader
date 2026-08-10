@@ -17,8 +17,7 @@ namespace {
 
 constexpr const char* SHY = "\xC2\xAD";  // UTF-8 U+00AD
 
-TextBlock::WordRange makeRange(const std::vector<std::string>& words,
-                               const std::vector<EpdFontFamily::Style>& styles,
+TextBlock::WordRange makeRange(const std::vector<std::string>& words, const std::vector<EpdFontFamily::Style>& styles,
                                const std::vector<uint8_t>& sizes, const size_t first, const size_t count) {
   TextBlock::WordRange r;
   r.words = &words;
@@ -72,10 +71,10 @@ struct Fixture {
 };
 
 Fixture uniformFixture() {
-  return {{"alpha", "beta", "gamma", "delta", "epsilon"},
-          {EpdFontFamily::REGULAR, EpdFontFamily::BOLD, EpdFontFamily::ITALIC, EpdFontFamily::REGULAR,
-           EpdFontFamily::BOLD},
-          {100, 100, 100, 100, 100}};
+  return {
+      {"alpha", "beta", "gamma", "delta", "epsilon"},
+      {EpdFontFamily::REGULAR, EpdFontFamily::BOLD, EpdFontFamily::ITALIC, EpdFontFamily::REGULAR, EpdFontFamily::BOLD},
+      {100, 100, 100, 100, 100}};
 }
 
 TEST(TextBlockRange, MatchesVectorCtorForInteriorSlice) {
@@ -95,8 +94,8 @@ TEST(TextBlockRange, MatchesVectorCtorForTrailingSlice) {
 
 TEST(TextBlockRange, StripsSoftHyphensAndMatchesVectorCtor) {
   Fixture f;
-  f.words = {std::string("hy") + SHY + "phen", std::string(SHY) + "leading",
-             std::string("trailing") + SHY, std::string("mul") + SHY + "ti" + SHY + "ple", "plain"};
+  f.words = {std::string("hy") + SHY + "phen", std::string(SHY) + "leading", std::string("trailing") + SHY,
+             std::string("mul") + SHY + "ti" + SHY + "ple", "plain"};
   f.styles.assign(f.words.size(), EpdFontFamily::REGULAR);
   f.sizes.assign(f.words.size(), 100);
   const std::vector<int16_t> xpos{0, 30, 60, 90, 120};

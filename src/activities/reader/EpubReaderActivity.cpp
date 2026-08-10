@@ -243,6 +243,38 @@ constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
 
+// --- Heap-gate instrumentation (temporary; heap/gate-rederivation branch) --------------------
+// The reader path has ~8 free/contig floors (PRE_RENDER_, BG_BUILD_*, IN_PLACE_BUILD_*,
+// RESIDENT_BUILD_ABORT_*) that predate the build arena. Several of them REJECT SILENTLY, so a
+// device trace cannot show which floor sent a build down the released path — and the released
+// path is where the X3 fragmented-heap restart happens. Device-measured example (X4):
+//
+//   heapAllowsInPlaceBuild=0 css=1 ring=15799 free=71544(floor=83383) contig=59380(floor=32768)
+//
+// contig passes with 26 KB to spare; `free` fails against a floor that is UNREACHABLE (post-font
+// free peaks at ~97 KB and is ~71 KB by reader time), because the floor adds ringBytes on top of
+// a base already sized for the working set. Meanwhile the arena serves every build with
+// failedAlloc=0 at ~30 KB high-water. One line per gate, so one trace shows every decision and
+// the arithmetic behind it. Values are NOT changed in this commit — measure first.
+//
+// HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
+#ifndef HEAP_GATE_TRACE
+#define HEAP_GATE_TRACE 1
+#endif
+
+#if HEAP_GATE_TRACE
+// `floor` of 0 means "not a numeric floor" (e.g. a delegated predicate); printed as `-`.
+void logHeapGate(const char* gate, const bool passed, const uint32_t freeHeap, const uint32_t freeFloor,
+                 const uint32_t contigHeap, const uint32_t contigFloor) {
+  LOG_INF("HEAP", "gate=%-22s %s free=%lu(floor=%lu) contig=%lu(floor=%lu)", gate, passed ? "PASS" : "REJECT",
+          static_cast<unsigned long>(freeHeap), static_cast<unsigned long>(freeFloor),
+          static_cast<unsigned long>(contigHeap), static_cast<unsigned long>(contigFloor));
+}
+#define HEAP_GATE(gate, passed, f, ff, c, cf) logHeapGate((gate), (passed), (f), (ff), (c), (cf))
+#else
+#define HEAP_GATE(gate, passed, f, ff, c, cf) ((void)0)
+#endif
+
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
 // Temporary corruption tripwire: walks the entire heap and names the checkpoint that
 // sees damage. DANGEROUS on this platform: the ESP32-C3 startup-stack heap region
@@ -267,7 +299,17 @@ inline void checkHeapIntegrity(const char*) {}
 void logReaderMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  LOG_DBG("ERS", "Reader mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
+  // free+contig alone cannot tell "something is retaining bytes" from "the same bytes have
+  // fragmented": both show up as contig falling. The block counts separate them --
+  //   allocated rising, free bytes falling  -> a session-lifetime allocation is accumulating
+  //   allocated flat, freeBlk rising        -> pure fragmentation, the bytes came back split
+  // The X3 trace has contig decaying 49140 -> 38900 -> 15860 across one session with the
+  // secondary buffer RELEASED at each sample, so the cause is resident, not the framebuffer.
+  multi_heap_info_t info{};
+  heap_caps_get_info(&info, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  LOG_DBG("ERS", "Reader mem[%s]: free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu", stage, freeHeap,
+          contigHeap, static_cast<unsigned long>(info.allocated_blocks), static_cast<unsigned long>(info.free_blocks),
+          static_cast<unsigned long>(info.total_allocated_bytes));
 }
 #else
 inline void logReaderMemSnapshot(const char*) {}
@@ -452,9 +494,10 @@ void EpubReaderActivity::onEnter() {
   bookFontSizeNormalizationOverride = currentBook.fontSizeNormalizationOverride;
   bookGuideDotsOverride = currentBook.guideDotsOverride;
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
-  // Prime the footnote-cache flag with one existence probe so Background-B is not
-  // needlessly gated on an already-gathered book (the gather itself runs lazily at
-  // the first preview-enabled foreground build).
+  // Prime the footnote-cache flag with one existence probe: an already-gathered book must
+  // report previews-available immediately, or makeSectionBuildParams() would key its sections
+  // to the previews-OFF variant and rebuild the whole book. The gather itself now runs lazily,
+  // on the first page that actually contains a footnote (see render()).
   footnotePreviewCacheReady_ = FootnotePreviews::cacheExists(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_recent_books");
 
@@ -840,7 +883,12 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
   p.bionicReadingEnabled = getEffectiveBionicReading();
-  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews();
+  // ACTUAL availability, not just the setting. This is what lets the gather be deferred: a
+  // section built before footnotes.bin exists genuinely has no previews baked in, so it must be
+  // cached under the previews-OFF hash. Once the gather runs the hash flips, the preview-less
+  // cache entry is simply not looked up, and the spine rebuilds with previews. Keying this on
+  // the setting alone is why the gather previously had to run up-front for every book.
+  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews() && footnotePreviewCacheReady_;
   p.imageRendering = lastRenderStats.imageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   return p;
@@ -936,12 +984,10 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
     return;
   }
-  // Never bake a preview-enabled section variant before footnotes.bin exists: the pages
-  // would be cached preview-less under the previews-on hash and stay that way. The gather
-  // is foreground-only (first preview-enabled build); B just waits for it.
-  if (getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_) {
-    return;
-  }
+  // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
+  // actual preview availability, so a build started before the gather is cached under the
+  // previews-OFF hash rather than masquerading as preview-enabled. Blocking B here used to stall
+  // all background building for the whole of a preview-enabled book's first open.
   // Background A keeps priority: it determines perceived page-turn speed, and its total
   // cost is small against a multi-second page-read window. Wait until its pass has run
   // (pendingPreRender clears whether or not it produced a ready page).
@@ -980,9 +1026,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // section state the render task mutates — an earlier unlocked version in
   // serviceBackgroundWork() raced buildSection's reassignment of `section`. B keeps
   // waiting behind pendingPreRender until the retry has run, preserving A's priority.
-  if (!preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
-      esp_get_free_heap_size() >= PRE_RENDER_MIN_FREE_HEAP_BYTES &&
-      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage)) {
+  const uint32_t preRenderFree = esp_get_free_heap_size();
+  // Everything except the heap floor, so the floor can be reported on its own. Pre-render is a
+  // nice-to-have (page-turn latency), not correctness — but a floor that rejects it constantly is
+  // still evidence the floors are mistuned.
+  const bool preRenderWanted =
+      !preRenderedPage.ready && section->currentPage + 1 < section->pageCount &&
+      (preRenderRearmSpine_ != currentSpineIndex || preRenderRearmPage_ != section->currentPage);
+  if (preRenderWanted && preRenderFree < PRE_RENDER_MIN_FREE_HEAP_BYTES) {
+    HEAP_GATE("preRenderArm", false, preRenderFree, PRE_RENDER_MIN_FREE_HEAP_BYTES, 0, 0);
+  }
+  if (preRenderWanted && preRenderFree >= PRE_RENDER_MIN_FREE_HEAP_BYTES) {
     preRenderRearmSpine_ = currentSpineIndex;
     preRenderRearmPage_ = section->currentPage;
     pendingPreRender = true;
@@ -1085,9 +1139,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
       const uint32_t freeHeap = esp_get_free_heap_size();
       const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      if (freeHeap <
-              std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) ||
-          contigHeap < std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024)) {
+      const uint32_t bgFreeFloor =
+          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
+      const uint32_t bgContigFloor = std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024);
+      if (freeHeap < bgFreeFloor || contigHeap < bgContigFloor) {
+        HEAP_GATE("bgB_waitheap", false, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
         return;
       }
       // Refuse — don't let startBuild silently downgrade — when the book wants embedded
@@ -1097,6 +1153,9 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       if (lastRenderStats.embeddedStyle) {
         const CssParser* css = epub->getCssParser();
         if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
+          // Delegated predicate (Section::heapAllowsEmbeddedStyle) rather than a local floor —
+          // 0 floors print as the raw heap state so the trace still shows where it stood.
+          HEAP_GATE("bgB_embeddedCss", false, freeHeap, 0, contigHeap, 0);
           return;
         }
         // Reached only when the borrow above was unavailable, i.e. B is building RESIDENT out of
@@ -1105,9 +1164,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         // let Background-C build it released (clean) on navigation. (A borrowed build resolves CSS
         // from the arena at the lower lean floor, so it never consults this gate.)
         if (freeHeap < BG_BUILD_CSS_MIN_FREE_HEAP_BYTES) {
+          HEAP_GATE("bgB_cssResident", false, freeHeap, BG_BUILD_CSS_MIN_FREE_HEAP_BYTES, contigHeap, 0);
           return;
         }
       }
+      // Log the PASS too: knowing how much margin a successful gate had is what tells us whether
+      // a floor is merely conservative or actively wrong.
+      HEAP_GATE("bgB_waitheap", true, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
       backgroundBuildState_ = BackgroundBuildState::Building;
       return;
     }
@@ -1146,6 +1209,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         step = backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
       }
       checkHeapIntegrity("after_b_slice");
+      if (gatherFootnotesIfBuildNeedsThem(backgroundSection_.get())) {
+        // Variant hash changed under this build; discard and let B start again on the
+        // previews-ON variant.
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+        return;
+      }
       if (step == Section::BuildStep::More) {
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
         // The moment the CSS resolver starts skipping lookups the result is doomed to be
@@ -1282,13 +1352,27 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   }
   checkHeapIntegrity("after_c_slice");
 
+  if (gatherFootnotesIfBuildNeedsThem(section.get())) {
+    // Variant hash changed under this build; drop it and re-enter, which rebuilds this spine
+    // with the preview text baked in. No RenderLock here: this function already holds one for
+    // its whole body, and renderingMutex is a plain (non-recursive) mutex taken with
+    // portMAX_DELAY — a second take from this task would hang the loop task permanently.
+    section.reset();
+    requestUpdate();
+    return;
+  }
+
   if (step == Section::BuildStep::More) {
     // Proactive low-heap guard: while the build is resident (AA buffer kept), bail to the released
     // path before heap reaches the fault zone. Only meaningful when the buffer is still resident —
     // a build already running released has that headroom and should ride it out.
-    if (!secondaryBufferDegraded_ && (esp_get_free_heap_size() < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
-                                      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) <
-                                          RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES)) {
+    const uint32_t residentFree = esp_get_free_heap_size();
+    const uint32_t residentContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    const bool residentAbort = !secondaryBufferDegraded_ && (residentFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
+                                                             residentContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+    if (residentAbort) {
+      HEAP_GATE("residentAbort", false, residentFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, residentContig,
+                RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
       fallbackToReleasedRebuild("low heap mid-build", /*retryIncremental=*/true);
       return;
     }
@@ -2408,6 +2492,24 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
   return false;
 }
 
+bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(const Section* target) {
+  if (!target || !getEffectiveInlineFootnotePreviews() || footnotePreviewCacheReady_ ||
+      footnotePreviewGatherAttempted_ || !target->sawFootnote()) {
+    return false;
+  }
+  // The build in progress is laying this spine out WITHOUT previews, and we now know it needs
+  // them. Stop here rather than at first render: a whole-book-in-one-spine EPUB (Small Gods is
+  // one 583991-byte spine) would otherwise lay out the entire novel, render, and only then
+  // discover it must do all of it again. Polled between build slices, so the work discarded is
+  // whatever came before the first footnote link — typically a page or two.
+  footnotePreviewGatherAttempted_ = true;
+  LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now", currentSpineIndex);
+  if (!ensureFootnotePreviewCache()) {
+    return false;  // gather failed; the latch stops us retrying, build continues preview-less
+  }
+  return true;  // caller must drop the section: its variant hash just changed
+}
+
 bool EpubReaderActivity::ensureFootnotePreviewCache() {
   if (!epub || !getEffectiveInlineFootnotePreviews()) {
     return true;
@@ -2701,6 +2803,8 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
           embeddedStyle ? 1 : 0, static_cast<unsigned long>(ringBytes), static_cast<unsigned long>(freeHeap),
           static_cast<unsigned long>(freeFloor), static_cast<unsigned long>(contigHeap),
           static_cast<unsigned long>(contigFloor));
+  // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
+  HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", ok, freeHeap, freeFloor, contigHeap, contigFloor);
   return ok;
 }
 
@@ -2794,10 +2898,12 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     LOG_INF("ERS", "Building section in place (secondary buffer kept): free=%lu contig=%lu", esp_get_free_heap_size(),
             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
   } else {
-    LOG_INF("ERS", "Index start mem (before fb release): free=%lu", esp_get_free_heap_size());
+    LOG_INF("ERS", "Index start mem (before fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
     released = true;
-    LOG_INF("ERS", "Index start mem (after fb release): free=%lu", esp_get_free_heap_size());
+    LOG_INF("ERS", "Index start mem (after fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   }
 
   // Blocking build (the fallback path: X3, tight heap, a failed Background-C attempt, or a
@@ -2808,8 +2914,9 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
 
   const uint32_t createStart = millis();
   bool createOk = runCreate();
-  LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - createStart,
-          esp_get_free_heap_size());
+  LOG_INF("ERS", "createSectionFile returned %d in %ums (free=%lu contig=%lu)", createOk ? 1 : 0,
+          millis() - createStart, esp_get_free_heap_size(),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("after_createSectionFile");
 
   if (!createOk && inPlace) {
@@ -2839,7 +2946,9 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     // pass on the first image page, where headroom is worse.
     section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true,
                                 /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing());
-    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu)", millis() - warmStart, esp_get_free_heap_size());
+    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu contig=%lu)", millis() - warmStart,
+            esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     renderer.clearScreen();
     checkHeapIntegrity("after_warmAllImageCaches");
   }
@@ -2931,11 +3040,11 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   resetBackgroundBuild();
   const unsigned long sectionStart = millis();
 
-  // Preview text is baked into laid-out pages. Prepare its book-level source before
-  // probing the preview-enabled section variant so a cache hit can never bypass gather.
-  if (getEffectiveInlineFootnotePreviews()) {
-    ensureFootnotePreviewCache();
-  }
+  // The gather is NOT run here any more. It is a whole-book two-pass scan (measured 2822 ms on
+  // X3 for alice-illustrated, which has no footnotes at all) and running it before every first
+  // section build charged every reader open for it, whether or not the book has notes. It now
+  // runs on the first page that actually contains a footnote -- see render(). Sections built
+  // before that are cached honestly as previews-off.
 
   // A resumed partial Background-B build has no on-disk LUT yet, so skip loadSectionFile (it
   // would clobber the live write handle); it always needs building. Otherwise probe the cache.
@@ -2955,9 +3064,12 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   // One grep-able line per section entry tying the cache decision to the effective
   // preview inputs — discriminates "stale variant loaded" from "effective value not
   // what the UI shows" from "parser gate leak" in field logs.
-  LOG_INF("ERS", "Section probe spine=%d: cacheHit=%d previews=%d (override=%d global=%u)", currentSpineIndex,
-          cacheHit ? 1 : 0, getEffectiveInlineFootnotePreviews() ? 1 : 0,
-          static_cast<int>(bookInlineFootnotePreviewsOverride), static_cast<unsigned>(SETTINGS.inlineFootnotePreviews));
+  // `previews` is the SETTING; `variant` is what actually keys the cache — they differ before the
+  // deferred gather has run, which is precisely the state this line exists to make visible.
+  LOG_INF("ERS", "Section probe spine=%d: cacheHit=%d previews=%d variant=%d (override=%d global=%u)",
+          currentSpineIndex, cacheHit ? 1 : 0, getEffectiveInlineFootnotePreviews() ? 1 : 0,
+          probeParams.inlineFootnotePreviews ? 1 : 0, static_cast<int>(bookInlineFootnotePreviewsOverride),
+          static_cast<unsigned>(SETTINGS.inlineFootnotePreviews));
 
   if (needBuild) {
     lastRenderStats.cacheRebuilt = true;
@@ -3223,6 +3335,25 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
     // Collect footnotes from the loaded page
     currentPageFootnotes = std::move(p->footnotes);
+
+    // Deferred gather: the first page that actually carries a footnote is the first moment we
+    // know this book needs previews at all. Doing it here instead of before every first section
+    // build means a book with no notes never pays the whole-book two-pass scan (2822 ms on X3).
+    // Latched so a failed gather is not retried on every single page turn.
+    if (!currentPageFootnotes.empty() && getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_ &&
+        !footnotePreviewGatherAttempted_) {
+      footnotePreviewGatherAttempted_ = true;
+      if (ensureFootnotePreviewCache()) {
+        // The section on disk was built as previews-OFF and is now the wrong variant:
+        // makeSectionBuildParams() yields the previews-ON hash from here on. Drop it and
+        // re-enter render(), which rebuilds this spine with the preview text baked in.
+        LOG_INF("ERS", "Footnote previews gathered on demand (spine %d); rebuilding with previews", currentSpineIndex);
+        section.reset();
+        requestUpdate();
+        automaticPageTurnActive = false;
+        return;
+      }
+    }
     lastRenderStats.hadImages = p->hasImages();
     lastRenderStats.footnoteCount = static_cast<int>(currentPageFootnotes.size());
     lastRenderStats.spineIndex = currentSpineIndex;

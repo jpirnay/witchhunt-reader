@@ -21,11 +21,21 @@ namespace {
 
 std::atomic<size_t> g_liveBytes{0};
 std::atomic<size_t> g_peakBytes{0};
+std::atomic<size_t> g_allocCount{0};
+constexpr int kSizeBucketCount = 12;
+std::atomic<size_t> g_sizeBuckets[kSizeBucketCount];
 std::atomic<bool> g_tracking{false};
 thread_local bool g_inHook = false;
 
 void trackAlloc(size_t sz) {
   if (!g_tracking || g_inHook) return;
+  g_allocCount.fetch_add(1, std::memory_order_relaxed);
+  // Size histogram: which allocations dominate the count is not obvious from the code — the
+  // ones that fragment a no-compaction heap are not necessarily the ones you notice reading it.
+  // Buckets are powers of two: [0]=<=16B, [1]=<=32B, ... [11]=>16KB.
+  size_t bucket = 0;
+  for (size_t limit = 16; bucket < 11 && sz > limit; limit <<= 1) bucket++;
+  g_sizeBuckets[bucket].fetch_add(1, std::memory_order_relaxed);
   const size_t live = g_liveBytes.fetch_add(sz) + sz;
   size_t peak = g_peakBytes.load(std::memory_order_relaxed);
   while (live > peak && !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
@@ -118,10 +128,18 @@ void* realloc(void* ptr, size_t size) {
 void heapTrackBegin() {
   g_liveBytes.store(0);
   g_peakBytes.store(0);
+  g_allocCount.store(0);
+  for (auto& b : g_sizeBuckets) b.store(0);
   g_tracking.store(true);
 }
 
 size_t heapTrackEnd() {
   g_tracking.store(false);
   return g_peakBytes.load();
+}
+
+size_t heapTrackAllocCount() { return g_allocCount.load(); }
+
+void heapTrackSizeHistogram(size_t* out, const int count) {
+  for (int i = 0; i < count && i < kSizeBucketCount; i++) out[i] = g_sizeBuckets[i].load();
 }

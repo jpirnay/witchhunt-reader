@@ -9,3 +9,11 @@
 void heapTrackBegin();
 // Stop tracking and return the peak live bytes observed since begin().
 size_t heapTrackEnd();
+// Number of allocations since begin(). Peak bytes alone hides allocation CHURN — many
+// short-lived blocks can leave peak flat while still fragmenting a no-compaction heap,
+// which is the failure mode on the ESP32-C3. Valid after heapTrackEnd().
+size_t heapTrackAllocCount();
+// Power-of-two size histogram of allocations since begin(): [0]=<=16B, [1]=<=32B, ... [11]=>16KB.
+// Fills up to `count` buckets. Reveals which allocations dominate by COUNT, which is what
+// fragments a no-compaction heap.
+void heapTrackSizeHistogram(size_t* out, int count);

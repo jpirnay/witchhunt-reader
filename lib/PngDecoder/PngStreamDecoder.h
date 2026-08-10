@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>     // optional caller-owned scratch (see setScratchArena)
 #include <HalStorage.h>     // FsFile
 #include <InflateReader.h>  // uzlib streaming inflate
 
@@ -64,6 +65,25 @@ class PngStreamDecoder {
   // (interlaced) or oversized image, or if buffer allocation fails.
   bool begin(FsFile& file, Info& info);
 
+  // Draw the inflate ring and the two scanline buffers from `arena` instead of the heap.
+  // Call BEFORE begin(); ignored once begin() has allocated.
+  //
+  // These three are the largest per-decode blocks (ring ≤32 KB + 2 x rawRowBytes), and a warm
+  // pass decodes many images back to back — on a no-compaction heap that churn is what breaks
+  // up the contiguous region a later framebuffer realloc needs (see
+  // docs/memory-allocation-strategy.md, rule 4). Sourcing them from a caller-owned arena keeps
+  // the whole pass to one allocation.
+  //
+  // The arena must outlive this decoder. Allocation is scoped to one reserveBlock() released
+  // by end()/~PngStreamDecoder, so consecutive decoders over the same arena reuse the bytes
+  // rather than stacking. Falls back to the heap for any block the arena cannot satisfy, so a
+  // too-small arena degrades in speed, never in correctness.
+  void setScratchArena(BuildArena* arena) { scratchArena_ = arena; }
+
+  // Bytes setScratchArena() needs for an image of this shape. Callers size their arena from
+  // the worst case in the pass; `expectedOutputSize` is height * (rawRowBytes + 1).
+  static size_t scratchBytesFor(size_t expectedOutputSize, uint32_t rawRowBytes);
+
   // Decode the next source scanline (top to bottom).
   //   grayOut  : receives `info.width` 8-bit grayscale samples. When alphaOut is
   //              null, transparent pixels are composited over white (the opaque
@@ -103,6 +123,12 @@ class PngStreamDecoder {
 
   uint8_t* currentRow_ = nullptr;
   uint8_t* previousRow_ = nullptr;
+  // Optional caller-owned scratch (see setScratchArena). When set and the reservation
+  // succeeds, currentRow_/previousRow_/the ring point INTO the arena and must not be freed;
+  // arenaOwnsBuffers_ records that so end() frees the right things.
+  BuildArena* scratchArena_ = nullptr;
+  BuildArena::Block scratchBlock_;
+  bool arenaOwnsBuffers_ = false;
 
   uint32_t chunkBytesRemaining_ = 0;
   bool idatFinished_ = false;

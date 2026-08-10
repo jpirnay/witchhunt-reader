@@ -13,6 +13,7 @@
 #include <memory>
 #include <new>
 
+#include "../blocks/ImageBlock.h"  // image_scratch: pass-wide decode arena
 #include "DirectPixelWriter.h"
 #include "DitherUtils.h"
 #include "PixelCache.h"
@@ -152,6 +153,9 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
     file.close();
     return points;
   }
+  // This analysis is a FULL second inflate of the image (see the loop below), so it pays the
+  // same ring cost as a real decode — route it through the pass scratch too.
+  decoder->setScratchArena(image_scratch::get());
   PngStreamDecoder::Info info;
   if (!decoder->begin(file, info)) {
     file.close();
@@ -217,6 +221,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     file.close();
     return false;
   }
+  decoder->setScratchArena(image_scratch::get());
   PngStreamDecoder::Info info;
   if (!decoder->begin(file, info)) {
     LOG_ERR("PNG", "Failed to start PNG decode: %s", imagePath.c_str());

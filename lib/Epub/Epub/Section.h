@@ -33,6 +33,9 @@ class Section {
   // usable but visually degraded; background callers discard it so the foreground
   // blocking path (more headroom) rebuilds it clean.
   bool cssLowHeapDegraded_ = false;
+  // Latched from the parser during the build; survives buildState_ teardown so callers can
+  // still read it after Done. See sawFootnote().
+  bool sawFootnote_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -159,7 +162,10 @@ class Section {
   // until the build completes or is aborted; it is reset (not freed) per build.
   // Call before the first stepSectionBuild/createSectionFile of a build; a null
   // pointer reverts to the internal heap-backed arena.
-  void setExternalBuildScratch(BuildArena* scratch) { externalScratch_ = scratch; }
+  // Not a plain setter: if a build is already live on the small owned arena when a large
+  // external region arrives, it restarts the build so the region is actually used. See the
+  // definition in Section.cpp.
+  void setExternalBuildScratch(BuildArena* scratch);
   // Percent of the spine XHTML consumed by the in-flight build (0–100; 100 once the
   // stream is exhausted and only Finalize remains). 0 when no build is live. Feeds the
   // DEBUG_BACKGROUND_WORK overlay.
@@ -176,7 +182,10 @@ class Section {
   // cssRuleCount sizes the dominant contiguous allocation (the selector index,
   // ~16 B/rule) — pass CssParser::ruleCount(), or 0 when unknown. Never logs; callers
   // log refusals at whatever cadence suits them.
-  static bool heapAllowsEmbeddedStyle(size_t cssRuleCount);
+  // arenaBacked: the build will bump-allocate the ruleset from a build arena (the borrowed
+  // secondary framebuffer) instead of the heap, in which case no heap floor applies. Reader-side
+  // callers gate heap-RESIDENT builds and keep the default.
+  static bool heapAllowsEmbeddedStyle(size_t cssRuleCount, bool arenaBacked = false);
   std::unique_ptr<Page> loadPageFromSectionFile();
   // Number of pages fully written to the section file during an active build.
   // Increases monotonically as the build progresses; 0 when no build is live.
@@ -209,6 +218,10 @@ class Section {
   // True when the last build's CSS resolution hit low-heap skips (styles silently
   // missing from the cached pages). Only meaningful right after a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True once the build has seen a footnote link in this spine. Live during the build (the
+  // reader polls it between steps to abandon a previews-less build early) and still valid
+  // after it finishes.
+  bool sawFootnote() const;
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced
   // caller (Background-B) abort early instead of finishing a build it will discard. False when
