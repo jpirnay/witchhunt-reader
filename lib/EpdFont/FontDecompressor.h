@@ -7,7 +7,12 @@
 class FontDecompressor {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
-  static constexpr uint8_t MAX_PAGE_SLOTS = 4;  // One per font style (R/B/I/BI)
+  // Slots are keyed by EpdFontData POINTER, and every SIZE is a distinct EpdFontData -- so these
+  // are shared across style x size, not "one per style" as long assumed. A page using R/B/I at
+  // two sizes wants six. Exhaustion evicts the least-recently-used slot rather than refusing the
+  // prewarm outright; a refused font used to send every one of its glyphs down the per-glyph
+  // fallback for the whole page.
+  static constexpr uint8_t MAX_PAGE_SLOTS = 4;
 
   FontDecompressor() = default;
   ~FontDecompressor();
@@ -74,12 +79,42 @@ class FontDecompressor {
     const EpdFontData* fontData = nullptr;
     PageGlyphEntry* glyphs = nullptr;
     uint16_t glyphCount = 0;
+    uint32_t bufferBytes = 0;   // size of `buffer`, so eviction can unwind the stats it added
+    uint32_t lastUsedTick = 0;  // bumped on prewarm and on every getBitmap hit; drives eviction
   };
   PageSlot pageSlots[MAX_PAGE_SLOTS] = {};
   uint8_t pageSlotCount = 0;
+  uint32_t pageSlotTick_ = 0;
+
+  // Fixed scratch for group decompression, shared by prewarmCache() and the getBitmap()
+  // fallback. At most ONE group is live at a time in either path (each decompresses, extracts,
+  // then releases before touching the next), and the two never overlap -- prewarm runs before
+  // the render pass that calls getBitmap -- so a single buffer serves both.
+  //
+  // This replaces a malloc/free per group per prewarm call per page. Measured X3: one page ran
+  // 3 prewarm calls over 5 groups with a peak group of 10555 B, so ~5 transient allocations of
+  // wildly varying size per page, each landing in the largest free block and splitting it at a
+  // different offset. That is what ratcheted contig down 42996 -> 38900 -> 34804 without ever
+  // recovering, while allocated/free block counts merely oscillated (i.e. fragmentation, not a
+  // leak). A fixed size is the point: the block is carved once, at a stable address.
+  //
+  // NOT sized to the format cap. GROUP_MAX_UNCOMPRESSED_BYTES is 65536 in fontconvert.py, whose
+  // comment calls 64 KB "a comfortable transient malloc on the ESP32-C3" -- untrue once contig
+  // sits near 34 KB. Groups above this bound still take the malloc path.
+  static constexpr uint32_t GROUP_SCRATCH_BYTES = 16 * 1024;
+  uint8_t* groupScratch_ = nullptr;
+  // Borrow the shared scratch when the group fits, else malloc. *outOwned tells the caller
+  // whether releaseGroupBuffer() must free it.
+  uint8_t* acquireGroupBuffer(uint32_t bytes, bool* outOwned);
+  static void releaseGroupBuffer(uint8_t* buf, bool owned);
 
   static constexpr uint16_t HOT_GLYPH_BUF_SIZE = 512;  // largest packed single glyph
-  static constexpr uint8_t FALLBACK_CACHE_SLOTS = 1;
+  // A 1-slot LRU is pathological: consecutive distinct glyphs evict each other every time, so
+  // the fallback degenerates to a full group inflate per glyph. Measured X3 on a page whose
+  // prewarm did not cover its heading size: 16 getBitmap calls, 121007 us total (7562 us/call),
+  // fallback hits=1 misses=12. These slots are fixed-size and live inside the object, so more
+  // of them cost static bytes and cannot fragment the heap.
+  static constexpr uint8_t FALLBACK_CACHE_SLOTS = 8;
 
   struct FallbackSlot {
     const EpdFontData* fontData;
