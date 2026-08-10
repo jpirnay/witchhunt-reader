@@ -294,8 +294,26 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
    W x=172 s=0 z=100 t=path
    W x=218 s=0 z=100 t=is
    W x=239 s=0 z=100 t=untouched.
-  TABLE y=276 x=0 h=36
-  TABLE y=312 x=0 h=36
+  TABLE y=276 x=0 h=36 cols=1 border=1 rows=1
+   ROW h=34 hdr=1 cells=1
+    CELL 0 hdr=1 lines=1
+     LN words=4
+      W x=18 s=0 z=100 t=Header
+      W x=78 s=0 z=100 t=spanning
+      W x=161 s=0 z=100 t=two
+      W x=195 s=0 z=100 t=columns
+  TABLE y=312 x=0 h=36 cols=2 border=1 rows=1
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=3
+      W x=18 s=0 z=100 t=Body
+      W x=61 s=0 z=100 t=cell
+      W x=101 s=0 z=100 t=one.
+    CELL 1 hdr=0 lines=1
+     LN words=3
+      W x=18 s=0 z=100 t=Body
+      W x=61 s=0 z=100 t=cell
+      W x=101 s=0 z=100 t=two.
   LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=Closing
    W x=74 s=0 z=100 t=text
