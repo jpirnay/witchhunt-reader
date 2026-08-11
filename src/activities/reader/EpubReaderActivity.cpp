@@ -1314,6 +1314,31 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   const auto fallbackToReleasedRebuild = [&](const char* reason, const bool retryIncremental) {
     LOG_ERR("ERS", "Background-C spine=%d %s; falling back to released %s rebuild", currentSpineIndex, reason,
             retryIncremental ? "incremental" : "blocking");
+    // Why did the BORROWED build fail — was the arena out of room, or the heap? The comment below
+    // asserts the latter ("CSS-heavy books need the full freed block"), and the whole released
+    // path rests on it, but the claim has never been separated from its alternative. It is also
+    // circular as stated: a released build has no arena, so CSS resolves from the HEAP, and that
+    // is what needs ~90 KB — a borrowed build resolves out of the arena at the lean floor.
+    //
+    // BuildArena exposes exactly the pair that decides it (see BuildArena.h: failedAllocSize is
+    // the last REFUSED size, highWater only records successes):
+    //   failedAlloc != 0                     -> the arena really ran out; the release is earned.
+    //   failedAlloc == 0, highWater << cap   -> the arena was never the constraint; the failure is
+    //                                           heap-side and the release treats the wrong cause.
+    // Logged before the teardown below destroys the arena. See
+    // docs/memory-allocation-strategy.md §9.2.
+    if (buildScratch_) {
+      LOG_ERR("ERS", "Background-C spine=%d arena: highWater=%u/%u failedAlloc=%u releaseFails=%lu free=%lu contig=%lu",
+              currentSpineIndex, static_cast<uint32_t>(buildScratch_->highWater()),
+              static_cast<uint32_t>(buildScratch_->capacity()), static_cast<uint32_t>(buildScratch_->failedAllocSize()),
+              static_cast<unsigned long>(buildScratch_->releaseFailures()),
+              static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    } else {
+      LOG_ERR("ERS", "Background-C spine=%d arena: none (heap-backed build) free=%lu contig=%lu", currentSpineIndex,
+              static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    }
     section->clearCache();
     section.reset();  // aborts the in-flight build, releasing into the scratch arena
     // If this build ran inside the BORROWED secondary buffer, hand it back before the released
