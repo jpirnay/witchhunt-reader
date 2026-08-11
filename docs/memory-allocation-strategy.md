@@ -573,14 +573,45 @@ B now fails on **contig**, not free. Contig recovers only to 18420 after the bui
 > render interleaves with build → contig 30708 → 8692 → never recovers past 18420 →
 > B's contig floor is unreachable → B never pre-builds.
 
-Candidate directions, none measured:
+### 9.2.3 Releasing the page slots: measured, partial (X3, 2026-08-11)
 
-1. **Skip font prewarm for mid-build pages.** The `SectionBuilding` pass draws a transient page
-   the reader re-renders at Done anyway; it could draw with resident glyphs only.
-2. **Do not draw mid-build pages at all** while the build holds its working set. Costs exactly
-   the build-while-you-read responsiveness Background-C exists to provide.
-3. **Reuse one prewarm buffer across the groups of a call** (§9.4). Low value on transient size,
-   but placement is the live argument here.
+Three directions were on the table. (1) *Skip prewarm for mid-build pages* is **dead**: prewarm
+costs ~50 ms and the fallback it avoids is measured at **5642 µs/glyph** against 1 µs prewarmed,
+so a mid-build page would render slower than the popup it replaces. (2) *Stop drawing mid-build
+pages* deletes the feature. (3) *An arena for the prewarm* was deferred in favour of the cheaper
+test of the same hypothesis, since if placement is the problem, giving the bytes back before the
+build resumes is enough — and if it is not, the arena would not have helped either.
+
+`040b2c1b` releases the font page slots at the end of `displayBuildPage`. Result:
+
+| | before | after |
+|---|---|---|
+| `allocBytes` step across the draw | **+12276** | **+3244** |
+| `spine_page=3` | free 32532, contig 8692 | free 41928, contig 18420 |
+| `spine_page=7` | free 28016, contig 8692 | free 38096, contig 18420 |
+| `after_parse` | free 32896, contig 8692 | free 41868, contig 14836 |
+| `continuing in degraded mode` | throughout the parse | **gone** |
+
+The retention step fell by ~9 KB, matching the page-slot size (pageBuf 7635 + pageGlyphs 1264)
+almost exactly, so the mechanism is confirmed. Free heap is ~10 KB higher at every comparable
+page and the parser no longer runs degraded — a real quality win independent of contig.
+
+**But it is not the whole cliff.** With the slots released, contig *still* steps 26612 → 16372
+across the draw, and B still fails its floor (`contig=20468(floor=24576)`).
+
+**Confound, stated plainly:** this run entered the build at `after_setup contig=38900`, the
+comparison run at `47092`. Run-to-run variance in the starting block exceeds the effect being
+measured, so the free-heap and degraded-mode results are trustworthy and **the net contig
+comparison is not**. Any future attempt here needs runs that start from the same contig, or a
+delta measured strictly across the draw rather than end-to-end.
+
+What is left in that window, now that ~8.9 KB of retention is gone: the transient peak. The draw
+holds a deserialized `Page` (~10.5 KB measured, §8.2) *and* the prewarm's group buffer
+(`peakTemp` 8100–10555) at overlapping times, against a contig of ~26 KB. Two ~10 KB transients
+that cannot both fit in the largest block will split it whichever order they arrive in, and
+freeing them afterwards does not undo the split. That, not retention, is the remaining target —
+and it is the case an arena would actually address, because an arena moves them off the heap
+entirely rather than returning them to it.
 
 Caveat on the whole section: the trough is mid-build and recovers, and no trace yet has a
 pre-change baseline beside it, so treat 40948 → 15348 as the shape of the problem rather than a
