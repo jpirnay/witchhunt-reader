@@ -685,16 +685,40 @@ Background-B: returned secondary buffer (spine 2, build discarded, preemptions=1
 Borrowed, got two pages in, lost the race to a page turn, discarded. Then nothing for the rest of
 the session.
 
-Three candidate directions, none measured:
+**Two of the three causes are now fixed and device-confirmed (X3, 2026-08-11).**
 
-- **Re-derive the floors.** Both are sized for a heap-backed build, and §9.2 shows that build's
-  working set is ~28 KB of which the 10 KB `ownedArena` holds a third — so the floors are covering
-  a spill a bigger arena would remove, not an intrinsic need.
-- **Reconsider the quiet gate.** Its cost model is "the borrow loses this page's AA", but a page
-  turn now *ends* the borrow and discards the whole slice. Losing 40 ms of AA is cheaper than
-  losing the build, so the gate may be protecting the smaller of the two costs.
-- **Let a preempted build keep its progress.** Phase (a) already banks the inflated XHTML to SD;
-  the parse does not survive. That asymmetry is what makes preemption expensive.
+*A preempted build no longer loses its work* (`67a2ee4f`). `abortSectionBuild` kept the banked
+XHTML only when `reusedHtml`, so every preempted attempt discarded a **finished** extraction and
+the retry re-inflated from scratch — the exact asymmetry that made preemption expensive. Now keyed
+on `extractDone`. Confirmed: a `build discarded, preemptions=1` immediately followed by
+`createSectionFile spine=1 reusing cached HTML (16340 bytes)`.
+
+*B no longer takes a buffer it is about to lose* (`4a302744`). The 4 s quiet window measured from
+`lastPageTurnTime`, which is stamped only by actual turns and initialises to 0 — so before the
+reader's first turn it was **vacuously satisfied**. B took the buffer 731 ms after a cold open and
+lost it 513 ms later. Now measured from `lastPageOnScreenMs_` (any page reaching the screen, seeded
+at `onEnter`), and B also declines while `CooperativeAbort` reports queued input.
+
+Result on the same book and panel: **`preempt=0` for the whole session and no `build discarded`
+lines at all**, with B still borrowing during genuine pauses — four 1 Hz `waitheap` rejects after
+the last page settled, then a clean borrow and build of spine 2.
+
+**What remains is throughput, and it is downstream of §9.2.1.** While the reader is active B
+correctly declines the borrow and falls through to the heap-backed floors:
+
+```
+gate=bgB_waitheap REJECT free=60560(floor=49152) contig=23540(floor=24576)
+```
+
+Free passes with 11 KB to spare; **contig misses by 1036 bytes** — because the render/build
+interleave has already taken it 40948 → 23540 and it never recovers. So B's remaining idleness is
+the contig cliff, not its own gating, and fixing the cliff should let the heap-backed path pass
+instead of B depending entirely on 4-second pauses.
+
+The third original candidate — re-deriving the floors — is deliberately **not** done. They are
+sized for a heap-backed build whose ~28 KB working set the 10 KB `ownedArena` cannot hold, so
+lowering them would admit builds that then run degraded. Fix the arena or the cliff, not the
+thermometer.
 
 ### 9.8 Landed since 2026-08-09
 
