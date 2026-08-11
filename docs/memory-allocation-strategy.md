@@ -605,13 +605,45 @@ measured, so the free-heap and degraded-mode results are trustworthy and **the n
 comparison is not**. Any future attempt here needs runs that start from the same contig, or a
 delta measured strictly across the draw rather than end-to-end.
 
-What is left in that window, now that ~8.9 KB of retention is gone: the transient peak. The draw
-holds a deserialized `Page` (~10.5 KB measured, §8.2) *and* the prewarm's group buffer
-(`peakTemp` 8100–10555) at overlapping times, against a contig of ~26 KB. Two ~10 KB transients
-that cannot both fit in the largest block will split it whichever order they arrive in, and
-freeing them afterwards does not undo the split. That, not retention, is the remaining target —
-and it is the case an arena would actually address, because an arena moves them off the heap
-entirely rather than returning them to it.
+### 9.2.4 The draw, fully attributed (X3, 2026-08-11)
+
+`07bcc22a` bracketed each step of the draw. One trace settles it:
+
+| step | Δcontig | ΔallocBlk | ΔallocBytes | what |
+|---|---|---|---|---|
+| page load | −6144 | +155 | +6428 | `Page::deserialize` |
+| prewarm | **−9216** | +6 | +9028 | 3 × (slot buffer + glyph table) |
+| render | −5120 | +2 | +5032 | scaled-glyph cache |
+| slot release | **0** | −6 | **−9028** | `clearCache()` |
+
+**The last row is the finding.** The release returns every byte the prewarm took (−9028 against
++9028), every block (−6 against +6) and 9124 of free heap — and `contig` does not move at all,
+22516 → 22516. Bytes come back; contiguity does not. **The damage is placement**, so releasing
+sooner cannot fix it: by the time the slots go, the render's allocations sit above them and the
+9 KB hole they leave is not the largest block. This is the evidence that justifies an arena, as
+opposed to the earlier assumption that it would help.
+
+Two corrections to §9.2.3's reasoning fall out of the same trace:
+
+- The transient peak theory was wrong about *which* transients. `Page::deserialize` is 155 small
+  allocations as predicted, but it still costs 6144 of contig — small allocations fragment too.
+  And the prewarm's damage is the six *persistent* slot blocks, not the group buffer.
+- The render step's 5032 bytes are `SCALED_GLYPH_MAX_ENTRIES 80 × 16` + `SCALED_GLYPH_ARENA_BYTES
+  3584` = 4864 plus headers: the **scaled-glyph cache**. It is allocated *lazily on first scaled
+  glyph* and never freed — a permanent block taken mid-session, which eliminated #8 proved is the
+  worst possible shape. Nobody chose that; it is what "allocate on first use" does when first use
+  happens to fall inside a build.
+
+Ranked by cost, with the cheapest fix first:
+
+1. **Scaled-glyph cache, −5120.** Allocate it at a stable point (reader entry / renderer init)
+   instead of on first use. It is permanent either way, so fixing its placement fixes it for the
+   whole session rather than per draw. Smallest change here by a wide margin.
+2. **Font page slots, −9216.** The arena case, now evidenced rather than assumed. Six clean
+   allocations, strictly scoped to one draw, and the borrowed region they would come from is
+   sitting mostly unused (`highWater` 12864–28656 of 52272).
+3. **Page load, −6144.** §8.3's `PageLine`/`TextBlock` pool territory; the largest change and the
+   one to attempt last.
 
 Caveat on the whole section: the trough is mid-build and recovers, and no trace yet has a
 pre-change baseline beside it, so treat 40948 → 15348 as the shape of the problem rather than a
