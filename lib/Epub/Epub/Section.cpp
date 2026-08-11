@@ -336,17 +336,36 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   // is allocated and released between two page emissions, so only a low-water mark inside the
   // feed loop can see it. lowAt is the parser byte offset where the dip occurred — feed that
   // offset back into the chapter XHTML to identify the construct responsible.
+  //
+  // Block counts are what separate the two remaining explanations, and free/contig alone cannot:
+  //   allocBlk rising, allocBytes rising -> the parse RETAINS something per page
+  //   allocBlk flat, freeBlk rising      -> pure fragmentation; the bytes come back split
+  // Measured X3 2026-08-11: contig fell 40948 -> 15348 across one 17-page parse while free
+  // oscillated 20-40 KB, with the arena covering the ring, the chunk feed AND the CSS ruleset
+  // (failedAlloc=0). So whatever does this is on the heap and is NOT arena-eligible — but no
+  // measurement yet names it. That is the open question in docs/memory-allocation-strategy.md
+  // section 8.4, unchanged since it was written; these three counters are what answer it.
+  multi_heap_info_t pageHeapInfo{};
+  heap_caps_get_info(&pageHeapInfo, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   if (g_parseLowWater.seen()) {
-    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu | page-low free=%lu contig=%lu lowAt=%lu", pageCount,
-            static_cast<unsigned long>(esp_get_free_heap_size()),
+    LOG_INF("HEAP",
+            "spine_page=%d free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu | page-low free=%lu "
+            "contig=%lu lowAt=%lu",
+            pageCount, static_cast<unsigned long>(esp_get_free_heap_size()),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(pageHeapInfo.allocated_blocks),
+            static_cast<unsigned long>(pageHeapInfo.free_blocks),
+            static_cast<unsigned long>(pageHeapInfo.total_allocated_bytes),
             static_cast<unsigned long>(g_parseLowWater.minFree), static_cast<unsigned long>(g_parseLowWater.minContig),
             static_cast<unsigned long>(g_parseLowWater.atByteOffset));
     g_parseLowWater.reset();  // per-page window
   } else {
-    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount,
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu", pageCount,
             static_cast<unsigned long>(esp_get_free_heap_size()),
-            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(pageHeapInfo.allocated_blocks),
+            static_cast<unsigned long>(pageHeapInfo.free_blocks),
+            static_cast<unsigned long>(pageHeapInfo.total_allocated_bytes));
   }
 #endif
 
