@@ -84,15 +84,25 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
   cannot reach) stop being the binding constraint. The block never enters the heap, so returning
   it cannot fail.
   - **Cost:** the borrow drops the current page's AA (`secondaryBufferDegraded_`), so it only
-    starts once the reader has been settled for `BG_BUILD_BORROW_QUIET_MS` (4 s) — below that the
-    reader is skimming and B should stay out of the way. Gates: free ≥ 40 KB, contig ≥ 12 KB.
+    starts once the reader has been settled for `BG_BUILD_BORROW_QUIET_MS` (**1.5 s**) — below
+    that the reader is skimming and B should stay out of the way. It also declines while
+    `CooperativeAbort` reports a queued button edge, so it never takes a buffer it is about to
+    hand back. Gates: free ≥ 40 KB, contig ≥ 12 KB. The window is measured from the last page
+    reaching the SCREEN (`lastPageOnScreenMs_`), not the last page TURN — `lastPageTurnTime`
+    starts at 0 and is stamped only by turns, so before the reader's first turn the check was
+    vacuously satisfied.
+    1.5 s is sized against what B needs, not what feels safe: attempt 2 (extraction already
+    banked) is setup 123 + parse 818 = ~950 ms measured on X3 alice spine 1.
   - Unlike C's borrow it deliberately does **not** seed RED RAM or opt in to single-buffer fast
     differential: no refresh happens during B's borrow, and a completed Background-A pre-render
     usually leaves the *next* page in `frameBuffer`, so seeding from it would be actively wrong.
   - **Preemption:** a page turn ends the borrow, and `endBackgroundBorrow()` tears the live build
-    down *before* handing the region back (the build allocates inside it). The work is discarded —
-    but phase (a) banks the inflated XHTML to SD, so the retry skips re-inflation.
-    `BG_BUILD_MAX_PREEMPTIONS` (2) then leaves the spine to C.
+    down *before* handing the region back (the build allocates inside it). The parse is discarded,
+    but phase (a)'s inflated XHTML survives on SD, so the retry skips re-inflation and is the
+    cheap one. `BG_BUILD_MAX_PREEMPTIONS` (2) then leaves the spine to C. (That banking was
+    broken until 2026-08-11: `abortSectionBuild` deleted the cache whenever THIS build had
+    produced it, complete or not, so every retry re-paid the extraction and B abandoned spines
+    it should have finished. Keyed on `extractDone` now.)
 - **Heap-backed fallback (no buffer lendable).** Then B builds resident out of the heap, and these
   are the gates that apply: free ≥ max(`BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES` 48 KB,
   `BG_BUILD_EXTRACT_BASE_HEAP_BYTES` 30 KB + inflate-ring); contig ≥
@@ -102,8 +112,12 @@ cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded sli
   skipped → a *css-degraded* cache the foreground must rebuild. So B refuses CSS sections unless
   free ≥ `BG_BUILD_CSS_MIN_FREE_HEAP_BYTES` (72 KB); below that it parks in `WaitHeap` and lets
   **C** build the section on arrival. A **borrowed** build never consults this gate — it resolves
-  CSS out of the arena at the lower lean floor (`setIndexArena` / `setLeanResolve`), which is the
-  whole point of the borrow. B also
+  CSS out of the arena, which is the whole point of the borrow.
+  Note the lean resolver (`setLeanResolve`) is no longer tied to the borrow: since 2026-08-11
+  every build uses the disk-backed path, because the hot-rule LRU it gives up cannot hit during a
+  build anyway (the parser memoises on `tag|class|id` upstream, so the resolver only ever sees
+  first occurrences — measured `hotHits=0` on every spine of three books). That dropped the
+  resolver floor 40 KB → 24 KB and `heapAllowsEmbeddedStyle`'s free floor 56 KB → 44 KB. B also
   **early-aborts** (`Section::activeBuildCssDegraded()`) the instant a slice starts skipping, rather
   than finishing a build it will discard.
 - **Discards** truncated or css-degraded results (`clearCache()`); those rebuild clean in the
@@ -185,7 +199,8 @@ active) returns or reallocates and (X4) reseeds on the first render after the bu
   `Background-B: returned secondary buffer (spine N, build discarded|no build live,
   preemptions=K)`. Repeated `build discarded` at `preemptions=2` means B keeps losing the race to
   page turns on that spine and is handing it to C.
-- **Heap gates** (`INF`, `HEAP_GATE_TRACE=1`): one `gate=<name> PASS|REJECT free=…(floor=…)
+- **Heap gates** (`INF`, off by default — build `-DHEAP_GATE_TRACE=1`): one
+  `gate=<name> PASS|REJECT free=…(floor=…)
   contig=…(floor=…)` line per decision. Several floors reject *silently* otherwise, so this is the
   only way to see which one sent a build down the released path.
 - **Render-task stack** (`ERR`, always on): `Render task stack LOW: N bytes free` if the high-water

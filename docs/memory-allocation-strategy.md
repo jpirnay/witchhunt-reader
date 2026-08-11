@@ -561,7 +561,7 @@ splits the region.** §9.4's verdict (the per-call buffer is low value) was argu
 *size*; this is an argument about *placement*, which is a different question and the one
 eliminated #8 says actually decides.
 
-### 9.2.2 Which is also why Background-B never runs
+### 9.2.2 Which is also why Background-B never ran — RESOLVED in §9.9
 
 ```
 gate=bgB_waitheap REJECT free=58572(floor=49152) contig=18420(floor=24576)
@@ -676,10 +676,10 @@ Downstream on the same book and panel:
 | `Min Free` | 14544 | **23960** |
 
 **This closes §9.7's second half.** Contig 40948 clears B's 24576 floor with room, so the
-constraint that made B depend on four-second pauses is gone. What gates B now is the 56 KB
-embedded-CSS floor (`heapAllowsEmbeddedStyle`) against ~50–59 KB of reading free heap — a
-threshold to re-derive, not a structural problem. §9.7's "fix the arena or the cliff, not the
-thermometer" has been satisfied, so the thermometer is now the fair thing to look at.
+constraint that made B depend on four-second pauses is gone. What gated B next was the 56 KB
+embedded-CSS floor (`heapAllowsEmbeddedStyle`) against ~50–59 KB of reading free heap — §9.7's
+"fix the arena or the cliff, not the thermometer" having been satisfied, the thermometer became
+the fair thing to look at. Resolved in §9.9.
 
 What remains of the cliff is the page load: 155 small allocations, 6388 bytes, −6144 of contig.
 That is §8.3's `PageLine`/`TextBlock` pool and nothing cheaper will touch it.
@@ -760,7 +760,7 @@ interleaved through the whole parse, which is the fragmentation shape this docum
 stop. `st.inflatedSize` is known at setup, so a conservative estimate is available. CLAUDE.md's
 Resource Protocol rule 7 already requires this.
 
-### 9.7 Background-B does nothing during active reading, on both devices
+### 9.7 Background-B did nothing during active reading, on both devices — RESOLVED in §9.9
 
 The gate trace was added to find floors no reachable heap state can satisfy. The 2026-08-11
 captures have one on each panel — *different* floors, same root cause:
@@ -853,7 +853,7 @@ runs — the reader never got that far:
 | run | built spine 2? | Min Free |
 |---|---|---|
 | slot arena + scaled glyph | no | 23960 |
-| status-bar prewarm | no | 23960 |
+| TRC log cleanup | no | 23960 |
 | lean resolver + 1500 ms quiet | **yes** | 7772 |
 | watermark probe | **yes** | 11988 |
 
@@ -881,6 +881,59 @@ it holds.
   unbounded class-D consumer in the parser; the 12 KB byte budget was retargeted from the table to
   the **row** (eliminated #16 — it is not redundant at row scope).
 - **`bea07a3d`** — the font group scratch revert, §9.4.
+
+### 9.9 Background-B works end to end (X3, 2026-08-11)
+
+The last two changes in this round, and the first time B has delivered its purpose in a trace.
+
+**The disk-backed lean resolver on every build path.** `setLeanResolve` was tied to
+`externalArena`, so only borrowed builds used the sparse-index + on-demand-seek path. It is now
+unconditional. What lean gives up is the hot-rule LRU, and that cache **cannot hit during a
+build**: `ChapterHtmlSlimParser` memoises resolved styles on `tag|class|id` before calling
+`resolveStyle`, so the resolver only ever sees first occurrences. Measured with the LRU enabled —
+alice 341 calls, kings-avatar 24, small-gods 17 — `hotHits=0` on every spine of all three. It was
+~100 B/entry × 128 entries of heap growth plus 16 KB of resolver floor, buying nothing.
+
+Resolver floor 40 KB → 24 KB, and `SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES` 56 KB → 44 KB. Host
+426/426 with all 96 goldens byte-identical, and on small-gods the resolve counters are unchanged
+call for call — turning off a cache that never hit costs nothing, which is the whole argument.
+
+**Quiet period 4000 ms → 1500 ms**, sized against attempt 2's measured ~950 ms rather than
+against caution. Both reasons 4000 was conservative had already been removed: the banked XHTML
+(§9.7) and the queued-input check.
+
+Result — B borrowed 1596 ms after the last page, built spine 2 in ~950 ms, and the reader then
+crossed into it:
+
+```
+Background-B: borrowed secondary buffer for spine 2 build (52272 bytes, free=55096)
+BG work: ... state=building spine=2 borrow=1 preempt=0 buildPct=69
+Background build spine=2 complete: 20 pages
+...
+Section probe spine=2: cacheHit=1 ... Cache found, skipping build...
+```
+
+`preempt=0` for the session. **Attribution matters here: it was the quiet period, not the CSS
+floor.** The borrow is attempted before any CSS gate, so `heapAllowsEmbeddedStyle` was never
+consulted — the 44 KB change is defensible on its own evidence but remains unexercised in the
+field, and its falsifier (`lowHeapSkips` on a *heap-backed* build, where a skip means real missing
+styles rather than the harmless resident-ruleset case) has not had a chance to fire.
+
+### 9.10 What is still open
+
+- **The page load, −6144 of contig per mid-build draw** (§9.2.5). §8.3's `PageLine`/`TextBlock`
+  pool; the largest remaining change and the only thing that will reach it.
+- **`Min Free` 11988** on alice's rabbithole table (§9.7.1). Pre-existing, holds, and the obvious
+  fix is worse than the problem: catching that cell needs the row budget below 9200, which would
+  fire on any row past ~187 words and flatten legitimate grids. If it ever does fail, check cell
+  height incrementally instead of at `</tr>` — the code already states the rule ("a cell taller
+  than the whole viewport can never be a grid row on any device").
+- **~90 ms of glyph faults on image-only pages** (`getBitmap SLOW: 16 calls, ~6000 us/call`).
+  Cause unknown. The status bar was the obvious suspect and was **wrong** — scanning it changed
+  the image page not at all and cost four new glyph faults on text pages, so that change was
+  reverted. Diagnosing it wants the per-call `Prewarm: N glyphs …` line, which the TRC cleanup
+  moved down a level: one session at `-DLOG_LEVEL=3`, not another guess. Speed, not memory.
+- **The heap-backed CSS floor at 44 KB** — derived, not measured; see §9.9.
 
 See [heap-work-handover-2026-08-10.md](heap-work-handover-2026-08-10.md) for the full
 eliminated list. Sixteen hypotheses have been disproved on device; check it before proposing
