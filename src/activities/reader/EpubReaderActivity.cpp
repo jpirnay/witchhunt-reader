@@ -4138,6 +4138,27 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   } else {
     ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+  // Hand the font page slots back before the build resumes. This is THE allocation that makes a
+  // mid-build draw expensive, and it is expensive because of where it lands, not what it costs:
+  // prewarm takes ~8.9 KB of page buffer + glyph table (pageBuf 7635 + pageGlyphs 1264 measured,
+  // across the 3 style slots a page uses) out of the middle of the largest free block, while the
+  // build's working set already occupies the rest of the heap. Device-measured X3 2026-08-11:
+  // contig 40948 -> 23540 across this one draw, never recovering for the remainder of the parse,
+  // which then ran in "continuing in degraded mode" throughout and left contig 1036 bytes short
+  // of Background-B's floor afterwards.
+  //
+  // Normally the slots live on until the next prewarm replaces them, which is free — but here
+  // "until the next prewarm" spans the rest of a multi-second build. Releasing now lets the block
+  // coalesce before stepCurrentSectionBuild() resumes; nothing else allocates in between, because
+  // the lock is still held.
+  //
+  // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
+  // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
+  // page would not have redone. Safe here because every glyph consumer for this page has already
+  // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
+  // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
+  renderer.getFontCacheManager()->clearCache();
+
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
   // uses for Background-A.
