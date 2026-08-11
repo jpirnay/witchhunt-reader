@@ -1,10 +1,14 @@
 # Background work in the EPUB reader (A / B / C)
 
 How the reader hides latency behind three cooperative background mechanisms. This is the
-**current-state reference**; the historical design/handoff lives in
-[epubreader-control-flow-refactor.md](epubreader-control-flow-refactor.md) and
-[background-b-handoff.md](background-b-handoff.md). All code is in
-`src/activities/reader/EpubReaderActivity.cpp`.
+**current-state reference**. All code is in `src/activities/reader/EpubReaderActivity.cpp`.
+
+For the memory model these mechanisms operate under — the borrow-vs-release distinction in
+particular, which is what shapes B's and C's gates — see
+[memory-allocation-strategy.md](memory-allocation-strategy.md).
+
+(The historical design notes `epubreader-control-flow-refactor.md` and `background-b-handoff.md`
+were deleted as outdated in `3d79a05b` / `01cb8a1e`; a few source comments still cite them.)
 
 ## Task model
 
@@ -23,11 +27,11 @@ task gets the CPU during the ~0.5 s refresh — that window is when background w
 
 ## The three mechanisms at a glance
 
-| | What it hides | Runs on | Builds with buffer | When |
+| | What it hides | Runs on | Secondary buffer | When |
 |---|---|---|---|---|
 | **A** — next-page pre-render | per-page-turn render compute (~90 ms) | render task (`PreRender` pass) | resident | next page is text-only & heap ok |
-| **B** — next-section pre-build | the "Indexing…" parse when you cross a chapter | loop task | **resident** (can't release — it's displaying) | idle, lookahead window |
-| **C** — current-section build | the freeze when you *land* on an uncached section | loop task (build) + render task (draw only) | released or resident, device-dependent | on entry to an uncached section |
+| **B** — next-section pre-build | the "Indexing…" parse when you cross a chapter | loop task | **borrowed** as a build arena (heap-backed fallback if not lendable) | idle, lookahead window, reader settled |
+| **C** — current-section build | the freeze when you *land* on an uncached section | loop task (build) + render task (draw only) | **borrowed**; released only when there is none to lend | on entry to an uncached section |
 
 A and B are *look-ahead* for a section that's already on screen. C is for the section you just
 navigated to and have nothing to read yet — so it has the highest priority.
@@ -66,20 +70,40 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
 Builds the **next consecutive** sections' caches during idle so crossing a chapter boundary is a
 cache hit, not a blocking parse. `stepBackgroundSectionBuild()`, one bounded slice per idle tick.
 
-- **Lookahead:** up to `BG_BUILD_LOOKAHEAD` (3) spines ahead of the reading position; the cursor
-  walks forward as each settles and re-anchors on any navigation.
+- **Lookahead:** a *page budget*, not a spine count — `BG_BUILD_LOOKAHEAD_PAGES` (50) of runway
+  ahead of the reading position, counting the current section's unread tail plus the sections
+  built so far. Whole spines are built until the budget is covered, so many tiny front-matter
+  spines get several built while one big chapter covers it alone. The cursor walks forward as each
+  settles and re-anchors on any navigation.
 - **State machine:** `Probe` (cache check) → `WaitHeap` (gates) → `Building` (`BG_BUILD_BUDGET_MS`
   = 40 ms slices) → `Settled`.
-- **Builds resident.** B runs while a page is displayed, so it *cannot* release the secondary
-  buffer (that would drop the current page's AA / fast-refresh baseline). This is the key
-  constraint that shapes its gates.
-- **Heap gates (resident):** free ≥ max(`BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES` 48 KB,
-  `BG_BUILD_EXTRACT_BASE_HEAP_BYTES` 30 KB + inflate-ring); contig ≥ max(`BG_BUILD_MIN_CONTIG_HEAP_BYTES`
-  24 KB, ring + 8 KB).
-- **CSS refuse gate:** a CSS section built resident reliably drops below the runtime CSS-resolve
-  floor (~40 KB free) mid-parse → styles silently skipped → a *css-degraded* cache the foreground
-  must rebuild. So B refuses CSS sections unless free ≥ `BG_BUILD_CSS_MIN_FREE_HEAP_BYTES` (72 KB);
-  below that it parks in `WaitHeap` and lets **C** build the section released on arrival. It also
+- **Borrows the secondary buffer as its arena — the preferred path.** `beginBackgroundBorrow()`
+  is tried *first*, before any heap floor is consulted, and is what makes B viable on the reading
+  heap at all: the parse working set, the inflate ring and the CSS index all bump-allocate inside
+  the lent ~48 KB region, so the heap-backed floors below (which the ~57 KB reading steady state
+  cannot reach) stop being the binding constraint. The block never enters the heap, so returning
+  it cannot fail.
+  - **Cost:** the borrow drops the current page's AA (`secondaryBufferDegraded_`), so it only
+    starts once the reader has been settled for `BG_BUILD_BORROW_QUIET_MS` (4 s) — below that the
+    reader is skimming and B should stay out of the way. Gates: free ≥ 40 KB, contig ≥ 12 KB.
+  - Unlike C's borrow it deliberately does **not** seed RED RAM or opt in to single-buffer fast
+    differential: no refresh happens during B's borrow, and a completed Background-A pre-render
+    usually leaves the *next* page in `frameBuffer`, so seeding from it would be actively wrong.
+  - **Preemption:** a page turn ends the borrow, and `endBackgroundBorrow()` tears the live build
+    down *before* handing the region back (the build allocates inside it). The work is discarded —
+    but phase (a) banks the inflated XHTML to SD, so the retry skips re-inflation.
+    `BG_BUILD_MAX_PREEMPTIONS` (2) then leaves the spine to C.
+- **Heap-backed fallback (no buffer lendable).** Then B builds resident out of the heap, and these
+  are the gates that apply: free ≥ max(`BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES` 48 KB,
+  `BG_BUILD_EXTRACT_BASE_HEAP_BYTES` 30 KB + inflate-ring); contig ≥
+  max(`BG_BUILD_MIN_CONTIG_HEAP_BYTES` 24 KB, ring + 8 KB).
+- **CSS refuse gate — heap-backed path only.** A CSS section built resident *out of the heap*
+  reliably drops below the runtime CSS-resolve floor (~40 KB free) mid-parse → styles silently
+  skipped → a *css-degraded* cache the foreground must rebuild. So B refuses CSS sections unless
+  free ≥ `BG_BUILD_CSS_MIN_FREE_HEAP_BYTES` (72 KB); below that it parks in `WaitHeap` and lets
+  **C** build the section on arrival. A **borrowed** build never consults this gate — it resolves
+  CSS out of the arena at the lower lean floor (`setIndexArena` / `setLeanResolve`), which is the
+  whole point of the borrow. B also
   **early-aborts** (`Section::activeBuildCssDegraded()`) the instant a slice starts skipping, rather
   than finishing a build it will discard.
 - **Discards** truncated or css-degraded results (`clearCache()`); those rebuild clean in the
@@ -113,23 +137,34 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
 
 | Mode | When | Buffer |
 |---|---|---|
-| `IncrementalReleased` | **X3** (any), or **X4 + CSS** | released; restored after via `recoverSecondaryBufferIfNeeded()` |
-| `IncrementalResident` | **X4 + non-CSS** that fits the in-place floors (`IN_PLACE_BUILD_MIN_FREE` 60 KB / `…_CONTIG` 28 KB) | kept resident |
+| `IncrementalReleased` | **X3** (any), or **X4** that misses the in-place floors, or the buffer is already lent | **borrowed** as the build arena; *released* only when there is none to lend. Restored via `recoverSecondaryBufferIfNeeded()` |
+| `IncrementalResident` | **X4** that fits the in-place floors (`IN_PLACE_BUILD_MIN_FREE` 60 KB / `…_CONTIG` 28 KB; higher CSS variants) | kept resident |
 | `Blocking` | `forceBlockingBuildSpine_` latch, no secondary buffer, or a CSS-fallback rebuild | released → rebuilt → realloc'd |
+
+The mode name is historical: `IncrementalReleased` now *borrows* first and only releases as a
+fallback, because the lent block never enters the heap and returning it cannot fail. The
+`Blocking` row is the one that still genuinely releases — and it builds with the 10 KB heap
+arena rather than the freed 52 KB, which
+[memory-allocation-strategy.md §9.2](memory-allocation-strategy.md) identifies as the largest
+measured fragmentation source left in the reader.
 
 Device rationale (see [contributing/eink-controllers.md](contributing/eink-controllers.md)):
 
-- **X3** keeps the differential baseline in the controller's **DTM1**, so releasing the RAM buffer
-  costs no display benefit (fast refresh still works) and frees ~52 KB — and keeps CSS parses above
-  the resolve floor. So X3 **always** builds released. Mid-build draws are plain BW off the DTM1
-  baseline; AA returns once the buffer is restored.
-- **X4** re-seeds its fast-refresh baseline from the RAM buffer, so non-CSS builds keep it resident.
-  CSS builds release anyway (resident reliably css-degrades), at the cost of half-refresh mid-build
-  draws until restored.
+- **X3** keeps the differential baseline in the controller's **DTM1**, so giving up the RAM buffer
+  costs no display benefit (fast refresh still works) — and building out of it keeps CSS parses
+  above the resolve floor. So X3 **never builds resident**: it always takes the buffer, in practice
+  by borrowing it. Mid-build draws are plain BW off the DTM1 baseline; AA returns once the buffer
+  is back. Device-confirmed 2026-08-11: `Background-C: building spine 1 incrementally, secondary
+  buffer BORROWED`, `CSS RESIDENT in arena`, `cap=52272 highWater=28656 failedAlloc=0`.
+- **X4** re-seeds its fast-refresh baseline from the RAM buffer, so builds that clear the in-place
+  floors keep it resident. The rest take it, at the cost of half-refresh mid-build draws until it
+  is handed back.
 
-The released path sets `secondaryBufferDegraded_`; `recoverSecondaryBufferIfNeeded()` (top of every
-`render()`, guarded to skip while a build is active) reallocates + (X4) reseeds the buffer on the
-first render after the build ends. `onExit()` restores it too if the reader is left mid-build.
+Note the mode name says *released* but the buffer is normally **borrowed** — that path only
+releases when there is nothing to lend. Both variants set `secondaryBufferDegraded_`;
+`recoverSecondaryBufferIfNeeded()` (top of every `render()`, guarded to skip while a build is
+active) returns or reallocates and (X4) reseeds on the first render after the build ends.
+`onExit()` restores it too if the reader is left mid-build.
 
 ---
 
@@ -143,17 +178,29 @@ first render after the build ends. `onExit()` restores it too if the reader is l
   free=… contig=…`. A CSS book on a tight heap shows B parked in `waitheap` (the refuse gate) rather
   than building-and-discarding.
 - **C lifecycle** (`INF`): `Background-C: building spine N … (buffer resident | secondary buffer
-  RELEASED …)`, `Background-C spine=N complete: M pages`, and on failure
+  BORROWED | … RELEASED …)`, `Background-C spine=N complete: M pages`, and on failure
   `Background-C spine=N … falling back to blocking rebuild` / `… declined … blocking build`.
+  `BORROWED` is the healthy case; a `RELEASED` line means there was no buffer to lend.
+- **B borrow** (`INF`): `Background-B: borrowed secondary buffer for spine N …` /
+  `Background-B: returned secondary buffer (spine N, build discarded|no build live,
+  preemptions=K)`. Repeated `build discarded` at `preemptions=2` means B keeps losing the race to
+  page turns on that spine and is handing it to C.
+- **Heap gates** (`INF`, `HEAP_GATE_TRACE=1`): one `gate=<name> PASS|REJECT free=…(floor=…)
+  contig=…(floor=…)` line per decision. Several floors reject *silently* otherwise, so this is the
+  only way to see which one sent a build down the released path.
 - **Render-task stack** (`ERR`, always on): `Render task stack LOW: N bytes free` if the high-water
   margin drops below 1536 B — the render task runs the deepest chains (build parse + image decode +
   dither) and its stack abuts the heap, so an overflow corrupts the heap.
 
 ## On X3 specifically (the common device)
 
-- B effectively steps aside for CSS books at steady reading heap (~57–65 KB free < 72 KB), so
-  forward chapter crosses into CSS sections are handled by **C released** (clean, responsive,
-  ~1–1.5 s to page 0) rather than B cache hits.
+- The borrow is what carries CSS books here. At steady reading heap (~57–65 KB free) B cannot
+  clear the 72 KB heap-backed CSS gate, so before the borrow existed every forward chapter cross
+  into a CSS section fell to **C** rather than a B cache hit. B now borrows the buffer instead and
+  resolves CSS from the arena, so that gate is only reached when there is no buffer to lend.
+- X3 has no resident build mode at all (`chooseSectionBuildMode` returns `IncrementalReleased`
+  unconditionally), so on this device C is *always* the borrow-or-release path and the in-place
+  floors never apply.
 - Page turns are fast (`refresh=fast`) except the scheduled anti-ghost **half** every
   `getRefreshFrequency()` (15) turns. On X3 a "fast" request is never silently turned into a half —
   it's honoured, or escalated to a *full* only when the differential baseline isn't synced (which
