@@ -165,11 +165,10 @@ FontCacheManager::ScopedSlotArena::ScopedSlotArena(FontCacheManager& manager, Bu
 
 FontCacheManager::ScopedSlotArena::~ScopedSlotArena() {
   if (!installed_) return;
-  // Order is load-bearing, which is the reason this class exists:
-  //   1. drop the slots WHILE the arena is still installed, so freePageBuffer() can see they are
-  //      arena-backed and must not be free()d;
-  //   2. uninstall, so a later prewarm outside this scope goes back to the heap;
-  //   3. rewind, returning the bytes to the build that lent them.
+  // Clearing must precede uninstalling: freePageBuffer() decides whether to free() a slot by
+  // reading the arena-backed flag, and with the arena already gone it would call free() on
+  // interior pointers into a region this code does not own. That ordering is the reason this
+  // class exists rather than two calls at each site.
   manager_.clearCache();
   manager_.fontDecompressor_->setSlotArena(nullptr);
   if (!arena_->release(block_)) {
