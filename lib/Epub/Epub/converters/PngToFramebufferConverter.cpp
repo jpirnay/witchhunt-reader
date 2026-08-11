@@ -213,17 +213,17 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
 
   points = adaptive_tone::derivePoints(histogram.get(), sampled);
   if (points.active) {
-    LOG_DBG("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
+    LOG_TRC("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
             (unsigned)points.whitePoint);
   } else {
-    LOG_DBG("PNG", "Adaptive tone skipped: range too narrow");
+    LOG_TRC("PNG", "Adaptive tone skipped: range too narrow");
   }
   return points;
 }
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                     const RenderConfig& config) {
-  LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
+  LOG_TRC("PNG", "Decoding PNG: %s", imagePath.c_str());
 
   const size_t freeHeap = ESP.getFreeHeap();
   if (const size_t floor = pngDecodeHeapFloor(); freeHeap < floor) {
@@ -274,7 +274,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // Aspect ratio is preserved by the caller's sizing, so a single factor maps both axes.
   const float scale = (float)dstWidth / srcWidth;
 
-  LOG_DBG("PNG", "PNG %dx%d -> %dx%d (scale %.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
+  LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
           scale, info.colorType, info.bitDepth);
 
   auto grayLine = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[srcWidth]);

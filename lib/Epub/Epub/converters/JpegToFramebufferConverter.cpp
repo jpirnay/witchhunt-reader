@@ -349,7 +349,7 @@ bool shouldEnableJpegCache(const RenderConfig& config, int width, int height) {
 
 #if JPEG_ENABLE_FIRST_RENDER_NO_CACHE
   if (!Storage.exists(config.cachePath.c_str())) {
-    LOG_DBG("JPG", "No existing JPEG cache file on first render; enabling cache write: %s", config.cachePath.c_str());
+    LOG_TRC("JPG", "No existing JPEG cache file on first render; enabling cache write: %s", config.cachePath.c_str());
   }
 #endif
 
@@ -939,7 +939,7 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
   if (!readJpegDimensionsFromHeader(imagePath, out)) {
     return false;
   }
-  LOG_DBG("JPG", "Image dimensions: %dx%d", out.width, out.height);
+  LOG_TRC("JPG", "Image dimensions: %dx%d", out.width, out.height);
   return true;
 }
 
@@ -993,7 +993,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
 
   if (histCtx.histogramSamples == 0) return points;
   points = adaptive_tone::derivePoints(histogram.get(), histCtx.histogramSamples);
-  LOG_DBG("JPG", "Adaptive tone: active=%d black=%u white=%u (%llu samples): %s", points.active ? 1 : 0,
+  LOG_TRC("JPG", "Adaptive tone: active=%d black=%u white=%u (%llu samples): %s", points.active ? 1 : 0,
           points.blackPoint, points.whitePoint, static_cast<unsigned long long>(histCtx.histogramSamples),
           imagePath.c_str());
   return points;
@@ -1001,7 +1001,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
-  LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
+  LOG_TRC("JPG", "Decoding JPEG: %s", imagePath.c_str());
   jpgCheckHeap("jpg_decode_entry");
 
   // No pre-decode marker validation here. An EOI gate used to guard JPEGDEC, which
@@ -1135,7 +1135,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.fineScaleFPY = (int32_t)((int64_t)destHeight * FP_ONE / ctx.scaledSrcHeight);
   ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / destHeight);
 
-  LOG_DBG("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
+  LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
           destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);
 
   // A TJpgDec MCU is at most 16 scaled-source rows tall, which our fine scale maps

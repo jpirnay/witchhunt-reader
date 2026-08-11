@@ -607,7 +607,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     free(groupBuf);
   }
 
-  LOG_DBG("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
+  LOG_TRC("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
           missed);
 
   return missed;
@@ -625,20 +625,44 @@ void FontDecompressor::logStats(const char* label) {
     resetStats();
     return;
   }
-  LOG_DBG("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
+  // Routine per-pass counters. Every number here is either duplicated by the reader's one-line
+  // "Page summary" (fontHits / fontMisses / fontHitPct / glyphCalls / glyphUs) or only meaningful
+  // when something is wrong, and at 5-7 lines per pass and two passes per page they were the
+  // single largest source of noise in a reading trace.
+  LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
           total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
-  LOG_DBG("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
-  LOG_DBG("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
+  LOG_TRC("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
+  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
           stats.pageGlyphsBytes, stats.peakTempBytes);
+
+  // getBitmap timing is the exception: a prewarm that missed its font sends every glyph down the
+  // hot-group path at thousands of us each (measured 5642 us/glyph against 1 us prewarmed), and
+  // that is a real, visible stall worth seeing without raising the log level. So report it at DBG
+  // only when it is actually pathological, and let the healthy case go to TRC with the rest.
   if (stats.getBitmapCalls > 0) {
-    LOG_DBG("FDC", "[%s] getBitmap: %lu calls, %luus total, %luus/call avg", label, stats.getBitmapCalls,
-            stats.getBitmapTimeUs, stats.getBitmapTimeUs / stats.getBitmapCalls);
+    const uint32_t avgUs = stats.getBitmapTimeUs / stats.getBitmapCalls;
+    // ~100 us/glyph is an order of magnitude above a cache hit and far below a group inflate,
+    // so it separates the two populations without needing tuning.
+    constexpr uint32_t SLOW_GLYPH_US = 100;
+    if (avgUs >= SLOW_GLYPH_US) {
+      LOG_DBG("FDC", "[%s] getBitmap SLOW: %lu calls, %luus total, %luus/call avg (prewarm missed this font)", label,
+              stats.getBitmapCalls, stats.getBitmapTimeUs, avgUs);
+    } else {
+      LOG_TRC("FDC", "[%s] getBitmap: %lu calls, %luus total, %luus/call avg", label, stats.getBitmapCalls,
+              stats.getBitmapTimeUs, avgUs);
+    }
   }
 
-  uint32_t lruTotal = stats.fallbackCacheHits + stats.fallbackCacheMisses;
+  // Same rule: the fallback cache only matters when it is missing, which is the state that makes
+  // the line above slow.
+  const uint32_t lruTotal = stats.fallbackCacheHits + stats.fallbackCacheMisses;
   if (lruTotal > 0) {
-    LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
-            stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+    if (stats.fallbackCacheMisses > 0) {
+      LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
+              stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+    } else {
+      LOG_TRC("FDC", "[%s] LRU Fallback: hits=%lu misses=0", label, stats.fallbackCacheHits);
+    }
   }
 
   // Degraded render: these glyphs drew nothing. One line per pass instead of one per glyph.
