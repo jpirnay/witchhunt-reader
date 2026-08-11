@@ -822,6 +822,55 @@ sized for a heap-backed build whose ~28 KB working set the 10 KB `ownedArena` ca
 lowering them would admit builds that then run degraded. Fix the arena or the cliff, not the
 thermometer.
 
+### 9.7.1 The Min Free watermark is a 9200-byte table cell, not a regression
+
+`Min Free` dropped from 23960 to 7772 in the run where Background-B first started building
+successfully, which looked like the price of B running while the reader reads. It is not.
+
+The watermark probe (`ea91e262`) reports only when the mark moves, naming the interval:
+
+```
+Watermark DROP 40128 -> 27636 (-12492) in the interval ending at [render_start]
+Watermark DROP 27636 -> 11988 (-15648) in the interval ending at [render_start]
+```
+
+Both intervals contain a section build, and the second contains spine 2 of
+`alice-illustrated`, where the log shows the cause directly:
+
+```
+Table cell is 1178 px, taller than the 744 px viewport — falling back to paragraphs
+Table row degraded to paragraphs: 1 buffered cell(s), 9200 buffered byte(s)
+spine_page=2 free=28092 contig=12788 | page-low free=27252 contig=17396
+```
+
+That is the same 9200-byte cell recorded as the cause of the original X3 `abort()`. PR #126's
+per-row budget now catches it and degrades the row to paragraphs instead of crashing; the heap
+dip is the cost of buffering the row before laying it out.
+
+**It is pre-existing, not caused by the recent work.** Spine 2 was never built in the earlier
+runs — the reader never got that far:
+
+| run | built spine 2? | Min Free |
+|---|---|---|
+| slot arena + scaled glyph | no | 23960 |
+| status-bar prewarm | no | 23960 |
+| lean resolver + 1500 ms quiet | **yes** | 7772 |
+| watermark probe | **yes** | 11988 |
+
+The lean-resolver and quiet-period changes did not create the dip; they *exposed* it, by letting
+the reader reach content nothing had previously reached. Anyone reading that far would have hit
+it on the first pass.
+
+Note the per-page `page-low` probe does NOT see it (27252 against a real 11988): that probe
+samples between ~1 KB parse chunks, and the whole degradation happens inside one chunk's
+`</tr>` handler. A probe that samples between units cannot see a spike inside one.
+
+Open question, deliberately not acted on: 11988 sits at the documented 13–15 KB fault zone, but
+nothing failed — the build completed and cached 20 pages. Bounding the degradation path's
+buffer is the obvious fix; whether it is worth doing before something actually breaks is a
+judgement call, and the honest answer today is that this is the tightest spot in the system and
+it holds.
+
 ### 9.8 Landed since 2026-08-09
 
 - **PR #124** — CSS arena gate exemption, table-cell size bound, zip ring sizing, CSS parse churn
