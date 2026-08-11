@@ -98,8 +98,27 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 //
 // Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
 // ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
+// 2026-08-11: 56 KB -> 44 KB, because the component it was covering no longer exists.
+//
+// The 56 KB was index + hot/negative caches + margin, sized against the resolver's 40 KB
+// self-protection floor. Lean resolve is now unconditional (see runBuildSetup), so the hot LRU
+// never allocates — that is the "typically ~10 KB" term above — and the resolver's floor is
+// LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB), not 40 KB. Both halves of the arithmetic moved down.
+//
+// It also had to move for the gate to mean anything. On X3 free heap peaks at ~72 KB at reader
+// entry and sits at 50-60 KB while reading, so a 56 KB floor rejected essentially every
+// heap-backed CSS build — and Background-B, whose fallback path this gates, simply stopped
+// pre-building on CSS books. A floor that no reachable heap state satisfies is not a safety
+// margin, it is a disabled feature.
+//
+// This is DERIVED, not measured: 56 minus the ~10 KB hot cache, rounded down. It is a
+// pre-filter, not a guarantee, and it is not the safety mechanism — that is the contig check
+// below (a failed std::vector reserve aborts under -fno-exceptions, so contig must be real)
+// plus the resolver's own 24 KB floor and isCssLowHeapDegraded(), which lets a caller discard a
+// degraded result rather than ship it. Watch lowHeapSkips: if heap-backed builds start
+// degrading, this is the number that moved.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (44 * 1024)
 #endif
 
 // Contiguous floor: the only sizable contiguous CSS allocation is the selector index
@@ -774,7 +793,22 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       // parser never carries a stale lean flag into an owned/heap-backed build.
       const bool externalArena = st.arena && st.arena != st.ownedArena.get();
       st.cssParser->setIndexArena(externalArena ? st.arena : nullptr);
-      st.cssParser->setLeanResolve(externalArena);
+      // Lean resolve unconditionally, not just for arena builds. It does exactly two things:
+      // skip the hot-rule LRU, and drop the resolver's self-protection floor from
+      // MIN_FREE_HEAP_FOR_CSS (40 KB) to LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB).
+      //
+      // The hot LRU cannot hit during a build, structurally: ChapterHtmlSlimParser memoises
+      // resolved styles on `tag|class|id` in cssStyleCache_ BEFORE calling resolveStyle
+      // (ChapterHtmlSlimParser.cpp), so the resolver only ever sees the FIRST occurrence of each
+      // distinct key. A second-occurrence cache downstream of a first-occurrence filter has
+      // nothing to catch. Measured on three books with the LRU enabled (heap-backed host runs):
+      // hotHits=0 on every spine — alice 341 calls, kings-avatar 24, small-gods 17.
+      //
+      // So the LRU was pure cost: ~100 B/entry × 128 entries of heap growth, and 16 KB of extra
+      // resolver floor to accommodate it. Dropping it makes the disk-backed path — sparse index
+      // (8 B/rule) + on-demand seek + negative cache — the single CSS strategy on every build
+      // path, instead of only the borrowed one.
+      st.cssParser->setLeanResolve(true);
       if (!st.cssParser->loadFromCache()) {
         LOG_ERR("SCT", "Failed to load CSS from cache");
       }
