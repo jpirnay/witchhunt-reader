@@ -1,5 +1,7 @@
 # Heap / fragmentation work — handover, 2026-08-10
 
+*Last reviewed 2026-08-11, against `master` at `1d8eaf87` (PR #126 merged).*
+
 Device: ESP32-C3 (X3), ~380 KB heap, **no compaction**, `-fno-exceptions` (so `bad_alloc` = `abort()`).
 Books used throughout: `alice-illustrated.epub` (15 small spines, images, tables) and
 `small-gods.epub` (2 spines, one of which is the entire novel — 583991 bytes).
@@ -15,49 +17,54 @@ valuable half of this document: each entry cost real time to disprove.
 CSS parse churn −61%, heap block-count probe, font page-slot LRU, mid-build arena adoption,
 and a `RenderLock` self-deadlock fix caught by cppcheck.
 
-**PR #125 (open)** — footnote gather can no longer write a "no footnotes" cache it never earned.
+**PR #125 (merged)** — footnote gather can no longer write a "no footnotes" cache it never earned.
 
-Net effect on a fresh alice open: the spine-2 `abort()` is gone, 2822 ms is gone from every book
-open, 189 words of silently-dropped table text are back, and contig holds 40948 → 32756 across two
-spine builds instead of ratcheting to 15860.
+Net effect on a fresh alice open, measured after #124/#125 and before #126: the spine-2 `abort()` is
+gone, 2822 ms is gone from every book open, 189 words of silently-dropped table text are back, and
+contig holds 40948 → 32756 across two spine builds instead of ratcheting to 15860.
+
+**PR #126 (merged)** — the streaming table renderer, which closed the `MAX_CELL_LINES` item that
+used to head the list below. Rows now lay out at `</tr>` instead of the whole table buffering to
+`</table>`, so the live set is one row of `ParsedText` plus one fragment of `TextBlock`s, and a
+fragment is bounded by the viewport by construction. The per-table 12 KB byte budget became a
+per-**row** budget and the 96-word cell bound was deleted, since a per-row budget is charged per
+word and can act with a cell open (`degradeRowAtOpenCell`). `SECTION_FILE_VERSION` 65 → 66.
+
+It closed the truncation twice, which is the part worth remembering. `15be06af` replaced the silent
+truncation with a fallback to `emitTableAsParagraphs` and passed 418/418 — because no fixture
+reached it. The fallback rested on `layoutAndExtractLines` preserving its source, and
+[ParsedText.cpp:430](../lib/Epub/Epub/ParsedText.cpp#L430) erases every word it lays out, so the call
+that *detected* the overflow was the call that erased the evidence: the fallback emitted not the tail
+of the cell but the whole cell, plus every cell laid out before it. Strictly worse than the
+truncation. `c44f6f2d` fixed it with an opt-in `preserveSource`. The bail is now row-scoped, so one
+oversized cell in row 40 no longer flattens all 40 rows.
+
+Host-measured on the new `test_table_grid_edges.epub` fixtures: a cell over the 64-line cap keeps its
+70 words and the other row stays a grid (was: no grid, 70 words deleted); a row over the viewport
+keeps its 40 words the same way; a 60-row table renders as a grid across 3 fragments on 4 pages (was:
+5 pages of flattened paragraphs). Word stream identical and in the same order across every table
+book. **Not yet measured on device** — see worth-doing #3.
 
 ---
 
 ## Worth doing, in order
 
-Ranked by value ÷ risk. The first two are correctness bugs and do not depend on heap state, so they
-reproduce on the host test suite.
+Ranked by value ÷ risk. The first is a correctness bug that does not depend on heap state, so it
+reproduces on the host test suite.
 
-### 1. `MAX_CELL_LINES` silently truncates table cell text
+### 1. Nested-table character data is dropped
 
-`lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp:3267`
+[ChapterHtmlSlimParser.cpp:2110](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L2110) —
+`characterData` early-returns when `currentTable->depth > 1`, so every word inside a nested table is
+discarded. Pre-existing, known, parked earlier by the user. Violates "never drop content",
+independent of heap.
 
-```cpp
-if (cell.lines.size() < MAX_CELL_LINES) {   // 64, from Page.h
-  cell.lines.push_back(tb);
-}
-```
+A nested table already calls `degradeTable("nested table")`, so the inner text has a natural
+destination — the outer table's paragraph stream. But every `depth > 1` element handler needs
+auditing, not just this one `return`. This was scoped as C5 of the streaming table work and
+deliberately kept out of it; it is still its own commit.
 
-Every line past 64 is discarded — no log, no fallback, no degraded-mode marker. This is how
-alice lost 189 words before the cell-word bound routed oversized cells away from the grid path.
-It still fires for any cell under 96 words that lays out to more than 64 lines in a narrow column.
-
-The bound exists because `Page.h` stores the count in a `uint8_t`. The fix is not to raise it but to
-fall back to the paragraph path when a cell would overflow — the machinery already exists
-(`emitTableAsParagraphs`). Note the over-tall-row fallback rebuilds from `cell.lines`, which are
-already truncated, so it cannot be the recovery path.
-
-**Verify with:** word-stream comparison, not golden diff. Extract with
-`re.findall(r'\bW x=\S+ s=\S+ z=\S+ t=([^\r\n]*)', dump)` and compare counts. Redirect stderr
-separately — an interleaved `BENCHMARK` line split a `W` record and faked a missing word once.
-
-### 2. Nested-table character data is dropped
-
-`ChapterHtmlSlimParser::characterData` early-returns when `currentTable->depth > 1`, so every word
-inside a nested table is discarded. Pre-existing, known, parked earlier by the user. Same class as
-(1): violates "never drop content", independent of heap.
-
-### 3. Close the footnote gather gap
+### 2. Close the footnote gather gap
 
 PR #125 makes the build-path trigger decline while the framebuffer is lent — which is correct, but
 the trigger is *only* polled from inside a build slice, and a build always holds the borrow. So it
@@ -65,10 +72,43 @@ never fires. Correctness holds via the render-time backstop, but the giant-spine
 the build-path trigger is unserved.
 
 **Fix:** poll `Section::sawFootnote()` after a build completes and the buffer is returned. The flag
-is already latched into `Section::sawFootnote_` before `buildState_` teardown for exactly this.
-A few lines in the background tick.
+is already latched into `Section::sawFootnote_` before `buildState_` teardown for exactly this
+([Section.cpp:1477](../lib/Epub/Epub/Section.cpp#L1477)). A few lines in the background tick.
 
-### 4. Re-test the warm-pass borrow, one narrow question
+Still true as of `1d8eaf87`: the only two call sites
+([EpubReaderActivity.cpp:1222](../src/activities/reader/EpubReaderActivity.cpp#L1222) and
+[:1365](../src/activities/reader/EpubReaderActivity.cpp#L1365)) both sit immediately after a build
+slice, and the borrow check at
+[:2528](../src/activities/reader/EpubReaderActivity.cpp#L2528) declines there every time.
+
+### 3. Device-measure the streaming table renderer
+
+PR #126 is entirely host-verified. The claim to check on the X3 with `alice-illustrated.epub` is that
+contig across the two spine builds is **no worse than 40948 → 32756**. The mechanism predicts better:
+the peak used to be the whole table's `ParsedText` held simultaneously with every row's laid-out
+`TextBlock` lines, and both terms are now bounded by the display rather than the document.
+
+Watch for the second-order effect too — tables now span pages as grids instead of being flattened at
+48 rows, so a long table allocates fragments across several pages where it previously allocated none.
+
+### 4. Anchors have no dump coverage
+
+`runAndDump` emits no anchor records, and `Section` only exposes `getPageForAnchor(id)` — a lookup,
+not an enumeration. So an anchor regression breaks TOC navigation silently, with a green suite.
+
+This is the same blind-spot class as the table-content one that `0d093a72` fixed, and it is not
+hypothetical: `flushTableFragment()` can call `emitPage` mid-table, so `completedPageCount` advances
+*during* the table parse. Inside a grid table there is no text block to flush `pendingAnchorId`
+([:906](../lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp#L906)), so an `id` on a `<tr>` stays
+pending until the first paragraph after `</table>` — before and after #126 alike. The mechanism is
+unchanged and the page number moves only because the table is now denser. **That is reasoned, not
+measured.** `test_table_grid_edges.epub` carries `id="row-thirty"` and `id="row-fiftyfive"` for
+whoever checks it.
+
+Adding `ANCHOR id= page=` to the dump touches every golden in the corpus, so it wants its own commit,
+the way `0d093a72` was its own commit.
+
+### 5. Re-test the warm-pass borrow, one narrow question
 
 Reverted, but on confounded evidence — see eliminated #14. The single question to answer:
 
@@ -79,7 +119,7 @@ arena-capable (`PngStreamDecoder::setScratchArena`, and the JPEG converter's 12 
 `image_scratch`), and `Section::warmAllImageCaches` already borrows for the whole-section pass. Only
 the reader's per-page path is unwired.
 
-### 5. Build-scoped arena candidates — measure before writing
+### 6. Build-scoped arena candidates — measure before writing
 
 Two survive scrutiny; one did not (eliminated #12).
 
@@ -92,16 +132,19 @@ Both need a custom allocator threaded through container *and* strings — materi
 "put it in the arena". And 92.3% of words fit SSO, so the win is smaller than the element count
 suggests. **Instrument first** with the `EpubCssPerformanceTest` allocation-tracking harness.
 
-### 6. Contig decay — still unexplained
+### 7. Contig decay — still unexplained
 
 Much milder now (40948 → 32756 over two builds, vs → 15860 before), but not understood. The
 `allocBlk` / `freeBlk` / `allocBytes` probe added in PR #124 is the tool: block counts oscillating
 while contig ratchets down means fragmentation, not retention.
 
-### 7. Cosmetic, but misleading in exactly the wrong moment
+### 8. Cosmetic, but misleading in exactly the wrong moment
 
-- `"Build for spine %d hit a footnote"` prints `currentSpineIndex`, not the spine being built.
-  During a Background-B build those differ.
+Both still present as of `1d8eaf87`.
+
+- `"Build for spine %d hit a footnote"`
+  ([EpubReaderActivity.cpp:2535](../src/activities/reader/EpubReaderActivity.cpp#L2535)) prints
+  `currentSpineIndex`, not the spine being built. During a Background-B build those differ.
 - `[COF] Couldn't open temp items file … probably going to be a fatal error` fires three times on
   every normal first open (the book's cache dir does not exist yet). It is not fatal. Logging it as
   `ERR` on a healthy path buries real errors.
@@ -151,8 +194,9 @@ Each was investigated and disproved. Re-proposing one costs the same time again.
 | 11 | Piggyback footnote Pass A on the section build | No whole-book parser pass exists — the `spineCount` loops are metadata only. The build *consumes* previews, so it is circular |
 | 12 | Move the section LUT into the arena | `Section.cpp:1289` moves it into the Section; it outlives the arena |
 | 13 | Give the render pass its own arena | Font path needs ~21 KB; the 52272 B framebuffer realloc must keep succeeding, and there is nothing to lend during prewarm (the buffer is being rendered into) |
-| 15 | **Shrink the font group size in `fontconvert.py`** | **Flash.** DEFLATE ratio is strongly size-dependent — <2K groups compress at 0.505, >16K at 0.260. Capping at 8192 costs **+478957 bytes (+37.7%)** of font data against **228685 bytes** of flash headroom. A 16 KB cap is the only one that builds (+175951) and changes nothing, since the transient is already 8–10.5 KB. The 64 KB cap was never binding: largest real group is 43779, and group size is set by the script ranges, not the cap |
 | 14 | Borrow the framebuffer for the image warm pass | Reverted — but **on confounded evidence**, see worth-doing #5. Not settled |
+| 15 | **Shrink the font group size in `fontconvert.py`** | **Flash.** DEFLATE ratio is strongly size-dependent — <2K groups compress at 0.505, >16K at 0.260. Capping at 8192 costs **+478957 bytes (+37.7%)** of font data against **228685 bytes** of flash headroom. A 16 KB cap is the only one that builds (+175951) and changes nothing, since the transient is already 8–10.5 KB. The 64 KB cap was never binding: largest real group is 43779, and group size is set by the script ranges, not the cap |
+| 16 | Delete the table byte budget once rows stream | True at *table* scope, false at *row* scope: one row of 8 cells each holding the 9200-byte cell that caused the original X3 `abort()` is ~72 KB, and streaming bounds none of it. The 12 KB number was retargeted to the row, not dropped |
 
 ---
 
@@ -172,13 +216,29 @@ made confidently and each needed reverting or repair (#8, #9, #14). The two that
 the CSS arena gate and the table cell bound — were both preceded by a measurement that disproved the
 first theory.
 
+**A guard with no fixture is a guess.** `15be06af` shipped a fallback that was strictly worse than
+the bug it replaced, with a green 418/418 behind it, because nothing reached the guard — its own
+commit message says it was "exercised only by inspection". Write the fixture that enters the branch
+before trusting the branch.
+
+**A green suite only covers what `dumpPage` prints.** Table cells were invisible to every golden
+until `0d093a72`, which is why the truncation survived as long as it did. Before verifying a change
+in some subsystem, check that the dump can *see* that subsystem — anchors still cannot
+(worth-doing #4).
+
 ---
 
 ## Reproducing the measurements
 
-- Host suite: `cd test/build && cmake --build . -j 8 && ctest -j 8` → 418/418.
+- Host suite: `cd test/build && cmake --build . -j 8 && ctest -j 8` → 424/424.
 - Pipeline dump: `epub_pipeline_dump_noheap.exe <book.epub> <cachedir>` (use the `_noheap` variant on
   Windows; the malloc-interposing one deadlocks under MinGW).
+- **Content changes: compare word streams, not goldens.** Extract with
+  `re.findall(r'\bW x=\S+ s=\S+ z=\S+ t=([^\r\n]*)', dump)` and compare the *sequence* pre/post for
+  every corpus book × both `fontSizeNormalization` variants. Redirect stderr separately — an
+  interleaved `BENCHMARK` line split a `W` record and faked a missing word once. Since `0d093a72`
+  this covers table cells too; grid and paragraph layout both emit cells in row-major order with
+  hyphenation off, so the stream is invariant even where the rendering mode changes.
 - Device: `pio run -e default`, then read `[HEAP]`, `[FBUF]`, and `Reader mem[...]` lines.
 - The X3's real serial port is **COM6** — COM3 is a fake AMT SOL device; native USB re-enumerates on
   reset.
