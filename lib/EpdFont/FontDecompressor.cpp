@@ -1,6 +1,7 @@
 #include "FontDecompressor.h"
 
 #include <Arduino.h>
+#include <BuildArena.h>
 #include <Logging.h>
 #include <Utf8.h>
 
@@ -21,11 +22,23 @@ void FontDecompressor::clearCache() { freePageBuffer(); }
 
 void FontDecompressor::freePageBuffer() {
   for (uint8_t s = 0; s < pageSlotCount; s++) {
-    free(pageSlots[s].buffer);
-    free(pageSlots[s].glyphs);
+    // Arena-backed slots are not ours to free: the region belongs to whoever installed it (see
+    // setSlotArena) and is rewound wholesale by its owner. free() on an interior pointer into
+    // that region would corrupt the heap.
+    if (!pageSlots[s].arenaBacked) {
+      free(pageSlots[s].buffer);
+      free(pageSlots[s].glyphs);
+    }
     pageSlots[s] = {};
   }
   pageSlotCount = 0;
+}
+
+bool FontDecompressor::hasArenaBackedSlots() const {
+  for (uint8_t s = 0; s < pageSlotCount; s++) {
+    if (pageSlots[s].arenaBacked) return true;
+  }
+  return false;
 }
 
 uint16_t FontDecompressor::getGroupIndex(const EpdFontData* fontData, uint32_t glyphIndex) {
@@ -389,8 +402,13 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     const uint32_t evictedGlyphBytes = pageSlots[slotIndex].glyphCount * sizeof(PageGlyphEntry);
     stats.pageBufferBytes -= std::min(stats.pageBufferBytes, pageSlots[slotIndex].bufferBytes);
     stats.pageGlyphsBytes -= std::min(stats.pageGlyphsBytes, evictedGlyphBytes);
-    free(pageSlots[slotIndex].buffer);
-    free(pageSlots[slotIndex].glyphs);
+    if (!pageSlots[slotIndex].arenaBacked) {
+      free(pageSlots[slotIndex].buffer);
+      free(pageSlots[slotIndex].glyphs);
+    }
+    // An evicted arena slot leaks its bytes for the rest of the arena scope: the arena bump-
+    // allocates and this block is no longer the newest. Bounded and short-lived (one page draw,
+    // MAX_PAGE_SLOTS is 4), so it is cheaper than tracking a block token per slot.
     pageSlots[slotIndex] = {};
     pageSlotCount--;
     // Keep the live slots contiguous in [0, pageSlotCount): the scan loops rely on it.
@@ -450,13 +468,40 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     neededGroups[j + 1] = key;
   }
 
-  // Step 3: Allocate page buffer and lookup table for this slot
-  slot.buffer = static_cast<uint8_t*>(malloc(totalBytes));
-  slot.glyphs = static_cast<PageGlyphEntry*>(malloc(glyphCount * sizeof(PageGlyphEntry)));
+  // Step 3: Allocate page buffer and lookup table for this slot.
+  //
+  // From the scratch arena when one is installed (see setSlotArena). Both blocks come from a
+  // single reserved scope so a partial failure rewinds cleanly and the pair can never end up
+  // half-arena, half-heap. Falling back to the heap on refusal is the pre-existing behaviour,
+  // so an arena too small for the page simply costs the anti-fragmentation benefit.
+  const uint32_t glyphTableBytes = glyphCount * sizeof(PageGlyphEntry);
+  slot.arenaBacked = false;
+  if (slotArena_ && slotArena_->valid()) {
+    // Plain bump allocation, no per-slot block. The whole page's slots live inside ONE scope
+    // reserved by FontCacheManager::ScopedSlotArena and rewound when it exits, which is what
+    // keeps the arena cursor from creeping: committing a block per slot would advance it ~9 KB
+    // per mid-build draw with no way back until the build ended, and a reader paging forward
+    // during a build would exhaust the region in three draws.
+    auto* buf = static_cast<uint8_t*>(slotArena_->alloc(totalBytes));
+    auto* glyphs = static_cast<PageGlyphEntry*>(slotArena_->alloc(glyphTableBytes, alignof(PageGlyphEntry)));
+    if (buf && glyphs) {
+      slot.buffer = buf;
+      slot.glyphs = glyphs;
+      slot.arenaBacked = true;
+    }
+    // A partial fit (buf but no glyphs, or neither) just falls through to the heap below. The
+    // bytes taken are reclaimed with the rest of the scope, so there is nothing to unwind.
+  }
+  if (!slot.arenaBacked) {
+    slot.buffer = static_cast<uint8_t*>(malloc(totalBytes));
+    slot.glyphs = static_cast<PageGlyphEntry*>(malloc(glyphTableBytes));
+  }
   if (!slot.buffer || !slot.glyphs) {
     LOG_ERR("FDC", "Failed to allocate page buffer (%u bytes, %u glyphs)", totalBytes, glyphCount);
-    free(slot.buffer);
-    free(slot.glyphs);
+    if (!slot.arenaBacked) {
+      free(slot.buffer);
+      free(slot.glyphs);
+    }
     slot = {};
     return glyphCount;
   }

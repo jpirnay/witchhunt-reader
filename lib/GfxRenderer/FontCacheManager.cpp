@@ -1,5 +1,6 @@
 #include "FontCacheManager.h"
 
+#include <BuildArena.h>
 #include <FontDecompressor.h>
 #include <Logging.h>
 #include <SdCardFont.h>
@@ -145,3 +146,36 @@ FontCacheManager::PrewarmScope::PrewarmScope(PrewarmScope&& other) noexcept
 }
 
 FontCacheManager::PrewarmScope FontCacheManager::createPrewarmScope() { return PrewarmScope(*this); }
+
+FontCacheManager::ScopedSlotArena::ScopedSlotArena(FontCacheManager& manager, BuildArena* arena) : manager_(manager) {
+  if (!arena || !arena->valid() || !manager_.fontDecompressor_) return;
+  // One reserved block for the whole page. Every slot bump-allocates inside it and the lot is
+  // rewound in the destructor, so the arena cursor ends exactly where it started -- important
+  // because the region is on loan from a live section build, which resumes using it afterwards.
+  block_ = arena->reserveBlock();
+  if (!block_.valid()) return;
+  // Start from a clean slot table: a heap-backed slot left over from the previous page would
+  // otherwise survive into this scope and be indistinguishable from an arena-backed one at
+  // teardown. Prewarm rebuilds slot buffers on every call, so nothing useful is discarded.
+  manager_.clearCache();
+  manager_.fontDecompressor_->setSlotArena(arena);
+  arena_ = arena;
+  installed_ = true;
+}
+
+FontCacheManager::ScopedSlotArena::~ScopedSlotArena() {
+  if (!installed_) return;
+  // Order is load-bearing, which is the reason this class exists:
+  //   1. drop the slots WHILE the arena is still installed, so freePageBuffer() can see they are
+  //      arena-backed and must not be free()d;
+  //   2. uninstall, so a later prewarm outside this scope goes back to the heap;
+  //   3. rewind, returning the bytes to the build that lent them.
+  manager_.clearCache();
+  manager_.fontDecompressor_->setSlotArena(nullptr);
+  if (!arena_->release(block_)) {
+    // Only reachable if something else allocated from the arena inside this scope and did not
+    // release -- i.e. the render lock stopped excluding the build. Not fatal (the arena is reset
+    // at the next build), but it means the invariant this class relies on has been broken.
+    LOG_ERR("FCM", "Slot arena release refused: another owner allocated inside the page scope");
+  }
+}

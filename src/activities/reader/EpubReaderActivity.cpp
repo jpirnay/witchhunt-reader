@@ -4144,6 +4144,16 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // which is the classic way to leave a block split. See §9.2.3.
   logReaderMemSnapshot("buildpage_begin");
   auto* fcm = renderer.getFontCacheManager();
+  // Draw this page's font slots from the build's own arena rather than the heap. Measured X3
+  // 2026-08-11: the prewarm's six blocks (~9 KB) cost contig 36852 -> 27636 here, and releasing
+  // them afterwards returned every byte and every block while contig did not move at all — the
+  // bytes were never the problem, their placement was (§9.2.4). The borrowed region they come
+  // from is the one the build already holds and is barely using (highWater 12864-28656 of
+  // 52272), and nothing else can allocate inside it.
+  //
+  // Only while the buffer is actually lent; otherwise buildScratch_ is null and the scope
+  // self-disables, leaving the heap path exactly as it was.
+  FontCacheManager::ScopedSlotArena slotArena(*fcm, secondaryBorrowed_ ? buildScratch_.get() : nullptr);
   auto scope = fcm->createPrewarmScope();
   page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
   scope.endScanAndPrewarm();
@@ -4176,6 +4186,11 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // "until the next prewarm" spans the rest of a multi-second build. Releasing now lets the block
   // coalesce before stepCurrentSectionBuild() resumes; nothing else allocates in between, because
   // the lock is still held.
+  //
+  // When the slots came from the arena instead (the normal case now — see ScopedSlotArena above)
+  // this returns nothing to the heap, because they never came from it; the arena scope rewinds
+  // them on the way out of this function. Kept unconditional because it is still the right thing
+  // on the heap path, which is what runs whenever the buffer is not lent.
   //
   // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
   // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next

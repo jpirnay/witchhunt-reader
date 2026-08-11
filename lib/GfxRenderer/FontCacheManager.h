@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <EpdFontFamily.h>
 
 #include <cstdint>
@@ -29,6 +30,30 @@ class FontCacheManager {
 
   // The FontDecompressor pointer, needed by GfxRenderer::getGlyphBitmap()
   FontDecompressor* getDecompressor() const { return fontDecompressor_; }
+
+  // RAII scope that draws prewarm page slots from `arena` instead of the heap.
+  //
+  // The ordering this enforces is the whole point. Arena-backed slots are never free()d and stop
+  // being valid when the region is rewound, so they must be dropped BEFORE the arena is
+  // withdrawn. Written out by hand that is two calls in one order at every call site, and one
+  // wrong order is a use-after-free in the glyph path. Here the destructor does both, so a caller
+  // cannot get it wrong: clear the slots, then uninstall.
+  //
+  // Nesting is not supported (there is one decompressor and one slot table); constructing a
+  // second scope while one is live is a programming error, not a runtime case to handle.
+  class ScopedSlotArena {
+   public:
+    ScopedSlotArena(FontCacheManager& manager, BuildArena* arena);
+    ~ScopedSlotArena();
+    ScopedSlotArena(const ScopedSlotArena&) = delete;
+    ScopedSlotArena& operator=(const ScopedSlotArena&) = delete;
+
+   private:
+    FontCacheManager& manager_;
+    BuildArena* arena_ = nullptr;
+    BuildArena::Block block_;
+    bool installed_ = false;
+  };
 
   // RAII scope for two-pass prewarm pattern
   class PrewarmScope {
