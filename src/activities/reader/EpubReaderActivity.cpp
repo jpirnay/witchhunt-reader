@@ -386,6 +386,11 @@ void EpubReaderActivity::onEnter() {
   // reader rather than from millis()==0. Otherwise B's quiet check is satisfied before the book
   // has drawn anything, which is the worst possible moment to take the display buffer.
   lastPageOnScreenMs_ = millis();
+  // Take the scaled-glyph cache now, while the heap is still whole. It is ~4.9 KB that is never
+  // released, and allocating it on first use meant a permanent block landed wherever the first
+  // heading happened to be drawn — measured on X3 as 5120 of contig lost inside a mid-build page
+  // draw, for the rest of the session. Here it sits with the other permanent allocations.
+  renderer.ensureScaledGlyphCache();
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the

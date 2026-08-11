@@ -128,6 +128,12 @@ class GfxRenderer {
   mutable uint16_t scaledGlyphUsed_ = 0;
   mutable bool scaledGlyphOom_ = false;  // arena allocation failed; do not retry every glyph
 
+ public:
+  // Allocate the scaled-glyph cache now rather than on first scaled glyph. Call at a stable
+  // point (reader entry); see the definition for why the timing matters more than the size.
+  bool ensureScaledGlyphCache() const;
+
+ private:
   mutable std::atomic<unsigned int> refreshOverride = REFRESH_OVERRIDE_NONE;
   // Atomically consume a pending setNextDisplayRefreshMode() override: if one is set, clear it
   // and return its mode; otherwise return `requested`. Shared by displayBuffer() and
