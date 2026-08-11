@@ -46,6 +46,17 @@ BuildArena* get();
 // Install/clear. The arena must outlive the scope; use ScopedArena rather than calling these.
 void set(BuildArena* arena);
 
+// True when the installed arena has room to serve `bytes`, i.e. the heap will NOT be asked for
+// them. Free-heap floors that exist to cover an arena-capable block MUST discount it through
+// this, or they double-count: MIN_FREE_HEAP_FOR_JPEG is literally the work-pool size plus
+// headroom, so with an arena installed it demands 12 KB of heap for a block the heap never
+// sees, and refuses decodes the heap could easily serve.
+//
+// Mirrors what the allocators actually do (they bump-allocate and fall back to the heap on
+// refusal), including worst-case alignment padding. An over-optimistic answer degrades to a
+// heap fallback inside the decoder, which is already handled — it cannot crash.
+bool canServe(size_t bytes);
+
 // RAII installer — restores the previous value, so nesting is safe.
 class ScopedArena {
  public:

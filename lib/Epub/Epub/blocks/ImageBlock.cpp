@@ -1,5 +1,6 @@
 #include "ImageBlock.h"
 
+#include <BuildArena.h>  // image_scratch::canServe needs the complete type
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -65,6 +66,17 @@ BuildArena* g_arena = nullptr;
 }
 BuildArena* get() { return g_arena; }
 void set(BuildArena* arena) { g_arena = arena; }
+bool canServe(const size_t bytes) {
+  if (!g_arena || !g_arena->valid()) return false;
+  const size_t used = g_arena->used();
+  const size_t capacity = g_arena->capacity();
+  if (used >= capacity) return false;
+  // alloc() pads the cursor up to the requested alignment before the block, so budget for the
+  // worst case rather than reporting room the allocator would then refuse.
+  const size_t remaining = capacity - used;
+  constexpr size_t ALIGN_SLACK = alignof(std::max_align_t);
+  return remaining >= bytes && remaining - bytes >= ALIGN_SLACK;
+}
 }  // namespace image_scratch
 
 namespace {
