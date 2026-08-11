@@ -31,6 +31,28 @@ class Epub;
 
 #define MAX_WORD_SIZE 200
 
+// Rough page count for a spine of `inflatedSize` XHTML bytes, used only to pre-size the
+// per-page vectors that the build grows one entry at a time (Section's page-offset LUT and
+// the parser's paragraph LUT). Deliberately an UNDER-estimate: the point is to remove the
+// long doubling ladder from the middle of a parse, not to get the count right. Reserving
+// too much would take heap the build needs; reserving a bit too little just leaves one or
+// two doublings at the end, which is already the cheap case.
+//
+// 1 KB of XHTML per page, from device measurement (X4, 2026-08-11): a 16340-byte spine laid
+// out to 19 pages (860 B/page), and a 551-byte spine to 1. An earlier 4096 guess reserved 3
+// entries for that 19-page spine and left most of the ladder in place.
+//
+// Erring low is cheap here because MAX_RESERVED_PAGES bounds the whole downside: even a spine
+// that saturates it reserves only 2 KB (Section's u32 LUT) and 4 KB (the 8-byte paragraph LUT).
+// Past the cap the vector grows normally.
+inline constexpr size_t estimatePagesForSpine(const size_t inflatedSize) {
+  constexpr size_t XHTML_BYTES_PER_PAGE = 1024;
+  constexpr size_t MAX_RESERVED_PAGES = 512;
+  const size_t pages = inflatedSize / XHTML_BYTES_PER_PAGE;
+  if (pages > MAX_RESERVED_PAGES) return MAX_RESERVED_PAGES;
+  return pages;
+}
+
 class ChapterHtmlSlimParser final : public Print {
   std::shared_ptr<Epub> epub;
   GfxRenderer& renderer;

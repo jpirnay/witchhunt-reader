@@ -727,6 +727,10 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
                          p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
                          p.imageRendering);
   st.lut.clear();
+  // One u32 per page, appended by the completePageFn below across the whole parse. Pre-sized for
+  // the same reason as the parser's paragraph LUT — see estimatePagesForSpine and
+  // docs/memory-allocation-strategy.md §9.6.
+  st.lut.reserve(estimatePagesForSpine(st.inflatedSize));
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = st.localPath.find_last_of('/');

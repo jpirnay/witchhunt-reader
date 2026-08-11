@@ -2612,6 +2612,20 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   layoutFailed = false;
   streamStartTimeMs = millis();
 
+  // Pre-size the two vectors that grow one entry at a time across the whole parse. Without
+  // this each doubles ~10 times mid-parse, and every growth is an allocate-copy-free of an
+  // increasing size interleaved with all the other parse traffic — the churn shape a
+  // no-compaction heap cannot recover from (CLAUDE.md Resource Protocol rule 7,
+  // docs/memory-allocation-strategy.md §9.6). The blocks are individually small, so this is
+  // an allocation-COUNT fix; it is not expected to move contig on its own.
+  paragraphLutPerPage.reserve(estimatePagesForSpine(totalInflatedSize));
+  // Anchors are unbounded in principle (capped at MAX_ANCHORS_PER_CHAPTER) but a few dozen in
+  // practice, and each entry is ~28 B plus a heap string for ids over the SSO limit. Reserve
+  // for the common case only: reserving for the cap would cost ~28 KB up front on every
+  // chapter to save reallocations that the rare anchor-heavy chapter alone would pay.
+  constexpr size_t TYPICAL_ANCHORS_PER_CHAPTER = 32;
+  anchorData.reserve(TYPICAL_ANCHORS_PER_CHAPTER);
+
   // Choose progress granularity by chapter size. Each callback drives a full-screen
   // e-ink refresh (~640ms), so smaller chapters skip mid-parse ticks entirely.
   // progressStepPercent == 0 means "popup only, no mid-parse updates".
