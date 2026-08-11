@@ -1527,12 +1527,28 @@ void Section::abortSectionBuild() {
     return;
   }
   // Drop the extraction temp file alongside the partial cache file. tempPath is the book-keyed
-  // HTML cache: delete it only if WE were producing it (a partial inflate). When it was reused
-  // (read-only), it is a complete valid cache — keep it so the next build still skips inflation.
+  // HTML cache, and the only version worth deleting is an INCOMPLETE one: a partial inflate is
+  // garbage, a finished one is exactly what the next attempt wants.
+  //
+  // This used to test `!reusedHtml` — "delete whenever WE produced it" — which threw away every
+  // complete extraction a preempted build had just paid for, because a build that produced the
+  // file has reusedHtml == false whether or not its inflate finished. That silently broke the
+  // retry design documented at BG_BUILD_MAX_PREEMPTIONS: attempt 1 is supposed to bank the
+  // inflated XHTML so attempt 2 skips inflation and gets a real shot at the parse. It never did.
+  // Attempt 2 re-inflated from scratch, lost the same race, and Background-B abandoned the spine
+  // — which is why B stopped pre-building after its first section or two.
+  //
+  // Device-observed (X3, 2026-08-11): spine 2 extracted 14054 bytes at t=16924, was preempted at
+  // t=17087 with phase (a) complete, and the cache was deleted anyway.
+  //
+  // extractDone covers both ways the file becomes complete: the reused-cache path sets it when it
+  // skips phase (a), and the extract loop sets it when the inflate finishes. Erring towards
+  // keeping is self-correcting — runBuildParse re-validates the cache against the entry's
+  // inflated size and re-inflates on any mismatch.
   if (buildState_->tempFile) {
     buildState_->tempFile.close();
   }
-  if (!buildState_->reusedHtml && !buildState_->tempPath.empty()) {
+  if (!buildState_->extractDone && !buildState_->tempPath.empty()) {
     Storage.remove(buildState_->tempPath.c_str());
   }
   // During a live build, `file` is the build's write handle and filePath its cache path
