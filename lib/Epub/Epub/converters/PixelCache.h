@@ -131,7 +131,7 @@ struct PixelCache {
       return false;
     }
 
-    LOG_DBG("IMG", "Cache stream started: %s (%dx%d, band %d rows)", cachePath.c_str(), w, h, bandRows);
+    LOG_TRC("IMG", "Cache stream started: %s (%dx%d, band %d rows)", cachePath.c_str(), w, h, bandRows);
     ok = true;
     return true;
   }

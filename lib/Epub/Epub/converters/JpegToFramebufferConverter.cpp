@@ -314,6 +314,16 @@ class JpegWorkPool {
 constexpr size_t MIN_FREE_HEAP_FOR_JPEG = TJPG_WORK_POOL_SIZE + 16 * 1024;
 constexpr size_t MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG = 16 * 1024;
 
+// The work-pool term of the floor above is only a HEAP cost when no pass arena is installed --
+// JpegWorkPool draws from image_scratch first. Charging it either way makes the floor demand
+// 12 KB of heap for a block the heap never sees, which is what refuses decodes under a borrowed
+// framebuffer (free heap is ~52 KB lower there than on the released path, but the arena is
+// serving the largest block). See docs/memory-allocation-strategy.md §9.3.
+size_t minFreeHeapForJpeg() {
+  return image_scratch::canServe(TJPG_WORK_POOL_SIZE) ? MIN_FREE_HEAP_FOR_JPEG - TJPG_WORK_POOL_SIZE
+                                                      : MIN_FREE_HEAP_FOR_JPEG;
+}
+
 // Optional memory-behavior knobs for embedded targets.
 #ifndef JPEG_ENABLE_FIRST_RENDER_NO_CACHE
 #define JPEG_ENABLE_FIRST_RENDER_NO_CACHE 1
@@ -323,8 +333,11 @@ constexpr size_t MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG = 16 * 1024;
 #define JPEG_CACHE_MIN_FREE_HEAP_MARGIN (24 * 1024)
 #endif
 
+// Arena-aware for the same reason as the cache floor: otherwise a borrowed-framebuffer decode
+// silently drops from Atkinson to Bayer dithering on every image — a visible quality regression
+// caused by charging heap for a block the arena is serving.
 #ifndef JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP
-#define JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP (MIN_FREE_HEAP_FOR_JPEG + 8 * 1024)
+#define JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP (minFreeHeapForJpeg() + 8 * 1024)
 #endif
 
 size_t jpegCacheBytes(int width, int height) {
@@ -336,13 +349,13 @@ bool shouldEnableJpegCache(const RenderConfig& config, int width, int height) {
 
 #if JPEG_ENABLE_FIRST_RENDER_NO_CACHE
   if (!Storage.exists(config.cachePath.c_str())) {
-    LOG_DBG("JPG", "No existing JPEG cache file on first render; enabling cache write: %s", config.cachePath.c_str());
+    LOG_TRC("JPG", "No existing JPEG cache file on first render; enabling cache write: %s", config.cachePath.c_str());
   }
 #endif
 
   const size_t cacheBytes = jpegCacheBytes(width, height);
   const size_t freeHeap = ESP.getFreeHeap();
-  const size_t minFreeForCaching = MIN_FREE_HEAP_FOR_JPEG + JPEG_CACHE_MIN_FREE_HEAP_MARGIN;
+  const size_t minFreeForCaching = minFreeHeapForJpeg() + JPEG_CACHE_MIN_FREE_HEAP_MARGIN;
 
   if (freeHeap < minFreeForCaching) {
     LOG_DBG("JPG", "Skipping cache: free heap %u < %u (cache %u bytes)", static_cast<unsigned>(freeHeap),
@@ -926,7 +939,7 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
   if (!readJpegDimensionsFromHeader(imagePath, out)) {
     return false;
   }
-  LOG_DBG("JPG", "Image dimensions: %dx%d", out.width, out.height);
+  LOG_TRC("JPG", "Image dimensions: %dx%d", out.width, out.height);
   return true;
 }
 
@@ -942,7 +955,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
   }
 
   const size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < MIN_FREE_HEAP_FOR_JPEG) {
+  if (freeHeap < minFreeHeapForJpeg()) {
     LOG_DBG("JPG", "Skipping adaptive tone analysis, low heap (%u free)", static_cast<unsigned>(freeHeap));
     return points;
   }
@@ -980,7 +993,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
 
   if (histCtx.histogramSamples == 0) return points;
   points = adaptive_tone::derivePoints(histogram.get(), histCtx.histogramSamples);
-  LOG_DBG("JPG", "Adaptive tone: active=%d black=%u white=%u (%llu samples): %s", points.active ? 1 : 0,
+  LOG_TRC("JPG", "Adaptive tone: active=%d black=%u white=%u (%llu samples): %s", points.active ? 1 : 0,
           points.blackPoint, points.whitePoint, static_cast<unsigned long long>(histCtx.histogramSamples),
           imagePath.c_str());
   return points;
@@ -988,7 +1001,7 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                      const RenderConfig& config) {
-  LOG_DBG("JPG", "Decoding JPEG: %s", imagePath.c_str());
+  LOG_TRC("JPG", "Decoding JPEG: %s", imagePath.c_str());
   jpgCheckHeap("jpg_decode_entry");
 
   // No pre-decode marker validation here. An EOI gate used to guard JPEGDEC, which
@@ -1020,8 +1033,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     return true;
   }
 
-  const size_t requiredHeap =
-      mode == JpegMode::Progressive ? MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG : MIN_FREE_HEAP_FOR_JPEG;
+  const size_t requiredHeap = mode == JpegMode::Progressive ? MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG : minFreeHeapForJpeg();
   const size_t freeHeap = ESP.getFreeHeap();
   if (freeHeap < requiredHeap) {
     LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", freeHeap, requiredHeap);
@@ -1123,7 +1135,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.fineScaleFPY = (int32_t)((int64_t)destHeight * FP_ONE / ctx.scaledSrcHeight);
   ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / destHeight);
 
-  LOG_DBG("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
+  LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
           destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);
 
   // A TJpgDec MCU is at most 16 scaled-source rows tall, which our fine scale maps

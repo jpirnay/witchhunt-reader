@@ -1,6 +1,7 @@
 #include "FontDecompressor.h"
 
 #include <Arduino.h>
+#include <BuildArena.h>
 #include <Logging.h>
 #include <Utf8.h>
 
@@ -21,11 +22,23 @@ void FontDecompressor::clearCache() { freePageBuffer(); }
 
 void FontDecompressor::freePageBuffer() {
   for (uint8_t s = 0; s < pageSlotCount; s++) {
-    free(pageSlots[s].buffer);
-    free(pageSlots[s].glyphs);
+    // Arena-backed slots are not ours to free: the region belongs to whoever installed it (see
+    // setSlotArena) and is rewound wholesale by its owner. free() on an interior pointer into
+    // that region would corrupt the heap.
+    if (!pageSlots[s].arenaBacked) {
+      free(pageSlots[s].buffer);
+      free(pageSlots[s].glyphs);
+    }
     pageSlots[s] = {};
   }
   pageSlotCount = 0;
+}
+
+bool FontDecompressor::hasArenaBackedSlots() const {
+  for (uint8_t s = 0; s < pageSlotCount; s++) {
+    if (pageSlots[s].arenaBacked) return true;
+  }
+  return false;
 }
 
 uint16_t FontDecompressor::getGroupIndex(const EpdFontData* fontData, uint32_t glyphIndex) {
@@ -389,8 +402,13 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     const uint32_t evictedGlyphBytes = pageSlots[slotIndex].glyphCount * sizeof(PageGlyphEntry);
     stats.pageBufferBytes -= std::min(stats.pageBufferBytes, pageSlots[slotIndex].bufferBytes);
     stats.pageGlyphsBytes -= std::min(stats.pageGlyphsBytes, evictedGlyphBytes);
-    free(pageSlots[slotIndex].buffer);
-    free(pageSlots[slotIndex].glyphs);
+    if (!pageSlots[slotIndex].arenaBacked) {
+      free(pageSlots[slotIndex].buffer);
+      free(pageSlots[slotIndex].glyphs);
+    }
+    // An evicted arena slot leaks its bytes for the rest of the arena scope: the arena bump-
+    // allocates and this block is no longer the newest. Bounded and short-lived (one page draw,
+    // MAX_PAGE_SLOTS is 4), so it is cheaper than tracking a block token per slot.
     pageSlots[slotIndex] = {};
     pageSlotCount--;
     // Keep the live slots contiguous in [0, pageSlotCount): the scan loops rely on it.
@@ -450,13 +468,40 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     neededGroups[j + 1] = key;
   }
 
-  // Step 3: Allocate page buffer and lookup table for this slot
-  slot.buffer = static_cast<uint8_t*>(malloc(totalBytes));
-  slot.glyphs = static_cast<PageGlyphEntry*>(malloc(glyphCount * sizeof(PageGlyphEntry)));
+  // Step 3: Allocate page buffer and lookup table for this slot.
+  //
+  // From the scratch arena when one is installed (see setSlotArena). Both blocks come from a
+  // single reserved scope so a partial failure rewinds cleanly and the pair can never end up
+  // half-arena, half-heap. Falling back to the heap on refusal is the pre-existing behaviour,
+  // so an arena too small for the page simply costs the anti-fragmentation benefit.
+  const uint32_t glyphTableBytes = glyphCount * sizeof(PageGlyphEntry);
+  slot.arenaBacked = false;
+  if (slotArena_ && slotArena_->valid()) {
+    // Plain bump allocation, no per-slot block. The whole page's slots live inside ONE scope
+    // reserved by FontCacheManager::ScopedSlotArena and rewound when it exits, which is what
+    // keeps the arena cursor from creeping: committing a block per slot would advance it ~9 KB
+    // per mid-build draw with no way back until the build ended, and a reader paging forward
+    // during a build would exhaust the region in three draws.
+    auto* buf = static_cast<uint8_t*>(slotArena_->alloc(totalBytes));
+    auto* glyphs = static_cast<PageGlyphEntry*>(slotArena_->alloc(glyphTableBytes, alignof(PageGlyphEntry)));
+    if (buf && glyphs) {
+      slot.buffer = buf;
+      slot.glyphs = glyphs;
+      slot.arenaBacked = true;
+    }
+    // A partial fit (buf but no glyphs, or neither) just falls through to the heap below. The
+    // bytes taken are reclaimed with the rest of the scope, so there is nothing to unwind.
+  }
+  if (!slot.arenaBacked) {
+    slot.buffer = static_cast<uint8_t*>(malloc(totalBytes));
+    slot.glyphs = static_cast<PageGlyphEntry*>(malloc(glyphTableBytes));
+  }
   if (!slot.buffer || !slot.glyphs) {
     LOG_ERR("FDC", "Failed to allocate page buffer (%u bytes, %u glyphs)", totalBytes, glyphCount);
-    free(slot.buffer);
-    free(slot.glyphs);
+    if (!slot.arenaBacked) {
+      free(slot.buffer);
+      free(slot.glyphs);
+    }
     slot = {};
     return glyphCount;
   }
@@ -607,7 +652,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     free(groupBuf);
   }
 
-  LOG_DBG("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
+  LOG_TRC("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
           missed);
 
   return missed;
@@ -625,20 +670,44 @@ void FontDecompressor::logStats(const char* label) {
     resetStats();
     return;
   }
-  LOG_DBG("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
+  // Routine per-pass counters. Every number here is either duplicated by the reader's one-line
+  // "Page summary" (fontHits / fontMisses / fontHitPct / glyphCalls / glyphUs) or only meaningful
+  // when something is wrong, and at 5-7 lines per pass and two passes per page they were the
+  // single largest source of noise in a reading trace.
+  LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
           total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
-  LOG_DBG("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
-  LOG_DBG("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
+  LOG_TRC("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
+  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
           stats.pageGlyphsBytes, stats.peakTempBytes);
+
+  // getBitmap timing is the exception: a prewarm that missed its font sends every glyph down the
+  // hot-group path at thousands of us each (measured 5642 us/glyph against 1 us prewarmed), and
+  // that is a real, visible stall worth seeing without raising the log level. So report it at DBG
+  // only when it is actually pathological, and let the healthy case go to TRC with the rest.
   if (stats.getBitmapCalls > 0) {
-    LOG_DBG("FDC", "[%s] getBitmap: %lu calls, %luus total, %luus/call avg", label, stats.getBitmapCalls,
-            stats.getBitmapTimeUs, stats.getBitmapTimeUs / stats.getBitmapCalls);
+    const uint32_t avgUs = stats.getBitmapTimeUs / stats.getBitmapCalls;
+    // ~100 us/glyph is an order of magnitude above a cache hit and far below a group inflate,
+    // so it separates the two populations without needing tuning.
+    constexpr uint32_t SLOW_GLYPH_US = 100;
+    if (avgUs >= SLOW_GLYPH_US) {
+      LOG_DBG("FDC", "[%s] getBitmap SLOW: %lu calls, %luus total, %luus/call avg (prewarm missed this font)", label,
+              stats.getBitmapCalls, stats.getBitmapTimeUs, avgUs);
+    } else {
+      LOG_TRC("FDC", "[%s] getBitmap: %lu calls, %luus total, %luus/call avg", label, stats.getBitmapCalls,
+              stats.getBitmapTimeUs, avgUs);
+    }
   }
 
-  uint32_t lruTotal = stats.fallbackCacheHits + stats.fallbackCacheMisses;
+  // Same rule: the fallback cache only matters when it is missing, which is the state that makes
+  // the line above slow.
+  const uint32_t lruTotal = stats.fallbackCacheHits + stats.fallbackCacheMisses;
   if (lruTotal > 0) {
-    LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
-            stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+    if (stats.fallbackCacheMisses > 0) {
+      LOG_DBG("FDC", "[%s] LRU Fallback: hits=%lu misses=%lu (%.1f%%)", label, stats.fallbackCacheHits,
+              stats.fallbackCacheMisses, 100.0f * stats.fallbackCacheHits / lruTotal);
+    } else {
+      LOG_TRC("FDC", "[%s] LRU Fallback: hits=%lu misses=0", label, stats.fallbackCacheHits);
+    }
   }
 
   // Degraded render: these glyphs drew nothing. One line per pass instead of one per glyph.

@@ -77,6 +77,29 @@ void advanceDitherRow(DitherState& d) {
 // buffers won't fit. begin() also fails gracefully if a specific malloc fails.
 constexpr size_t PNG_DECODE_HEAP_FLOOR = 36 * 1024;
 
+// The ring is the whole reason for the floor above, and PngStreamDecoder draws it from the pass
+// arena when one is installed (setScratchArena -> the alloc at PngStreamDecoder.cpp). With an
+// arena the heap only has to cover the decoder object, the cache band and the ditherer rows —
+// roughly 9 KB measured — so charging the full 36 KB refuses decodes the heap can easily serve.
+// This is what would otherwise make a borrowed framebuffer (free heap ~52 KB lower than the
+// released path) unusable for image pages. See docs/memory-allocation-strategy.md §9.3.
+//
+// The residual floor keeps real headroom rather than dropping to the measured 9 KB: the band and
+// ditherer scale with image width, and begin()'s per-allocation fallbacks are graceful but not
+// free.
+constexpr size_t PNG_DECODE_HEAP_FLOOR_WITH_ARENA = 16 * 1024;
+
+// Worst case the arena is asked for on this path, in the order PngStreamDecoder::begin() takes
+// them: two scanline buffers, then the ring (capped at 32 KB). Image width is unknown at the
+// gate, so budget the same way WARM_PASS_SCRATCH_BYTES does. Asking for the whole worst case is
+// deliberate — a partial fit sends the ring back to the heap, which is the block the floor
+// exists for.
+constexpr size_t PNG_ARENA_WORST_CASE_BYTES = 32 * 1024 + 2 * 4096;
+
+size_t pngDecodeHeapFloor() {
+  return image_scratch::canServe(PNG_ARENA_WORST_CASE_BYTES) ? PNG_DECODE_HEAP_FLOOR_WITH_ARENA : PNG_DECODE_HEAP_FLOOR;
+}
+
 }  // namespace
 
 bool PngToFramebufferConverter::getDimensionsFromBuffer(const uint8_t* buf, const size_t len, ImageDimensions& out) {
@@ -140,7 +163,7 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
   adaptive_tone::Points points;
 
   const size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < PNG_DECODE_HEAP_FLOOR) {
+  if (freeHeap < pngDecodeHeapFloor()) {
     LOG_DBG("PNG", "Skipping adaptive tone analysis, low heap (%u free)", (unsigned)freeHeap);
     return points;
   }
@@ -190,22 +213,21 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
 
   points = adaptive_tone::derivePoints(histogram.get(), sampled);
   if (points.active) {
-    LOG_DBG("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
+    LOG_TRC("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
             (unsigned)points.whitePoint);
   } else {
-    LOG_DBG("PNG", "Adaptive tone skipped: range too narrow");
+    LOG_TRC("PNG", "Adaptive tone skipped: range too narrow");
   }
   return points;
 }
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                     const RenderConfig& config) {
-  LOG_DBG("PNG", "Decoding PNG: %s", imagePath.c_str());
+  LOG_TRC("PNG", "Decoding PNG: %s", imagePath.c_str());
 
   const size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < PNG_DECODE_HEAP_FLOOR) {
-    LOG_ERR("PNG", "Not enough heap for PNG decode (%u free, need %u)", (unsigned)freeHeap,
-            (unsigned)PNG_DECODE_HEAP_FLOOR);
+  if (const size_t floor = pngDecodeHeapFloor(); freeHeap < floor) {
+    LOG_ERR("PNG", "Not enough heap for PNG decode (%u free, need %u)", (unsigned)freeHeap, (unsigned)floor);
     return false;
   }
 
@@ -252,7 +274,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // Aspect ratio is preserved by the caller's sizing, so a single factor maps both axes.
   const float scale = (float)dstWidth / srcWidth;
 
-  LOG_DBG("PNG", "PNG %dx%d -> %dx%d (scale %.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
+  LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
           scale, info.colorType, info.bitDepth);
 
   auto grayLine = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[srcWidth]);

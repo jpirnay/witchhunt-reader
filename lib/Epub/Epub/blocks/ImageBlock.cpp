@@ -1,5 +1,6 @@
 #include "ImageBlock.h"
 
+#include <BuildArena.h>  // image_scratch::canServe needs the complete type
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -39,13 +40,13 @@ bool ImageBlock::ensureExtracted() const {
     LOG_ERR("IMG", "Image missing and no EPUB source: %s", imagePath.c_str());
     return false;
   }
-  LOG_DBG("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
+  LOG_TRC("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
   Epub epub(epubFilePath_, "/.crosspoint");
   if (!epub.extractItemToFile(epubEntryPath_, imagePath)) {
     LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
     return false;
   }
-  LOG_DBG("IMG", "Lazy extraction done: %s", imagePath.c_str());
+  LOG_TRC("IMG", "Lazy extraction done: %s", imagePath.c_str());
   return true;
 }
 
@@ -65,6 +66,17 @@ BuildArena* g_arena = nullptr;
 }
 BuildArena* get() { return g_arena; }
 void set(BuildArena* arena) { g_arena = arena; }
+bool canServe(const size_t bytes) {
+  if (!g_arena || !g_arena->valid()) return false;
+  const size_t used = g_arena->used();
+  const size_t capacity = g_arena->capacity();
+  if (used >= capacity) return false;
+  // alloc() pads the cursor up to the requested alignment before the block, so budget for the
+  // worst case rather than reporting room the allocator would then refuse.
+  const size_t remaining = capacity - used;
+  constexpr size_t ALIGN_SLACK = alignof(std::max_align_t);
+  return remaining >= bytes && remaining - bytes >= ALIGN_SLACK;
+}
 }  // namespace image_scratch
 
 namespace {
@@ -158,7 +170,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   const int maxRows = std::min(static_cast<int>(cachedHeight) - srcYOffset, expectedHeight - srcYOffset);
   const int rowsToRender = (srcHeight > 0) ? std::min(srcHeight, maxRows) : maxRows;
 
-  LOG_DBG("IMG", "Loading from cache: %s (%dx%d) srcY=%d rows=%d", cachePath.c_str(), cachedWidth, cachedHeight,
+  LOG_TRC("IMG", "Loading from cache: %s (%dx%d) srcY=%d rows=%d", cachePath.c_str(), cachedWidth, cachedHeight,
           srcYOffset, rowsToRender);
 
   const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
@@ -238,7 +250,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 
   free(readBuffer);
   cacheFile.close();
-  LOG_DBG("IMG", "Cache render complete");
+  LOG_TRC("IMG", "Cache render complete");
   return true;
 }
 
@@ -308,7 +320,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   if (renderer.isFontCacheScanning()) return;
 
   const int renderedHeight = srcHeight_ > 0 ? srcHeight_ : height;
-  LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d) srcY=%d rendH=%d mono=%d", x, y, imagePath.c_str(), width,
+  LOG_TRC("IMG", "Rendering image at %d,%d: %s (%dx%d) srcY=%d rendH=%d mono=%d", x, y, imagePath.c_str(), width,
           height, srcYOffset_, renderedHeight, monochromeOutput ? 1 : 0);
 
   const int screenWidth = renderer.getScreenWidth();
@@ -356,7 +368,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
-  LOG_DBG("IMG", "Decoding and caching: %s", imagePath.c_str());
+  LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
 
   RenderConfig config;
   config.x = x;
@@ -385,7 +397,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
-  LOG_DBG("IMG", "Using %s decoder", decoder->getFormatName());
+  LOG_TRC("IMG", "Using %s decoder", decoder->getFormatName());
 
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
   if (!success) {

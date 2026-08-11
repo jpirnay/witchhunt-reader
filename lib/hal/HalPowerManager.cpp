@@ -80,7 +80,7 @@ void HalPowerManager::enterWaveformWait() {
   // restore with setPowerSaving(); don't double-track it here.
   if (!foreignLock && !isLowPower && setCpuFrequencyMhz(LOW_POWER_FREQ)) {
     waveformLowPower_ = true;
-    LOG_DBG("PWR", "Waveform wait: CPU down to %d MHz", LOW_POWER_FREQ);
+    LOG_TRC("PWR", "Waveform wait: CPU down to %d MHz", LOW_POWER_FREQ);
   }
   xSemaphoreGive(modeMutex);
 }
@@ -93,7 +93,7 @@ void HalPowerManager::exitWaveformWait() {
     // intentional — keep it and let setPowerSaving(false) restore it later.
     if (!isLowPower) {
       setCpuFrequencyMhz(normalFreq);
-      LOG_DBG("PWR", "Waveform wait: CPU restored to %d MHz", normalFreq);
+      LOG_TRC("PWR", "Waveform wait: CPU restored to %d MHz", normalFreq);
     }
   }
   xSemaphoreGive(modeMutex);

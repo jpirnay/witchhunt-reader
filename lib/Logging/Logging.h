@@ -12,7 +12,26 @@ Define LOG_LEVEL to control log verbosity:
 0 = ERR only
 1 = ERR + INF
 2 = ERR + INF + DBG
+3 = ERR + INF + DBG + TRC
 If not defined, defaults to 0
+
+Choosing a level for a new log line:
+
+  ERR  something went wrong, or a degraded path was taken that the user may notice.
+  INF  a state change worth seeing in a release build: activity transitions, build
+       lifecycle, ownership of a scarce resource (the secondary framebuffer).
+  DBG  ONE line per user-visible event — a page rendered, a section built, an image
+       decoded. This is the level a developer reads while working, so it has to stay
+       readable: if a normal page turn adds more than a handful of lines, they belong
+       one level down.
+  TRC  per-item detail *inside* one of those events: per image, per line, per glyph
+       group, per element. Individually useful when debugging that one subsystem,
+       collectively the thing that makes a trace impossible to read. Compiled out at
+       the default development level (2) and re-enabled with -DLOG_LEVEL=3.
+
+TRC exists because the alternative was a per-subsystem #define for each area anyone
+had ever debugged, each defaulting to on because turning it off felt like losing
+something. One dial, nothing deleted.
 
 If you have a legitimate need for raw Serial access (e.g., binary data,
 special formatting), use the underlying logSerial object directly:
@@ -59,8 +78,15 @@ bool isSerialWireMuted();
 #else
 #define LOG_DBG(origin, format, ...)
 #endif
+
+#if LOG_LEVEL >= 3
+#define LOG_TRC(origin, format, ...) logPrintf("TRC", origin, format "\n", ##__VA_ARGS__)
+#else
+#define LOG_TRC(origin, format, ...)
+#endif
 #else
 #define LOG_DBG(origin, format, ...)
+#define LOG_TRC(origin, format, ...)
 #define LOG_ERR(origin, format, ...)
 #define LOG_INF(origin, format, ...)
 #endif

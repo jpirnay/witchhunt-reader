@@ -4,6 +4,8 @@
 
 #include "EpdFontData.h"
 
+class BuildArena;  // lib/Memory — optional page-slot scratch, see setSlotArena
+
 class FontDecompressor {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
@@ -30,6 +32,21 @@ class FontDecompressor {
 
   // Free all cached data (page buffers).
   void clearCache();
+
+  // Install a scratch arena for prewarm page slots, or nullptr to go back to the heap.
+  //
+  // Why this exists: a page's slots are ~9 KB across six allocations, and when the prewarm runs
+  // while a section build holds its working set, those six blocks land in the middle of the
+  // largest free region. Measured X3 2026-08-11 — the draw cost contig 36852 -> 27636, and
+  // releasing the slots afterwards returned every byte and every block while contig did not move
+  // at all. The bytes were never the problem; where they sat was. Drawing them from a region the
+  // build already owns keeps them off the heap entirely.
+  //
+  // Lifetime contract, and it is strict: arena-backed slots are NOT free()d and stop being valid
+  // the moment the arena scope ends, so the caller MUST clearCache() before withdrawing the
+  // arena. Use FontCacheManager::ScopedSlotArena, which does both in the right order.
+  void setSlotArena(BuildArena* arena) { slotArena_ = arena; }
+  bool hasArenaBackedSlots() const;
 
   // Pre-scan UTF-8 text and extract needed glyph bitmaps into a flat page buffer.
   // Each group is decompressed once into a temp buffer; only needed glyphs are kept.
@@ -65,6 +82,7 @@ class FontDecompressor {
  private:
   Stats stats;
   InflateReader inflateReader;
+  BuildArena* slotArena_ = nullptr;  // not owned; see setSlotArena
 
   // Page buffer slots: each style gets its own flat glyph buffer with sorted lookup.
   // Up to MAX_PAGE_SLOTS (4) styles can be prewarmed simultaneously.
@@ -81,6 +99,9 @@ class FontDecompressor {
     uint16_t glyphCount = 0;
     uint32_t bufferBytes = 0;   // size of `buffer`, so eviction can unwind the stats it added
     uint32_t lastUsedTick = 0;  // bumped on prewarm and on every getBitmap hit; drives eviction
+    // Buffer/glyphs came from the scratch arena, not the heap: they must NOT be free()d, and
+    // they die when the arena scope ends (see setSlotArena).
+    bool arenaBacked = false;
   };
   PageSlot pageSlots[MAX_PAGE_SLOTS] = {};
   uint8_t pageSlotCount = 0;

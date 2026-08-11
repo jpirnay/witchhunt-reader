@@ -360,7 +360,7 @@ void ParsedText::layoutAndExtractLines(
       const size_t lineStart = i > 0 ? lineBreakIndices[i - 1] : 0;
       const size_t lineEnd = i < lineBreakIndices.size() ? lineBreakIndices[i] : lineStart;
       const std::string firstAttemptPreview = buildLinePreview(words, wordContinues, lineStart, lineEnd);
-      LOG_DBG("PTX", "Line %u requested rerender without hyphenation, first attempt: %s", static_cast<unsigned>(i),
+      LOG_TRC("PTX", "Line %u requested rerender without hyphenation, first attempt: %s", static_cast<unsigned>(i),
               firstAttemptPreview.c_str());
       // Undo precomputed splits from this line onward so the retry starts from
       // clean, unsplit tokens and cannot inherit future hyphenation artifacts.
@@ -418,7 +418,7 @@ void ParsedText::layoutAndExtractLines(
         const size_t retryLineStart = i > 0 ? lineBreakIndices[i - 1] : 0;
         const size_t retryLineEnd = i < lineBreakIndices.size() ? lineBreakIndices[i] : retryLineStart;
         const std::string retryPreview = buildLinePreview(words, wordContinues, retryLineStart, retryLineEnd);
-        LOG_DBG("PTX", "Rerendering line %u with hyphenation suppressed, retry attempt: %s", static_cast<unsigned>(i),
+        LOG_TRC("PTX", "Rerendering line %u with hyphenation suppressed, retry attempt: %s", static_cast<unsigned>(i),
                 retryPreview.c_str());
         extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId, false,
                     true, firstLineIndent, blockStartY, lineHeight);
@@ -441,7 +441,7 @@ void ParsedText::layoutAndExtractLines(
                                    suffixSplitInsertedHyphen.end());
 
         lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
-        LOG_DBG("PTX", "Resumed regular hyphenation after rerendered line %u", static_cast<unsigned>(i));
+        LOG_TRC("PTX", "Resumed regular hyphenation after rerendered line %u", static_cast<unsigned>(i));
       }
     }
   }

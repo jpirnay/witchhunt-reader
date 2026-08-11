@@ -17,6 +17,7 @@
 
 #include "EpubReaderActivity.h"
 
+#include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -178,12 +179,30 @@ constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_F
 #ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
-// Quiet period after the last page turn before B may take the buffer. B's borrow costs a page's
-// AA if the reader turns during it, and the whole slice budget is wasted work when preempted —
-// so only start once the reader has settled into a page. Below this the reader is flipping
-// (skimming, or holding the button), which is exactly when B should stay out of the way.
+// Quiet period after the last page reached the screen before B may take the buffer. B's borrow
+// costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
+// only start once the reader has settled. Below this the reader is flipping (skimming, or
+// holding the button), which is when B should stay out of the way.
+//
+// 4000 -> 1500 (2026-08-11), because the two things that made 4000 conservative are both gone:
+//   - a preempted attempt used to throw away its inflated XHTML, so a retry re-paid the whole
+//     extraction. It now keeps it (Section::abortSectionBuild keys on extractDone), which is
+//     what makes attempt 2 cheap.
+//   - B used to start with a button edge already queued and hand the buffer straight back. It
+//     now consults CooperativeAbort before taking it.
+//
+// Sized against what B actually needs rather than what feels safe. Measured X3, alice spine 1
+// (16340 bytes, 17 pages): attempt 1 is 1652 ms total, attempt 2 skips the extract and is
+// setup 123 + parse 818 = ~950 ms. 1500 clears that with margin. The old 4000 asked for ~4x
+// the stillness B needs to finish, which during genuine reading (20-60 s per page) it got
+// trivially, but while skimming — when chapters are crossed fastest and lookahead matters most
+// — it never got at all: observed turn intervals were 1.2-5.6 s.
+//
+// The signal that this is wrong is `preempt=` in the BG work line. It was 0 for a whole session
+// after the two fixes above; if it starts climbing toward BG_BUILD_MAX_PREEMPTIONS, B is losing
+// races again and this is the number to raise.
 #ifndef BG_BUILD_BORROW_QUIET_MS
-#define BG_BUILD_BORROW_QUIET_MS 4000UL
+#define BG_BUILD_BORROW_QUIET_MS 1500UL
 #endif
 // See backgroundPreemptCount_: give up on a target after this many preempted attempts. Two is
 // deliberate — attempt 1 banks the inflated XHTML in the book-keyed HTML cache (kept on abort,
@@ -268,8 +287,12 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 // the arithmetic behind it. Values are NOT changed in this commit — measure first.
 //
 // HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
+// Default OFF (2026-08-11). It did its job — it is how the unreachable X4 CSS floor (73728
+// against a heap that peaks at 71080) and B's contig-floor miss were both found. The floors have
+// not been re-derived yet, so this stays available rather than being deleted: build with
+// -DHEAP_GATE_TRACE=1 when tuning them. At ~1 Hz per waiting gate it is far too loud to leave on.
 #ifndef HEAP_GATE_TRACE
-#define HEAP_GATE_TRACE 1
+#define HEAP_GATE_TRACE 0
 #endif
 
 #if HEAP_GATE_TRACE
@@ -306,7 +329,33 @@ inline void checkHeapIntegrity(const char*) {}
 #endif
 
 #if DEBUG_MEMORY_CONSUMPTION
+// The `Min Free` in the periodic [MEM] line is esp_get_minimum_free_heap_size() — a boot-wide
+// watermark with no timestamp, so it tells you the session dipped to N and nothing about where.
+// X3 2026-08-11 reported 7772 (against 23960 the run before, and a documented fault zone of
+// ~13-15 KB) while the lowest value any probe actually logged was 23028, so the dip is happening
+// between the points that sample.
+//
+// A watermark only ever falls, so noticing the fall is enough: sample it wherever we already
+// sample the heap and report only when it MOVED, naming the interval it moved in. The label is
+// the stage the drop was DETECTED at, i.e. the dip happened somewhere between the previous
+// snapshot and this one — that is the bracket, not a point measurement.
+uint32_t g_lastHeapWatermark = 0;
+
+void noteHeapWatermark(const char* stage) {
+  const uint32_t mark = esp_get_minimum_free_heap_size();
+  if (g_lastHeapWatermark == 0) {
+    g_lastHeapWatermark = mark;  // first call: establish the baseline, nothing to report yet
+    return;
+  }
+  if (mark >= g_lastHeapWatermark) return;
+  LOG_ERR("MEM", "Watermark DROP %lu -> %lu (-%lu) in the interval ending at [%s]",
+          static_cast<unsigned long>(g_lastHeapWatermark), static_cast<unsigned long>(mark),
+          static_cast<unsigned long>(g_lastHeapWatermark - mark), stage);
+  g_lastHeapWatermark = mark;
+}
+
 void logReaderMemSnapshot(const char* stage) {
+  noteHeapWatermark(stage);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   // free+contig alone cannot tell "something is retaining bytes" from "the same bytes have
@@ -323,6 +372,7 @@ void logReaderMemSnapshot(const char* stage) {
 }
 #else
 inline void logReaderMemSnapshot(const char*) {}
+inline void noteHeapWatermark(const char*) {}
 #endif
 
 // Computes the [0..100] EPUB progress percent. Returns 0 when pageCount is unknown (sync/bookmark
@@ -377,6 +427,15 @@ void EpubReaderActivity::onEnter() {
   // reader (Home sidecar JPEG conversion / thumb generation are prime suspects — see
   // the long-standing "heap may be corrupt after image decode failures" note below).
   checkHeapIntegrity("reader_onEnter");
+  // Start the Background-B settle window now, so the interval is measured from entering the
+  // reader rather than from millis()==0. Otherwise B's quiet check is satisfied before the book
+  // has drawn anything, which is the worst possible moment to take the display buffer.
+  lastPageOnScreenMs_ = millis();
+  // Take the scaled-glyph cache now, while the heap is still whole. It is ~4.9 KB that is never
+  // released, and allocating it on first use meant a permanent block landed wherever the first
+  // heading happened to be drawn — measured on X3 as 5120 of contig lost inside a mid-build page
+  // draw, for the rest of the session. Here it sits with the other permanent allocations.
+  renderer.ensureScaledGlyphCache();
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
@@ -844,6 +903,10 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // still downclock normally: they run on this same task, so enterWaveformWait() sees its own
   // lock owner rather than a foreign one.
   HalPowerManager::Lock powerLock;
+  // The AA pass is the largest window in the reader with no heap sampling in it: 200-450 ms of
+  // plane rendering plus a grayscale replay, all on the loop task. It is the prime suspect for
+  // the unattributed Min Free watermark, so bracket it.
+  logReaderMemSnapshot("aa_begin");
   pendingGrayscale_.active = false;
   renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
@@ -865,7 +928,9 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
         pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
       },
       [&] { return planeAborted || aaPreemptedByNavigation(); });
+  logReaderMemSnapshot("aa_after_planes");
   pendingGrayscale_.page.reset();
+  logReaderMemSnapshot("aa_end");
   LOG_DBG("ERS", "Deferred AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
           gt.displayMs, gt.restoreMs);
   checkHeapIntegrity("after_deferred_aa");
@@ -1137,7 +1202,21 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // settled on a page: the borrow costs this page's AA if a turn lands during it.
       // beginBackgroundBorrow() self-declines when there is no secondary buffer to lend (X3
       // baseline, or a Background-C build already holds it), so this needs no device split.
-      if ((now - lastPageTurnTime) >= BG_BUILD_BORROW_QUIET_MS &&
+      // Settle check. Measured from the last page ON SCREEN, not the last page TURN:
+      // lastPageTurnTime is only stamped by turns, so before the reader's first turn it still
+      // holds 0 and the quiet period is vacuously satisfied — B would take the buffer moments
+      // after a book's first page appeared, which is precisely when the next turn is coming.
+      // max() of the two so an explicit turn still resets the window even if no render followed.
+      const unsigned long lastActivityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
+      // And do not start when a button edge is already queued: the borrow would be handed back
+      // on the very next loop tick, wasting the slice AND burning one of the two attempts
+      // BG_BUILD_MAX_PREEMPTIONS allows before B abandons the spine. This is the same predicate
+      // the image decoders bail on, so "the user is waiting" means the same thing everywhere.
+      // Safe to gate B on: nothing waits on B. (Background-C must NEVER be gated this way — the
+      // foreground draws mid-build pages out of C's own progress, so blocking C on a pending
+      // foreground draw deadlocks: the page is never built, so the draw stays pending forever.)
+      const bool inputQueued = CooperativeAbort::shouldAbortLongTask();
+      if (!inputQueued && (now - lastActivityMs) >= BG_BUILD_BORROW_QUIET_MS &&
           esp_get_free_heap_size() >= BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES &&
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
@@ -1314,6 +1393,31 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   const auto fallbackToReleasedRebuild = [&](const char* reason, const bool retryIncremental) {
     LOG_ERR("ERS", "Background-C spine=%d %s; falling back to released %s rebuild", currentSpineIndex, reason,
             retryIncremental ? "incremental" : "blocking");
+    // Why did the BORROWED build fail — was the arena out of room, or the heap? The comment below
+    // asserts the latter ("CSS-heavy books need the full freed block"), and the whole released
+    // path rests on it, but the claim has never been separated from its alternative. It is also
+    // circular as stated: a released build has no arena, so CSS resolves from the HEAP, and that
+    // is what needs ~90 KB — a borrowed build resolves out of the arena at the lean floor.
+    //
+    // BuildArena exposes exactly the pair that decides it (see BuildArena.h: failedAllocSize is
+    // the last REFUSED size, highWater only records successes):
+    //   failedAlloc != 0                     -> the arena really ran out; the release is earned.
+    //   failedAlloc == 0, highWater << cap   -> the arena was never the constraint; the failure is
+    //                                           heap-side and the release treats the wrong cause.
+    // Logged before the teardown below destroys the arena. See
+    // docs/memory-allocation-strategy.md §9.2.
+    if (buildScratch_) {
+      LOG_ERR("ERS", "Background-C spine=%d arena: highWater=%u/%u failedAlloc=%u releaseFails=%lu free=%lu contig=%lu",
+              currentSpineIndex, static_cast<uint32_t>(buildScratch_->highWater()),
+              static_cast<uint32_t>(buildScratch_->capacity()), static_cast<uint32_t>(buildScratch_->failedAllocSize()),
+              static_cast<unsigned long>(buildScratch_->releaseFailures()),
+              static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    } else {
+      LOG_ERR("ERS", "Background-C spine=%d arena: none (heap-backed build) free=%lu contig=%lu", currentSpineIndex,
+              static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    }
     section->clearCache();
     section.reset();  // aborts the in-flight build, releasing into the scratch arena
     // If this build ran inside the BORROWED secondary buffer, hand it back before the released
@@ -3394,6 +3498,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     renderContents(lock, std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom,
                    orientedMarginLeft);
     lastRenderStats.requestRenderMs = millis() - start;
+    // A page is now on screen, however it got there. Background-B's quiet period runs from here.
+    lastPageOnScreenMs_ = millis();
     if (truncatedSectionHintRendersRemaining > 0) {
       truncatedSectionHintRendersRemaining--;
     }
@@ -3757,13 +3863,49 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // before calling renderContents()) — this flag is a second, explicit guard against that
   // invariant silently breaking if a future change adds a yield point in here.
   imageProcessingActive_ = page->hasUncachedImages(warmForceLoad, imageMonochrome, warmGrayscaleImageCache);
+  // BORROW the secondary buffer as the decode scratch rather than releasing it. Both give the
+  // decoders the same ~52 KB, but the borrowed block never enters the heap:
+  //   - it cannot be carved up by the decode's own churn (rule 4 — this pass was the documented
+  //     violation: 32 KB ring + 12 KB pool + band + ditherer cycling inside the freed hole);
+  //   - returning it cannot fail, so the reallocSecondaryEvictingCaches() below — which evicts
+  //     font caches and can escalate to a fragmented-heap RESTART — never runs.
+  // The decoders bump-allocate inside it via image_scratch instead of malloc'ing per decode.
+  //
+  // Release stays as the fallback for when there is nothing to lend (already released for a C
+  // build, or no secondary buffer at all), so the previous behaviour is intact on those paths.
+  // See docs/memory-allocation-strategy.md §9.3.
+  std::unique_ptr<BuildArena> warmScratch;
+  bool borrowedSecondaryForWarm = false;
   if (imageProcessingActive_ && renderer.hasSecondaryBuffer()) {
-    renderer.releaseSecondaryBuffer();
-    releasedSecondaryForWarm = true;
-    LOG_DBG("ERS", "Released secondary buffer for image warm pass");
+    size_t borrowedSize = 0;
+    if (uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize)) {
+      warmScratch = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+      if (warmScratch && warmScratch->valid()) {
+        borrowedSecondaryForWarm = true;
+        LOG_DBG("ERS", "Borrowed secondary buffer (%u bytes) as image warm scratch",
+                static_cast<uint32_t>(borrowedSize));
+      } else {
+        warmScratch.reset();
+        renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+      }
+    }
+    if (!borrowedSecondaryForWarm) {
+      renderer.releaseSecondaryBuffer();
+      releasedSecondaryForWarm = true;
+      LOG_DBG("ERS", "Released secondary buffer for image warm pass (nothing to lend)");
+    }
   }
-  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome,
-                        warmGrayscaleImageCache);
+  {
+    // Scoped so the arena is uninstalled before the borrow is returned below — a stale
+    // image_scratch pointer into a region the display owns again would be a use-after-free.
+    image_scratch::ScopedArena warmScratchScope(warmScratch.get());
+    page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome,
+                          warmGrayscaleImageCache);
+  }
+  // The borrow is returned after clearScreen() below, not here: returnSecondaryBuffer() seeds the
+  // restored buffer from the live framebuffer, and right now that still holds the decode's
+  // side-effect pixels. Returning after the clear seeds it clean instead.
+  //
   // Image decode (JPEG/PNG) is the deepest, most heap-hungry work in a render pass
   // and the prime suspect for the lazy multi_heap poisoning assert. Check here, right
   // after the warm/decode pass, so corruption is attributed to the decode rather than
@@ -3794,6 +3936,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   imageProcessingActive_ = false;
   renderer.clearScreen();
+  if (borrowedSecondaryForWarm) {
+    // Now that the framebuffer is clean, hand the block back. returnSecondaryBuffer() seeds the
+    // restored secondary from it and arms the one-shot RED baseline, exactly as
+    // reallocSecondaryBuffer() would have — so the release path's careful
+    // "do NOT syncRedRamFromFrameBuffer()" reasoning above applies unchanged here. Unlike that
+    // path this cannot fail, so there is no eviction and no restart branch.
+    warmScratch.reset();
+    renderer.returnSecondaryBuffer();
+  }
 
   logReaderMemSnapshot("prewarm_begin");
 
@@ -4030,6 +4181,16 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
   auto* fcm = renderer.getFontCacheManager();
+  // Draw this page's font slots from the build's own arena rather than the heap. Measured X3
+  // 2026-08-11: the prewarm's six blocks (~9 KB) cost contig 36852 -> 27636 here, and releasing
+  // them afterwards returned every byte and every block while contig did not move at all — the
+  // bytes were never the problem, their placement was (§9.2.4). The borrowed region they come
+  // from is the one the build already holds and is barely using (highWater 12864-28656 of
+  // 52272), and nothing else can allocate inside it.
+  //
+  // Only while the buffer is actually lent; otherwise buildScratch_ is null and the scope
+  // self-disables, leaving the heap path exactly as it was.
+  FontCacheManager::ScopedSlotArena slotArena(*fcm, secondaryBorrowed_ ? buildScratch_.get() : nullptr);
   auto scope = fcm->createPrewarmScope();
   page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
   scope.endScanAndPrewarm();
@@ -4047,6 +4208,32 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   } else {
     ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
+  // Hand the font page slots back before the build resumes. This is THE allocation that makes a
+  // mid-build draw expensive, and it is expensive because of where it lands, not what it costs:
+  // prewarm takes ~8.9 KB of page buffer + glyph table (pageBuf 7635 + pageGlyphs 1264 measured,
+  // across the 3 style slots a page uses) out of the middle of the largest free block, while the
+  // build's working set already occupies the rest of the heap. Device-measured X3 2026-08-11:
+  // contig 40948 -> 23540 across this one draw, never recovering for the remainder of the parse,
+  // which then ran in "continuing in degraded mode" throughout and left contig 1036 bytes short
+  // of Background-B's floor afterwards.
+  //
+  // Normally the slots live on until the next prewarm replaces them, which is free — but here
+  // "until the next prewarm" spans the rest of a multi-second build. Releasing now lets the block
+  // coalesce before stepCurrentSectionBuild() resumes; nothing else allocates in between, because
+  // the lock is still held.
+  //
+  // When the slots came from the arena instead (the normal case now — see ScopedSlotArena above)
+  // this returns nothing to the heap, because they never came from it; the arena scope rewinds
+  // them on the way out of this function. Kept unconditional because it is still the right thing
+  // on the heap path, which is what runs whenever the buffer is not lent.
+  //
+  // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
+  // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
+  // page would not have redone. Safe here because every glyph consumer for this page has already
+  // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
+  // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
+  renderer.getFontCacheManager()->clearCache();
+
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
   // uses for Background-A.

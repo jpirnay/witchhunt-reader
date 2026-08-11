@@ -121,6 +121,39 @@ static inline uint32_t floatBits(const float f) {
   return bits;
 }
 
+// Allocate the scaled-glyph cache. Call this EARLY — at reader entry, not on first scaled glyph.
+//
+// It is ~4.9 KB in two blocks (80 entries + a 3584-byte mask arena) and, once taken, it is never
+// released: a session-lifetime allocation in the strategy note's class A. Allocating it lazily
+// meant "first use" decided where a permanent block landed, and first use is often a heading
+// inside a mid-build page draw — so it was being carved out of the middle of the largest free
+// region while a section build held the rest of the heap. Device-measured X3 2026-08-11: 5032
+// bytes taken during a mid-build draw cost 5120 of contig, permanently.
+//
+// That is eliminated #8 of the heap handover ("a permanent block taken mid-session pins the
+// largest free region") arrived at by accident, via "allocate on first use". Taking it at a
+// stable point puts it next to the other permanent allocations instead.
+//
+// Idempotent, and failure is non-fatal: scaled text renders uncached, exactly as before.
+bool GfxRenderer::ensureScaledGlyphCache() const {
+  if (scaledGlyphArena_) return true;
+  if (scaledGlyphOom_) return false;  // already failed once; don't thrash the heap
+  auto entries = makeUniqueNoThrow<ScaledGlyphEntry[]>(SCALED_GLYPH_MAX_ENTRIES);
+  auto arena = makeUniqueNoThrow<uint8_t[]>(SCALED_GLYPH_ARENA_BYTES);
+  if (!entries || !arena) {
+    LOG_ERR("GFX", "OOM: scaled-glyph cache (%u + %u bytes); rendering scaled text uncached",
+            static_cast<unsigned>(SCALED_GLYPH_MAX_ENTRIES * sizeof(ScaledGlyphEntry)),
+            static_cast<unsigned>(SCALED_GLYPH_ARENA_BYTES));
+    scaledGlyphOom_ = true;
+    return false;
+  }
+  scaledGlyphEntries_ = std::move(entries);
+  scaledGlyphArena_ = std::move(arena);
+  scaledGlyphCount_ = 0;
+  scaledGlyphUsed_ = 0;
+  return true;
+}
+
 const uint8_t* GfxRenderer::findScaledGlyphMask(const void* fontData, const uint32_t cp, const float scale,
                                                 const uint8_t sel, const int w, const int h) const {
   if (!scaledGlyphArena_) return nullptr;
@@ -144,22 +177,7 @@ uint8_t* GfxRenderer::allocScaledGlyphMask(const void* fontData, const uint32_t 
   const uint16_t bytes = scaledGlyphMaskBytes(w, h);
   if (bytes > SCALED_GLYPH_MAX_MASK_BYTES) return nullptr;
 
-  if (!scaledGlyphArena_) {
-    if (scaledGlyphOom_) return nullptr;  // already failed once; don't thrash the heap
-    auto entries = makeUniqueNoThrow<ScaledGlyphEntry[]>(SCALED_GLYPH_MAX_ENTRIES);
-    auto arena = makeUniqueNoThrow<uint8_t[]>(SCALED_GLYPH_ARENA_BYTES);
-    if (!entries || !arena) {
-      LOG_ERR("GFX", "OOM: scaled-glyph cache (%u + %u bytes); rendering scaled text uncached",
-              static_cast<unsigned>(SCALED_GLYPH_MAX_ENTRIES * sizeof(ScaledGlyphEntry)),
-              static_cast<unsigned>(SCALED_GLYPH_ARENA_BYTES));
-      scaledGlyphOom_ = true;
-      return nullptr;
-    }
-    scaledGlyphEntries_ = std::move(entries);
-    scaledGlyphArena_ = std::move(arena);
-    scaledGlyphCount_ = 0;
-    scaledGlyphUsed_ = 0;
-  }
+  if (!scaledGlyphArena_ && !ensureScaledGlyphCache()) return nullptr;
 
   if (scaledGlyphCount_ >= SCALED_GLYPH_MAX_ENTRIES || scaledGlyphUsed_ + bytes > SCALED_GLYPH_ARENA_BYTES) {
     // Wholesale reset instead of LRU bookkeeping: the working set is one page's

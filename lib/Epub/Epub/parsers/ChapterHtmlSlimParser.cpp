@@ -1321,7 +1321,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       };
 
       if (!src.empty() && self->imageRendering != 1) {
-        LOG_DBG("EHP", "Found image: src=%s", src.c_str());
+        LOG_TRC("EHP", "Found image: src=%s", src.c_str());
 
         if (self->lowMemoryImageFallback) {
           handleImageFallback();
@@ -1365,7 +1365,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
             }
             if (dimsOk) {
-              LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
+              LOG_TRC("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
               {
                 int displayWidth = 0;
                 int displayHeight = 0;
@@ -1419,7 +1419,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                     if (displayWidth < 1) displayWidth = 1;
                     if (displayHeight < 1) displayHeight = 1;
                   }
-                  LOG_DBG("EHP", "Display size from CSS height+width: %dx%d", displayWidth, displayHeight);
+                  LOG_TRC("EHP", "Display size from CSS height+width: %dx%d", displayWidth, displayHeight);
                 } else if (hasCssHeight && !hasCssWidth && dims.width > 0 && dims.height > 0) {
                   // Use CSS height (resolve % against viewport height) and derive width from aspect ratio
                   displayHeight = static_cast<int>(
@@ -1442,7 +1442,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                     if (displayHeight < 1) displayHeight = 1;
                   }
                   if (displayWidth < 1) displayWidth = 1;
-                  LOG_DBG("EHP", "Display size from CSS height: %dx%d", displayWidth, displayHeight);
+                  LOG_TRC("EHP", "Display size from CSS height: %dx%d", displayWidth, displayHeight);
                 } else if (hasCssWidth && !hasCssHeight && dims.width > 0 && dims.height > 0) {
                   // Use CSS width (resolve % against container width) and derive
                   // height from aspect ratio.
@@ -1460,7 +1460,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                     if (displayWidth < 1) displayWidth = 1;
                   }
                   if (displayHeight < 1) displayHeight = 1;
-                  LOG_DBG("EHP", "Display size from CSS width: %dx%d", displayWidth, displayHeight);
+                  LOG_TRC("EHP", "Display size from CSS width: %dx%d", displayWidth, displayHeight);
                 } else {
                   // Scale to fit current container while maintaining aspect ratio.
                   int maxWidth = containerWidth;
@@ -1472,7 +1472,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
                   displayWidth = (int)(dims.width * scale);
                   displayHeight = (int)(dims.height * scale);
-                  LOG_DBG("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
+                  LOG_TRC("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
                 }
 
                 // Inline image path: if inside a CSS float context and the image leaves a
@@ -1498,7 +1498,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   self->pendingInlineImage_.isRight =
                       (self->floatDepth_ > 0) && self->floatOpenSides_[self->floatDepth_ - 1];
                   self->pendingInlineImage_.active = true;
-                  LOG_DBG("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
+                  LOG_TRC("EHP", "Inline image deferred: w=%d h=%d", displayWidth, displayHeight);
                   // Don't flush the current text block — let it continue into the next paragraph.
                   self->depth += 1;
                   return;
@@ -1536,7 +1536,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 // Create page for image - only break if image won't fit remaining space
                 if (self->currentPage && !self->currentPage->elements.empty() &&
                     (self->currentPageNextY + totalImageHeightWithSpacing > self->viewportHeight)) {
-                  LOG_DBG("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", self->currentPageNextY,
+                  LOG_TRC("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", self->currentPageNextY,
                           totalImageHeightWithSpacing, self->viewportHeight);
                   self->emitPage(self->lastBodyChildByteOffset);
                   if (!self->currentPage) {
@@ -1573,7 +1573,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 self->currentPageNextY += displayHeight;
                 self->currentPageNextY += imageSpacingBottom;
 
-                LOG_DBG("EHP", "Image placed: x=%d y=%d w=%d h=%d nextY=%d", xPos, pageImage->yPos, displayWidth,
+                LOG_TRC("EHP", "Image placed: x=%d y=%d w=%d h=%d nextY=%d", xPos, pageImage->yPos, displayWidth,
                         displayHeight, self->currentPageNextY);
 
                 // Reset empty pending block style after consuming spacing around the image.
@@ -1587,7 +1587,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                                          : static_cast<CssTextAlign>(self->paragraphAlignment);
                   resetStyle.alignment = align;
                   self->currentTextBlock->setBlockStyle(resetStyle);
-                  LOG_DBG("EHP", "Image spacing consumed; pending empty block style reset for following text");
+                  LOG_TRC("EHP", "Image spacing consumed; pending empty block style reset for following text");
                 }
 
                 self->depth += 1;
@@ -2612,6 +2612,20 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   layoutFailed = false;
   streamStartTimeMs = millis();
 
+  // Pre-size the two vectors that grow one entry at a time across the whole parse. Without
+  // this each doubles ~10 times mid-parse, and every growth is an allocate-copy-free of an
+  // increasing size interleaved with all the other parse traffic — the churn shape a
+  // no-compaction heap cannot recover from (CLAUDE.md Resource Protocol rule 7,
+  // docs/memory-allocation-strategy.md §9.6). The blocks are individually small, so this is
+  // an allocation-COUNT fix; it is not expected to move contig on its own.
+  paragraphLutPerPage.reserve(estimatePagesForSpine(totalInflatedSize));
+  // Anchors are unbounded in principle (capped at MAX_ANCHORS_PER_CHAPTER) but a few dozen in
+  // practice, and each entry is ~28 B plus a heap string for ids over the SSO limit. Reserve
+  // for the common case only: reserving for the cap would cost ~28 KB up front on every
+  // chapter to save reallocations that the rare anchor-heavy chapter alone would pay.
+  constexpr size_t TYPICAL_ANCHORS_PER_CHAPTER = 32;
+  anchorData.reserve(TYPICAL_ANCHORS_PER_CHAPTER);
+
   // Choose progress granularity by chapter size. Each callback drives a full-screen
   // e-ink refresh (~640ms), so smaller chapters skip mid-parse ticks entirely.
   // progressStepPercent == 0 means "popup only, no mid-parse updates".
@@ -2779,7 +2793,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
       currentPageNextY + lineHeight <= viewportHeight && currentPageNextY + (lineHeight * 2) > viewportHeight;
   if (lineEndsWithHyphenatedWord && !suppressHyphenationRetry && noRoomForAnotherLine) {
     const std::string linePreview = buildTextBlockPreview(line);
-    LOG_DBG("EHP", "Requesting line rerender without hyphenation to avoid page-break split word: %s",
+    LOG_TRC("EHP", "Requesting line rerender without hyphenation to avoid page-break split word: %s",
             linePreview.c_str());
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
@@ -3120,7 +3134,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
   if (displayHeight <= viewportHeight) {
     currentPage->elements.push_back(std::make_shared<PageImage>(image, xPos, currentPageNextY));
     currentPageNextY += displayHeight;
-    LOG_DBG("EHP", "Image placed as block: %dx%d", displayWidth, displayHeight);
+    LOG_TRC("EHP", "Image placed as block: %dx%d", displayWidth, displayHeight);
     return;
   }
 

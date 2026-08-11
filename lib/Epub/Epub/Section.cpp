@@ -98,8 +98,27 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 //
 // Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
 // ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
+// 2026-08-11: 56 KB -> 44 KB, because the component it was covering no longer exists.
+//
+// The 56 KB was index + hot/negative caches + margin, sized against the resolver's 40 KB
+// self-protection floor. Lean resolve is now unconditional (see runBuildSetup), so the hot LRU
+// never allocates — that is the "typically ~10 KB" term above — and the resolver's floor is
+// LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB), not 40 KB. Both halves of the arithmetic moved down.
+//
+// It also had to move for the gate to mean anything. On X3 free heap peaks at ~72 KB at reader
+// entry and sits at 50-60 KB while reading, so a 56 KB floor rejected essentially every
+// heap-backed CSS build — and Background-B, whose fallback path this gates, simply stopped
+// pre-building on CSS books. A floor that no reachable heap state satisfies is not a safety
+// margin, it is a disabled feature.
+//
+// This is DERIVED, not measured: 56 minus the ~10 KB hot cache, rounded down. It is a
+// pre-filter, not a guarantee, and it is not the safety mechanism — that is the contig check
+// below (a failed std::vector reserve aborts under -fno-exceptions, so contig must be real)
+// plus the resolver's own 24 KB floor and isCssLowHeapDegraded(), which lets a caller discard a
+// degraded result rather than ship it. Watch lowHeapSkips: if heap-backed builds start
+// degrading, this is the number that moved.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
-#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (56 * 1024)
+#define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (44 * 1024)
 #endif
 
 // Contiguous floor: the only sizable contiguous CSS allocation is the selector index
@@ -123,8 +142,14 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
 // contiguous number at the same points plus a per-page trace.
 //
 // SCT_HEAP_TRACE=0 compiles all of it out. Remove this block once the question is answered.
+// Default OFF (2026-08-11). This trace answered what it was added for: section 8.4 of
+// docs/memory-allocation-strategy.md asked whether small-object churn or retention collapses the
+// contiguous block during a parse, and the per-page block counts showed BOTH — freeBlk 16 -> 35
+// from churn, plus a one-page cliff from the mid-build render's font page slots (fixed in
+// 040b2c1b). Kept rather than deleted because the cliff is only partly closed and the next
+// attempt needs exactly these numbers again: build with -DSCT_HEAP_TRACE=1.
 #ifndef SCT_HEAP_TRACE
-#define SCT_HEAP_TRACE 1
+#define SCT_HEAP_TRACE 0
 #endif
 
 #if SCT_HEAP_TRACE
@@ -336,17 +361,36 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   // is allocated and released between two page emissions, so only a low-water mark inside the
   // feed loop can see it. lowAt is the parser byte offset where the dip occurred — feed that
   // offset back into the chapter XHTML to identify the construct responsible.
+  //
+  // Block counts are what separate the two remaining explanations, and free/contig alone cannot:
+  //   allocBlk rising, allocBytes rising -> the parse RETAINS something per page
+  //   allocBlk flat, freeBlk rising      -> pure fragmentation; the bytes come back split
+  // Measured X3 2026-08-11: contig fell 40948 -> 15348 across one 17-page parse while free
+  // oscillated 20-40 KB, with the arena covering the ring, the chunk feed AND the CSS ruleset
+  // (failedAlloc=0). So whatever does this is on the heap and is NOT arena-eligible — but no
+  // measurement yet names it. That is the open question in docs/memory-allocation-strategy.md
+  // section 8.4, unchanged since it was written; these three counters are what answer it.
+  multi_heap_info_t pageHeapInfo{};
+  heap_caps_get_info(&pageHeapInfo, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   if (g_parseLowWater.seen()) {
-    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu | page-low free=%lu contig=%lu lowAt=%lu", pageCount,
-            static_cast<unsigned long>(esp_get_free_heap_size()),
+    LOG_INF("HEAP",
+            "spine_page=%d free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu | page-low free=%lu "
+            "contig=%lu lowAt=%lu",
+            pageCount, static_cast<unsigned long>(esp_get_free_heap_size()),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(pageHeapInfo.allocated_blocks),
+            static_cast<unsigned long>(pageHeapInfo.free_blocks),
+            static_cast<unsigned long>(pageHeapInfo.total_allocated_bytes),
             static_cast<unsigned long>(g_parseLowWater.minFree), static_cast<unsigned long>(g_parseLowWater.minContig),
             static_cast<unsigned long>(g_parseLowWater.atByteOffset));
     g_parseLowWater.reset();  // per-page window
   } else {
-    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu", pageCount,
+    LOG_INF("HEAP", "spine_page=%d free=%lu contig=%lu allocBlk=%lu freeBlk=%lu allocBytes=%lu", pageCount,
             static_cast<unsigned long>(esp_get_free_heap_size()),
-            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
+            static_cast<unsigned long>(pageHeapInfo.allocated_blocks),
+            static_cast<unsigned long>(pageHeapInfo.free_blocks),
+            static_cast<unsigned long>(pageHeapInfo.total_allocated_bytes));
   }
 #endif
 
@@ -727,6 +771,10 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
                          p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
                          p.imageRendering);
   st.lut.clear();
+  // One u32 per page, appended by the completePageFn below across the whole parse. Pre-sized for
+  // the same reason as the parser's paragraph LUT — see estimatePagesForSpine and
+  // docs/memory-allocation-strategy.md §9.6.
+  st.lut.reserve(estimatePagesForSpine(st.inflatedSize));
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = st.localPath.find_last_of('/');
@@ -745,7 +793,22 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       // parser never carries a stale lean flag into an owned/heap-backed build.
       const bool externalArena = st.arena && st.arena != st.ownedArena.get();
       st.cssParser->setIndexArena(externalArena ? st.arena : nullptr);
-      st.cssParser->setLeanResolve(externalArena);
+      // Lean resolve unconditionally, not just for arena builds. It does exactly two things:
+      // skip the hot-rule LRU, and drop the resolver's self-protection floor from
+      // MIN_FREE_HEAP_FOR_CSS (40 KB) to LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB).
+      //
+      // The hot LRU cannot hit during a build, structurally: ChapterHtmlSlimParser memoises
+      // resolved styles on `tag|class|id` in cssStyleCache_ BEFORE calling resolveStyle
+      // (ChapterHtmlSlimParser.cpp), so the resolver only ever sees the FIRST occurrence of each
+      // distinct key. A second-occurrence cache downstream of a first-occurrence filter has
+      // nothing to catch. Measured on three books with the LRU enabled (heap-backed host runs):
+      // hotHits=0 on every spine — alice 341 calls, kings-avatar 24, small-gods 17.
+      //
+      // So the LRU was pure cost: ~100 B/entry × 128 entries of heap growth, and 16 KB of extra
+      // resolver floor to accommodate it. Dropping it makes the disk-backed path — sparse index
+      // (8 B/rule) + on-demand seek + negative cache — the single CSS strategy on every build
+      // path, instead of only the borrowed one.
+      st.cssParser->setLeanResolve(true);
       if (!st.cssParser->loadFromCache()) {
         LOG_ERR("SCT", "Failed to load CSS from cache");
       }
@@ -1504,12 +1567,28 @@ void Section::abortSectionBuild() {
     return;
   }
   // Drop the extraction temp file alongside the partial cache file. tempPath is the book-keyed
-  // HTML cache: delete it only if WE were producing it (a partial inflate). When it was reused
-  // (read-only), it is a complete valid cache — keep it so the next build still skips inflation.
+  // HTML cache, and the only version worth deleting is an INCOMPLETE one: a partial inflate is
+  // garbage, a finished one is exactly what the next attempt wants.
+  //
+  // This used to test `!reusedHtml` — "delete whenever WE produced it" — which threw away every
+  // complete extraction a preempted build had just paid for, because a build that produced the
+  // file has reusedHtml == false whether or not its inflate finished. That silently broke the
+  // retry design documented at BG_BUILD_MAX_PREEMPTIONS: attempt 1 is supposed to bank the
+  // inflated XHTML so attempt 2 skips inflation and gets a real shot at the parse. It never did.
+  // Attempt 2 re-inflated from scratch, lost the same race, and Background-B abandoned the spine
+  // — which is why B stopped pre-building after its first section or two.
+  //
+  // Device-observed (X3, 2026-08-11): spine 2 extracted 14054 bytes at t=16924, was preempted at
+  // t=17087 with phase (a) complete, and the cache was deleted anyway.
+  //
+  // extractDone covers both ways the file becomes complete: the reused-cache path sets it when it
+  // skips phase (a), and the extract loop sets it when the inflate finishes. Erring towards
+  // keeping is self-correcting — runBuildParse re-validates the cache against the entry's
+  // inflated size and re-inflates on any mismatch.
   if (buildState_->tempFile) {
     buildState_->tempFile.close();
   }
-  if (!buildState_->reusedHtml && !buildState_->tempPath.empty()) {
+  if (!buildState_->extractDone && !buildState_->tempPath.empty()) {
     Storage.remove(buildState_->tempPath.c_str());
   }
   // During a live build, `file` is the build's write handle and filePath its cache path
