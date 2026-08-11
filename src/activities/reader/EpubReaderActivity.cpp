@@ -3901,6 +3901,14 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const uint32_t heapBefore = esp_get_free_heap_size();
   auto scope = fcm->createPrewarmScope();
   page->renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);  // scan pass
+  // The status bar is text too, and it was never scanned — it draws further down, after the
+  // prewarm has already run, so every one of its glyphs took the per-glyph hot-group fallback.
+  // On a text page that hides among the body glyphs; on an image page the status bar is the ONLY
+  // text, so the whole render pays it. Measured X3 2026-08-11 on the title-image page: 16
+  // getBitmap calls, 92521 us, 5782 us/call, against 1 us/call when prewarmed.
+  // Scanning is side-effect-free — drawText records the string and returns without drawing
+  // (GfxRenderer::drawText, isScanning) — and this runs before the clearScreen below in any case.
+  renderStatusBar();
   scope.endScanAndPrewarm();
   const uint32_t heapAfter = esp_get_free_heap_size();
   fcm->logStats("prewarm");
@@ -4142,6 +4150,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   FontCacheManager::ScopedSlotArena slotArena(*fcm, secondaryBorrowed_ ? buildScratch_.get() : nullptr);
   auto scope = fcm->createPrewarmScope();
   page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
+  renderStatusBar();  // scanned, not drawn — see the matching note in renderContents()
   scope.endScanAndPrewarm();
 
   renderer.clearScreen();
