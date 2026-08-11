@@ -329,7 +329,33 @@ inline void checkHeapIntegrity(const char*) {}
 #endif
 
 #if DEBUG_MEMORY_CONSUMPTION
+// The `Min Free` in the periodic [MEM] line is esp_get_minimum_free_heap_size() — a boot-wide
+// watermark with no timestamp, so it tells you the session dipped to N and nothing about where.
+// X3 2026-08-11 reported 7772 (against 23960 the run before, and a documented fault zone of
+// ~13-15 KB) while the lowest value any probe actually logged was 23028, so the dip is happening
+// between the points that sample.
+//
+// A watermark only ever falls, so noticing the fall is enough: sample it wherever we already
+// sample the heap and report only when it MOVED, naming the interval it moved in. The label is
+// the stage the drop was DETECTED at, i.e. the dip happened somewhere between the previous
+// snapshot and this one — that is the bracket, not a point measurement.
+uint32_t g_lastHeapWatermark = 0;
+
+void noteHeapWatermark(const char* stage) {
+  const uint32_t mark = esp_get_minimum_free_heap_size();
+  if (g_lastHeapWatermark == 0) {
+    g_lastHeapWatermark = mark;  // first call: establish the baseline, nothing to report yet
+    return;
+  }
+  if (mark >= g_lastHeapWatermark) return;
+  LOG_ERR("MEM", "Watermark DROP %lu -> %lu (-%lu) in the interval ending at [%s]",
+          static_cast<unsigned long>(g_lastHeapWatermark), static_cast<unsigned long>(mark),
+          static_cast<unsigned long>(g_lastHeapWatermark - mark), stage);
+  g_lastHeapWatermark = mark;
+}
+
 void logReaderMemSnapshot(const char* stage) {
+  noteHeapWatermark(stage);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   // free+contig alone cannot tell "something is retaining bytes" from "the same bytes have
@@ -346,6 +372,7 @@ void logReaderMemSnapshot(const char* stage) {
 }
 #else
 inline void logReaderMemSnapshot(const char*) {}
+inline void noteHeapWatermark(const char*) {}
 #endif
 
 // Computes the [0..100] EPUB progress percent. Returns 0 when pageCount is unknown (sync/bookmark
@@ -876,6 +903,10 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // still downclock normally: they run on this same task, so enterWaveformWait() sees its own
   // lock owner rather than a foreign one.
   HalPowerManager::Lock powerLock;
+  // The AA pass is the largest window in the reader with no heap sampling in it: 200-450 ms of
+  // plane rendering plus a grayscale replay, all on the loop task. It is the prime suspect for
+  // the unattributed Min Free watermark, so bracket it.
+  logReaderMemSnapshot("aa_begin");
   pendingGrayscale_.active = false;
   renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
@@ -897,7 +928,9 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
         pagePtr->renderImagesFromGrayscaleCache(renderer, marginLeft, contentTop);
       },
       [&] { return planeAborted || aaPreemptedByNavigation(); });
+  logReaderMemSnapshot("aa_after_planes");
   pendingGrayscale_.page.reset();
+  logReaderMemSnapshot("aa_end");
   LOG_DBG("ERS", "Deferred AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
           gt.displayMs, gt.restoreMs);
   checkHeapIntegrity("after_deferred_aa");
