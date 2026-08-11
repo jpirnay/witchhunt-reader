@@ -3782,13 +3782,49 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // before calling renderContents()) — this flag is a second, explicit guard against that
   // invariant silently breaking if a future change adds a yield point in here.
   imageProcessingActive_ = page->hasUncachedImages(warmForceLoad, imageMonochrome, warmGrayscaleImageCache);
+  // BORROW the secondary buffer as the decode scratch rather than releasing it. Both give the
+  // decoders the same ~52 KB, but the borrowed block never enters the heap:
+  //   - it cannot be carved up by the decode's own churn (rule 4 — this pass was the documented
+  //     violation: 32 KB ring + 12 KB pool + band + ditherer cycling inside the freed hole);
+  //   - returning it cannot fail, so the reallocSecondaryEvictingCaches() below — which evicts
+  //     font caches and can escalate to a fragmented-heap RESTART — never runs.
+  // The decoders bump-allocate inside it via image_scratch instead of malloc'ing per decode.
+  //
+  // Release stays as the fallback for when there is nothing to lend (already released for a C
+  // build, or no secondary buffer at all), so the previous behaviour is intact on those paths.
+  // See docs/memory-allocation-strategy.md §9.3.
+  std::unique_ptr<BuildArena> warmScratch;
+  bool borrowedSecondaryForWarm = false;
   if (imageProcessingActive_ && renderer.hasSecondaryBuffer()) {
-    renderer.releaseSecondaryBuffer();
-    releasedSecondaryForWarm = true;
-    LOG_DBG("ERS", "Released secondary buffer for image warm pass");
+    size_t borrowedSize = 0;
+    if (uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize)) {
+      warmScratch = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+      if (warmScratch && warmScratch->valid()) {
+        borrowedSecondaryForWarm = true;
+        LOG_DBG("ERS", "Borrowed secondary buffer (%u bytes) as image warm scratch",
+                static_cast<uint32_t>(borrowedSize));
+      } else {
+        warmScratch.reset();
+        renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+      }
+    }
+    if (!borrowedSecondaryForWarm) {
+      renderer.releaseSecondaryBuffer();
+      releasedSecondaryForWarm = true;
+      LOG_DBG("ERS", "Released secondary buffer for image warm pass (nothing to lend)");
+    }
   }
-  page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome,
-                        warmGrayscaleImageCache);
+  {
+    // Scoped so the arena is uninstalled before the borrow is returned below — a stale
+    // image_scratch pointer into a region the display owns again would be a use-after-free.
+    image_scratch::ScopedArena warmScratchScope(warmScratch.get());
+    page->warmImageCaches(renderer, orientedMarginLeft, contentTop, warmForceLoad, imageMonochrome,
+                          warmGrayscaleImageCache);
+  }
+  // The borrow is returned after clearScreen() below, not here: returnSecondaryBuffer() seeds the
+  // restored buffer from the live framebuffer, and right now that still holds the decode's
+  // side-effect pixels. Returning after the clear seeds it clean instead.
+  //
   // Image decode (JPEG/PNG) is the deepest, most heap-hungry work in a render pass
   // and the prime suspect for the lazy multi_heap poisoning assert. Check here, right
   // after the warm/decode pass, so corruption is attributed to the decode rather than
@@ -3819,6 +3855,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   imageProcessingActive_ = false;
   renderer.clearScreen();
+  if (borrowedSecondaryForWarm) {
+    // Now that the framebuffer is clean, hand the block back. returnSecondaryBuffer() seeds the
+    // restored secondary from it and arms the one-shot RED baseline, exactly as
+    // reallocSecondaryBuffer() would have — so the release path's careful
+    // "do NOT syncRedRamFromFrameBuffer()" reasoning above applies unchanged here. Unlike that
+    // path this cannot fail, so there is no eviction and no restart branch.
+    warmScratch.reset();
+    renderer.returnSecondaryBuffer();
+  }
 
   logReaderMemSnapshot("prewarm_begin");
 
