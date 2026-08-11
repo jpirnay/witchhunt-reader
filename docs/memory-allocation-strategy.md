@@ -511,18 +511,80 @@ Free oscillates between 20 and 40 KB — bytes are coming back — while contig 
 never recovers until the build ends (it returns to 31732 afterwards). That is fragmentation, not
 retention, and **everything §9.2 proposes moving into an arena was already in one.**
 
-So the residual fragmenter is what is still on the heap during a parse: the per-line
-`make_shared<TextBlock>` / `make_shared<PageLine>` traffic of §8.2, ~89% of allocations under
-128 bytes. Two consequences:
+There are two distinct effects in that trace, and only one of them is churn.
 
-1. Giving the blocking path a real arena (§9.2) is **necessary but not sufficient** — it removes
-   the ~18 KB spill, not this.
-2. §8.3's two candidate shapes — `unique_ptr` instead of `shared_ptr` on the line path, and a
-   page-scoped pool for `PageLine`/`TextBlock` — are no longer blocked on §8.4. The measurement
-   they were waiting for exists.
+**The gradual half is churn**, as §8.2 predicted: `freeBlk` climbs 16 → 35 across the parse while
+`allocBlk` oscillates 357–516 with no trend. Same bytes, more pieces. That is the per-line
+`make_shared<TextBlock>` / `make_shared<PageLine>` traffic, and it is what §8.3's two candidate
+shapes address.
 
-Caveat: the trough is mid-build and recovers, and this trace has no pre-change baseline beside
-it, so treat 40948 → 15348 as the shape of the problem rather than a regression signal.
+**The cliff is not.** Contig halves in a single page, which churn cannot do.
+
+### 9.2.1 The cliff is a render interleaving with a build (measured 2026-08-11, X3)
+
+The first suspect was `EpubImageManifest::ensureResolved`, which constructs a `ZipFile` on the
+first image miss and deliberately leaves it open for the whole build — a large block taken
+mid-parse, the eliminated-#8 shape. A probe was added to attribute it. **It is not the cause:**
+
+```
+retain[ZipFile ctor] allocBytes+72  blk+2 free-104 contig 30708->30708
+retain[zip open    ] allocBytes+80  blk+1 free-96  contig 30708->30708
+retain[resolve net ] allocBytes+220 blk+5 free-300 contig 30708->30708
+retain[zip close   ] allocBytes+0   blk+0 free+0   contig 12276->12276
+```
+
+220 bytes, and contig does not move. The manifest is exonerated; the ZipFile is cheap because it
+caches offsets, not content.
+
+What the same trace *does* show, at the page boundary where contig collapses:
+
+```
+spine_page=2  free=48888 contig=30708  allocBytes=207292
+  Prewarm: 43 glyphs in 3525 bytes from 2 groups
+  Prewarm: 31 glyphs in 3764 bytes from 2 groups
+  Prewarm:  5 glyphs in  346 bytes from 1 groups     <- pageBuf=7635 peakTemp=10555
+  triggerWithRefreshCycle: fast -> waveform wait -> display
+  Low heap (35312 free, 8692 max alloc) before paragraph layout
+spine_page=3  free=32532 contig=8692   allocBytes=223136   (+15844)
+```
+
+A **foreground page render interleaved with the live build** — the `SectionBuilding` pass drawing
+a page out of the partial build, with its font prewarm. Those allocations, made while the build's
+working set is resident, split the largest free block 30708 → **8692**. It never recovers: every
+later page in that build logs `contig=8692`, and the parser spends the rest of the parse in
+`continuing in degraded mode`. The same step appears at the same boundary in the previous run, so
+it reproduces.
+
+This is the handover's "known and unsolved" font-prewarm transient with the missing condition
+attached: **alone it is churn; against a build's resident working set it is the allocation that
+splits the region.** §9.4's verdict (the per-call buffer is low value) was argued on transient
+*size*; this is an argument about *placement*, which is a different question and the one
+eliminated #8 says actually decides.
+
+### 9.2.2 Which is also why Background-B never runs
+
+```
+gate=bgB_waitheap REJECT free=58572(floor=49152) contig=18420(floor=24576)
+```
+
+B now fails on **contig**, not free. Contig recovers only to 18420 after the build, against a
+24576 floor. So §9.7 and this section are one story, not two:
+
+> render interleaves with build → contig 30708 → 8692 → never recovers past 18420 →
+> B's contig floor is unreachable → B never pre-builds.
+
+Candidate directions, none measured:
+
+1. **Skip font prewarm for mid-build pages.** The `SectionBuilding` pass draws a transient page
+   the reader re-renders at Done anyway; it could draw with resident glyphs only.
+2. **Do not draw mid-build pages at all** while the build holds its working set. Costs exactly
+   the build-while-you-read responsiveness Background-C exists to provide.
+3. **Reuse one prewarm buffer across the groups of a call** (§9.4). Low value on transient size,
+   but placement is the live argument here.
+
+Caveat on the whole section: the trough is mid-build and recovers, and no trace yet has a
+pre-change baseline beside it, so treat 40948 → 15348 as the shape of the problem rather than a
+regression signal.
 
 ### 9.3 `image_scratch` is installed in exactly one place
 
