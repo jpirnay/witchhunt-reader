@@ -179,12 +179,30 @@ constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_F
 #ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
-// Quiet period after the last page turn before B may take the buffer. B's borrow costs a page's
-// AA if the reader turns during it, and the whole slice budget is wasted work when preempted —
-// so only start once the reader has settled into a page. Below this the reader is flipping
-// (skimming, or holding the button), which is exactly when B should stay out of the way.
+// Quiet period after the last page reached the screen before B may take the buffer. B's borrow
+// costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
+// only start once the reader has settled. Below this the reader is flipping (skimming, or
+// holding the button), which is when B should stay out of the way.
+//
+// 4000 -> 1500 (2026-08-11), because the two things that made 4000 conservative are both gone:
+//   - a preempted attempt used to throw away its inflated XHTML, so a retry re-paid the whole
+//     extraction. It now keeps it (Section::abortSectionBuild keys on extractDone), which is
+//     what makes attempt 2 cheap.
+//   - B used to start with a button edge already queued and hand the buffer straight back. It
+//     now consults CooperativeAbort before taking it.
+//
+// Sized against what B actually needs rather than what feels safe. Measured X3, alice spine 1
+// (16340 bytes, 17 pages): attempt 1 is 1652 ms total, attempt 2 skips the extract and is
+// setup 123 + parse 818 = ~950 ms. 1500 clears that with margin. The old 4000 asked for ~4x
+// the stillness B needs to finish, which during genuine reading (20-60 s per page) it got
+// trivially, but while skimming — when chapters are crossed fastest and lookahead matters most
+// — it never got at all: observed turn intervals were 1.2-5.6 s.
+//
+// The signal that this is wrong is `preempt=` in the BG work line. It was 0 for a whole session
+// after the two fixes above; if it starts climbing toward BG_BUILD_MAX_PREEMPTIONS, B is losing
+// races again and this is the number to raise.
 #ifndef BG_BUILD_BORROW_QUIET_MS
-#define BG_BUILD_BORROW_QUIET_MS 4000UL
+#define BG_BUILD_BORROW_QUIET_MS 1500UL
 #endif
 // See backgroundPreemptCount_: give up on a target after this many preempted attempts. Two is
 // deliberate — attempt 1 banks the inflated XHTML in the book-keyed HTML cache (kept on abort,
