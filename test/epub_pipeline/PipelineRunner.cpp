@@ -25,15 +25,47 @@ std::string normalizePath(const std::string& path, const std::string& cacheDir) 
   return std::regex_replace(p, std::regex("epub_[0-9]+"), "epub_<hash>");
 }
 
+// One `W` record per word, at `indent`. Kept to a single shape so the word-stream extraction used
+// to verify "no content was dropped" (`\bW x=\S+ s=\S+ z=\S+ t=(.*)`) sees table cells and ordinary
+// paragraphs alike.
+void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
+  for (uint16_t w = 0; w < block.wordCount(); ++w) {
+    out << indent << "W x=" << block.wordXpos(w) << " s=" << static_cast<int>(block.wordStyle(w))
+        << " z=" << static_cast<int>(block.wordSizePct(w)) << " t=" << block.wordText(w) << "\n";
+  }
+}
+
 void dumpTextLine(std::ostream& out, const PageLine& line) {
   const auto& block = *line.getBlock();
   const auto& bs = block.getRenderStyle();
   out << "  LINE y=" << line.yPos << " x=" << line.xPos << " align=" << static_cast<int>(bs.alignment)
       << " mult=" << std::fixed << std::setprecision(3) << bs.fontSizeMultiplier << " hfid=" << bs.headingFontId
       << " words=" << block.wordCount() << "\n";
-  for (uint16_t w = 0; w < block.wordCount(); ++w) {
-    out << "   W x=" << block.wordXpos(w) << " s=" << static_cast<int>(block.wordStyle(w))
-        << " z=" << static_cast<int>(block.wordSizePct(w)) << " t=" << block.wordText(w) << "\n";
+  dumpWords(out, block, "   ");
+}
+
+// Table fragments used to dump as a single `TABLE y= x= h=` line, so every golden was blind to the
+// text inside a grid — the reason a cell truncation went unnoticed across the whole corpus. Walk
+// rows, cells and lines so cell content is covered by the same golden and word-stream checks as
+// body text.
+void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const std::string& cacheDir) {
+  out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " h=" << tbl.getTotalHeight()
+      << " cols=" << static_cast<int>(tbl.getColumnCount()) << " border=" << (tbl.getHasBorder() ? 1 : 0)
+      << " rows=" << tbl.getRows().size() << "\n";
+  for (const auto& row : tbl.getRows()) {
+    out << "   ROW h=" << row.height << " hdr=" << (row.isHeaderRow ? 1 : 0) << " cells=" << row.cells.size() << "\n";
+    for (size_t c = 0; c < row.cells.size(); ++c) {
+      const auto& cell = row.cells[c];
+      out << "    CELL " << c << " hdr=" << (cell.isHeader ? 1 : 0) << " lines=" << cell.lines.size() << "\n";
+      for (const auto& line : cell.lines) {
+        out << "     LN words=" << line->wordCount() << "\n";
+        dumpWords(out, *line, "      ");
+      }
+      if (cell.image) {
+        out << "     CELLIMG w=" << cell.image->getWidth() << " h=" << cell.image->getRenderedHeight()
+            << " src=" << normalizePath(cell.image->getImagePath(), cacheDir) << "\n";
+      }
+    }
   }
 }
 
@@ -52,11 +84,9 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
             << " src=" << normalizePath(ib.getImagePath(), cacheDir) << "\n";
         break;
       }
-      case TAG_PageTable: {
-        const auto& tbl = static_cast<const PageTableFragment&>(*el);
-        out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " h=" << tbl.getTotalHeight() << "\n";
+      case TAG_PageTable:
+        dumpTableFragment(out, static_cast<const PageTableFragment&>(*el), cacheDir);
         break;
-      }
       case TAG_PageHR:
         out << "  HR y=" << el->yPos << " x=" << el->xPos << "\n";
         break;

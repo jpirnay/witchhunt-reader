@@ -250,10 +250,35 @@ int ParsedText::widthForLine(const int lineIndex, const int lineHeight, const in
 void ParsedText::layoutAndExtractLines(
     const GfxRenderer& renderer, const int bodyFontId, const uint16_t viewportWidth,
     const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
-    const bool includeLastLine, const int16_t blockStartY, const int lineHeight) {
+    const bool includeLastLine, const int16_t blockStartY, const int lineHeight, const bool preserveSource) {
   if (words.empty()) {
     return;
   }
+
+  // preserveSource: take a snapshot now and put it back on the way out, so the caller sees the
+  // text exactly as it handed it over. Suppressing the trailing erase alone is not enough --
+  // computeLineBreaks force-splits any word too wide for the line (inserting a hyphen), and
+  // applyParagraphIndent/applyBionicReadingTransform rewrite words too. A cell measured against a
+  // 47px column and then re-laid out as a full-width paragraph would otherwise keep the narrow
+  // column's breaks: "Wordy0001" coming back as "Word-" + "y0001".
+  //
+  // The copy is bounded by the caller: only the table grid path sets this, and a cell is size-
+  // bounded before it gets here. It lives for one cell's layout and is released on return.
+  std::vector<std::string> savedWords;
+  std::vector<EpdFontFamily::Style> savedStyles;
+  std::vector<uint8_t> savedSizes;
+  std::vector<bool> savedContinues;
+  bool savedIsContinuation = false;
+  size_t savedBionicWatermark = 0;
+  if (preserveSource) {
+    savedWords = words;
+    savedStyles = wordStyles;
+    savedSizes = wordSizes;
+    savedContinues = wordContinues;
+    savedIsContinuation = isContinuation_;
+    savedBionicWatermark = bionicTransformedUpTo_;
+  }
+
   // Heading blocks lay out (and below render) with a taller real font instead of scaling the
   // body font. Resolve the effective fontId once; all measurement helpers below take it as
   // their fontId argument, so widths/kerning/indent are computed in the heading font and stay
@@ -425,7 +450,11 @@ void ParsedText::layoutAndExtractLines(
   // release excess capacity.  Without shrink_to_fit the vector retains a
   // large allocation from before the flush; the next paragraph fills it
   // back up and eventually needs an even larger contiguous realloc.
-  if (lineCount > 0) {
+  //
+  // preserveSource skips this: a caller that may have to lay the same text out a second time (the
+  // table grid path, which can only discover a cell does not fit by laying it out) needs the words
+  // to still be there. It pays for that in residency, so it is opt-in.
+  if (lineCount > 0 && !preserveSource) {
     const size_t consumed = lineBreakIndices[lineCount - 1];
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
@@ -440,6 +469,15 @@ void ParsedText::layoutAndExtractLines(
     bionicTransformedUpTo_ = words.size();
   }
   isContinuation_ = !includeLastLine;
+
+  if (preserveSource) {
+    words = std::move(savedWords);
+    wordStyles = std::move(savedStyles);
+    wordSizes = std::move(savedSizes);
+    wordContinues = std::move(savedContinues);
+    isContinuation_ = savedIsContinuation;
+    bionicTransformedUpTo_ = savedBionicWatermark;
+  }
 }
 
 std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {

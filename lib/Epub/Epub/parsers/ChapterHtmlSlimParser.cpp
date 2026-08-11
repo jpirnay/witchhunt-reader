@@ -70,13 +70,15 @@ constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_M
 
 // Guard: minimum free heap before attempting table layout (cell wrapping allocates TextBlock
 // vectors). Checked on <td> as cells accumulate, so a table that cannot afford grid layout
-// switches to streaming before the buffer is built — and again in emitBufferedTable() to pick
-// the layout for tables that stayed within budget.
+// degrades before the row is built — and again in commitPendingRow(), immediately before the
+// layout allocations, so a dip costs the pending row rather than the rows already packed.
+// Unlike the row-scoped bounds, this one takes the whole table: a heap this low will not have
+// recovered by the next row.
 constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
 
-// Size bound on the buffered table (the gate that actually fires in time).
+// Size bound on the buffered row (the gate that actually fires in time).
 //
-// MIN_FREE_HEAP_FOR_TABLE above is a POINT check at cell open, so it cannot bound a table that
+// MIN_FREE_HEAP_FOR_TABLE above is a POINT check at cell open, so it cannot bound a row that
 // grows into the margin: X3 alice spine 2 opened its table at ~30 KB free, passed every per-cell
 // check, and was at 9776 free / 5364 max alloc by the time </table> drained it as paragraphs --
 // 20 KB consumed in 61 ms with no switch. By construction the heap check only trips once enough
@@ -85,13 +87,17 @@ constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
 //
 // So bound the quantity we can actually measure as it accumulates -- attributed buffered bytes --
 // instead of sampling the heap. Deterministic, book-independent, and it fires BEFORE the memory
-// is committed. Exceeding it defers to the next <td> (beginTableStreaming drains and clears
-// `rows`, so it must not run with a cell open), which bounds the resident buffer to the budget
-// plus the one cell in flight.
+// is committed. It can act at the next <td>, or with a cell still open via
+// degradeRowAtOpenCell(), which is what a one-cell row needs.
 #ifndef EHP_TABLE_BUFFER_BUDGET_BYTES
 #define EHP_TABLE_BUFFER_BUDGET_BYTES (12 * 1024)
 #endif
-constexpr size_t MAX_TABLE_BUFFER_BYTES = EHP_TABLE_BUFFER_BUDGET_BYTES;
+// Now a per-ROW budget: rows are laid out and freed at </tr>, so the table as a whole no longer
+// accumulates. The budget stays because streaming bounds residency at table scope, not at row
+// scope -- one row of 8 cells each holding the 189-word cell that caused the original X3 abort()
+// is ~72 KB, and nothing else bounds it. Keeping the same number makes this strictly tighter than
+// the whole-table budget it replaces, and it fires far more rarely.
+constexpr size_t MAX_TABLE_ROW_BUFFER_BYTES = EHP_TABLE_BUFFER_BUDGET_BYTES;
 
 // Attributed cost of one buffered word: the std::string header in ParsedText::words (24 B under
 // 32-bit libstdc++) plus the parallel per-word vectors (wordStyles, wordSizes, wordContinues) and
@@ -105,18 +111,11 @@ constexpr size_t TABLE_BUFFER_SSO_CAPACITY = 15;
 // pointer) plus the heap-allocated ParsedText and its four empty vectors.
 constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 
-// Word bound on a SINGLE buffered cell, and the reason the whole-table budget above is not
-// enough on its own: the budget can only act at the next <td> (beginTableStreaming drains and
-// clears `rows`, so it cannot run with a cell open), and a one-cell table has no next <td>.
-// X3 alice spine 2 is exactly that -- <table class="rabbithole"> is ONE row, ONE cell holding a
-// whole <div> of two paragraphs, measured at 189 words / 9200 attributed bytes. Nothing bounded
-// it, so it buffered to the hard floor and aborted the parse before layout even started.
-//
-// A <td> was the only text container in the parser without a size bound: an ordinary paragraph
-// already flushes at >96 words (see the currentTextBlock->size() > 96 split in
-// flushPartWordBuffer). Reuse that same number rather than inventing one -- it makes a cell
-// behave like the paragraph it falls back to, and 96 is already the measured-safe layout chunk.
-constexpr size_t MAX_TABLE_CELL_WORDS = 96;
+// The separate 96-word bound on a single cell is gone. It existed only because the old whole-table
+// budget could not act with a cell open, so a one-cell table -- X3 alice spine 2's
+// <table class="rabbithole">, ONE row, ONE cell, 189 words / 9200 attributed bytes -- had no next
+// <td> at which to switch, and buffered to the hard floor. The row budget is charged per word and
+// acts with a cell open via degradeRowAtOpenCell(), so it covers that case directly.
 
 const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
@@ -523,18 +522,17 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // text is null only for a cell already consumed by the streaming path; currentTableCell is
     // cleared alongside that, so this is belt-and-braces against a future reordering.
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
-    // Charge the word against the buffer budget. Only a buffering table accumulates — a streaming
-    // cell is drained and freed at </td>. The switch itself cannot happen here (a cell is open and
-    // beginTableStreaming clears `rows`), so the <td> handler acts on this.
-    if (currentTable && !currentTable->streaming) {
-      currentTable->bufferedBytes += TABLE_BUFFER_BYTES_PER_WORD;
-      if (partWordBufferIndex > TABLE_BUFFER_SSO_CAPACITY) {
-        currentTable->bufferedBytes += partWordBufferIndex + 1;
+    // Charge the word against the row budget. Only a row still headed for the grid accumulates —
+    // a degraded cell is drained and freed at </td>.
+    if (currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
+      currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_WORD;
+      if (static_cast<size_t>(partWordBufferIndex) > TABLE_BUFFER_SSO_CAPACITY) {
+        currentTable->pendingRowBytes += partWordBufferIndex + 1;
       }
-      // A single cell past the paragraph-sized bound cannot wait for the next <td> — there may
-      // not be one. Drain here, with the cell still open.
-      if (currentTableCell->text->size() > MAX_TABLE_CELL_WORDS) {
-        if (!beginTableStreamingAtOpenCell()) {
+      // A row past the budget cannot wait for the next <td> — a one-cell row has none. Drain here,
+      // with the cell still open.
+      if (currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES) {
+        if (!degradeRowAtOpenCell("row size budget")) {
           partWordBufferIndex = 0;
           nextWordContinues = false;
           return false;
@@ -1105,14 +1103,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
   }
 
-  // Buffered table rendering: accumulate cells in memory, emit as PageTableFragment on </table>.
+  // Streaming table rendering: buffer one row, emit it as part of a PageTableFragment at </tr>.
   if (strcmp(name, "table") == 0) {
     if (self->currentTable) {
-      // Nested table — mark unsupported and track depth. Grid layout is now impossible, so
-      // stop buffering: the inner table's cells fold into the outer one's stream.
+      // Nested table — grid layout is now impossible for the outer table, and it cannot recover
+      // on the next row either, so the inner table's cells fold into the outer one's stream.
       self->currentTable->depth += 1;
-      self->currentTable->unsupported = true;
-      self->beginTableStreaming("nested table");
+      self->degradeTable("nested table");
       self->depth += 1;
       return;
     }
@@ -1132,25 +1129,23 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         }
       }
     }
+    self->currentTable->packer.totalWidth = self->viewportWidth;
+    self->currentTable->packer.hasBorder = self->currentTable->hasBorder;
     self->depth += 1;
     return;
   }
 
   if (self->currentTable && self->currentTable->depth == 1 && strcmp(name, "tr") == 0) {
-    // Streaming keeps exactly one row alive as scratch for the open cell, so reuse it
-    // rather than growing the vector once per <tr>.
-    if (self->currentTable->streaming) {
-      if (self->currentTable->rows.empty()) self->currentTable->rows.emplace_back();
-      self->currentTable->rows.back().cells.clear();
-      self->currentTable->rows.back().effectiveCols = 0;
-      self->depth += 1;
-      return;
-    }
-    self->currentTable->rows.emplace_back();
-    if (self->currentTable->rows.size() > MAX_TABLE_ROWS) {
-      self->currentTable->unsupported = true;
-      self->beginTableStreaming("row limit");
-    }
+    // One row of scratch, reused for every <tr>. Clearing rowDegraded here is what bounds a bad
+    // row to itself: a row that overflowed the budget, or could not be a grid row, does not stop
+    // the next one from going back into the grid.
+    auto& t = *self->currentTable;
+    t.pendingRow.cells.clear();
+    t.pendingRow.effectiveCols = 0;
+    t.pendingRow.isHeaderRow = false;
+    t.pendingRowBytes = 0;
+    t.rowDegraded = false;
+    t.rowOverflowed = false;
     self->depth += 1;
     return;
   }
@@ -1159,30 +1154,23 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
-    // Heap gate on the BUFFERING side. The check in emitBufferedTable() can only pick a layout
-    // after the whole table is already resident; this one fires while cells are still
-    // accumulating, so a big table degrades to streaming instead of running the heap down and
-    // then discovering it has nothing left to lay out with.
-    if (!self->currentTable->streaming) {
-      if (self->currentTable->bufferedBytes >= MAX_TABLE_BUFFER_BYTES) {
-        // The bound that fires in time: the buffer has grown past what grid layout can afford,
-        // and this is the first point since it happened where no cell is open. Draining here
-        // keeps the resident buffer at budget + the cell just closed, instead of letting it run
-        // to </table> and discovering there is nothing left to lay out with.
-        self->currentTable->unsupported = true;
-        self->beginTableStreaming("size budget");
-      } else if (self->currentTable->unsupported) {
-        // Deferred from a trigger that fired while a cell was open (e.g. column overflow).
-        self->beginTableStreaming("unsupported");
+    // Gates on the BUFFERING side, so a row that cannot afford grid layout degrades before the
+    // memory is committed rather than after. No cell is open at this point, so degradeRow() is
+    // safe here; the mid-cell case goes through degradeRowAtOpenCell() from the word handler.
+    if (!self->currentTable->degraded && !self->currentTable->rowDegraded) {
+      if (self->currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES) {
+        self->degradeRow("row size budget");
+      } else if (self->currentTable->rowOverflowed) {
+        // Deferred from the previous <td>, which was open when the row outgrew MAX_TABLE_COLS.
+        self->degradeRow("column overflow");
       } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
-        self->currentTable->unsupported = true;
-        self->beginTableStreaming("low heap");
+        // Unlike the two above, a heap this low will not have recovered by the next row.
+        self->degradeTable("low heap");
       }
     }
     // Parse colspan attribute (inspired by uxjulia/CrossInk; rewritten for our codebase).
     // Any rowspan != 1 is unsupported; we ignore it and let the fallback handle those tables.
-    // Parsed BEFORE the row reference is taken: a rowspan can trigger the streaming switch,
-    // which clears `rows` and would dangle it.
+    // Parsed BEFORE the cell is pushed: a rowspan degrades the table, which clears pendingRow.
     uint8_t colSpan = 1;
     if (atts != nullptr) {
       for (int i = 0; atts[i]; i += 2) {
@@ -1196,17 +1184,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           char* end;
           const long v = std::strtol(atts[i + 1], &end, 10);
           if (end != atts[i + 1] && v != 1) {
-            self->currentTable->unsupported = true;
-            self->beginTableStreaming("rowspan");
+            // A rowspan mis-renders every row it covers, not just this one, so it takes the table.
+            self->degradeTable("rowspan");
           }
         }
       }
     }
 
-    if (self->currentTable->rows.empty()) {
-      self->currentTable->rows.emplace_back();
-    }
-    BufferedTableRow& row = self->currentTable->rows.back();
+    BufferedTableRow& row = self->currentTable->pendingRow;
 
     const bool isHeader = (strcmp(name, "th") == 0);
     row.cells.emplace_back();
@@ -1214,19 +1199,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().colSpan = colSpan;
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
-    if (!self->currentTable->streaming) {
-      self->currentTable->bufferedBytes += TABLE_BUFFER_BYTES_PER_CELL;
-    }
+    self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
-    if (row.effectiveCols > self->currentTable->maxCols) {
-      self->currentTable->maxCols = row.effectiveCols;
-    }
-    // Column overflow: grid layout is off the table. Not switched to streaming here — the cell
-    // just created is still open and about to receive text, and beginTableStreaming() drains
-    // and clears `rows`. The switch happens on the next <td> (or the emit falls back to
-    // paragraphs), which keeps the open-cell invariant simple.
+    // Column overflow: this row cannot be a grid row. Not degraded here — the cell just created is
+    // still open and about to receive text, and degradeRow() clears the row. Latched for the next
+    // <td>, or picked up by commitPendingRow() at </tr> if this was the last cell.
     if (row.cells.size() > MAX_TABLE_COLS || row.effectiveCols > MAX_TABLE_COLS) {
-      self->currentTable->unsupported = true;
+      self->currentTable->rowOverflowed = true;
     }
     self->currentTableCell = &row.cells.back();
     self->depth += 1;
@@ -2485,19 +2464,17 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
-    // Streaming: the cell is complete, so lay it out and drop it now. isHeaderRow is only
-    // consulted by the grid layout, which this table can no longer reach.
-    if (self->currentTable->streaming) {
-      if (!self->currentTable->rows.empty()) {
-        self->streamClosedCell(self->currentTable->rows.back());
-      }
+    // Degraded: the cell is complete, so lay it out and drop it now. isHeaderRow is only
+    // consulted by the grid layout, which this row can no longer reach.
+    if (self->currentTable->degraded || self->currentTable->rowDegraded) {
+      self->streamClosedCell(self->currentTable->pendingRow);
       self->currentTableCell = nullptr;
       self->nextWordContinues = false;
       return;
     }
     // Determine if the whole row consists of header cells
-    if (!self->currentTable->rows.empty()) {
-      auto& row = self->currentTable->rows.back();
+    {
+      auto& row = self->currentTable->pendingRow;
       bool allHeaders = !row.cells.empty();
       for (const auto& c : row.cells) {
         if (!c.isHeader) {
@@ -2512,6 +2489,9 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   }
 
   if (self->currentTable && self->currentTable->depth == 1 && strcmp(name, "tr") == 0) {
+    // The row is complete: lay it out, pack it, and free its cells. This is the whole point of the
+    // streaming model -- residency is one row, not one table.
+    self->commitPendingRow();
     self->nextWordContinues = false;
   }
 
@@ -2520,7 +2500,9 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       if (!self->flushPartWordBuffer()) return;
     }
     self->currentTableCell = nullptr;
-    self->emitBufferedTable();
+    // A table whose last row had no </tr> (or no <tr> at all) still has cells pending.
+    self->commitPendingRow();
+    self->flushTableFragment(self->currentTable->packer);
     self->currentTable.reset();
     self->nextWordContinues = false;
   }
@@ -2979,30 +2961,99 @@ void ChapterHtmlSlimParser::makePages() {
   }
 }
 
-void ChapterHtmlSlimParser::emitBufferedTable() {
+void ChapterHtmlSlimParser::commitPendingRow() {
   if (!currentTable) return;
+  auto& t = *currentTable;
 
-  // Streaming tables already emitted every cell (text and image) from </td>; rows is empty
-  // and there is nothing left to lay out.
-  if (currentTable->streaming) {
+  // Degraded rows already emitted every cell from </td>; there is nothing pending.
+  if (t.degraded || t.rowDegraded) {
+    t.pendingRow.cells.clear();
+    t.pendingRowBytes = 0;
+    return;
+  }
+  if (t.pendingRow.cells.empty()) return;
+
+  if (t.rowOverflowed) {
+    degradeRow("column overflow");
     return;
   }
 
-  if (currentTable->unsupported || currentTable->rows.empty()) {
-    LOG_DBG("EHP", "Table unsupported or empty — falling back to paragraph mode");
-    emitTableAsParagraphs(*currentTable);
-    emitCellImagesAsBlocks(*currentTable);
-  } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
-    // Note this check can only choose between layouts — the buffer is already paid for by the
-    // time we get here. The heap is kept off this cliff by the streaming switch in
-    // beginTableStreaming(), which fires while cells are still accumulating.
-    LOG_ERR("EHP", "Low heap (%u), falling back to paragraph mode for table", ESP.getFreeHeap());
-    emitTableAsParagraphs(*currentTable);
-    emitCellImagesAsBlocks(*currentTable);
-  } else {
-    // Fragment path places cell images inside the grid; no separate block-image emit.
-    emitTableAsFragments(*currentTable);
+  // Widening rows open a new fragment at the wider count; narrower rows are padded by
+  // layoutTableRow and stay aligned with the fragment they are joining. Only the maximum column
+  // count ever needed the whole table, and this is how streaming pays for not having it: the
+  // count is discovered as rows arrive rather than known up front, so a table that widens
+  // halfway widens on screen instead of being laid out wide from its first row.
+  const uint8_t columnCount = std::max(t.columnCount, t.pendingRow.effectiveCols);
+  if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
+    degradeRow("column count out of range");
+    return;
   }
+
+  const uint16_t colWidth = viewportWidth / columnCount;
+  const uint16_t innerColWidth =
+      (colWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(colWidth - 2 * TABLE_CELL_PADDING) : 0;
+  if (innerColWidth < MIN_COL_INNER_WIDTH) {
+    degradeRow("columns too narrow");
+    return;
+  }
+
+  // Gate before the layout allocations rather than after: a heap dip now costs this row, not the
+  // rows already packed into the fragment.
+  if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
+    degradeTable("low heap at row layout");
+    return;
+  }
+
+  LayoutRow lr;
+  if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
+    degradeRow("row cannot be a grid row");
+    return;
+  }
+  t.columnCount = columnCount;
+
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
+
+  // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
+  if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
+    flushTableFragment(t.packer);
+  }
+  if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
+
+  const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
+
+  // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
+  // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
+  // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
+  // it. The viewport check below reaches it first at any realistic row height; this is the
+  // invariant, not the working limit.
+  if (!t.packer.rows.empty() &&
+      (t.packer.rows.size() >= MAX_TABLE_ROWS || currentPageNextY + t.packer.height + rowContrib > viewportHeight)) {
+    flushTableFragment(t.packer);
+    t.packer.cols = lr.renderCols;
+  }
+
+  // If what is left of the page cannot hold even this one row, break now. Without this the row
+  // opens a fragment in the few pixels left at the bottom, the next row immediately has to flush
+  // it, and the table arrives on the next page split into a one-row box followed by the rest --
+  // two bordered boxes where the reader should see one continuous table. Only reachable now that
+  // tables span pages as grids rather than flattening at 48 rows.
+  if (t.packer.rows.empty() && currentPageNextY > 0 && currentPageNextY + rowContrib > viewportHeight) {
+    emitPage(lastBodyChildByteOffset);
+  }
+
+  TableRow tr;
+  tr.isHeaderRow = lr.isHeaderRow;
+  tr.height = lr.height;
+  tr.cells = std::move(lr.cells);
+  t.packer.rows.push_back(std::move(tr));
+  t.packer.height += rowContrib;
+
+  // Free the row's words. Everything above exists to make this possible one row at a time.
+  t.pendingRow.cells.clear();
+  t.pendingRowBytes = 0;
 }
 
 std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::string& src, const std::string& alt,
@@ -3103,53 +3154,57 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
   }
 }
 
-void ChapterHtmlSlimParser::beginTableStreaming(const char* reason) {
-  if (!currentTable || currentTable->streaming) return;
+void ChapterHtmlSlimParser::degradeRow(const char* reason) {
+  if (!currentTable) return;
+  auto& t = *currentTable;
+  if (t.rowDegraded) return;
 
-  LOG_DBG("EHP", "Table switched to streaming mode (%s): draining %u buffered row(s), %u buffered byte(s)", reason,
-          static_cast<unsigned>(currentTable->rows.size()), static_cast<unsigned>(currentTable->bufferedBytes));
-  currentTable->streaming = true;
-  // Nothing accumulates from here on: cells are drained and freed at </td>.
-  currentTable->bufferedBytes = 0;
+  LOG_DBG("EHP", "Table row degraded to paragraphs (%s): %u buffered cell(s), %u buffered byte(s)", reason,
+          static_cast<unsigned>(t.pendingRow.cells.size()), static_cast<unsigned>(t.pendingRowBytes));
 
-  // Drain what was buffered before the switch. Text first, then images, so the already-buffered
-  // portion keeps the batch fallback's ordering; cells that arrive after this point interleave
-  // their image with their text, which is the best streaming can do without re-buffering.
-  emitTableAsParagraphs(*currentTable);
-  emitCellImagesAsBlocks(*currentTable);
+  // Close the fragment first: the paragraphs about to be emitted come AFTER every row already
+  // packed, and a fragment written later would land below them on the page.
+  flushTableFragment(t.packer);
 
-  // Release the row storage itself, not just the cell contents — this is the allocation the
-  // switch exists to avoid holding. Callers only reach this while no cell is open (the <table>,
-  // <tr> and <td> handlers), so clearing currentTableCell here cannot orphan a cell mid-fill;
-  // the next <td> re-creates the single scratch row and re-points it.
-  currentTable->rows.clear();
-  currentTable->rows.shrink_to_fit();
+  t.rowDegraded = true;
+  t.pendingRowBytes = 0;
+
+  // Text first, then images, matching the order the batch fallback always used. Callers only reach
+  // this with no cell open (<table>, <td>, </tr>); the mid-cell case goes through
+  // degradeRowAtOpenCell(), so clearing currentTableCell here cannot orphan a cell mid-fill.
+  // The return is deliberately dropped: degradeRow() is reached from void SAX handlers, and a
+  // heap guard that stops the parse has already latched streamFailed, which every handler checks.
+  // Only degradeRowAtOpenCell() propagates, because its caller can still refuse the word.
+  (void)emitRowAsParagraphs(t.pendingRow);
+  emitRowImagesAsBlocks(t.pendingRow);
+  t.pendingRow.cells.clear();
+  t.pendingRow.cells.shrink_to_fit();
   currentTableCell = nullptr;
 }
 
-bool ChapterHtmlSlimParser::beginTableStreamingAtOpenCell() {
-  if (!currentTable || currentTable->streaming || !currentTableCell) return true;
-  if (currentTable->rows.empty() || currentTable->rows.back().cells.empty()) return true;
+void ChapterHtmlSlimParser::degradeTable(const char* reason) {
+  if (!currentTable) return;
+  degradeRow(reason);
+  currentTable->degraded = true;
+}
 
-  // beginTableStreaming() cannot be used here: it drains every buffered cell and clears `rows`,
-  // which would destroy the cell we are still filling. Lift the open cell out first, drain the
-  // rest exactly as the normal switch does, then emit the open cell's accumulated words and hand
-  // it back empty so the words still arriving keep flowing into the same cell.
-  BufferedTableCell open = std::move(currentTable->rows.back().cells.back());
-  currentTable->rows.back().cells.pop_back();
+bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
+  if (!currentTable || currentTable->rowDegraded || currentTable->degraded || !currentTableCell) return true;
+  auto& t = *currentTable;
+  if (t.pendingRow.cells.empty()) return true;
+
+  // degradeRow() cannot be used here: it drains every buffered cell and clears the row, which
+  // would destroy the cell we are still filling. Lift the open cell out first, degrade the rest
+  // exactly as the normal path does, then emit the open cell's accumulated words and hand it back
+  // empty so the words still arriving keep flowing into the same cell.
+  BufferedTableCell open = std::move(t.pendingRow.cells.back());
+  t.pendingRow.cells.pop_back();
   currentTableCell = nullptr;  // nothing may route into the detached cell during the drain
 
-  LOG_DBG("EHP", "Table cell over word bound: draining %u buffered row(s), %u buffered byte(s)",
-          static_cast<unsigned>(currentTable->rows.size()), static_cast<unsigned>(currentTable->bufferedBytes));
-  currentTable->streaming = true;
-  currentTable->bufferedBytes = 0;
-  emitTableAsParagraphs(*currentTable);
-  emitCellImagesAsBlocks(*currentTable);
-  currentTable->rows.clear();
-  currentTable->rows.shrink_to_fit();
+  degradeRow(reason);
 
   // The open cell's words come after everything buffered before it, in document order. Its image
-  // does NOT go out here — streaming emits a cell image at </td>, and `open` keeps it.
+  // does NOT go out here — a degraded cell emits its image at </td>, and `open` keeps it.
   bool ok = true;
   if (open.text && !open.text->isEmpty()) {
     BufferedTableCell chunk;
@@ -3159,10 +3214,9 @@ bool ChapterHtmlSlimParser::beginTableStreamingAtOpenCell() {
   }
   open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
 
-  currentTable->rows.emplace_back();
-  currentTable->rows.back().cells.push_back(std::move(open));
-  currentTable->rows.back().effectiveCols = 0;
-  currentTableCell = &currentTable->rows.back().cells.back();
+  t.pendingRow.cells.push_back(std::move(open));
+  t.pendingRow.effectiveCols = 0;
+  currentTableCell = &t.pendingRow.cells.back();
   return ok;
 }
 
@@ -3172,245 +3226,138 @@ void ChapterHtmlSlimParser::streamClosedCell(BufferedTableRow& row) {
   row.cells.pop_back();  // the cell is fully consumed; never accumulates
 }
 
-void ChapterHtmlSlimParser::emitCellImagesAsBlocks(BufferedTable& table) {
-  // Fallback (paragraph) path: cells are flattened to paragraphs, so any cell image is emitted
-  // as a full-width block image below the table, one per line — same as any other block image.
-  // Runs after emitTableAsParagraphs, which has already released every cell's ParsedText, so the
-  // image decodes below get the heap the text was holding. Rows are dropped as they are consumed
-  // for the same reason: an image decode needs contiguous heap more than the table needs its
-  // remaining rows.
-  for (auto& row : table.rows) {
-    for (auto& cell : row.cells) {
-      if (cell.imageSrc.empty()) continue;
-      placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
-    }
-    row.cells.clear();
-    row.cells.shrink_to_fit();
+void ChapterHtmlSlimParser::emitRowImagesAsBlocks(BufferedTableRow& row) {
+  // Paragraph path: cells are flattened to paragraphs, so any cell image is emitted as a
+  // full-width block image below them, one per line — same as any other block image. Runs after
+  // emitRowAsParagraphs, which has already released every cell's ParsedText, so the image decodes
+  // below get the heap the text was holding.
+  for (auto& cell : row.cells) {
+    if (cell.imageSrc.empty()) continue;
+    placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
   }
-  table.rows.clear();
-  table.rows.shrink_to_fit();
 }
 
-void ChapterHtmlSlimParser::emitTableAsFragments(BufferedTable& table) {
-  // Use the pre-computed maxCols which accounts for colspan values (inspired by uxjulia/CrossInk).
-  const uint8_t columnCount = table.maxCols > 0 ? table.maxCols : [&]() {
-    uint8_t n = 0;
-    for (const auto& row : table.rows) n = std::max(n, static_cast<uint8_t>(row.cells.size()));
-    return n;
-  }();
+bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8_t columnCount, LayoutRow& out) {
+  const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
 
-  if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
-    emitTableAsParagraphs(table);
-    return;
+  const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
+  const uint16_t renderColWidth = viewportWidth / renderCols;
+  const uint16_t renderInnerWidth =
+      (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
+
+  // Any other colspan structure falls back; we only handle full-span or plain cells.
+  const bool hasMergedCell =
+      std::any_of(bufRow.cells.begin(), bufRow.cells.end(), [](const BufferedTableCell& c) { return c.colSpan != 1; });
+  if (hasMergedCell && !isFullWidthSpan) {
+    LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
+    return false;
   }
 
-  const uint16_t totalWidth = viewportWidth;
-  const uint16_t colWidth = totalWidth / columnCount;
-  const uint16_t innerColWidth =
-      (colWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(colWidth - 2 * TABLE_CELL_PADDING) : 0;
-  if (innerColWidth < MIN_COL_INNER_WIDTH) {
-    LOG_DBG("EHP", "Table columns too narrow (%u px inner) — falling back to paragraphs", innerColWidth);
-    emitTableAsParagraphs(table);
-    return;
-  }
-
+  // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
+  // paragraph fallback and drop the image).
+  const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
+      std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
+  const uint16_t cellImageMaxWidth =
+      (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
   const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
-  const bool hasBorder = table.hasBorder;
 
-  // Pre-wrap all cells and compute row heights.
-  // A row whose single cell spans the full table width (colspan == maxCols) is treated as a
-  // 1-column fragment so it renders full-width inline with the surrounding grid rather than
-  // falling back to paragraph mode. Idea from uxjulia/CrossInk; rewritten for our layout model.
-  struct LayoutRow {
-    std::vector<TableCell> cells;
-    uint16_t height = 0;
-    bool isHeaderRow = false;
-    uint8_t renderCols = 0;  // 1 for full-width single-cell rows, else columnCount
-  };
-  std::vector<LayoutRow> layoutRows;
-  layoutRows.reserve(table.rows.size());
+  out.cells.clear();
+  out.isHeaderRow = bufRow.isHeaderRow;
+  out.renderCols = renderCols;
+  out.cells.reserve(renderCols);
+  uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
 
-  for (auto& bufRow : table.rows) {
-    // Detect a full-width spanning row: exactly one cell whose colSpan equals the table's column count.
-    const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
+  for (auto& bufCell : bufRow.cells) {
+    TableCell cell;
+    cell.isHeader = bufCell.isHeader;
 
-    const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
-    const uint16_t renderColWidth = totalWidth / renderCols;
-    const uint16_t renderInnerWidth =
-        (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
-
-    // Any other colspan structure falls back; we only handle full-span or plain cells.
-    const bool hasMergedCell = std::any_of(bufRow.cells.begin(), bufRow.cells.end(),
-                                           [](const BufferedTableCell& c) { return c.colSpan != 1; });
-    if (hasMergedCell && !isFullWidthSpan) {
-      LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
-      emitTableAsParagraphs(table);
-      return;
-    }
-
-    // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
-    // paragraph fallback and drop the image).
-    const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
-        std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
-    const uint16_t cellImageMaxWidth =
-        (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
-
-    LayoutRow lr;
-    lr.isHeaderRow = bufRow.isHeaderRow;
-    lr.renderCols = renderCols;
-    lr.cells.reserve(renderCols);
-    uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
-
-    for (auto& bufCell : bufRow.cells) {
-      TableCell cell;
-      cell.isHeader = bufCell.isHeader;
-
-      if (bufCell.text && !bufCell.text->isEmpty()) {
-        // Count past the cap rather than stopping at it: the overflow itself is the signal, and
-        // the grid cannot represent this cell either way.
-        size_t producedLines = 0;
-        bufCell.text->layoutAndExtractLines(renderer, fontId, renderInnerWidth,
-                                            [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
-                                              ++producedLines;
-                                              if (cell.lines.size() < MAX_CELL_LINES) {
-                                                cell.lines.push_back(tb);
-                                              }
-                                              return ParsedText::LineProcessResult::Accepted;
-                                            });
-        // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
-        // silently, with no log and no fallback, so the tail of the cell was simply deleted from
-        // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
-        // paragraphs instead, which is what the colspan check above already does for a table the
-        // grid cannot represent.
-        //
-        // Safe because layoutAndExtractLines does NOT consume its source (see the note on its
-        // declaration): bufCell.text is still intact, so emitTableAsParagraphs can lay it out in
-        // full. Nothing has been written to the page yet -- every row is laid out into
-        // `layoutRows` before the second loop emits any fragment -- so bailing here is clean.
-        if (producedLines > MAX_CELL_LINES) {
-          LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
-                  static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
-          emitTableAsParagraphs(table);
-          return;
-        }
-      }
-
-      if (!bufCell.imageSrc.empty()) {
-        cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
-      }
-
-      uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
-      if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
-      // A cell taller than the whole viewport can never be a grid row on any device, so the
-      // fragment packer below would emit a row that cannot be displayed. Adopted from CrossInk,
-      // which guards this case and we did not.
-      if (contentHeight + 2 * TABLE_CELL_PADDING > viewportHeight) {
-        LOG_DBG("EHP", "Table cell is %u px, taller than the %u px viewport — falling back to paragraphs",
-                static_cast<unsigned>(contentHeight), static_cast<unsigned>(viewportHeight));
-        emitTableAsParagraphs(table);
-        return;
-      }
-      if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
-      lr.cells.push_back(std::move(cell));
-    }
-
-    // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
-    if (!isFullWidthSpan) {
-      while (lr.cells.size() < columnCount) {
-        lr.cells.emplace_back();
+    if (bufCell.text && !bufCell.text->isEmpty()) {
+      // Count past the cap rather than stopping at it: the overflow itself is the signal, and
+      // the grid cannot represent this cell either way.
+      size_t producedLines = 0;
+      bufCell.text->layoutAndExtractLines(
+          renderer, fontId, renderInnerWidth,
+          [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+            ++producedLines;
+            // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
+            // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
+            if (cell.lines.size() < MAX_CELL_LINES) {
+              cell.lines.push_back(tb);
+            }
+            return ParsedText::LineProcessResult::Accepted;
+          },
+          /*includeLastLine=*/true, /*blockStartY=*/0, /*lineHeight=*/0, /*preserveSource=*/true);
+      // A cell that lays out to more lines than the grid can carry used to be TRUNCATED here --
+      // silently, with no log and no fallback, so the tail of the cell was simply deleted from
+      // the book. Measured on alice-illustrated: 189 words lost from one cell. Fall back to
+      // paragraphs instead, which is what the colspan check above already does for a table the
+      // grid cannot represent.
+      //
+      // This only works because of the preserveSource argument above. Without it the layout call
+      // that DETECTS the overflow also erases the words it laid out, so the caller's fallback
+      // would find this cell -- and every cell laid out before it -- already empty, and would
+      // emit nothing at all. Nothing has been written to a page from here, so bailing is clean.
+      if (producedLines > MAX_CELL_LINES) {
+        LOG_DBG("EHP", "Table cell needs %u lines (max %u) — falling back to paragraphs",
+                static_cast<unsigned>(producedLines), static_cast<unsigned>(MAX_CELL_LINES));
+        return false;
       }
     }
 
-    if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
-    lr.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);
-    layoutRows.push_back(std::move(lr));
+    if (!bufCell.imageSrc.empty()) {
+      cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
+    }
+
+    uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
+    if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
+    // A cell taller than the whole viewport can never be a grid row on any device, so the
+    // fragment packer would emit a row that cannot be displayed. Adopted from CrossInk,
+    // which guards this case and we did not.
+    if (contentHeight + 2 * TABLE_CELL_PADDING > viewportHeight) {
+      LOG_DBG("EHP", "Table cell is %u px, taller than the %u px viewport — falling back to paragraphs",
+              static_cast<unsigned>(contentHeight), static_cast<unsigned>(viewportHeight));
+      return false;
+    }
+    if (contentHeight > maxContentHeight) maxContentHeight = contentHeight;
+    out.cells.push_back(std::move(cell));
   }
 
-  // Ensure page is initialised.
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
+  // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
+  if (!isFullWidthSpan) {
+    while (out.cells.size() < columnCount) {
+      out.cells.emplace_back();
+    }
   }
 
-  // Greedily pack rows into fragments, page-breaking between fragments.
-  // Rows with a different renderCols than the pending fragment flush it first, since each
-  // PageTableFragment has a single fixed column count.
-  std::vector<TableRow> fragmentRows;
-  uint16_t fragmentHeight = 0;
-  uint8_t fragmentCols = 0;
-
-  auto emitFragment = [&]() {
-    if (fragmentRows.empty()) return;
-
-    // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
-    // in fragmentHeight; add 1 for the bottom border. When borderless: fragmentHeight is exact.
-    const uint16_t fragTotalHeight =
-        hasBorder ? static_cast<uint16_t>(fragmentHeight + 1) : static_cast<uint16_t>(fragmentHeight);
-
-    if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
-      emitPage(lastBodyChildByteOffset);
-    }
-
-    currentPage->elements.push_back(
-        std::make_shared<PageTableFragment>(fragmentCols, totalWidth, fragTotalHeight, std::move(fragmentRows),
-                                            /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), hasBorder));
-    currentPageNextY += fragTotalHeight;
-    fragmentRows.clear();
-    fragmentHeight = 0;
-    fragmentCols = 0;
-  };
-
-  for (auto& lr : layoutRows) {
-    if (lr.height > viewportHeight) {
-      emitFragment();
-      BufferedTable singleRowFallback;
-      BufferedTableRow fbRow;
-      fbRow.isHeaderRow = lr.isHeaderRow;
-      for (auto& cell : lr.cells) {
-        BufferedTableCell fbc;
-        fbc.isHeader = cell.isHeader;
-        fbc.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
-        for (const auto& line : cell.lines) {
-          const uint16_t wordCount = line->wordCount();
-          for (uint16_t i = 0; i < wordCount; ++i) {
-            fbc.text->addWord(line->wordText(i), EpdFontFamily::REGULAR, false, false);
-          }
-        }
-        fbRow.cells.push_back(std::move(fbc));
-      }
-      singleRowFallback.rows.push_back(std::move(fbRow));
-      emitTableAsParagraphs(singleRowFallback);
-      // The paragraph fallback only carries text; re-emit any cell images as block images so
-      // they are not lost on an over-tall row.
-      for (auto& cell : lr.cells) placeImageBlockAsBlock(cell.image);
-      continue;
-    }
-
-    // A change in column count requires a new fragment.
-    if (!fragmentRows.empty() && lr.renderCols != fragmentCols) {
-      emitFragment();
-    }
-
-    if (fragmentCols == 0) fragmentCols = lr.renderCols;
-
-    const uint16_t rowContrib = hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
-
-    if (!fragmentRows.empty() && currentPageNextY + fragmentHeight + rowContrib > viewportHeight) {
-      emitFragment();
-      fragmentCols = lr.renderCols;
-    }
-
-    TableRow tr;
-    tr.isHeaderRow = lr.isHeaderRow;
-    tr.height = lr.height;
-    tr.cells = std::move(lr.cells);
-    fragmentRows.push_back(std::move(tr));
-    fragmentHeight += rowContrib;
-  }
-
-  emitFragment();
+  if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
+  out.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);
+  return true;
 }
 
+void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
+  if (packer.rows.empty()) return;
+
+  // When bordered: outer drawRect covers top+bottom; inter-row separators (+1 per row) are already
+  // in packer.height; add 1 for the bottom border. When borderless: packer.height is exact.
+  const uint16_t fragTotalHeight =
+      packer.hasBorder ? static_cast<uint16_t>(packer.height + 1) : static_cast<uint16_t>(packer.height);
+
+  if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
+    emitPage(lastBodyChildByteOffset);
+  }
+
+  currentPage->elements.push_back(std::make_shared<PageTableFragment>(
+      packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
+      /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder));
+  currentPageNextY += fragTotalHeight;
+  packer.rows.clear();
+  packer.height = 0;
+  packer.cols = 0;
+}
+
+// Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose
+// renderCols differs from the pending fragment flushes it first, since each PageTableFragment
+// carries a single fixed column count.
 bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const bool emitImage) {
   // The cell's ParsedText is released before returning either way: this is the one place
   // that consumes a buffered cell, and holding it past layout is what made the fallback
@@ -3440,9 +3387,9 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
   }
   text.reset();  // free the words before the image decode below needs contiguous heap
 
-  // Batch callers emit images in a second pass (emitCellImagesAsBlocks) to keep all text
-  // above all images, matching the historical fallback order. Streaming has no second pass,
-  // so it emits the image inline here.
+  // degradeRow() emits images in a second pass (emitRowImagesAsBlocks) to keep all of the row's
+  // text above all of its images, matching the historical fallback order. A cell closed while
+  // already degraded has no second pass, so it emits its image inline here.
   if (emitImage && !cell.imageSrc.empty()) {
     placeImageBlockAsBlock(buildCellImage(cell.imageSrc, cell.imageAlt, viewportWidth, viewportHeight));
     cell.imageSrc.clear();
@@ -3453,21 +3400,18 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
   return true;
 }
 
-void ChapterHtmlSlimParser::emitTableAsParagraphs(BufferedTable& table) {
+bool ChapterHtmlSlimParser::emitRowAsParagraphs(BufferedTableRow& row) {
   // Emit each cell as a sequential paragraph (content-preserving fallback).
   // Each cell's ParsedText is released as it is laid out (see emitCellAsParagraph), so the
   // buffer shrinks while the emit grows instead of both peaking together. The cell shells stay
-  // until emitCellImagesAsBlocks has run — it still needs imageSrc — and are dropped there.
-  for (auto& row : table.rows) {
-    for (auto& cell : row.cells) {
-      if (!emitCellAsParagraph(cell, /*emitImage=*/false)) {
-        // Heap guard stopped the parse. Drop the remaining buffered text now rather than
-        // holding it until the table is destroyed; nothing further will be laid out.
-        for (auto& r : table.rows) {
-          for (auto& c : r.cells) c.text.reset();
-        }
-        return;
-      }
+  // until emitRowImagesAsBlocks has run — it still needs imageSrc — and are dropped by the caller.
+  for (auto& cell : row.cells) {
+    if (!emitCellAsParagraph(cell, /*emitImage=*/false)) {
+      // Heap guard stopped the parse. Drop the remaining buffered text now rather than holding it
+      // until the row is destroyed; nothing further will be laid out.
+      for (auto& c : row.cells) c.text.reset();
+      return false;
     }
   }
+  return true;
 }

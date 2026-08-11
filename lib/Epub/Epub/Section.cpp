@@ -31,7 +31,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 65;  // bumped: near-body font-size normalization (±10% snap)
+constexpr uint8_t SECTION_FILE_VERSION = 66;  // bumped: table rows stream into fragments (layout change)
                                               // v64: main-text font-size normalization
                                               // v63: drop-cap float zones + ink-metric cap placement
                                               // (62 was consumed by an earlier iteration of this feature)

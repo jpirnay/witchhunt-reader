@@ -15,15 +15,17 @@
 #include "../FontSizeLadder.h"
 #include "../FootnoteEntry.h"
 #include "../FootnotePreviews.h"
+// Page.h, not just a forward declaration: the table layout members below hold TableRow/TableCell
+// by value. Only ChapterHtmlSlimParser.cpp and Section.cpp include this header, and both already
+// pull Page.h in anyway.
+#include "../Page.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
 
-class Page;
-class PageImage;  // forward declaration — Page.h included in .cpp
-class PageLine;
+// Page, PageImage and PageLine all come from ../Page.h above.
 class GfxRenderer;
 class Epub;
 
@@ -175,7 +177,12 @@ class ChapterHtmlSlimParser final : public Print {
   // words currently being flushed. 100 outside sized spans; clamped to the
   // ParsedText per-word range so it always fits the uint8_t word-size channel.
   uint8_t effectiveSizePct = 100;
-  // Buffered table model — populated while inside <table>, emitted on </table>
+  // Streaming table model. A row is buffered only until its </tr>, where it is laid out, packed
+  // into the pending fragment and freed. The whole table was buffered until </table> once, because
+  // grid layout needs the column count before the first row can be placed -- but our columns are
+  // viewportWidth/N regardless of content, so the only thing that ever needed every row was the
+  // maximum column count. Widening rows flush the fragment and start a new one at the wider count
+  // instead; narrower rows still pad, which keeps a ragged row aligned with its neighbours.
   struct BufferedTableCell {
     std::unique_ptr<ParsedText> text;
     std::string imageSrc;  // first image found in this cell (empty if none)
@@ -188,24 +195,45 @@ class ChapterHtmlSlimParser final : public Print {
     bool isHeaderRow = false;   // true when all cells in this row are <th>
     uint8_t effectiveCols = 0;  // sum of colSpan values; tracks actual column footprint
   };
+  // One buffered row wrapped into grid cells, sized but not yet placed on a page.
+  struct LayoutRow {
+    std::vector<TableCell> cells;
+    uint16_t height = 0;  // content height + 2 x TABLE_CELL_PADDING
+    bool isHeaderRow = false;
+    uint8_t renderCols = 0;  // 1 for a full-width single-cell row, else the table's column count
+  };
+  // Rows accumulated for the PageTableFragment currently being packed. A fragment carries a single
+  // column count and must fit the viewport, so a change in either forces a flush.
+  struct TableFragmentPacker {
+    std::vector<TableRow> rows;
+    uint16_t height = 0;
+    uint8_t cols = 0;
+    uint16_t totalWidth = 0;
+    bool hasBorder = true;
+  };
   struct BufferedTable {
-    std::vector<BufferedTableRow> rows;
-    int depth = 0;             // nesting depth; > 1 means we're inside a nested table
-    bool unsupported = false;  // true → emit as paragraphs instead of grid
-    bool hasBorder = true;     // false when border="0" on the <table> element
-    uint8_t maxCols = 0;       // max effectiveCols across all rows
-    // Streaming mode: once a table can no longer become a grid (unsupported) or the heap has
-    // run low, cells are emitted as paragraphs from </td> and freed immediately, so `rows`
-    // never holds more than the cell currently being filled. Buffering the whole table only
-    // exists because grid layout needs every cell measured before column widths are known;
-    // when that layout is off the table, holding the cells is pure cost. Set only via
-    // beginTableStreaming(), which first drains whatever was already buffered.
-    bool streaming = false;
-    // Attributed resident bytes held by the buffered cells (see MAX_TABLE_BUFFER_BYTES).
-    // Accumulated as cells and words arrive; once it passes the budget the table can no longer
-    // afford grid layout and the next <td> switches to streaming. Meaningless once streaming,
-    // where nothing accumulates.
-    size_t bufferedBytes = 0;
+    // The row currently being filled. Cleared at every <tr> and freed again at </tr> once the row
+    // has been laid out, so a table's resident cost is one row, not one table.
+    BufferedTableRow pendingRow;
+    TableFragmentPacker packer;
+    // Column count for the table as a whole, widened by any row that needs more. Distinct from
+    // packer.cols, which is per-fragment and resets on every flush: without this a ragged row
+    // landing just after a page break would narrow the table's second half.
+    uint8_t columnCount = 0;
+    int depth = 0;          // nesting depth; > 1 means we're inside a nested table
+    bool hasBorder = true;  // false when border="0" on the <table> element
+    // This table can never be a grid (nested table, rowspan, low heap): every cell from here on
+    // is emitted as a paragraph at </td>. Latched -- degrading is one-way.
+    bool degraded = false;
+    // This ROW has already emitted part of itself as paragraphs, so the rest of it must follow
+    // in document order rather than going back into the grid. Cleared at the next <tr>, which is
+    // what makes a bad row cost one row instead of the whole table.
+    bool rowDegraded = false;
+    // Set when a cell pushes the row past MAX_TABLE_COLS. The cell is open and about to receive
+    // text, so the degrade is deferred to </td> rather than run with a cell mid-fill.
+    bool rowOverflowed = false;
+    // Attributed resident bytes held by pendingRow's cells (see MAX_TABLE_ROW_BUFFER_BYTES).
+    size_t pendingRowBytes = 0;
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -329,25 +357,40 @@ class ChapterHtmlSlimParser final : public Print {
   void startNewTextBlock(const BlockStyle& blockStyle);
   bool flushPartWordBuffer();
   void makePages();
-  void emitBufferedTable();
-  void emitTableAsFragments(BufferedTable& table);
-  void emitTableAsParagraphs(BufferedTable& table);
-  // Fallback path: emit each cell's image as a full-width block image below the table.
-  void emitCellImagesAsBlocks(BufferedTable& table);
+  // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.
+  // Degrades the row to paragraphs if it cannot be a grid row. No-op for an empty row.
+  void commitPendingRow();
+  // Wrap one buffered row into grid cells at `columnCount` columns. Returns false when the row
+  // cannot be a grid row at all -- an unsupported colspan, a cell needing more lines than the grid
+  // carries, or a cell taller than the viewport -- leaving `out` unusable and the row's cell text
+  // untouched, so the caller can still emit it as paragraphs. The caller chooses how far to fall
+  // back; nothing is written to a page from here.
+  bool layoutTableRow(BufferedTableRow& bufRow, uint8_t columnCount, LayoutRow& out);
+  // Emit the packed rows as one PageTableFragment, page-breaking first if it does not fit, and
+  // reset the packer. No-op when nothing is packed.
+  void flushTableFragment(TableFragmentPacker& packer);
+  // Emit every cell of `row` as a sequential paragraph, releasing each cell's ParsedText as it is
+  // laid out. Returns false when the heap guard stopped the parse.
+  bool emitRowAsParagraphs(BufferedTableRow& row);
+  // Paragraph path only: emit each cell's image as a full-width block image, then drop the cells.
+  void emitRowImagesAsBlocks(BufferedTableRow& row);
   // Emit one buffered cell as a paragraph (plus its image, when emitImage) and free the cell's
-  // ParsedText before returning. Shared by the batch fallback and the streaming path so both
+  // ParsedText before returning. Shared by the row fallback and the degraded path so both
   // produce identical output. Returns false when the heap guard stopped the parse.
   bool emitCellAsParagraph(BufferedTableCell& cell, bool emitImage);
-  // Switch to streaming while a <td> is still open: drains the buffered rows and the open cell's
-  // accumulated words, then hands the cell back empty so parsing continues into it. Needed
-  // because beginTableStreaming() clears `rows` and so can only run between cells — which never
-  // happens in a one-cell table. Returns false when the drain stopped the parse (low heap).
-  bool beginTableStreamingAtOpenCell();
-  // Switch an in-flight table to streaming mode: emit everything buffered so far as paragraphs,
-  // free the row storage, and mark the table so later cells emit directly from </td> instead of
-  // accumulating. Grid layout is already off the table by the time this is called.
-  void beginTableStreaming(const char* reason);
-  // Called on </td> while streaming: emit and release the just-closed cell immediately.
+  // Give up the grid for the pending ROW: flush whatever is packed so the fragment closes before
+  // the paragraphs, then emit the row's buffered cells (text then images) and latch rowDegraded so
+  // the rest of the row streams at </td>. The next <tr> clears it and the grid resumes.
+  void degradeRow(const char* reason);
+  // Give up the grid for the whole TABLE. degradeRow plus a latch, for triggers that cannot
+  // recover on the next row: a nested table, a rowspan, or a heap too low to lay rows out.
+  void degradeTable(const char* reason);
+  // Degrade the row while a <td> is still open: lifts the open cell out, degrades, then emits the
+  // words accumulated so far and hands the cell back empty so parsing continues into it. Needed
+  // because degradeRow() clears the row and so can only run between cells -- which never happens
+  // in a one-cell row. Returns false when the drain stopped the parse (low heap).
+  bool degradeRowAtOpenCell(const char* reason);
+  // Called on </td> once degraded: emit and release the just-closed cell immediately.
   void streamClosedCell(BufferedTableRow& row);
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions

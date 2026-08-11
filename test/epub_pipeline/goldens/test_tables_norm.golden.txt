@@ -21,13 +21,52 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=13 s=0 z=100 t=columns,
    W x=96 s=0 z=100 t=2
    W x=109 s=0 z=100 t=rows
-  TABLE y=162 x=0 h=71
+  TABLE y=162 x=0 h=71 cols=2 border=1 rows=2
+   ROW h=34 hdr=1 cells=2
+    CELL 0 hdr=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Col
+      W x=55 s=0 z=100 t=1
+    CELL 1 hdr=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Col
+      W x=55 s=0 z=100 t=2
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Some
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Text
   LINE y=233 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=0 z=100 t=3
    W x=14 s=0 z=100 t=columns,
    W x=97 s=0 z=100 t=2
    W x=110 s=0 z=100 t=rows
-  TABLE y=275 x=0 h=71
+  TABLE y=275 x=0 h=71 cols=3 border=1 rows=2
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Col
+      W x=55 s=0 z=100 t=1
+    CELL 1 hdr=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Col
+      W x=55 s=0 z=100 t=2
+    CELL 2 hdr=1 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Col
+      W x=55 s=0 z=100 t=3
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Some
+    CELL 1 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Text
+    CELL 2 hdr=0 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Oho
 SPINE 3 href=EPUB/text/ch002.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=18 footnotes=0
   LINE y=54 x=0 align=2 mult=2.000 hfid=0 words=3
@@ -161,30 +200,30 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=1 truncated=0 cssFallback=0
    W x=285 s=0 z=100 t=voluptua.
    W x=387 s=0 z=100 t=At
    W x=414 s=0 z=100 t=vero
-  LINE y=474 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=474 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=eos
-   W x=36 s=0 z=100 t=et
-   W x=61 s=0 z=100 t=accusam
-   W x=135 s=0 z=100 t=et
-   W x=160 s=0 z=100 t=justo
-   W x=215 s=0 z=100 t=duo
-   W x=252 s=0 z=100 t=dolores
-   W x=325 s=0 z=100 t=et
-  LINE y=498 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=0 z=100 t=ea
-   W x=53 s=0 z=100 t=rebum.
-   W x=121 s=0 z=100 t=Stet
-   W x=176 s=0 z=100 t=clita
-   W x=234 s=0 z=100 t=kasd
-   W x=285 s=0 z=100 t=gubergren,
-   W x=391 s=0 z=100 t=no
-   W x=428 s=0 z=100 t=sea
-  LINE y=522 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=takimata
-   W x=86 s=0 z=100 t=sanctus
-   W x=161 s=0 z=100 t=est
-   W x=195 s=0 z=100 t=Lorem
-   W x=252 s=0 z=100 t=ipsum
-   W x=300 s=0 z=100 t=dolor
-   W x=355 s=0 z=100 t=sit
-   W x=386 s=0 z=100 t=amet.
+   W x=39 s=0 z=100 t=et
+   W x=67 s=0 z=100 t=accusam
+   W x=144 s=0 z=100 t=et
+   W x=172 s=0 z=100 t=justo
+   W x=230 s=0 z=100 t=duo
+   W x=270 s=0 z=100 t=dolores
+   W x=346 s=0 z=100 t=et
+   W x=374 s=0 z=100 t=ea
+   W x=404 s=0 z=100 t=rebum.
+  LINE y=498 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Stet
+   W x=59 s=0 z=100 t=clita
+   W x=121 s=0 z=100 t=kasd
+   W x=176 s=0 z=100 t=gubergren,
+   W x=286 s=0 z=100 t=no
+   W x=327 s=0 z=100 t=sea
+   W x=375 s=0 z=100 t=takimata
+  LINE y=522 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=sanctus
+   W x=75 s=0 z=100 t=est
+   W x=109 s=0 z=100 t=Lorem
+   W x=166 s=0 z=100 t=ipsum
+   W x=214 s=0 z=100 t=dolor
+   W x=269 s=0 z=100 t=sit
+   W x=300 s=0 z=100 t=amet.

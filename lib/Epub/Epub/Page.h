@@ -114,6 +114,11 @@ class PageTableFragment final : public PageElement {
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
+  uint8_t getColumnCount() const { return columnCount; }
+  bool getHasBorder() const { return hasBorder; }
+  // Read-only view of the laid-out cells. Exists for the pipeline dump: without it no golden can
+  // see table text, which is how a cell-truncation bug once survived a full corpus of goldens.
+  const std::vector<TableRow>& getRows() const { return rows; }
 
   // In-cell graphics participate in the Page-level image passes below.
   bool hasImages() const;

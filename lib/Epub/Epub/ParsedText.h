@@ -110,19 +110,26 @@ class ParsedText {
   bool isEmpty() const { return words.empty(); }
   bool isContinuation() const { return isContinuation_; }
 
-  // PRESERVES ITS SOURCE. Lines are emitted through the callback; `words` and the parallel
-  // per-word vectors are read, never erased or cleared. Callers rely on this: the table grid path
-  // lays a cell out to discover it needs more lines than the grid can carry, then hands the SAME
-  // ParsedText to emitTableAsParagraphs — which only works because the words are still there.
+  // CONSUMES ITS SOURCE by default: every word it lays out is erased from `words` (and the
+  // parallel per-word vectors) before returning, so the vector shrinks as the paragraph drains.
+  // A caller that needs to lay the SAME text out twice must pass preserveSource.
   //
-  // The one operation that does mutate words is hyphenateWordAtIndex (it splits a word and inserts
-  // the hyphen). It is reachable from here only when hyphenationEnabled is set, and table cells are
-  // constructed with it off. If that ever changes, or a caller with hyphenation on starts depending
-  // on re-layout, this guarantee needs a real second entry point rather than an accident.
+  // This was previously documented as preserving its source, which was wrong and cost content: the
+  // table grid path laid a cell out to discover it needed more lines than the grid can carry, then
+  // handed the same ParsedText to emitTableAsParagraphs — by which point every word of that cell,
+  // and of every cell laid out before it, had already been erased. The whole cell rendered as
+  // nothing. Fixture: test_table_grid_edges.epub ch3.
+  //
+  // `preserveSource` snapshots the words on entry and restores them on return, so the caller gets
+  // back exactly what it passed in. Suppressing the erase alone would not be enough: layout also
+  // force-splits any word too wide for the line (inserting a hyphen), and applies the paragraph
+  // indent and bionic transform in place. It costs one copy of the word vectors for the duration
+  // of the call, so it is opt-in and only the table grid path uses it.
   void layoutAndExtractLines(
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
       const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
       bool includeLastLine = true,
       int16_t blockStartY = 0,  // currentPageNextY at call site — needed for float zone geometry
-      int lineHeight = 0);      // 0 = no float zones (fast path, existing callers unchanged)
+      int lineHeight = 0,       // 0 = no float zones (fast path, existing callers unchanged)
+      bool preserveSource = false);
 };
