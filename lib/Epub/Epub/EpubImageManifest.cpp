@@ -4,8 +4,6 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
-#include <esp_heap_caps.h>
-#include <esp_system.h>
 
 #include <algorithm>
 
@@ -13,64 +11,6 @@
 #include "converters/GifToFramebufferConverter.h"
 #include "converters/JpegToFramebufferConverter.h"
 #include "converters/PngToFramebufferConverter.h"
-
-// --- Resolve-path retention probe (temporary; answers docs/memory-allocation-strategy.md §8.4) --
-//
-// The per-page build trace shows contig HALVING in a single page (X3 2026-08-11, spine 1:
-// 45044 -> 23540 between page 2 and page 3) with allocBytes stepping +15776 at the same
-// boundary. That is not the gradual small-object churn the free-block count also shows
-// (freeBlk 16 -> 35 across the parse) — it is one retention event, and it lands immediately
-// after the first image resolve of the build:
-//
-//   [ZIP] EOCD found at offset 1473764 in file
-//   [IMF] Resolved OEBPS/..._endpapers.jpg -> 600x401 (1 cached)
-//
-// ensureResolved() deliberately constructs a ZipFile on the first miss and leaves it OPEN for
-// the rest of the build (closeResolveHandle() releases at persist). If that is the +15776, it
-// is a large block taken MID-PARSE and held to the end — the shape eliminated #8 of the heap
-// handover proved is the worst kind on a no-compaction heap, recurring somewhere nobody looked.
-//
-// The correlation is across a page boundary, so it names a suspect, not a cause. This probe
-// brackets the three allocations separately (ZipFile object / open() + its EOCD scan / the
-// per-resolve header buffer) and the release, so one device trace attributes the step exactly.
-//
-// IMF_RETAIN_TRACE=0 compiles it out. Delete once the question is answered.
-#ifndef IMF_RETAIN_TRACE
-#define IMF_RETAIN_TRACE 1
-#endif
-
-#if IMF_RETAIN_TRACE
-namespace {
-struct ImfHeapSample {
-  uint32_t free = 0;
-  uint32_t contig = 0;
-  uint32_t allocBytes = 0;
-  uint32_t allocBlk = 0;
-};
-
-ImfHeapSample imfSampleHeap() {
-  multi_heap_info_t info{};
-  heap_caps_get_info(&info, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  return {static_cast<uint32_t>(esp_get_free_heap_size()),
-          static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)),
-          static_cast<uint32_t>(info.total_allocated_bytes), static_cast<uint32_t>(info.allocated_blocks)};
-}
-
-// Signed deltas: a retention shows as allocBytes UP and contig DOWN across the same step.
-void imfLogStep(const char* what, const ImfHeapSample& before, const ImfHeapSample& after) {
-  LOG_INF("IMF", "retain[%-12s] allocBytes%+ld blk%+ld free%+ld contig %lu->%lu", what,
-          static_cast<long>(after.allocBytes) - static_cast<long>(before.allocBytes),
-          static_cast<long>(after.allocBlk) - static_cast<long>(before.allocBlk),
-          static_cast<long>(after.free) - static_cast<long>(before.free), static_cast<unsigned long>(before.contig),
-          static_cast<unsigned long>(after.contig));
-}
-}  // namespace
-#define IMF_SAMPLE(name) const ImfHeapSample name = imfSampleHeap()
-#define IMF_STEP(what, before, after) imfLogStep((what), (before), (after))
-#else
-#define IMF_SAMPLE(name) ((void)0)
-#define IMF_STEP(what, before, after) ((void)0)
-#endif
 
 namespace {
 constexpr const char* kImagesBinFile = "/images.bin";
@@ -165,7 +105,6 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
   // call made this O(images × entries) of SD I/O, and because it all runs inside one parser
   // write() — which the section build's time budget cannot interrupt mid-call — an image-heavy
   // section froze input for the duration of the (background) build.
-  IMF_SAMPLE(atEntry);
   if (!resolveZip_ || resolveEpubPath_ != epubPath) {
     resolveEpubPath_ = epubPath;
     resolveZip_.reset(new (std::nothrow) ZipFile(resolveEpubPath_));
@@ -173,8 +112,6 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
       LOG_ERR("IMF", "ensureResolved: ZipFile alloc failed");
       return nullptr;
     }
-    IMF_SAMPLE(afterCtor);
-    IMF_STEP("ZipFile ctor", atEntry, afterCtor);
   }
   ZipFile& zf = *resolveZip_;
 
@@ -184,18 +121,9 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
   // is most of the per-image cost on a large book. persistIfDirty() (run once at each build's
   // end, under RenderLock) releases the handle. While open, loadFileStatSlim and
   // readBytesFromStat also share this one SD open instead of opening/closing per call.
-  const bool openedThisCall = !zf.isOpen();
-  IMF_SAMPLE(beforeOpen);
-  if (openedThisCall && !zf.open()) {
+  if (!zf.isOpen() && !zf.open()) {
     LOG_DBG("IMF", "ensureResolved: failed to open zip for %s", epubEntryPath.c_str());
     return nullptr;
-  }
-  if (openedThisCall) {
-    IMF_SAMPLE(afterOpen);
-    // The suspected culprit: open() runs the EOCD scan and leaves the handle live for the whole
-    // build. A large positive allocBytes here, with contig dropping and NOT recovering until
-    // closeResolveHandle(), confirms the page-3 step.
-    IMF_STEP("zip open", beforeOpen, afterOpen);
   }
 
   const ImageManifestEntry* result = nullptr;
@@ -228,25 +156,13 @@ const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& e
   }
 
   // Note: the handle is intentionally left open; closeResolveHandle() releases it at persist.
-  //
-  // The whole-call net is what the per-page build trace actually attributes to the page the
-  // resolve happened on — compare it against the +15776 step seen at spine_page=3.
-  IMF_SAMPLE(atExit);
-  IMF_STEP("resolve net", atEntry, atExit);
   return result;
 }
 
 void EpubImageManifest::closeResolveHandle() {
   // Release the SD descriptor the resolve loop held open across this build's images. The
   // ZipFile object itself is kept (cheap) and reused for the next build, which reopens lazily.
-  if (!resolveZip_) return;
-  // Does the retention come back, and does contig come back WITH it? Bytes returning while
-  // contig stays low is the signature that matters: it means the damage was the placement of
-  // the block, not its size, and closing it later cannot undo that.
-  IMF_SAMPLE(beforeClose);
-  resolveZip_->close();
-  IMF_SAMPLE(afterClose);
-  IMF_STEP("zip close", beforeClose, afterClose);
+  if (resolveZip_) resolveZip_->close();
 }
 
 const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {

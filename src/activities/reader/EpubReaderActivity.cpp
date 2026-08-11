@@ -269,8 +269,12 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 // the arithmetic behind it. Values are NOT changed in this commit — measure first.
 //
 // HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
+// Default OFF (2026-08-11). It did its job — it is how the unreachable X4 CSS floor (73728
+// against a heap that peaks at 71080) and B's contig-floor miss were both found. The floors have
+// not been re-derived yet, so this stays available rather than being deleted: build with
+// -DHEAP_GATE_TRACE=1 when tuning them. At ~1 Hz per waiting gate it is far too loud to leave on.
 #ifndef HEAP_GATE_TRACE
-#define HEAP_GATE_TRACE 1
+#define HEAP_GATE_TRACE 0
 #endif
 
 #if HEAP_GATE_TRACE

@@ -123,8 +123,14 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
 // contiguous number at the same points plus a per-page trace.
 //
 // SCT_HEAP_TRACE=0 compiles all of it out. Remove this block once the question is answered.
+// Default OFF (2026-08-11). This trace answered what it was added for: section 8.4 of
+// docs/memory-allocation-strategy.md asked whether small-object churn or retention collapses the
+// contiguous block during a parse, and the per-page block counts showed BOTH — freeBlk 16 -> 35
+// from churn, plus a one-page cliff from the mid-build render's font page slots (fixed in
+// 040b2c1b). Kept rather than deleted because the cliff is only partly closed and the next
+// attempt needs exactly these numbers again: build with -DSCT_HEAP_TRACE=1.
 #ifndef SCT_HEAP_TRACE
-#define SCT_HEAP_TRACE 1
+#define SCT_HEAP_TRACE 0
 #endif
 
 #if SCT_HEAP_TRACE
