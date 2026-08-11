@@ -23,7 +23,7 @@ Any change to a parameter produces a different hash and a new cache file. Old va
 
 ## Cache load path
 
-`Section::loadSectionFile` opens the candidate file, validates the version byte (`SECTION_FILE_VERSION = 31`) and all ten render parameters, then:
+`Section::loadSectionFile` opens the candidate file, validates the version byte (`SECTION_FILE_VERSION`, defined at the top of `lib/Epub/Epub/Section.cpp` — it is bumped on every layout change, so read it there rather than trusting a number quoted here) and all ten render parameters, then:
 
 1. Reads `parseComplete` (bool) — false means the cache was truncated (low-memory partial parse); the reader shows a hint to the user.
 2. Reads `pageCount` and the page LUT offset.
@@ -52,7 +52,7 @@ If either check fails the function calls itself recursively with `embeddedStyle=
 
 ```
 [Header: 56 bytes]
-  u8  version (= SECTION_FILE_VERSION = 31)
+  u8  version (= SECTION_FILE_VERSION, see Section.cpp)
   int fontId
   float lineCompression
   bool extraParagraphSpacing
