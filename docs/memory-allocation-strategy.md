@@ -645,6 +645,45 @@ Ranked by cost, with the cheapest fix first:
 3. **Page load, −6144.** §8.3's `PageLine`/`TextBlock` pool territory; the largest change and the
    one to attempt last.
 
+### 9.2.5 Both landed; the draw is down to the page load (X3, 2026-08-11)
+
+`4af4b87e` (scaled-glyph cache eager) and `779b7e44` (slot arena). The bracket is now flat across
+everything except the page load:
+
+```
+buildpage_begin               free=35852 contig=32756 allocBlk=548 allocBytes=217976
+buildpage_after_prewarm       free=35852 contig=32756 allocBlk=548 allocBytes=217976
+buildpage_after_render        free=35852 contig=32756 allocBlk=548 allocBytes=217976
+buildpage_after_slot_release  free=35852 contig=32756 allocBlk=548 allocBytes=217976
+```
+
+| draw step | before | after |
+|---|---|---|
+| page load | −6144 | −6144 |
+| prewarm | −9216 (+6 blk, +9028 B) | **0** |
+| render / scaled-glyph | −5120 (+2 blk, +5032 B) | **0** |
+| **total** | **−20480** | **−6144** |
+
+The scaled-glyph move is visible at the other end too: `onEnter_begin` → `onEnter_after_orientation`
+is now +2 blocks / +5032 bytes, taken while contig is 61428 rather than mid-build.
+
+Downstream on the same book and panel:
+
+| | before | after |
+|---|---|---|
+| build contig floor | 22516 | **27636** |
+| post-build contig | 22516 | **40948** |
+| `Min Free` | 14544 | **23960** |
+
+**This closes §9.7's second half.** Contig 40948 clears B's 24576 floor with room, so the
+constraint that made B depend on four-second pauses is gone. What gates B now is the 56 KB
+embedded-CSS floor (`heapAllowsEmbeddedStyle`) against ~50–59 KB of reading free heap — a
+threshold to re-derive, not a structural problem. §9.7's "fix the arena or the cliff, not the
+thermometer" has been satisfied, so the thermometer is now the fair thing to look at.
+
+What remains of the cliff is the page load: 155 small allocations, 6388 bytes, −6144 of contig.
+That is §8.3's `PageLine`/`TextBlock` pool and nothing cheaper will touch it.
+
 Caveat on the whole section: the trough is mid-build and recovers, and no trace yet has a
 pre-change baseline beside it, so treat 40948 → 15348 as the shape of the problem rather than a
 regression signal.
