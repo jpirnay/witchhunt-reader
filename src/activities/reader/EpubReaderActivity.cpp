@@ -17,6 +17,7 @@
 
 #include "EpubReaderActivity.h"
 
+#include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -377,6 +378,10 @@ void EpubReaderActivity::onEnter() {
   // reader (Home sidecar JPEG conversion / thumb generation are prime suspects — see
   // the long-standing "heap may be corrupt after image decode failures" note below).
   checkHeapIntegrity("reader_onEnter");
+  // Start the Background-B settle window now, so the interval is measured from entering the
+  // reader rather than from millis()==0. Otherwise B's quiet check is satisfied before the book
+  // has drawn anything, which is the worst possible moment to take the display buffer.
+  lastPageOnScreenMs_ = millis();
   secondaryBufferDegraded_ = !renderer.hasSecondaryBuffer();
   // Cold open: arm the dramatic-transition HALF for the first section entry only (cleared by any
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
@@ -1137,7 +1142,21 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // settled on a page: the borrow costs this page's AA if a turn lands during it.
       // beginBackgroundBorrow() self-declines when there is no secondary buffer to lend (X3
       // baseline, or a Background-C build already holds it), so this needs no device split.
-      if ((now - lastPageTurnTime) >= BG_BUILD_BORROW_QUIET_MS &&
+      // Settle check. Measured from the last page ON SCREEN, not the last page TURN:
+      // lastPageTurnTime is only stamped by turns, so before the reader's first turn it still
+      // holds 0 and the quiet period is vacuously satisfied — B would take the buffer moments
+      // after a book's first page appeared, which is precisely when the next turn is coming.
+      // max() of the two so an explicit turn still resets the window even if no render followed.
+      const unsigned long lastActivityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
+      // And do not start when a button edge is already queued: the borrow would be handed back
+      // on the very next loop tick, wasting the slice AND burning one of the two attempts
+      // BG_BUILD_MAX_PREEMPTIONS allows before B abandons the spine. This is the same predicate
+      // the image decoders bail on, so "the user is waiting" means the same thing everywhere.
+      // Safe to gate B on: nothing waits on B. (Background-C must NEVER be gated this way — the
+      // foreground draws mid-build pages out of C's own progress, so blocking C on a pending
+      // foreground draw deadlocks: the page is never built, so the draw stays pending forever.)
+      const bool inputQueued = CooperativeAbort::shouldAbortLongTask();
+      if (!inputQueued && (now - lastActivityMs) >= BG_BUILD_BORROW_QUIET_MS &&
           esp_get_free_heap_size() >= BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES &&
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
@@ -3419,6 +3438,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     renderContents(lock, std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom,
                    orientedMarginLeft);
     lastRenderStats.requestRenderMs = millis() - start;
+    // A page is now on screen, however it got there. Background-B's quiet period runs from here.
+    lastPageOnScreenMs_ = millis();
     if (truncatedSectionHintRendersRemaining > 0) {
       truncatedSectionHintRendersRemaining--;
     }

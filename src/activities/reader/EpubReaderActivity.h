@@ -178,6 +178,13 @@ class EpubReaderActivity final : public Activity {
       1;  // initialized to freq in onEnter(); 1 triggers HALF on first render if somehow not reset
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
+  // When the reader last put a page on screen, for ANY reason — a turn, the first page of a
+  // freshly opened book, a jump, a rebuild. Background-B's borrow quiet period measures from
+  // here rather than from lastPageTurnTime, which is only stamped by actual page turns and so
+  // reads as "settled forever" until the reader turns for the first time. Device-observed
+  // (X3, 2026-08-11): B took the buffer 731 ms after a book's first page appeared and lost it
+  // 513 ms later, because millis() - lastPageTurnTime was still measured from 0.
+  unsigned long lastPageOnScreenMs_ = 0UL;
   bool pendingHalfRefreshAfterImagePage = false;
   // Force-refresh button: -1 = none, else a HalDisplay::RefreshMode to apply on the next
   // normal render of the CURRENT page (overrides the fast/half cadence for that one render).
