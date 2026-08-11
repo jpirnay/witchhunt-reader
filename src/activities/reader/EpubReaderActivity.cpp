@@ -3524,15 +3524,7 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     // Text-only pages render cleanly without the image decode / secondary-buffer dance that the
     // lock-light build path avoids; an image target waits for the final Normal render but is
     // still marked handled so the C step stops nudging us about it.
-    // Bracket the page load on its own. This draw is where contig collapses mid-build
-    // (docs/memory-allocation-strategy.md §9.2.1), and after 040b2c1b removed the font page
-    // slots from the window there is still a −10240 step to account for. Page::deserialize is
-    // ~10.5 KB but spread over ~100 small allocations, so it should move allocBytes a lot and
-    // contig little; if contig drops HERE instead, that assumption is wrong and the page load
-    // is the target rather than the prewarm.
-    logReaderMemSnapshot("buildpage_before_load");
     auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(target));
-    logReaderMemSnapshot("buildpage_after_load");
     buildDisplayedPage_ = target;
     if (page && !page->hasImages()) {
       buildingPopupShown_ = false;
@@ -4137,12 +4129,6 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
-  // Four samples across the draw, so one trace attributes the remaining −10240 contig step to a
-  // specific step rather than to "the draw". The prewarm is the prime suspect: its group buffer
-  // is the largest single contiguous request in this window (peakTemp 8100-10555, and the step is
-  // 10240), and three prewarmCache calls interleave persistent slot buffers with that transient,
-  // which is the classic way to leave a block split. See §9.2.3.
-  logReaderMemSnapshot("buildpage_begin");
   auto* fcm = renderer.getFontCacheManager();
   // Draw this page's font slots from the build's own arena rather than the heap. Measured X3
   // 2026-08-11: the prewarm's six blocks (~9 KB) cost contig 36852 -> 27636 here, and releasing
@@ -4157,13 +4143,11 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   auto scope = fcm->createPrewarmScope();
   page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
   scope.endScanAndPrewarm();
-  logReaderMemSnapshot("buildpage_after_prewarm");
 
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
               /*monochromeOutput=*/true);
   renderStatusBar();
-  logReaderMemSnapshot("buildpage_after_render");
   if (forceHalfRefreshAfterPopup_) {
     // First real page after the indexing popup: establish a clean baseline (see
     // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.
@@ -4198,10 +4182,6 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
   // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
   renderer.getFontCacheManager()->clearCache();
-  // The pair that matters: if allocBytes returns to its buildpage_begin value but contig does
-  // NOT, the bytes came back split and the damage is placement — which is the case an arena
-  // fixes and releasing-sooner cannot.
-  logReaderMemSnapshot("buildpage_after_slot_release");
 
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()
