@@ -486,7 +486,7 @@ bool moveFinishedBookToCompleted(const std::string& currentBookPath, std::string
 void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputManager& mappedInput,
                             const std::string& bookPath, const std::string& series, const std::string& seriesIndex,
                             const std::string& author, void (*onMenuClosed)(void*), void* onMenuClosedCtx,
-                            void (*onSyncToKOReader)(void*, const std::string&, KOReaderSyncPostAction,
+                            bool (*onSyncToKOReader)(void*, const std::string&, KOReaderSyncPostAction,
                                                      const std::string&),
                             void* onSyncToKOReaderCtx) {
   const std::string nextBookPath = findNextBookInDirectory(bookPath, series, seriesIndex);
@@ -546,8 +546,11 @@ void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputMa
             postAction = KOReaderSyncPostAction::OpdsSearch;
             target = author;
           }
-          onSyncToKOReader(onSyncToKOReaderCtx, effectiveBookPath, postAction, target);
-          return;
+          // Falls through to the ordinary navigation below when the callback declines, so a
+          // sync that cannot run degrades to "the toggle was off" rather than stranding the user.
+          if (onSyncToKOReader(onSyncToKOReaderCtx, effectiveBookPath, postAction, target)) {
+            return;
+          }
         }
         if (goHome) {
           activityManager.goHome();
@@ -609,7 +612,7 @@ FinishedBookActivity::RowModel FinishedBookActivity::buildRowModel() const {
     // A toggle, not an action row, so it composes with whichever of GoHome/OpenNext/SearchOpds
     // is picked above instead of replacing it — see launchFinishedBookFlow.
     model.actions.push_back(RowModel::Action::ToggleSyncToKOReader);
-    model.titles.push_back(tr(STR_KOREADER_SYNC));
+    model.titles.push_back(tr(STR_KO_SYNC_FINISHED_BOOK));
     model.values.push_back(syncFinishedBookToKOReader_ ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
   }
 

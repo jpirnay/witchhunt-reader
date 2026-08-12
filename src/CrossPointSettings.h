@@ -333,8 +333,14 @@ class CrossPointSettings {
   uint8_t inlineFootnotePreviews = 0;
   // Automatically push reading progress to the KOReader sync server when leaving the reader
   // (1 = enabled, 0 = disabled). The push only fires when credentials are configured and the
-  // reader session advanced at least 3 pages, and is skipped when remote progress is already ahead.
+  // reader session advanced at least koSyncMinSessionPages pages, and is skipped when remote
+  // progress is already ahead.
   uint8_t koSyncOnBookClose = 0;
+  // Pages that must be turned in a reader session before auto-push-on-close will fire. Opening a
+  // book to check the cover or skim the TOC should not burn a network round-trip, but how much
+  // reading counts as "a session" is a matter of taste — someone reading a page or two over
+  // breakfast wants a lower bar than someone who only reads in long sittings.
+  uint8_t koSyncMinSessionPages = 3;
   // Move finished book to /COMPLETED when the end-of-book screen action is selected.
   uint8_t moveFinishedBooksToCompleted = 0;
   // Remove finished book from Recent Books when the end-of-book screen action is selected.

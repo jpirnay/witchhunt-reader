@@ -40,11 +40,15 @@ enum class FinishedBookAction {
 // OPDS author, empty for Go Home). The callback owns pushing progress and, once its own reboot
 // completes, performing that action itself (EpubReaderActivity is the only caller that supplies
 // one, since KOReader sync is EPUB-only).
+// It returns whether it actually took over: the sync path REPLACES this flow's own navigation, so
+// a callback that declines (no credentials, no live Epub to read a position from) must say so or
+// the user is left sitting on a dead screen with nothing having happened. False means "I did not
+// navigate", and the picked action is performed here as if the toggle had been off.
 void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputManager& mappedInput,
                             const std::string& bookPath, const std::string& series, const std::string& seriesIndex,
                             const std::string& author = {}, void (*onMenuClosed)(void*) = nullptr,
                             void* onMenuClosedCtx = nullptr,
-                            void (*onSyncToKOReader)(void*, const std::string& bookPath, KOReaderSyncPostAction,
+                            bool (*onSyncToKOReader)(void*, const std::string& bookPath, KOReaderSyncPostAction,
                                                      const std::string& target) = nullptr,
                             void* onSyncToKOReaderCtx = nullptr);
 }  // namespace BookFinished

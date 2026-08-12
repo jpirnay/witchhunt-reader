@@ -723,11 +723,15 @@ class EpubReaderActivity final : public Activity {
   // destination the finished-book flow resolved (the toggle composes with Go Home / Open Next /
   // Search OPDS rather than replacing them, so `bookPath` may already be the moved-to-/COMPLETED
   // path and `postAction`/`target` may point at the next book or an OPDS author search).
-  static void onFinishedBookSyncRequested(void* ctx, const std::string& bookPath, KOReaderSyncPostAction postAction,
+  // Returns false when it cannot run (no credentials, or no live Epub to read a position from),
+  // which tells launchFinishedBookFlow to perform the picked action itself rather than leave the
+  // user on a screen where nothing happened.
+  static bool onFinishedBookSyncRequested(void* ctx, const std::string& bookPath, KOReaderSyncPostAction postAction,
                                           const std::string& target);
   // Reader-close auto-push gate. Returns true if AUTO_PUSH was launched (the caller
   // must not perform its own exit — the sync activity will route to home on completion).
-  // Returns false when any of the gates fails (setting off, no credentials, < 3 pages),
+  // Returns false when any of the gates fails (setting off, no credentials, fewer pages read
+  // this session than SETTINGS.koSyncMinSessionPages),
   // letting the caller take its normal exit path.
   bool tryAutoPushOnClose();
   // Consume a persisted standalone KOReader sync session for this EPUB. Remote

@@ -42,6 +42,8 @@ void KOReaderSettingsActivity::buildMenuItems() {
       }));
   menuItems.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                           "koSyncOnBookClose"));
+  menuItems.push_back(SettingInfo::Value(StrId::STR_KO_MIN_SESSION_PAGES, &CrossPointSettings::koSyncMinSessionPages,
+                                         {1, 20, 1}, "koSyncMinSessionPages"));
   {
     SettingInfo s;
     s.nameId = StrId::STR_SEND_METADATA;

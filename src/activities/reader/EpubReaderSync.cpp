@@ -91,29 +91,41 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   activityManager.goToKOReaderSync();
 }
 
-void EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::string& bookPath,
+bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::string& bookPath,
                                                      const KOReaderSyncPostAction postAction,
                                                      const std::string& target) {
   auto* self = static_cast<EpubReaderActivity*>(ctx);
   if (!KOREADER_STORE.hasCredentials()) {
-    return;
+    LOG_DBG("ERS", "Finished-book sync requested without credentials; leaving navigation to the caller");
+    return false;
+  }
+  // launchKOReaderSync() silently does nothing without a live Epub, and since the sync path
+  // replaces the finished-book flow's own navigation, that would strand the user. Check the same
+  // condition here so the caller can fall back instead.
+  if (!self->epub) {
+    LOG_ERR("ERS", "Finished-book sync requested with no Epub loaded; leaving navigation to the caller");
+    return false;
   }
   const SyncPositionOverride position{self->finishedBookSyncSpineIndex_, self->finishedBookSyncPage_,
                                       self->finishedBookSyncPageCount_, bookPath};
   self->launchKOReaderSync(SyncLaunchMode::PUSH_LOCAL, &position, {postAction, target});
+  return true;
 }
 
 bool EpubReaderActivity::tryAutoPushOnClose() {
-  // Three-page minimum filters out brief inspections — opening to check the cover or
-  // skim the TOC shouldn't burn a network round-trip. Counter is per-activity-instance.
-  constexpr int MIN_SESSION_PAGES = 3;
+  // A page minimum filters out brief inspections — opening to check the cover or skim the TOC
+  // shouldn't burn a network round-trip. Counter is per-activity-instance. The threshold is a
+  // user setting because what counts as "a real session" differs between someone reading a
+  // couple of pages at a time and someone reading in long sittings.
   if (!SETTINGS.koSyncOnBookClose) {
     return false;
   }
   if (!KOREADER_STORE.hasCredentials()) {
     return false;
   }
-  if (sessionPagesAdvanced < MIN_SESSION_PAGES) {
+  const int minSessionPages = SETTINGS.koSyncMinSessionPages > 0 ? SETTINGS.koSyncMinSessionPages : 1;
+  if (sessionPagesAdvanced < minSessionPages) {
+    LOG_DBG("ERS", "Skipping AUTO_PUSH: %d pages this session, threshold is %d", sessionPagesAdvanced, minSessionPages);
     return false;
   }
   if (!epub) {

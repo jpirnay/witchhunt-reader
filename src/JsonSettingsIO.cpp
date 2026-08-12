@@ -235,6 +235,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["moveFinishedBooksToCompleted"] = s.moveFinishedBooksToCompleted;
   doc["removeFinishedBooksFromRecents"] = s.removeFinishedBooksFromRecents;
   doc["syncFinishedBookToKOReader"] = s.syncFinishedBookToKOReader;
+  doc["koSyncMinSessionPages"] = s.koSyncMinSessionPages;
   doc["sleepTimeoutMinutes"] = s.sleepTimeoutMinutes;
   doc["refreshFrequencyPages"] = s.refreshFrequencyPages;
 
@@ -393,6 +394,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.moveFinishedBooksToCompleted = doc["moveFinishedBooksToCompleted"] | (uint8_t)0;
   s.removeFinishedBooksFromRecents = doc["removeFinishedBooksFromRecents"] | (uint8_t)0;
   s.syncFinishedBookToKOReader = doc["syncFinishedBookToKOReader"] | (uint8_t)0;
+  s.koSyncMinSessionPages = doc["koSyncMinSessionPages"] | (uint8_t)3;
 
   const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
   CrossPointSettings::normalizeDependentSettings(s);
