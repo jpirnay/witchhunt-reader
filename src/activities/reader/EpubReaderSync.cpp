@@ -28,13 +28,14 @@ inline void logReaderMemSnapshot(const char*) {}
 #endif
 }  // namespace
 
-void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
+void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const SyncPositionOverride* positionOverride,
+                                            const SyncPostAction postAction) {
   if (!epub) {
     return;
   }
 
-  const int currentPage = section ? section->currentPage : 0;
-  const int totalPages = section ? section->pageCount : 0;
+  const int currentPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
+  const int totalPages = positionOverride ? positionOverride->pageCount : (section ? section->pageCount : 0);
   KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE;
   if (mode == SyncLaunchMode::PULL_REMOTE) {
     syncIntent = KOReaderSyncIntentState::PULL_REMOTE;
@@ -46,12 +47,14 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
 
   auto& sync = APP_STATE.koReaderSyncSession;
   sync.active = true;
-  sync.epubPath = epub->getPath();
-  sync.spineIndex = currentSpineIndex;
+  sync.epubPath =
+      (positionOverride && !positionOverride->bookPath.empty()) ? positionOverride->bookPath : epub->getPath();
+  sync.spineIndex = positionOverride ? positionOverride->spineIndex : currentSpineIndex;
   sync.page = currentPage;
   sync.totalPagesInSpine = totalPages;
-  // Populate paragraph index and XHTML seek hint from section LUT if available.
-  if (section) {
+  // Populate paragraph index and XHTML seek hint from section LUT if available. Not applicable
+  // (and not attempted) for an overridden position — see the SyncPositionOverride comment.
+  if (section && !positionOverride) {
     if (const auto pIdx = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage))) {
       sync.paragraphIndex = *pIdx;
       sync.hasParagraphIndex = true;
@@ -76,15 +79,28 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
   sync.resultPage = 0;
   sync.resultParagraphIndex = 0;
   sync.resultHasParagraphIndex = false;
-  // Only auto-push-on-close should bypass the reader on resume; explicit syncs from the
-  // reader menu always come back to the reader. Reset here so a stale flag from a prior
-  // run cannot steal the user back to home.
-  sync.exitToHomeAfterSync = (mode == SyncLaunchMode::AUTO_PUSH);
+  // Reset here (rather than trusting whatever the struct already held) so a stale destination
+  // from a prior run cannot steal the user to the wrong place; every caller states what it wants,
+  // defaulting to Reader (the pre-existing behavior for reader-menu-triggered syncs).
+  sync.postAction = postAction.action;
+  sync.postActionTarget = postAction.target;
   APP_STATE.saveToFile();
 
-  LOG_DBG("ERS", "Standalone sync handoff: spine=%d page=%d/%d", currentSpineIndex, currentPage, totalPages);
+  LOG_DBG("ERS", "Standalone sync handoff: spine=%d page=%d/%d", sync.spineIndex, currentPage, totalPages);
   logReaderMemSnapshot("before_replace_with_sync");
   activityManager.goToKOReaderSync();
+}
+
+void EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::string& bookPath,
+                                                     const KOReaderSyncPostAction postAction,
+                                                     const std::string& target) {
+  auto* self = static_cast<EpubReaderActivity*>(ctx);
+  if (!KOREADER_STORE.hasCredentials()) {
+    return;
+  }
+  const SyncPositionOverride position{self->finishedBookSyncSpineIndex_, self->finishedBookSyncPage_,
+                                      self->finishedBookSyncPageCount_, bookPath};
+  self->launchKOReaderSync(SyncLaunchMode::PUSH_LOCAL, &position, {postAction, target});
 }
 
 bool EpubReaderActivity::tryAutoPushOnClose() {
@@ -111,8 +127,8 @@ bool EpubReaderActivity::tryAutoPushOnClose() {
     return false;
   }
 
-  // exitToHomeAfterSync flag is set inside launchKOReaderSync for AUTO_PUSH mode.
-  launchKOReaderSync(SyncLaunchMode::AUTO_PUSH);
+  // Reader-close auto-push has no reader session left to return to once it completes.
+  launchKOReaderSync(SyncLaunchMode::AUTO_PUSH, nullptr, {KOReaderSyncPostAction::Home, {}});
   return true;
 }
 

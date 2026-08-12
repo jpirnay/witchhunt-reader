@@ -339,6 +339,11 @@ class CrossPointSettings {
   uint8_t moveFinishedBooksToCompleted = 0;
   // Remove finished book from Recent Books when the end-of-book screen action is selected.
   uint8_t removeFinishedBooksFromRecents = 0;
+  // Push reading progress to the KOReader sync server when the end-of-book screen action is
+  // selected (1 = enabled, 0 = disabled). Only offered when KOReader credentials are configured;
+  // composes with whichever action (home / open next / OPDS search) was picked rather than
+  // replacing it — see BookFinished::launchFinishedBookFlow.
+  uint8_t syncFinishedBookToKOReader = 0;
   // Show clock in the reader status bar
   uint8_t statusBarClock = 0;
   // Clock format: 0 = 24h (14:00), 1 = 12h (2:00pm)
