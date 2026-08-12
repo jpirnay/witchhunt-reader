@@ -584,6 +584,18 @@ void KOReaderSyncActivity::onEnter() {
   // Past this point every path uses WiFi.
   wifiActivated = true;
 
+  // Free the ~52 KB secondary framebuffer before the radio comes up rather than after, which is
+  // what trimMemoryForNetworkSession's contract asks for and what the other network activities
+  // already do: association and the WPA supplicant are allocation-heavy well ahead of TLS.
+  // Doing it in onWifiSelectionComplete() alone left WiFi bring-up and NTP running against the
+  // buffer, and a finished-book sync reached them with 3.4 KB contiguous free.
+  //
+  // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
+  // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
+  // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
+  trimMemoryForNetworkSession(renderer, "KOSync");
+  logSyncMemSnapshot("after_trim_before_wifi");
+
   // Check if already connected (e.g. from settings page auth)
   if (WiFi.status() == WL_CONNECTED) {
     LOG_DBG("KOSync", "Already connected to WiFi");
