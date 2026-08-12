@@ -62,7 +62,10 @@ inline std::string getRefreshFrequencyDisplay(void*) {
 
 inline std::string getKoSyncMinPagesDisplay(void*) {
   const uint8_t v = SETTINGS.koSyncMinSessionPages;
-  return std::to_string(v > 0 ? v : 1) + tr(STR_PAGES_SUFFIX);
+  // Zero is "Always", not "Never": it means no minimum, so every close pushes. Turning the
+  // feature off is the separate Auto-Push toggle.
+  if (v == 0) return std::string(tr(STR_ALWAYS));
+  return std::to_string(v) + tr(STR_PAGES_SUFFIX);
 }
 
 inline std::vector<SettingInfo> buildSettingsList() {
@@ -456,9 +459,9 @@ inline std::vector<SettingInfo> buildSettingsList() {
       "koSyncBehavior", StrId::STR_KOREADER_SYNC));
   settings.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                          "koSyncOnBookClose", StrId::STR_KOREADER_SYNC));
-  settings.push_back(SettingInfo::Value(StrId::STR_KO_MIN_SESSION_PAGES, &CrossPointSettings::koSyncMinSessionPages,
-                                        {1, 20, 1}, "koSyncMinSessionPages", StrId::STR_KOREADER_SYNC)
-                         .withDisplayGetter(getKoSyncMinPagesDisplay));
+  settings.push_back(SettingInfo::Action(StrId::STR_KO_MIN_SESSION_PAGES, SettingAction::KOSyncMinPagesPicker)
+                         .withDisplayGetter(getKoSyncMinPagesDisplay)
+                         .withCategory(StrId::STR_KOREADER_SYNC));
   settings.push_back([]() {
     SettingInfo s;
     s.nameId = StrId::STR_SEND_METADATA;

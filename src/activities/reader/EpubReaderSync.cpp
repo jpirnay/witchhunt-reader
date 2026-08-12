@@ -142,7 +142,10 @@ bool EpubReaderActivity::tryAutoPushOnClose() {
   if (!KOREADER_STORE.hasCredentials()) {
     return false;
   }
-  const int minSessionPages = SETTINGS.koSyncMinSessionPages > 0 ? SETTINGS.koSyncMinSessionPages : 1;
+  // Zero is a real setting here, shown as "Always": no minimum, so even a session that turned no
+  // pages pushes. That is not pointless — jumping via the TOC and closing moves the position
+  // without a single page turn.
+  const int minSessionPages = SETTINGS.koSyncMinSessionPages;
   if (sessionPagesAdvanced < minSessionPages) {
     LOG_DBG("ERS", "Skipping AUTO_PUSH: %d pages this session, threshold is %d", sessionPagesAdvanced, minSessionPages);
     return false;
