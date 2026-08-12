@@ -20,21 +20,31 @@ toolchain due to embedded-only dependencies):
   bash test/run_epub_css_test.sh
 
 KOReader sync (lib/KOReaderSync) is esp_http_client-based and cannot be built
-by this toolchain either. It is covered instead by a conformance harness that
-speaks the firmware's exact wire format to a live KOSync server:
+by this toolchain either. It is covered instead by a pair of offline scripts.
+No credentials, no accounts, no third-party server is ever contacted.
 
-  # Offline. No network, no account -- pins the status -> Error mapping table.
+  # Every server dialect, end to end against a local mock.
+  python scripts/kosync_conformance.py
+
+  # Mapping table only; opens no sockets.
   python scripts/kosync_conformance.py --self-test
 
-  # Online. Auth + progress round-trip against a real server.
-  python scripts/kosync_conformance.py --server https://sync.koreader.rocks \
-      --user NAME --password PASS
+scripts/kosync_mock_server.py impersonates the dialects the client has to cope
+with -- the reference kosync server, Spring-based services like BookLore that
+answer a PUT with 201/204 (crosspoint-reader #2876), bodiless 204s, disabled
+registration, a captive portal serving HTML with 200, and a redirecting proxy.
+The conformance runner spawns one per dialect and asserts the client's
+status -> Error mapping comes out right for each.
 
-The default online run creates no account and writes progress only under a
-fixed, namespaced test document id. Account registration is opt-in behind
---check-register-existing (one create attempt for an account you already own)
-and --allow-create-user (creates one, requires an explicit fixed username).
-See the module docstring for why those are gated.
+To exercise the real C++ client rather than the Python mirror of it, run the
+mock on the LAN and point a device at it -- plain HTTP, no TLS, no account:
 
-The mapping table in the harness is a hand transcription of
+  python scripts/kosync_mock_server.py --dialect spring --host 0.0.0.0 --port 8080
+  # device: Settings -> System -> KOReader Sync -> Sync Server URL
+  #         http://<your-lan-ip>:8080   (any username/password is accepted)
+
+Every request is logged, so this doubles as a way to see exactly what the
+firmware puts on the wire.
+
+The mapping table in the conformance runner is a hand transcription of
 KOReaderSyncClient.cpp; there is no automatic link, so change both together.
