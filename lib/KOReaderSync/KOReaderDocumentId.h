@@ -1,5 +1,8 @@
 #pragma once
+#include <optional>
 #include <string>
+
+#include "KOReaderCredentialStore.h"  // DocumentMatchMethod
 
 /**
  * Calculate KOReader document ID (partial MD5 hash).
@@ -33,7 +36,30 @@ class KOReaderDocumentId {
    */
   static std::string calculateFromFilename(const std::string& filePath);
 
+  /**
+   * The matching method this book is actually synced under, learned from the server.
+   *
+   * KOReader defaults to binary matching and we default to filename, so two devices left on
+   * their defaults compute different document ids for the same book and never see each
+   * other. When a lookup under the configured method finds nothing but the other method
+   * does, that is proof of which id the server holds this book under, and it is recorded
+   * here so later syncs -- reads and writes alike -- go straight to it.
+   *
+   * Deliberately stored apart from the document-hash cache: that file is keyed on file size
+   * and mtime, whereas this is a fact about the server. Re-downloading the same book must
+   * not discard it.
+   *
+   * @return the learned method, or nullopt when nothing has been learned for this book
+   */
+  static std::optional<DocumentMatchMethod> loadLearnedMatchMethod(const std::string& filePath);
+
+  /** Record the matching method a remote record was actually found under. */
+  static void saveLearnedMatchMethod(const std::string& filePath, DocumentMatchMethod method);
+
  private:
+  // Path to the learned-method marker, a sibling of the document-hash cache.
+  static std::string getLearnedMethodFilePath(const std::string& filePath);
+
   // Size of each chunk to read at each offset
   static constexpr size_t CHUNK_SIZE = 1024;
 

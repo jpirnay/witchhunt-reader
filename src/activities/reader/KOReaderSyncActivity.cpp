@@ -84,12 +84,26 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   logSyncMemSnapshot("after_performSync");
 }
 
+std::string KOReaderSyncActivity::hashForMethod(const DocumentMatchMethod method) const {
+  return method == DocumentMatchMethod::FILENAME ? KOReaderDocumentId::calculateFromFilename(epubPath)
+                                                 : KOReaderDocumentId::calculate(epubPath);
+}
+
+const char* KOReaderSyncActivity::matchMethodName(const DocumentMatchMethod method) {
+  return method == DocumentMatchMethod::FILENAME ? "filename" : "binary";
+}
+
 bool KOReaderSyncActivity::calculateDocumentHash() {
-  if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
-    documentHash = KOReaderDocumentId::calculateFromFilename(epubPath);
-  } else {
-    documentHash = KOReaderDocumentId::calculate(epubPath);
+  // A previous sync may have proved the server holds this book under the other method's id
+  // (KOReader defaults to binary, we default to filename). That is a fact about the server,
+  // so it outranks the local preference for both reads and writes.
+  const auto learned = KOReaderDocumentId::loadLearnedMatchMethod(epubPath);
+  effectiveMatchMethod = learned.value_or(KOREADER_STORE.getMatchMethod());
+  if (learned) {
+    LOG_DBG("KOSync", "Using learned %s document id for this book", matchMethodName(effectiveMatchMethod));
   }
+
+  documentHash = hashForMethod(effectiveMatchMethod);
   if (documentHash.empty()) {
     {
       RenderLock lock(*this);
@@ -100,14 +114,53 @@ bool KOReaderSyncActivity::calculateDocumentHash() {
     return false;
   }
 
-  LOG_DBG("KOSync", "Document hash: %s", documentHash.c_str());
+  LOG_DBG("KOSync", "Document hash (%s): %s", matchMethodName(effectiveMatchMethod), documentHash.c_str());
+  return true;
+}
+
+bool KOReaderSyncActivity::probeAlternateDocumentId() {
+  const DocumentMatchMethod altMethod = effectiveMatchMethod == DocumentMatchMethod::FILENAME
+                                            ? DocumentMatchMethod::BINARY
+                                            : DocumentMatchMethod::FILENAME;
+  const std::string altHash = hashForMethod(altMethod);
+  if (altHash.empty() || altHash == documentHash) {
+    return false;
+  }
+
+  LOG_DBG("KOSync", "No record under the %s id; probing the %s id %s", matchMethodName(effectiveMatchMethod),
+          matchMethodName(altMethod), altHash.c_str());
+
+  KOReaderProgress altProgress;
+  const auto altResult = KOReaderSyncClient::getProgress(altHash, altProgress);
+  if (altResult != KOReaderSyncClient::OK) {
+    LOG_DBG("KOSync", "Alternate %s id has no record either (result=%d)", matchMethodName(altMethod), altResult);
+    return false;
+  }
+
+  // Proof of which id the server holds this book under. Adopt it for this session and
+  // persist it, so subsequent syncs skip the probe entirely and — the point of the whole
+  // exercise — upload to the id the other device actually reads.
+  LOG_INF("KOSync", "Found remote progress under the %s id; adopting it for this book", matchMethodName(altMethod));
+  documentHash = altHash;
+  effectiveMatchMethod = altMethod;
+  remoteProgress = std::move(altProgress);
+  KOReaderDocumentId::saveLearnedMatchMethod(epubPath, altMethod);
   return true;
 }
 
 bool KOReaderSyncActivity::handleAutoPushPreflight() {
   KOReaderSyncClient::beginPersistentSession();
   KOReaderProgress warmupProgress;
-  const auto warmupResult = KOReaderSyncClient::getProgress(documentHash, warmupProgress);
+  auto warmupResult = KOReaderSyncClient::getProgress(documentHash, warmupProgress);
+
+  // Same probe as the compare path. Without it, auto-push-on-close is the most likely way to
+  // create the divergence in the first place: it would silently write a second record under
+  // our id while the other device's progress sits under theirs.
+  if (warmupResult == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId()) {
+    warmupProgress = remoteProgress;
+    warmupResult = KOReaderSyncClient::OK;
+  }
+
   if (warmupResult != KOReaderSyncClient::OK && warmupResult != KOReaderSyncClient::NOT_FOUND) {
     KOReaderSyncClient::endPersistentSession();
     {
@@ -151,7 +204,13 @@ void KOReaderSyncActivity::performFetchAndCompare() {
   KOReaderSyncClient::beginPersistentSession();
 
   // Fetch remote progress
-  const auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+  auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+
+  // Nothing under our id may just mean the other device computed a different one. Costs one
+  // extra GET on the already-warm session, and only when the lookup came up empty.
+  if (result == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId()) {
+    result = KOReaderSyncClient::OK;
+  }
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
     if (syncIntent == KOReaderSyncIntentState::PULL_REMOTE) {

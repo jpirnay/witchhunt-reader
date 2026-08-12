@@ -307,6 +307,13 @@ def main() -> int:
                    help="Expected x-auth-key, i.e. the MD5 of the password. Empty accepts any key "
                         "for that user, which is usually what you want when testing a device.")
     p.add_argument("--list-dialects", action="store_true")
+    p.add_argument("--preload-document", metavar="HEXID",
+                   help="Seed a stored progress record under this document id before starting. "
+                        "Use it to stage the cross-method case: seed the book's BINARY id, leave "
+                        "the device on filename matching, and its lookup should miss, probe the "
+                        "binary id, find this record and adopt it. The device logs both ids.")
+    p.add_argument("--preload-percentage", type=float, default=0.5)
+    p.add_argument("--preload-progress", default="/body/DocFragment[3]/body/p[12]/text().0")
     args = p.parse_args()
 
     if args.list_dialects:
@@ -315,10 +322,21 @@ def main() -> int:
         return 0
 
     state = MockState(args.dialect, args.user, args.auth_key, accept_any_key=not args.auth_key)
+    if args.preload_document:
+        state.progress[args.preload_document] = {
+            "document": args.preload_document,
+            "progress": args.preload_progress,
+            "percentage": args.preload_percentage,
+            "device": "PreloadedPeer",
+            "device_id": "preloaded-peer",
+            "timestamp": 0,
+        }
     httpd = ThreadingHTTPServer((args.host, args.port), make_handler(state))
     print(f"KOSync mock server on http://{args.host}:{args.port}")
     print(f"  dialect : {args.dialect} -- {DIALECTS[args.dialect]['description']}")
     print(f"  account : {args.user} ({'any key accepted' if not args.auth_key else 'fixed key'})")
+    if args.preload_document:
+        print(f"  preload : {args.preload_document} at {args.preload_percentage:.4f}")
     print("  point the device's Sync Server URL here; Ctrl-C to stop\n")
     try:
         httpd.serve_forever()

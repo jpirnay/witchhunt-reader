@@ -15,12 +15,55 @@ std::string getFilename(const std::string& path) {
   }
   return path.substr(pos + 1);
 }
+
+// Mirror the Epub cache directory convention so KOSync's per-book files share the same
+// folder as other cached data for that book.
+std::string bookCacheDir(const std::string& filePath) {
+  return std::string("/.crosspoint/epub_") + std::to_string(std::hash<std::string>{}(filePath));
+}
 }  // namespace
 
 std::string KOReaderDocumentId::getCacheFilePath(const std::string& filePath) {
-  // Mirror the Epub cache directory convention so the hash file shares the
-  // same per-book folder as other cached data.
-  return std::string("/.crosspoint/epub_") + std::to_string(std::hash<std::string>{}(filePath)) + "/koreader_docid.txt";
+  return bookCacheDir(filePath) + "/koreader_docid.txt";
+}
+
+std::string KOReaderDocumentId::getLearnedMethodFilePath(const std::string& filePath) {
+  return bookCacheDir(filePath) + "/koreader_syncmethod.txt";
+}
+
+std::optional<DocumentMatchMethod> KOReaderDocumentId::loadLearnedMatchMethod(const std::string& filePath) {
+  const std::string path = getLearnedMethodFilePath(filePath);
+  if (!Storage.exists(path.c_str())) {
+    return std::nullopt;
+  }
+  const String content = Storage.readFile(path.c_str());
+  // Single character: '0' filename, '1' binary, matching the DocumentMatchMethod values.
+  // Anything else means a truncated or hand-edited file; treat it as nothing learned rather
+  // than guessing, since guessing wrong sends progress to the wrong document id.
+  if (content.length() < 1) {
+    return std::nullopt;
+  }
+  switch (content[0]) {
+    case '0':
+      return DocumentMatchMethod::FILENAME;
+    case '1':
+      return DocumentMatchMethod::BINARY;
+    default:
+      LOG_DBG("KODoc", "Learned sync method file %s is malformed; ignoring", path.c_str());
+      return std::nullopt;
+  }
+}
+
+void KOReaderDocumentId::saveLearnedMatchMethod(const std::string& filePath, const DocumentMatchMethod method) {
+  const std::string path = getLearnedMethodFilePath(filePath);
+  Storage.ensureDirectoryExists(bookCacheDir(filePath).c_str());
+  const String content(method == DocumentMatchMethod::BINARY ? "1" : "0");
+  if (!Storage.writeFile(path.c_str(), content)) {
+    LOG_DBG("KODoc", "Failed to write learned sync method to %s", path.c_str());
+    return;
+  }
+  LOG_INF("KODoc", "Learned that this book syncs under the %s document id",
+          method == DocumentMatchMethod::BINARY ? "binary" : "filename");
 }
 
 std::string KOReaderDocumentId::loadCachedHash(const std::string& cacheFilePath, const size_t fileSize,

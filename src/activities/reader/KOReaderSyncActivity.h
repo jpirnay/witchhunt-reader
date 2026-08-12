@@ -5,6 +5,7 @@
 
 #include "ChapterXPathIndexer.h"
 #include "CrossPointState.h"
+#include "KOReaderCredentialStore.h"  // DocumentMatchMethod
 #include "KOReaderSyncClient.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
@@ -83,6 +84,11 @@ class KOReaderSyncActivity final : public Activity {
   std::string statusMessage;
   std::string documentHash;
 
+  // The matching method documentHash was actually computed with: the learned per-book method
+  // when one has been recorded, otherwise the configured one. Uploads use this too, so a book
+  // the server holds under the other device's id keeps syncing under that id.
+  DocumentMatchMethod effectiveMatchMethod = DocumentMatchMethod::FILENAME;
+
   // Remote progress data
   bool hasRemoteProgress = false;
   bool remotePositionMapped = false;
@@ -115,6 +121,11 @@ class KOReaderSyncActivity final : public Activity {
   void onWifiSelectionComplete(bool success);
   void performSync();
   bool calculateDocumentHash();
+  std::string hashForMethod(DocumentMatchMethod method) const;
+  static const char* matchMethodName(DocumentMatchMethod method);
+  // On a NOT_FOUND, look the book up under the other matching method. On a hit, adopts that
+  // id for this session (documentHash, effectiveMatchMethod, remoteProgress) and persists it.
+  bool probeAlternateDocumentId();
   bool handleAutoPushPreflight();
   void performFetchAndCompare();
   void performUpload();

@@ -46,5 +46,21 @@ mock on the LAN and point a device at it -- plain HTTP, no TLS, no account:
 Every request is logged, so this doubles as a way to see exactly what the
 firmware puts on the wire.
 
+--preload-document stages the cross-method case, which is device-side logic
+the conformance runner cannot reach. KOReader defaults to binary document
+matching and we default to filename, so two devices on their defaults compute
+different ids for the same book. Seed the book's BINARY id, leave the device on
+filename matching, and its lookup should miss, probe the binary id, find the
+record and adopt it -- persisting the choice so later syncs skip the probe and
+upload to the id the other device actually reads:
+
+  python scripts/kosync_mock_server.py --host 0.0.0.0 --port 8080 \
+      --preload-document <binary-id-of-the-book>
+
+The device logs both ids ("Document hash (filename): ...", then "probing the
+binary id ..."). The learned choice lands in
+/.crosspoint/epub_<hash>/koreader_syncmethod.txt on the SD card; delete that
+file to re-run the experiment from scratch.
+
 The mapping table in the conformance runner is a hand transcription of
 KOReaderSyncClient.cpp; there is no automatic link, so change both together.
