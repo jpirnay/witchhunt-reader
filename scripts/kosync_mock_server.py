@@ -94,6 +94,8 @@ DIALECTS: dict[str, dict] = {
     # The client must refuse this rather than treat it as success.
     "portal": {
         "description": "Captive portal: 200 with HTML for everything",
+        "intercept_all": True,
+        "content_type": "text/html",
         "auth_ok": (200, "<html><body>Sign in to the network</body></html>"),
         "create_ok": (200, "<html><body>Sign in to the network</body></html>"),
         "create_exists": (200, "<html><body>Sign in to the network</body></html>"),
@@ -101,9 +103,24 @@ DIALECTS: dict[str, dict] = {
         "progress_found": (200, "<html><body>Sign in to the network</body></html>"),
         "put_ok": (200, "<html><body>Sign in to the network</body></html>"),
     },
+    # The nastier portal: it answers 404 rather than 200. A client that only screens 2xx for
+    # HTML reads this as "no stored progress for this document" and uploads local progress
+    # into the void.
+    "portal_404": {
+        "description": "Captive portal answering 404 + HTML, which mimics 'no progress stored'",
+        "intercept_all": True,
+        "content_type": "text/html",
+        "auth_ok": (404, "<html><body>Sign in to the network</body></html>"),
+        "create_ok": (404, "<html><body>Sign in to the network</body></html>"),
+        "create_exists": (404, "<html><body>Sign in to the network</body></html>"),
+        "progress_missing": (404, "<html><body>Sign in to the network</body></html>"),
+        "progress_found": (404, "<html><body>Sign in to the network</body></html>"),
+        "put_ok": (404, "<html><body>Sign in to the network</body></html>"),
+    },
     # A proxy that redirects everything, e.g. http -> https upgrade the client won't follow.
     "redirect": {
         "description": "Everything answers 302",
+        "intercept_all": True,
         "auth_ok": (302, ""),
         "create_ok": (302, ""),
         "create_exists": (302, ""),
@@ -123,6 +140,10 @@ class MockState:
                  accept_any_key: bool = False) -> None:
         self.rules = DIALECTS[dialect]
         self.dialect = dialect
+        # Dialects that answer every request straight from the rules table, without consulting
+        # accounts or stored progress: portals and redirecting proxies never reach the API.
+        self.intercept_all = bool(self.rules.get("intercept_all"))
+        self.content_type = self.rules.get("content_type", "application/json")
         self.users: dict[str, str] = {user: auth_key} if user else {}
         self.progress: dict[str, dict] = {}
         self.verbose = verbose
@@ -183,16 +204,16 @@ def make_handler(state: MockState):
         # -- endpoints ---------------------------------------------------------------
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler hook
             if self.path == "/users/auth":
-                if state.dialect in ("portal", "redirect"):
-                    return self._respond(*self._rule("auth_ok"), content_type="text/html")
+                if state.intercept_all:
+                    return self._respond(*self._rule("auth_ok"), content_type=state.content_type)
                 if not self._authenticated():
                     return self._respond(401, '{"message": "Unauthorized"}')
                 return self._respond(*self._rule("auth_ok"))
 
             m = PROGRESS_PATH.match(self.path)
             if m:
-                if state.dialect in ("portal", "redirect"):
-                    return self._respond(*self._rule("progress_found"), content_type="text/html")
+                if state.intercept_all:
+                    return self._respond(*self._rule("progress_found"), content_type=state.content_type)
                 if not self._authenticated():
                     return self._respond(401, '{"message": "Unauthorized"}')
                 document = m.group(1)
@@ -208,8 +229,8 @@ def make_handler(state: MockState):
             body = self._body()
             if self.path != "/users/create":
                 return self._respond(404, '{"message": "Not found"}')
-            if state.dialect in ("portal", "redirect"):
-                return self._respond(*self._rule("create_ok"), content_type="text/html")
+            if state.intercept_all:
+                return self._respond(*self._rule("create_ok"), content_type=state.content_type)
             try:
                 payload = json.loads(body) if body else {}
             except ValueError:
@@ -233,8 +254,8 @@ def make_handler(state: MockState):
             body = self._body()
             if self.path != "/syncs/progress":
                 return self._respond(404, '{"message": "Not found"}')
-            if state.dialect in ("portal", "redirect"):
-                return self._respond(*self._rule("put_ok"), content_type="text/html")
+            if state.intercept_all:
+                return self._respond(*self._rule("put_ok"), content_type=state.content_type)
             if not self._authenticated():
                 return self._respond(401, '{"message": "Unauthorized"}')
             try:

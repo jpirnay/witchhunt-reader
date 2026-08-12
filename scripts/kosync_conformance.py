@@ -56,9 +56,19 @@ def _skip_bom_and_whitespace(body: str) -> str:
     return body.lstrip("﻿").lstrip()
 
 
+def body_is_not_json(body: str) -> bool:
+    """A body that is present but is not a JSON object: a captive portal or proxy answering
+    with its own HTML, which makes the accompanying status code untrustworthy. An empty body
+    is deliberately not a portal signature."""
+    return _skip_bom_and_whitespace(body)[:1] not in ("", "{")
+
+
 def map_register(status: int, body: str) -> str:
     if 300 <= status < 400:
         return "REDIRECT_ERROR"
+    # 2xx only: the 402 branch below deliberately reads a human-readable body.
+    if 200 <= status < 300 and body_is_not_json(body):
+        return "INVALID_RESPONSE"
     if status == 200:
         return "USER_EXISTS"  # some servers answer 200 when the user already exists
     if 200 <= status < 300:
@@ -73,9 +83,12 @@ def map_register(status: int, body: str) -> str:
 def map_authenticate(status: int, body: str) -> str:
     if 300 <= status < 400:
         return "REDIRECT_ERROR"
+    # Screened at every status: a portal's 401 + HTML must not surface as AUTH_FAILED.
+    if body_is_not_json(body):
+        return "INVALID_RESPONSE"
     if 200 <= status < 300:
         # 204/205 are legitimately bodiless; every other 2xx must carry a JSON object.
-        if status not in (204, 205) and _skip_bom_and_whitespace(body)[:1] != "{":
+        if status not in (204, 205) and not body:
             return "INVALID_RESPONSE"
         return "OK"
     if status == 401:
@@ -86,6 +99,10 @@ def map_authenticate(status: int, body: str) -> str:
 def map_get_progress(status: int, body: str) -> str:
     if 300 <= status < 400:
         return "REDIRECT_ERROR"
+    # Checked before any status is interpreted: a portal's 404 would otherwise read as
+    # "no progress stored", which the caller answers by uploading into the void.
+    if body_is_not_json(body):
+        return "INVALID_RESPONSE"
     if 200 <= status < 300:
         if not body:
             return "NOT_FOUND"
@@ -106,10 +123,9 @@ def map_get_progress(status: int, body: str) -> str:
 def map_update_progress(status: int, body: str) -> str:
     if 300 <= status < 400:
         return "REDIRECT_ERROR"
+    if body_is_not_json(body):
+        return "INVALID_RESPONSE"
     if 200 <= status < 300:
-        first = _skip_bom_and_whitespace(body)[:1]
-        if first and first != "{":
-            return "INVALID_RESPONSE"
         return "OK"
     if status == 401:
         return "AUTH_FAILED"
@@ -141,20 +157,32 @@ SELF_TEST_CASES: list[tuple[str, int, str, str]] = [
     ("get_progress", 200, "{}", "NOT_FOUND"),                 # reference server's no-progress shape
     ("get_progress", 200, "", "NOT_FOUND"),
     ("get_progress", 204, "", "NOT_FOUND"),                   # Spring-style no-progress shape
-    ("get_progress", 200, "not json", "JSON_ERROR"),
+    ("get_progress", 200, "not json", "INVALID_RESPONSE"),
+    ("get_progress", 200, '{"progress":', "JSON_ERROR"),      # JSON-shaped but malformed
     ("get_progress", 404, "", "NOT_FOUND"),
     ("get_progress", 401, "", "AUTH_FAILED"),
     ("get_progress", 500, "", "SERVER_ERROR"),
+    # A portal's 404 must not read as "no stored progress": the caller answers that by
+    # uploading local progress into the void.
+    ("get_progress", 404, "<html>portal</html>", "INVALID_RESPONSE"),
+    ("get_progress", 401, "<html>portal</html>", "INVALID_RESPONSE"),
+    ("get_progress", 500, "<html>portal</html>", "INVALID_RESPONSE"),
     ("update_progress", 200, '{"document":"d"}', "OK"),
     ("update_progress", 202, "", "OK"),
     ("update_progress", 201, "", "OK"),                       # the #2876 regression
     ("update_progress", 204, "", "OK"),                       # the #2876 regression
     ("update_progress", 200, "<html>portal</html>", "INVALID_RESPONSE"),
+    ("update_progress", 404, "<html>portal</html>", "INVALID_RESPONSE"),
     ("update_progress", 401, "", "AUTH_FAILED"),
     ("update_progress", 500, "", "SERVER_ERROR"),
     ("register", 201, "", "OK"),
     ("register", 204, "", "OK"),
     ("register", 200, "", "USER_EXISTS"),                     # servers that answer 200 for existing
+    ("register", 200, "<html>portal</html>", "INVALID_RESPONSE"),
+    ("register", 201, "<html>portal</html>", "INVALID_RESPONSE"),
+    # The 402 branch reads the body text, so a plain-text error must still reach it rather
+    # than being swallowed as a portal response.
+    ("register", 402, "Username is already registered.", "USER_EXISTS"),
     ("register", 402, '{"message":"Username is already registered."}', "USER_EXISTS"),
     ("register", 402, '{"message":"Registration is disabled."}', "REGISTRATION_DISABLED"),
     ("register", 409, "", "USER_EXISTS"),
@@ -221,11 +249,25 @@ EXPECTATIONS: dict[str, dict[str, str]] = {
     "portal": {
         "auth/valid-credentials": "INVALID_RESPONSE",
         "auth/rejects-bad-key": "INVALID_RESPONSE",  # portal answers before auth is considered
-        "progress/unknown-document": "JSON_ERROR",
+        "progress/unknown-document": "INVALID_RESPONSE",
         "progress/upload-accepted": "INVALID_RESPONSE",
-        "progress/round-trip": "JSON_ERROR",
+        "progress/round-trip": "INVALID_RESPONSE",
         "register/new-account": "INVALID_RESPONSE",
         "register/existing-account": "INVALID_RESPONSE",
+    },
+    "portal_404": {
+        "auth/valid-credentials": "INVALID_RESPONSE",
+        "auth/rejects-bad-key": "INVALID_RESPONSE",
+        # The check this dialect exists for: a 404 of HTML must not read as "no progress
+        # stored", which the caller would answer by uploading local progress into the void.
+        "progress/unknown-document": "INVALID_RESPONSE",
+        "progress/upload-accepted": "INVALID_RESPONSE",
+        "progress/round-trip": "INVALID_RESPONSE",
+        # registerUser screens only 2xx for HTML, because its 402 branch has to read a
+        # human-readable body. A 404 therefore lands in SERVER_ERROR -- still an error the
+        # user sees, just a less specific one.
+        "register/new-account": "SERVER_ERROR",
+        "register/existing-account": "SERVER_ERROR",
     },
     "redirect": {
         "auth/valid-credentials": "REDIRECT_ERROR",
@@ -237,14 +279,6 @@ EXPECTATIONS: dict[str, dict[str, str]] = {
         "register/existing-account": "REDIRECT_ERROR",
     },
 }
-
-# The portal dialect answers HTML with 200 for POST /users/create too, which the register
-# mapping reads as USER_EXISTS (status 200) rather than INVALID_RESPONSE -- registerUser has
-# no body-shape guard, because it needs the body to tell 402 cases apart. Record the real
-# behaviour rather than an aspiration.
-EXPECTATIONS["portal"]["register/new-account"] = "USER_EXISTS"
-EXPECTATIONS["portal"]["register/existing-account"] = "USER_EXISTS"
-
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """The firmware reports any 3xx as REDIRECT_ERROR, so observe them instead of following."""

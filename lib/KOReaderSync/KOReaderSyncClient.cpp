@@ -45,6 +45,11 @@ std::unique_ptr<crosspoint::SecureHttpClient> g_sessionHttp;
 char g_failureDetailBuf[160] = {0};
 char g_lastResponsePreview[160] = {0};
 
+// Set when a request was rejected as INVALID_RESPONSE. lastFailureDetail() cannot infer this
+// from the status code any more: a captive portal's HTML is now rejected under 404 as well as
+// under 2xx, and 404 otherwise means a legitimate "no stored progress".
+bool g_lastInvalidBody = false;
+
 std::string previewBody(const char* body, const size_t maxLen = 120) {
   if (!body || !*body) {
     return "<empty>";
@@ -84,6 +89,7 @@ void beginRequest(const char* operation) {
   KOReaderSyncClient::lastHeapAtFailure = ESP.getFreeHeap();
   KOReaderSyncClient::lastContigHeapAtFailure = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   g_lastResponsePreview[0] = '\0';
+  g_lastInvalidBody = false;
 }
 
 // Skip a leading UTF-8 BOM (EF BB BF) and ASCII whitespace, returning a pointer
@@ -99,6 +105,30 @@ const char* skipBomAndWhitespace(const char* p) {
     p++;
   }
   return p;
+}
+
+// True when a body is present but is not a JSON object. That did not come from the KOSync
+// API — it is the signature of a captive portal or reverse proxy answering with its own
+// HTML — so the accompanying status code cannot be trusted to mean what it says.
+//
+// An empty body is deliberately NOT a portal signature: several endpoints legitimately
+// answer bodiless (204/205), and portals always serve a page. Callers that additionally
+// require a body decide that for themselves.
+bool bodyIsNotJson(const std::string& body) {
+  if (body.empty()) return false;
+  const char c = *skipBomAndWhitespace(body.c_str());
+  return c != '\0' && c != '{';
+}
+
+// Screen a response body before its status code is interpreted. Returns true when the caller
+// should give up with INVALID_RESPONSE, having recorded the diagnostic state for
+// lastFailureDetail().
+bool shouldRejectBody(int httpCode, const std::string& body) {
+  if (!bodyIsNotJson(body)) return false;
+  g_lastInvalidBody = true;
+  rememberResponsePreview(body.c_str());
+  LOG_ERR("KOSync", "HTTP %d body is not JSON — refusing to interpret it: %s", httpCode, g_lastResponsePreview);
+  return true;
 }
 
 // Device identifier for CrossPoint reader
@@ -339,6 +369,12 @@ KOReaderSyncClient::Error KOReaderSyncClient::registerUser() {
 
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
 
+  // A 2xx carrying HTML is a captive portal, not a created account. Check before the status
+  // mapping below, or a portal's 200 would be reported as "username already taken".
+  // Only 2xx is guarded: the 402 branch deliberately reads a human-readable body, so a server
+  // that words its errors in plain text must still reach it.
+  if (httpCode >= 200 && httpCode < 300 && shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
+
   if (httpCode == 200) {
     // Some server implementations return 200 when the user already exists
     return USER_EXISTS;
@@ -383,12 +419,15 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
 
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
+  // Reject a non-JSON body whatever the status. Screening only 2xx would let a captive
+  // portal's 401 + HTML surface as AUTH_FAILED, sending the user off to reset credentials
+  // that were fine.
+  if (shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
   if (httpCode >= 200 && httpCode < 300) {
-    // Guard against a reverse proxy or captive portal returning 2xx + HTML.
-    // 204/205 are legitimately bodiless, so they skip the guard; every other 2xx
-    // must carry a JSON object, which is what the reference server sends on 200.
-    if (httpCode != 204 && httpCode != 205 &&
-        (responseBody.empty() || *skipBomAndWhitespace(responseBody.c_str()) != '{')) {
+    // 204/205 are legitimately bodiless; every other 2xx must carry the JSON object the
+    // reference server sends on 200.
+    if (httpCode != 204 && httpCode != 205 && responseBody.empty()) {
+      g_lastInvalidBody = true;
       return INVALID_RESPONSE;
     }
     return OK;
@@ -452,6 +491,13 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
+
+  // A captive portal or proxy serving HTML makes the status code meaningless, and here that
+  // is worse than a bad error message: its 404 would read as "no progress stored", and the
+  // caller answers that by uploading local progress into the void. Reject on body shape
+  // before any status is interpreted. 401 is included so a portal cannot masquerade as an
+  // authentication failure and send the user off resetting working credentials.
+  if (shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
 
   if (httpCode >= 200 && httpCode < 300) {
     // A bodiless 2xx means the server has no stored progress for this document:
@@ -575,16 +621,10 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
-  if (httpCode >= 200 && httpCode < 300) {
-    // Guard against a reverse proxy or captive portal returning 2xx + HTML.
-    if (!responseBody.empty()) {
-      const char c = *skipBomAndWhitespace(responseBody.c_str());
-      if (c != '\0' && c != '{') {
-        return INVALID_RESPONSE;
-      }
-    }
-    return OK;
-  }
+  // Same reasoning as getProgress: HTML here means the response is not from the API, so
+  // neither a 2xx "accepted" nor a 4xx "rejected" reading of the status is trustworthy.
+  if (shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
+  if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
   return SERVER_ERROR;
 }
@@ -617,11 +657,12 @@ const char* KOReaderSyncClient::lastFailureDetail() {
     }
     return g_failureDetailBuf;
   }
-  // Invalid-response case: a 2xx whose body was not JSON (e.g. captive portal HTML).
-  // On real success callers never reach lastFailureDetail(), so a 2xx here means INVALID_RESPONSE.
-  if (lastHttpCode >= 200 && lastHttpCode < 300 && lastEspError == ESP_OK) {
+  // Invalid-response case: the body was not JSON (e.g. captive portal HTML). Flagged
+  // explicitly rather than inferred from the status, because this is now rejected under 404
+  // and 401 too, where the status alone would look like an ordinary API answer.
+  if (g_lastInvalidBody) {
     snprintf(g_failureDetailBuf, sizeof(g_failureDetailBuf),
-             "%s: expected JSON but received HTML (captive portal or proxy?)", lastOperation);
+             "%s: HTTP %d but the body was not JSON (captive portal or proxy?)", lastOperation, lastHttpCode);
     return g_failureDetailBuf;
   }
   // Server case: got an HTTP status the client didn't recognize as success.
