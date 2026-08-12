@@ -19,6 +19,7 @@
 
 #include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
+#include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
@@ -35,6 +36,7 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -2643,6 +2645,19 @@ bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(const Section* target) 
   return true;  // caller must drop the section: its variant hash just changed
 }
 
+bool EpubReaderActivity::pageHasFootnoteShapedLink() const {
+  // currentPageFootnotes holds EVERY internal link on the page, because every internal link is
+  // navigable from the footnote list. Only marker-shaped ones are worth a gather — see
+  // FootnoteShape.h for what a Calibre table-of-contents spine costs otherwise.
+  //
+  // Note the asymmetry with the build-slice trigger: FootnoteEntry carries no noteref bit (it
+  // would cost a section-cache format bump for a flag nothing renders), so a noteref-tagged link
+  // whose text is a word rather than a marker is invisible here. Such a book still gathers via
+  // the build-slice trigger the first time one of its spines is actually built.
+  return std::any_of(currentPageFootnotes.begin(), currentPageFootnotes.end(),
+                     [](const auto& fn) { return FootnoteShape::isMarkerText(fn.number, strlen(fn.number)); });
+}
+
 bool EpubReaderActivity::ensureFootnotePreviewCache() {
   if (!epub || !getEffectiveInlineFootnotePreviews()) {
     return true;
@@ -3473,8 +3488,15 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     // know this book needs previews at all. Doing it here instead of before every first section
     // build means a book with no notes never pays the whole-book two-pass scan (2822 ms on X3).
     // Latched so a failed gather is not retried on every single page turn.
-    if (!currentPageFootnotes.empty() && getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_ &&
-        !footnotePreviewGatherAttempted_) {
+    //
+    // The build-slice trigger (gatherFootnotesIfBuildNeedsThem) covers spines built this
+    // session; this path covers the rest — a section loaded from cache never runs a parse, so
+    // it produces no sawFootnote() signal at all. That is the normal case when previews are
+    // switched on for a book that has already been read.
+    // Latches first: the shape scan walks the page's links and runs on every render, whereas
+    // these three are false for the whole session on the overwhelmingly common paths.
+    if (getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_ && !footnotePreviewGatherAttempted_ &&
+        pageHasFootnoteShapedLink()) {
       footnotePreviewGatherAttempted_ = true;
       if (ensureFootnotePreviewCache()) {
         // The section on disk was built as previews-OFF and is now the wrong variant:

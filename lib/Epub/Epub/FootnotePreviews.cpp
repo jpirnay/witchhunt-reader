@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../Epub.h"
+#include "FootnoteShape.h"
 
 namespace {
 
@@ -50,56 +51,6 @@ const char* getAttribute(const char** atts, const char* name) {
   return nullptr;
 }
 
-bool hasAttributeToken(const char* value, const char* token) {
-  if (!value) return false;
-  const size_t tokenLen = strlen(token);
-  const char* cursor = value;
-  while (*cursor != '\0') {
-    while (*cursor != '\0' && isSpaceChar(*cursor)) ++cursor;
-    const char* start = cursor;
-    while (*cursor != '\0' && !isSpaceChar(*cursor)) ++cursor;
-    if (static_cast<size_t>(cursor - start) == tokenLen && strncmp(start, token, tokenLen) == 0) return true;
-  }
-  return false;
-}
-
-// True when the trimmed link text looks like a footnote marker: 1-4 codepoints, each a
-// digit, *, dagger/double-dagger, section/pilcrow sign, dot or bracket. Catches "*",
-// "12", "[3]", "†" — the shapes untagged reference links actually use — while a normal
-// word link ("see chapter 2") never qualifies.
-bool isMarkerText(const char* text, size_t len) {
-  while (len > 0 && isSpaceChar(*text)) {
-    ++text;
-    --len;
-  }
-  while (len > 0 && isSpaceChar(text[len - 1])) --len;
-  if (len == 0) return false;
-
-  int codepoints = 0;
-  size_t i = 0;
-  while (i < len) {
-    uint32_t cp = static_cast<unsigned char>(text[i]);
-    size_t adv = 1;
-    if (cp >= 0xF0 && i + 3 < len) {
-      cp = ((cp & 0x07) << 18) | ((text[i + 1] & 0x3F) << 12) | ((text[i + 2] & 0x3F) << 6) | (text[i + 3] & 0x3F);
-      adv = 4;
-    } else if (cp >= 0xE0 && i + 2 < len) {
-      cp = ((cp & 0x0F) << 12) | ((text[i + 1] & 0x3F) << 6) | (text[i + 2] & 0x3F);
-      adv = 3;
-    } else if (cp >= 0xC0 && i + 1 < len) {
-      cp = ((cp & 0x1F) << 6) | (text[i + 1] & 0x3F);
-      adv = 2;
-    }
-    const bool allowed = (cp >= '0' && cp <= '9') || cp == '*' || cp == '.' || cp == ',' || cp == '[' || cp == ']' ||
-                         cp == '(' || cp == ')' || cp == 0x2020 /* † */ || cp == 0x2021 /* ‡ */ ||
-                         cp == 0x00A7 /* § */ || cp == 0x00B6 /* ¶ */;
-    if (!allowed) return false;
-    ++codepoints;
-    i += adv;
-  }
-  return codepoints >= 1 && codepoints <= 4;
-}
-
 struct Target {
   uint32_t keyHash;
   uint16_t spineIndex;
@@ -133,8 +84,8 @@ class LinkScanner {
         self->linkDepth_ = self->depth_;
         strncpy(self->href_, href, MAX_HREF_BYTES);
         self->href_[MAX_HREF_BYTES] = '\0';
-        self->linkIsNoteref_ = hasAttributeToken(getAttribute(atts, "epub:type"), "noteref") ||
-                               hasAttributeToken(getAttribute(atts, "role"), "doc-noteref");
+        self->linkIsNoteref_ =
+            FootnoteShape::isNoterefTagged(getAttribute(atts, "epub:type"), getAttribute(atts, "role"));
         self->textLen_ = 0;
         self->textOverflow_ = false;
       }
@@ -146,6 +97,11 @@ class LinkScanner {
     auto* self = static_cast<LinkScanner*>(ctx);
     if (self->linkDepth_ < 0) return;
     for (int i = 0; i < length; ++i) {
+      // Leading whitespace does not consume the marker budget. Pretty-printed XHTML writes
+      // <a href="#n1">\n        1\n      </a>, whose indentation alone exceeds
+      // MAX_MARKER_BYTES — the link would overflow before its marker was ever seen, and a
+      // real footnote would be dropped from the cache. isMarkerText trims the rest.
+      if (self->textLen_ == 0 && isSpaceChar(text[i])) continue;
       if (self->textLen_ >= MAX_MARKER_BYTES) {
         self->textOverflow_ = true;  // too long to be a marker; noteref tagging may still qualify
         return;
@@ -159,7 +115,8 @@ class LinkScanner {
     --self->depth_;
     if (self->linkDepth_ != self->depth_) return;
     self->text_[self->textLen_] = '\0';
-    const bool qualifies = self->linkIsNoteref_ || (!self->textOverflow_ && isMarkerText(self->text_, self->textLen_));
+    const bool qualifies =
+        self->linkIsNoteref_ || (!self->textOverflow_ && FootnoteShape::isMarkerText(self->text_, self->textLen_));
     if (qualifies && self->targets_.size() < FootnotePreviews::MAX_ENTRIES) {
       const char* hash = strchr(self->href_, '#');
       const char* fragment = hash + 1;  // '#' presence checked at startElement

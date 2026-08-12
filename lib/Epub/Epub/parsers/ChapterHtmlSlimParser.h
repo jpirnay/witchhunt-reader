@@ -342,6 +342,10 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
+  // epub:type="noteref" / role="doc-noteref" on the open <a>. Not part of FootnoteEntry —
+  // it feeds only the sawFootnote_ latch and would otherwise cost a section-cache format
+  // bump for a bit no renderer reads.
+  bool currentFootnoteIsNoteref = false;
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
   // Membership in the book-level preview cache is the sole expansion gate: it already
   // encodes "this link points at a real note", so no epub:type/same-file checks here.
@@ -351,7 +355,8 @@ class ChapterHtmlSlimParser final : public Print {
   int wordsExtractedInBlock = 0;
   bool bionicReadingEnabled = false;
   bool layoutFailed = false;
-  // True once any footnote link has been seen in this chapter. Latched; see sawFootnote().
+  // True once a link that FootnotePreviews::gather would actually collect has been seen in
+  // this chapter — NOT merely any internal link. Latched; see sawFootnote().
   bool sawFootnote_ = false;
 
   // Per-chapter caches: resolveStyle and parseInlineStyle are called for every HTML element;
@@ -489,9 +494,11 @@ class ChapterHtmlSlimParser final : public Print {
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
-  // True once this chapter has yielded at least one footnote link. Readable mid-parse, which is
-  // the point: it lets a caller abandon a build that is being laid out without previews as soon
-  // as it learns previews are needed, instead of after the whole spine is done.
+  // True once this chapter has yielded at least one link that FootnotePreviews::gather would
+  // collect (see FootnoteShape). Readable mid-parse, which is the point: it lets a caller
+  // abandon a build that is being laid out without previews as soon as it learns previews are
+  // needed, instead of after the whole spine is done. Deliberately narrower than
+  // pendingFootnotes, which stays broad because every internal link is navigable.
   bool sawFootnote() const { return sawFootnote_; }
 
   // Print interface — fed by Epub::readItemContentsToStream.

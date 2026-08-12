@@ -512,6 +512,9 @@ class EpubReaderActivity final : public Activity {
   // but not yet gathered, gathers them and returns true — meaning the caller must discard the
   // section, whose cache variant has just changed from previews-OFF to previews-ON.
   bool gatherFootnotesIfBuildNeedsThem(const Section* target);
+  // True when currentPageFootnotes holds at least one link the gatherer would collect. Gates
+  // the cached-section fallback trigger; see the definition for why it is shape-only.
+  bool pageHasFootnoteShapedLink() const;
   // True once footnotes.bin is known to exist for this book (primed in onEnter, set by
   // ensureFootnotePreviewCache). Feeds makeSectionBuildParams(), so it selects the section
   // cache VARIANT: sections built before the gather are keyed previews-OFF and are rebuilt
