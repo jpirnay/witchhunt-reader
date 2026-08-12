@@ -34,8 +34,27 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     return;
   }
 
-  const int currentPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
-  const int totalPages = positionOverride ? positionOverride->pageCount : (section ? section->pageCount : 0);
+  int currentPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
+  int totalPages = positionOverride ? positionOverride->pageCount : (section ? section->pageCount : 0);
+
+  // An override only ever comes from the finished-book flow, so it always means "the reader
+  // reached the end of this book". Its call sites can usually say which page that was, but not
+  // when there is no live section left to ask (renderFinishedBookPass, and the guarded fallbacks
+  // in the other two), and they then hand over 0/0 — the same end-of-book sentinel they write to
+  // progress.bin, where a page count of zero plus 100% is understood locally as "finished".
+  //
+  // ProgressMapper does not read it that way. It derives intra-spine progress as
+  // page / (pageCount - 1), so 0/0 becomes 0.0 and the upload describes the START of the final
+  // chapter. Field log of exactly that: a book finished at "Chapter 20, Page 4 (100%)" went up as
+  // "spine=20 progress=0.000 -> /body/DocFragment[21]/body/p[1]/span[1]/b[1]", 98.85%.
+  //
+  // Any pair with page == pageCount - 1 encodes "the end of this spine", which is what finishing
+  // the book means, so use the smallest one.
+  if (positionOverride && totalPages <= 0) {
+    currentPage = 1;
+    totalPages = 2;
+    LOG_DBG("ERS", "Finished-book sync has no page count; syncing the end of spine %d", positionOverride->spineIndex);
+  }
   KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE;
   if (mode == SyncLaunchMode::PULL_REMOTE) {
     syncIntent = KOReaderSyncIntentState::PULL_REMOTE;
