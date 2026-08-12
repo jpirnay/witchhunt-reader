@@ -29,7 +29,7 @@ inline void logReaderMemSnapshot(const char*) {}
 }  // namespace
 
 void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const SyncPositionOverride* positionOverride,
-                                            const SyncPostAction postAction) {
+                                            const SyncPostAction& postAction) {
   if (!epub) {
     return;
   }

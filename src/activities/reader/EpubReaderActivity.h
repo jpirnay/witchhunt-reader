@@ -715,7 +715,8 @@ class EpubReaderActivity final : public Activity {
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
-                          const SyncPositionOverride* positionOverride = nullptr, SyncPostAction postAction = {});
+                          const SyncPositionOverride* positionOverride = nullptr,
+                          const SyncPostAction& postAction = {});
   // BookFinished::launchFinishedBookFlow callback trampoline (plain fn ptr + ctx, per the
   // project's std::function-avoidance convention): pushes finishedBookSync{SpineIndex,Page,
   // PageCount}_ (stashed by the three call sites right before launchFinishedBookFlow, from the
