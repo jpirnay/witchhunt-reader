@@ -132,6 +132,7 @@ are never compiled, so they cost no flash.
 | `hello-plugin` | settings | Minimal reference and smoke test - renders a card and lists `/` |
 | `find-duplicates` | files | Reports files sharing an exact size. Report only: never writes, and never downloads a book |
 | `organize-by-author` | files | Sorts loose EPUBs into `<Author>/` folders. Preview first, moves only on Apply, carries sidecars along |
+| `metadata-editor` | files | Edits title, author, language, series, series index and description, saving them to a `book.opf` sidecar. Never rewrites the book |
 
 ## Loading order and failures
 

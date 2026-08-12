@@ -146,6 +146,35 @@ TEST_F(MetadataSidecarFixture, OversizedSidecarIsIgnored) {
   EXPECT_EQ(epub.getTitle(), kEmbeddedTitle);
 }
 
+// Contract with the metadata-editor plugin (plugins/metadata-editor): the exact
+// document its freshDoc() + writeInto() produce must be readable here, for all
+// six fields it edits. The plugin's XML handling runs in a browser and cannot be
+// unit-tested from this suite, so this pins the format they agree on - if the
+// editor's output shape ever drifts, this is what catches it.
+TEST_F(MetadataSidecarFixture, ReadsTheShapeTheMetadataEditorWrites) {
+  writeSidecar(
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"uuid_id\">\n"
+      "  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:opf=\"http://www.idpf.org/2007/opf\">"
+      "<dc:title>Edited Title</dc:title>"
+      "<dc:creator>Edited Author</dc:creator>"
+      "<dc:language>de</dc:language>"
+      "<meta name=\"calibre:series\" content=\"Edited Series\"/>"
+      "<meta name=\"calibre:series_index\" content=\"7\"/>"
+      "<dc:description>Edited description text.</dc:description>"
+      "</metadata>\n"
+      "</package>\n");
+
+  Epub epub(bookPath.string(), cacheDir);
+  ASSERT_TRUE(epub.load(true));
+  EXPECT_EQ(epub.getTitle(), "Edited Title");
+  EXPECT_EQ(epub.getAuthor(), "Edited Author");
+  EXPECT_EQ(epub.getLanguage(), "de");
+  EXPECT_EQ(epub.getSeries(), "Edited Series");
+  EXPECT_EQ(epub.getSeriesIndex(), "7");
+  EXPECT_EQ(epub.getDescription(), "Edited description text.");
+}
+
 TEST_F(MetadataSidecarFixture, MetadataSidecarPathResolves) {
   EXPECT_EQ(Epub::metadataSidecarPath(bookPath.string()), "");
   writeSidecar(sidecarXml("T", "A"));
