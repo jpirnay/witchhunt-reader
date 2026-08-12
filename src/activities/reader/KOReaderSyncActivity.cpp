@@ -666,17 +666,31 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
     sync.resultListItemIndex = 0;
     sync.resultHasListItemIndex = false;
   }
-  // Capture where this session wants to land before clearing it — Reader/Home/OpenBook all
-  // resolve their destination below (and, for the real reboot path, in onExit()) using this
-  // captured copy, so nothing needs to survive past this function for them. OpdsSearch is the
-  // exception: it's resolved by HomeActivity after the reboot, so its fields are left in the
-  // persisted session instead of being cleared here.
+  // Capture the destination before touching the session, since onExit() still needs it after the
+  // reboot decision. What may be cleared here depends entirely on who consumes the session next:
+  //
+  //  - Reader: the reopened reader is the consumer. applyPendingSyncSession() reads active,
+  //    epubPath and the result fields to move the user to the position Apply just resolved.
+  //    Clearing here throws that away and the book reopens exactly where it was, which looks
+  //    from the outside like Apply silently doing nothing.
+  //  - OpdsSearch: HomeActivity consumes postActionTarget after the reboot, so only `active`
+  //    is dropped and the rest is left in place for it.
+  //  - Home / OpenBook: nobody applies a result (Home has no reader; OpenBook opens a
+  //    different book, whose reader would reject this session on the epubPath check and leave
+  //    it lying around active). Clear it.
   postAction_ = sync.postAction;
   postActionTarget_ = sync.postActionTarget;
-  if (postAction_ == KOReaderSyncPostAction::OpdsSearch) {
-    sync.active = false;
-  } else {
-    sync.clear();
+  switch (postAction_) {
+    case KOReaderSyncPostAction::Reader:
+      break;
+    case KOReaderSyncPostAction::OpdsSearch:
+      sync.active = false;
+      break;
+    case KOReaderSyncPostAction::Home:
+    case KOReaderSyncPostAction::OpenBook:
+    default:
+      sync.clear();
+      break;
   }
   APP_STATE.saveToFile();
   logSyncMemSnapshot("before_resume_reader");
