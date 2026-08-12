@@ -106,7 +106,11 @@ class KOReaderSyncActivity final : public Activity {
   std::string localChapterLabel;
   std::optional<KOReaderMetadata> localDocumentMetadata;
 
-  // Selection in result screen (0=Apply, 1=Upload)
+  // Selection in the compare screen: 0=Apply remote, 1=Upload local, 2=conflict policy toggle.
+  // The policy row is not an action — confirming it flips the setting and returns the cursor to
+  // whichever of the two actions the new policy would pick.
+  static constexpr int OPTION_SYNC_BEHAVIOR = 2;
+  static constexpr int OPTION_COUNT = 3;
   int selectedOption = 0;
 
   // Timestamp when completion state was entered (for auto-close)

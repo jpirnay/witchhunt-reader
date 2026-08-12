@@ -783,6 +783,17 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + optionHeight, tr(STR_UPLOAD_LOCAL),
                       selectedOption != 1);
 
+    // Conflict policy. Offered here because this screen is the only place the choice is ever
+    // felt: a user who has just been asked is the one best placed to say "stop asking".
+    if (selectedOption == OPTION_SYNC_BEHAVIOR) {
+      renderer.fillRect(contentRect.x, optionY + 2 * optionHeight - 2, contentRect.width - 1, optionHeight);
+    }
+    char behaviorStr[96];
+    snprintf(behaviorStr, sizeof(behaviorStr), "%s: %s", tr(STR_KO_SYNC_CONFLICT),
+             smartSyncEnabled() ? tr(STR_KO_SMART_SYNC) : tr(STR_KO_ASK_EVERY_TIME));
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + 2 * optionHeight, behaviorStr,
+                      selectedOption != OPTION_SYNC_BEHAVIOR);
+
     // Bottom button hints
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -976,18 +987,33 @@ void KOReaderSyncActivity::loop() {
   }
 
   if (state == SHOWING_RESULT) {
-    // Navigate options
+    // Navigate options. Up and Down previously both advanced, which was invisible with two rows
+    // and wrong as soon as a third existed.
     if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
         mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-      selectedOption = (selectedOption + 1) % 2;  // Wrap around among 2 options
+      selectedOption = (selectedOption + OPTION_COUNT - 1) % OPTION_COUNT;
       requestUpdate();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) ||
                mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-      selectedOption = (selectedOption + 1) % 2;  // Wrap around among 2 options
+      selectedOption = (selectedOption + 1) % OPTION_COUNT;
       requestUpdate();
     }
 
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (selectedOption == OPTION_SYNC_BEHAVIOR) {
+        const bool nowSmart = !smartSyncEnabled();
+        KOREADER_STORE.setSyncBehavior(nowSmart ? KOReaderSyncBehavior::SMART : KOReaderSyncBehavior::ASK_EVERY_TIME);
+        KOREADER_STORE.saveToFile();
+        // Leave the cursor on an actionable row rather than the toggle, and put it on the row
+        // the new policy would have chosen — which both avoids a second Confirm toggling straight
+        // back and shows what "use furthest" actually resolves to for this book.
+        {
+          RenderLock lock(*this);
+          selectedOption = compareLocalToRemote() > 0 ? 1 : 0;
+        }
+        requestUpdate();
+        return;
+      }
       if (selectedOption == 0) {
         if (!ensureRemotePositionMapped()) {
           {
