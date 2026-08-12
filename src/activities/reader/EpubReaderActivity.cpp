@@ -803,9 +803,13 @@ void EpubReaderActivity::loop() {
         lastPageIndex = std::max(0, section->pageCount - 1);
       }
       writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, lastPageIndex, lastPageCount, 100);
+      finishedBookSyncSpineIndex_ = lastSpineIndex;
+      finishedBookSyncPage_ = lastPageIndex;
+      finishedBookSyncPageCount_ = lastPageCount;
 
       BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, epub->getPath(), epub->getSeries(),
-                                           epub->getSeriesIndex(), epub->getAuthor());
+                                           epub->getSeriesIndex(), epub->getAuthor(), nullptr, nullptr,
+                                           &EpubReaderActivity::onFinishedBookSyncRequested, this);
     } else {
       currentSpineIndex = epub->getSpineItemsCount() - 1;
       navTarget = NavigationTarget::makeLastPage();
@@ -1833,9 +1837,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         } else {
           writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
         }
+        finishedBookSyncSpineIndex_ = lastSpineIndex;
+        finishedBookSyncPage_ = lastPageCount > 0 ? lastPageIndex : 0;
+        finishedBookSyncPageCount_ = lastPageCount;
       }
       BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, epub->getPath(), epub->getSeries(),
-                                           epub->getSeriesIndex(), epub->getAuthor());
+                                           epub->getSeriesIndex(), epub->getAuthor(), nullptr, nullptr,
+                                           &EpubReaderActivity::onFinishedBookSyncRequested, this);
       return;
     }
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
@@ -2821,10 +2829,14 @@ void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spin
   finishedBookActivityStarted_ = true;
   const int lastSpineIndex = std::max(0, spineCount - 1);
   writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, 0, 0, 100);
+  finishedBookSyncSpineIndex_ = lastSpineIndex;
+  finishedBookSyncPage_ = 0;
+  finishedBookSyncPageCount_ = 0;
   lock.unlock();
   BookFinished::launchFinishedBookFlow(
       *this, renderer, mappedInput, epub->getPath(), epub->getSeries(), epub->getSeriesIndex(), epub->getAuthor(),
-      [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this);
+      [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this,
+      &EpubReaderActivity::onFinishedBookSyncRequested, this);
 }
 
 bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {

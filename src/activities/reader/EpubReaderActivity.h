@@ -16,6 +16,7 @@
 #include <atomic>
 
 #include "BookmarkStore.h"
+#include "CrossPointState.h"
 #include "EpubReaderMenuActivity.h"
 #include "ReaderUtils.h"
 #include "activities/Activity.h"
@@ -32,6 +33,37 @@ class EpubReaderActivity final : public Activity {
     PULL_REMOTE,
     PUSH_LOCAL,
     AUTO_PUSH,
+  };
+
+  // Explicit spine/page/path override for launchKOReaderSync(), used when pushing progress from
+  // the finished-book flow: by the time that flow runs, currentSpineIndex already points past the
+  // last spine (see classifyRenderPass()'s FinishedBook check / the RowModel::Action::OpenNext
+  // handler at end-of-book), so the live currentSpineIndex/section state no longer describes a
+  // position to sync. Callers pass the last valid spine/page/pageCount they already computed
+  // for the progress.bin write at finish. No paragraph/XPath hint is available for this
+  // position, so mapping falls back to the same percentage-based estimate used for any position
+  // without a LUT match — see docs/contributing/koreader-synchronization.md.
+  // bookPath overrides epub->getPath(): the finished-book flow may have already moved the file to
+  // /COMPLETED (SETTINGS.moveFinishedBooksToCompleted) before requesting the sync, and the live
+  // `epub` object's path member does not follow a rename made outside of it. Empty means
+  // "use epub->getPath() as before".
+  struct SyncPositionOverride {
+    int spineIndex;
+    int page;
+    int pageCount;
+    std::string bookPath;
+  };
+
+  // Where launchKOReaderSync() should land once the sync (and the reboot it triggers to reclaim
+  // WiFi-session heap fragmentation) completes — see KOReaderSyncPostAction in CrossPointState.h.
+  // `target` is the book path (OpenBook) or OPDS author (OpdsSearch); unused otherwise. Deliberately
+  // no default member initializer on `action` (KOReaderSyncPostAction::Reader == 0 covers it via
+  // plain value-init) — one triggers a "required before the end of its enclosing class" error from
+  // launchKOReaderSync()'s own `= SyncPostAction()` default argument, since that argument appears
+  // textually before EpubReaderActivity (the enclosing class of this nested struct) is complete.
+  struct SyncPostAction {
+    KOReaderSyncPostAction action;
+    std::string target;
   };
 
   // Encodes pending navigation intent — where to land once the target section is loaded.
@@ -463,6 +495,11 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool finishedBookActivityStarted_ = false;
+  // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
+  // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
+  int finishedBookSyncSpineIndex_ = 0;
+  int finishedBookSyncPage_ = 0;
+  int finishedBookSyncPageCount_ = 0;
   ReaderUtils::InputDrainGuard inputDrainGuard;
   bool automaticPageTurnActive = false;
   // Pages turned in the current reader session. Used to gate auto-push-on-close: a brief
@@ -677,10 +714,25 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
-  void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE);
+  void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
+                          const SyncPositionOverride* positionOverride = nullptr,
+                          const SyncPostAction& postAction = {});
+  // BookFinished::launchFinishedBookFlow callback trampoline (plain fn ptr + ctx, per the
+  // project's std::function-avoidance convention): pushes finishedBookSync{SpineIndex,Page,
+  // PageCount}_ (stashed by the three call sites right before launchFinishedBookFlow, from the
+  // same values they write to progress.bin) to the KOReader sync server, landing on whichever
+  // destination the finished-book flow resolved (the toggle composes with Go Home / Open Next /
+  // Search OPDS rather than replacing them, so `bookPath` may already be the moved-to-/COMPLETED
+  // path and `postAction`/`target` may point at the next book or an OPDS author search).
+  // Returns false when it cannot run (no credentials, or no live Epub to read a position from),
+  // which tells launchFinishedBookFlow to perform the picked action itself rather than leave the
+  // user on a screen where nothing happened.
+  static bool onFinishedBookSyncRequested(void* ctx, const std::string& bookPath, KOReaderSyncPostAction postAction,
+                                          const std::string& target);
   // Reader-close auto-push gate. Returns true if AUTO_PUSH was launched (the caller
   // must not perform its own exit — the sync activity will route to home on completion).
-  // Returns false when any of the gates fails (setting off, no credentials, < 3 pages),
+  // Returns false when any of the gates fails (setting off, no credentials, fewer pages read
+  // this session than SETTINGS.koSyncMinSessionPages),
   // letting the caller take its normal exit path.
   bool tryAutoPushOnClose();
   // Consume a persisted standalone KOReader sync session for this EPUB. Remote

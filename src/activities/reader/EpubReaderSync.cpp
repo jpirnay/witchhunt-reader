@@ -28,13 +28,33 @@ inline void logReaderMemSnapshot(const char*) {}
 #endif
 }  // namespace
 
-void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
+void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const SyncPositionOverride* positionOverride,
+                                            const SyncPostAction& postAction) {
   if (!epub) {
     return;
   }
 
-  const int currentPage = section ? section->currentPage : 0;
-  const int totalPages = section ? section->pageCount : 0;
+  int currentPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
+  int totalPages = positionOverride ? positionOverride->pageCount : (section ? section->pageCount : 0);
+
+  // An override only ever comes from the finished-book flow, so it always means "the reader
+  // reached the end of this book". Its call sites can usually say which page that was, but not
+  // when there is no live section left to ask (renderFinishedBookPass, and the guarded fallbacks
+  // in the other two), and they then hand over 0/0 — the same end-of-book sentinel they write to
+  // progress.bin, where a page count of zero plus 100% is understood locally as "finished".
+  //
+  // ProgressMapper does not read it that way. It derives intra-spine progress as
+  // page / (pageCount - 1), so 0/0 becomes 0.0 and the upload describes the START of the final
+  // chapter. Field log of exactly that: a book finished at "Chapter 20, Page 4 (100%)" went up as
+  // "spine=20 progress=0.000 -> /body/DocFragment[21]/body/p[1]/span[1]/b[1]", 98.85%.
+  //
+  // Any pair with page == pageCount - 1 encodes "the end of this spine", which is what finishing
+  // the book means, so use the smallest one.
+  if (positionOverride && totalPages <= 0) {
+    currentPage = 1;
+    totalPages = 2;
+    LOG_DBG("ERS", "Finished-book sync has no page count; syncing the end of spine %d", positionOverride->spineIndex);
+  }
   KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE;
   if (mode == SyncLaunchMode::PULL_REMOTE) {
     syncIntent = KOReaderSyncIntentState::PULL_REMOTE;
@@ -46,12 +66,14 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
 
   auto& sync = APP_STATE.koReaderSyncSession;
   sync.active = true;
-  sync.epubPath = epub->getPath();
-  sync.spineIndex = currentSpineIndex;
+  sync.epubPath =
+      (positionOverride && !positionOverride->bookPath.empty()) ? positionOverride->bookPath : epub->getPath();
+  sync.spineIndex = positionOverride ? positionOverride->spineIndex : currentSpineIndex;
   sync.page = currentPage;
   sync.totalPagesInSpine = totalPages;
-  // Populate paragraph index and XHTML seek hint from section LUT if available.
-  if (section) {
+  // Populate paragraph index and XHTML seek hint from section LUT if available. Not applicable
+  // (and not attempted) for an overridden position — see the SyncPositionOverride comment.
+  if (section && !positionOverride) {
     if (const auto pIdx = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage))) {
       sync.paragraphIndex = *pIdx;
       sync.hasParagraphIndex = true;
@@ -76,28 +98,56 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode) {
   sync.resultPage = 0;
   sync.resultParagraphIndex = 0;
   sync.resultHasParagraphIndex = false;
-  // Only auto-push-on-close should bypass the reader on resume; explicit syncs from the
-  // reader menu always come back to the reader. Reset here so a stale flag from a prior
-  // run cannot steal the user back to home.
-  sync.exitToHomeAfterSync = (mode == SyncLaunchMode::AUTO_PUSH);
+  // Reset here (rather than trusting whatever the struct already held) so a stale destination
+  // from a prior run cannot steal the user to the wrong place; every caller states what it wants,
+  // defaulting to Reader (the pre-existing behavior for reader-menu-triggered syncs).
+  sync.postAction = postAction.action;
+  sync.postActionTarget = postAction.target;
   APP_STATE.saveToFile();
 
-  LOG_DBG("ERS", "Standalone sync handoff: spine=%d page=%d/%d", currentSpineIndex, currentPage, totalPages);
+  LOG_DBG("ERS", "Standalone sync handoff: spine=%d page=%d/%d", sync.spineIndex, currentPage, totalPages);
   logReaderMemSnapshot("before_replace_with_sync");
   activityManager.goToKOReaderSync();
 }
 
+bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::string& bookPath,
+                                                     const KOReaderSyncPostAction postAction,
+                                                     const std::string& target) {
+  auto* self = static_cast<EpubReaderActivity*>(ctx);
+  if (!KOREADER_STORE.hasCredentials()) {
+    LOG_DBG("ERS", "Finished-book sync requested without credentials; leaving navigation to the caller");
+    return false;
+  }
+  // launchKOReaderSync() silently does nothing without a live Epub, and since the sync path
+  // replaces the finished-book flow's own navigation, that would strand the user. Check the same
+  // condition here so the caller can fall back instead.
+  if (!self->epub) {
+    LOG_ERR("ERS", "Finished-book sync requested with no Epub loaded; leaving navigation to the caller");
+    return false;
+  }
+  const SyncPositionOverride position{self->finishedBookSyncSpineIndex_, self->finishedBookSyncPage_,
+                                      self->finishedBookSyncPageCount_, bookPath};
+  self->launchKOReaderSync(SyncLaunchMode::PUSH_LOCAL, &position, {postAction, target});
+  return true;
+}
+
 bool EpubReaderActivity::tryAutoPushOnClose() {
-  // Three-page minimum filters out brief inspections — opening to check the cover or
-  // skim the TOC shouldn't burn a network round-trip. Counter is per-activity-instance.
-  constexpr int MIN_SESSION_PAGES = 3;
+  // A page minimum filters out brief inspections — opening to check the cover or skim the TOC
+  // shouldn't burn a network round-trip. Counter is per-activity-instance. The threshold is a
+  // user setting because what counts as "a real session" differs between someone reading a
+  // couple of pages at a time and someone reading in long sittings.
   if (!SETTINGS.koSyncOnBookClose) {
     return false;
   }
   if (!KOREADER_STORE.hasCredentials()) {
     return false;
   }
-  if (sessionPagesAdvanced < MIN_SESSION_PAGES) {
+  // Zero is a real setting here, shown as "Always": no minimum, so even a session that turned no
+  // pages pushes. That is not pointless — jumping via the TOC and closing moves the position
+  // without a single page turn.
+  const int minSessionPages = SETTINGS.koSyncMinSessionPages;
+  if (sessionPagesAdvanced < minSessionPages) {
+    LOG_DBG("ERS", "Skipping AUTO_PUSH: %d pages this session, threshold is %d", sessionPagesAdvanced, minSessionPages);
     return false;
   }
   if (!epub) {
@@ -111,8 +161,8 @@ bool EpubReaderActivity::tryAutoPushOnClose() {
     return false;
   }
 
-  // exitToHomeAfterSync flag is set inside launchKOReaderSync for AUTO_PUSH mode.
-  launchKOReaderSync(SyncLaunchMode::AUTO_PUSH);
+  // Reader-close auto-push has no reader session left to return to once it completes.
+  launchKOReaderSync(SyncLaunchMode::AUTO_PUSH, nullptr, {KOReaderSyncPostAction::Home, {}});
   return true;
 }
 

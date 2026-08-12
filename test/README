@@ -18,3 +18,49 @@ Shell-script based tests (suites that cannot be built with the host CMake
 toolchain due to embedded-only dependencies):
 
   bash test/run_epub_css_test.sh
+
+KOReader sync (lib/KOReaderSync) is esp_http_client-based and cannot be built
+by this toolchain either. It is covered instead by a pair of offline scripts.
+No credentials, no accounts, no third-party server is ever contacted.
+
+  # Every server dialect, end to end against a local mock.
+  python scripts/kosync_conformance.py
+
+  # Mapping table only; opens no sockets.
+  python scripts/kosync_conformance.py --self-test
+
+scripts/kosync_mock_server.py impersonates the dialects the client has to cope
+with -- the reference kosync server, Spring-based services like BookLore that
+answer a PUT with 201/204 (crosspoint-reader #2876), bodiless 204s, disabled
+registration, a captive portal serving HTML with 200, and a redirecting proxy.
+The conformance runner spawns one per dialect and asserts the client's
+status -> Error mapping comes out right for each.
+
+To exercise the real C++ client rather than the Python mirror of it, run the
+mock on the LAN and point a device at it -- plain HTTP, no TLS, no account:
+
+  python scripts/kosync_mock_server.py --dialect spring --host 0.0.0.0 --port 8080
+  # device: Settings -> System -> KOReader Sync -> Sync Server URL
+  #         http://<your-lan-ip>:8080   (any username/password is accepted)
+
+Every request is logged, so this doubles as a way to see exactly what the
+firmware puts on the wire.
+
+--preload-document stages the cross-method case, which is device-side logic
+the conformance runner cannot reach. KOReader defaults to binary document
+matching and we default to filename, so two devices on their defaults compute
+different ids for the same book. Seed the book's BINARY id, leave the device on
+filename matching, and its lookup should miss, probe the binary id, find the
+record and adopt it -- persisting the choice so later syncs skip the probe and
+upload to the id the other device actually reads:
+
+  python scripts/kosync_mock_server.py --host 0.0.0.0 --port 8080 \
+      --preload-document <binary-id-of-the-book>
+
+The device logs both ids ("Document hash (filename): ...", then "probing the
+binary id ..."). The learned choice lands in
+/.crosspoint/epub_<hash>/koreader_syncmethod.txt on the SD card; delete that
+file to re-run the experiment from scratch.
+
+The mapping table in the conformance runner is a hand transcription of
+KOReaderSyncClient.cpp; there is no automatic link, so change both together.

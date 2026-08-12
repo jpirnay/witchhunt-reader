@@ -114,7 +114,8 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   sync["resultHasParagraphIndex"] = s.koReaderSyncSession.resultHasParagraphIndex;
   sync["resultListItemIndex"] = s.koReaderSyncSession.resultListItemIndex;
   sync["resultHasListItemIndex"] = s.koReaderSyncSession.resultHasListItemIndex;
-  sync["exitToHomeAfterSync"] = s.koReaderSyncSession.exitToHomeAfterSync;
+  sync["postAction"] = static_cast<uint8_t>(s.koReaderSyncSession.postAction);
+  sync["postActionTarget"] = s.koReaderSyncSession.postActionTarget;
   sync["autoPullEpubPath"] = s.koReaderSyncSession.autoPullEpubPath;
   // Information about a pending bookmark jump
   JsonObject jump = doc["pendingBookmarkJump"].to<JsonObject>();
@@ -175,7 +176,9 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.koReaderSyncSession.resultHasParagraphIndex = sync["resultHasParagraphIndex"] | false;
   s.koReaderSyncSession.resultListItemIndex = sync["resultListItemIndex"] | (uint16_t)0;
   s.koReaderSyncSession.resultHasListItemIndex = sync["resultHasListItemIndex"] | false;
-  s.koReaderSyncSession.exitToHomeAfterSync = sync["exitToHomeAfterSync"] | false;
+  s.koReaderSyncSession.postAction =
+      static_cast<KOReaderSyncPostAction>(sync["postAction"] | static_cast<uint8_t>(KOReaderSyncPostAction::Reader));
+  s.koReaderSyncSession.postActionTarget = sync["postActionTarget"] | std::string("");
   s.koReaderSyncSession.autoPullEpubPath = sync["autoPullEpubPath"] | std::string("");
   if (s.koReaderSyncSession.autoPullEpubPath.empty() && (sync["autoPullOnOpen"] | false)) {
     LOG_DBG("CPS", "Legacy autoPullOnOpen state found without epubPath - ignoring");
@@ -231,6 +234,8 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   }
   doc["moveFinishedBooksToCompleted"] = s.moveFinishedBooksToCompleted;
   doc["removeFinishedBooksFromRecents"] = s.removeFinishedBooksFromRecents;
+  doc["syncFinishedBookToKOReader"] = s.syncFinishedBookToKOReader;
+  doc["koSyncMinSessionPages"] = s.koSyncMinSessionPages;
   doc["sleepTimeoutMinutes"] = s.sleepTimeoutMinutes;
   doc["refreshFrequencyPages"] = s.refreshFrequencyPages;
 
@@ -388,6 +393,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.txtSdFontFamilyName[sizeof(s.txtSdFontFamilyName) - 1] = '\0';
   s.moveFinishedBooksToCompleted = doc["moveFinishedBooksToCompleted"] | (uint8_t)0;
   s.removeFinishedBooksFromRecents = doc["removeFinishedBooksFromRecents"] | (uint8_t)0;
+  s.syncFinishedBookToKOReader = doc["syncFinishedBookToKOReader"] | (uint8_t)0;
+  s.koSyncMinSessionPages = doc["koSyncMinSessionPages"] | (uint8_t)3;
 
   const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
   CrossPointSettings::normalizeDependentSettings(s);
@@ -407,6 +414,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["serverUrl"] = store.getServerUrl();
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
+  doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
 
   String json;
   serializeJson(doc, json);
@@ -444,6 +452,17 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
+
+  // A file written before this key existed belongs to someone already using the chooser.
+  // Default them to ASK_EVERY_TIME rather than the SMART the member initialiser carries, so
+  // an update never silently changes how their sync resolves; only fresh installs get SMART.
+  const JsonVariantConst behaviorValue = doc["syncBehavior"];
+  if (behaviorValue.isNull()) {
+    store.setSyncBehavior(KOReaderSyncBehavior::ASK_EVERY_TIME);
+    if (needsResave) *needsResave = true;
+  } else {
+    store.setSyncBehavior(static_cast<KOReaderSyncBehavior>(behaviorValue | (uint8_t)0));
+  }
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;

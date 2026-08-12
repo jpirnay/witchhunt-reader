@@ -8,6 +8,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SettingActionDispatch.h"
+#include "SliderSettingPicker.h"
 #include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -24,36 +25,14 @@ void SettingsSubmenuActivity::onActionSelected(int index) {
   if (setting.isSeparator) return;
 
   if (setting.type == SettingType::ACTION) {
-    if (setting.action == SettingAction::SleepTimeoutPicker ||
-        setting.action == SettingAction::RefreshFrequencyPicker) {
-      const bool isSleep = setting.action == SettingAction::SleepTimeoutPicker;
-      SliderPickerActivity::Config cfg;
-      if (isSleep) {
-        cfg = {.titleId = StrId::STR_TIME_TO_SLEEP,
-               .hintId = StrId::STR_SLIDER_STEP_HINT,
-               .minValue = 0,
-               .maxValue = 60,
-               .initialValue = SETTINGS.sleepTimeoutMinutes,
-               .suffix = tr(STR_MIN_SUFFIX),
-               .zeroLabel = tr(STR_NEVER)};
-      } else {
-        cfg = {.titleId = StrId::STR_REFRESH_FREQ,
-               .hintId = StrId::STR_SLIDER_STEP_HINT,
-               .minValue = 0,
-               .maxValue = 60,
-               .initialValue = SETTINGS.refreshFrequencyPages,
-               .suffix = tr(STR_PAGES_SUFFIX),
-               .zeroLabel = tr(STR_NEVER)};
-      }
-      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(cfg)),
-                             [this, isSleep](const ActivityResult& result) {
+    SliderPickerActivity::Config sliderCfg;
+    if (SliderSetting::configFor(setting.action, sliderCfg)) {
+      const SettingAction sliderAction = setting.action;
+      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(sliderCfg)),
+                             [this, sliderAction](const ActivityResult& result) {
                                if (!result.isCancelled) {
-                                 const auto* pr = std::get_if<PercentResult>(&result.data);
-                                 if (pr) {
-                                   if (isSleep)
-                                     SETTINGS.sleepTimeoutMinutes = static_cast<uint8_t>(pr->percent);
-                                   else
-                                     SETTINGS.refreshFrequencyPages = static_cast<uint8_t>(pr->percent);
+                                 if (const auto* pr = std::get_if<PercentResult>(&result.data)) {
+                                   SliderSetting::apply(sliderAction, static_cast<uint8_t>(pr->percent));
                                    SETTINGS.saveToFile();
                                  }
                                }

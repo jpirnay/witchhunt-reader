@@ -60,6 +60,14 @@ inline std::string getRefreshFrequencyDisplay(void*) {
   return std::to_string(v) + tr(STR_PAGES_SUFFIX);
 }
 
+inline std::string getKoSyncMinPagesDisplay(void*) {
+  const uint8_t v = SETTINGS.koSyncMinSessionPages;
+  // Zero is "Always", not "Never": it means no minimum, so every close pushes. Turning the
+  // feature off is the separate Auto-Push toggle.
+  if (v == 0) return std::string(tr(STR_ALWAYS));
+  return std::to_string(v) + tr(STR_PAGES_SUFFIX);
+}
+
 inline std::vector<SettingInfo> buildSettingsList() {
   // Shared button action options used by all button enum entries.
   const std::vector<StrId> btnActionOptions = {StrId::STR_BTN_ACT_PAGE_FORWARD,
@@ -441,8 +449,19 @@ inline std::vector<SettingInfo> buildSettingsList() {
         KOREADER_STORE.saveToFile();
       },
       "koMatchMethod", StrId::STR_KOREADER_SYNC));
+  settings.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_KO_SYNC_CONFLICT, {StrId::STR_KO_ASK_EVERY_TIME, StrId::STR_KO_SMART_SYNC},
+      [](const void*) -> uint8_t { return static_cast<uint8_t>(KOREADER_STORE.getSyncBehavior()); },
+      [](void*, uint8_t v) {
+        KOREADER_STORE.setSyncBehavior(static_cast<KOReaderSyncBehavior>(v));
+        KOREADER_STORE.saveToFile();
+      },
+      "koSyncBehavior", StrId::STR_KOREADER_SYNC));
   settings.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                          "koSyncOnBookClose", StrId::STR_KOREADER_SYNC));
+  settings.push_back(SettingInfo::Action(StrId::STR_KO_MIN_SESSION_PAGES, SettingAction::KOSyncMinPagesPicker)
+                         .withDisplayGetter(getKoSyncMinPagesDisplay)
+                         .withCategory(StrId::STR_KOREADER_SYNC));
   settings.push_back([]() {
     SettingInfo s;
     s.nameId = StrId::STR_SEND_METADATA;

@@ -271,7 +271,7 @@ void RecentBooksActivity::loop() {
       if (longPress && isEpubBook) {
         auto& sync = APP_STATE.koReaderSyncSession;
         sync.autoPullEpubPath = selectedPath;
-        sync.exitToHomeAfterSync = false;
+        sync.postAction = KOReaderSyncPostAction::Reader;
         APP_STATE.saveToFile();
       }
       openingBook = true;
