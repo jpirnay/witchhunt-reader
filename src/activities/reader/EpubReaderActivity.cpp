@@ -2654,10 +2654,8 @@ bool EpubReaderActivity::pageHasFootnoteShapedLink() const {
   // would cost a section-cache format bump for a flag nothing renders), so a noteref-tagged link
   // whose text is a word rather than a marker is invisible here. Such a book still gathers via
   // the build-slice trigger the first time one of its spines is actually built.
-  for (const auto& fn : currentPageFootnotes) {
-    if (FootnoteShape::isMarkerText(fn.number, strlen(fn.number))) return true;
-  }
-  return false;
+  return std::any_of(currentPageFootnotes.begin(), currentPageFootnotes.end(),
+                     [](const auto& fn) { return FootnoteShape::isMarkerText(fn.number, strlen(fn.number)); });
 }
 
 bool EpubReaderActivity::ensureFootnotePreviewCache() {
