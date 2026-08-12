@@ -1,0 +1,84 @@
+# Sidecar files
+
+A sidecar is a file sitting beside a book, sharing its name but with a different
+extension. The firmware prefers it over the equivalent data embedded in the book,
+so you can correct a cover or a title without rewriting the EPUB.
+
+```
+/Books/
+    Some Book.epub      the book
+    Some Book.jpg       cover sidecar     (optional)
+    Some Book.opf       metadata sidecar  (optional)
+```
+
+The rule is the same for both: **a sidecar wins over what is inside the book.**
+
+## Cover sidecar — `book.jpg`
+
+Recognised extensions, in this order: `.jpg`, `.jpeg`, `.png`, `.bmp` (and their
+uppercase forms). The first one found wins.
+
+When present it replaces the book's embedded cover on the home screen and in the
+book browser, and the firmware skips extracting the embedded cover entirely.
+Implemented by `ReaderActivity::sidecarCoverPath()`.
+
+## Metadata sidecar — `book.opf`
+
+A Calibre-style OPF. Calibre writes one beside every book it exports, so a
+library exported from Calibre already has these and needs no extra work.
+
+Fields taken from the sidecar, when non-empty:
+
+| Field | Source in the OPF |
+|---|---|
+| title | `<dc:title>` |
+| author | `<dc:creator>` |
+| language | `<dc:language>` |
+| series | `<meta name="calibre:series">` or `belongs-to-collection` |
+| series index | `<meta name="calibre:series_index">` or `group-position` |
+| description | `<dc:description>` |
+
+A minimal sidecar:
+
+```xml
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uuid_id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>The Title As You Want It Shown</dc:title>
+    <dc:creator opf:file-as="Lastname, First" opf:role="aut">First Lastname</dc:creator>
+    <meta name="calibre:series" content="Series Name"/>
+    <meta name="calibre:series_index" content="4"/>
+  </metadata>
+</package>
+```
+
+### Rules
+
+- **Empty fields are ignored.** A sidecar supplying only an author leaves the
+  book's own title alone, so a partial sidecar cannot blank out good metadata.
+- **Cover references are not taken from it.** `coverItemHref` points inside the
+  ZIP, which a sidecar cannot meaningfully supply — use a cover sidecar instead.
+- **Only metadata.** The spine, manifest and reading order always come from the
+  book itself. A sidecar cannot change what you read, only how it is labelled.
+- **A malformed or oversized sidecar is ignored**, and the book opens normally
+  with its embedded metadata. The cap is 16KB
+  (`Epub::MAX_METADATA_SIDECAR_BYTES`); a real Calibre OPF is a couple of KB.
+
+### When changes take effect
+
+Immediately — on the next time the book's metadata is loaded.
+
+The sidecar is deliberately **not** baked into the `book.bin` cache. That cache
+is only rebuilt when the EPUB's own bytes change, so a baked value would leave an
+edited sidecar silently ineffective. Instead the overlay is applied on every
+load, including the cached path (`Epub::applyMetadataSidecar()`). Cost when no
+sidecar exists is a single file-existence check.
+
+Deleting the sidecar restores the book's embedded metadata, again on next load.
+
+## Moving books
+
+A sidecar is tied to its book by filename, so **moving or renaming a book must
+carry its sidecars along** — otherwise the cover silently reverts to the embedded
+one and metadata corrections are lost. The bundled `organize-by-author` plugin
+does this; see [sd-plugins.md](sd-plugins.md).

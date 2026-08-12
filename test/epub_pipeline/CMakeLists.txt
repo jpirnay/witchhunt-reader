@@ -86,6 +86,7 @@ set(PIPELINE_INCLUDES
 add_executable(EpubPipelineTest
   EpubPipelineTest.cpp
   FingerprintTest.cpp
+  MetadataSidecarTest.cpp
   SectionAbortTest.cpp
   ${PIPELINE_SOURCES}
 )

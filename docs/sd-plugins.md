@@ -117,8 +117,10 @@ Prefer `opf:file-as` over the element text when deriving a folder name - that is
 the sortable form, and what Calibre's own author folders use.
 
 This mirrors the existing cover-sidecar rule, and the same priority applies:
-sidecar wins over what is embedded in the book. Note the firmware itself does
-not read `book.opf` today; this is a convention between plugins for now.
+sidecar wins over what is embedded in the book. **The firmware reads it too** -
+the title, author and series shown on the device come from `book.opf` when one
+is present, so a plugin writing one changes what the reader displays. See
+[sidecar-files.md](sidecar-files.md) for the device-side rules.
 
 ## Bundled plugins
 

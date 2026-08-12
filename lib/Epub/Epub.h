@@ -104,6 +104,13 @@ class Epub {
   bool readStoredFingerprint(uint64_t* out) const;
   void writeStoredFingerprint(uint64_t fp) const;
 
+  // Overlay a "<book>.opf" metadata sidecar onto the loaded coreMetadata, if one
+  // exists. Called from every load path once coreMetadata is final — including
+  // the cached ones, which is the point: the sidecar is never baked into
+  // book.bin, so editing it takes effect on the next open rather than waiting
+  // for the EPUB's own bytes to change. Cheap when absent (one Storage.exists).
+  void applyMetadataSidecar() const;
+
  public:
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
     // create a cache key based on the filepath
@@ -139,6 +146,16 @@ class Epub {
   // cache is missing. Cheap (only file-existence checks) so callers can decide
   // whether to show a progress popup before calling load().
   bool needsFirstOpenIndexing() const;
+
+  // Path of the Calibre-style metadata sidecar for a book ("/Books/x.epub" ->
+  // "/Books/x.opf"), or "" when there is none. Mirrors
+  // ReaderActivity::sidecarCoverPath, and the same rule applies: a file beside
+  // the book wins over what is embedded in it.
+  static std::string metadataSidecarPath(const std::string& bookPath);
+  // Sidecars above this are treated as not-a-metadata-file and ignored. A
+  // Calibre metadata OPF is a couple of KB; the cap stops a stray large file
+  // sharing the book's basename from being read into the heap.
+  static constexpr size_t MAX_METADATA_SIDECAR_BYTES = 16384;
 
   bool clearCache(bool preserveThumbs = false) const;
   void setupCacheDir() const;

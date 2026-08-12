@@ -132,6 +132,21 @@ class HalStorage {
   bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
   bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
   bool exists(const char* path) { return std::filesystem::exists(path); }
+  // Mirrors the device HalStorage: stream a whole file into a Print sink in
+  // chunks. Epub::applyMetadataSidecar() feeds ContentOpfParser through this,
+  // so the host pipeline exercises the same code path the device runs.
+  bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256) {
+    HalFile f;
+    if (!f.openForRead(path)) return false;
+    std::vector<uint8_t> buf(chunkSize ? chunkSize : 256);
+    for (;;) {
+      const int n = f.read(buf.data(), buf.size());
+      if (n < 0) return false;
+      if (n == 0) break;
+      if (out.write(buf.data(), static_cast<size_t>(n)) != static_cast<size_t>(n)) return false;
+    }
+    return true;
+  }
   bool mkdir(const char* path, bool recursive = true) {
     std::error_code ec;
     return recursive ? std::filesystem::create_directories(path, ec) : std::filesystem::create_directory(path, ec);
