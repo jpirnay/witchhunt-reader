@@ -339,11 +339,14 @@ KOReaderSyncClient::Error KOReaderSyncClient::registerUser() {
 
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
 
-  if (httpCode == 201) {
-    return OK;
-  } else if (httpCode == 200) {
+  if (httpCode == 200) {
     // Some server implementations return 200 when the user already exists
     return USER_EXISTS;
+  } else if (httpCode >= 200 && httpCode < 300) {
+    // Any other 2xx means the account was created. The reference kosync server
+    // answers 201, but KOSync-compatible implementations differ (BookLore/grimmory
+    // is a Spring service and uses the idiomatic 204).
+    return OK;
   } else if (httpCode == 402) {
     // Both "user already exists" (error 2002) and "registration disabled" (error 2005)
     // return HTTP 402 on the original kosync server. Distinguish them by body text.
@@ -380,9 +383,12 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
 
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
-  if (httpCode == 200) {
-    // Guard against a reverse proxy or captive portal returning HTTP 200 + HTML.
-    if (responseBody.empty() || *skipBomAndWhitespace(responseBody.c_str()) != '{') {
+  if (httpCode >= 200 && httpCode < 300) {
+    // Guard against a reverse proxy or captive portal returning 2xx + HTML.
+    // 204/205 are legitimately bodiless, so they skip the guard; every other 2xx
+    // must carry a JSON object, which is what the reference server sends on 200.
+    if (httpCode != 204 && httpCode != 205 &&
+        (responseBody.empty() || *skipBomAndWhitespace(responseBody.c_str()) != '{')) {
       return INVALID_RESPONSE;
     }
     return OK;
@@ -447,7 +453,16 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
 
-  if (httpCode == 200 && !responseBody.empty()) {
+  if (httpCode >= 200 && httpCode < 300) {
+    // A bodiless 2xx means the server has no stored progress for this document:
+    // Spring-based KOSync implementations answer 204 where the reference server
+    // answers 200 with an empty object. Both belong on the same graceful
+    // no-remote-progress path as 404, not in SERVER_ERROR.
+    if (responseBody.empty()) {
+      LOG_INF("KOSync", "HTTP %d with no body — treating as not found", httpCode);
+      return NOT_FOUND;
+    }
+
     JsonDocument doc;
     const DeserializationError error = deserializeJson(doc, responseBody);
 
@@ -560,8 +575,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
 
   if (err != ESP_OK) return NETWORK_ERROR;
   if (httpCode >= 300 && httpCode < 400) return REDIRECT_ERROR;
-  if (httpCode == 200 || httpCode == 202) {
-    // Guard against a reverse proxy or captive portal returning HTTP 200 + HTML.
+  if (httpCode >= 200 && httpCode < 300) {
+    // Guard against a reverse proxy or captive portal returning 2xx + HTML.
     if (!responseBody.empty()) {
       const char c = *skipBomAndWhitespace(responseBody.c_str());
       if (c != '\0' && c != '{') {
@@ -602,9 +617,9 @@ const char* KOReaderSyncClient::lastFailureDetail() {
     }
     return g_failureDetailBuf;
   }
-  // Invalid-response case: HTTP 200/202 but body was not JSON (e.g. captive portal HTML).
+  // Invalid-response case: a 2xx whose body was not JSON (e.g. captive portal HTML).
   // On real success callers never reach lastFailureDetail(), so a 2xx here means INVALID_RESPONSE.
-  if ((lastHttpCode == 200 || lastHttpCode == 202) && lastEspError == ESP_OK) {
+  if (lastHttpCode >= 200 && lastHttpCode < 300 && lastEspError == ESP_OK) {
     snprintf(g_failureDetailBuf, sizeof(g_failureDetailBuf),
              "%s: expected JSON but received HTML (captive portal or proxy?)", lastOperation);
     return g_failureDetailBuf;
