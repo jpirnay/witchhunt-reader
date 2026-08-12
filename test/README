@@ -18,3 +18,23 @@ Shell-script based tests (suites that cannot be built with the host CMake
 toolchain due to embedded-only dependencies):
 
   bash test/run_epub_css_test.sh
+
+KOReader sync (lib/KOReaderSync) is esp_http_client-based and cannot be built
+by this toolchain either. It is covered instead by a conformance harness that
+speaks the firmware's exact wire format to a live KOSync server:
+
+  # Offline. No network, no account -- pins the status -> Error mapping table.
+  python scripts/kosync_conformance.py --self-test
+
+  # Online. Auth + progress round-trip against a real server.
+  python scripts/kosync_conformance.py --server https://sync.koreader.rocks \
+      --user NAME --password PASS
+
+The default online run creates no account and writes progress only under a
+fixed, namespaced test document id. Account registration is opt-in behind
+--check-register-existing (one create attempt for an account you already own)
+and --allow-create-user (creates one, requires an explicit fixed username).
+See the module docstring for why those are gated.
+
+The mapping table in the harness is a hand transcription of
+KOReaderSyncClient.cpp; there is no automatic link, so change both together.
