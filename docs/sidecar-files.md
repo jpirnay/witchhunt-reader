@@ -38,6 +38,11 @@ Fields taken from the sidecar, when non-empty:
 | series index | `<meta name="calibre:series_index">` or `group-position` |
 | description | `<dc:description>` |
 
+The bundled `metadata-editor` plugin writes these from the web UI, so you do not
+have to hand-edit XML — see [sd-plugins.md](sd-plugins.md). It edits an existing
+sidecar in place rather than regenerating it, so publisher, identifiers, dates
+and other fields it does not manage survive untouched.
+
 A minimal sidecar:
 
 ```xml
@@ -80,5 +85,21 @@ Deleting the sidecar restores the book's embedded metadata, again on next load.
 
 A sidecar is tied to its book by filename, so **moving or renaming a book must
 carry its sidecars along** — otherwise the cover silently reverts to the embedded
-one and metadata corrections are lost. The bundled `organize-by-author` plugin
-does this; see [sd-plugins.md](sd-plugins.md).
+one and metadata corrections are lost.
+
+Who does this today:
+
+- **Move to `/COMPLETED`** (the optional finished-book action) moves the book
+  and every sidecar, resolving name collisions for each
+  (`moveSidecarFilesToCompleted`).
+- **The `organize-by-author` plugin** moves sidecars with the book — see
+  [sd-plugins.md](sd-plugins.md).
+- **Manual moves** through the web File Manager or a script are your own
+  responsibility: move `book.epub`, `book.jpg` and `book.opf` together.
+
+If you add another sidecar type, three places need to agree on what counts as
+one: `ReaderActivity::sidecarCoverPath` (images), `Epub::metadataSidecarPath`
+(`.opf`), and the extension list in `moveSidecarFilesToCompleted`.
+
+Deleting a book does **not** currently delete its sidecars; they are left behind
+as harmless orphans.

@@ -137,7 +137,12 @@ bool moveSidecarFilesToCompleted(const std::string& currentBookPath, const std::
 
   const std::string srcBase = currentBookPath.substr(0, srcDot);
   const std::string dstBase = targetBookPath.substr(0, dstDot);
-  const char* extensions[] = {".bmp", ".jpg", ".jpeg", ".png", ".BMP", ".JPG", ".JPEG", ".PNG"};
+  // A sidecar is bound to its book by filename, so every one of them has to
+  // travel with it - a book that arrives in /COMPLETED without its sidecars
+  // silently loses its cover and reverts to the metadata embedded in the EPUB.
+  // Keep in step with the two resolvers that decide what counts as a sidecar:
+  // ReaderActivity::sidecarCoverPath (images) and Epub::metadataSidecarPath (.opf).
+  const char* extensions[] = {".bmp", ".jpg", ".jpeg", ".png", ".opf", ".BMP", ".JPG", ".JPEG", ".PNG", ".OPF"};
   bool success = true;
   for (const char* ext : extensions) {
     const std::string srcSidecar = srcBase + ext;
