@@ -25,6 +25,11 @@ class HalStorage {
   bool readFileToStream(const char* path, Print& out, size_t chunkSize = 256);
   // Read up to `bufferSize-1` bytes into `buffer`, null-terminating it. Returns bytes read.
   size_t readFileToBuffer(const char* path, char* buffer, size_t bufferSize, size_t maxBytes = 0);
+  // Read the whole file at `path` into `out`. Unlike readFile(), the size is
+  // checked against `cap` before anything is allocated, so an unexpectedly
+  // large file fails instead of claiming the heap. Fails on missing,
+  // directory, empty, above-`cap` and short-read files.
+  bool readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out);
   // Write a string to `path` on the SD card. Overwrites existing file.
   // Returns true on success.
   bool writeFile(const char* path, const String& content);

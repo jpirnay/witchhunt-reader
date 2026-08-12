@@ -89,6 +89,22 @@ size_t HalStorage::readFileToBuffer(const char* path, char* buffer, size_t buffe
   HAL_STORAGE_WRAPPED_CALL(readFileToBuffer, path, buffer, bufferSize, maxBytes);
 }
 
+// Ported verbatim from crosspoint-reader PR #2734 by Justin Mitchell
+// (@itsthisjustin).
+//
+// Composed of already-locked HalStorage/HalFile operations, so it takes no
+// StorageLock of its own - doing so would deadlock on the non-recursive mutex.
+bool HalStorage::readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out) {
+  out.clear();
+  HalFile file;
+  if (!openFileForRead(moduleName, path, file)) return false;
+  if (file.isDirectory()) return false;
+  const size_t size = file.fileSize();
+  if (size == 0 || size > cap) return false;
+  out.resize(size);
+  return file.read(out.data(), size) == static_cast<int>(size);
+}
+
 bool HalStorage::writeFile(const char* path, const String& content) {
   HAL_STORAGE_WRAPPED_CALL(writeFile, path, content);
 }

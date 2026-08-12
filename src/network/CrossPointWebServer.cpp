@@ -37,6 +37,7 @@
 #include "html/WelcomePageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 #include "network/HttpDownloader.h"
+#include "util/PluginLocations.h"
 
 // Log free heap + max contiguous block at a named point.
 #define LOG_WEB_MEM(tag)                                                                             \
@@ -178,6 +179,27 @@ bool isProtectedItemName(const String& name) {
   }
   return false;
 }
+
+// True when `s` is usable as a single path component: no separator and no
+// parent reference, so it cannot escape the folder it is joined to. Rejecting
+// "/" outright also means plugin folders are flat - no subdirectories.
+bool isSafePathComponent(const String& s) {
+  return !s.isEmpty() && s.indexOf('/') < 0 && s.indexOf('\\') < 0 && s.indexOf("..") < 0;
+}
+
+const char* pluginContentType(const String& file) {
+  if (file.endsWith(".js")) return "application/javascript";
+  if (file.endsWith(".css")) return "text/css";
+  if (file.endsWith(".html")) return "text/html";
+  if (file.endsWith(".json")) return "application/json";
+  if (file.endsWith(".svg")) return "image/svg+xml";
+  return "application/octet-stream";
+}
+
+// A manifest carries a title and a mount point. The cap keeps a stray large
+// file in a plugin folder from being read into the heap; 4KB is far more than
+// the handful of fields the format defines.
+constexpr size_t PLUGIN_MANIFEST_MAX_BYTES = 4096;
 }  // namespace
 
 // File listing page template - now using generated headers:
@@ -278,6 +300,10 @@ void CrossPointWebServer::begin() {
   server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
 
   // Wi-Fi credential endpoints
+  // Web-UI plugins (SD card)
+  server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
+  server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
+
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
   server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
@@ -2625,6 +2651,100 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
   }
   LOG_DBG("WEB", "Deleted OPDS server at index %d", idx);
   server->send(200, "text/plain", "OK");
+}
+
+// GET /api/plugins -> [{"name","title","mount"}, ...]
+// Only folders carrying a plugin.js are listed, since the page's whole job is
+// to load that file; manifest.json just supplies the label and mount point.
+// Streamed rather than assembled: a JsonDocument holding every entry plus a
+// manifest string each would be the largest allocation on this path.
+void CrossPointWebServer::handlePluginList() const {
+  if (rejectIfLowMemory(server.get())) return;
+
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  ChunkedJsonArray out(server.get());
+
+  char output[384];
+  JsonDocument doc;
+  size_t listed = 0;
+
+  for (const auto& e : PluginLocations::scanPlugins()) {
+    if (!e.hasPluginJs) continue;
+
+    doc.clear();
+    doc["name"] = e.name;
+    doc["title"] = e.name;      // manifest overrides below
+    doc["mount"] = "settings";  // default page
+
+    std::string manifest;
+    if (e.hasManifest &&
+        Storage.readFileToString("WEB", e.dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) {
+      JsonDocument m;
+      if (deserializeJson(m, manifest) == DeserializationError::Ok) {
+        if (m["title"].is<const char*>()) doc["title"] = m["title"];
+        if (m["mount"].is<const char*>()) doc["mount"] = m["mount"];
+      } else {
+        LOG_DBG("WEB", "Plugin %s: unparseable manifest.json", e.name.c_str());
+      }
+    }
+
+    const size_t written = serializeJson(doc, output, sizeof(output));
+    if (written >= sizeof(output)) {
+      LOG_DBG("WEB", "Plugin %s: entry too long, skipped", e.name.c_str());
+      continue;
+    }
+    out.addEntry(output, written);
+    listed++;
+  }
+
+  out.finish();
+  // Logged even when empty: "no plugins" and "the page never asked" look
+  // identical from the outside otherwise.
+  LOG_DBG("WEB", "Served plugin list (%u plugins)", static_cast<unsigned>(listed));
+}
+
+// GET /plugin?name=<plugin>&file=<file> -> that file from the plugin's folder.
+// Both components are validated as single path segments, so a request cannot
+// reach outside the folder findPluginDir resolved.
+void CrossPointWebServer::handlePluginFile() const {
+  // Streaming claims a 4KB chunk buffer, same as /download.
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String name = server->arg("name");
+  const String file = server->arg("file");
+  if (!isSafePathComponent(name) || !isSafePathComponent(file)) {
+    server->send(400, "text/plain", "Bad plugin path");
+    return;
+  }
+
+  const std::string pluginDir = PluginLocations::findPluginDir(name.c_str());
+  if (pluginDir.empty()) {
+    LOG_DBG("WEB", "Plugin not found in any root: %s", name.c_str());
+    server->send(404, "text/plain", "Plugin not found");
+    return;
+  }
+
+  const std::string path = pluginDir + "/" + file.c_str();
+  FsFile f = Storage.open(path.c_str());
+  if (!f || !f.isOpen() || f.isDirectory()) {
+    if (f) f.close();
+    LOG_DBG("WEB", "Plugin file not found: %s", path.c_str());
+    server->send(404, "text/plain", "File not found");
+    return;
+  }
+  LOG_DBG("WEB", "Serving plugin file: %s (%u bytes)", path.c_str(), static_cast<unsigned>(f.size()));
+
+  server->setContentLength(f.size());
+  server->send(200, pluginContentType(file), "");
+
+  NetworkClient client = server->client();
+  const bool ok = HttpFileStreamer::streamFileToClient(f, client);
+  client.clear();
+  f.close();
+  if (!ok) {
+    LOG_DBG("WEB", "Plugin file streaming interrupted: %s/%s", name.c_str(), file.c_str());
+  }
 }
 
 // WebSocket callback trampoline

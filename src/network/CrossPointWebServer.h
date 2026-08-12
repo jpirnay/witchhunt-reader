@@ -157,4 +157,19 @@ class CrossPointWebServer {
   void handleStatsPage() const;
   void handleStatsApi() const;
   void handleStatsExport() const;
+
+  // Web-UI plugins: JS on the SD card that the Settings and File Manager pages
+  // discover and load, so the web interface can be extended without a firmware
+  // build. The firmware only lists the folders and serves their files - plugin
+  // code runs in the browser, never on the device, and reaches the card through
+  // the same endpoints the pages themselves use.
+  //
+  // Both endpoints are ported from crosspoint-reader PR #2734 ("feat: Add
+  // browser-side plugin system with SD card support", Justin Mitchell /
+  // @itsthisjustin). His /api/plugins and /plugin contract is preserved so
+  // plugins written for either firmware work on both; the implementations
+  // differ (streamed listing, low-memory guard, tighter manifest cap). None of
+  // that branch's device-capability endpoints are ported.
+  void handlePluginList() const;  // GET /api/plugins -> discovered plugins
+  void handlePluginFile() const;  // GET /plugin?name&file -> one file from its folder
 };

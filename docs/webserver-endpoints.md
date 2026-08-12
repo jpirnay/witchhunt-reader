@@ -261,6 +261,64 @@ Deleted successfully
 
 ---
 
+## Plugin Endpoints
+
+Discovery and file serving for SD-card web plugins. The firmware only enumerates
+plugin folders and serves their bytes — plugin code runs in the browser. See
+[sd-plugins.md](sd-plugins.md) for the folder layout and the JS contract.
+
+### GET `/api/plugins` - List Plugins
+
+Scans `/.crosspoint/plugins`, `/plugins`, and `/.plugins` and returns every
+folder holding a `plugin.js`.
+
+**Request:**
+```bash
+curl http://crosspoint.local/api/plugins
+```
+
+**Response (200 OK):**
+```json
+[{"name":"organize-by-author","title":"Organize by Author","mount":"files"}]
+```
+
+| Field   | Description                                                              |
+| ------- | ------------------------------------------------------------------------ |
+| `name`  | Folder name; the value to pass to `/plugin`                              |
+| `title` | From `manifest.json`, falling back to `name`                             |
+| `mount` | `settings` (default) or `files` — which page loads the plugin            |
+
+Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
+
+### GET `/plugin` - Serve a Plugin File
+
+Serves one file from a plugin's folder.
+
+**Request:**
+```bash
+curl "http://crosspoint.local/plugin?name=organize-by-author&file=plugin.js"
+```
+
+**Query Parameters:**
+
+| Parameter | Required | Description                          |
+| --------- | -------- | ------------------------------------ |
+| `name`    | Yes      | Plugin folder name                   |
+| `file`    | Yes      | File within that folder (flat, no subdirectories) |
+
+Content-Type is derived from the extension (`.js`, `.css`, `.html`, `.json`,
+`.svg`), else `application/octet-stream`.
+
+**Error Responses:**
+
+| Status | Body                | Cause                                                   |
+| ------ | ------------------- | ------------------------------------------------------- |
+| 400    | `Bad plugin path`   | `name` or `file` empty or containing `/`, `\`, or `..`   |
+| 404    | `Plugin not found`  | No such folder in any plugins root                      |
+| 404    | `File not found`    | No such file in that folder, or it is a directory       |
+
+---
+
 ## WebSocket Endpoint
 
 ### Port 81 - Fast Binary Upload

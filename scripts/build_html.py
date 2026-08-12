@@ -10,8 +10,49 @@ SRC_DIR = "src"
 
 PLACEHOLDERS = {}
 
+# <!--#include file="shared/Foo.js.inc" --> directives, resolved relative to the
+# including file's directory. Included fragments use the .inc suffix so the
+# asset walk below skips them — they are only ever inlined, never compiled to a
+# header of their own.
+INCLUDE_RE = re.compile(r'<!--\s*#include\s+file="([^"]+)"\s*-->')
+MAX_INCLUDE_DEPTH = 8
+
 def warn(msg: str) -> None:
     print(f"WARNING [build_html.py]: {msg}", file=sys.stderr)
+
+
+def resolve_includes(html: str, base_dir: str, included: list) -> str:
+    """Inline #include directives, appending each resolved path to `included`.
+
+    Must run BEFORE minify_html, which strips every HTML comment. Repeats so an
+    included fragment may itself include others; the caller stats `included` so
+    editing a fragment invalidates the generated header of every page using it.
+
+    Ported from crosspoint-reader PR #2734 by Justin Mitchell (@itsthisjustin) -
+    the directive syntax, the substitution loop and its depth bound are his.
+    Added here: recording resolved paths, because this fork's asset pipeline
+    caches on mtime and would otherwise leave a page stale when only the
+    fragment changed; and failing the build loudly on a missing include.
+    """
+
+    def repl(match):
+        inc_path = os.path.normpath(os.path.join(base_dir, match.group(1)))
+        included.append(inc_path)
+        try:
+            with open(inc_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError as e:
+            raise SystemExit(
+                f'ERROR [build_html.py]: cannot resolve #include "{match.group(1)}"'
+                f" from {base_dir}: {e}"
+            )
+
+    for _ in range(MAX_INCLUDE_DEPTH):
+        html, count = INCLUDE_RE.subn(repl, html)
+        if count == 0:
+            return html
+    warn(f"#include nesting exceeded {MAX_INCLUDE_DEPTH} levels (circular include?)")
+    return html
 
 
 def get_base_version(project_dir: str) -> (str, str):
@@ -262,7 +303,11 @@ for root, _, files in os.walk(SRC_DIR):
                 content = f.read()
 
             # Replace build-time placeholders only in HTML files
+            included = []
             if file.endswith(".html"):
+                # Resolve includes first, so a fragment gets placeholder
+                # substitution and comment stripping like any inline script.
+                content = resolve_includes(content, root, included)
                 content = replace_placeholders(content, PLACEHOLDERS)
                 processed = minify_html(content)
             else:
@@ -278,11 +323,13 @@ for root, _, files in os.walk(SRC_DIR):
             base_name = sanitize_identifier(f"{os.path.splitext(file)[0]}{suffix}")
             header_path = os.path.join(root, f"{base_name}.generated.h")
 
-            if (
-                os.path.exists(header_path)
-                and os.path.getmtime(header_path) >= os.path.getmtime(file_path)
-                and os.path.getmtime(header_path) >= ini_time
-            ):
+            # Editing an included fragment must invalidate the header too, so
+            # the freshness bar is the newest of the page, its includes and the ini.
+            newest_src = max(
+                [os.path.getmtime(file_path), ini_time]
+                + [os.path.getmtime(p) for p in included if os.path.exists(p)]
+            )
+            if os.path.exists(header_path) and os.path.getmtime(header_path) >= newest_src:
                 print(f"Unchanged: {header_path}")
                 continue
 
