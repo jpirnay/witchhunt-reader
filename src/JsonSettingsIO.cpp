@@ -407,6 +407,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["serverUrl"] = store.getServerUrl();
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
+  doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
 
   String json;
   serializeJson(doc, json);
@@ -444,6 +445,17 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
+
+  // A file written before this key existed belongs to someone already using the chooser.
+  // Default them to ASK_EVERY_TIME rather than the SMART the member initialiser carries, so
+  // an update never silently changes how their sync resolves; only fresh installs get SMART.
+  const JsonVariantConst behaviorValue = doc["syncBehavior"];
+  if (behaviorValue.isNull()) {
+    store.setSyncBehavior(KOReaderSyncBehavior::ASK_EVERY_TIME);
+    if (needsResave) *needsResave = true;
+  } else {
+    store.setSyncBehavior(static_cast<KOReaderSyncBehavior>(behaviorValue | (uint8_t)0));
+  }
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;

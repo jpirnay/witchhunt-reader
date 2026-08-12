@@ -9,6 +9,8 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 
+#include <cmath>
+
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
@@ -118,7 +120,62 @@ bool KOReaderSyncActivity::calculateDocumentHash() {
   return true;
 }
 
-bool KOReaderSyncActivity::probeAlternateDocumentId() {
+void KOReaderSyncActivity::applyRemoteAndFinish() {
+  // Preserve the apply result and show explicit confirmation before returning
+  // to the reader so users can tell the remote position was taken.
+  auto& sync = APP_STATE.koReaderSyncSession;
+  sync.outcome = KOReaderSyncOutcomeState::APPLIED_REMOTE;
+  sync.resultSpineIndex = remotePosition.spineIndex;
+  sync.resultPage = remotePosition.pageNumber;
+  sync.resultParagraphIndex = remotePosition.paragraphIndex;
+  sync.resultHasParagraphIndex = remotePosition.hasParagraphIndex;
+  sync.resultListItemIndex = remotePosition.listItemIndex;
+  sync.resultHasListItemIndex = remotePosition.hasListItemIndex;
+  APP_STATE.saveToFile();
+
+  if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
+    // Auto-pull skips the success-screen dwell — the reader will render the new
+    // position immediately, which is the only visible feedback the user needs.
+    esp_wifi_stop();
+    resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
+    return;
+  }
+  {
+    RenderLock lock(*this);
+    state = APPLY_COMPLETE;
+    uploadCompleteTime = millis();
+  }
+  requestUpdate(true);
+}
+
+// -1 remote is further, 0 the two agree, +1 local is further.
+int KOReaderSyncActivity::compareLocalToRemote() const {
+  if (remotePosition.spineIndex < 0) {
+    // No usable mapping; percentage is all we have. Tolerate float noise so a rounding
+    // difference doesn't present as a real conflict.
+    static constexpr float SAME_PROGRESS_EPSILON = 0.001f;
+    const float delta = localProgress.percentage - remoteProgress.percentage;
+    if (std::fabs(delta) <= SAME_PROGRESS_EPSILON) return 0;
+    return delta > 0 ? 1 : -1;
+  }
+  if (currentSpineIndex != remotePosition.spineIndex) {
+    return currentSpineIndex > remotePosition.spineIndex ? 1 : -1;
+  }
+  if (currentPage != remotePosition.pageNumber) {
+    return currentPage > remotePosition.pageNumber ? 1 : -1;
+  }
+  if (hasLocalParagraphIndex && remotePosition.hasParagraphIndex &&
+      localParagraphIndex != remotePosition.paragraphIndex) {
+    return localParagraphIndex > remotePosition.paragraphIndex ? 1 : -1;
+  }
+  return 0;
+}
+
+bool KOReaderSyncActivity::smartSyncEnabled() const {
+  return KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART;
+}
+
+bool KOReaderSyncActivity::probeAlternateDocumentId(const bool havePrimaryRecord) {
   const DocumentMatchMethod altMethod = effectiveMatchMethod == DocumentMatchMethod::FILENAME
                                             ? DocumentMatchMethod::BINARY
                                             : DocumentMatchMethod::FILENAME;
@@ -127,13 +184,23 @@ bool KOReaderSyncActivity::probeAlternateDocumentId() {
     return false;
   }
 
-  LOG_DBG("KOSync", "No record under the %s id; probing the %s id %s", matchMethodName(effectiveMatchMethod),
+  LOG_DBG("KOSync", "%s under the %s id; probing the %s id %s",
+          havePrimaryRecord ? "Checking for a further record" : "No record", matchMethodName(effectiveMatchMethod),
           matchMethodName(altMethod), altHash.c_str());
 
   KOReaderProgress altProgress;
   const auto altResult = KOReaderSyncClient::getProgress(altHash, altProgress);
   if (altResult != KOReaderSyncClient::OK) {
     LOG_DBG("KOSync", "Alternate %s id has no record either (result=%d)", matchMethodName(altMethod), altResult);
+    return false;
+  }
+
+  // Both ids hold a record, so this is not a missing-book question any more but a
+  // which-one-is-live question. Only move if the other device is genuinely further along;
+  // otherwise ours stands and we keep writing where we already were.
+  if (havePrimaryRecord && altProgress.percentage <= remoteProgress.percentage) {
+    LOG_DBG("KOSync", "Alternate %s id is not ahead (%.4f <= %.4f); keeping the %s id", matchMethodName(altMethod),
+            altProgress.percentage, remoteProgress.percentage, matchMethodName(effectiveMatchMethod));
     return false;
   }
 
@@ -156,7 +223,7 @@ bool KOReaderSyncActivity::handleAutoPushPreflight() {
   // Same probe as the compare path. Without it, auto-push-on-close is the most likely way to
   // create the divergence in the first place: it would silently write a second record under
   // our id while the other device's progress sits under theirs.
-  if (warmupResult == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId()) {
+  if (warmupResult == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId(false)) {
     warmupProgress = remoteProgress;
     warmupResult = KOReaderSyncClient::OK;
   }
@@ -208,8 +275,14 @@ void KOReaderSyncActivity::performFetchAndCompare() {
 
   // Nothing under our id may just mean the other device computed a different one. Costs one
   // extra GET on the already-warm session, and only when the lookup came up empty.
-  if (result == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId()) {
+  if (result == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId(false)) {
     result = KOReaderSyncClient::OK;
+  } else if (result == KOReaderSyncClient::OK && smartSyncEnabled()) {
+    // Smart mode also probes when our own id DID resolve. Otherwise a pairing that diverged
+    // before the learned-id work existed stays diverged forever: our record keeps answering,
+    // so the miss that would trigger a probe never happens. Costs one extra GET per smart
+    // sync, which is the price of not asking the user to reconcile it by hand.
+    probeAlternateDocumentId(true);
   }
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
@@ -292,31 +365,7 @@ void KOReaderSyncActivity::performFetchAndCompare() {
       return;
     }
 
-    // Preserve the apply result and show explicit confirmation before returning
-    // to the reader so users can tell pull succeeded.
-    auto& sync = APP_STATE.koReaderSyncSession;
-    sync.outcome = KOReaderSyncOutcomeState::APPLIED_REMOTE;
-    sync.resultSpineIndex = remotePosition.spineIndex;
-    sync.resultPage = remotePosition.pageNumber;
-    sync.resultParagraphIndex = remotePosition.paragraphIndex;
-    sync.resultHasParagraphIndex = remotePosition.hasParagraphIndex;
-    sync.resultListItemIndex = remotePosition.listItemIndex;
-    sync.resultHasListItemIndex = remotePosition.hasListItemIndex;
-    APP_STATE.saveToFile();
-
-    if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
-      // Auto-pull skips the success-screen dwell — the reader will render the new
-      // position immediately, which is the only visible feedback the user needs.
-      esp_wifi_stop();
-      resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
-      return;
-    }
-    {
-      RenderLock lock(*this);
-      state = APPLY_COMPLETE;
-      uploadCompleteTime = millis();
-    }
-    requestUpdate(true);
+    applyRemoteAndFinish();
     return;
   }
 
@@ -344,27 +393,36 @@ void KOReaderSyncActivity::performFetchAndCompare() {
   // Local progress was precomputed before network; keep using the cached value.
   releaseEpubForMapping();
 
+  const int comparison = compareLocalToRemote();
+
+  if (smartSyncEnabled()) {
+    // Resolve it rather than asking. The chooser only ever had one sensible answer in these
+    // cases, and it was already preselected — this just stops making the user confirm it.
+    if (comparison == 0) {
+      LOG_DBG("KOSync", "Smart sync: the two sides agree, nothing to do");
+      {
+        RenderLock lock(*this);
+        state = SYNC_COMPLETE;
+        uploadCompleteTime = millis();
+      }
+      requestUpdate(true);
+      return;
+    }
+    if (comparison > 0) {
+      LOG_DBG("KOSync", "Smart sync: local is further, uploading");
+      performUpload();
+      return;
+    }
+    LOG_DBG("KOSync", "Smart sync: remote is further, applying");
+    applyRemoteAndFinish();
+    return;
+  }
+
   {
     RenderLock lock(*this);
     state = SHOWING_RESULT;
-
-    // Default to the option that corresponds to the furthest progress.
-    auto isLocalAhead = [&]() {
-      if (remotePosition.spineIndex < 0) {
-        return localProgress.percentage > remoteProgress.percentage;  // mapping unavailable; fall back
-      }
-      if (currentSpineIndex != remotePosition.spineIndex) {
-        return currentSpineIndex > remotePosition.spineIndex;
-      }
-      if (currentPage != remotePosition.pageNumber) {
-        return currentPage > remotePosition.pageNumber;
-      }
-      if (hasLocalParagraphIndex && remotePosition.hasParagraphIndex) {
-        return localParagraphIndex > remotePosition.paragraphIndex;
-      }
-      return false;
-    };
-    selectedOption = isLocalAhead() ? 1 /* Upload local */ : 0 /* Apply remote */;
+    // Default to the option matching the furthest progress.
+    selectedOption = comparison > 0 ? 1 /* Upload local */ : 0 /* Apply remote */;
   }
   requestUpdate(true);
 }
@@ -718,6 +776,15 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     return;
   }
 
+  if (state == SYNC_COMPLETE) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_ALREADY_IN_SYNC), true, EpdFontFamily::BOLD);
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
   if (state == SYNC_FAILED) {
     renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_SYNC_FAILED_MSG), true, EpdFontFamily::BOLD);
 
@@ -837,7 +904,8 @@ void KOReaderSyncActivity::computeRemoteChapter() {
 }
 
 void KOReaderSyncActivity::loop() {
-  if (state == NO_CREDENTIALS || state == SYNC_FAILED || state == UPLOAD_COMPLETE || state == APPLY_COMPLETE) {
+  if (state == NO_CREDENTIALS || state == SYNC_FAILED || state == UPLOAD_COMPLETE || state == APPLY_COMPLETE ||
+      state == SYNC_COMPLETE) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       if (state == APPLY_COMPLETE) {
         resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
@@ -851,8 +919,12 @@ void KOReaderSyncActivity::loop() {
       return;
     }
 
-    if ((state == UPLOAD_COMPLETE || state == APPLY_COMPLETE) && millis() - uploadCompleteTime >= 3000) {
-      if (state == APPLY_COMPLETE) {
+    if ((state == UPLOAD_COMPLETE || state == APPLY_COMPLETE || state == SYNC_COMPLETE) &&
+        millis() - uploadCompleteTime >= 3000) {
+      if (state == SYNC_COMPLETE) {
+        // Nothing moved on either side, so there is no outcome to report to the reader.
+        resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+      } else if (state == APPLY_COMPLETE) {
         resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
       } else {
         resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
@@ -905,11 +977,9 @@ void KOReaderSyncActivity::loop() {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       // Calculate hash if not done yet
       if (documentHash.empty()) {
-        if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
-          documentHash = KOReaderDocumentId::calculateFromFilename(epubPath);
-        } else {
-          documentHash = KOReaderDocumentId::calculate(epubPath);
-        }
+        // Must go through the effective method, not the configured one: a book the server
+        // holds under the other device's id has to keep uploading there.
+        documentHash = hashForMethod(effectiveMatchMethod);
       }
       performUpload();
     }

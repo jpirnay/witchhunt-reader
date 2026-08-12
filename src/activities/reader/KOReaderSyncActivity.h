@@ -24,8 +24,9 @@
  * 3. Calculate document hash
  *
  * Intent-specific behavior:
- * - COMPARE: fetch remote progress, show full comparison screen, let user
- *   choose Apply or Upload.
+ * - COMPARE: fetch remote progress. Under ASK_EVERY_TIME, show the full comparison
+ *   screen and let the user choose Apply or Upload; under SMART, resolve it in favour
+ *   of whichever side is further and report the outcome.
  * - PULL_REMOTE: fetch and map remote progress, show success feedback, then
  *   persist an applied SyncResult for the reopened reader.
  * - PUSH_LOCAL: compute local mapping, warm session with GET, then upload via
@@ -54,7 +55,9 @@ class KOReaderSyncActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool preventAutoSleep() override { return state == CONNECTING || state == SYNCING; }
+  // UPLOADING belongs here too: sleeping mid-PUT drops the connection with the write in
+  // flight, and the user is not touching buttons while it runs.
+  bool preventAutoSleep() override { return state == CONNECTING || state == SYNCING || state == UPLOADING; }
 
  private:
   enum State {
@@ -65,6 +68,8 @@ class KOReaderSyncActivity final : public Activity {
     UPLOADING,
     UPLOAD_COMPLETE,
     APPLY_COMPLETE,
+    // Smart mode found the two sides already at the same place: nothing to upload or apply.
+    SYNC_COMPLETE,
     NO_REMOTE_PROGRESS,
     SYNC_FAILED,
     NO_CREDENTIALS
@@ -125,7 +130,15 @@ class KOReaderSyncActivity final : public Activity {
   static const char* matchMethodName(DocumentMatchMethod method);
   // On a NOT_FOUND, look the book up under the other matching method. On a hit, adopts that
   // id for this session (documentHash, effectiveMatchMethod, remoteProgress) and persists it.
-  bool probeAlternateDocumentId();
+  // havePrimaryRecord: our own id already resolved, so only adopt the alternate when it is
+  // further along. When false, any hit wins because we had nothing.
+  bool probeAlternateDocumentId(bool havePrimaryRecord);
+  bool smartSyncEnabled() const;
+  // -1 remote is further, 0 the two agree, +1 local is further.
+  int compareLocalToRemote() const;
+  // Persist the mapped remote position and show the apply confirmation (or return straight
+  // to the reader for auto-pull). Shared by the pull intent and smart resolution.
+  void applyRemoteAndFinish();
   bool handleAutoPushPreflight();
   void performFetchAndCompare();
   void performUpload();

@@ -441,6 +441,14 @@ inline std::vector<SettingInfo> buildSettingsList() {
         KOREADER_STORE.saveToFile();
       },
       "koMatchMethod", StrId::STR_KOREADER_SYNC));
+  settings.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_KO_SYNC_CONFLICT, {StrId::STR_KO_ASK_EVERY_TIME, StrId::STR_KO_SMART_SYNC},
+      [](const void*) -> uint8_t { return static_cast<uint8_t>(KOREADER_STORE.getSyncBehavior()); },
+      [](void*, uint8_t v) {
+        KOREADER_STORE.setSyncBehavior(static_cast<KOReaderSyncBehavior>(v));
+        KOREADER_STORE.saveToFile();
+      },
+      "koSyncBehavior", StrId::STR_KOREADER_SYNC));
   settings.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                          "koSyncOnBookClose", StrId::STR_KOREADER_SYNC));
   settings.push_back([]() {

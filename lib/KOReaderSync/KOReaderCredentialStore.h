@@ -8,6 +8,12 @@ enum class DocumentMatchMethod : uint8_t {
   BINARY = 1,    // Match by partial MD5 of file content (more accurate, but files must be identical)
 };
 
+// How the compare flow resolves a difference between local and remote progress.
+enum class KOReaderSyncBehavior : uint8_t {
+  ASK_EVERY_TIME = 0,  // Always show the Apply/Upload chooser.
+  SMART = 1,           // Resolve it without asking: whichever side is further wins.
+};
+
 class KOReaderCredentialStore;
 namespace JsonSettingsIO {
 bool saveKOReader(const KOReaderCredentialStore& store, const char* path);
@@ -28,6 +34,9 @@ class KOReaderCredentialStore {
   std::string serverUrl;                                            // Custom sync server URL (empty = default)
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
   bool sendMetadata = false;
+  // New installs get the one-tap flow. An existing koreader.json that predates this key is
+  // migrated to ASK_EVERY_TIME on load, so nobody's sync silently changes behaviour.
+  KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -75,6 +84,10 @@ class KOReaderCredentialStore {
   // Send document metadata (filename, title, authors) with progress uploads
   void setSendMetadata(bool value);
   bool getSendMetadata() const { return sendMetadata; }
+
+  // How the compare flow resolves a local/remote difference
+  void setSyncBehavior(KOReaderSyncBehavior behavior);
+  KOReaderSyncBehavior getSyncBehavior() const { return syncBehavior; }
 };
 
 // Helper macro to access credential store

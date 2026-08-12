@@ -33,6 +33,13 @@ void KOReaderSettingsActivity::buildMenuItems() {
                             KOREADER_STORE.saveToFile();
                           })
                           .withSubcategory(StrId::STR_MENU_KOSYNC_BEHAVIOR));
+  menuItems.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_KO_SYNC_CONFLICT, {StrId::STR_KO_ASK_EVERY_TIME, StrId::STR_KO_SMART_SYNC},
+      [](const void*) -> uint8_t { return static_cast<uint8_t>(KOREADER_STORE.getSyncBehavior()); },
+      [](void*, uint8_t v) {
+        KOREADER_STORE.setSyncBehavior(static_cast<KOReaderSyncBehavior>(v));
+        KOREADER_STORE.saveToFile();
+      }));
   menuItems.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                           "koSyncOnBookClose"));
   {
