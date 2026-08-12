@@ -185,6 +185,11 @@
       cursor: not-allowed;
     }
 
+    .plugin-error {
+      color: #c0392b;
+      margin: 0;
+    }
+
     /* Drag & drop overlay */
     .drop-overlay {
       display: none;
@@ -1894,6 +1899,8 @@
       </div>
     </div>
   </div>
+
+  <div id="plugin-container"></div>
 
   <div class="card">
     <p style="text-align: center; color: #95a5a6; margin: 0;">
@@ -6069,7 +6076,13 @@
 
       moveNext(0);
     }
-    hydrate();
+
+<!--#include file="shared/PluginHost.js.inc" -->
+
+    // Plugins load after the listing, not beside it: the device serves one
+    // connection at a time. finally() so a hydrate failure still surfaces the
+    // way it does today, and a broken listing does not disable plugins.
+    hydrate().finally(() => loadPlugins('files'));
   </script>
 </body>
 

@@ -215,6 +215,10 @@
       color: #721c24;
       border: 1px solid #f5c6cb;
     }
+    .plugin-error {
+      color: #c0392b;
+      margin: 0;
+    }
     .loader-container {
       display: flex;
       justify-content: center;
@@ -331,6 +335,7 @@
   
   <div id="wifi-container"></div>
   <div id="opds-container"></div>
+  <div id="plugin-container"></div>
 
   <div class="card">
     <p style="text-align: center; color: #95a5a6; margin: 0;">
@@ -839,13 +844,17 @@
     }
   }
   
+<!--#include file="shared/PluginHost.js.inc" -->
+
   // Sequential, not concurrent: the device's web server handles one client
   // connection at a time, and three simultaneous fetches on page load can
   // stall long enough inside a single response to trip the firmware watchdog.
+  // Plugins load last, so a slow or broken one cannot delay the real settings.
   (async () => {
     await loadSettings();
     await loadWifiNetworks();
     await loadOpdsServers();
+    await loadPlugins('settings');
   })();
 </script>
 </body>
