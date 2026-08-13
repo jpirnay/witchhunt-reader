@@ -50,6 +50,17 @@ jobs:
           version: "latest"
           enable-cache: false
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # terser minifies the inline JS in the embedded web pages (see
+      # scripts/build_html.py). Without it the build still succeeds, but the
+      # generated pages are ~17% larger - so CI installs it to match a release.
+      - name: Install web asset tooling
+        run: npm ci
+
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
@@ -80,6 +91,17 @@ jobs:
           version: "latest"
           enable-cache: false
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # terser minifies the inline JS in the embedded web pages (see
+      # scripts/build_html.py). Without it the build still succeeds, but the
+      # generated pages are ~17% larger - so CI installs it to match a release.
+      - name: Install web asset tooling
+        run: npm ci
+
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
@@ -93,7 +115,18 @@ jobs:
       - name: Build CrossPoint
         run: |
           set -euo pipefail
-          pio run | tee pio.log
+          pio run 2>&1 | tee pio.log
+
+      # A missing terser is only a warning in build_html.py, so that the build
+      # still works for contributors without node. In CI it must be an error:
+      # silently shipping ~10KB of un-mangled JS is exactly the regression this
+      # tooling exists to prevent.
+      - name: Verify web assets were minified
+        run: |
+          if grep -q "terser not found" pio.log; then
+            echo "::error::terser did not run - embedded web pages are ~17% larger than a release build"
+            exit 1
+          fi
 
       - name: Extract firmware stats
 
