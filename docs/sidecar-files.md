@@ -97,9 +97,17 @@ Who does this today:
 - **Manual moves** through the web File Manager or a script are your own
   responsibility: move `book.epub`, `book.jpg` and `book.opf` together.
 
-If you add another sidecar type, three places need to agree on what counts as
-one: `ReaderActivity::sidecarCoverPath` (images), `Epub::metadataSidecarPath`
-(`.opf`), and the extension list in `moveSidecarFilesToCompleted`.
+Adding another sidecar type means adding it to **one** place:
+`lib/FsHelpers/SidecarFiles.h`. Cover resolution, metadata resolution and the
+move-with-the-book path all read those tables — `ReaderActivity::sidecarCoverPath`
+and `Epub::metadataSidecarPath` are one-line delegates that add only their own
+logging.
+
+This used to be three independent copies, which is exactly how `.opf` came to be
+readable by the reader but left behind when a finished book moved. The copies had
+also drifted: the move path derived its base name without checking for a path
+separator, so a book with no extension inside a dotted folder (`/My.Books/untitled`)
+took the dot from the folder.
 
 Deleting a book does **not** currently delete its sidecars; they are left behind
 as harmless orphans.

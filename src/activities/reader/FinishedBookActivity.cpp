@@ -9,6 +9,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <SidecarFiles.h>
 #include <Txt.h>
 #include <Xtc.h>
 #include <esp_task_wdt.h>
@@ -128,28 +129,20 @@ std::string getSidecarCoverBmpPath(const std::string& bookPath, int width, int h
   return convertSidecarToBmp(ReaderActivity::bookCacheDir(bookPath), sidecarPath, width, height, fileName);
 }
 
+// A sidecar is bound to its book by filename, so every one of them has to
+// travel with it - a book that arrives in /COMPLETED without its sidecars
+// silently loses its cover and reverts to the metadata embedded in the EPUB.
+// Which extensions those are is SidecarFiles' business, not this function's.
 bool moveSidecarFilesToCompleted(const std::string& currentBookPath, const std::string& targetBookPath) {
-  const auto srcDot = currentBookPath.rfind('.');
-  const auto dstDot = targetBookPath.rfind('.');
-  if (srcDot == std::string::npos || dstDot == std::string::npos) {
+  const std::string srcBase = SidecarFiles::basePath(currentBookPath);
+  const std::string dstBase = SidecarFiles::basePath(targetBookPath);
+  if (srcBase.empty() || dstBase.empty()) {
     return false;
   }
 
-  const std::string srcBase = currentBookPath.substr(0, srcDot);
-  const std::string dstBase = targetBookPath.substr(0, dstDot);
-  // A sidecar is bound to its book by filename, so every one of them has to
-  // travel with it - a book that arrives in /COMPLETED without its sidecars
-  // silently loses its cover and reverts to the metadata embedded in the EPUB.
-  // Keep in step with the two resolvers that decide what counts as a sidecar:
-  // ReaderActivity::sidecarCoverPath (images) and Epub::metadataSidecarPath (.opf).
-  const char* extensions[] = {".bmp", ".jpg", ".jpeg", ".png", ".opf", ".BMP", ".JPG", ".JPEG", ".PNG", ".OPF"};
   bool success = true;
-  for (const char* ext : extensions) {
+  for (const char* ext : SidecarFiles::existingExtensions(currentBookPath)) {
     const std::string srcSidecar = srcBase + ext;
-    if (!Storage.exists(srcSidecar.c_str())) {
-      continue;
-    }
-
     std::string dstSidecar = dstBase + ext;
     if (Storage.exists(dstSidecar.c_str())) {
       dstSidecar = findUniqueCompletedSidecarPath(dstSidecar);

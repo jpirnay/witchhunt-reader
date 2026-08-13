@@ -9,6 +9,7 @@
 #include <Logging.h>
 #include <PngToBmpConverter.h>
 #include <Serialization.h>
+#include <SidecarFiles.h>
 #include <ZipFile.h>
 #include <esp_system.h>
 
@@ -772,17 +773,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   return true;
 }
 
-std::string Epub::metadataSidecarPath(const std::string& bookPath) {
-  const auto sep = bookPath.find_last_of("/\\");
-  const auto dot = bookPath.rfind('.');
-  if (dot == std::string::npos || (sep != std::string::npos && dot < sep)) return "";
-  const std::string base = bookPath.substr(0, dot);
-  for (const char* ext : {".opf", ".OPF"}) {
-    const std::string candidate = base + ext;
-    if (Storage.exists(candidate.c_str())) return candidate;
-  }
-  return "";
-}
+std::string Epub::metadataSidecarPath(const std::string& bookPath) { return SidecarFiles::metadataPath(bookPath); }
 
 // Calibre writes an OPF beside each exported book. Where one sits next to the
 // EPUB it is authoritative for that book's descriptive metadata, so a user can

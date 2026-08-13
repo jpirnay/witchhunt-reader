@@ -8,6 +8,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <SidecarFiles.h>
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -163,19 +164,12 @@ bool ReaderActivity::isImageFile(const std::string& path) {
   return FsHelpers::hasBmpExtension(path) || FsHelpers::hasJpgExtension(path) || FsHelpers::hasPngExtension(path);
 }
 
+// Which extensions count, and how the base name is derived, live in
+// SidecarFiles - see the header there for why this is one definition.
 std::string ReaderActivity::sidecarCoverPath(const std::string& bookPath) {
-  const auto sep = bookPath.find_last_of("/\\");
-  const auto dot = bookPath.rfind('.');
-  if (dot == std::string::npos || (sep != std::string::npos && dot < sep)) return "";
-  const std::string base = bookPath.substr(0, dot);
-  for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG", ".BMP"}) {
-    const std::string candidate = base + ext;
-    if (Storage.exists(candidate.c_str())) {
-      LOG_DBG("SIDECAR", "Found sidecar cover: %s", candidate.c_str());
-      return candidate;
-    }
-  }
-  return "";
+  const std::string candidate = SidecarFiles::coverPath(bookPath);
+  if (!candidate.empty()) LOG_DBG("SIDECAR", "Found sidecar cover: %s", candidate.c_str());
+  return candidate;
 }
 
 std::string ReaderActivity::bookCacheDir(const std::string& bookPath) {

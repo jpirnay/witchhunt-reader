@@ -41,6 +41,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp
+  ${REPO_ROOT}/lib/FsHelpers/SidecarFiles.cpp
   ${REPO_ROOT}/lib/CooperativeAbort/CooperativeAbort.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/lib/GfxRenderer/Bitmap.cpp
@@ -87,6 +88,7 @@ add_executable(EpubPipelineTest
   EpubPipelineTest.cpp
   FingerprintTest.cpp
   MetadataSidecarTest.cpp
+  SidecarFilesTest.cpp
   SectionAbortTest.cpp
   ${PIPELINE_SOURCES}
 )
