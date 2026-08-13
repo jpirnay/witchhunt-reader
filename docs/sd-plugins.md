@@ -10,9 +10,11 @@ card on that page. Adding or changing a plugin never needs a firmware build.
 > Mitchell ([@itsthisjustin](https://github.com/itsthisjustin)). The folder
 > layout, the `/api/plugins` and `/plugin` contract, the `registerPlugin`
 > handshake and the `mount` convention are his design, and are kept compatible
-> so a plugin written for either firmware works on both. This port deliberately
-> carries none of that branch's device-capability endpoints, on-device catalog
-> screens or content-protection work — see [Trust](#trust) for why.
+> so a plugin written for either firmware works on both. This port takes a
+> subset of that branch: the relay, fetch-to-SD and small-file endpoints are
+> here (with the host allowlist upstream had removed), while its crypto
+> endpoint, job queue, on-device catalog screens and content-protection work
+> are not — see [Trust](#trust) and `allowedHosts` below.
 
 Plugins extend the **web interface**, not the reader. Nothing runs on the
 device: the firmware only enumerates the folders and serves their bytes, and the
@@ -60,14 +62,32 @@ The plugin is handed an empty `<div class="card">` and owns all of it, heading
 included — the firmware renders no chrome of its own, so a plugin that draws no
 heading shows an untitled card.
 
-`api` carries three things:
+`api` carries:
 
 | Field | Description |
 |---|---|
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
+| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
+| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
+| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
+
+**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
+hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
+it. A plugin written against the upstream API that calls `api.crypto` gets a
+readable error rather than `is not a function`.
+
+A plugin may declare what it needs, and one asking for something this firmware
+does not implement is refused with a visible message instead of failing somewhere
+inside its own code:
+
+```jsonc
+{ "requires": ["relay", "fetchToSd"] }
+```
+
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -76,11 +96,44 @@ same-origin API — a plugin uses `fetch()` against the endpoints in
 The File Manager page also has JSZip already loaded, so a plugin mounted there
 can open and rewrite an EPUB in the browser.
 
-That set is deliberate. There is **no** device endpoint for outbound HTTP,
-crypto, or arbitrary file writes: a plugin can reach the SD card through the
-same doors the web UI already opens, and it cannot make the reader talk to the
-internet. Anything needing a remote service must be done by the browser
-directly, subject to normal CORS rules.
+Prefer these same-origin endpoints wherever they suffice — they cost the device
+nothing beyond the request itself. A plugin reaches the SD card through the same
+doors the web UI already opens, so it gains no privilege the page does not have.
+
+Reaching *outward* is different, and is fenced separately: see `allowedHosts`
+below. Where a remote site sends CORS headers, call it directly with `fetch()`
+and leave the device out of it entirely.
+
+### Reaching the internet: `allowedHosts`
+
+A plugin runs in a browser page served by the device, so it can only read a
+cross-origin response when the remote site sends CORS headers. Most do not —
+Goodreads and `books.google.com` among them — and an image without CORS taints a
+canvas, so its bytes can be displayed but never saved.
+
+`GET /api/relay?plugin=<name>&url=<url>` fetches on the page's behalf and answers
+same-origin. It is opt-in per plugin: the host must be listed in that plugin's
+own `manifest.json`, so a plugin's reach is readable before you install it.
+
+```jsonc
+{
+  "title": "Metadata Editor",
+  "mount": "files",
+  "allowedHosts": [
+    "openlibrary.org",        // exact match
+    ".openlibrary.org"        // any subdomain, e.g. covers.openlibrary.org
+  ]
+}
+```
+
+No list means no access. `GET` only — a plugin cannot make the device POST
+anywhere. Redirects are **not** followed: a 3xx comes back as-is, and the plugin
+may relay the `Location` itself so the new host is judged on its own merits.
+The body streams back rather than being buffered, so a large image does not have
+to fit in the device's largest free block.
+
+Prefer a direct `fetch()` when the site sends CORS (Open Library does) and keep
+the relay for sites that do not — it costs the device a network round trip.
 
 ### Mount points
 
@@ -133,7 +186,27 @@ are never compiled, so they cost no flash.
 | `hello-plugin` | settings | Minimal reference and smoke test - renders a card and lists `/` |
 | `find-duplicates` | files | Reports files sharing an exact size. Report only: never writes, and never downloads a book |
 | `organize-by-author` | files | Sorts loose EPUBs into `<Author>/` folders. Preview first, moves only on Apply, carries sidecars along |
-| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (file, clipboard paste, Open Library). Never rewrites the book |
+| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (local file, clipboard paste, or a search of Open Library / Goodreads / Google Books). Never rewrites the book |
+
+### Cover sources, and why they differ
+
+`metadata-editor` is the worked example of the CORS rules above:
+
+| Source | Search | Cover bytes |
+|---|---|---|
+| Open Library | direct — it sends CORS | direct |
+| Google Books | direct — the API sends CORS | **relay** — images are on `books.google.com`, which does not |
+| Goodreads | **relay** — no API since 2020, so the search page is scraped | **relay** — images are on `i.gr-assets.com` |
+
+Result thumbnails are plain `<img>` tags pointing at the remote host, because
+*displaying* a cross-origin image was never restricted — only reading its pixels
+is. The relay is used for one thing: reading the bytes of the cover you actually
+pick. The device does work for one image, not for the whole grid.
+
+Two caveats. The Goodreads path scrapes HTML and will break if they change their
+markup — it looks for `img.bookCover` and strips the `._SX50_` size segment to
+get the full-size image. And Google's covers are small (~128px), so Open Library
+or Goodreads give a better result on the device.
 
 ## Loading order and failures
 

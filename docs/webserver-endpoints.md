@@ -290,6 +290,95 @@ curl http://crosspoint.local/api/plugins
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
 
+### GET `/api/relay` - Fetch a URL for a Plugin
+
+Fetches a URL the browser cannot reach itself and streams the body back. A page
+served from the device may not read a cross-origin response unless the remote
+sends CORS headers, and most do not; the device is not a browser, so it fetches
+on the page's behalf and answers same-origin.
+
+**Request:**
+```bash
+curl "http://crosspoint.local/api/relay?plugin=metadata-editor&url=https%3A%2F%2Fcovers.example.org%2Fb%2F1.jpg"
+```
+
+**Query Parameters:**
+
+| Parameter | Required | Description                                   |
+| --------- | -------- | --------------------------------------------- |
+| `plugin`  | Yes      | Plugin folder name; its manifest is the allowlist |
+| `url`     | Yes      | Absolute `http://` or `https://` URL           |
+
+The body streams back as `application/octet-stream` — response headers are not
+forwarded, so the caller infers the type from what it asked for.
+
+**Constraints:**
+
+- **GET only.** A plugin cannot make the device POST anywhere.
+- **Allowlisted per plugin.** The host must appear in that plugin's
+  `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
+  with a dot matches that suffix. No list, no access.
+- **Redirects are not followed.** A 3xx is returned as-is. Following them would
+  mean the host actually fetched was never checked against the allowlist — the
+  plugin may relay the `Location` itself, which is judged on its own merits.
+- **Streamed, not buffered**, with a 4MB ceiling. Nothing large is resident:
+  during a web session the largest free block is around 53KB, so a buffered
+  response would fail on an ordinary cover image.
+
+**Error Responses:**
+
+| Status | Cause                                                        |
+| ------ | ------------------------------------------------------------ |
+| 400    | Missing `plugin`/`url`, or a non-http(s) URL                  |
+| 403    | Host not listed in the plugin's `allowedHosts`                |
+| 502    | The fetch failed before any data arrived                      |
+| 503    | Heap too low to serve the request                             |
+
+A transfer that fails or hits the ceiling *after* data has been sent ends as a
+truncated 200; the failure is logged (`[WEB]`).
+
+### POST `/api/fetch` - Download to the SD Card
+
+Downloads a URL straight to the card. Relaying through the browser and uploading
+the bytes back would move the file twice over WiFi and hold all of it in browser
+memory — tolerable for a cover, prohibitive for a book.
+
+```bash
+curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F%2Fexample.org%2Fbook.epub&dest=%2FBooks%2Fbook.epub"
+# -> {"ok":true,"dest":"/Books/book.epub"}
+```
+
+Same allowlist and no-redirect rules as `/api/relay`. `dest` must pass the same
+check `/upload` applies: inside the card, no `..`, and not a hidden or protected
+item. The book's layout cache is invalidated on success.
+
+| Status | Cause                                          |
+| ------ | ---------------------------------------------- |
+| 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
+| 403    | Host not in the plugin's `allowedHosts`        |
+| 502    | Download failed                                 |
+
+### POST `/api/plugin-fs` - Write a Small File
+
+Writes one small file, with the raw request body as its contents. `/upload`
+already does this; it exists for compatibility with plugins written against the
+upstream API.
+
+```bash
+curl -X POST --data-binary @cover.jpg \
+  "http://crosspoint.local/api/plugin-fs?plugin=my-plugin&path=%2FBooks%2Fbook.jpg"
+# -> {"ok":true,"path":"/Books/book.jpg"}
+```
+
+Capped at 64KB — the body is buffered by the web server, so bulk transfers
+belong in `/upload`, which streams. `path` passes the same check as `dest` above.
+
+| Status | Cause                                   |
+| ------ | --------------------------------------- |
+| 400    | Missing `plugin`/`path`, or a refused path |
+| 413    | Body over 64KB — use `/upload`          |
+| 500    | Could not create the file, or short write |
+
 ### GET `/plugin` - Serve a Plugin File
 
 Serves one file from a plugin's folder.

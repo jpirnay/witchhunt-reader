@@ -1,4 +1,10 @@
 {
   "title": "Metadata Editor",
-  "mount": "files"
+  "mount": "files",
+  "requires": ["relay"],
+  "allowedHosts": [
+    "www.goodreads.com",
+    ".gr-assets.com",
+    "books.google.com"
+  ]
 }

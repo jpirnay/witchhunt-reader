@@ -200,6 +200,85 @@ const char* pluginContentType(const String& file) {
 // file in a plugin folder from being read into the heap; 4KB is far more than
 // the handful of fields the format defines.
 constexpr size_t PLUGIN_MANIFEST_MAX_BYTES = 4096;
+
+// /api/plugin-fs is the small-file door; anything bigger belongs in /upload,
+// which streams instead of buffering the whole body in the request.
+constexpr size_t PLUGIN_FS_MAX_BYTES = 64u * 1024u;
+
+// Host of a URL: between "://" and the next "/", minus any port, and minus any
+// userinfo. Dropping everything before an "@" matters - "https://ok.com@evil.com/"
+// connects to evil.com, so that is the host the allowlist must judge.
+std::string urlHost(const std::string& url) {
+  const size_t schemeEnd = url.find("://");
+  if (schemeEnd == std::string::npos) return {};
+  const size_t start = schemeEnd + 3;
+  size_t end = url.find('/', start);
+  if (end == std::string::npos) end = url.size();
+
+  std::string host = url.substr(start, end - start);
+  const size_t at = host.rfind('@');
+  if (at != std::string::npos) host = host.substr(at + 1);
+  const size_t colon = host.find(':');
+  if (colon != std::string::npos) host = host.substr(0, colon);
+  return host;
+}
+
+// True when the URL's host appears in the calling plugin's manifest
+// "allowedHosts". A bare entry must match exactly; one starting with a dot
+// matches that suffix (".example.org" allows "covers.example.org"). Absent or
+// empty list means nothing is allowed - the relay is opt-in per plugin, and a
+// plugin's reach is readable in its own folder before it is installed.
+bool relayHostAllowed(const String& plugin, const std::string& url) {
+  const std::string host = urlHost(url);
+  if (host.empty() || !isSafePathComponent(plugin)) return false;
+
+  const std::string dir = PluginLocations::findPluginDir(plugin.c_str());
+  if (dir.empty()) return false;
+
+  std::string manifest;
+  if (!Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) return false;
+
+  JsonDocument m;
+  if (deserializeJson(m, manifest) != DeserializationError::Ok || !m["allowedHosts"].is<JsonArray>()) return false;
+
+  for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
+    const char* pattern = entry.as<const char*>();
+    if (!pattern || !*pattern) continue;
+    const std::string pat = pattern;
+    if (pat[0] == '.') {
+      if (host.size() > pat.size() && host.compare(host.size() - pat.size(), pat.size(), pat) == 0) return true;
+    } else if (host == pat) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Where a plugin may write, or "" when the path is refused.
+//
+// Containment comes from normalizeWebPath: FsHelpers::normalisePath resolves
+// every ".." against the components before it and no-ops once nothing is left,
+// so the result cannot climb above the card root. No separate ".." check is
+// needed - and a textual one would be wrong, because by this point ".." can
+// only survive inside a filename ("my..book.epub"), which is legitimate.
+//
+// The name check is stricter than /upload, which applies none: a plugin may not
+// create a hidden or protected item even though the web UI's own upload can.
+String pluginWriteTarget(const String& rawPath) {
+  String path = normalizeWebPath(rawPath);
+  if (path.isEmpty() || path == "/" || path.endsWith("/")) return "";
+
+  const int lastSlash = path.lastIndexOf('/');
+  if (lastSlash < 0) return "";
+  const String name = path.substring(lastSlash + 1);
+  if (name.isEmpty() || isProtectedItemName(name)) return "";
+  return path;
+}
+
+// Ceiling on a relayed response. Nothing is buffered (see handleRelay), so this
+// only bounds how long one request may occupy the single-connection server.
+constexpr size_t MAX_RELAY_BYTES = 4u * 1024u * 1024u;
+
 }  // namespace
 
 // File listing page template - now using generated headers:
@@ -303,6 +382,9 @@ void CrossPointWebServer::begin() {
   // Web-UI plugins (SD card)
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
+  server->on("/api/relay", HTTP_GET, [this] { handleRelay(); });
+  server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
+  server->on("/api/plugin-fs", HTTP_POST, [this] { handlePluginFs(); });
 
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
@@ -2745,6 +2827,175 @@ void CrossPointWebServer::handlePluginFile() const {
   if (!ok) {
     LOG_DBG("WEB", "Plugin file streaming interrupted: %s/%s", name.c_str(), file.c_str());
   }
+}
+
+// GET /api/relay?plugin=<name>&url=<url>
+//
+// Fetches a URL the browser cannot reach itself. A page served from this device
+// may not read a cross-origin response unless the remote sends CORS headers, and
+// most do not; the device is not a browser and has no such restriction, so it
+// fetches on the page's behalf and answers same-origin.
+//
+// That is a real capability, so it is fenced: GET only, and only to hosts the
+// calling plugin declares in its own manifest. Redirects are NOT followed -
+// otherwise an allowed host could 302 anywhere and the host actually fetched
+// would never have been checked, which is how upstream's version could be
+// bypassed. A 3xx is returned to the plugin, which may relay the new location
+// and have it judged on its own merits.
+//
+// The body is streamed straight through rather than buffered: during a web
+// session the heap has around 110KB free with a ~53KB largest block, and a
+// single cover image can exceed that on its own.
+void CrossPointWebServer::handleRelay() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const String urlArg = server->arg("url");
+  const std::string url = urlArg.c_str();
+
+  if (!isSafePathComponent(plugin) || url.empty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin or url\"}");
+    return;
+  }
+  // Only http(s): the client speaks nothing else, and this keeps the scheme out
+  // of the allowlist's business.
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
+    return;
+  }
+  if (!relayHostAllowed(plugin, url)) {
+    LOG_DBG("WEB", "Relay refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
+    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "Relay %s -> %s", plugin.c_str(), url.c_str());
+
+  bool headerSent = false;
+  bool overLimit = false;
+  size_t total = 0;
+
+  const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t len) {
+    if (total + len > MAX_RELAY_BYTES) {
+      overLimit = true;
+      return false;  // aborts the transfer
+    }
+    if (!headerSent) {
+      // Content type is not forwarded - HttpDownloader does not surface response
+      // headers - so the caller infers it from what it asked for.
+      server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+      server->send(200, "application/octet-stream", "");
+      headerSent = true;
+    }
+    esp_task_wdt_reset();
+    server->sendContent(reinterpret_cast<const char*>(data), len);
+    total += len;
+    return true;
+  });
+
+  if (!headerSent) {
+    server->send(502, "application/json", "{\"error\":\"fetch failed\"}");
+    return;
+  }
+  server->sendContent("");  // terminate the chunked response
+  if (!ok || overLimit) {
+    LOG_ERR("WEB", "Relay truncated after %u bytes%s: %s", static_cast<unsigned>(total),
+            overLimit ? " (size limit)" : "", url.c_str());
+  } else {
+    LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
+  }
+}
+
+// POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>
+//
+// Downloads straight to the card. Doing this through /api/relay plus /upload
+// would move the file twice over WiFi and hold all of it in browser memory;
+// for a cover that is merely wasteful, for a book it is prohibitive.
+//
+// Same fence as the relay - allowlisted per plugin manifest, no redirects -
+// plus the write target must pass the same check /upload applies.
+void CrossPointWebServer::handleFetchToSd() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const std::string url = server->arg("url").c_str();
+  const String dest = pluginWriteTarget(server->arg("dest"));
+
+  if (!isSafePathComponent(plugin) || url.empty() || dest.isEmpty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin, url or dest\"}");
+    return;
+  }
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
+    return;
+  }
+  if (!relayHostAllowed(plugin, url)) {
+    LOG_DBG("WEB", "Fetch refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
+    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "Fetch %s -> %s", url.c_str(), dest.c_str());
+  const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(url, dest.c_str());
+  if (result != HttpDownloader::OK) {
+    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", static_cast<int>(result), url.c_str());
+    server->send(502, "application/json", "{\"error\":\"download failed\"}");
+    return;
+  }
+
+  // A downloaded book replaces whatever was cached for that path.
+  clearBookCacheIfNeeded(dest);
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["dest"] = dest.c_str();
+  sendJson(server.get(), 200, doc);
+}
+
+// POST /api/plugin-fs?plugin=<name>&path=<sd path>  (raw body = file contents)
+//
+// Writes one small file to the card. /upload already does this, so this exists
+// for compatibility with plugins written against the upstream API rather than
+// because the web UI needs it - hence the modest cap, which keeps it to the
+// small-file job it advertises and leaves bulk transfers to /upload.
+void CrossPointWebServer::handlePluginFs() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const String path = pluginWriteTarget(server->arg("path"));
+  if (!isSafePathComponent(plugin) || path.isEmpty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin or path\"}");
+    return;
+  }
+
+  // WebServer has already buffered the body; "plain" is the raw payload for a
+  // non-form content type.
+  const String body = server->arg("plain");
+  if (body.length() > PLUGIN_FS_MAX_BYTES) {
+    server->send(413, "application/json", "{\"error\":\"file too large, use /upload\"}");
+    return;
+  }
+
+  FsFile out;
+  if (!Storage.openFileForWrite("WEB", path.c_str(), out)) {
+    server->send(500, "application/json", "{\"error\":\"could not create file\"}");
+    return;
+  }
+  const size_t written = body.length() ? out.write(body.c_str(), body.length()) : 0;
+  out.close();
+
+  if (written != static_cast<size_t>(body.length())) {
+    LOG_ERR("WEB", "plugin-fs short write: %u of %u to %s", static_cast<unsigned>(written),
+            static_cast<unsigned>(body.length()), path.c_str());
+    server->send(500, "application/json", "{\"error\":\"short write\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "plugin-fs wrote %u bytes to %s", static_cast<unsigned>(written), path.c_str());
+  clearBookCacheIfNeeded(path);
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["path"] = path.c_str();
+  sendJson(server.get(), 200, doc);
 }
 
 // WebSocket callback trampoline
