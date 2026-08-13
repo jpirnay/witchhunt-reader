@@ -110,6 +110,14 @@ class HalGPIO {
   inline bool deviceIsX3() const { return _deviceType == DeviceType::X3; }
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
 
+  // True only on the Xteink C3 boards (X3, X3/UC8279, X4). Guards the pin
+  // assumptions that hold for the C3 hardware but not for its S3 siblings or
+  // third-party boards — chiefly GPIO13, which is a power control here and an
+  // ordinary bus signal elsewhere. Note this is NOT !deviceIsX3(): X4 Pro is an
+  // Xteink board but not an Xteink *C3* board, and _deviceType only ever
+  // distinguishes the two C3 variants.
+  bool isXteinkDevice() const;
+
   // Start button GPIO and setup SPI for screen and SD card
   void begin();
 
