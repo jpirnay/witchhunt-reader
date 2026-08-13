@@ -67,25 +67,25 @@ heading shows an untitled card.
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
-| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
-| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
-| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
+| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
+| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
+| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
-
-**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
-hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
-it. A plugin written against the upstream API that calls `api.crypto` gets a
-readable error rather than `is not a function`.
-
-A plugin may declare what it needs, and one asking for something this firmware
-does not implement is refused with a visible message instead of failing somewhere
-inside its own code:
-
-```jsonc
-{ "requires": ["relay", "fetchToSd"] }
-```
-
-Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
+
+**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
+hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
+it. A plugin written against the upstream API that calls `api.crypto` gets a
+readable error rather than `is not a function`.
+
+A plugin may declare what it needs, and one asking for something this firmware
+does not implement is refused with a visible message instead of failing somewhere
+inside its own code:
+
+```jsonc
+{ "requires": ["relay", "fetchToSd"] }
+```
+
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -182,7 +182,27 @@ are never compiled, so they cost no flash.
 | `hello-plugin` | settings | Minimal reference and smoke test - renders a card and lists `/` |
 | `find-duplicates` | files | Reports files sharing an exact size. Report only: never writes, and never downloads a book |
 | `organize-by-author` | files | Sorts loose EPUBs into `<Author>/` folders. Preview first, moves only on Apply, carries sidecars along |
-| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (file, clipboard paste, Open Library). Never rewrites the book |
+| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (local file, clipboard paste, or a search of Open Library / Goodreads / Google Books). Never rewrites the book |
+
+### Cover sources, and why they differ
+
+`metadata-editor` is the worked example of the CORS rules above:
+
+| Source | Search | Cover bytes |
+|---|---|---|
+| Open Library | direct — it sends CORS | direct |
+| Google Books | direct — the API sends CORS | **relay** — images are on `books.google.com`, which does not |
+| Goodreads | **relay** — no API since 2020, so the search page is scraped | **relay** — images are on `i.gr-assets.com` |
+
+Result thumbnails are plain `<img>` tags pointing at the remote host, because
+*displaying* a cross-origin image was never restricted — only reading its pixels
+is. The relay is used for one thing: reading the bytes of the cover you actually
+pick. The device does work for one image, not for the whole grid.
+
+Two caveats. The Goodreads path scrapes HTML and will break if they change their
+markup — it looks for `img.bookCover` and strips the `._SX50_` size segment to
+get the full-size image. And Google's covers are small (~128px), so Open Library
+or Goodreads give a better result on the device.
 
 ## Loading order and failures
 

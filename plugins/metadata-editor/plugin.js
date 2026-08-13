@@ -146,7 +146,11 @@ CrossPoint.registerPlugin((container, api) => {
       '<p id="me-paste" tabindex="0" style="border:1px dashed rgba(128,128,128,.6);padding:10px">' +
       'Click here and press Ctrl+V to paste a copied image. Works with any site: copy the ' +
       'image in your browser, then paste it here.</p>' +
-      '<p><button id="me-search">Search Open Library</button> ' +
+      '<p><label>Search <select id="me-source">' +
+      '<option value="openlibrary">Open Library</option>' +
+      '<option value="goodreads">Goodreads</option>' +
+      '<option value="google">Google Books</option>' +
+      '</select></label> <button id="me-search">Find covers</button> ' +
       '<button id="me-remove">Remove cover</button> <span id="me-cover-msg"></span></p>' +
       '<div id="me-results"></div>';
 
@@ -170,7 +174,7 @@ CrossPoint.registerPlugin((container, api) => {
     };
 
     el('#me-remove').onclick = removeCover;
-    el('#me-search').onclick = () => searchOpenLibrary(values);
+    el('#me-search').onclick = () => searchCovers(el('#me-source').value, values);
   }
 
   function coverMsg(t) {
@@ -260,7 +264,29 @@ CrossPoint.registerPlugin((container, api) => {
     return '';
   }
 
-  async function searchOpenLibrary(values) {
+  // Covers come from three sources with different constraints.
+  //
+  // Open Library serves both its search API and its images with CORS, so it is
+  // fetched directly and never troubles the device.
+  //
+  // Goodreads has no public API - it was retired in 2020 - so its search page is
+  // scraped, which means this breaks if they change their markup. Google Books
+  // does have an API and it does send CORS, so the search is direct; only its
+  // images are on books.google.com, which does not.
+  //
+  // For both of those the relay is used for ONE thing: reading the bytes of the
+  // cover actually chosen. Previews are plain <img> tags pointing straight at the
+  // remote thumbnail, because displaying a cross-origin image was never
+  // restricted - only reading its pixels is. So the device does work for the one
+  // cover you pick, not for the whole grid.
+  const SOURCES = {
+    openlibrary: { label: 'Open Library', search: searchOpenLibrary, direct: true },
+    goodreads: { label: 'Goodreads', search: searchGoodreads, direct: false },
+    google: { label: 'Google Books', search: searchGoogleBooks, direct: false }
+  };
+
+  async function searchCovers(sourceKey, values) {
+    const source = SOURCES[sourceKey] || SOURCES.openlibrary;
     const results = el('#me-results');
     const title = (el('#me-f-title').value || values.title || '').trim();
     const author = (el('#me-f-author').value || values.author || '').trim();
@@ -269,45 +295,90 @@ CrossPoint.registerPlugin((container, api) => {
       return;
     }
 
-    coverMsg('Searching Open Library...');
+    coverMsg('Searching ' + source.label + '...');
     results.textContent = '';
     try {
-      const url = 'https://openlibrary.org/search.json?limit=8&fields=title,author_name,cover_i' +
-        '&title=' + encodeURIComponent(title) +
-        (author ? '&author=' + encodeURIComponent(author) : '');
-      const data = await (await fetch(url)).json();
-      const hits = (data.docs || []).filter((d) => d.cover_i);
+      const hits = await source.search(title, author);
       if (!hits.length) {
-        coverMsg('No covers found.');
+        coverMsg('No covers found on ' + source.label + '.');
         return;
       }
-
-      coverMsg(hits.length + ' result(s) - click one to use it');
-      results.innerHTML = hits.map((d, i) =>
-        '<figure style="display:inline-block;margin:4px;text-align:center;width:110px">' +
-        '<img data-i="' + i + '" class="me-hit" style="max-height:140px;cursor:pointer"' +
-        ' src="https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg" alt="">' +
-        '<figcaption style="font-size:.8em">' + esc((d.author_name || []).join(', ')) + '</figcaption>' +
-        '</figure>').join('');
-
-      results.querySelectorAll('.me-hit').forEach((img) => {
-        img.onclick = async () => {
-          const hit = hits[Number(img.dataset.i)];
-          coverMsg('Fetching cover...');
-          try {
-            // -L is the large size. Readable only because Open Library sends CORS.
-            const resp = await fetch('https://covers.openlibrary.org/b/id/' + hit.cover_i + '-L.jpg');
-            if (!resp.ok) throw new Error('cover ' + resp.status);
-            await installCover(await resp.blob(), 'openlibrary.jpg');
-            results.textContent = '';
-          } catch (e) {
-            coverMsg('Could not fetch that cover: ' + msg(e));
-          }
-        };
-      });
+      renderHits(hits, source);
     } catch (e) {
-      coverMsg('Search failed: ' + msg(e));
+      coverMsg(source.label + ' search failed: ' + msg(e));
     }
+  }
+
+  // hit = { thumb, full, label, direct }
+  function renderHits(hits, source) {
+    const results = el('#me-results');
+    coverMsg(hits.length + ' result(s) - click one to use it');
+    results.innerHTML = hits.map((h, i) =>
+      '<figure style="display:inline-block;margin:4px;text-align:center;width:110px">' +
+      '<img data-i="' + i + '" class="me-hit" style="max-height:140px;cursor:pointer"' +
+      ' src="' + h.thumb + '" alt="" loading="lazy">' +
+      '<figcaption style="font-size:.8em">' + esc(h.label || '') + '</figcaption>' +
+      '</figure>').join('');
+
+    results.querySelectorAll('.me-hit').forEach((img) => {
+      img.onclick = async () => {
+        const hit = hits[Number(img.dataset.i)];
+        coverMsg('Fetching cover...');
+        try {
+          // Direct where the host allows it; through the device where it does not.
+          const resp = source.direct ? await fetch(hit.full) : await api.relay(hit.full);
+          if (!resp.ok) throw new Error('cover ' + resp.status);
+          await installCover(await resp.blob(), 'cover.jpg');
+          results.textContent = '';
+        } catch (e) {
+          coverMsg('Could not fetch that cover: ' + msg(e));
+        }
+      };
+    });
+  }
+
+  async function searchOpenLibrary(title, author) {
+    const url = 'https://openlibrary.org/search.json?limit=8&fields=title,author_name,cover_i' +
+      '&title=' + encodeURIComponent(title) +
+      (author ? '&author=' + encodeURIComponent(author) : '');
+    const data = await (await fetch(url)).json();
+    return (data.docs || []).filter((d) => d.cover_i).map((d) => ({
+      thumb: 'https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg',
+      full: 'https://covers.openlibrary.org/b/id/' + d.cover_i + '-L.jpg',
+      label: (d.author_name || []).join(', ')
+    }));
+  }
+
+  async function searchGoodreads(title, author) {
+    const query = title + (author ? ' ' + author : '');
+    const html = await (await api.relay(
+      'https://www.goodreads.com/search?q=' + encodeURIComponent(query))).text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    return Array.from(doc.querySelectorAll('img.bookCover')).slice(0, 8).map((img) => {
+      const thumb = img.getAttribute('src') || '';
+      // Search results are ~50px wide. Goodreads encodes the size as a "._SX50_"
+      // segment before the extension; dropping it yields the full-size cover
+      // (verified: 1.8KB thumbnail vs 266KB full).
+      const full = thumb.replace(/\._S[XY]\d+_(?=\.[a-z]+$)/i, '');
+      return { thumb, full, label: (img.getAttribute('alt') || '').trim() };
+    }).filter((h) => h.thumb);
+  }
+
+  async function searchGoogleBooks(title, author) {
+    const q = 'intitle:' + title + (author ? ' inauthor:' + author : '');
+    const url = 'https://www.googleapis.com/books/v1/volumes?maxResults=8&q=' + encodeURIComponent(q);
+    const data = await (await fetch(url)).json();
+    return (data.items || []).map((item) => {
+      const info = item.volumeInfo || {};
+      const links = info.imageLinks || {};
+      const thumb = links.thumbnail || links.smallThumbnail;
+      if (!thumb) return null;
+      // Served over http in the payload, and edge=curl draws a page-curl effect
+      // that has no business on a cover.
+      const clean = thumb.replace(/^http:/, 'https:').replace(/&edge=curl/, '');
+      return { thumb: clean, full: clean, label: (info.authors || []).join(', ') };
+    }).filter(Boolean);
   }
 
   async function del(path) {
