@@ -31,7 +31,8 @@ CrossPoint.registerPlugin((container, api) => {
     '<p>Sorts loose EPUBs in one folder into <code>&lt;Author&gt;/</code> subfolders. ' +
     'Reads a Calibre <code>book.opf</code> sidecar when there is one, otherwise downloads ' +
     'the book to read its metadata. Nothing moves until you press Apply.</p>' +
-    '<p><label>Folder <input type="text" id="oba-dir" value="/" style="width:16em"></label> ' +
+    '<p><label>Folder <input type="text" id="oba-dir" value="' + esc(api.currentPath) +
+    '" style="width:16em"></label> ' +
     '<label><input type="checkbox" id="oba-sortname" checked> Prefer sort name (Lastname, First)</label></p>' +
     '<p><button id="oba-scan">Scan</button> ' +
     '<button id="oba-apply" disabled>Apply</button> <span id="oba-status"></span></p>' +

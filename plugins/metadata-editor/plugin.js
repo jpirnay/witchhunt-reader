@@ -35,14 +35,15 @@ CrossPoint.registerPlugin((container, api) => {
     '<p>Edits a book\'s metadata and saves it as a <code>book.opf</code> sidecar beside it. ' +
     'The book itself is never modified. Clearing a field removes it from the sidecar, so the ' +
     'book\'s own value shows again.</p>' +
-    '<p><label>Folder <input type="text" id="me-dir" value="/" style="width:16em"></label> ' +
+    '<p><label>Folder <input type="text" id="me-dir" value="' + esc(api.currentPath) +
+    '" style="width:16em"></label> ' +
     '<button id="me-scan">Scan</button> <span id="me-status"></span></p>' +
     '<div id="me-list"></div>' +
     '<div id="me-form"></div>';
 
   const el = (id) => container.querySelector(id);
   const status = (t) => { el('#me-status').textContent = t; };
-  let dir = '/';
+  let dir = api.currentPath;
   let books = [];
   let editing = null;   // { name, base, hasSidecar }
   let sourceDoc = null; // parsed existing sidecar, or null when creating fresh

@@ -69,7 +69,16 @@ async function loadPlugins(mount) {
         // URL of another file in this plugin's folder, for a plugin that ships
         // its own assets. Flat: the server serves no subdirectories.
         pluginFile: (f) => '/plugin?name=' + encodeURIComponent(p.name) +
-          '&file=' + encodeURIComponent(f)
+          '&file=' + encodeURIComponent(f),
+        // Folder the File Manager is showing, so a plugin can act on what the
+        // user is already looking at instead of asking them to type a path
+        // again. A getter, not a captured value, so it stays right if the page
+        // ever navigates in place rather than reloading. Reads the host page's
+        // global; typeof keeps it safe on Settings, which has no file browser
+        // and where this is always '/'.
+        get currentPath() {
+          return typeof currentPath === 'string' ? currentPath : '/';
+        }
       });
     } catch (e) {
       const title = document.createElement('h2');

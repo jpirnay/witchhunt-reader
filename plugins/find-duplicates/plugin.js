@@ -23,7 +23,8 @@ CrossPoint.registerPlugin((container, api) => {
     '<h2>' + esc(api.title) + '</h2>' +
     '<p>Lists files that share an exact size - usually the same book stored twice. ' +
     'Reads only the folder listing, so it never downloads a book, and never changes anything.</p>' +
-    '<p><label>Start folder <input type="text" id="fd-root" value="/" style="width:16em"></label> ' +
+    '<p><label>Start folder <input type="text" id="fd-root" value="' + esc(api.currentPath) +
+    '" style="width:16em"></label> ' +
     '<label><input type="checkbox" id="fd-epub" checked> EPUBs only</label></p>' +
     '<p><button id="fd-scan">Scan</button> <span id="fd-status"></span></p>' +
     '<div id="fd-out"></div>';

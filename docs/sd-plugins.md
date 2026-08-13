@@ -67,6 +67,7 @@ heading shows an untitled card.
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
+| `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
