@@ -10,9 +10,11 @@ card on that page. Adding or changing a plugin never needs a firmware build.
 > Mitchell ([@itsthisjustin](https://github.com/itsthisjustin)). The folder
 > layout, the `/api/plugins` and `/plugin` contract, the `registerPlugin`
 > handshake and the `mount` convention are his design, and are kept compatible
-> so a plugin written for either firmware works on both. This port deliberately
-> carries none of that branch's device-capability endpoints, on-device catalog
-> screens or content-protection work — see [Trust](#trust) for why.
+> so a plugin written for either firmware works on both. This port takes a
+> subset of that branch: the relay, fetch-to-SD and small-file endpoints are
+> here (with the host allowlist upstream had removed), while its crypto
+> endpoint, job queue, on-device catalog screens and content-protection work
+> are not — see [Trust](#trust) and `allowedHosts` below.
 
 Plugins extend the **web interface**, not the reader. Nothing runs on the
 device: the firmware only enumerates the folders and serves their bytes, and the
@@ -94,11 +96,13 @@ same-origin API — a plugin uses `fetch()` against the endpoints in
 The File Manager page also has JSZip already loaded, so a plugin mounted there
 can open and rewrite an EPUB in the browser.
 
-That set is deliberate. There is **no** device endpoint for outbound HTTP,
-crypto, or arbitrary file writes: a plugin can reach the SD card through the
-same doors the web UI already opens, and it cannot make the reader talk to the
-internet. Anything needing a remote service must be done by the browser
-directly, subject to normal CORS rules.
+Prefer these same-origin endpoints wherever they suffice — they cost the device
+nothing beyond the request itself. A plugin reaches the SD card through the same
+doors the web UI already opens, so it gains no privilege the page does not have.
+
+Reaching *outward* is different, and is fenced separately: see `allowedHosts`
+below. Where a remote site sends CORS headers, call it directly with `fetch()`
+and leave the device out of it entirely.
 
 ### Reaching the internet: `allowedHosts`
 
