@@ -1,0 +1,11 @@
+{
+  "name": "witchhunt-reader-web-assets",
+  "private": true,
+  "description": "Build-time tooling for the firmware's embedded web pages. Not shipped, not required to run the firmware - scripts/build_html.py falls back to whitespace-only minification when this is not installed.",
+  "scripts": {
+    "postinstall": "node -e \"console.log('terser available - build_html.py will minify inline JS')\""
+  },
+  "devDependencies": {
+    "terser": "5.50.0"
+  }
+}

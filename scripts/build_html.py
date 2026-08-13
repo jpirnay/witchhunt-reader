@@ -1,6 +1,7 @@
 import configparser
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -200,7 +201,66 @@ def strip_js_comments(js: str) -> str:
     return "".join(result)
 
 
-def minify_html(html: str) -> str:
+_TERSER = "unresolved"  # cached: None once we know it is unavailable
+
+
+def find_terser(project_dir: str):
+    """Locate terser, or None. Resolved once per build.
+
+    Invoked through `node <entry>` rather than the .bin shim so the same code
+    path works on Windows and POSIX.
+    """
+    global _TERSER
+    if _TERSER != "unresolved":
+        return _TERSER
+
+    entry = os.path.join(project_dir, "node_modules", "terser", "bin", "terser")
+    if os.path.isfile(entry) and shutil.which("node"):
+        _TERSER = ["node", entry]
+    else:
+        _TERSER = None
+        warn(
+            "terser not found - inline JS keeps its original identifiers, so the "
+            "generated pages are roughly 17% larger than a release build. "
+            "Run `npm install` in the project root to match CI."
+        )
+    return _TERSER
+
+
+def minify_js(js: str, project_dir: str) -> str:
+    """Compress and mangle one inline <script> body.
+
+    Mangles local names only: `toplevel` is deliberately NOT set, because the
+    pages call top-level functions from inline HTML attributes
+    (onclick="validateFile()") which terser cannot see and would rename into
+    oblivion. Same reason unused top-level functions must not be dropped.
+
+    Falls back to the caller's whitespace/comment stripping if terser is absent
+    or rejects the input - a bigger page is always preferable to a broken one.
+    """
+    terser = find_terser(project_dir)
+    if not terser or not js.strip():
+        return strip_js_comments(js)
+
+    try:
+        result = subprocess.run(
+            terser + ["--compress", "--mangle"],
+            input=js,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as e:
+        warn(f"could not run terser ({e}); falling back to comment stripping")
+        return strip_js_comments(js)
+
+    if result.returncode != 0 or not result.stdout.strip():
+        warn(f"terser failed, falling back to comment stripping: {(result.stderr or '').strip()[:200]}")
+        return strip_js_comments(js)
+    return result.stdout
+
+
+def minify_html(html: str, project_dir: str = "") -> str:
     # Tags where whitespace should be preserved
     preserve_tags = ["pre", "code", "textarea"]
     script_style_tags = ["script", "style"]
@@ -229,7 +289,7 @@ def minify_html(html: str) -> str:
         content = full[open_end:close_start]
         closing = full[close_start:]
         if tag == "script":
-            content = strip_js_comments(content)
+            content = minify_js(content, project_dir)
         elif tag == "style":
             # Remove CSS comments
             content = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
@@ -295,6 +355,10 @@ PLACEHOLDERS["%%CROSSPOINT%%"] = name_string
 PLACEHOLDERS["%%VERSION%%"] = version_string
 ini_path = os.path.join(project_dir, "platformio.ini")
 ini_time = os.path.getmtime(ini_path) if os.path.exists(ini_path) else 0
+# Resolved once, before the walk, so the warning prints at most one time and
+# so its mtime can take part in the staleness check below.
+_terser_cmd = find_terser(project_dir)
+terser_time = os.path.getmtime(_terser_cmd[1]) if _terser_cmd else 0
 for root, _, files in os.walk(SRC_DIR):
     for file in files:
         if file.endswith(".html") or file.endswith(".js"):
@@ -309,7 +373,7 @@ for root, _, files in os.walk(SRC_DIR):
                 # substitution and comment stripping like any inline script.
                 content = resolve_includes(content, root, included)
                 content = replace_placeholders(content, PLACEHOLDERS)
-                processed = minify_html(content)
+                processed = minify_html(content, project_dir)
             else:
                 processed = content
 
@@ -324,9 +388,12 @@ for root, _, files in os.walk(SRC_DIR):
             header_path = os.path.join(root, f"{base_name}.generated.h")
 
             # Editing an included fragment must invalidate the header too, so
-            # the freshness bar is the newest of the page, its includes and the ini.
+            # the freshness bar is the newest of the page, its includes and the
+            # ini. Terser's own mtime joins them: installing it after a build
+            # changes the output, and without this the cached headers would stay
+            # at their larger un-mangled size.
             newest_src = max(
-                [os.path.getmtime(file_path), ini_time]
+                [os.path.getmtime(file_path), ini_time, terser_time]
                 + [os.path.getmtime(p) for p in included if os.path.exists(p)]
             )
             if os.path.exists(header_path) and os.path.getmtime(header_path) >= newest_src:
