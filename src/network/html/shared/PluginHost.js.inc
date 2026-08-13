@@ -22,6 +22,19 @@ window.CrossPoint = window.CrossPoint || {
   registerPlugin(fn) { this._pending = fn; }
 };
 
+// Device capabilities this firmware implements. A plugin may declare what it
+// needs as "requires" in its manifest, and one asking for something absent is
+// refused with a readable card instead of failing somewhere inside its own code.
+//
+// "crypto" is deliberately absent: the browser's own crypto.subtle covers
+// hashing, HMAC, AES and RSA, so a device-side implementation would duplicate it.
+const PLUGIN_CAPABILITIES = ['relay', 'fetchToSd', 'writeFile', 'pluginFile'];
+
+function missingCapabilities(plugin) {
+  const required = Array.isArray(plugin.requires) ? plugin.requires : [];
+  return required.filter((cap) => PLUGIN_CAPABILITIES.indexOf(cap) === -1);
+}
+
 // `mount` selects which page's plugins to load, matching the manifest's "mount"
 // field ("settings" or "files"); plugins omitting it default to "settings".
 //
@@ -47,6 +60,13 @@ async function loadPlugins(mount) {
     container.id = 'plugin-' + p.name;
     host.appendChild(container);
 
+    const missing = missingCapabilities(p);
+    if (missing.length) {
+      showPluginError(container, p, 'needs ' + missing.join(', ') +
+        ', which this firmware does not provide.');
+      continue;
+    }
+
     CrossPoint._pending = null;
     try {
       await new Promise((resolve, reject) => {
@@ -61,6 +81,38 @@ async function loadPlugins(mount) {
       }
       CrossPoint._pending(container, {
         name: p.name,
+        // Fetch a URL the browser cannot reach itself, via the device. GET only,
+        // and only to hosts this plugin's manifest lists in allowedHosts.
+        // Resolves to a Response so callers can pick .blob()/.text()/.json().
+        relay: async (url) => {
+          const r = await fetch('/api/relay?plugin=' + encodeURIComponent(p.name) +
+            '&url=' + encodeURIComponent(url));
+          if (!r.ok) throw new Error('relay ' + r.status + ': ' + (await r.text().catch(() => '')));
+          return r;
+        },
+        // Download straight to the card - one transfer instead of relaying
+        // through the browser and uploading the bytes back.
+        fetchToSd: async (url, dest) => {
+          const r = await fetch('/api/fetch?plugin=' + encodeURIComponent(p.name) +
+            '&url=' + encodeURIComponent(url) + '&dest=' + encodeURIComponent(dest),
+            { method: 'POST' });
+          if (!r.ok) throw new Error('fetch ' + r.status + ': ' + (await r.text().catch(() => '')));
+          return r.json();
+        },
+        // Write one small file. `data` may be a string, Blob or ArrayBuffer.
+        writeFile: async (path, data) => {
+          const r = await fetch('/api/plugin-fs?plugin=' + encodeURIComponent(p.name) +
+            '&path=' + encodeURIComponent(path),
+            { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data });
+          if (!r.ok) throw new Error('plugin-fs ' + r.status + ': ' + (await r.text().catch(() => '')));
+          return r.json();
+        },
+        // Present so a plugin written against the upstream API fails with a
+        // sentence rather than "api.crypto is not a function".
+        crypto: () => {
+          throw new Error('api.crypto is not available on this firmware - use the ' +
+            "browser's crypto.subtle instead");
+        },
         // manifest.json's title, falling back to the folder name. The host
         // renders no chrome - the plugin owns its whole card - so this is here
         // for a plugin that wants its heading to track the manifest instead of
@@ -81,12 +133,16 @@ async function loadPlugins(mount) {
         }
       });
     } catch (e) {
-      const title = document.createElement('h2');
-      title.textContent = p.title || p.name;
-      const msg = document.createElement('p');
-      msg.className = 'plugin-error';
-      msg.textContent = 'Failed to load plugin: ' + ((e && e.message) || e);
-      container.replaceChildren(title, msg);
+      showPluginError(container, p, 'failed to load: ' + ((e && e.message) || e));
     }
   }
+}
+
+function showPluginError(container, plugin, detail) {
+  const title = document.createElement('h2');
+  title.textContent = plugin.title || plugin.name;
+  const msg = document.createElement('p');
+  msg.className = 'plugin-error';
+  msg.textContent = 'This plugin ' + detail;
+  container.replaceChildren(title, msg);
 }

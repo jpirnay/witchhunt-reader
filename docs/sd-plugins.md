@@ -60,14 +60,32 @@ The plugin is handed an empty `<div class="card">` and owns all of it, heading
 included — the firmware renders no chrome of its own, so a plugin that draws no
 heading shows an untitled card.
 
-`api` carries three things:
+`api` carries:
 
 | Field | Description |
 |---|---|
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
+| `relay(url)` | GET a URL the browser cannot reach itself; resolves to a `Response`. Allowlisted — see below |
+| `fetchToSd(url, dest)` | download straight to the card, one transfer instead of two |
+| `writeFile(path, data)` | write one small file (≤64KB); `data` may be a string, Blob or ArrayBuffer |
 | `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
+
+**`api.crypto` is not provided.** The browser's own `crypto.subtle` covers
+hashing, HMAC, AES and RSA, so a device-side implementation would only duplicate
+it. A plugin written against the upstream API that calls `api.crypto` gets a
+readable error rather than `is not a function`.
+
+A plugin may declare what it needs, and one asking for something this firmware
+does not implement is refused with a visible message instead of failing somewhere
+inside its own code:
+
+```jsonc
+{ "requires": ["relay", "fetchToSd"] }
+```
+
+Supported: `relay`, `fetchToSd`, `writeFile`, `pluginFile`.
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in

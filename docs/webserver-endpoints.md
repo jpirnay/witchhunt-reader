@@ -337,6 +337,48 @@ forwarded, so the caller infers the type from what it asked for.
 A transfer that fails or hits the ceiling *after* data has been sent ends as a
 truncated 200; the failure is logged (`[WEB]`).
 
+### POST `/api/fetch` - Download to the SD Card
+
+Downloads a URL straight to the card. Relaying through the browser and uploading
+the bytes back would move the file twice over WiFi and hold all of it in browser
+memory — tolerable for a cover, prohibitive for a book.
+
+```bash
+curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F%2Fexample.org%2Fbook.epub&dest=%2FBooks%2Fbook.epub"
+# -> {"ok":true,"dest":"/Books/book.epub"}
+```
+
+Same allowlist and no-redirect rules as `/api/relay`. `dest` must pass the same
+check `/upload` applies: inside the card, no `..`, and not a hidden or protected
+item. The book's layout cache is invalidated on success.
+
+| Status | Cause                                          |
+| ------ | ---------------------------------------------- |
+| 400    | Missing `plugin`/`url`/`dest`, bad scheme, or a refused destination |
+| 403    | Host not in the plugin's `allowedHosts`        |
+| 502    | Download failed                                 |
+
+### POST `/api/plugin-fs` - Write a Small File
+
+Writes one small file, with the raw request body as its contents. `/upload`
+already does this; it exists for compatibility with plugins written against the
+upstream API.
+
+```bash
+curl -X POST --data-binary @cover.jpg \
+  "http://crosspoint.local/api/plugin-fs?plugin=my-plugin&path=%2FBooks%2Fbook.jpg"
+# -> {"ok":true,"path":"/Books/book.jpg"}
+```
+
+Capped at 64KB — the body is buffered by the web server, so bulk transfers
+belong in `/upload`, which streams. `path` passes the same check as `dest` above.
+
+| Status | Cause                                   |
+| ------ | --------------------------------------- |
+| 400    | Missing `plugin`/`path`, or a refused path |
+| 413    | Body over 64KB — use `/upload`          |
+| 500    | Could not create the file, or short write |
+
 ### GET `/plugin` - Serve a Plugin File
 
 Serves one file from a plugin's folder.

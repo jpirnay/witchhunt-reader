@@ -201,6 +201,10 @@ const char* pluginContentType(const String& file) {
 // the handful of fields the format defines.
 constexpr size_t PLUGIN_MANIFEST_MAX_BYTES = 4096;
 
+// /api/plugin-fs is the small-file door; anything bigger belongs in /upload,
+// which streams instead of buffering the whole body in the request.
+constexpr size_t PLUGIN_FS_MAX_BYTES = 64u * 1024u;
+
 // Host of a URL: between "://" and the next "/", minus any port, and minus any
 // userinfo. Dropping everything before an "@" matters - "https://ok.com@evil.com/"
 // connects to evil.com, so that is the host the allowlist must judge.
@@ -248,6 +252,23 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
     }
   }
   return false;
+}
+
+// Where a plugin may write. Normalised, must stay inside the card, must not
+// name a hidden or protected item, and must have a filename - the same fence
+// /upload and /delete already apply, so a plugin gains no reach the web UI
+// does not already have. Returns "" when the path is refused.
+String pluginWriteTarget(const String& rawPath) {
+  String path = normalizeWebPath(rawPath);
+  if (path.isEmpty() || path == "/" || path.endsWith("/")) return "";
+  // normalizeWebPath keeps "..", which would climb out of the card.
+  if (path.indexOf("..") >= 0) return "";
+
+  const int lastSlash = path.lastIndexOf('/');
+  if (lastSlash < 0) return "";
+  const String name = path.substring(lastSlash + 1);
+  if (name.isEmpty() || isProtectedItemName(name)) return "";
+  return path;
 }
 
 // Ceiling on a relayed response. Nothing is buffered (see handleRelay), so this
@@ -358,6 +379,8 @@ void CrossPointWebServer::begin() {
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
   server->on("/api/relay", HTTP_GET, [this] { handleRelay(); });
+  server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
+  server->on("/api/plugin-fs", HTTP_POST, [this] { handlePluginFs(); });
 
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
@@ -2877,6 +2900,98 @@ void CrossPointWebServer::handleRelay() {
   } else {
     LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
   }
+}
+
+// POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>
+//
+// Downloads straight to the card. Doing this through /api/relay plus /upload
+// would move the file twice over WiFi and hold all of it in browser memory;
+// for a cover that is merely wasteful, for a book it is prohibitive.
+//
+// Same fence as the relay - allowlisted per plugin manifest, no redirects -
+// plus the write target must pass the same check /upload applies.
+void CrossPointWebServer::handleFetchToSd() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const std::string url = server->arg("url").c_str();
+  const String dest = pluginWriteTarget(server->arg("dest"));
+
+  if (!isSafePathComponent(plugin) || url.empty() || dest.isEmpty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin, url or dest\"}");
+    return;
+  }
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
+    return;
+  }
+  if (!relayHostAllowed(plugin, url)) {
+    LOG_DBG("WEB", "Fetch refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
+    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "Fetch %s -> %s", url.c_str(), dest.c_str());
+  const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(url, dest.c_str());
+  if (result != HttpDownloader::OK) {
+    LOG_ERR("WEB", "Fetch to SD failed (%d): %s", static_cast<int>(result), url.c_str());
+    server->send(502, "application/json", "{\"error\":\"download failed\"}");
+    return;
+  }
+
+  // A downloaded book replaces whatever was cached for that path.
+  clearBookCacheIfNeeded(dest);
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["dest"] = dest.c_str();
+  sendJson(server.get(), 200, doc);
+}
+
+// POST /api/plugin-fs?plugin=<name>&path=<sd path>  (raw body = file contents)
+//
+// Writes one small file to the card. /upload already does this, so this exists
+// for compatibility with plugins written against the upstream API rather than
+// because the web UI needs it - hence the modest cap, which keeps it to the
+// small-file job it advertises and leaves bulk transfers to /upload.
+void CrossPointWebServer::handlePluginFs() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const String path = pluginWriteTarget(server->arg("path"));
+  if (!isSafePathComponent(plugin) || path.isEmpty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin or path\"}");
+    return;
+  }
+
+  // WebServer has already buffered the body; "plain" is the raw payload for a
+  // non-form content type.
+  const String body = server->arg("plain");
+  if (body.length() > PLUGIN_FS_MAX_BYTES) {
+    server->send(413, "application/json", "{\"error\":\"file too large, use /upload\"}");
+    return;
+  }
+
+  FsFile out;
+  if (!Storage.openFileForWrite("WEB", path.c_str(), out)) {
+    server->send(500, "application/json", "{\"error\":\"could not create file\"}");
+    return;
+  }
+  const size_t written = body.length() ? out.write(body.c_str(), body.length()) : 0;
+  out.close();
+
+  if (written != static_cast<size_t>(body.length())) {
+    LOG_ERR("WEB", "plugin-fs short write: %u of %u to %s", static_cast<unsigned>(written),
+            static_cast<unsigned>(body.length()), path.c_str());
+    server->send(500, "application/json", "{\"error\":\"short write\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "plugin-fs wrote %u bytes to %s", static_cast<unsigned>(written), path.c_str());
+  clearBookCacheIfNeeded(path);
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["path"] = path.c_str();
+  sendJson(server.get(), 200, doc);
 }
 
 // WebSocket callback trampoline
