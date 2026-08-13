@@ -40,6 +40,30 @@ class HalPowerManager {
   bool waveformLowPower_ = false;
 
  public:
+  // Idle light-sleep instrumentation, all written from the loop task only. Plain
+  // members rather than RTC memory: light sleep retains RAM, so they survive every
+  // slice, and a deep sleep ends the session they describe anyway. `awakeMs` is
+  // wall time between consecutive lightSleep() calls, so sleptMs/(sleptMs+awakeMs)
+  // is the idle duty cycle — the closest proxy for average current without a meter.
+  struct LightSleepStats {
+    uint32_t attempts = 0;     // calls to lightSleep()
+    uint32_t slept = 0;        // calls that actually halted the chip
+    uint32_t sleptMs = 0;      // total time halted
+    uint32_t awakeMs = 0;      // total time between slices
+    uint32_t wakeTimer = 0;    // woke on the slice timer (the normal case)
+    uint32_t wakeGpio = 0;     // woke early on the power button
+    uint32_t rejLock = 0;      // declined: a render Lock was held
+    uint32_t rejWifi = 0;      // declined: WiFi up
+    uint32_t rejUsb = 0;       // declined: host attached
+    uint32_t rejDebounce = 0;  // declined: button change mid-debounce
+    uint32_t rejIdf = 0;       // esp_light_sleep_start() returned non-OK
+  };
+
+ private:
+  LightSleepStats lightSleepStats_;
+  unsigned long lastSliceEndMs_ = 0;
+
+ public:
   static constexpr int LOW_POWER_FREQ = 10;  // MHz
 
   // Two-stage idle backoff. Renders re-raise the clock via Lock regardless, so the
@@ -72,10 +96,17 @@ class HalPowerManager {
   // Light-sleep the CPU for LIGHT_SLEEP_SLICE_MS (timer wake; buttons are polled on
   // wake at the same cadence as the delay() this replaces). Returns false WITHOUT
   // sleeping when unsafe: a performance Lock is held (render in flight), WiFi is
-  // active, or USB is connected (light sleep kills the CDC link). The caller must
-  // fall back to delay() in that case. Call from the main loop only — light sleep
-  // halts the whole chip, including the button sampler task.
-  bool lightSleep(const HalGPIO& gpio) const;
+  // active, USB is connected (light sleep kills the CDC link), or a button change
+  // is mid-debounce. The caller must fall back to delay() in that case. Call from
+  // the main loop only — light sleep halts the whole chip, including the button
+  // sampler task.
+  bool lightSleep(const HalGPIO& gpio);
+
+  // Idle light-sleep counters since boot, for the System Information screen. That
+  // screen is the only practical way to read them: the CDC guard means light sleep
+  // is off for as long as a serial monitor is attached, so a serial log of these
+  // would only ever print zeroes.
+  const LightSleepStats& lightSleepStats() const { return lightSleepStats_; }
 
   // Setup wake up GPIO and enter deep sleep.
   // When keepClockAlive is true, GPIO13 stays HIGH so the LP timer keeps

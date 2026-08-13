@@ -11,6 +11,15 @@
 #include "fontIds.h"
 #include "images/Logo120.h"
 
+// Set to 1 to add a "Declined" row breaking down why idle light sleep did not
+// happen: the attempt count, then per-guard counters (lock / wifi / usb / dbnc /
+// idf). A diagnostic for the idle-power path rather than something a reader
+// needs, so it is off in normal builds; the counters behind it are collected
+// either way in HalPowerManager::LightSleepStats, at ~44 bytes of .bss. Worth
+// keeping switchable: this row is what identified the BQ27220 FC false positive
+// that was silently disabling light sleep on X3 (see HalGPIO::isUsbElectricalConnected).
+#define SHOW_SLEEP_DIAGNOSTICS 0
+
 static const char* pickUnit(uint64_t maxBytes, double& outDivisor) {
   if (maxBytes >= 1024ULL * 1024 * 1024) {
     outDivisor = 1024.0 * 1024.0 * 1024.0;
@@ -169,6 +178,67 @@ void SystemInformationActivity::render(RenderLock&&) {
   char uptimeBuf[16];
   snprintf(uptimeBuf, sizeof(uptimeBuf), "%uh %02um %02us", h, m, s);
   drawRow(tr(STR_UPTIME), uptimeBuf);
+
+  // Power behaviour. Light sleep is the share of uptime the chip was actually
+  // halted between input polls — the readable stand-in for average current, since
+  // the CDC guard means it can never be observed over a serial monitor. Deep sleep
+  // is the length of the sleep this boot woke from, blank when unknowable.
+  char sleepBuf[32];
+  snprintf(sleepBuf, sizeof(sleepBuf), "%um %02us (%u%%)", status.lightSleepSeconds / 60, status.lightSleepSeconds % 60,
+           status.lightSleepPercent);
+  drawRow(tr(STR_LIGHT_SLEEP), sleepBuf);
+
+#if SHOW_SLEEP_DIAGNOSTICS
+  // Why it did not sleep. Only non-zero reasons are listed, so a healthy device
+  // shows a short line rather than a wall of zeroes. "0 tries" is the meaningful
+  // distinct case: the idle branch was never reached, so no guard is to blame.
+  {
+    const auto& raw = status.lightSleepRaw;
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%u tries", raw.attempts);
+    drawRow(tr(STR_SLEEP_DECLINED), buf);
+
+    // Reasons go on their own continuation rows (blank label), wrapped to the
+    // buffer width: the value column is only half the screen, so packing them
+    // onto the row above truncated the list exactly when several guards had
+    // fired and the detail mattered most. Healthy devices list nothing here.
+    const struct {
+      const char* name;
+      uint32_t count;
+    } reasons[] = {{"lock", raw.rejLock},
+                   {"wifi", raw.rejWifi},
+                   {"usb", raw.rejUsb},
+                   {"dbnc", raw.rejDebounce},
+                   {"idf", raw.rejIdf}};
+    int n = 0;
+    buf[0] = '\0';
+    for (const auto& r : reasons) {
+      if (r.count == 0) {
+        continue;
+      }
+      char item[16];
+      const int len = snprintf(item, sizeof(item), "%s %u", r.name, r.count);
+      if (n > 0 && n + 2 + len >= static_cast<int>(sizeof(buf))) {
+        drawRow("", buf);  // flush the full line and start the next
+        n = 0;
+        buf[0] = '\0';
+      }
+      n += snprintf(buf + n, sizeof(buf) - n, "%s%s", n > 0 ? ", " : "", item);
+    }
+    if (n > 0) {
+      drawRow("", buf);
+    }
+  }
+#endif  // SHOW_SLEEP_DIAGNOSTICS
+
+  if (status.deepSleepSeconds > 0) {
+    const uint32_t dh = status.deepSleepSeconds / 3600;
+    const uint32_t dm = (status.deepSleepSeconds % 3600) / 60;
+    const uint32_t ds = status.deepSleepSeconds % 60;
+    snprintf(sleepBuf, sizeof(sleepBuf), "%uh %02um %02us", dh, dm, ds);
+    drawRow(tr(STR_DEEP_SLEEP), sleepBuf);
+  }
+
   std::string batteryLabel = std::to_string(status.batteryPercent) + "%";
   if (status.charging) {
     batteryLabel += " (";

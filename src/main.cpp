@@ -1470,14 +1470,8 @@ void loop() {
       // only happens when USB (externally powered), WiFi, or a render Lock (full
       // speed wanted anyway) is active.
       powerManager.setPowerSaving(false);
-      if (gpio.isDebouncePending()) {
-        // A raw button-state change is mid-debounce: committing it needs a second
-        // matching sample, so poll again quickly instead of halting the chip — a
-        // tap shorter than the slice would otherwise land in a single sample and
-        // be dropped, and every press would commit a slice late.
-        delay(10);
-      } else if (!powerManager.lightSleep(gpio)) {
-        delay(10);
+      if (!powerManager.lightSleep(gpio)) {
+        delay(10);  // declined (render Lock, WiFi, USB, mid-debounce): poll at 100 Hz
       }
     } else {
       // Response window after recent input: keep 100 Hz polling for snappy

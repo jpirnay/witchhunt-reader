@@ -77,6 +77,18 @@ RTC_NOINIT_ATTR static uint32_t rtcStateChecksum;
 
 static bool clockApproximate = true;
 
+// How long the deep sleep that this boot woke from lasted, in seconds; 0 when it
+// cannot be established. Set once by restore(), reported on the System Information
+// screen. Only the two authoritative restore paths can produce it: the DS3231 and
+// the LP-timer correction both give a wall clock derived independently of the
+// sleep-entry epoch, so the difference between them is real elapsed time. The
+// cold-boot NVS path sets the clock FROM that same epoch, so its difference is
+// zero by construction and tells us nothing.
+static uint32_t lastSleepSec = 0;
+// Sanity bound on the above, shared by both paths: a year. Anything larger means
+// a stale NVS epoch or a corrupt snapshot, not a real sleep.
+static constexpr double MAX_PLAUSIBLE_SLEEP_S = 365.0 * 24 * 3600;
+
 // Drift correction scale factor (learned from NTP sync results).
 //
 // Raw temp drift model uses 2 min/day/°C -> factor = 120/86400. This is a
@@ -128,6 +140,13 @@ static constexpr char NVS_KEY[] = "epoch";
 static constexpr char NVS_SYNC_KEY[] = "lastsync";
 static constexpr char NVS_DRIFT_KEY[] = "driftcoef";
 static constexpr char NVS_TEMP_KEY[] = "lasttemp";
+// Sleep-entry epoch, written by capture() and CONSUMED (zeroed) by restore().
+// Deliberately not NVS_KEY: that one is the clock's cold-boot fallback and must
+// survive, whereas this must not. Consuming it is what makes the reported
+// duration a sleep length rather than "time since the last sleep began" — the
+// device can reboot many times between sleeps (every reflash does), and each of
+// those boots would otherwise report the same ever-staler figure.
+static constexpr char NVS_SLEEP_KEY[] = "sleepmark";
 
 static void nvsWrite(time_t epoch) {
   Preferences prefs;
@@ -183,6 +202,29 @@ static void nvsWriteSyncTime(time_t syncEpoch) {
     prefs.putLong64(NVS_SYNC_KEY, (int64_t)syncEpoch);
     prefs.end();
   }
+}
+
+static void nvsWriteSleepMark(time_t epoch) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putLong64(NVS_SLEEP_KEY, (int64_t)epoch);
+    prefs.end();
+  }
+}
+
+// Read the sleep marker and clear it in the same breath, so exactly one boot can
+// ever claim a given sleep. Returns 0 when no sleep is pending.
+static time_t nvsTakeSleepMark() {
+  Preferences prefs;
+  time_t epoch = 0;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    epoch = (time_t)prefs.getLong64(NVS_SLEEP_KEY, 0);
+    if (epoch != 0) {
+      prefs.putLong64(NVS_SLEEP_KEY, 0);  // one write per sleep cycle, not per boot
+    }
+    prefs.end();
+  }
+  return epoch;
 }
 
 static time_t nvsRead() {
@@ -420,6 +462,7 @@ static void capture(bool lpValid) {
   rtcClockFlags = lpValid ? CLOCK_RTC_FLAG_LP_VALID : 0;
   rtcStateChecksum = computeRtcStateChecksum();
   nvsWrite(rtcEpoch);
+  nvsWriteSleepMark(rtcEpoch);
 }
 
 // ---- public API -----------------------------------------------------------
@@ -574,14 +617,28 @@ void saveBeforeSleep(bool keepLpAlive) {
 }
 
 void restore() {
+  // Claim any pending sleep marker up front, exactly once per boot. Only the
+  // branches below whose wall clock came from a source that ran THROUGH the
+  // sleep can turn it into a duration; the rest just consume it so a later boot
+  // cannot report a stale one.
+  const time_t sleepEntryEpoch = nvsTakeSleepMark();
+
   // PRIORITY 1: DS3231 (Hardware-RTC)
   if (initExternalRTC()) {
     time_t rtcTime = readExternalRTC();
     if (rtcTime > 1577836800) {  // Check if time is after 2020 (plausible timestamp)
+      // The DS3231 ran through the sleep, so the difference against the marker
+      // capture() persisted on the way in is the sleep duration. The marker is
+      // zero on any boot that did not follow a sleep (a reflash, a reset), which
+      // is what keeps this from reporting time-since-last-sleep instead.
+      const double slept = static_cast<double>(rtcTime - sleepEntryEpoch);
+      if (sleepEntryEpoch > 0 && slept > 0.0 && slept < MAX_PLAUSIBLE_SLEEP_S) {
+        lastSleepSec = static_cast<uint32_t>(slept);
+      }
       setSystemClock(rtcTime);
       rtcEpoch = rtcTime;
       clockApproximate = false;
-      LOG_INF("CLK", "Got time from DS3231.");
+      LOG_INF("CLK", "Got time from DS3231. Last deep sleep %us", lastSleepSec);
       return;
     }
   }
@@ -617,6 +674,10 @@ void restore() {
       // 157680000 s = 5 years.
       if (std::isfinite(correctedSec) && correctedSec >= 0.0 && correctedSec <= 157680000.0) {
         estimated += static_cast<time_t>(correctedSec);
+        // The LP timer ran through the sleep, so this correction IS its duration.
+        if (correctedSec < MAX_PLAUSIBLE_SLEEP_S) {
+          lastSleepSec = static_cast<uint32_t>(correctedSec);
+        }
       } else {
         LOG_ERR("CLK", "Discarding implausible LP elapsed time: %.3fs", correctedSec);
       }
@@ -735,6 +796,8 @@ bool isSynced() {
 bool isApproximate() { return clockApproximate; }
 
 time_t lastSyncTime() { return nvsReadSyncTime(); }
+
+uint32_t lastSleepSeconds() { return lastSleepSec; }
 
 void formatTime(char* buf, size_t bufSize, bool use24h) {
   if (!isSynced()) {

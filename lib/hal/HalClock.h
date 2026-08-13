@@ -77,6 +77,13 @@ bool isApproximate();
 /// no sync has ever been recorded.
 time_t lastSyncTime();
 
+/// How long the deep sleep this boot woke from lasted, in seconds, or 0 when it
+/// cannot be established (cold boot, or a clock that was never synced so no
+/// sleep-entry epoch was captured). Only restore() paths whose wall clock comes
+/// from a source that ran through the sleep — the DS3231 or the LP timer — can
+/// produce a real figure; see the definition in HalClock.cpp.
+uint32_t lastSleepSeconds();
+
 /// Format the current time for display.  Returns "--:--" if the clock was
 /// never synced, prefixes with "~" if approximate.
 /// When use24h is false, formats as "2:05pm" / "12:30am".

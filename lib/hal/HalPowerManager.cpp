@@ -109,17 +109,38 @@ void HalPowerManager::exitWaveformWait() {
 // guard on the GPIO13 hold follows PR #2998 (Justin Mitchell / @itsthisjustin).
 // The xTaskCatchUpTicks() correction at the end is this fork's own addition — see
 // the comment there for why our background button sampler needs it.
-bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
+bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
+  const unsigned long entryMs = millis();
+  if (lastSliceEndMs_ != 0) {
+    lightSleepStats_.awakeMs += entryMs - lastSliceEndMs_;
+  }
+  lightSleepStats_.attempts++;
+  lastSliceEndMs_ = entryMs;  // overwritten with the post-sleep stamp if we do sleep
+
   // A performance Lock means a render (or similar) task is mid-flight; light sleep
   // freezes the whole chip, so it would stall that task. Read without the mutex,
   // like setPowerSaving(): stale in either direction is acceptable — a stale lock
   // delays sleeping by one slice, and a Lock acquired after this check freezes that
   // task for at most one slice (timer wake; RAM and peripheral state are retained).
   if (currentLockMode.load(std::memory_order_relaxed) != None) {
+    lightSleepStats_.rejLock++;
     return false;
   }
   // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
-  if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached()) {
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    lightSleepStats_.rejWifi++;
+    return false;
+  }
+  if (gpio.isUsbConnectedCached()) {
+    lightSleepStats_.rejUsb++;
+    return false;
+  }
+  // A raw button-state change is still inside the debounce window: committing it
+  // needs a second matching sample, so the caller should poll again quickly rather
+  // than halt the chip — a tap shorter than the slice would otherwise land in a
+  // single sample and be dropped, and every press would commit a slice late.
+  if (gpio.isDebouncePending()) {
+    lightSleepStats_.rejDebounce++;
     return false;
   }
 
@@ -180,9 +201,21 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
 
   if (err != ESP_OK) {
     // e.g. ESP_ERR_SLEEP_REJECT — we did not actually sleep
+    lightSleepStats_.rejIdf++;
     LOG_DBG("PWR", "Light sleep rejected: %d", static_cast<int>(err));
     return false;
   }
+
+  lightSleepStats_.slept++;
+  lightSleepStats_.sleptMs += sleptMs;
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+    lightSleepStats_.wakeGpio++;  // power button pressed mid-slice
+  } else {
+    lightSleepStats_.wakeTimer++;
+  }
+  // Restart the awake stopwatch from here, so awakeMs counts only time the chip
+  // was actually running between slices, not the slices themselves.
+  lastSliceEndMs_ = millis();
 
   // esp_light_sleep_start() corrects esp_timer (so millis() stays wall-clock
   // honest) but NOT the FreeRTOS tick, which simply stops for the duration
