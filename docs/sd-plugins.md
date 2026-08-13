@@ -82,6 +82,37 @@ same doors the web UI already opens, and it cannot make the reader talk to the
 internet. Anything needing a remote service must be done by the browser
 directly, subject to normal CORS rules.
 
+### Reaching the internet: `allowedHosts`
+
+A plugin runs in a browser page served by the device, so it can only read a
+cross-origin response when the remote site sends CORS headers. Most do not —
+Goodreads and `books.google.com` among them — and an image without CORS taints a
+canvas, so its bytes can be displayed but never saved.
+
+`GET /api/relay?plugin=<name>&url=<url>` fetches on the page's behalf and answers
+same-origin. It is opt-in per plugin: the host must be listed in that plugin's
+own `manifest.json`, so a plugin's reach is readable before you install it.
+
+```jsonc
+{
+  "title": "Metadata Editor",
+  "mount": "files",
+  "allowedHosts": [
+    "openlibrary.org",        // exact match
+    ".openlibrary.org"        // any subdomain, e.g. covers.openlibrary.org
+  ]
+}
+```
+
+No list means no access. `GET` only — a plugin cannot make the device POST
+anywhere. Redirects are **not** followed: a 3xx comes back as-is, and the plugin
+may relay the `Location` itself so the new host is judged on its own merits.
+The body streams back rather than being buffered, so a large image does not have
+to fit in the device's largest free block.
+
+Prefer a direct `fetch()` when the site sends CORS (Open Library does) and keep
+the relay for sites that do not — it costs the device a network round trip.
+
 ### Mount points
 
 | `mount` | Page | Suits |

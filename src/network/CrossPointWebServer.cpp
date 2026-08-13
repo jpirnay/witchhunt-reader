@@ -200,6 +200,60 @@ const char* pluginContentType(const String& file) {
 // file in a plugin folder from being read into the heap; 4KB is far more than
 // the handful of fields the format defines.
 constexpr size_t PLUGIN_MANIFEST_MAX_BYTES = 4096;
+
+// Host of a URL: between "://" and the next "/", minus any port, and minus any
+// userinfo. Dropping everything before an "@" matters - "https://ok.com@evil.com/"
+// connects to evil.com, so that is the host the allowlist must judge.
+std::string urlHost(const std::string& url) {
+  const size_t schemeEnd = url.find("://");
+  if (schemeEnd == std::string::npos) return {};
+  const size_t start = schemeEnd + 3;
+  size_t end = url.find('/', start);
+  if (end == std::string::npos) end = url.size();
+
+  std::string host = url.substr(start, end - start);
+  const size_t at = host.rfind('@');
+  if (at != std::string::npos) host = host.substr(at + 1);
+  const size_t colon = host.find(':');
+  if (colon != std::string::npos) host = host.substr(0, colon);
+  return host;
+}
+
+// True when the URL's host appears in the calling plugin's manifest
+// "allowedHosts". A bare entry must match exactly; one starting with a dot
+// matches that suffix (".example.org" allows "covers.example.org"). Absent or
+// empty list means nothing is allowed - the relay is opt-in per plugin, and a
+// plugin's reach is readable in its own folder before it is installed.
+bool relayHostAllowed(const String& plugin, const std::string& url) {
+  const std::string host = urlHost(url);
+  if (host.empty() || !isSafePathComponent(plugin)) return false;
+
+  const std::string dir = PluginLocations::findPluginDir(plugin.c_str());
+  if (dir.empty()) return false;
+
+  std::string manifest;
+  if (!Storage.readFileToString("WEB", dir + "/manifest.json", PLUGIN_MANIFEST_MAX_BYTES, manifest)) return false;
+
+  JsonDocument m;
+  if (deserializeJson(m, manifest) != DeserializationError::Ok || !m["allowedHosts"].is<JsonArray>()) return false;
+
+  for (JsonVariant entry : m["allowedHosts"].as<JsonArray>()) {
+    const char* pattern = entry.as<const char*>();
+    if (!pattern || !*pattern) continue;
+    const std::string pat = pattern;
+    if (pat[0] == '.') {
+      if (host.size() > pat.size() && host.compare(host.size() - pat.size(), pat.size(), pat) == 0) return true;
+    } else if (host == pat) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Ceiling on a relayed response. Nothing is buffered (see handleRelay), so this
+// only bounds how long one request may occupy the single-connection server.
+constexpr size_t MAX_RELAY_BYTES = 4u * 1024u * 1024u;
+
 }  // namespace
 
 // File listing page template - now using generated headers:
@@ -303,6 +357,7 @@ void CrossPointWebServer::begin() {
   // Web-UI plugins (SD card)
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
+  server->on("/api/relay", HTTP_GET, [this] { handleRelay(); });
 
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
@@ -2744,6 +2799,83 @@ void CrossPointWebServer::handlePluginFile() const {
   f.close();
   if (!ok) {
     LOG_DBG("WEB", "Plugin file streaming interrupted: %s/%s", name.c_str(), file.c_str());
+  }
+}
+
+// GET /api/relay?plugin=<name>&url=<url>
+//
+// Fetches a URL the browser cannot reach itself. A page served from this device
+// may not read a cross-origin response unless the remote sends CORS headers, and
+// most do not; the device is not a browser and has no such restriction, so it
+// fetches on the page's behalf and answers same-origin.
+//
+// That is a real capability, so it is fenced: GET only, and only to hosts the
+// calling plugin declares in its own manifest. Redirects are NOT followed -
+// otherwise an allowed host could 302 anywhere and the host actually fetched
+// would never have been checked, which is how upstream's version could be
+// bypassed. A 3xx is returned to the plugin, which may relay the new location
+// and have it judged on its own merits.
+//
+// The body is streamed straight through rather than buffered: during a web
+// session the heap has around 110KB free with a ~53KB largest block, and a
+// single cover image can exceed that on its own.
+void CrossPointWebServer::handleRelay() {
+  if (rejectIfLowMemory(server.get())) return;
+
+  const String plugin = server->arg("plugin");
+  const String urlArg = server->arg("url");
+  const std::string url = urlArg.c_str();
+
+  if (!isSafePathComponent(plugin) || url.empty()) {
+    server->send(400, "application/json", "{\"error\":\"missing plugin or url\"}");
+    return;
+  }
+  // Only http(s): the client speaks nothing else, and this keeps the scheme out
+  // of the allowlist's business.
+  if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
+    server->send(400, "application/json", "{\"error\":\"only http(s) urls\"}");
+    return;
+  }
+  if (!relayHostAllowed(plugin, url)) {
+    LOG_DBG("WEB", "Relay refused for %s: %s not in allowedHosts", plugin.c_str(), urlHost(url).c_str());
+    server->send(403, "application/json", "{\"error\":\"host not allowed by plugin manifest\"}");
+    return;
+  }
+
+  LOG_DBG("WEB", "Relay %s -> %s", plugin.c_str(), url.c_str());
+
+  bool headerSent = false;
+  bool overLimit = false;
+  size_t total = 0;
+
+  const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t len) {
+    if (total + len > MAX_RELAY_BYTES) {
+      overLimit = true;
+      return false;  // aborts the transfer
+    }
+    if (!headerSent) {
+      // Content type is not forwarded - HttpDownloader does not surface response
+      // headers - so the caller infers it from what it asked for.
+      server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+      server->send(200, "application/octet-stream", "");
+      headerSent = true;
+    }
+    esp_task_wdt_reset();
+    server->sendContent(reinterpret_cast<const char*>(data), len);
+    total += len;
+    return true;
+  });
+
+  if (!headerSent) {
+    server->send(502, "application/json", "{\"error\":\"fetch failed\"}");
+    return;
+  }
+  server->sendContent("");  // terminate the chunked response
+  if (!ok || overLimit) {
+    LOG_ERR("WEB", "Relay truncated after %u bytes%s: %s", static_cast<unsigned>(total),
+            overLimit ? " (size limit)" : "", url.c_str());
+  } else {
+    LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
   }
 }
 

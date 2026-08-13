@@ -290,6 +290,53 @@ curl http://crosspoint.local/api/plugins
 
 Always 200 with an array; an unreadable or absent plugins folder yields `[]`.
 
+### GET `/api/relay` - Fetch a URL for a Plugin
+
+Fetches a URL the browser cannot reach itself and streams the body back. A page
+served from the device may not read a cross-origin response unless the remote
+sends CORS headers, and most do not; the device is not a browser, so it fetches
+on the page's behalf and answers same-origin.
+
+**Request:**
+```bash
+curl "http://crosspoint.local/api/relay?plugin=metadata-editor&url=https%3A%2F%2Fcovers.example.org%2Fb%2F1.jpg"
+```
+
+**Query Parameters:**
+
+| Parameter | Required | Description                                   |
+| --------- | -------- | --------------------------------------------- |
+| `plugin`  | Yes      | Plugin folder name; its manifest is the allowlist |
+| `url`     | Yes      | Absolute `http://` or `https://` URL           |
+
+The body streams back as `application/octet-stream` — response headers are not
+forwarded, so the caller infers the type from what it asked for.
+
+**Constraints:**
+
+- **GET only.** A plugin cannot make the device POST anywhere.
+- **Allowlisted per plugin.** The host must appear in that plugin's
+  `manifest.json` `allowedHosts`. A bare entry matches exactly; one starting
+  with a dot matches that suffix. No list, no access.
+- **Redirects are not followed.** A 3xx is returned as-is. Following them would
+  mean the host actually fetched was never checked against the allowlist — the
+  plugin may relay the `Location` itself, which is judged on its own merits.
+- **Streamed, not buffered**, with a 4MB ceiling. Nothing large is resident:
+  during a web session the largest free block is around 53KB, so a buffered
+  response would fail on an ordinary cover image.
+
+**Error Responses:**
+
+| Status | Cause                                                        |
+| ------ | ------------------------------------------------------------ |
+| 400    | Missing `plugin`/`url`, or a non-http(s) URL                  |
+| 403    | Host not listed in the plugin's `allowedHosts`                |
+| 502    | The fetch failed before any data arrived                      |
+| 503    | Heap too low to serve the request                             |
+
+A transfer that fails or hits the ceiling *after* data has been sent ends as a
+truncated 200; the failure is logged (`[WEB]`).
+
 ### GET `/plugin` - Serve a Plugin File
 
 Serves one file from a plugin's folder.

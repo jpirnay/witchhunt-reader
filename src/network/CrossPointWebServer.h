@@ -172,4 +172,8 @@ class CrossPointWebServer {
   // that branch's device-capability endpoints are ported.
   void handlePluginList() const;  // GET /api/plugins -> discovered plugins
   void handlePluginFile() const;  // GET /plugin?name&file -> one file from its folder
+  // GET /api/relay?plugin&url -> fetch a URL the browser cannot reach itself.
+  // GET only, allowlisted per plugin manifest, no redirects, streamed not
+  // buffered. See the definition for why each of those is load-bearing.
+  void handleRelay();
 };
