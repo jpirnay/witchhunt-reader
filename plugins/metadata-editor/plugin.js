@@ -116,10 +116,205 @@ CrossPoint.registerPlugin((container, api) => {
         '</label></p>';
     }
     html += '<p><button id="me-save">Save sidecar</button> ' +
-      '<button id="me-cancel">Cancel</button> <span id="me-saved"></span></p>';
+      '<button id="me-cancel">Cancel</button> <span id="me-saved"></span></p>' +
+      '<hr><div id="me-cover"></div>';
     el('#me-form').innerHTML = html;
     el('#me-cancel').onclick = () => { el('#me-form').textContent = ''; editing = null; };
     el('#me-save').onclick = save;
+    renderCover(book, values);
+  }
+
+  // --- cover sidecar --------------------------------------------------------
+  // A cover beside the book overrides the one embedded in it, exactly like the
+  // metadata sidecar, and is written the same way: the book is never touched.
+  //
+  // No image is ever fetched cross-origin. A page served from the device cannot
+  // read a response from goodreads.com or books.google.com - they send no CORS
+  // headers, and drawing such an image to a canvas taints it, so its bytes could
+  // never be saved anyway. Hence the three sources here: a local file, the
+  // clipboard (which is how you take a cover from any site at all - right-click
+  // the image, Copy image, paste here), and Open Library, which does serve both
+  // its search API and its covers with Access-Control-Allow-Origin.
+  function renderCover(book, values) {
+    const host = el('#me-cover');
+    host.innerHTML =
+      '<h3>Cover</h3>' +
+      '<p id="me-cover-state">Checking...</p>' +
+      '<div id="me-cover-preview"></div>' +
+      '<p><label>Replace from file <input type="file" id="me-cover-file" accept="image/*"></label></p>' +
+      '<p id="me-paste" tabindex="0" style="border:1px dashed rgba(128,128,128,.6);padding:10px">' +
+      'Click here and press Ctrl+V to paste a copied image. Works with any site: copy the ' +
+      'image in your browser, then paste it here.</p>' +
+      '<p><button id="me-search">Search Open Library</button> ' +
+      '<button id="me-remove">Remove cover</button> <span id="me-cover-msg"></span></p>' +
+      '<div id="me-results"></div>';
+
+    refreshCoverState();
+
+    el('#me-cover-file').onchange = async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) await installCover(file, file.name);
+    };
+
+    el('#me-paste').onpaste = async (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const item of items) {
+        if (item.type && item.type.indexOf('image/') === 0) {
+          e.preventDefault();
+          await installCover(item.getAsFile(), 'pasted.' + item.type.split('/')[1]);
+          return;
+        }
+      }
+      coverMsg('No image found in the clipboard.');
+    };
+
+    el('#me-remove').onclick = removeCover;
+    el('#me-search').onclick = () => searchOpenLibrary(values);
+  }
+
+  function coverMsg(t) {
+    const m = el('#me-cover-msg');
+    if (m) m.textContent = t;
+  }
+
+  // Must stay in step with SidecarFiles::kCoverExtensions in the firmware: the
+  // device resolves the cover by this order, so writing a .jpg while an older
+  // .png remains would be decided by the list rather than by what you chose.
+  const COVER_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.JPG', '.JPEG', '.PNG', '.BMP'];
+
+  async function currentCoverName() {
+    const entries = await getJson('/api/files?path=' + encodeURIComponent(dir));
+    const names = new Set(entries.filter((e) => !e.isDirectory).map((e) => e.name));
+    for (const ext of COVER_EXTS) {
+      if (names.has(editing.base + ext)) return editing.base + ext;
+    }
+    return null;
+  }
+
+  async function refreshCoverState() {
+    try {
+      const name = await currentCoverName();
+      el('#me-cover-state').textContent = name
+        ? 'Sidecar cover: ' + name
+        : 'No cover sidecar - the cover inside the book is used.';
+      el('#me-cover-preview').innerHTML = name
+        // Cache-busted: the filename stays the same when the image changes.
+        ? '<img alt="cover" style="max-height:160px" src="' + dl(join(dir, name)) + '&t=' + Date.now() + '">'
+        : '';
+    } catch (e) {
+      el('#me-cover-state').textContent = 'Could not read the folder: ' + msg(e);
+    }
+  }
+
+  async function installCover(blob, sourceName) {
+    if (!blob) return;
+    const ext = coverExtFor(blob.type, sourceName);
+    if (!ext) {
+      coverMsg('Unsupported image type - use JPEG, PNG or BMP.');
+      return;
+    }
+    coverMsg('Saving...');
+    try {
+      // Drop any other variant first, so exactly one cover sidecar exists.
+      const existing = await currentCoverName();
+      if (existing && existing !== editing.base + ext) await del(join(dir, existing));
+
+      const fd = new FormData();
+      fd.append('file', blob, editing.base + ext);
+      const r = await fetch('/upload?path=' + encodeURIComponent(dir), { method: 'POST', body: fd });
+      if (!r.ok) throw new Error('upload ' + r.status);
+      coverMsg('Saved ' + editing.base + ext);
+      await refreshCoverState();
+    } catch (e) {
+      coverMsg('Failed: ' + msg(e));
+    }
+  }
+
+  async function removeCover() {
+    coverMsg('');
+    try {
+      const name = await currentCoverName();
+      if (!name) {
+        coverMsg('There is no cover sidecar to remove.');
+        return;
+      }
+      if (!confirm('Delete ' + name + '? The cover inside the book will be used again.')) return;
+      await del(join(dir, name));
+      coverMsg('Removed ' + name);
+      await refreshCoverState();
+    } catch (e) {
+      coverMsg('Failed: ' + msg(e));
+    }
+  }
+
+  function coverExtFor(mime, name) {
+    const m = (mime || '').toLowerCase();
+    if (m === 'image/jpeg' || m === 'image/jpg') return '.jpg';
+    if (m === 'image/png') return '.png';
+    if (m === 'image/bmp' || m === 'image/x-ms-bmp') return '.bmp';
+    const n = (name || '').toLowerCase();
+    if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return '.jpg';
+    if (n.endsWith('.png')) return '.png';
+    if (n.endsWith('.bmp')) return '.bmp';
+    return '';
+  }
+
+  async function searchOpenLibrary(values) {
+    const results = el('#me-results');
+    const title = (el('#me-f-title').value || values.title || '').trim();
+    const author = (el('#me-f-author').value || values.author || '').trim();
+    if (!title) {
+      coverMsg('Enter a title first.');
+      return;
+    }
+
+    coverMsg('Searching Open Library...');
+    results.textContent = '';
+    try {
+      const url = 'https://openlibrary.org/search.json?limit=8&fields=title,author_name,cover_i' +
+        '&title=' + encodeURIComponent(title) +
+        (author ? '&author=' + encodeURIComponent(author) : '');
+      const data = await (await fetch(url)).json();
+      const hits = (data.docs || []).filter((d) => d.cover_i);
+      if (!hits.length) {
+        coverMsg('No covers found.');
+        return;
+      }
+
+      coverMsg(hits.length + ' result(s) - click one to use it');
+      results.innerHTML = hits.map((d, i) =>
+        '<figure style="display:inline-block;margin:4px;text-align:center;width:110px">' +
+        '<img data-i="' + i + '" class="me-hit" style="max-height:140px;cursor:pointer"' +
+        ' src="https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg" alt="">' +
+        '<figcaption style="font-size:.8em">' + esc((d.author_name || []).join(', ')) + '</figcaption>' +
+        '</figure>').join('');
+
+      results.querySelectorAll('.me-hit').forEach((img) => {
+        img.onclick = async () => {
+          const hit = hits[Number(img.dataset.i)];
+          coverMsg('Fetching cover...');
+          try {
+            // -L is the large size. Readable only because Open Library sends CORS.
+            const resp = await fetch('https://covers.openlibrary.org/b/id/' + hit.cover_i + '-L.jpg');
+            if (!resp.ok) throw new Error('cover ' + resp.status);
+            await installCover(await resp.blob(), 'openlibrary.jpg');
+            results.textContent = '';
+          } catch (e) {
+            coverMsg('Could not fetch that cover: ' + msg(e));
+          }
+        };
+      });
+    } catch (e) {
+      coverMsg('Search failed: ' + msg(e));
+    }
+  }
+
+  async function del(path) {
+    const fd = new FormData();
+    fd.append('path', path);
+    fd.append('type', 'file');
+    const r = await fetch('/delete', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('delete ' + r.status + ' ' + (await r.text().catch(() => '')));
   }
 
   async function save() {

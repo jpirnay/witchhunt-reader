@@ -22,6 +22,17 @@ When present it replaces the book's embedded cover on the home screen and in the
 book browser, and the firmware skips extracting the embedded cover entirely.
 Implemented by `ReaderActivity::sidecarCoverPath()`.
 
+The bundled `metadata-editor` plugin manages this from the web UI — preview the
+current cover, replace it from a local file, paste an image copied from any
+website, search Open Library, or remove it. See [sd-plugins.md](sd-plugins.md).
+
+**Replacing a cover takes effect on the next load.** The rendered thumbnail is
+cached per book, and `ReaderActivity::ensureCoverThumb()` compares the sidecar's
+modification time against it: a newer sidecar wins and the thumbnail is
+regenerated. Note this depends on the clock — files written while the RTC is
+unsynced all carry 1980-01-01, so on hardware without a working RTC a replaced
+cover may need a cache clear.
+
 ## Metadata sidecar — `book.opf`
 
 A Calibre-style OPF. Calibre writes one beside every book it exports, so a
