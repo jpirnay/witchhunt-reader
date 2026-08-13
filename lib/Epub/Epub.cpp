@@ -9,6 +9,7 @@
 #include <Logging.h>
 #include <PngToBmpConverter.h>
 #include <Serialization.h>
+#include <SidecarFiles.h>
 #include <ZipFile.h>
 #include <esp_system.h>
 
@@ -643,6 +644,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
         Storage.removeDir((cachePath + "/sections").c_str());
       }
     }
+    applyMetadataSidecar();
     LOG_DBG("EBP", "Loaded ePub: %s", filepath.c_str());
     return true;
   }
@@ -766,8 +768,56 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   // Pin the content this cache was built from (see the staleness check above).
   if (haveFp) writeStoredFingerprint(zipFp);
 
+  applyMetadataSidecar();
   LOG_DBG("EBP", "Loaded ePub: %s", filepath.c_str());
   return true;
+}
+
+std::string Epub::metadataSidecarPath(const std::string& bookPath) { return SidecarFiles::metadataPath(bookPath); }
+
+// Calibre writes an OPF beside each exported book. Where one sits next to the
+// EPUB it is authoritative for that book's descriptive metadata, so a user can
+// correct a title, author or series without rewriting the book - the same rule
+// the cover sidecar already follows.
+//
+// Only the descriptive fields are taken. coverItemHref and textReferenceHref
+// are zip-internal paths that a sidecar cannot meaningfully supply, and covers
+// have their own sidecar already. Empty sidecar fields are skipped, so a
+// partial sidecar cannot blank out good embedded metadata.
+void Epub::applyMetadataSidecar() const {
+  if (!bookMetadataCache) return;
+  const std::string path = metadataSidecarPath(filepath);
+  if (path.empty()) return;
+
+  size_t size = 0;
+  {
+    HalFile probe;
+    if (!Storage.openFileForRead("EBP", path, probe)) return;
+    size = probe.fileSize();
+  }
+  if (size == 0 || size > MAX_METADATA_SIDECAR_BYTES) {
+    LOG_DBG("EBP", "Ignoring metadata sidecar, %u bytes: %s", static_cast<unsigned>(size), path.c_str());
+    return;
+  }
+
+  // Null cache: a sidecar carries no real manifest or spine, so no item index
+  // must be built from it. cachePath/contentBasePath are passed because the
+  // parser holds them by reference - they must outlive it, so no temporaries.
+  ContentOpfParser parser(cachePath, contentBasePath, size, nullptr);
+  if (!parser.setup()) return;
+  if (!Storage.readFileToStream(path.c_str(), parser, 1024)) {
+    LOG_DBG("EBP", "Could not read metadata sidecar: %s", path.c_str());
+    return;
+  }
+
+  auto& md = bookMetadataCache->coreMetadata;
+  if (!parser.title.empty()) md.title = parser.title;
+  if (!parser.author.empty()) md.author = parser.author;
+  if (!parser.language.empty()) md.language = parser.language;
+  if (!parser.series.empty()) md.series = parser.series;
+  if (!parser.seriesIndex.empty()) md.seriesIndex = parser.seriesIndex;
+  if (!parser.description.empty()) md.description = parser.description;
+  LOG_DBG("EBP", "Applied metadata sidecar: %s", path.c_str());
 }
 
 bool Epub::loadForCover() {
@@ -779,6 +829,7 @@ bool Epub::loadForCover() {
 
   // Fast path: a book.bin already exists — it carries coverItemHref, no OPF parse needed.
   if (bookMetadataCache->load()) {
+    applyMetadataSidecar();
     return true;
   }
 
@@ -795,6 +846,7 @@ bool Epub::loadForCover() {
   // Mark loaded so ensureCoverImageCached()'s isLoaded() gate passes. Spine/TOC stay empty — the
   // caller uses only the cover path (documented on loadForCover / markCoverMetadataLoaded).
   bookMetadataCache->markCoverMetadataLoaded();
+  applyMetadataSidecar();
   return true;
 }
 
@@ -807,6 +859,7 @@ bool Epub::loadForMetadata() {
 
   // Fast path: an existing book.bin already carries title/author/series, no OPF parse needed.
   if (bookMetadataCache->load()) {
+    applyMetadataSidecar();
     return true;
   }
 
@@ -818,6 +871,7 @@ bool Epub::loadForMetadata() {
   }
   // Mark loaded for API symmetry with loadForCover(); spine/TOC stay empty and must not be used.
   bookMetadataCache->markCoverMetadataLoaded();
+  applyMetadataSidecar();
   return true;
 }
 

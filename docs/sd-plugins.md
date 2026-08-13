@@ -67,6 +67,7 @@ heading shows an untitled card.
 | `name` | the folder name |
 | `title` | `manifest.json`'s title, falling back to `name` — use it if you want the heading to track the manifest rather than hardcoding it |
 | `pluginFile(filename)` | URL for another file in this plugin's folder |
+| `currentPath` | the folder the File Manager is showing. Default to it rather than asking for a path the user has already navigated to; always `/` on Settings |
 
 Everything else is the web server's own
 same-origin API — a plugin uses `fetch()` against the endpoints in
@@ -117,8 +118,10 @@ Prefer `opf:file-as` over the element text when deriving a folder name - that is
 the sortable form, and what Calibre's own author folders use.
 
 This mirrors the existing cover-sidecar rule, and the same priority applies:
-sidecar wins over what is embedded in the book. Note the firmware itself does
-not read `book.opf` today; this is a convention between plugins for now.
+sidecar wins over what is embedded in the book. **The firmware reads it too** -
+the title, author and series shown on the device come from `book.opf` when one
+is present, so a plugin writing one changes what the reader displays. See
+[sidecar-files.md](sidecar-files.md) for the device-side rules.
 
 ## Bundled plugins
 
@@ -130,6 +133,7 @@ are never compiled, so they cost no flash.
 | `hello-plugin` | settings | Minimal reference and smoke test - renders a card and lists `/` |
 | `find-duplicates` | files | Reports files sharing an exact size. Report only: never writes, and never downloads a book |
 | `organize-by-author` | files | Sorts loose EPUBs into `<Author>/` folders. Preview first, moves only on Apply, carries sidecars along |
+| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (file, clipboard paste, Open Library). Never rewrites the book |
 
 ## Loading order and failures
 

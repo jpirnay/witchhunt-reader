@@ -8,6 +8,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
+#include <SidecarFiles.h>
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -163,19 +164,12 @@ bool ReaderActivity::isImageFile(const std::string& path) {
   return FsHelpers::hasBmpExtension(path) || FsHelpers::hasJpgExtension(path) || FsHelpers::hasPngExtension(path);
 }
 
+// Which extensions count, and how the base name is derived, live in
+// SidecarFiles - see the header there for why this is one definition.
 std::string ReaderActivity::sidecarCoverPath(const std::string& bookPath) {
-  const auto sep = bookPath.find_last_of("/\\");
-  const auto dot = bookPath.rfind('.');
-  if (dot == std::string::npos || (sep != std::string::npos && dot < sep)) return "";
-  const std::string base = bookPath.substr(0, dot);
-  for (const char* ext : {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG", ".BMP"}) {
-    const std::string candidate = base + ext;
-    if (Storage.exists(candidate.c_str())) {
-      LOG_DBG("SIDECAR", "Found sidecar cover: %s", candidate.c_str());
-      return candidate;
-    }
-  }
-  return "";
+  const std::string candidate = SidecarFiles::coverPath(bookPath);
+  if (!candidate.empty()) LOG_DBG("SIDECAR", "Found sidecar cover: %s", candidate.c_str());
+  return candidate;
 }
 
 std::string ReaderActivity::bookCacheDir(const std::string& bookPath) {
@@ -341,6 +335,33 @@ bool thumbFileValid(const std::string& path, int width, int height) {
 // calling them, or the "regeneration" silently no-ops and the stale file survives every pass
 // (observed: "larger than slot — regenerating" + "ok" with no decode between, every boot,
 // forever). 0-byte sentinels are kept: they encode "structurally absent" for the Epub generator.
+// FAT packs the modify date and time so that (date << 16) | time increases
+// monotonically, which is all the ordering this needs. False when either stamp
+// is unreadable, so an unknown age never triggers a rebuild.
+//
+// Note the device clock gates this: HalStorage writes 1980-01-01 to every file
+// created while the RTC is unsynced, so two such files compare equal and the
+// cover is left alone. On hardware with the DS3231 that does not arise.
+bool fileModifiedStamp(const std::string& path, uint32_t* out) {
+  FsFile f;
+  if (!Storage.openFileForRead("COVER", path, f)) return false;
+  uint16_t date = 0, time = 0;
+  const bool ok = f.getModifyDateTime(&date, &time);
+  f.close();
+  if (!ok) return false;
+  *out = (static_cast<uint32_t>(date) << 16) | time;
+  return true;
+}
+
+// True when the sidecar has been replaced since the thumb was cached.
+bool sidecarNewerThanThumb(const std::string& sidecarPath, const std::string& thumbPath) {
+  uint32_t sidecarStamp = 0;
+  uint32_t thumbStamp = 0;
+  if (!fileModifiedStamp(sidecarPath, &sidecarStamp)) return false;
+  if (!fileModifiedStamp(thumbPath, &thumbStamp)) return false;
+  return sidecarStamp > thumbStamp;
+}
+
 void removeStaleThumb(const std::string& path) {
   FsFile stale;
   if (!Storage.openFileForRead("COVER", path, stale)) return;
@@ -381,11 +402,22 @@ ThumbResult ReaderActivity::ensureCoverThumb(const std::string& bookPath, int wi
   const std::string dir = bookCacheDir(bookPath);
   const std::string name = "thumb_" + std::to_string(width) + "x" + std::to_string(height) + ".bmp";
   const std::string file = dir + "/" + name;
-  if (thumbFileValid(file, width, height)) return ThumbResult::Ok;
-  removeStaleThumb(file);
 
   // Source preference: a sidecar image beside the book wins over the embedded cover.
   const std::string sidecar = sidecarCoverPath(bookPath);
+
+  // Replacing a cover must take effect. Nothing else invalidates this thumb, so
+  // without the check the short circuit below serves the previous image forever
+  // — the cover editor's whole workflow, and replacing a cover by hand, both
+  // looked like they had silently failed.
+  if (!sidecar.empty() && sidecarNewerThanThumb(sidecar, file)) {
+    LOG_DBG("COVER", "Sidecar newer than cached thumb, regenerating: %s", sidecar.c_str());
+    Storage.remove(file.c_str());
+  }
+
+  if (thumbFileValid(file, width, height)) return ThumbResult::Ok;
+  removeStaleThumb(file);
+
   if (!sidecar.empty()) {
     // A sidecar may have changed since the sentinel was written — clear it so the
     // sidecar conversion runs fresh.
