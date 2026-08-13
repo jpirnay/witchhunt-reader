@@ -254,15 +254,19 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
   return false;
 }
 
-// Where a plugin may write. Normalised, must stay inside the card, must not
-// name a hidden or protected item, and must have a filename - the same fence
-// /upload and /delete already apply, so a plugin gains no reach the web UI
-// does not already have. Returns "" when the path is refused.
+// Where a plugin may write, or "" when the path is refused.
+//
+// Containment comes from normalizeWebPath: FsHelpers::normalisePath resolves
+// every ".." against the components before it and no-ops once nothing is left,
+// so the result cannot climb above the card root. No separate ".." check is
+// needed - and a textual one would be wrong, because by this point ".." can
+// only survive inside a filename ("my..book.epub"), which is legitimate.
+//
+// The name check is stricter than /upload, which applies none: a plugin may not
+// create a hidden or protected item even though the web UI's own upload can.
 String pluginWriteTarget(const String& rawPath) {
   String path = normalizeWebPath(rawPath);
   if (path.isEmpty() || path == "/" || path.endsWith("/")) return "";
-  // normalizeWebPath keeps "..", which would climb out of the card.
-  if (path.indexOf("..") >= 0) return "";
 
   const int lastSlash = path.lastIndexOf('/');
   if (lastSlash < 0) return "";
