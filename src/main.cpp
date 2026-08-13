@@ -1456,12 +1456,37 @@ void loop() {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {
-    if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
-      // If we've been inactive for a while, increase the delay to save power
-      powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
-      delay(50);
+    // Two-stage idle backoff, ported from crosspoint-reader PR #2525 (Brian Pugh /
+    // @BrianPugh), which measured 9.68 mA -> 2.78 mA idle on an X3 with a PPK2.
+    const unsigned long idleMs = millis() - lastActivityTime;
+    if (idleMs >= HalPowerManager::IDLE_LIGHT_SLEEP_MS) {
+      // Idle: light-sleep between polls instead of busy-delaying. Race-to-sleep —
+      // run the brief wake windows at the normal clock, not LOW_POWER_FREQ. The
+      // board's sleep-floor current is paid per millisecond regardless of CPU
+      // speed, so finishing the per-wake work ~16x faster and returning to sleep
+      // costs less charge than stretching the window at 10 MHz. The downclock
+      // below only serves the pre-sleep 100 Hz polling phase. When lightSleep()
+      // declines, the fallback delay() runs at the normal clock too — but that
+      // only happens when USB (externally powered), WiFi, or a render Lock (full
+      // speed wanted anyway) is active.
+      powerManager.setPowerSaving(false);
+      if (gpio.isDebouncePending()) {
+        // A raw button-state change is mid-debounce: committing it needs a second
+        // matching sample, so poll again quickly instead of halting the chip — a
+        // tap shorter than the slice would otherwise land in a single sample and
+        // be dropped, and every press would commit a slice late.
+        delay(10);
+      } else if (!powerManager.lightSleep(gpio)) {
+        delay(10);
+      }
     } else {
-      // Short delay to prevent tight loop while still being responsive
+      // Response window after recent input: keep 100 Hz polling for snappy
+      // interaction, but downclock once rapid-input bursts have settled — renders
+      // re-raise the clock via HalPowerManager::Lock, so full speed only serves
+      // loop bookkeeping here.
+      if (idleMs >= HalPowerManager::IDLE_DOWNCLOCK_MS) {
+        powerManager.setPowerSaving(true);
+      }
       delay(10);
     }
   }

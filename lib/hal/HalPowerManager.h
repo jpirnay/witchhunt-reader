@@ -40,9 +40,16 @@ class HalPowerManager {
   bool waveformLowPower_ = false;
 
  public:
-  static constexpr int LOW_POWER_FREQ = 10;                    // MHz
-  static constexpr unsigned long IDLE_POWER_SAVING_MS = 3000;  // ms
-  static constexpr unsigned long BATTERY_POLL_MS = 1500;       // ms
+  static constexpr int LOW_POWER_FREQ = 10;  // MHz
+
+  // Two-stage idle backoff. Renders re-raise the clock via Lock regardless, so the
+  // full-speed window only needs to cover rapid consecutive input (avoids clock
+  // thrash); polling stays at 100 Hz until light sleep takes over the cadence.
+  static constexpr unsigned long IDLE_DOWNCLOCK_MS = 500;     // full speed -> LOW_POWER_FREQ
+  static constexpr unsigned long IDLE_LIGHT_SLEEP_MS = 1000;  // 100 Hz polling -> light sleep
+
+  static constexpr unsigned long BATTERY_POLL_MS = 1500;     // ms
+  static constexpr unsigned long LIGHT_SLEEP_SLICE_MS = 50;  // ms
 
   void begin();
 
@@ -61,6 +68,14 @@ class HalPowerManager {
   // concurrent setPowerSaving() calls (same relaxed model as setPowerSaving).
   void enterWaveformWait();
   void exitWaveformWait();
+
+  // Light-sleep the CPU for LIGHT_SLEEP_SLICE_MS (timer wake; buttons are polled on
+  // wake at the same cadence as the delay() this replaces). Returns false WITHOUT
+  // sleeping when unsafe: a performance Lock is held (render in flight), WiFi is
+  // active, or USB is connected (light sleep kills the CDC link). The caller must
+  // fall back to delay() in that case. Call from the main loop only — light sleep
+  // halts the whole chip, including the button sampler task.
+  bool lightSleep(const HalGPIO& gpio) const;
 
   // Setup wake up GPIO and enter deep sleep.
   // When keepClockAlive is true, GPIO13 stays HIGH so the LP timer keeps

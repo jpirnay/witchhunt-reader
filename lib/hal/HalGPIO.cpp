@@ -6,6 +6,7 @@
 #include <Wire.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
+#include <soc/usb_serial_jtag_struct.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
@@ -296,7 +297,30 @@ void HalGPIO::update() {
     accumReleased_ = 0;
     portEXIT_CRITICAL(&inputMux_);
   }
-  const bool connected = isUsbConnected();
+  updateUsbState(millis());
+}
+
+void HalGPIO::updateUsbState(const unsigned long now) {
+  // SOF-based host-link sampling (see the member comment). A cheap register
+  // read, so it runs at its own short cadence on both devices and is never
+  // behind the I2C throttle below — a fresh enumeration must cancel light
+  // sleep within a poll or two, or the next slice kills the CDC link again.
+  if (sofLastSampleMs == 0 || now - sofLastSampleMs >= SOF_SAMPLE_MS) {
+    const auto sof = static_cast<uint16_t>(USB_SERIAL_JTAG.fram_num.sof_frame_index);
+    usbSofActive = (sof != lastSofFrameIndex);
+    lastSofFrameIndex = sof;
+    sofLastSampleMs = now;
+  }
+
+  // Throttle the X3's I2C-based USB detection; see USB_POLL_X3_MS. First call
+  // (usbLastPollMs == 0) always polls so boot state is correct. The combined
+  // verdict below is still recomputed every call so a SOF-detected attach is
+  // not held back by the throttle window.
+  if (usbLastPollMs == 0 || !deviceIsX3() || now - usbLastPollMs >= USB_POLL_X3_MS) {
+    usbLastPollMs = now;
+    usbElectricalConnected = isUsbElectricalConnected();
+  }
+  const bool connected = usbSofActive || usbElectricalConnected;
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
 }
@@ -312,6 +336,8 @@ bool HalGPIO::wasAnyPressed() const { return snapPressed_ != 0; }
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return (snapReleased_ & (1u << buttonIndex)) != 0; }
 
 bool HalGPIO::wasAnyReleased() const { return snapReleased_ != 0; }
+
+bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
 unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
 
@@ -457,10 +483,18 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
 }
 
 bool HalGPIO::isUsbConnected() const {
+  // Recent SOF activity means an enumerated host regardless of what the
+  // electrical check says (false at boot until update() has sampled twice).
+  return usbSofActive || isUsbElectricalConnected();
+}
+
+bool HalGPIO::isUsbElectricalConnected() const {
   if (deviceIsX3()) {
     // X3: GPIO20 is repurposed as I2C SDA, so the X4 pin-level USB detect is
     // unusable here — the I2C pull-ups would always report HIGH. Probe the
-    // BQ27220 fuel gauge instead.
+    // BQ27220 fuel gauge instead. Charge inference misses a data-only cable and
+    // any cable once the battery is full; the SOF check in updateUsbState()
+    // covers those.
     //
     // Current() is the primary signal: it is signed, and current flowing INTO
     // the battery (positive, above a noise floor) only happens on a charger.
