@@ -496,27 +496,32 @@ bool HalGPIO::isUsbElectricalConnected() const {
     // any cable once the battery is full; the SOF check in updateUsbState()
     // covers those.
     //
-    // Current() is the primary signal: it is signed, and current flowing INTO
-    // the battery (positive, above a noise floor) only happens on a charger.
-    // DSG alone must NOT be trusted as "charger present": the gauge clears DSG
-    // whenever the pack isn't actively discharging above its detection
-    // threshold, which includes plain idle/relaxation on battery. Treating
-    // DSG=0 as connected made the UI latch to the charging bolt shortly after
-    // unplugging and never recover (issue #86). FC (fully charged) is the one
-    // resting state that does imply a charger, since it only latches while
-    // topped off on the charger, so it stays as a secondary signal.
+    // Current() is the ONLY signal trusted here: it is signed, and current
+    // flowing INTO the battery (positive, above a noise floor) only happens on a
+    // charger.
+    //
+    // Neither resting flag can be used. DSG=0 means "charging OR merely at
+    // rest", so treating it as charger-present latched the charging bolt after
+    // unplugging and never recovered (issue #86). FC was then kept as a
+    // secondary signal on the theory that it only latches while topped off on a
+    // charger — it does not. A detached, fully-charged, idle device reads FC=1
+    // with DSG=0 (idle draw sits under the gauge's discharge-detection
+    // threshold) and so reported USB permanently connected. That was merely a
+    // wrong battery icon until HalPowerManager::lightSleep() started gating on
+    // this verdict, at which point it disabled idle light sleep outright —
+    // device-observed on an X3 at 100% with no cable attached.
+    //
+    // The case FC was meant to catch — a cable to a computer with the battery
+    // already full — is now covered properly by the SOF check in
+    // updateUsbState(), which sees the host link itself rather than inferring it
+    // from charge state. The one remaining gap is a dumb wall charger with a
+    // full battery: no charge current and no SOF, so no charging indication.
+    // That is the honest reading ("charged", not "charging"), and light sleep is
+    // safe there because there is no CDC link to lose.
     for (uint8_t attempt = 0; attempt < 2; ++attempt) {
-      uint16_t flags = 0;
-      if (X3GPIO::readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_FLAGS_REG, &flags)) {
-        const bool discharging = (flags & BQ27220_FLAG_DSG) != 0;
-        if (!discharging && (flags & BQ27220_FLAG_FC) != 0) {
-          return true;  // topped off on the charger
-        }
-        int16_t currentMa = 0;
-        if (X3GPIO::readBQ27220CurrentMA(&currentMa) && currentMa > USB_CHARGE_CURRENT_MIN_MA) {
-          return true;  // measurable current into the battery
-        }
-        return false;
+      int16_t currentMa = 0;
+      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
+        return currentMa > USB_CHARGE_CURRENT_MIN_MA;
       }
       delay(2);
     }
