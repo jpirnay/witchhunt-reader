@@ -12,8 +12,8 @@
 #include "images/Logo120.h"
 
 // Set to 1 to add a "Declined" row breaking down why idle light sleep did not
-// happen: the attempt count, then per-guard counters (lock / wifi / usb / dbnc /
-// idf). A diagnostic for the idle-power path rather than something a reader
+// happen: the attempt count, then per-guard counters (lock / wifi / usb / front /
+// dbnc / idf). A diagnostic for the idle-power path rather than something a reader
 // needs, so it is off in normal builds; the counters behind it are collected
 // either way in HalPowerManager::LightSleepStats, at ~44 bytes of .bss. Worth
 // keeping switchable: this row is what identified the BQ27220 FC false positive
@@ -205,11 +205,8 @@ void SystemInformationActivity::render(RenderLock&&) {
     const struct {
       const char* name;
       uint32_t count;
-    } reasons[] = {{"lock", raw.rejLock},
-                   {"wifi", raw.rejWifi},
-                   {"usb", raw.rejUsb},
-                   {"dbnc", raw.rejDebounce},
-                   {"idf", raw.rejIdf}};
+    } reasons[] = {{"lock", raw.rejLock},        {"wifi", raw.rejWifi},     {"usb", raw.rejUsb},
+                   {"front", raw.rejFrontlight}, {"dbnc", raw.rejDebounce}, {"idf", raw.rejIdf}};
     int n = 0;
     buf[0] = '\0';
     for (const auto& r : reasons) {

@@ -117,6 +117,22 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   lightSleepStats_.attempts++;
   lastSliceEndMs_ = entryMs;  // overwritten with the post-sleep stamp if we do sleep
 
+  // Light sleep stops the LEDC peripheral's clock, so an ESP-driven PWM
+  // frontlight visibly flickers as the idle loop enters slice after slice.
+  // Justin Mitchell (@itsthisjustin) reported this against crosspoint PR #2983
+  // ("feat: Add support for x4pro & papermono devices"), where the guard reads
+  // `Frontlight.present() && Frontlight.isOn()`. This fork has no frontlight
+  // driver, so it cannot ask whether the light is currently lit — decline on any
+  // board that HAS one. That costs nothing today (no board we build has a
+  // frontlight, so this never fires and the counter stays 0) and keeps the X4
+  // Pro correct the moment its profile is selectable. Tighten to
+  // present-and-on once a frontlight HAL exists, so those boards can still
+  // idle-sleep with the light off.
+  if (BoardConfig::hasPwmFrontlight()) {
+    lightSleepStats_.rejFrontlight++;
+    return false;
+  }
+
   // A performance Lock means a render (or similar) task is mid-flight; light sleep
   // freezes the whole chip, so it would stall that task. Read without the mutex,
   // like setPowerSaving(): stale in either direction is acceptable — a stale lock

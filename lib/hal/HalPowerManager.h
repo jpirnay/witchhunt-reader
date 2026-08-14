@@ -46,17 +46,18 @@ class HalPowerManager {
   // wall time between consecutive lightSleep() calls, so sleptMs/(sleptMs+awakeMs)
   // is the idle duty cycle — the closest proxy for average current without a meter.
   struct LightSleepStats {
-    uint32_t attempts = 0;     // calls to lightSleep()
-    uint32_t slept = 0;        // calls that actually halted the chip
-    uint32_t sleptMs = 0;      // total time halted
-    uint32_t awakeMs = 0;      // total time between slices
-    uint32_t wakeTimer = 0;    // woke on the slice timer (the normal case)
-    uint32_t wakeGpio = 0;     // woke early on the power button
-    uint32_t rejLock = 0;      // declined: a render Lock was held
-    uint32_t rejWifi = 0;      // declined: WiFi up
-    uint32_t rejUsb = 0;       // declined: host attached
-    uint32_t rejDebounce = 0;  // declined: button change mid-debounce
-    uint32_t rejIdf = 0;       // esp_light_sleep_start() returned non-OK
+    uint32_t attempts = 0;       // calls to lightSleep()
+    uint32_t slept = 0;          // calls that actually halted the chip
+    uint32_t sleptMs = 0;        // total time halted
+    uint32_t awakeMs = 0;        // total time between slices
+    uint32_t wakeTimer = 0;      // woke on the slice timer (the normal case)
+    uint32_t wakeGpio = 0;       // woke early on the power button
+    uint32_t rejLock = 0;        // declined: a render Lock was held
+    uint32_t rejWifi = 0;        // declined: WiFi up
+    uint32_t rejUsb = 0;         // declined: host attached
+    uint32_t rejFrontlight = 0;  // declined: board has a PWM frontlight
+    uint32_t rejDebounce = 0;    // declined: button change mid-debounce
+    uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
   };
 
  private:
@@ -96,8 +97,9 @@ class HalPowerManager {
   // Light-sleep the CPU for LIGHT_SLEEP_SLICE_MS (timer wake; buttons are polled on
   // wake at the same cadence as the delay() this replaces). Returns false WITHOUT
   // sleeping when unsafe: a performance Lock is held (render in flight), WiFi is
-  // active, USB is connected (light sleep kills the CDC link), or a button change
-  // is mid-debounce. The caller must fall back to delay() in that case. Call from
+  // active, USB is connected (light sleep kills the CDC link), the board has a PWM
+  // frontlight (light sleep stops LEDC and the light would flicker), or a button
+  // change is mid-debounce. The caller must fall back to delay() in that case. Call from
   // the main loop only — light sleep halts the whole chip, including the button
   // sampler task.
   bool lightSleep(const HalGPIO& gpio);
