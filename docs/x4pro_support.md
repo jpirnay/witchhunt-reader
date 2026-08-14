@@ -134,6 +134,16 @@ entries, so they persist and are web-exposed but stay out of the settings menu
   until its frontlight double-click window expires, so a double-click can open the
   panel. This changes power-button timing, so it needs care against our own
   power-button handling and `waitForStablePowerRelease()`.
+
+  **TODO — do not port this as-is.** Upstream's version is a special case bolted
+  onto one button. We already have a much broader click-recognition system:
+  `ButtonEventManager` classifies short / long / double from the timestamped
+  `HalGPIO::ButtonEdge` queue for *all* buttons, and the resulting actions are
+  user-remappable through `CrossPointSettings` / `SettingsList.h` (`btnShort*`,
+  `btnLong*`) with `ButtonNavigator` on top. The frontlight panel should become
+  another bindable action in that system, not a second, parallel timing path on
+  the power button. Whoever picks this up should design it into
+  `ButtonEventManager` first and treat Justin's code as a statement of intent.
 - `src/activities/reader/EpubReaderMenuActivity.h` — a `FRONTLIGHT` menu entry.
 
 ### i18n
