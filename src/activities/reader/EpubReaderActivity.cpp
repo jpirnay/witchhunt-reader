@@ -898,7 +898,7 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
     return;
   }
   // Full clock for the pass, as for the Background-B/C build slices. Usually redundant — the AA
-  // pass is normally owed within IDLE_POWER_SAVING_MS of the page turn that armed it, so the idle
+  // pass is normally owed within IDLE_DOWNCLOCK_MS of the page turn that armed it, so the idle
   // saver has not downclocked yet (device trace 2026-08-07: AA ran ~1.7 s after the button press,
   // at 160 MHz). It matters in the case this pass is built around: AA self-gates on
   // !isRefreshPending(), and on X3 that stays asserted for the whole multi-second waveform, so a
@@ -1462,7 +1462,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   Section::BuildStep step;
   {
     // Full clock for the slice, same reasoning as the Background-B slice: this runs on the loop
-    // task, and a build long enough to matter has already passed IDLE_POWER_SAVING_MS with no
+    // task, and a build long enough to matter has already passed IDLE_DOWNCLOCK_MS with no
     // button press, so main.cpp's idle saver has dropped the CPU to LOW_POWER_FREQ. The wall-clock
     // BG_BUILD_BUDGET_MS is only checked between ~1 KB visitor chunks, so at 10 MHz one chunk
     // overruns the whole budget and the slice stops being a slice. Worse here than for B: this is

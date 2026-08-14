@@ -55,6 +55,35 @@ class HalGPIO {
 
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
+  unsigned long usbLastPollMs = 0;
+  bool usbElectricalConnected = false;  // last result of the per-device electrical/charge check
+
+  // X3 USB detection is a BQ27220 I2C read (~0.3-1 ms of awake CPU per call);
+  // polled every loop it costs a few percent of the light-sleep idle floor for
+  // nothing. At >=1 s intervals the energy cost is unmeasurable, so 1 s is
+  // chosen for prompt plug/unplug UX (battery icon, the light-sleep USB guard).
+  // X4 detection is a single digitalRead and stays per-loop.
+  static constexpr unsigned long USB_POLL_X3_MS = 1000;
+
+  // USB-Serial-JTAG SOF activity, sampled by update(): the host sends a SOF
+  // frame every 1 ms while the bus is enumerated, so a frame index that moved
+  // between two samples means a live host link. Catches what the charge-based
+  // X3 check misses: a data-only cable, and any cable once the battery is full
+  // (charge current ~0). Both matter for HalPowerManager::lightSleep(), which
+  // must not halt the chip out from under an enumerated CDC link. Samples must
+  // be >SOF_SAMPLE_MS apart — update() can be called back-to-back (inner input
+  // loops), and adjacent reads would compare equal and flicker the verdict.
+  uint16_t lastSofFrameIndex = 0;
+  unsigned long sofLastSampleMs = 0;
+  bool usbSofActive = false;
+  static constexpr unsigned long SOF_SAMPLE_MS = 10;
+
+  // Per-device electrical/charge-inference USB check (fresh read; X3 = BQ27220
+  // charge current over I2C, X4 = VBUS-driven level on GPIO20).
+  bool isUsbElectricalConnected() const;
+
+  // SOF sampling + throttled electrical check + combined-verdict edge tracking.
+  void updateUsbState(unsigned long now);
 
  public:
   enum class DeviceType : uint8_t { X4, X3 };
@@ -128,6 +157,11 @@ class HalGPIO {
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
+  // True while a raw button-state change is still inside the debounce window.
+  // The idle loop polls fast while this is set so the confirming sample lands
+  // ~10 ms after the first; at the light-sleep cadence a short tap can
+  // otherwise appear in a single sample and never commit (dropped press).
+  bool isDebouncePending() const;
   unsigned long getHeldTime() const;
 
   // Start/stop the background sampler. startInputSampler() must be called once
@@ -218,6 +252,10 @@ class HalGPIO {
 
   // Check if USB is connected
   bool isUsbConnected() const;
+
+  // USB state as sampled by the last update() call. Prefer this in per-loop
+  // polling: isUsbConnected() performs a fresh I2C read on X3.
+  bool isUsbConnectedCached() const { return lastUsbConnected; }
 
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;

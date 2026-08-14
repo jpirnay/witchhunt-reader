@@ -1,8 +1,10 @@
 #include "HalPowerManager.h"
 
+#include <BoardConfig.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
 
 #include <cassert>
@@ -10,6 +12,10 @@
 #include "HalGPIO.h"
 
 HalPowerManager powerManager;  // Singleton instance
+
+// The C3 flash SPIWP pad, unused in these boards' DIO flash mode and rewired as a
+// power control on the Xteink C3 units (see lightSleep()).
+static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
   if (gpio.deviceIsX3()) {
@@ -97,6 +103,147 @@ void HalPowerManager::exitWaveformWait() {
     }
   }
   xSemaphoreGive(modeMutex);
+}
+
+// Ported from crosspoint-reader PR #2525 (Brian Pugh / @BrianPugh); the Xteink C3
+// guard on the GPIO13 hold follows PR #2998 (Justin Mitchell / @itsthisjustin).
+// The xTaskCatchUpTicks() correction at the end is this fork's own addition — see
+// the comment there for why our background button sampler needs it.
+bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
+  const unsigned long entryMs = millis();
+  if (lastSliceEndMs_ != 0) {
+    lightSleepStats_.awakeMs += entryMs - lastSliceEndMs_;
+  }
+  lightSleepStats_.attempts++;
+  lastSliceEndMs_ = entryMs;  // overwritten with the post-sleep stamp if we do sleep
+
+  // Light sleep stops the LEDC peripheral's clock, so an ESP-driven PWM
+  // frontlight visibly flickers as the idle loop enters slice after slice.
+  // Justin Mitchell (@itsthisjustin) reported this against crosspoint PR #2983
+  // ("feat: Add support for x4pro & papermono devices"), where the guard reads
+  // `Frontlight.present() && Frontlight.isOn()`. This fork has no frontlight
+  // driver, so it cannot ask whether the light is currently lit — decline on any
+  // board that HAS one. That costs nothing today (no board we build has a
+  // frontlight, so this never fires and the counter stays 0) and keeps the X4
+  // Pro correct the moment its profile is selectable. Tighten to
+  // present-and-on once a frontlight HAL exists, so those boards can still
+  // idle-sleep with the light off.
+  if (BoardConfig::hasPwmFrontlight()) {
+    lightSleepStats_.rejFrontlight++;
+    return false;
+  }
+
+  // A performance Lock means a render (or similar) task is mid-flight; light sleep
+  // freezes the whole chip, so it would stall that task. Read without the mutex,
+  // like setPowerSaving(): stale in either direction is acceptable — a stale lock
+  // delays sleeping by one slice, and a Lock acquired after this check freezes that
+  // task for at most one slice (timer wake; RAM and peripheral state are retained).
+  if (currentLockMode.load(std::memory_order_relaxed) != None) {
+    lightSleepStats_.rejLock++;
+    return false;
+  }
+  // Light sleep drops a WiFi association and kills an enumerated USB-CDC link.
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    lightSleepStats_.rejWifi++;
+    return false;
+  }
+  if (gpio.isUsbConnectedCached()) {
+    lightSleepStats_.rejUsb++;
+    return false;
+  }
+  // A raw button-state change is still inside the debounce window: committing it
+  // needs a second matching sample, so the caller should poll again quickly rather
+  // than halt the chip — a tap shorter than the slice would otherwise land in a
+  // single sample and be dropped, and every press would commit a slice late.
+  if (gpio.isDebouncePending()) {
+    lightSleepStats_.rejDebounce++;
+    return false;
+  }
+
+  // Timer wake keeps the poll cadence bounded: the front/side buttons are ADC
+  // resistor-ladder inputs whose pressed levels sit mid-rail, invisible to a
+  // digital GPIO wake, so they can only be sampled awake. The power button (a
+  // true GPIO) is ALSO armed, as a level wake at its pressed level, so a tap
+  // shorter than one slice still gets the chip awake in time to sample it. That
+  // wake is only an early poll — the sampler's debounce still decides whether a
+  // real press happened, so a misread around the sleep transition costs one
+  // extra wake, never a phantom press. Idle cost is zero: the pin only holds its
+  // pressed level while a finger is on it.
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(LIGHT_SLEEP_SLICE_MS) * 1000ULL);
+  const int8_t powerPin = BoardConfig::ACTIVE.input.power;
+  if (powerPin >= 0) {
+    gpio_wakeup_enable(static_cast<gpio_num_t>(powerPin),
+                       BoardConfig::ACTIVE.input.powerActiveHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+  }
+
+  // GPIO13 is rewired as a power control on the Xteink C3 boards: the X4
+  // battery-latch MOSFET gate, and the X3 SD-rail enable (BoardConfig's
+  // XTEINK_X3 sd.powerEnable). Both are active-high and both must stay HIGH
+  // while the device runs. The IDF flash-leakage workaround
+  // (CONFIG_ESP_SLEEP_FLASH_LEAKAGE_WORKAROUND) pulls the DIO-unused SPIWP pad
+  // low on light-sleep entry, which would power an X4 off outright and cut the
+  // X3's card out from under an open file. Drive the pad HIGH and pad-hold it:
+  // the hold latches the level and overrides both the sleep-time pull and any
+  // pad re-muxing on the wake path. It is left enabled while running — the wake
+  // path may restore flash-pad muxing, so even a brief release between slices
+  // can drop it. Nothing downstream is blocked by that: both deep-sleep paths
+  // release the hold first (startDeepSleep()'s own gpio_hold_dis on X4,
+  // holdRailOff()'s inside powerDownRailsForSleep() on X3).
+  // Level is set BEFORE direction so the pad never glitches low on the way to
+  // output mode. Non-Xteink boards are left alone — GPIO13 is an ordinary signal
+  // there (SPI MOSI on the LilyGo T5S3, display CS on the X4 Pro).
+  if (gpio.isXteinkDevice()) {
+    gpio_set_level(GPIO_BATTERY_LATCH, 1);
+    gpio_set_direction(GPIO_BATTERY_LATCH, GPIO_MODE_OUTPUT);
+    gpio_hold_en(GPIO_BATTERY_LATCH);
+  }
+
+  const unsigned long sleepStart = millis();
+  const esp_err_t err = esp_light_sleep_start();
+  const unsigned long sleptMs = millis() - sleepStart;
+
+  // Disarm immediately: an armed timer wake persists across sleep calls and would
+  // carry over into startDeepSleep(), waking the device on USB power after one
+  // slice. gpio_wakeup_disable() clears only the wake-enable bit — the pin's LEVEL
+  // interrupt type survives it, and a leftover level type is live ammunition for
+  // any later-installed GPIO ISR service (an asserted level with no per-pin
+  // handler re-enters the shared ISR forever). Clear the type explicitly.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  if (powerPin >= 0) {
+    gpio_wakeup_disable(static_cast<gpio_num_t>(powerPin));
+    gpio_set_intr_type(static_cast<gpio_num_t>(powerPin), GPIO_INTR_DISABLE);
+  }
+
+  if (err != ESP_OK) {
+    // e.g. ESP_ERR_SLEEP_REJECT — we did not actually sleep
+    lightSleepStats_.rejIdf++;
+    LOG_DBG("PWR", "Light sleep rejected: %d", static_cast<int>(err));
+    return false;
+  }
+
+  lightSleepStats_.slept++;
+  lightSleepStats_.sleptMs += sleptMs;
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+    lightSleepStats_.wakeGpio++;  // power button pressed mid-slice
+  } else {
+    lightSleepStats_.wakeTimer++;
+  }
+  // Restart the awake stopwatch from here, so awakeMs counts only time the chip
+  // was actually running between slices, not the slices themselves.
+  lastSliceEndMs_ = millis();
+
+  // esp_light_sleep_start() corrects esp_timer (so millis() stays wall-clock
+  // honest) but NOT the FreeRTOS tick, which simply stops for the duration
+  // (sleep_modes.c only calls esp_timer_private_set/esp_set_time_from_rtc).
+  // Uncorrected, every tick-paced waiter stretches by the slice: the 10 ms
+  // button sampler task would only get one pass per ~10 slices, turning idle
+  // input latency into half a second, and any delay() elsewhere would run long.
+  // Step the tick forward by the measured sleep so blocked tasks come due on
+  // wall-clock time. Tasks whose deadline passed are released here, which is why
+  // this is xTaskCatchUpTicks() and not vTaskStepTick().
+  xTaskCatchUpTicks(pdMS_TO_TICKS(sleptMs));
+  return true;
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {

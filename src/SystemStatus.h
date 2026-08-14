@@ -10,6 +10,7 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 
+#include "HalClock.h"
 #include "HalGPIO.h"
 #include "HalPowerManager.h"
 
@@ -72,6 +73,20 @@ struct SystemStatus {
   uint64_t sdFreeBytes;
   uint64_t fontCacheUsedBytes;   // bytes used in the flash font partition (0 if empty)
   uint64_t fontCacheTotalBytes;  // total size of the flash font partition
+  // Power behaviour since boot. lightSleepSeconds is time the chip was actually
+  // halted by the idle light-sleep path; lightSleepPercent is that as a share of
+  // uptime, which is the readable proxy for average current. deepSleepSeconds is
+  // the length of the sleep this boot woke from (0 when it cannot be established
+  // — see HalClock::lastSleepSeconds).
+  uint32_t lightSleepSeconds;
+  uint8_t lightSleepPercent;
+  uint32_t lightSleepSlices;
+  uint32_t deepSleepSeconds;
+  // Why light sleep did not happen. `attempts` separates the two failure modes a
+  // bare 0% cannot: zero attempts means the idle branch was never reached at all
+  // (input kept resetting the timer, or an activity held skipLoopDelay), whereas
+  // attempts with a decline count names the guard that turned it down.
+  HalPowerManager::LightSleepStats lightSleepRaw;
 
   static SystemStatus collectFast() {
     SystemStatus s;
@@ -106,6 +121,17 @@ struct SystemStatus {
     // bus pull-ups made this read HIGH (= "charging") permanently.
     s.charging = gpio.isUsbConnected();
     s.uptimeSeconds = millis() / 1000;
+    const auto& sleepStats = powerManager.lightSleepStats();
+    s.lightSleepRaw = sleepStats;
+    s.lightSleepSeconds = sleepStats.sleptMs / 1000;
+    s.lightSleepSlices = sleepStats.slept;
+    // Against uptime, not against sleptMs+awakeMs: awakeMs only accumulates
+    // between slices, so the ratio against it would ignore all the time the
+    // device spent reading, rendering or below the idle threshold — and read as
+    // a far higher sleep share than the battery actually sees.
+    const uint32_t uptimeMs = millis();
+    s.lightSleepPercent = uptimeMs > 0 ? static_cast<uint8_t>((sleepStats.sleptMs * 100ULL) / uptimeMs) : 0;
+    s.deepSleepSeconds = HalClock::lastSleepSeconds();
     s.macAddress = WiFi.macAddress().c_str();
     s.sdTotalBytes = 0;
     s.sdUsedBytes = 0;
