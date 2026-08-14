@@ -2,6 +2,36 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.22 — 2026-08-14
+
+- Background chapter build (read-ahead) now actually runs on device: its memory floors were unreachable — one by 12 bytes, another excluding every book with embedded CSS — correct builds were being discarded as "degraded", and background work ran at the 10 MHz idle clock. A section that took 28s to build now takes ~2s, the up-to-1.2s input freezes during a background slice are gone, and read-ahead waits 1.5s of stillness instead of 4s so it also works while skimming.
+- Fewer restarts while reading: the fragmentation caused by a page render interleaving with a live chapter build is fixed (font page slots released, build arena adopted mid-build, arena-aware image decode floors).
+- Added web-UI plugins loaded from the SD card (`/.crosspoint/plugins`), with four bundled: metadata-editor (edit title/author/series/description and manage covers, incl. Open Library / Goodreads / Google Books cover search), organize-by-author, find-duplicates and a reference plugin. Plugins run in the browser; a manifest declares which capabilities and remote hosts they may use.
+- Added Calibre `book.opf` metadata sidecars: a `book.opf` beside a book overrides its embedded title, author, language, series and description without rewriting the EPUB.
+- Added "Adaptive" as a fourth Sleep Screen Cover Filter, applied to BMP and full-screen PNG sleep images and to book covers, with line art detected and left alone.
+- Inline images in books now render in grayscale (and get adaptive tone mapping) when anti-aliasing is on.
+- KOReader sync: new "On Progress Conflict" setting ("Ask every time" / "Use furthest", changeable from the compare screen), automatic discovery of the document id the server actually uses (KOReader defaults to a content hash, we defaulted to filename — the two never saw each other), an optional sync when a book is finished, and a configurable auto-push page threshold.
+- Idle light sleep: the chip now halts between button polls when idle, with unchanged button response. Light-sleep and deep-sleep behaviour is reported on the System Information screen.
+- Faster boot (~0.45s off the recovery-combo check) and ~0.5s faster wake straight back into a book on X3.
+- Sleep images are now decoded once and cached in a sidecar, instead of three or four times per sleep.
+- Books with no real footnotes no longer pay a ~2.8s whole-book scan before the first page.
+- Web file browser: images preview in-page instead of downloading, and dropping a folder now uploads its contents with the folder structure intact.
+- Fix: an oversized table cell deleted itself and every earlier cell in the same table; tables now lay out row by row, which also removes the limits that made large tables abort a page build.
+- Fix: the e-ink panel and the SD card share one SPI bus but only storage locked it, so an interleaved refresh and SD read could corrupt data or panic the system.
+- Fix: a failed footnote gather recorded "this book has no footnotes" permanently, surviving reboots.
+- Fix: finishing a book synced the start of the last chapter instead of the end.
+- Fix: applying remote KOReader progress resolved the position correctly and then discarded it.
+- Fix: KOSync now accepts any 2xx response from compatible servers.
+- Fix: watchdog-triggered resets are now reported as crashes instead of rebooting silently.
+- Fix: X3 reported USB connected and showed the charging icon when detached with a full battery.
+- Fix: the web Settings page could stall or trip the watchdog by opening three simultaneous connections.
+- Fix: replacing a book cover by hand had no effect, because the cached thumbnail was never invalidated.
+- Fix: a finished book left its metadata sidecar behind when moved to /COMPLETED.
+- Fix: sleep and wake button handling now agree with each other.
+- Hardening: stored credentials (Wi-Fi, KOReader, OPDS) are decoded with a bounded buffer.
+- Translations: the 13 strings that were still English-only (the new KOReader sync and sleep settings, the adaptive filter, "Normalize font size", NTP server and the new System Information rows) are now translated in all 15 fully-maintained languages — German, French, Spanish, Italian, Dutch, Portuguese (PT/BR), Polish, Russian, Ukrainian, Belarusian, Slovenian, Swedish, Turkish and Vietnamese.
+- Upgrade notes: book covers are re-generated once (they are now cached as 8-bit greyscale so they can be tone-mapped), sleep images gain a small hidden `.pxc` cache file beside them, existing KOReader configurations keep "Ask every time" while new installs default to "Use furthest", a `book.opf` beside a book now takes precedence over the book's own metadata, and web plugins run unsandboxed on a web server that has no authentication — install only ones you trust.
+
 ## 2.21 - 2026-08-03
  - Recognition of newer X3 / X4 batches with alternative display controller
  - Implemented "Normalize font size" as a user setting that snaps publisher near-body font wrappers (e.g. around whole paragraphs) back to native 100%
