@@ -74,6 +74,15 @@ HalGPIO::DeviceType nvsToDeviceType(NvsDeviceValue value) {
   return value == NvsDeviceValue::X3 ? HalGPIO::DeviceType::X3 : HalGPIO::DeviceType::X4;
 }
 
+// True when this binary targets one of the Xteink C3 variants. A binary holds
+// exactly one MCU family — BoardConfig enforces that with an #error — so
+// DEFAULT_DEVICE settles the question at compile time.
+constexpr bool buildTargetsXteinkC3() {
+  return BoardConfig::DEFAULT_DEVICE.board == BoardConfig::Board::XteinkX4 ||
+         BoardConfig::DEFAULT_DEVICE.board == BoardConfig::Board::XteinkX3 ||
+         BoardConfig::DEFAULT_DEVICE.board == BoardConfig::Board::XteinkX3Uc8279;
+}
+
 HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
   // Explicit override for recovery/support:
   // 0 = auto, 1 = force X4, 2 = force X3
@@ -113,18 +122,29 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 }  // namespace
 
 void HalGPIO::begin() {
-  _deviceType = detectDeviceTypeWithFingerprint();
-  BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
+  // Both probes below poke C3 hardware — the X3/X4 fingerprint reads C3 pins and
+  // applyXteinkDisplayController() drives the Xteink display bus — so they must
+  // not run on another board. BoardConfig::ACTIVE would survive them intact
+  // (selectDevice() returns false for a board this binary was not built with,
+  // leaving the profile the build's own FREEINK_DEVICE_* flag chose), but the
+  // probes themselves would still touch pins that mean something else there.
+  if constexpr (buildTargetsXteinkC3()) {
+    _deviceType = detectDeviceTypeWithFingerprint();
+    BoardConfig::selectDevice(deviceIsX3() ? BoardConfig::Board::XteinkX3 : BoardConfig::Board::XteinkX4);
 
-  // Resolve the per-batch controller before SPI owns the display pins. FreeInk
-  // checks the OEM hw_calib/screenType value first, then falls back to its
-  // two-pass display-bus probe. X3's facade keys panel selection off the sibling
-  // board profile, so preserve a detected UC8279 through setDisplayX3().
-  freeink::applyXteinkDisplayController();
-  if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
-    BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
+    // Resolve the per-batch controller before SPI owns the display pins. FreeInk
+    // checks the OEM hw_calib/screenType value first, then falls back to its
+    // two-pass display-bus probe. X3's facade keys panel selection off the sibling
+    // board profile, so preserve a detected UC8279 through setDisplayX3().
+    freeink::applyXteinkDisplayController();
+    if (deviceIsX3() && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8279) {
+      BoardConfig::selectDevice(BoardConfig::Board::XteinkX3Uc8279);
+    }
   }
 
+  // inputMgr.begin() is board-generic (it reads BoardConfig::ACTIVE.input). The
+  // rest below is still hardcoded to C3 Xteink pin macros — bringing up another
+  // board means sourcing these from BoardConfig::ACTIVE.display too.
   inputMgr.begin();
   SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
 
@@ -132,6 +152,15 @@ void HalGPIO::begin() {
     pinMode(BAT_GPIO0, INPUT);
     pinMode(UART0_RXD, INPUT);
   }
+}
+
+// Ported from crosspoint-reader PR #2998 ("fix: Guard GPIO13 power control for
+// Xteink C3 boards only", Justin Mitchell / @itsthisjustin). The predicate is
+// his, verbatim; the call sites differ because this fork has no light sleep.
+bool HalGPIO::isXteinkDevice() const {
+  return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4;
 }
 
 // Push one debounced edge into the loop-drained FIFO. Caller holds inputMux_.
