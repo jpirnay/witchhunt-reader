@@ -1312,6 +1312,35 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         return;
       }
       if (step == Section::BuildStep::More) {
+        // Proactive low-heap guard, the mirror of Background-C's residentAbort. Only a build
+        // that is NOT in the borrowed arena allocates its working set from the heap; a borrowed
+        // one bump-allocates inside the lent region and can ride the same numbers out safely.
+        // B reaches the resident case whenever there was no buffer to lend (already released for
+        // a C build, or a realloc that never came back), and until now nothing re-checked heap
+        // between the WaitHeap entry gate and completion — so a build admitted at 48 KB could
+        // grind all the way into the fault zone. Same floors as C: this is the same situation
+        // (buffer resident in the heap, build heap-backed), and a second set of numbers for it
+        // would be a second thing to keep tuned.
+        //
+        // The action differs from C's, though, and deliberately: C rebuilds on the released path
+        // because the reader is waiting on that section. Nothing waits on B, so it discards and
+        // settles, exactly as the css-degraded case below does — Background-C builds the section
+        // released (clean) if and when the reader navigates into it.
+        if (!backgroundBorrowActive_) {
+          const uint32_t bFree = esp_get_free_heap_size();
+          const uint32_t bContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+          if (bFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES || bContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES) {
+            HEAP_GATE("bgB_residentAbort", false, bFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, bContig,
+                      RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+            LOG_INF("ERS", "Background build spine=%d low heap mid-build (free=%lu contig=%lu); discarding",
+                    targetSpine, static_cast<unsigned long>(bFree), static_cast<unsigned long>(bContig));
+            backgroundSection_->abortSectionBuild();
+            backgroundSection_.reset();
+            backgroundBuildPercent_ = -1;
+            backgroundBuildState_ = BackgroundBuildState::Settled;
+            return;
+          }
+        }
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
         // The moment the CSS resolver starts skipping lookups the result is doomed to be
         // css-degraded and discarded — bail now instead of grinding through the rest of the
