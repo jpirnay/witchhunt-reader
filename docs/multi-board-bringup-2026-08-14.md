@@ -4,6 +4,10 @@ Date: 2026-08-14 (last updated 2026-08-15)
 Hardware: both boards physically in hand since ~2026-08-13
 Lead board: **Xteink X4 Pro**
 Related: [touch-input-migration-2026-08-14.md](touch-input-migration-2026-08-14.md) (workstream C)
+**Resuming work?** Start from
+[multiboard-bringup-handover-2026-08-15.md](multiboard-bringup-handover-2026-08-15.md)
+— current state, what is verified, and where to pick up. This document is the
+plan and rationale.
 
 | Workstream | State |
 |---|---|
