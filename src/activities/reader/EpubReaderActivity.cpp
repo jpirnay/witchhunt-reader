@@ -1548,9 +1548,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   } else {
     navTarget.resolveInto(*section, currentSpineIndex);
   }
-  if (section) {
-    navTarget = NavigationTarget::makePage(section->currentPage);
-  }
+  anchorNavTargetToCurrentPage();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   buildingPopupShown_ = false;
@@ -1641,6 +1639,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                     : std::nullopt;
             if (resolvedPage) {
               section->currentPage = *resolvedPage;
+              anchorNavTargetToCurrentPage();
               forceLoadLargeImages = false;
               pageHasPlaceholders = false;
             } else {
@@ -2364,6 +2363,36 @@ void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIn
   }
 }
 
+// navTarget is the anchor a section (re)build resolves into. It used to be written only when a
+// section was ENTERED and then left frozen for the whole chapter, so every mid-chapter teardown
+// re-seeded currentPage from the entry page — page 0 for a chapter reached by reading forward.
+// The reader landed back at the top of the chapter, and the next render persisted that to
+// progress.bin (issue #147). Four teardowns can fire during ordinary reading:
+//
+//   - fallbackToReleasedRebuild(): a Background-C build aborting mid-build on low heap, or
+//     finishing truncated / CSS-degraded — the common one, since the reader is turning pages
+//     through a live build the whole time it runs;
+//   - renderNormalPass(): loadPageFromSectionFile() returning null (deserialize OOM, bad seek);
+//   - both footnote-preview gather triggers, which drop the section to rebuild it previews-ON.
+//
+// None of them can be expected to remember the position individually, so keep the anchor live
+// instead: after this call navTarget names what is on screen, and any teardown lands back there.
+void EpubReaderActivity::anchorNavTargetToCurrentPage() {
+  if (!section) {
+    return;
+  }
+  navTarget = NavigationTarget::makePage(section->currentPage);
+  // Carrying the page count lets resolveInto() rescale proportionally when the rebuild
+  // repaginates rather than landing on a raw index — the previews-ON variant does exactly
+  // that (it bakes preview text into the layout). Only meaningful once the count is final:
+  // during a build pageCount is "pages written so far", and rescaling a partial count
+  // against the finished one would throw the position far past where the reader was.
+  if (!section->hasActiveBuild() && section->pageCount > 0) {
+    navTarget.cachedPageCount = section->pageCount;
+    navTarget.cachedSpineIdx = currentSpineIndex;
+  }
+}
+
 bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
   if (!epub || !section) {
     return false;
@@ -2402,6 +2431,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     // first post-build render overwrites with the real count. Skipped when the back-cross branch
     // reset the section (position resolves when the previous spine loads).
     if (section) {
+      // Mid-build turns are exactly the case the anchor was losing: a build that then falls
+      // back to the released path restarts this chapter from navTarget.
+      anchorNavTargetToCurrentPage();
       pendingProgressSave.spineIndex = currentSpineIndex;
       pendingProgressSave.page = section->currentPage;
       pendingProgressSave.pageCount = 0;
@@ -2455,6 +2487,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     }
   }
 
+  // Only the within-section branches above reach here with a section still loaded; the
+  // cross-spine branches set their own target and reset it, and this no-ops for them.
+  anchorNavTargetToCurrentPage();
   lastPageTurnTime = millis();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
@@ -2550,6 +2585,10 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
             pageTurnStatsWindow.turns, preRenderedPage.pageIndex);
     logPageTurnWindowIfReady();
     section->currentPage = preRenderedPage.pageIndex;
+    // This fast path advances the page without going through stepPageState(), so it owes the
+    // anchor update too — otherwise every pre-rendered turn (the common case) leaves navTarget
+    // behind on the page the section was entered at.
+    anchorNavTargetToCurrentPage();
     preRenderedPage.ready = false;
     usePreRenderedBuffer = true;
     sessionPagesAdvanced++;
@@ -3447,7 +3486,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
   navTarget.resolveInto(*section, currentSpineIndex);
   LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
-  navTarget = NavigationTarget::makePage(section->currentPage);
+  anchorNavTargetToCurrentPage();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   return true;
@@ -4899,6 +4938,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
                                          : std::nullopt;
                                  if (resolvedPage) {
                                    section->currentPage = *resolvedPage;
+                                   anchorNavTargetToCurrentPage();
                                    forceLoadLargeImages = false;
                                    pageHasPlaceholders = false;
                                  } else {
@@ -4934,6 +4974,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
             if (newSpineIndex == currentSpineIndex) {
               if (const auto resolvedPage = section->getPageForTocIndex(nextTocIndex)) {
                 section->currentPage = *resolvedPage;
+                anchorNavTargetToCurrentPage();
                 forceLoadLargeImages = false;
                 pageHasPlaceholders = false;
               }
