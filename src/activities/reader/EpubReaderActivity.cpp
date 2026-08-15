@@ -165,6 +165,13 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 // the CSS resolver needs above the LEAN floor it drops to in arena mode. These floors cover that
 // remainder with reserve, and are reachable from the ~57 KB reading steady state — which the
 // heap-backed floors above are not, on either device.
+#ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
+#endif
+#ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
+#endif
+
 // Free heap the deferred footnote gather needs before it will start. It opens the ZIP once per
 // spine and each open takes a 4 KB contiguous EOCD buffer plus a 1 KB stream chunk; starting it
 // without room does not merely fail, it produces a cache that records "no footnotes" for the book
@@ -174,13 +181,6 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #define FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES (48 * 1024)
 #endif
 constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES;
-
-#ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
-#endif
-#ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
-#define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
-#endif
 // Quiet period after the last page reached the screen before B may take the buffer. B's borrow
 // costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
 // only start once the reader has settled. Below this the reader is flipping (skimming, or
