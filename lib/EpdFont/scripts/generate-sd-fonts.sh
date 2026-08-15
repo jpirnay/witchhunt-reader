@@ -55,7 +55,7 @@ python3 "$SCRIPT" \
   --italic "$FONT_DIR/Bookerly/Bookerly-Italic.ttf" \
   --bolditalic "$FONT_DIR/Bookerly/Bookerly-BoldItalic.ttf" \
   --intervals builtin \
-  --sizes "$SIZES" --force-autohint \
+  --sizes "$SIZES" \
   --name Bookerly-SD \
   --output-dir "$OUTPUT_BASE/Bookerly-SD/" &
 PID_BOOKERLY=$!

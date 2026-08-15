@@ -605,7 +605,7 @@ def extract_ligatures_fonttools(font_path, codepoints):
     return pairs
 
 
-def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=False):
+def rasterize_font_style(fontfile, size, intervals, style_id=0):
     """Rasterize all glyphs for one font style. Returns StyleRasterData."""
     style_label = STYLE_LABELS.get(style_id, str(style_id))
 
@@ -616,9 +616,12 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
     # Invalid_Size_Handle on some fonts.
     face.set_char_size(size << 6, size << 6, 150, 150)
 
-    load_flags = freetype.FT_LOAD_RENDER
-    if force_autohint:
-        load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
+    # Always auto-hint, matching fontconvert.py — see the long comment there. Without
+    # grid-fitting, a stem's subpixel phase decides whether it quantises to a 3px or a
+    # 4px ink footprint, so otherwise identical letters ship at different weights
+    # (issue #149). advanceX comes from linearHoriAdvance (unhinted), so this changes
+    # ink boxes only and never reflows text.
+    load_flags = freetype.FT_LOAD_RENDER | freetype.FT_LOAD_FORCE_AUTOHINT
 
     def load_glyph(code_point):
         glyph_index = face.get_char_index(code_point)
@@ -830,8 +833,7 @@ def style_sections_total_size(sections):
 # --- File writers ---
 
 def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
-                               force_autohint=False, synthetic_bold=False,
-                               debug_images=False):
+                               synthetic_bold=False, debug_images=False):
     """Generate a multi-style v4 .cpfont file.
 
     style_fonts: dict of {style_id: fontfile_path} e.g. {0: "Regular.ttf", 2: "Italic.ttf"}
@@ -849,8 +851,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
         fontfile = style_fonts[style_id]
         print(f"  Rasterizing style {style_id}...", file=sys.stderr)
         raster_data[style_id] = rasterize_font_style(
-            fontfile, size, intervals, style_id=style_id,
-            force_autohint=force_autohint)
+            fontfile, size, intervals, style_id=style_id)
 
     if synthetic_bold:
         # If a bold-style output is identical to its base style, apply a synthetic
@@ -962,8 +963,6 @@ def main():
                         help="Font style for single-style mode (default: regular).")
     parser.add_argument("--name", dest="name",
                         help="Font family name for output filenames (default: derived from font filename).")
-    parser.add_argument("--force-autohint", dest="force_autohint", action="store_true",
-                        help="Force FreeType auto-hinter instead of native font hinting.")
     parser.add_argument("--synthetic-bold", dest="synthetic_bold", action="store_true",
                         help="Apply synthetic boldening when bold style equals its source style.")
     parser.add_argument("--debug-images", dest="debug_images", action="store_true",
@@ -1072,7 +1071,6 @@ def main():
         print(f"Generating {output_path} (size {sz}, {len(style_fonts)} style(s), v4)...", file=sys.stderr)
         total_size += generate_cpfont_multistyle(
             style_fonts, sz, intervals, output_path,
-            force_autohint=args.force_autohint,
             synthetic_bold=args.synthetic_bold,
             debug_images=args.debug_images)
     print(f"\nTotal: {len(sizes)} files, {total_size / 1024 / 1024:.2f} MB", file=sys.stderr)

@@ -10,7 +10,6 @@
 #   description: Human-readable description (shown in download UI and manifest)
 #   intervals: builtin,  Comma-separated Unicode interval presets for fontconvert_sdcard.py
 #   sizes:       Point sizes to generate
-#   force_autohint: (optional) Force FreeType auto-hinter instead of native hinting
 #   styles:      Map of style name -> font source
 #                  path: relative to lib/EpdFont (for committed fonts)
 #                  url:  download URL (for fonts not in the repo)
@@ -123,15 +122,18 @@ families:
       italic:     {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf", variable: {wght: 500}}
       bolditalic: {url: "https://raw.githubusercontent.com/google/fonts/main/ofl/bitter/Bitter-Italic%5Bwght%5D.ttf", variable: {wght: 700}}
 
-  - name: Readerly
-    description: "Similar to Bookerly (Latin, Cyrillic)"
+  # Replaces Readerly, which upstream retired from the core collection. Libron is
+  # the same author's rework of it — trimmed serifs, reworked glyphs, fixed
+  # composites — and is what they now recommend for e-ink.
+  - name: Libron
+    description: "Similar to Bookerly, understated serifs (Latin)"
     intervals: builtin,latin-cyrillic,musical-symbols
     sizes: [10, 12, 14, 16, 18]
     styles:
-      regular:    {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Readerly-Regular.ttf"}
-      bold:       {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Readerly-Bold.ttf"}
-      italic:     {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Readerly-Italic.ttf"}
-      bolditalic: {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Readerly-BoldItalic.ttf"}
+      regular:    {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Libron-Regular.ttf"}
+      bold:       {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Libron-Bold.ttf"}
+      italic:     {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Libron-Italic.ttf"}
+      bolditalic: {url: "https://raw.githubusercontent.com/nicoverbruggen/ebook-fonts/main/fonts/core/Libron-BoldItalic.ttf"}
 
   - name: Charis
     description: "Great universal pick"

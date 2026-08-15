@@ -3,6 +3,7 @@
  * name: inter_ui_12_bold
  * size: 12
  * mode: 1-bit
+ * hinting: auto (FT_LOAD_FORCE_AUTOHINT — grid-fits stems to whole pixels)
  * Command used: fontconvert.py inter_ui_12_bold 12 ../builtinFonts/source/Inter/Inter-Bold.ttf --additional-intervals 0x0000,0x007F --additional-intervals 0x0080,0x00FF --additional-intervals 0x0100,0x017F --additional-intervals 0x01A0,0x01A1 --additional-intervals 0x01AF,0x01B0 --additional-intervals 0x01C4,0x021F --additional-intervals 0x0300,0x036F --additional-intervals 0x0400,0x04FF --additional-intervals 0x1EA0,0x1EF9 --additional-intervals 0x2010,0x206F --additional-intervals 0x20A0,0x20CF --additional-intervals 0xFB00,0xFB06 --additional-intervals 0xFFFD,0xFFFD
  */
 #pragma once
