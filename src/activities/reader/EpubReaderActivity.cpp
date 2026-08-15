@@ -239,11 +239,26 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 // buffer (and possibly a pre-rendered page) resident, so pin above Background-B's idle gate.
 // Failure is recoverable — the build retries with the buffer released — so these gate "try in
 // place" rather than guaranteeing success; tune from the "Index start mem" serial logs.
+//
+// SHAPE (fixed 2026-08-15, device-measured — see heapAllowsInPlaceBuild): the free floor is the
+// MAXIMUM of the two phase peaks, not their sum. runBuildParse releases the inflate ring before
+// the parse begins, so the ring and the layout working set are never live together; adding them
+// asked for memory no build has ever needed. The bases below are the PARSE-phase floors and are
+// unchanged by that fix — only the arithmetic combining them with the ring changed, so an A/B
+// against the old behaviour reads cleanly.
 #ifndef IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES
 #define IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES (60 * 1024)
 #endif
 #ifndef IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES
 #define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
+#endif
+// Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
+// so here the sum is correct). Same value as Background-B's BG_BUILD_EXTRACT_BASE_HEAP_BYTES and
+// for the same reason — both gate an extract that runs heap-backed with the secondary framebuffer
+// resident, which is the one situation the 30 KB was measured in. Kept as its own name rather than
+// reusing B's so the two can diverge without silently retuning each other.
+#ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
+#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)
 #endif
 // CSS books need more margin to build in place: the parse resolves embedded styles, which
 // self-degrade below the runtime CSS-resolve floor (CSS_MIN_FREE_HEAP_FOR_CSS ≈ 40 KB). Since
@@ -283,16 +298,28 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 //   heapAllowsInPlaceBuild=0 css=1 ring=15799 free=71544(floor=83383) contig=59380(floor=32768)
 //
 // contig passes with 26 KB to spare; `free` fails against a floor that is UNREACHABLE (post-font
-// free peaks at ~97 KB and is ~71 KB by reader time), because the floor adds ringBytes on top of
+// free peaks at ~97 KB and is ~71 KB by reader time), because the floor added ringBytes on top of
 // a base already sized for the working set. Meanwhile the arena serves every build with
 // failedAlloc=0 at ~30 KB high-water. One line per gate, so one trace shows every decision and
-// the arithmetic behind it. Values are NOT changed in this commit — measure first.
+// the arithmetic behind it.
 //
-// HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
-// Default OFF (2026-08-11). It did its job — it is how the unreachable X4 CSS floor (73728
-// against a heap that peaks at 71080) and B's contig-floor miss were both found. The floors have
-// not been re-derived yet, so this stays available rather than being deleted: build with
-// -DHEAP_GATE_TRACE=1 when tuning them. At ~1 Hz per waiting gate it is far too loud to leave on.
+// RESOLVED for that gate (2026-08-15): heapAllowsInPlaceBuild now takes max(parse, extract+ring)
+// instead of parse+ring — see the derivation there, and the X4 trace that measured it.
+//
+// STILL UNREACHABLE, deliberately not touched in the same change: the two Background-B
+// heap-backed gates. Same X4 trace, ~20 evaluations across one reading session:
+//   gate=bgB_waitheap     REJECT free=~57000(floor=63488) contig=25588(floor=40960)
+//   gate=bgB_cssResident  REJECT free=~56500(floor=73728) contig=25588(floor=0)
+// Neither ever admitted, on any spine, at any point. B works anyway because the BORROW gates
+// (BG_BUILD_BORROW_*, 40960/12288) are reachable and are what it actually uses — so these two
+// only bind when there is no buffer to lend, and then they refuse unconditionally. Re-deriving
+// them wants its own measurement of a heap-backed B build, which this device cannot produce
+// while the borrow keeps succeeding.
+//
+// HEAP_GATE_TRACE=0 compiles it out. Default OFF (2026-08-11). It did its job twice over — the
+// unreachable in-place floor above and B's contig-floor miss were both found with it — so it
+// stays available rather than being deleted: build with -DHEAP_GATE_TRACE=1 when tuning a floor.
+// At ~1 Hz per waiting gate it is far too loud to leave on.
 #ifndef HEAP_GATE_TRACE
 #define HEAP_GATE_TRACE 0
 #endif
@@ -3016,8 +3043,26 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // straight to the released path instead of starting a resident build that is doomed to the
   // low-heap abort (~1.4 s of popup/setup/abort/re-setup waste, observed heap dip to <8 KB free).
   const uint32_t ringBytes = static_cast<uint32_t>(std::min<size_t>(32768, inflatedSize));
+  // max(), not sum: the build's two phases have disjoint peaks (runBuildParse releases the
+  // inflate ring before the CSS-resolving parse starts), so the ring and the layout working set
+  // are never live at the same time. This is the same shape Background-B's heap-backed gate has
+  // always used; only this one summed them.
+  //
+  // Device-measured on X4 (2026-08-15, HEAP_GATE_TRACE, book cache deleted to force builds):
+  //   spine 14  ring=27875  free=62468  old floor=95459   arena high-water 39268/48000, failedAlloc=0
+  //   spine 16  ring=32768  free=61580  old floor=100352  arena high-water 44148/48000, failedAlloc=0
+  // Total heap on that device is 265120 and free never exceeds ~69 KB at reader time, so the old
+  // floor could not be met by any book on any page — it was a constant false, not a tuning. That
+  // also made RESIDENT_BUILD_ABORT_* dead code, since reaching it requires IncrementalResident.
+  //
+  // NOTE the CSS base still (correctly) rejects both of those builds at ~62 KB free: a heap-backed
+  // parse there would dip under the runtime CSS-resolve floor (~40 KB) and come out degraded. The
+  // fix is not "let more builds go resident" — it is "let this gate be answerable at all". What it
+  // changes in practice is the NON-CSS case, where the floor drops from 60 KB + ring (up to 92 KB,
+  // unreachable) to a flat 60 KB, which the ~62-69 KB reading heap can actually clear.
   const uint32_t freeFloor =
-      (embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES) + ringBytes;
+      std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
+                         IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
   const uint32_t contigFloor = std::max<uint32_t>(
       embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
       ringBytes + 8 * 1024);
