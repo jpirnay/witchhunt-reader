@@ -205,6 +205,9 @@ class EpubReaderActivity final : public Activity {
   bool backgroundBorrowActive_ = false;
   std::unique_ptr<Section> section = nullptr;
   int currentSpineIndex = 0;
+  // Where to land when this section is (re)built. INVARIANT: while a section is loaded this
+  // names the page currently on screen, not the page the section was entered at — see
+  // anchorNavTargetToCurrentPage().
   NavigationTarget navTarget;
   int pagesUntilFullRefresh =
       1;  // initialized to freq in onEnter(); 1 triggers HALF on first render if somehow not reset
@@ -773,6 +776,9 @@ class EpubReaderActivity final : public Activity {
   bool getEffectiveInlineFootnotePreviews() const;
   int getEffectiveReaderFontId() const;
   float getEffectiveReaderLineCompression() const;
+  // Re-point navTarget at the page currently displayed. Must be called after every move of
+  // section->currentPage that stays inside the loaded section — see the definition for why.
+  void anchorNavTargetToCurrentPage();
   bool stepPageState(bool isForwardTurn);
   void pageTurn(bool isForwardTurn);
 #if ENABLE_BENCHMARKS
