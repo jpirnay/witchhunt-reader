@@ -10,7 +10,6 @@
 #   description: Human-readable description (shown in download UI and manifest)
 #   intervals: builtin,  Comma-separated Unicode interval presets for fontconvert_sdcard.py
 #   sizes:       Point sizes to generate
-#   force_autohint: (optional) Force FreeType auto-hinter instead of native hinting
 #   styles:      Map of style name -> font source
 #                  path: relative to lib/EpdFont (for committed fonts)
 #                  url:  download URL (for fonts not in the repo)

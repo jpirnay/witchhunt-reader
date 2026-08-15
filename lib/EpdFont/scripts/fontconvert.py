@@ -22,7 +22,6 @@ parser.add_argument("--2bit", dest="is2Bit", action="store_true", help="generate
 parser.add_argument("--additional-intervals", dest="additional_intervals", action="append", help="Additional code point intervals to export as min,max. This argument can be repeated.")
 parser.add_argument("--compress", dest="compress", action="store_true", help="Compress glyph bitmaps using DEFLATE with group-based compression.")
 parser.add_argument("--zopfli", dest="zopfli", action="store_true", help="Use Zopfli for the DEFLATE backend instead of zlib. Produces standard raw-DEFLATE streams (decoded unchanged by the on-device uzlib inflater), typically a few percent smaller than zlib -9, at the cost of much slower compression. Requires --compress and the 'zopfli' package.")
-parser.add_argument("--force-autohint", dest="force_autohint", action="store_true", help="Force FreeType auto-hinter instead of native font hinting. Improves stem width consistency for fonts with weak or no native TrueType hints.")
 parser.add_argument("--threshold", dest="threshold", type=float, default=0.4, help="Coverage threshold (0-1) for 1-bit black/white quantisation: pixels with greyscale coverage >= threshold become black. Lower = bolder stems. Default 0.4. Ignored for --2bit.")
 args = parser.parse_args()
 
@@ -33,17 +32,26 @@ is2Bit = args.is2Bit
 size = args.size
 font_name = args.name
 threshold = args.threshold
-load_flags = freetype.FT_LOAD_RENDER
-if not is2Bit:
-    # 1-bit fonts: render antialiased greyscale with the auto-hinter forced on
-    # (it grid-snaps stems to whole pixels), then threshold coverage to black/
-    # white. This gives evenly-weighted, solid stems at small UI sizes: native
-    # mono rasterising left single-pixel stems spindly and uneven, while the old
-    # un-hinted >=~13% threshold over-inked them. Still 1 bit/pixel, so glyph
-    # metrics and bitmap size are unchanged.
-    load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
-if args.force_autohint:
-    load_flags |= freetype.FT_LOAD_FORCE_AUTOHINT
+# Always rasterise through FreeType's auto-hinter rather than the font's own
+# TrueType hints, because it grid-snaps stems to whole pixels. Both output modes
+# need that, for the same underlying reason: a stem that is not grid-fitted lands
+# at whatever subpixel phase the outline dictates, and the quantisation step
+# afterwards freezes that phase into the font.
+#
+#   1-bit: native mono rasterising left single-pixel stems spindly and uneven,
+#          while the old un-hinted >=~13% threshold over-inked them. Rendering
+#          antialiased and thresholding a hinted coverage map gives evenly
+#          weighted, solid stems at small UI sizes.
+#   2-bit: un-hinted, a stem centred on a pixel quantises to (black,black,black)
+#          while the same stem straddling a boundary quantises to
+#          (light,black,black,light) — a 3px vs 4px ink footprint on otherwise
+#          identical letters. At Bookerly 14 that split 'b d f i n r u' from the
+#          rest of the alphabet and read as inconsistent letter thickness
+#          (issue #149). Hinting collapses every stem to one width.
+#
+# Regenerating an existing font with this on does not reflow text: advanceX comes
+# from linearHoriAdvance (unhinted) below, so only the ink boxes move, never the pen.
+load_flags = freetype.FT_LOAD_RENDER | freetype.FT_LOAD_FORCE_AUTOHINT
 
 # inclusive unicode code point intervals
 # must not overlap and be in ascending order
@@ -875,6 +883,7 @@ print(f"""/**
  * name: {font_name}
  * size: {size}
  * mode: {'2-bit' if is2Bit else '1-bit'}{('  compressed: ' + ('zopfli' if args.zopfli else 'zlib')) if compress else ''}
+ * hinting: auto (FT_LOAD_FORCE_AUTOHINT — grid-fits stems to whole pixels)
  * Command used: {' '.join(sys.argv)}
  */
 #pragma once
