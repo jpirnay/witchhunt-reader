@@ -3523,13 +3523,68 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     auto p = section->loadPageFromSectionFile();
     lastRenderStats.pageLoadMs = millis() - pageLoadStart;
     if (!p) {
-      LOG_ERR("ERS", "Failed to load page from SD - clearing section cache");
-      section->clearCache();
-      section.reset();
-      requestUpdate();  // Try again after clearing cache
-                        // TODO: prevent infinite loop if the page keeps failing to load for some reason
+      // Escalate in two steps instead of assuming the cache is damaged. The dominant reason
+      // this returns null is Page::deserialize failing to allocate under pressure — the file
+      // on disk is fine, and clearing it charges a full chapter re-index for one failed malloc.
+      // See the pageLoadFail* latch for the state machine.
+      if (pageLoadFailSpine_ != currentSpineIndex || pageLoadFailPage_ != section->currentPage) {
+        pageLoadFailSpine_ = currentSpineIndex;
+        pageLoadFailPage_ = section->currentPage;
+        pageLoadFailStage_ = 1;
+      } else if (pageLoadFailStage_ < 2) {
+        pageLoadFailStage_ = 2;
+      } else {
+        pageLoadFailStage_ = 3;
+      }
       automaticPageTurnActive = false;
+      if (pageLoadFailStage_ == 1) {
+        // Transient hypothesis: hand back everything the reader is holding that nobody is
+        // waiting on, then reload the section from the SAME cache file. The evictions are the
+        // ones reallocSecondaryEvictingCaches() already trusts for the harder case (a 48 KB
+        // contiguous request): font page slots are rebuilt by the next prewarm regardless, the
+        // CSS caches reload lazily from SD, and Background-B's lookahead section is pure
+        // speculation that re-probes on its own cadence. navTarget carries the position, so the
+        // re-entry costs a LUT re-read, not a rebuild.
+        LOG_ERR("ERS", "Page %d load failed (spine %d, free=%lu); evicting caches and reloading section",
+                section->currentPage, currentSpineIndex, static_cast<unsigned long>(esp_get_free_heap_size()));
+        if (FontCacheManager* fontCache = renderer.getFontCacheManager()) {
+          fontCache->clearCache();
+        }
+        if (epub && epub->getCssParser()) {
+          epub->getCssParser()->clearCaches(/*evictEverything=*/true);
+        }
+        resetBackgroundBuild();
+        section.reset();
+        requestUpdate();
+        return;
+      }
+      if (pageLoadFailStage_ == 2) {
+        // Failed again at the same page after a cache eviction and a fresh LUT read. That does
+        // not prove the file is damaged — the heap may simply still be short — but the transient
+        // hypothesis has had its chance, so fall through to what this site always did. The free
+        // figure in both log lines is what tells the two apart after the fact.
+        LOG_ERR("ERS", "Page %d load failed again (spine %d, free=%lu); clearing section cache and rebuilding",
+                section->currentPage, currentSpineIndex, static_cast<unsigned long>(esp_get_free_heap_size()));
+        section->clearCache();
+        section.reset();
+        requestUpdate();
+        return;
+      }
+      // Stage 3: a freshly rebuilt cache cannot serve this page either. Re-entering would loop
+      // forever (the old TODO at this call site), so stop and show the empty-chapter screen —
+      // the reader can still navigate out with the section left intact.
+      LOG_ERR("ERS", "Page %d unreadable after rebuild (spine %d); giving up on this page", section->currentPage,
+              currentSpineIndex);
+      renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+      renderStatusBar();
+      renderer.displayBuffer();
       return;
+    }
+    // Loaded: retire any escalation recorded against this page.
+    if (pageLoadFailStage_ != 0) {
+      pageLoadFailSpine_ = -1;
+      pageLoadFailPage_ = -1;
+      pageLoadFailStage_ = 0;
     }
 
     // Collect footnotes from the loaded page
