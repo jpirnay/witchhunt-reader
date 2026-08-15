@@ -315,7 +315,20 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // completely powered off, so the power button is hard-wired to briefly provide power to the MCU, waking it up
   // regardless of the wakeup source configuration.
   // When keepClockAlive is true, this is the actual wakeup mechanism since the MCU stays powered.
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
+  //
+  // The wake source itself is chip-family specific, so this branches on SoC
+  // capability rather than on a board or device name: the C3 has no RTC IO mux
+  // and uses the dedicated deep-sleep GPIO path, while the S3 wakes from EXT1
+  // over its RTC GPIOs (the X4 Pro power key is GPIO3, which is RTC-capable).
+  // Both boards' power keys are active-LOW, matching the level used here.
+  constexpr uint64_t powerPinMask = 1ULL << InputManager::POWER_BUTTON_PIN;
+#if SOC_PM_SUPPORT_EXT1_WAKEUP
+  esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#elif SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
+  esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+#else
+#error "No deep-sleep wake source available for this target — add one before enabling this board."
+#endif
   // Enter Deep Sleep
   esp_deep_sleep_start();
 }
