@@ -1,9 +1,17 @@
 # Multi-board bring-up — X4 Pro and LilyGo T5S3
 
-Date: 2026-08-14
-Status: proposal, nothing implemented
-Hardware: both boards physically in hand since ~2026-08-12
+Date: 2026-08-14 (last updated 2026-08-15)
+Hardware: both boards physically in hand since ~2026-08-13
+Lead board: **Xteink X4 Pro**
 Related: [touch-input-migration-2026-08-14.md](touch-input-migration-2026-08-14.md) (workstream C)
+
+| Workstream | State |
+|---|---|
+| A — build configuration | **done**, committed on `fix/s3-build-config` |
+| B0 — board concept / capability predicates | not started (next) |
+| B — de-hardcode the HAL | two link blockers fixed, rest not started |
+| C — touch | not started |
+| D — board features | not started; SDK dependency cleared |
 
 ## Priority
 
@@ -32,9 +40,11 @@ This makes workstream B (below) load-bearing: until the HAL reads
 
 ---
 
-## Workstream A — Build configuration
+## Workstream A — Build configuration ✅ DONE
 
-Mostly defects, all cheap, and they gate everything else.
+Mostly defects, all cheap, and they gated everything else. Diagnosis kept below
+for the record; **"Resolved"** notes say what actually shipped, which differs from
+the original proposal in a couple of places.
 
 ### A1. `[base]` hardcodes the C3 device set
 
@@ -62,10 +72,15 @@ It also answers the combined-build question below — **X4 Pro and T5S3 are both
 `FREEINK_MCU_S3` and so can share one binary**, exactly as X3/X4 share the C3 one.
 C3 and S3 never can.
 
-**Fix:** move `FREEINK_DEVICE_*` and `FREEINK_X4_OVERCLOCK_SPI` out of `[base]`
-into `env:default` / `gh_release` / `slim`, as upstream does — their `[base]`
-carries neither. The S3 envs additionally need a `build_unflags` section, which
-they currently lack entirely, so it must also re-list `${base.build_unflags}`.
+**Resolved.** `FREEINK_DEVICE_*` and `FREEINK_X4_OVERCLOCK_SPI` moved out of
+`[base]` into a new **`[c3]`** interpolation section, with a matching **`[s3]`**.
+Each env now references `${c3.build_flags}` or `${s3.build_flags}` and so opts
+into exactly one MCU family.
+
+This is a small departure from the original proposal, which was to unflag the C3
+device set in the S3 envs. Moving the flags out of `[base]` instead means the S3
+envs need no `build_unflags` at all — they keep inheriting `${base.build_unflags}`
+through `extends = base`, which is both smaller and harder to get wrong.
 
 ### A2. `-DWOLFSSL_SP_RISCV32` applied to Xtensa boards
 
@@ -81,11 +96,14 @@ Xtensa target. This is measured, not theoretical: the Xtensa assembler rejects t
 emitted asm with `unknown opcode 'sltu'/'mul'/'mulhu'`. Upstream uses
 `-DWOLFSSL_SP_SMALL` in `[base]` instead.
 
-**Fix:** `WOLFSSL_SP_SMALL` in `[base]`; `WOLFSSL_SP_RISCV32` only in the C3 envs.
+**Resolved.** Neither flag lives in `[base]` now: `WOLFSSL_SP_RISCV32` sits in
+`[c3]`, `WOLFSSL_SP_SMALL` in `[s3]`. (Upstream puts `SP_SMALL` in their `[base]`;
+we keep the C3's RISC-V assembly path, so the SP backend has to be per-family
+rather than a shared default.)
 
-A1 and A2 are the two known blockers for `env:lilygo_t5s3`. Neither is deep — but
-until both are cleared, no S3 board compiles at all, which is why workstream A
-comes first.
+A1 and A2 were the two blockers for `env:lilygo_t5s3`. Neither was deep — but
+until both were cleared, no S3 board compiled at all, which is why workstream A
+came first.
 
 **Measured 2026-08-14** — `pio run -e lilygo_t5s3` fails in 117 s:
 
@@ -97,31 +115,31 @@ BoardConfig.h:88:2: error: #error "FreeInk: all selected devices must share one 
 lilygo_t5s3    FAILED    00:01:56
 ```
 
-A1 is the *first* blocker; A2 sits behind it and only surfaces once A1 is fixed.
-So the current honest status of S3 support is **"does not build"**, not
-"builds but untested".
+A1 was the *first* blocker; A2 sat behind it and only surfaced once A1 was fixed.
+At that point the honest status of S3 support was **"does not build"**, not
+"builds but untested" — worth remembering when reading any earlier claim that the
+T5S3 env merely needed testing.
 
 ### A3. No `env:x4pro`
 
-We have no X4 Pro environment at all. Upstream's is short and portable:
+We had no X4 Pro environment at all, despite it being the lead board.
 
-```ini
-[env:x4pro]
-extends = base
-board = esp32-s3-devkitc1-n16r8
-board_build.mcu = esp32s3
-build_flags =
-  ${base.build_flags}
-  -DFREEINK_DEVICE_X4PRO=1
-  -DBOARD_HAS_PSRAM
-  -DUSE_BLOCK_DEVICE_INTERFACE=1   ; SD is native SDMMC (1-bit), not SPI
-  ...
-```
+**Resolved.** Added, modelled on upstream's but referencing `${s3.build_flags}`
+and carrying `-DFREEINK_DEVICE_X4PRO=1`, `-DUSE_BLOCK_DEVICE_INTERFACE=1`, and the
+usual version/log flags.
+
+Two deliberate differences from upstream's env:
+
+- **`-DBOARD_HAS_PSRAM` omitted.** Upstream sets it; we do not, pending the
+  allocation-policy decision in workstream D. Enabling it is a one-line change
+  once that is settled.
+- **`-DFREEINK_X4PRO_FAST_DU_SHORTCUT` omitted** (it postdates upstream's env
+  anyway) — see workstream D item 7.
 
 Note `USE_BLOCK_DEVICE_INTERFACE` — **X4 Pro's SD is SDMMC, not SPI.** That is a
 storage-path difference, not a pin difference, and it interacts with `HalStorage`.
 
-### A4. Missing SDK libraries
+### A4. Missing SDK libraries — still outstanding
 
 Upstream links these; we do not: `FrontlightManager`, `Rtc`, `Imu`
 (plus `FreeInkUI` + `Icons`, which belong to the touch/UI track).
@@ -129,11 +147,15 @@ Upstream links these; we do not: `FrontlightManager`, `Rtc`, `Imu`
 Both new boards have frontlights. X4 Pro has warm/cold dual-channel
 (`FREEINK_CAP_WARMLIGHT`).
 
-### A5. `env:lilygo_t5s3` omits `-DBOARD_HAS_PSRAM`
+**Deliberately deferred to workstream D**, not done with the rest of A: linking a
+library only helps once there is HAL code calling it, and adding unused libraries
+costs flash we do not have (see the flash section).
 
-The board is `esp32-s3-devkitc1-n16r8` — 16 MB flash, **8 MB PSRAM** — declared
-but never enabled. See workstream D for why this is a design question, not just a
-flag.
+### A5. PSRAM not enabled on either S3 env — deliberate
+
+Both S3 envs are `esp32-s3-devkitc1-n16r8` — 16 MB flash, **8 MB PSRAM** —
+declared by the board but not enabled by a build flag. Left that way on purpose;
+workstream D explains why this is a design question rather than a free win.
 
 ---
 
@@ -257,10 +279,13 @@ Ordered by how visible their absence is:
    `lib/hal/HalFrontlight` + a panel/settings activity. X4 Pro additionally has
    warm/cold (`FREEINK_CAP_WARMLIGHT`), needing a two-axis control.
 
-   **This now carries a hard dependency that did not exist a month ago.** Light
-   sleep stops the default LEDC PWM output, which visibly flashes an ESP-driven
-   frontlight as the idle loop enters repeated sleep slices. Upstream guards it
-   in both `HalPowerManager::lightSleep()` and `onEinkBusyWaitSlice()`:
+   **Frontlight vs light sleep — upstream has just changed the answer.**
+
+   Light sleep stops the default LEDC PWM output, which visibly flashes an
+   ESP-driven frontlight as the idle loop enters repeated sleep slices. Upstream
+   handled that by making the two mutually exclusive — a lit frontlight blocks
+   light sleep entirely, guarded in both `HalPowerManager::lightSleep()` and
+   `onEinkBusyWaitSlice()`:
 
    ```cpp
    if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached() ||
@@ -269,11 +294,50 @@ Ordered by how visible their absence is:
    }
    ```
 
-   Previous analysis dismissed this port on the grounds that we had no light
-   sleep. **That is no longer true** — PR #146 (`feat/idle-light-sleep`) merged
-   to master, and `HalPowerManager::lightSleep()` plus its stats now exist. So
-   the moment a frontlight is wired on either board, this guard is required or
-   the light will strobe during idle reading.
+   Earlier analysis dismissed porting this because we had no light sleep. That
+   stopped being true when PR #146 (`feat/idle-light-sleep`) merged to master.
+
+   **But the exclusion itself is no longer upstream's answer.** crosspoint PR
+   [#3032](https://github.com/crosspoint-reader/crosspoint-reader/pull/3032)
+   ("feat: light-sleep-surviving frontlight for the X4 Pro") **merged
+   2026-08-14**, paired with SDK PR
+   [Free-Ink/freeink-sdk#39](https://github.com/Free-Ink/freeink-sdk/pull/39):
+
+   - **SDK side:** the frontlight LEDC is clocked from **RC_FAST with
+     `KEEP_ALIVE`**, so its PWM survives light sleep blink-free — the flashing
+     the guard existed to prevent no longer happens. The keep-on cost is
+     refcounted against 0↔nonzero duty edges, so *dark* idle still sleeps at
+     full depth.
+   - **App side:** `[env:x4pro]` sets `FREEINK_FRONTLIGHT_LS`, under which the
+     `Frontlight.present() && Frontlight.isOn()` clause **compiles out**. Boards
+     without the define (Paper Mono, the C3s) keep the guard byte-identically.
+   - **Measured by the submitter on X4 Pro hardware:** 92 % light-sleep residency
+     over a ~31.5 min session (34,492 sleep entries, 0 rejects, ~50 ms average
+     window) with the light on.
+
+   **What this means for us.** Do not port the exclusion as the design — port the
+   *pair*: the guard as the fallback for non-opt-in boards, and
+   `FREEINK_FRONTLIGHT_LS` for X4 Pro. Since X4 Pro is our lead board and night
+   reading with the light on is exactly when light sleep pays, taking only the
+   guard would hand the X4 Pro a fully-awake chip for entire evening sessions.
+
+   **SDK dependency — resolved 2026-08-15.** The `freeink-sdk` submodule was
+   bumped `56efd2e` → **`76e61c4`**, which carries SDK PR #39, so
+   `FREEINK_FRONTLIGHT_LS` is now available in `FrontlightManager`. Seven commits
+   came in:
+
+   | Commit | What |
+   |---|---|
+   | `f6f5940` / #37 | FreeInkUI list rows grow by measured wrapped lines — inert for us, we don't link FUI |
+   | `877f951` / #38 | opt-in `FREEINK_X4PRO_FAST_DU_SHORTCUT` (see below) |
+   | `cb7ec59`, `e458e6e` / #39 | RC_FAST frontlight LEDC + polled-wait BUSY grace |
+
+   The app-side half of #3032 is still ours to port when the frontlight is wired.
+
+   **Review risk flagged by the PR itself:** the SDK side uses
+   `esp_private/esp_sleep_internal.h` (refcounted RC_FAST sleep sub-mode — no
+   public API exists), plus a 20 ms BUSY-assert grace in `EpdBus`'s polled slice
+   path to cover a BUSY edge taken while sleeping.
 2. **RTC** — X4 Pro's BM8563 via the SDK `Rtc` lib; retire the DS3231 hardcoding.
 3. **Capacitive Home key** — X4 Pro; upstream has `wasHomeKeyTapped()` /
    `wasHomeKeyLongPressed()` wired to home/reader-menu actions.
@@ -281,13 +345,22 @@ Ordered by how visible their absence is:
 5. **USB-MSC** — optional, opt-in, and it changes USB mode for the whole build
    (`ARDUINO_USB_MODE=0`). Treat as a separate decision.
 6. **PSRAM** — see below.
+7. **Refresh tuning (opt-in, default off).** SDK PR #38 adds
+   `-DFREEINK_X4PRO_FAST_DU_SHORTCUT`, the X4 Pro counterpart to the C3's
+   `FREEINK_X4_FAST_DU_SHORTCUT` that `[c3]` already documents: ~85 ms/refresh on
+   the same GDEQ0426T82 panel class, **SSD1677 batches only** (UC8179/UC8279
+   batches select different drivers and are unaffected). Deliberately not enabled
+   in `[env:x4pro]` — the C3 equivalent carries a "validate on hardware first"
+   warning after upstream saw long-session ghosting, and the same caution applies
+   until someone runs a long session on a real X4 Pro.
 
 ### PSRAM deserves an explicit decision
 
-The T5S3 has 8 MB and X4 Pro's env declares `BOARD_HAS_PSRAM`. Our entire memory
-strategy — the single 48 KB framebuffer, the borrow-vs-release discipline, the
-arena work, `EINK_DISPLAY_SINGLE_BUFFER_MODE` — exists because the C3 has 380 KB
-and no PSRAM.
+Both S3 boards ship 8 MB of PSRAM, and upstream's X4 Pro env enables it. **Ours
+does not** — neither `env:x4pro` nor `env:lilygo_t5s3` sets `BOARD_HAS_PSRAM`,
+pending this decision. Our entire memory strategy — the single 48 KB framebuffer,
+the borrow-vs-release discipline, the arena work,
+`EINK_DISPLAY_SINGLE_BUFFER_MODE` — exists because the C3 has 380 KB and no PSRAM.
 
 The temptation is to "just use PSRAM" on S3 boards. Resist it as a default:
 divergent memory behaviour between boards means every heap bug becomes
@@ -317,31 +390,32 @@ A (build config)  →  B0 (capability predicates)  →  B (HAL de-hardcode)
                                     UI/FUI decision (not blocking)
 ```
 
-A is done (below). B0 is small and unblocks everything without changing
-behaviour. B is the real work and the real risk. C and D parallelize once B
-lands. The UI/FUI question is deliberately last — it is about long-term
-maintainability, not about making these boards work.
+A is done and committed. B0 is small and unblocks everything without changing
+behaviour — it is the next commit. B is the real work and the real risk; its two
+*link* blockers are fixed, but none of the pin/peripheral de-hardcoding is. C and
+D parallelize once B lands. The UI/FUI question is deliberately last — it is about
+long-term maintainability, not about making these boards work.
 
 **First milestone: X4 Pro boots, mounts SD, renders a page.** Nothing else. That
 exercises A, B0 and most of B, and will surface the board differences this
 document is necessarily guessing at. T5S3 follows once the pattern is proven.
 
-### Status
+### Build history
 
-- **A — done and verified 2026-08-14.** `[base]` no longer carries a device set or
-  an architecture-specific wolfSSL SP backend; new `[c3]` / `[s3]` sections own
-  those, and `[env:x4pro]` exists. PSRAM (`-DBOARD_HAS_PSRAM`) deliberately **not**
-  enabled — see workstream D.
-  - `pio run -e default` → **SUCCESS** (650 s). C3 regression gate passed.
-  - `pio run -e x4pro` → **FAILED**, but now 321 s in and past every configuration
-    error. It fails on genuine architecture-specific code, which is workstream B.
+| Date | Build | Result |
+|---|---|---|
+| 08-14 | `lilygo_t5s3` (before A) | FAILED 117 s — MCU-family `#error` |
+| 08-14 | `default` (after A) | **SUCCESS** 650 s — C3 regression gate passed |
+| 08-14 | `x4pro` (after A) | FAILED 321 s — past all config errors, into the two B blockers below |
+| 08-15 | `x4pro` (after B blockers + SDK bump) | **SUCCESS** 766 s — first S3 build ever to link |
+| 08-15 | `default` (same) | **SUCCESS** 786 s — C3 gate held, +94 bytes flash (see below) |
 
-### The two concrete B blockers (measured, X4 Pro)
+### The two B link blockers — FIXED 2026-08-15
 
-Both are loud compile-time failures in the HAL — exactly where the plan predicted,
-and both are the "MCU families differ" warning made real:
+Both were loud compile-time failures in the HAL — exactly where the plan
+predicted, and both the "MCU families differ" warning made real.
 
-**1. Deep-sleep wakeup is a C3-only API.**
+**1. Deep-sleep wakeup was a C3-only API.**
 [HalPowerManager.cpp:318](../lib/hal/HalPowerManager.cpp#L318)
 
 ```
@@ -349,24 +423,43 @@ error: 'ESP_GPIO_WAKEUP_GPIO_LOW' was not declared … did you mean 'ESP_EXT1_WA
 error: 'esp_deep_sleep_enable_gpio_wakeup' was not declared … did you mean 'esp_sleep_enable_gpio_wakeup'?
 ```
 
-The C3 uses `esp_deep_sleep_enable_gpio_wakeup()`; the S3 wants the EXT1 path.
-This needs a HAL-level wakeup abstraction, not a local `#ifdef` — deep sleep is
-also where the GPIO13 guard and the power-latch work already live.
+Fixed by branching on **SoC capability**, not chip name — verified from
+`soc_caps.h` that C3 defines `SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP` and no EXT1,
+while S3 is the reverse, so each target compiles exactly one arm:
 
-**2. The panic backtrace wrapper is RISC-V-specific.**
+```cpp
+#if SOC_PM_SUPPORT_EXT1_WAKEUP           // S3: RTC GPIOs, EXT1
+  esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#elif SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP  // C3: dedicated deep-sleep GPIO path
+  esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+#else
+#error "No deep-sleep wake source available for this target …"
+#endif
+```
+
+`esp_sleep_enable_ext1_wakeup_io()` rather than `esp_sleep_enable_ext1_wakeup()`,
+which IDF documents for deprecation in v6.0. X4 Pro's power key is GPIO3, which is
+RTC-capable on the S3, so EXT1 is valid for it.
+
+**2. The panic backtrace wrapper was RISC-V-specific.**
 [HalSystem.cpp:46](../lib/hal/HalSystem.cpp#L46)
 
 ```
 error: 'RvExcFrame' was not declared in this scope; did you mean 'XtExcFrame'?
 ```
 
-`__wrap_panic_print_backtrace` walks a `RvExcFrame` (the comment says it was
-copied from `esp_system/port/arch/riscv/panic_arch.c`). Xtensa's `XtExcFrame` has
-a different layout, so this needs a per-architecture implementation — or to be
-compiled out on S3 until someone ports it. Note `-Wl,--wrap=panic_print_backtrace`
-is in `[base]`, so the wrapper is linked on every board.
+Smaller than it looked: only the stack-pointer extraction is architecture-specific
+— the raw stack walk below it dumps words upward and is arch-neutral. RISC-V keeps
+SP in `RvExcFrame::sp`, Xtensa in `XtExcFrame::a1` (confirmed from
+`xtensa_context.h:127`, *"stack pointer before interrupt"*). Gated on the
+compiler's own `__riscv` / `__XTENSA__` so it does not depend on IDF config
+macros, with an `#error` default.
 
-Neither is deep. Both must be fixed before X4 Pro links.
+**Deliberately not fixed while here:** the wake level is hardcoded LOW. It should
+follow `BoardConfig::ACTIVE.input.powerActiveHigh`, but every board we currently
+build is active-LOW, so making it runtime-derived would add behaviour risk to the
+shipped C3 product for no present gain. Left as a latent issue for B0, where it
+belongs with the other capability predicates.
 
 ## Flash is nearly full — this constrains everything below
 
@@ -408,17 +501,21 @@ features.
 - **Two boards at once.** They share an MCU family and a touch controller but
   differ in SD path, RTC, gauge, and frontlight channels. Bringing them up
   simultaneously risks conflating their failures; pick one to lead.
-- **The SDK is moving** (80 commits in six months on FreeInkUI alone). Board
-  profiles may shift under us; pin the SDK revision during bring-up.
+- **The SDK is moving fast** (80 commits in six months on FreeInkUI alone, and it
+  moved twice during this planning). It is a git submodule pinned by pointer, so
+  a bump is explicit and reviewable — but each one should be its own commit with
+  its own C3 regression build, never folded into board work.
 
 ## Open questions
 
-1. Which board leads — X4 Pro (upstream reference env exists) or T5S3 (our own
-   port, no upstream counterpart)?
+1. ~~Which board leads?~~ **Answered: X4 Pro** — it has an upstream reference env
+   and a complete upstream feature branch to compare against.
 2. Is the X4 Pro's SDMMC path a `HalStorage` change or an SDK-level one?
 3. PSRAM: enable-but-don't-spend, as argued above — agreed?
 4. Is USB-MSC in scope for the first release of these boards?
 5. ~~Single binary per board, or combined?~~ **Answered by A1**: X4 Pro and T5S3
    are both `FREEINK_MCU_S3`, so a combined S3 binary is possible exactly as
-   X3/X4 share the C3 one. Still a *choice* (flash cost vs release simplicity),
-   but not a constraint.
+   X3/X4 share the C3 one. Still a *choice*, and the flash section argues it is
+   probably unaffordable — but it is not a constraint.
+6. Should the app-side half of crosspoint #3032 (`FREEINK_FRONTLIGHT_LS`) land
+   with the frontlight work in D, or earlier as a standalone port?

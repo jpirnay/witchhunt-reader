@@ -1,7 +1,10 @@
 # Touch input migration — investigation and plan
 
-Date: 2026-08-14
+Date: 2026-08-14 (last updated 2026-08-15)
 Status: proposal, nothing implemented
+Scope: **workstream C** of
+[multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md) — read that
+first for sequencing. Touch is not on the critical path; the HAL de-hardcoding is.
 Reference: `upstream/feat-x4-papermono-support` (crosspoint-reader), `upstream/develop`
 
 ## Summary
@@ -437,7 +440,14 @@ Phase 6 is where this could become a general-purpose touch UI framework. Stop at
    `setFlash`/`clearTapFlash` answers it.
 3. **Phase 4 split** — 4a or 4b for the lists? This is the real decision in the
    document; everything before it is unconditional.
-4. Primary bring-up board — X4 Pro or LilyGo T5S3? Phase 0 ordering follows.
+4. ~~Primary bring-up board?~~ **Answered: X4 Pro**, which also has the capacitive
+   Home key the T5S3 lacks — so phase 3 should cover `wasHomeKeyTapped()` /
+   `wasHomeKeyLongPressed()`, not just tap/swipe.
 5. Are `papermono` / `sticky` in scope for us at all, or X4 Pro + T5S3 only?
-6. Does the FUI conversion wait for the paused reader/Stage-1 work to resolve?
-   Phases 0–3 do not conflict with it; phase 4b touches many of the same files.
+6. ~~Does the FUI conversion wait for the reader/Stage-1 work?~~ **No** — that work
+   is parked (2026-08-14), so nothing needs sequencing around it. The phase 4
+   decision is now purely about long-term maintainability and flash budget.
+
+Phase 0 also no longer needs to add `env:x4pro` or fix the S3 build — workstream A
+did both, and the `freeink-sdk` submodule is now at `76e61c4`. What remains of
+phase 0 is the GT911 bring-up itself and the P1 decision.
