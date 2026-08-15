@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "baseUrl": "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/",
   "families": [
     {
@@ -14,23 +14,28 @@
       "files": [
         {
           "name": "Alegreya/Alegreya_10.cpfont",
-          "size": 254633
+          "size": 269830,
+          "crc32": 3998528417
         },
         {
           "name": "Alegreya/Alegreya_12.cpfont",
-          "size": 319082
+          "size": 337979,
+          "crc32": 1096213647
         },
         {
           "name": "Alegreya/Alegreya_14.cpfont",
-          "size": 392855
+          "size": 416581,
+          "crc32": 1161848648
         },
         {
           "name": "Alegreya/Alegreya_16.cpfont",
-          "size": 479125
+          "size": 505422,
+          "crc32": 3950474071
         },
         {
           "name": "Alegreya/Alegreya_18.cpfont",
-          "size": 575909
+          "size": 610643,
+          "crc32": 3414699185
         }
       ]
     },
@@ -46,23 +51,28 @@
       "files": [
         {
           "name": "Arimo/Arimo_10.cpfont",
-          "size": 388843
+          "size": 394609,
+          "crc32": 553063859
         },
         {
           "name": "Arimo/Arimo_12.cpfont",
-          "size": 502675
+          "size": 532059,
+          "crc32": 3180973243
         },
         {
           "name": "Arimo/Arimo_14.cpfont",
-          "size": 637946
+          "size": 659965,
+          "crc32": 4065180988
         },
         {
           "name": "Arimo/Arimo_16.cpfont",
-          "size": 777763
+          "size": 811615,
+          "crc32": 3260996219
         },
         {
           "name": "Arimo/Arimo_18.cpfont",
-          "size": 951109
+          "size": 987450,
+          "crc32": 395530512
         }
       ]
     },
@@ -78,23 +88,28 @@
       "files": [
         {
           "name": "AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext_10.cpfont",
-          "size": 118633
+          "size": 123606,
+          "crc32": 1573478037
         },
         {
           "name": "AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext_12.cpfont",
-          "size": 140769
+          "size": 146898,
+          "crc32": 2646144973
         },
         {
           "name": "AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext_14.cpfont",
-          "size": 166585
+          "size": 174019,
+          "crc32": 1864597566
         },
         {
           "name": "AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext_16.cpfont",
-          "size": 194397
+          "size": 203960,
+          "crc32": 3347480254
         },
         {
           "name": "AtkinsonHyperlegibleNext/AtkinsonHyperlegibleNext_18.cpfont",
-          "size": 230872
+          "size": 238724,
+          "crc32": 3865956102
         }
       ]
     },
@@ -110,23 +125,28 @@
       "files": [
         {
           "name": "Bitter/Bitter_10.cpfont",
-          "size": 283762
+          "size": 343420,
+          "crc32": 263755631
         },
         {
           "name": "Bitter/Bitter_12.cpfont",
-          "size": 352284
+          "size": 427227,
+          "crc32": 180714058
         },
         {
           "name": "Bitter/Bitter_14.cpfont",
-          "size": 430628
+          "size": 522110,
+          "crc32": 858069294
         },
         {
           "name": "Bitter/Bitter_16.cpfont",
-          "size": 517782
+          "size": 620054,
+          "crc32": 2657835417
         },
         {
           "name": "Bitter/Bitter_18.cpfont",
-          "size": 615582
+          "size": 749256,
+          "crc32": 1271303195
         }
       ]
     },
@@ -142,23 +162,28 @@
       "files": [
         {
           "name": "Charis/Charis_10.cpfont",
-          "size": 338639
+          "size": 373385,
+          "crc32": 1053945936
         },
         {
           "name": "Charis/Charis_12.cpfont",
-          "size": 419052
+          "size": 475120,
+          "crc32": 693643446
         },
         {
           "name": "Charis/Charis_14.cpfont",
-          "size": 534581
+          "size": 608221,
+          "crc32": 2646667046
         },
         {
           "name": "Charis/Charis_16.cpfont",
-          "size": 658207
+          "size": 751872,
+          "crc32": 517733333
         },
         {
           "name": "Charis/Charis_18.cpfont",
-          "size": 846360
+          "size": 913166,
+          "crc32": 1272041031
         }
       ]
     },
@@ -174,23 +199,28 @@
       "files": [
         {
           "name": "Gelasio/Gelasio_10.cpfont",
-          "size": 227040
+          "size": 229734,
+          "crc32": 453471163
         },
         {
           "name": "Gelasio/Gelasio_12.cpfont",
-          "size": 298752
+          "size": 323845,
+          "crc32": 1213773838
         },
         {
           "name": "Gelasio/Gelasio_14.cpfont",
-          "size": 382806
+          "size": 412786,
+          "crc32": 10552741
         },
         {
           "name": "Gelasio/Gelasio_16.cpfont",
-          "size": 479436
+          "size": 516298,
+          "crc32": 2032992950
         },
         {
           "name": "Gelasio/Gelasio_18.cpfont",
-          "size": 589924
+          "size": 635871,
+          "crc32": 2419815493
         }
       ]
     },
@@ -206,23 +236,28 @@
       "files": [
         {
           "name": "GentiumBookPlus/GentiumBookPlus_10.cpfont",
-          "size": 324302
+          "size": 361548,
+          "crc32": 633410876
         },
         {
           "name": "GentiumBookPlus/GentiumBookPlus_12.cpfont",
-          "size": 420404
+          "size": 462975,
+          "crc32": 3283547972
         },
         {
           "name": "GentiumBookPlus/GentiumBookPlus_14.cpfont",
-          "size": 519293
+          "size": 568044,
+          "crc32": 1261919881
         },
         {
           "name": "GentiumBookPlus/GentiumBookPlus_16.cpfont",
-          "size": 643507
+          "size": 705272,
+          "crc32": 2906740525
         },
         {
           "name": "GentiumBookPlus/GentiumBookPlus_18.cpfont",
-          "size": 794387
+          "size": 861283,
+          "crc32": 662431708
         }
       ]
     },
@@ -238,23 +273,28 @@
       "files": [
         {
           "name": "IBMPlexMono/IBMPlexMono_10.cpfont",
-          "size": 165232
+          "size": 180846,
+          "crc32": 4018246563
         },
         {
           "name": "IBMPlexMono/IBMPlexMono_12.cpfont",
-          "size": 210770
+          "size": 230369,
+          "crc32": 18518392
         },
         {
           "name": "IBMPlexMono/IBMPlexMono_14.cpfont",
-          "size": 267380
+          "size": 305328,
+          "crc32": 847008431
         },
         {
           "name": "IBMPlexMono/IBMPlexMono_16.cpfont",
-          "size": 332010
+          "size": 376842,
+          "crc32": 2021910142
         },
         {
           "name": "IBMPlexMono/IBMPlexMono_18.cpfont",
-          "size": 425525
+          "size": 456260,
+          "crc32": 4051064025
         }
       ]
     },
@@ -270,23 +310,28 @@
       "files": [
         {
           "name": "IBMPlexSans/IBMPlexSans_10.cpfont",
-          "size": 346854
+          "size": 389015,
+          "crc32": 362355019
         },
         {
           "name": "IBMPlexSans/IBMPlexSans_12.cpfont",
-          "size": 402760
+          "size": 456067,
+          "crc32": 4110518964
         },
         {
           "name": "IBMPlexSans/IBMPlexSans_14.cpfont",
-          "size": 467012
+          "size": 537802,
+          "crc32": 1952470994
         },
         {
           "name": "IBMPlexSans/IBMPlexSans_16.cpfont",
-          "size": 544046
+          "size": 620632,
+          "crc32": 505555690
         },
         {
           "name": "IBMPlexSans/IBMPlexSans_18.cpfont",
-          "size": 658695
+          "size": 715099,
+          "crc32": 3260474799
         }
       ]
     },
@@ -302,23 +347,28 @@
       "files": [
         {
           "name": "IBMPlexSerif/IBMPlexSerif_10.cpfont",
-          "size": 261436
+          "size": 298914,
+          "crc32": 648919035
         },
         {
           "name": "IBMPlexSerif/IBMPlexSerif_12.cpfont",
-          "size": 311135
+          "size": 359134,
+          "crc32": 1223369569
         },
         {
           "name": "IBMPlexSerif/IBMPlexSerif_14.cpfont",
-          "size": 371513
+          "size": 433265,
+          "crc32": 1170287911
         },
         {
           "name": "IBMPlexSerif/IBMPlexSerif_16.cpfont",
-          "size": 441596
+          "size": 510294,
+          "crc32": 2656784399
         },
         {
           "name": "IBMPlexSerif/IBMPlexSerif_18.cpfont",
-          "size": 542532
+          "size": 592809,
+          "crc32": 4059221804
         }
       ]
     },
@@ -334,23 +384,28 @@
       "files": [
         {
           "name": "Inter/Inter_10.cpfont",
-          "size": 466300
+          "size": 513077,
+          "crc32": 1450383405
         },
         {
           "name": "Inter/Inter_12.cpfont",
-          "size": 578248
+          "size": 619674,
+          "crc32": 779954544
         },
         {
           "name": "Inter/Inter_14.cpfont",
-          "size": 702886
+          "size": 751158,
+          "crc32": 1457784112
         },
         {
           "name": "Inter/Inter_16.cpfont",
-          "size": 851741
+          "size": 931589,
+          "crc32": 3950886993
         },
         {
           "name": "Inter/Inter_18.cpfont",
-          "size": 1015069
+          "size": 1106832,
+          "crc32": 1572323868
         }
       ]
     },
@@ -366,23 +421,65 @@
       "files": [
         {
           "name": "LexicaUltralegible/LexicaUltralegible_10.cpfont",
-          "size": 155718
+          "size": 163324,
+          "crc32": 382370315
         },
         {
           "name": "LexicaUltralegible/LexicaUltralegible_12.cpfont",
-          "size": 195978
+          "size": 205073,
+          "crc32": 1410608088
         },
         {
           "name": "LexicaUltralegible/LexicaUltralegible_14.cpfont",
-          "size": 244278
+          "size": 255244,
+          "crc32": 1188907345
         },
         {
           "name": "LexicaUltralegible/LexicaUltralegible_16.cpfont",
-          "size": 297862
+          "size": 310859,
+          "crc32": 3856215901
         },
         {
           "name": "LexicaUltralegible/LexicaUltralegible_18.cpfont",
-          "size": 358357
+          "size": 373778,
+          "crc32": 646453686
+        }
+      ]
+    },
+    {
+      "name": "Libron",
+      "description": "Similar to Bookerly, understated serifs (Latin)",
+      "styles": [
+        "regular",
+        "bold",
+        "italic",
+        "bolditalic"
+      ],
+      "files": [
+        {
+          "name": "Libron/Libron_10.cpfont",
+          "size": 332766,
+          "crc32": 2319487510
+        },
+        {
+          "name": "Libron/Libron_12.cpfont",
+          "size": 406904,
+          "crc32": 226886262
+        },
+        {
+          "name": "Libron/Libron_14.cpfont",
+          "size": 485311,
+          "crc32": 1366366317
+        },
+        {
+          "name": "Libron/Libron_16.cpfont",
+          "size": 574117,
+          "crc32": 2309859678
+        },
+        {
+          "name": "Libron/Libron_18.cpfont",
+          "size": 694511,
+          "crc32": 1966090138
         }
       ]
     },
@@ -398,23 +495,28 @@
       "files": [
         {
           "name": "Literata/Literata_10.cpfont",
-          "size": 413941
+          "size": 435848,
+          "crc32": 4088991689
         },
         {
           "name": "Literata/Literata_12.cpfont",
-          "size": 478367
+          "size": 504683,
+          "crc32": 2436309353
         },
         {
           "name": "Literata/Literata_14.cpfont",
-          "size": 558295
+          "size": 590393,
+          "crc32": 496769305
         },
         {
           "name": "Literata/Literata_16.cpfont",
-          "size": 649363
+          "size": 700702,
+          "crc32": 61427569
         },
         {
           "name": "Literata/Literata_18.cpfont",
-          "size": 798979
+          "size": 832094,
+          "crc32": 76965351
         }
       ]
     },
@@ -430,23 +532,28 @@
       "files": [
         {
           "name": "Lora/Lora_10.cpfont",
-          "size": 245328
+          "size": 252001,
+          "crc32": 1985543034
         },
         {
           "name": "Lora/Lora_12.cpfont",
-          "size": 303403
+          "size": 311954,
+          "crc32": 940780484
         },
         {
           "name": "Lora/Lora_14.cpfont",
-          "size": 370703
+          "size": 381629,
+          "crc32": 3724582919
         },
         {
           "name": "Lora/Lora_16.cpfont",
-          "size": 454510
+          "size": 466941,
+          "crc32": 2840804124
         },
         {
           "name": "Lora/Lora_18.cpfont",
-          "size": 573700
+          "size": 560470,
+          "crc32": 2495573511
         }
       ]
     },
@@ -462,23 +569,28 @@
       "files": [
         {
           "name": "Merriweather/Merriweather_10.cpfont",
-          "size": 380502
+          "size": 398944,
+          "crc32": 1026438946
         },
         {
           "name": "Merriweather/Merriweather_12.cpfont",
-          "size": 469405
+          "size": 480578,
+          "crc32": 3254217961
         },
         {
           "name": "Merriweather/Merriweather_14.cpfont",
-          "size": 570179
+          "size": 601254,
+          "crc32": 3535019746
         },
         {
           "name": "Merriweather/Merriweather_16.cpfont",
-          "size": 688291
+          "size": 717179,
+          "crc32": 1758667421
         },
         {
           "name": "Merriweather/Merriweather_18.cpfont",
-          "size": 821310
+          "size": 854901,
+          "crc32": 1693515917
         }
       ]
     },
@@ -491,11 +603,13 @@
       "files": [
         {
           "name": "NotoSansCJK/NotoSansCJK_10.cpfont",
-          "size": 2567898
+          "size": 2567898,
+          "crc32": 1729141454
         },
         {
           "name": "NotoSansCJK/NotoSansCJK_12.cpfont",
-          "size": 3611786
+          "size": 3611786,
+          "crc32": 3308886697
         }
       ]
     },
@@ -511,23 +625,28 @@
       "files": [
         {
           "name": "NotoSansExtended/NotoSansExtended_10.cpfont",
-          "size": 457693
+          "size": 475651,
+          "crc32": 1610726609
         },
         {
           "name": "NotoSansExtended/NotoSansExtended_12.cpfont",
-          "size": 577210
+          "size": 596354,
+          "crc32": 3433368354
         },
         {
           "name": "NotoSansExtended/NotoSansExtended_14.cpfont",
-          "size": 726543
+          "size": 742561,
+          "crc32": 1562723801
         },
         {
           "name": "NotoSansExtended/NotoSansExtended_16.cpfont",
-          "size": 893325
+          "size": 921110,
+          "crc32": 131220490
         },
         {
           "name": "NotoSansExtended/NotoSansExtended_18.cpfont",
-          "size": 1078120
+          "size": 1120917,
+          "crc32": 1682017663
         }
       ]
     },
@@ -540,19 +659,23 @@
       "files": [
         {
           "name": "NotoSansHangul/NotoSansHangul_10.cpfont",
-          "size": 1180396
+          "size": 1210189,
+          "crc32": 2914649522
         },
         {
           "name": "NotoSansHangul/NotoSansHangul_12.cpfont",
-          "size": 1614395
+          "size": 1652040,
+          "crc32": 10562107
         },
         {
           "name": "NotoSansHangul/NotoSansHangul_14.cpfont",
-          "size": 2134684
+          "size": 2134684,
+          "crc32": 323936021
         },
         {
           "name": "NotoSansHangul/NotoSansHangul_16.cpfont",
-          "size": 2628464
+          "size": 2628464,
+          "crc32": 241952219
         }
       ]
     },
@@ -565,11 +688,13 @@
       "files": [
         {
           "name": "NotoSerifCJK/NotoSerifCJK_10.cpfont",
-          "size": 2615442
+          "size": 2615442,
+          "crc32": 3173986362
         },
         {
           "name": "NotoSerifCJK/NotoSerifCJK_12.cpfont",
-          "size": 3680444
+          "size": 3680444,
+          "crc32": 2790875638
         }
       ]
     },
@@ -585,23 +710,28 @@
       "files": [
         {
           "name": "NotoSerifExtended/NotoSerifExtended_10.cpfont",
-          "size": 475791
+          "size": 507981,
+          "crc32": 3055966101
         },
         {
           "name": "NotoSerifExtended/NotoSerifExtended_12.cpfont",
-          "size": 592995
+          "size": 631084,
+          "crc32": 2436971323
         },
         {
           "name": "NotoSerifExtended/NotoSerifExtended_14.cpfont",
-          "size": 741510
+          "size": 787247,
+          "crc32": 2448989014
         },
         {
           "name": "NotoSerifExtended/NotoSerifExtended_16.cpfont",
-          "size": 909403
+          "size": 963394,
+          "crc32": 7424440
         },
         {
           "name": "NotoSerifExtended/NotoSerifExtended_18.cpfont",
-          "size": 1132139
+          "size": 1196972,
+          "crc32": 158215570
         }
       ]
     },
@@ -617,55 +747,28 @@
       "files": [
         {
           "name": "OpenDyslexic/OpenDyslexic_10.cpfont",
-          "size": 288236
+          "size": 392617,
+          "crc32": 1316209052
         },
         {
           "name": "OpenDyslexic/OpenDyslexic_12.cpfont",
-          "size": 378678
+          "size": 502516,
+          "crc32": 3076829956
         },
         {
           "name": "OpenDyslexic/OpenDyslexic_14.cpfont",
-          "size": 483820
+          "size": 661828,
+          "crc32": 2391927313
         },
         {
           "name": "OpenDyslexic/OpenDyslexic_16.cpfont",
-          "size": 602862
+          "size": 812316,
+          "crc32": 494483358
         },
         {
           "name": "OpenDyslexic/OpenDyslexic_8.cpfont",
-          "size": 212648
-        }
-      ]
-    },
-    {
-      "name": "Readerly",
-      "description": "Similar to Bookerly (Latin, Cyrillic)",
-      "styles": [
-        "regular",
-        "bold",
-        "italic",
-        "bolditalic"
-      ],
-      "files": [
-        {
-          "name": "Readerly/Readerly_10.cpfont",
-          "size": 263347
-        },
-        {
-          "name": "Readerly/Readerly_12.cpfont",
-          "size": 310673
-        },
-        {
-          "name": "Readerly/Readerly_14.cpfont",
-          "size": 364939
-        },
-        {
-          "name": "Readerly/Readerly_16.cpfont",
-          "size": 427197
-        },
-        {
-          "name": "Readerly/Readerly_18.cpfont",
-          "size": 518089
+          "size": 288935,
+          "crc32": 2163805451
         }
       ]
     },
@@ -681,23 +784,28 @@
       "files": [
         {
           "name": "SourceCodePro/SourceCodePro_10.cpfont",
-          "size": 143190
+          "size": 184195,
+          "crc32": 344372194
         },
         {
           "name": "SourceCodePro/SourceCodePro_12.cpfont",
-          "size": 188782
+          "size": 236106,
+          "crc32": 2867404340
         },
         {
           "name": "SourceCodePro/SourceCodePro_14.cpfont",
-          "size": 237985
+          "size": 295239,
+          "crc32": 437069103
         },
         {
           "name": "SourceCodePro/SourceCodePro_16.cpfont",
-          "size": 292971
+          "size": 363072,
+          "crc32": 2230605393
         },
         {
           "name": "SourceCodePro/SourceCodePro_18.cpfont",
-          "size": 359581
+          "size": 441431,
+          "crc32": 2457958059
         }
       ]
     },
@@ -713,23 +821,28 @@
       "files": [
         {
           "name": "SourceSans3/SourceSans3_10.cpfont",
-          "size": 308750
+          "size": 336997,
+          "crc32": 3615581203
         },
         {
           "name": "SourceSans3/SourceSans3_12.cpfont",
-          "size": 376818
+          "size": 404823,
+          "crc32": 2763722670
         },
         {
           "name": "SourceSans3/SourceSans3_14.cpfont",
-          "size": 446470
+          "size": 481428,
+          "crc32": 452067176
         },
         {
           "name": "SourceSans3/SourceSans3_16.cpfont",
-          "size": 528985
+          "size": 568925,
+          "crc32": 39685355
         },
         {
           "name": "SourceSans3/SourceSans3_18.cpfont",
-          "size": 623347
+          "size": 669427,
+          "crc32": 2238322694
         }
       ]
     },
@@ -745,23 +858,28 @@
       "files": [
         {
           "name": "SourceSerif4/SourceSerif4_10.cpfont",
-          "size": 302374
+          "size": 322398,
+          "crc32": 2714583997
         },
         {
           "name": "SourceSerif4/SourceSerif4_12.cpfont",
-          "size": 359785
+          "size": 383710,
+          "crc32": 379251748
         },
         {
           "name": "SourceSerif4/SourceSerif4_14.cpfont",
-          "size": 429580
+          "size": 458205,
+          "crc32": 1218024878
         },
         {
           "name": "SourceSerif4/SourceSerif4_16.cpfont",
-          "size": 509015
+          "size": 542836,
+          "crc32": 3005448025
         },
         {
           "name": "SourceSerif4/SourceSerif4_18.cpfont",
-          "size": 599933
+          "size": 639760,
+          "crc32": 3458307862
         }
       ]
     },
@@ -777,23 +895,28 @@
       "files": [
         {
           "name": "Sourcerer/Sourcerer_10.cpfont",
-          "size": 253560
+          "size": 271277,
+          "crc32": 3060252142
         },
         {
           "name": "Sourcerer/Sourcerer_12.cpfont",
-          "size": 304329
+          "size": 326934,
+          "crc32": 700389571
         },
         {
           "name": "Sourcerer/Sourcerer_14.cpfont",
-          "size": 367372
+          "size": 394892,
+          "crc32": 488405816
         },
         {
           "name": "Sourcerer/Sourcerer_16.cpfont",
-          "size": 436241
+          "size": 471950,
+          "crc32": 2164334766
         },
         {
           "name": "Sourcerer/Sourcerer_18.cpfont",
-          "size": 536712
+          "size": 559704,
+          "crc32": 2677005694
         }
       ]
     },
@@ -809,23 +932,28 @@
       "files": [
         {
           "name": "Spectral/Spectral_10.cpfont",
-          "size": 255318
+          "size": 273350,
+          "crc32": 3356343146
         },
         {
           "name": "Spectral/Spectral_12.cpfont",
-          "size": 311041
+          "size": 334851,
+          "crc32": 1449281555
         },
         {
           "name": "Spectral/Spectral_14.cpfont",
-          "size": 369662
+          "size": 404801,
+          "crc32": 4211690840
         },
         {
           "name": "Spectral/Spectral_16.cpfont",
-          "size": 442045
+          "size": 476319,
+          "crc32": 3545303087
         },
         {
           "name": "Spectral/Spectral_18.cpfont",
-          "size": 547192
+          "size": 566857,
+          "crc32": 2666625826
         }
       ]
     },
@@ -841,23 +969,28 @@
       "files": [
         {
           "name": "Vollkorn/Vollkorn_10.cpfont",
-          "size": 353640
+          "size": 394441,
+          "crc32": 1081746608
         },
         {
           "name": "Vollkorn/Vollkorn_12.cpfont",
-          "size": 424365
+          "size": 472539,
+          "crc32": 1079228884
         },
         {
           "name": "Vollkorn/Vollkorn_14.cpfont",
-          "size": 508031
+          "size": 567211,
+          "crc32": 2551538376
         },
         {
           "name": "Vollkorn/Vollkorn_16.cpfont",
-          "size": 605607
+          "size": 679294,
+          "crc32": 3118231559
         },
         {
           "name": "Vollkorn/Vollkorn_18.cpfont",
-          "size": 716873
+          "size": 805359,
+          "crc32": 2072950097
         }
       ]
     }
