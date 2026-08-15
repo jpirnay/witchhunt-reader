@@ -406,6 +406,18 @@ class EpubReaderActivity final : public Activity {
   // never produce a pre-render) doesn't re-trigger the pass every idle tick.
   int preRenderRearmSpine_ = -1;
   int preRenderRearmPage_ = -1;
+  // Escalation latch for a page that will not load off the SD (see renderNormalPass). A null
+  // Page is overwhelmingly a transient allocation failure in Page::deserialize (~10.5 KB of
+  // small allocations, the one reader path with no arena), not a damaged cache — so the first
+  // failure must not delete the chapter's cache file and charge the reader a full re-index.
+  // Keyed on (spine, page) so any successful load or navigation clears it implicitly.
+  //   0 — no failure recorded here
+  //   1 — reloaded the section without touching the cache (transient hypothesis)
+  //   2 — cache cleared and rebuilt (structural hypothesis); a third failure gives up
+  //       rather than looping, which is the TODO that used to sit at that call site.
+  int pageLoadFailSpine_ = -1;
+  int pageLoadFailPage_ = -1;
+  uint8_t pageLoadFailStage_ = 0;
   // One-shot-per-target probe/settle latch so idle ticks don't re-hit the SD every loop:
   //   Probe    — not yet checked whether the target's cache already exists
   //   WaitHeap — cache missing; waiting for the heap gates to pass (rechecked each tick)
