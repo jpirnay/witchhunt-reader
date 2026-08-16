@@ -650,8 +650,13 @@ bool HalGPIO::isUsbElectricalConnected() const {
     }
     return false;
   }
-  // X4: U0RXD/GPIO20 reads HIGH when USB is connected
-  return digitalRead(UART0_RXD) == HIGH;
+  // Boards without a gauge read a plain GPIO instead: it goes HIGH when USB is
+  // connected (X4: U0RXD/GPIO20). Pin from the profile. Unassigned means the
+  // board has no electrical detect, so report not-connected and let the SOF path
+  // in updateUsbState() be the sole source of truth (X4 Pro today).
+  const int8_t usbDetect = BoardConfig::ACTIVE.usbDetect;
+  if (usbDetect == BoardConfig::PIN_UNASSIGNED) return false;
+  return digitalRead(usbDetect) == HIGH;
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {

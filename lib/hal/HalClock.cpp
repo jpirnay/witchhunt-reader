@@ -19,7 +19,12 @@
 
 // ---- RTC / I2C configuration ----------------------------------------------
 // Pins for ESP32-C3 (according to https://gist.github.com/CrazyCoder/1c5f846adee18e21f91e264601a6ddce)
-static constexpr uint8_t DS3231_ADDRESS = 0x68;
+// The DS3231's own I2C address. Read from the board profile rather than
+// hardcoded, but note the guard in initExternalRTC() is rtcType() == Ds3231, so
+// this is only ever used on a board that actually has one -- it is not a generic
+// "the RTC" address. A BM8563 answers at 0x51 with different registers and needs
+// its own driver, not this one with a different constant.
+static uint8_t ds3231Address() { return BoardConfig::ACTIVE.sensors.rtcAddr; }
 // static constexpr int I2C_SDA = 8;
 // static constexpr int I2C_SCL = 9;
 static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
@@ -284,7 +289,7 @@ static bool initExternalRTC() {
   // Shares the bus with the touch controller on touch boards, which is serviced
   // from the sampler task — see HalI2cBus. No-op on non-touch boards.
   HalI2cBus::Lock i2cLock;
-  Wire.beginTransmission(DS3231_ADDRESS);
+  Wire.beginTransmission(ds3231Address());
   if (Wire.endTransmission() == 0) {
     exists = true;
     LOG_INF("CLK", "DS3231 Hardware via I2C found.");
@@ -300,7 +305,7 @@ static void writeExternalRTC(time_t t) {
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
   HalI2cBus::Lock i2cLock;
-  Wire.beginTransmission(DS3231_ADDRESS);
+  Wire.beginTransmission(ds3231Address());
   Wire.write(0x00);                             // Start at register 0x00 (seconds)
   Wire.write(bin2bcd(timeinfo.tm_sec));         // 0x00: Seconds
   Wire.write(bin2bcd(timeinfo.tm_min));         // 0x01: Minutes
@@ -315,11 +320,11 @@ static void writeExternalRTC(time_t t) {
 // Read time from DS3231
 static time_t readExternalRTC() {
   HalI2cBus::Lock i2cLock;
-  Wire.beginTransmission(DS3231_ADDRESS);
+  Wire.beginTransmission(ds3231Address());
   Wire.write(0x00);
   if (Wire.endTransmission() != 0) return 0;
 
-  Wire.requestFrom(DS3231_ADDRESS, (uint8_t)7);
+  Wire.requestFrom(ds3231Address(), (uint8_t)7);
   if (Wire.available() < 7) return 0;
 
   struct tm timeinfo = {};
@@ -337,13 +342,13 @@ static time_t readExternalRTC() {
 
 // Read temperature (Register 0x11)
 static float readExternalTemp() {
-  Wire.beginTransmission(DS3231_ADDRESS);
+  Wire.beginTransmission(ds3231Address());
   Wire.write(0x11);
   if (Wire.endTransmission() != 0) {
     return 0.0f;
   }
 
-  int count = Wire.requestFrom(DS3231_ADDRESS, (uint8_t)2);
+  int count = Wire.requestFrom(ds3231Address(), (uint8_t)2);
   if (count < 2) {
     return 0.0f;
   }

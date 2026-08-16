@@ -367,7 +367,10 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
     _batteryLastPollMs = now;
     return _batteryCachedPercent;
   }
-  static const BatteryMonitor battery = BatteryMonitor(BAT_GPIO0);
+  // ADC pin from the profile. Only reached when hasI2cFuelGauge() was false, so
+  // hasAdcBattery() holds and batteryAdc is a real pin -- the same gate that
+  // decides whether gpio.begin() configures it as an input.
+  static const BatteryMonitor battery = BatteryMonitor(BoardConfig::ACTIVE.batteryAdc);
 
   // Smooth the battery % with a 1/10-weight IIR. The cache stores the value
   // scaled ×10 so integer math keeps enough precision. Seed explicitly on the
