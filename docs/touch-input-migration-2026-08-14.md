@@ -599,6 +599,74 @@ traffic than the RTC and gauge polls put together. Whichever resolution is
 chosen, the touch poll interval should be a tuned number, not inherited from the
 button sampler's 10 ms by accident.
 
+### P1 resolved — 2026-08-16
+
+Reading `InputManager` (the check open question 1 asked for) settles this, and
+corrects two claims in the draft above.
+
+**Correction 1 — "upstream has no sampler, so there is nothing to copy" is
+wrong about the SDK.** Upstream has no *HalGPIO-level* sampler, but the SDK ships
+one:
+
+```cpp
+void InputManager::beginAsync(uint8_t taskPriority, uint32_t pollMs, uint8_t queueLen);
+// creates task "fi_input", stack 4096, loops: update() → popPress/popTouchTap/
+// popSwipe/popMultiTouchSwipe queues → vTaskDelay(pollMs)
+```
+
+That is the same shape as our `btnsample`, at **4096 bytes** rather than 2048.
+Upstream simply never calls it. So the stack hazard has an authoritative number:
+**the SDK sizes a task that runs `update()` at 4096.** Our 2048 was measured
+against `analogRead` only, and is not safe once `update()` also walks the GT911
+path.
+
+**Correction 2 — resolution 1 is not implementable against today's SDK.**
+`serviceTouch()` is **private** ([InputManager.h:279]) and `update()` is the only
+public entry point, at line 26. `update()` *always* services touch. There is no
+public way to run buttons on one task and touch on another, so "keep touch off
+the sampler" cannot be done in our fork alone — it needs an SDK change (making
+`serviceTouch()` public, or an `update(bool includeTouch)` overload).
+
+Relatedly, the draft's phrasing "service touch from the loop task, relying on
+`popTouchTap`/`popSwipe`" is self-defeating: those queues are filled *only* by
+the `beginAsync` task. If touch is serviced from the loop task, `beginAsync` is
+not running and the queues are always empty.
+
+**`beginAsync()` is also not a drop-in replacement for our sampler.**
+`popPress()` reports a button id on the press edge only — no release edge, no
+timestamps. Our `ButtonEventManager` FSM classifies `PressType {Short, Double,
+Long}` over 9 buttons and needs both edges plus timing, which is precisely why
+`HalGPIO`'s `ButtonEdge` queue exists. Running `beginAsync` *and* `btnsample`
+together is not an option either: both call `update()`, so they would
+double-service the machine and race its one-shot edge flags.
+
+**Conclusion.** The bus hazard has to be solved in our fork regardless of where
+touch is serviced, because `HalClock` drives the RTC over `Wire` from the loop
+task ([HalClock.cpp:276-306](../lib/hal/HalClock.cpp#L276-L306)) and the gauge
+will too. So:
+
+> **Adopt resolution 2 — a HAL-owned I2C mutex — and raise the `btnsample`
+> stack from 2048 to 4096 when `FREEINK_CAP_TOUCH` is on.**
+
+Rationale: resolution 2 is the only one implementable entirely in our fork; it
+is required anyway for the loop-task RTC/gauge traffic on X4 Pro's shared bus;
+and it keeps the `ButtonEdge`/`ButtonEventManager` press-type FSM intact. The
+mutex follows the discipline `HalStorage` already applies to SPI.
+
+Resolution 1 stays on the table as a **later SDK contribution** (split
+`update()` so touch can be serviced independently). It would let touch run at
+its own cadence instead of the button sampler's 10 ms — worth doing, but it is
+an optimisation, not a prerequisite, and it should not block phases 1–2.
+
+Two follow-ups this creates:
+
+- Re-measure `samplerStackHighWater()` on an X4 Pro once the GT911 path runs;
+  4096 is the SDK's number for its own task, not a measurement of ours.
+- The mutex must cover `HalClock`, the battery gauge, *and* `sampleOnce()`'s
+  `inputMgr.update()`. Note `sampleOnce()` deliberately keeps `update()` outside
+  its `portENTER_CRITICAL(&inputMux_)` section — the I2C mutex is a separate
+  lock and must not be taken inside that critical section.
+
 **P2 — No hover, no free feedback.** A finger on glass gives no confirmation, and
 on e-paper acknowledgement costs a refresh (~200 ms fast, 1–2 s full). Upstream
 answers this with FUI's tap-flash (`clearTapFlash`, `setFlash`) — which is *inside*
@@ -646,11 +714,12 @@ Phase 6 is where this could become a general-purpose touch UI framework. Stop at
 
 ## 7. Open questions
 
-1. **P1** — answered: upstream has no sampler, so there is nothing to copy. We must
-   pick resolution 1 or 2 in §5 ourselves. Needs a read of `InputManager` to confirm
-   button/touch servicing can be split across tasks. **Narrowed 2026-08-16**:
-   upstream's `i2cBus`/`Wire1` separation is confirmed *unavailable* on X4 Pro
-   (all three devices on bus 0), so it really is 1-or-2. Still the top open item.
+1. ~~**P1**~~ — **CLOSED 2026-08-16.** The `InputManager` read is done; see
+   "P1 resolved" in §5. `serviceTouch()` is private and `update()` always
+   services touch, so resolution 1 needs an SDK change; bus separation is
+   unavailable on X4 Pro (all three devices on bus 0). **Decision: resolution 2
+   (HAL I2C mutex) + `btnsample` stack 2048 → 4096 under `FREEINK_CAP_TOUCH`.**
+   Phases 1–2 are unblocked.
 2. ~~**P2**~~ — **downgraded 2026-08-16.** `ListNav::rowRectFor()` (SDK
    `cc89c653`) plus upstream `57c389c0` give a bounded partial-refresh tap flash
    on *either* path. No longer a decision driver.
