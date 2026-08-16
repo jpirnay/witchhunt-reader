@@ -34,8 +34,33 @@ void HalPowerManager::begin() {
     // the address from the profile alone would talk BQ27220 registers to a
     // CW2017, the same trap as DS3231-vs-BM8563 in HalClock.
     const BoardConfig::BatteryGaugeConfig& gauge = BoardConfig::ACTIVE.batteryGauge;
-    Wire.begin(gauge.i2cSda, gauge.i2cScl, gauge.i2cHz);
-    Wire.setTimeOut(4);
+
+    // Only initialise the bus if nobody else already has.
+    //
+    // On a board whose touch controller sits on these same pins, the SDK's
+    // InputManager has ALREADY called Wire.begin() for the GT911 (at 100 kHz)
+    // during inputMgr.begin(), which runs earlier in setup() than this. Calling
+    // Wire.begin() a second time on one port hands the new ESP-IDF i2c_master
+    // driver a bus it already owns: the call fails and every later transaction
+    // returns ESP_ERR_INVALID_STATE (259). On X4 Pro that broke the RTC and the
+    // gauge with:
+    //   i2cWriteReadNonStop(): i2c_master_transmit_receive failed: [259]
+    //
+    // Upstream never hits this because their HalPowerManager does no Wire.begin
+    // at all. Ours needs one for the X3, where there is no touch controller and
+    // nothing else brings the bus up.
+    //
+    // Consequence when touch owns the bus: the gauge runs at the touch driver's
+    // 100 kHz rather than the profile's 400 kHz. Slower, but a fuel gauge is
+    // polled seconds apart, so it does not matter -- and correctness beats the
+    // rate. Sharing a bus means sharing its clock.
+    const BoardConfig::TouchConfig& touch = BoardConfig::ACTIVE.touch;
+    const bool touchAlreadyOwnsThisBus =
+        BoardConfig::hasTouch() && touch.sda == gauge.i2cSda && touch.scl == gauge.i2cScl;
+    if (!touchAlreadyOwnsThisBus) {
+      Wire.begin(gauge.i2cSda, gauge.i2cScl, gauge.i2cHz);
+      Wire.setTimeOut(4);
+    }
     _batteryUseI2C = true;
   } else {
     pinMode(BAT_GPIO0, INPUT);
