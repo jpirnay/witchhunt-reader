@@ -164,6 +164,49 @@ class HalGPIO {
   bool isDebouncePending() const;
   unsigned long getHeldTime() const;
 
+  // --- Touch passthrough ----------------------------------------------------
+  // Raw passthrough to the SDK's touch machine: normalized 0..1 coordinates in
+  // the PANEL's native frame, with no orientation applied. Interpretation
+  // (orientation mapping, logical pixels, gesture semantics, hit tests) belongs
+  // to MappedInputManager, not here — this layer only exposes the SDK
+  // capability, per the repo's HAL rule.
+  //
+  // Names and signatures are copied verbatim from upstream/develop's HalGPIO so
+  // the layers above stay diff-comparable; see
+  // docs/touch-input-migration-2026-08-14.md §1.
+  //
+  // No FREEINK_CAP_TOUCH guards are needed: every InputManager touch method is
+  // already guarded inside the SDK and compiles to an inert false/0 on non-touch
+  // boards, so the C3 pays nothing for these.
+  bool hasTouch() const;
+  // Capacitive Home key reported by the touch controller (X4 Pro). The tap
+  // event fires on release and excludes a long hold.
+  bool hasHomeKey() const;
+  bool wasHomeKeyTapped() const;
+  bool wasHomeKeyLongPressed() const;
+  bool wasTouchTap(float& nx, float& ny) const;
+  bool wasTouchDown(float& nx, float& ny) const;
+  // Raw release edge, reported even when the contact was not a tap (swipe end,
+  // drag-off). Snapshot builders forward it so interaction routing can clear
+  // pressed state.
+  bool wasTouchReleased() const;
+  bool isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const;
+  bool isTouchHeldAt(float& nx, float& ny) const;
+  // One-shot long-press, fired by the SDK classifier while the finger is still
+  // down (stationary contact held past its threshold). Position = touch-down
+  // point. Callers that act on it should suppressTouchContact() so the lift
+  // cannot also tap.
+  bool wasTouchLongPress(float& nx, float& ny) const;
+  // Ignore the remainder of the current contact (its continued hold and its
+  // release edge). Self-clears once the contact ends.
+  void suppressTouchContact();
+  unsigned long lastTouchHeldMs() const;
+  bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
+  // Coarse "the user touched the screen" signal — the touch analogue of
+  // wasAnyPressed(). Feed this into the idle/sleep timer so touch counts as
+  // activity (phase 3).
+  bool wasTouchActivity() const;
+
   // Start/stop the background sampler. startInputSampler() must be called once
   // input handling is wanted (end of setup, after the boot-time power-button
   // handling that drives inputMgr.update() directly). Until then update() falls

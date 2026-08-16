@@ -341,6 +341,50 @@ bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
 unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
 
+// --- Touch passthrough ------------------------------------------------------
+// Deliberately dumb one-liners: no orientation, no logical pixels, no gesture
+// naming. See the header for why, and MappedInputManager for the layer that
+// interprets these. Every underlying SDK method is already #if FREEINK_CAP_TOUCH
+// guarded and inert on non-touch boards.
+//
+// NOTE (P1, docs/touch-input-migration-2026-08-14.md §5): these are all pure
+// reads of state the SDK latched during inputMgr.update(). They do NOT touch
+// the I2C bus themselves — the GT911 transaction happens inside
+// serviceTouch(), which update() calls, i.e. on the btnsample task. The bus
+// mutex belongs there, not here.
+
+bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
+
+bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
+
+bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
+
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
+bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
+
+bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
+
+bool HalGPIO::wasTouchReleased() const { return inputMgr.wasTouchReleased(); }
+
+bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
+  return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
+}
+
+bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
+
+bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const { return inputMgr.wasTouchLongPress(nx, ny); }
+
+void HalGPIO::suppressTouchContact() { inputMgr.suppressTouchContact(); }
+
+unsigned long HalGPIO::lastTouchHeldMs() const { return inputMgr.lastTouchHeldMs(); }
+
+bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
+  return inputMgr.wasSwipe(nxStart, nyStart, nxEnd, nyEnd);
+}
+
+bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
+
 void HalGPIO::waitForStablePowerRelease() {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS
   // consecutive milliseconds.  The InputManager debounce (5 ms) is too short for
