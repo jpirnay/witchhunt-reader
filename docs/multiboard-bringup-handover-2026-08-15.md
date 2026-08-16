@@ -2,8 +2,9 @@
 
 *State (updated 2026-08-16): branch `fix/s3-build-config`, pushed. `master` (2.23)
 merged in; all three envs build. Workstream **A done**, **C phases 1-3 done**,
-**B0 done**, **B started**. **Nothing has been run on hardware — and the next
-step should not be taken until something has.** See "Flash before continuing".*
+**B0 done**, **B in progress**. **First hardware validation passed on X4** —
+see "Device validation" below. The S3 boards remain unflashed and will not yet
+boot.*
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -11,8 +12,9 @@ Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
 Plan: [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md).
 Touch (workstream C): [touch-input-migration-2026-08-14.md](touch-input-migration-2026-08-14.md).
 
-Everything below is build-measured unless it says otherwise. **Nothing has been
-run on hardware.** Both boards are on the desk; neither has been flashed.
+Everything below is build-measured unless it says otherwise. The **X4 (C3) has
+now been flashed and passes** (see "Device validation"); the two S3 boards are on
+the desk and neither has been flashed.
 
 ---
 
@@ -126,9 +128,54 @@ false on the C3. ~199 KB flash still free.
 
 ---
 
-## Flash before continuing
+## Device validation
 
-**This is now the blocking step, and it is cheap.**
+### ✅ X4 (C3) — flashed 2026-08-16 on `1c3a43ea`, PASSED
+
+| Check | Result | What it validates |
+|---|---|---|
+| Boots, screen visible | ✅ | `SPI.begin()` pins sourced from `BoardConfig::ACTIVE`; also the `main.cpp` global reorder (`GfxRenderer` now constructs before `MappedInputManager`, inside the TU `BootHeapProbe` slots 4/5 bracket) |
+| Navigate to a book and read it | ✅ | SD mount over the same SPI bus — `sd.miso` is the one pin that comes from a different profile struct than the rest |
+| System Info shows sane battery | ✅ | `pinMode(batteryAdc)` now gated on `hasAdcBattery()` instead of `deviceIsX4()` |
+| No ghosting | ✅ | `panelNeedsHalfRefreshSettle()` correctly resolves false on SSD1677 |
+
+**This validates the pin-sourcing approach itself**, not just these four commits:
+reading pins and capabilities out of the board profile produces a working device
+on the shipped hardware. The rest of workstream B can proceed on that basis.
+
+Transitively also exercised: the `master` 2.23 merge, touch phases 1–3 (inert on
+C3 but compiled in), and `HalI2cBus` (a no-op `Lock` there, which the
+byte-identical build already implied).
+
+**Still unverified on X4**, both cheap to check next time it is in hand:
+
+- **USB connect/disconnect** updates the charging state. The `usbDetect` pinMode
+  moved from a `deviceIsX4()` test to a gauge-bus pin-conflict test; the values
+  are right on paper but nothing has plugged a cable in.
+- **Settings → Controls** shows no Fast AA, no tilt and no touch entries on X4.
+  This is still a *prediction* from the board profiles rather than an
+  observation — it is the one claim in the `SettingRequires` refactor
+  (`968a8493`) that has not been eyeballed.
+
+### ⬜ X3 (C3) — not flashed
+
+X3 is the more informative C3 target for what remains, because it is the board
+where the converted predicates return **true**: it has the BQ27220 gauge (so
+`hasI2cFuelGauge()` drives `Wire.begin()` from the profile), the DS3231, the
+QMI8658, and the UC8253 that actually needs the half-refresh settle. X4 exercised
+the false arm of every one of those.
+
+### ⬜ X4 Pro / T5S3 — will not boot yet
+
+`HalDisplay` still holds the C3 display pins, `HalClock` the DS3231 address, and
+X4 Pro needs the SDMMC mount path. That is the rest of B.
+
+---
+
+## Flash before continuing — (satisfied for X4, 2026-08-16)
+
+**This was the blocking step, and X4 has now passed it.** Retained because the
+same checklist applies to X3 and, later, to the S3 boards.
 
 `1c3a43ea` changed how the *shipped* C3 sets up its display SPI bus, its ADC
 battery pin and its fuel-gauge I2C. Every value was verified against the board
