@@ -379,7 +379,7 @@ static void logStartupMemory(const char* stage) {
 
 // --- Boot phase trace ---------------------------------------------------------------
 // millis() stamp per boot phase, summarized at the end of setup() and again whenever the
-// serial link comes up. The wake gesture is only a ~400 ms gate (getPowerButtonDuration),
+// serial link comes up. The wake gesture is only a ~300 ms gate (getPowerWakeHoldDuration),
 // but the splash lands seconds later because the settle waits, the SD mount, the config
 // loads, the panel bring-up and the first (non-differential) waveform all sit between the
 // two. Without per-phase stamps that gap is invisible in the log — every phase before
@@ -463,7 +463,7 @@ static void logBootTrace() {
 static void logBootSummary() {
   LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
           HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
-          CrossPointSettings::getPowerButtonDuration());
+          CrossPointSettings::getPowerWakeHoldDuration());
   logBootTrace();
 }
 
@@ -717,7 +717,8 @@ void setup() {
   // whichever press type(s) the user configured to put the device to sleep.
   SETTINGS.loadStartupFromNvs();
   markBootPhase(BootPhase::NvsSettings);
-  bootWakeCheck = gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerButtonDuration());
+  bootWakeCheck =
+      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerWakeHoldDuration());
   markBootPhase(BootPhase::WakeGate);
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
@@ -831,7 +832,7 @@ void setup() {
   // answer "why did nothing happen when I pressed power".
   LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
           HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
-          CrossPointSettings::getPowerButtonDuration());
+          CrossPointSettings::getPowerWakeHoldDuration());
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
