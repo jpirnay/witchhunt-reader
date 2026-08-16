@@ -63,12 +63,24 @@ void ActivityManager::begin() {
   // documented hazard in EpubReaderActivity). Field high-water dipped to ~1.7 KB free of the
   // former 8 KB on a parse-on-render-task pass; +2 KB restores a safer margin. renderTaskLoop()
   // also warns (RENDER_STACK_WARN_BYTES) if the live margin ever gets thin again.
-  xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
-              10240,             // Stack size (bytes)
-              this,              // Parameters
-              1,                 // Priority
-              &renderTaskHandle  // Task handle
-  );
+  // Pin the render task to CPU 1 on dual-core parts (S3), CPU 0 on single-core
+  // (C3, where this is the only choice and the call is equivalent to
+  // xTaskCreate). Ported from upstream/develop, whose comment gives the reason:
+  // keep long renders and cover decodes off CPU 0's idle watchdog. CPU 0 also
+  // runs the Arduino loop task and the system/WiFi tasks, so a multi-second page
+  // build or JPEG decode landing there can starve the idle task and trip the
+  // watchdog. On the C3 this changes nothing.
+#if defined(configNUM_CORES) && configNUM_CORES > 1
+  constexpr BaseType_t renderTaskCore = 1;
+#else
+  constexpr BaseType_t renderTaskCore = 0;
+#endif
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
+                          10240,              // Stack size (bytes)
+                          this,               // Parameters
+                          1,                  // Priority
+                          &renderTaskHandle,  // Task handle
+                          renderTaskCore);
   assert(renderTaskHandle != nullptr && "Failed to create render task");
 }
 
