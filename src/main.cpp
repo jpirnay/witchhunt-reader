@@ -8,6 +8,7 @@
 #include <HalClock.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
+#include <HalI2cBus.h>
 #include <HalPowerManager.h>
 #include <HalSpiBus.h>
 #include <HalStorage.h>
@@ -790,6 +791,10 @@ void setup() {
   // Create the shared-SPI-bus mutex before anything can touch the panel or the
   // SD card, so no first-use allocation happens inside a refresh or read path.
   HalSpiBus::begin();
+  // Same reasoning for the shared I2C bus (touch + RTC + fuel gauge): create the
+  // mutex before gpio.begin() can start the sampler, so no first-use allocation
+  // lands in a touch poll. Compiles away on non-touch boards.
+  HalI2cBus::begin();
   gpio.begin();
   powerManager.begin();
   halTiltSensor.begin();

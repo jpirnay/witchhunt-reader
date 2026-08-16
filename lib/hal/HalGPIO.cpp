@@ -1,5 +1,6 @@
 #include <BoardConfig.h>
 #include <HalGPIO.h>
+#include <HalI2cBus.h>
 #include <Logging.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -14,6 +15,10 @@ HalGPIO gpio;
 namespace X3GPIO {
 
 bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
+  // Held across the whole repeated-start transaction: a touch read interleaving
+  // between endTransmission(false) and requestFrom() would break it. Runs on the
+  // loop task; touch runs on the sampler. No-op on non-touch boards.
+  HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(addr);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) {
@@ -182,7 +187,18 @@ void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
 // critical section (analogRead may take the ADC driver mutex). Only the latching
 // of the results into the shared accumulators/queue is done under inputMux_.
 void HalGPIO::sampleOnce() {
-  inputMgr.update();
+  {
+    // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
+    // transaction, and this runs on the btnsample task while HalClock and the
+    // fuel gauge drive the same bus from the loop task. Serialize them (P1 in
+    // docs/touch-input-migration-2026-08-14.md §5). No-op on non-touch boards.
+    //
+    // Scoped so the lock is released before the critical section below: the
+    // I2C mutex must never be held inside portENTER_CRITICAL(&inputMux_), which
+    // disables interrupts and cannot block on a semaphore.
+    HalI2cBus::Lock i2cLock;
+    inputMgr.update();
+  }
 
   uint8_t live = 0;
   uint8_t pressed = 0;
@@ -226,11 +242,22 @@ void HalGPIO::startInputSampler() {
   samplerRunning_ = true;
   sampleOnce();  // prime so the first loop iteration sees current state
   // Priority above the Arduino loop task (1) so the 10ms cadence holds even while
-  // the loop task is busy in a long build slice. 2 KB stack: the sampler's deepest
-  // path (inputMgr.update → analogRead) was measured at ~380 bytes peak on device,
-  // so this leaves >4x headroom while staying small (this codebase is sensitive to
-  // stack-into-heap spills). Watch the btnSampler high-water [MEM] line if changed.
-  xTaskCreate(&HalGPIO::samplerTask, "btnsample", 2048, this, 2, &samplerTaskHandle_);
+  // the loop task is busy in a long build slice.
+  //
+  // Stack: 2 KB on a button-only board — the deepest path there
+  // (inputMgr.update → analogRead) was measured at ~380 bytes peak on device, so
+  // that leaves >4x headroom while staying small (this codebase is sensitive to
+  // stack-into-heap spills).
+  //
+  // On a touch board inputMgr.update() also walks serviceTouch() → the GT911 I2C
+  // read path, which is considerably deeper than analogRead and has NOT been
+  // measured here. 4 KB is the SDK's own figure for a task that calls update()
+  // (InputManager::beginAsync creates "fi_input" with a 4096 stack), so we match
+  // it rather than guess. Re-measure with samplerStackHighWater() once the GT911
+  // runs on real hardware — see docs/touch-input-migration-2026-08-14.md §5.
+  // Watch the btnSampler high-water [MEM] line if changed.
+  constexpr uint32_t SAMPLER_STACK_BYTES = FREEINK_CAP_TOUCH ? 4096 : 2048;
+  xTaskCreate(&HalGPIO::samplerTask, "btnsample", SAMPLER_STACK_BYTES, this, 2, &samplerTaskHandle_);
 }
 
 void HalGPIO::stopInputSampler() {

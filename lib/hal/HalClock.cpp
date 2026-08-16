@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "HalI2cBus.h"
+
 // ---- RTC / I2C configuration ----------------------------------------------
 // Pins for ESP32-C3 (according to https://gist.github.com/CrazyCoder/1c5f846adee18e21f91e264601a6ddce)
 static constexpr uint8_t DS3231_ADDRESS = 0x68;
@@ -274,6 +276,9 @@ static bool initExternalRTC() {
   }
 
   // Wire has already been initialized; no need to call Wire.begin(I2C_SDA, I2C_SCL);
+  // Shares the bus with the touch controller on touch boards, which is serviced
+  // from the sampler task — see HalI2cBus. No-op on non-touch boards.
+  HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(DS3231_ADDRESS);
   if (Wire.endTransmission() == 0) {
     exists = true;
@@ -289,6 +294,7 @@ static void writeExternalRTC(time_t t) {
   struct tm timeinfo;
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
+  HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(DS3231_ADDRESS);
   Wire.write(0x00);                             // Start at register 0x00 (seconds)
   Wire.write(bin2bcd(timeinfo.tm_sec));         // 0x00: Seconds
@@ -303,6 +309,7 @@ static void writeExternalRTC(time_t t) {
 
 // Read time from DS3231
 static time_t readExternalRTC() {
+  HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(DS3231_ADDRESS);
   Wire.write(0x00);
   if (Wire.endTransmission() != 0) return 0;
