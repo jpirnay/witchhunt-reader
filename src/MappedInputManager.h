@@ -75,6 +75,9 @@ class MappedInputManager {
   // Raw release edge, also true when the contact ended in a swipe or drag-off
   // (which wasScreenTapped never reports).
   bool wasScreenTouchReleased() const;
+  // Duration of the contact just ended, latched at release. Readers use it to
+  // tell a tap from a deliberate hold on the same zone.
+  unsigned long lastTouchHeldMs() const;
   bool wasTapInRect(int x, int y, int width, int height) const;
 
   // Combined touch interaction for a band of equal rows with caller-supplied

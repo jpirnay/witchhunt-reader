@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BoardConfig.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
@@ -28,7 +29,10 @@
 //                 works inside a submenu exactly as it does in the parent tab.
 //                 Add with .withSubmenu(StrId::STR_MY_SUBMENU).
 //   key         — JSON property name used by the web settings API (nullptr = device-only).
-//   deviceTarget — hardware visibility (BOTH by default; override with .withDeviceTarget()).
+//   requiredCapability — hardware visibility. Default is "always visible";
+//     override with .requiring(SettingRequires::X) to hide the setting on boards
+//     that physically cannot do the thing it controls. Ask for a CAPABILITY,
+//     never a board name — see SettingInfo.h.
 //
 // ACTION-type entries and entries without a key are device-only and are added directly
 // in SettingsActivity::onEnter(), not here.
@@ -190,7 +194,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Toggle(StrId::STR_FAST_AA, &CrossPointSettings::fastAntiAliasing,
                                          "fastAntiAliasingV2", StrId::STR_CAT_READER)
                          .withSubmenu(StrId::STR_MENU_READER_FONT)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::SelectableGrayscaleLut));
   settings.push_back(SettingInfo::Enum(StrId::STR_TEXT_DARKNESS, &CrossPointSettings::textDarkness,
                                        {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK},
                                        "textDarkness", StrId::STR_CAT_READER)
@@ -367,21 +371,31 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPower,
                                        {StrId::STR_BTN_DEF_SLEEP}, "btnLongPower", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_BTN_POWER));
+  // Touch reading controls (touch boards only — gated on the capability, not on
+  // a board name, so X4 Pro and T5S3 both get them).
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
+                                       {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP,
+                                        StrId::STR_TOUCH_READER_SWIPE, StrId::STR_TOUCH_READER_INVERTED},
+                                       "touchReaderCtl", StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_TAP_FOR_READER_MENU, &CrossPointSettings::tapForReaderMenu,
+                                         "tapReaderMenu", StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
   // Tilt page turn (X3-only)
   settings.push_back(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                                          StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   settings.push_back(SettingInfo::Enum(StrId::STR_DIR_RIGHT, &CrossPointSettings::tiltPositiveAction,
                                        {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE},
                                        "tiltPositiveAction", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   settings.push_back(SettingInfo::Enum(StrId::STR_DIR_LEFT, &CrossPointSettings::tiltNegativeAction,
                                        {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE},
                                        "tiltNegativeAction", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   // --- System ---
   settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles,
                                          "showHiddenFiles", StrId::STR_CAT_SYSTEM)
@@ -516,17 +530,27 @@ inline std::vector<SettingInfo> buildSettingsList() {
 
 inline std::vector<SettingInfo> getSettingsList() {
   std::vector<SettingInfo> settings = SettingsListDetail::buildSettingsList();
-  const bool isX3 = gpio.deviceIsX3();
-  settings.erase(std::remove_if(settings.begin(), settings.end(),
-                                [isX3](const SettingInfo& setting) {
-                                  if (setting.deviceTarget == SettingDeviceTarget::BOTH) {
-                                    return false;
-                                  }
-                                  if (setting.deviceTarget == SettingDeviceTarget::X3) {
-                                    return !isX3;
-                                  }
-                                  return isX3;
-                                }),
-                 settings.end());
+  // Answer each capability ONCE here, from the HAL or the active board profile,
+  // so the rest of the codebase never has to ask "which board is this" to decide
+  // whether a setting is meaningful.
+  const auto boardHas = [](const SettingRequires capability) {
+    switch (capability) {
+      case SettingRequires::Nothing:
+        return true;
+      case SettingRequires::TouchPanel:
+        return gpio.hasTouch();
+      case SettingRequires::TiltSensor:
+        return BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::None;
+      case SettingRequires::SelectableGrayscaleLut:
+        // SSD1677 develops grayscale from a factory waveform, so there is no
+        // LUT to swap and the fast/OEM trade-off does not exist there.
+        return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+    }
+    return true;
+  };
+  settings.erase(
+      std::remove_if(settings.begin(), settings.end(),
+                     [&boardHas](const SettingInfo& setting) { return !boardHas(setting.requiredCapability); }),
+      settings.end());
   return settings;
 }

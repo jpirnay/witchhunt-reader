@@ -195,6 +195,8 @@ bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
 
 bool MappedInputManager::wasScreenTouchReleased() const { return gpio.wasTouchReleased(); }
 
+unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
+
 bool MappedInputManager::wasTapInRect(const int x, const int y, const int width, const int height) const {
   int tx = 0;
   int ty = 0;

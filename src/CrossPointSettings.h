@@ -159,6 +159,17 @@ class CrossPointSettings {
     TILT_GESTURE_ACTION_COUNT
   };
 
+  // How the reading surface responds to touch. Off leaves the page inert, so a
+  // thumb resting on the panel can never turn a page (P3 in
+  // docs/touch-input-migration-2026-08-14.md).
+  enum TOUCH_READER_CONTROLS {
+    TOUCH_READER_OFF = 0,
+    TOUCH_READER_ON = 1,            // tap the outer thirds: left = back, right = forward
+    TOUCH_READER_SWIPE = 2,         // horizontal swipes turn pages; taps stay free
+    TOUCH_READER_INVERTED_TAP = 3,  // mirrored tap zones
+    TOUCH_READER_CONTROLS_COUNT
+  };
+
   // Text darkness for AA glyph rendering (forwarded to GfxRenderer::setTextDarkness)
   enum TEXT_DARKNESS {
     DARKNESS_NORMAL = 0,      // true 4-level AA
@@ -322,6 +333,13 @@ class CrossPointSettings {
   uint8_t tiltPositiveAction = TILT_ACT_NEXT_PAGE;
   // Action when the computed tilt value crosses the negative threshold.
   uint8_t tiltNegativeAction = TILT_ACT_PREV_PAGE;
+  // Touch page turning on the reading surface (touch boards only). Defaults to
+  // tap zones, which is what upstream ships; the X4 Pro has no back/confirm
+  // button, so leaving it off would strand the reader.
+  uint8_t touchReaderControls = TOUCH_READER_ON;
+  // Centre-third tap opens the reader menu. Separate from touchReaderControls
+  // so the page-turn style and the menu tap can be chosen independently.
+  uint8_t tapForReaderMenu = 1;
   // Enable synthetic TOC fallback for malformed/sparse TOC books (1 = enabled, 0 = disabled)
   uint8_t syntheticTocFallback = 1;
   // Default bionic reading in EPUB pages when no per-book override is set (1 = enabled, 0 = disabled)

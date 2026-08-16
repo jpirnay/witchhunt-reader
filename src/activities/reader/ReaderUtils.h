@@ -120,6 +120,83 @@ inline PageTurnResult detectTiltPageTurn() {
   return {tiltPrev, tiltNext};
 }
 
+// --- Touch page turning ------------------------------------------------------
+// Ported from upstream/develop; see docs/touch-input-migration-2026-08-14.md
+// phase 3. Header-only and inert on non-touch boards (input.hasTouch() is false
+// there), so the readers need no ifdefs.
+
+struct TouchPageTurn {
+  bool prev;
+  bool next;
+  unsigned long heldMs;
+};
+
+inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
+  TouchPageTurn result{false, false, 0};
+  if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
+    return result;
+  }
+
+  if (SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_SWIPE) {
+    // Horizontal swipes turn pages; taps stay free for the centred reader-menu
+    // zone. A slow swipe never becomes a long-press chapter skip.
+    const auto dir = input.wasSwipe();
+    if (dir == MappedInputManager::SwipeDir::Left) {
+      result.next = true;
+    } else if (dir == MappedInputManager::SwipeDir::Right) {
+      result.prev = true;
+    }
+    return result;
+  }
+
+  int x = 0;
+  int y = 0;
+  if (!input.wasScreenTapped(x, y)) {
+    return result;
+  }
+
+  const int width = renderer.getScreenWidth();
+  const int height = renderer.getScreenHeight();
+  // Outer thirds only: the centre column carries the reader-menu tap target
+  // (isTouchMenuTap below), so it must not double as a page turn. The vertical
+  // bounds keep the menu zone from swallowing the whole centre column.
+  const int zoneWidth = width / 3;
+  if (y < 0 || y >= height) return result;
+  const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  if (x < zoneWidth) {
+    result.prev = !inverted;
+    result.next = inverted;
+  } else if (x >= width - zoneWidth) {
+    result.prev = inverted;
+    result.next = !inverted;
+  }
+  result.heldMs = input.lastTouchHeldMs();
+  return result;
+}
+
+// Tap in the centre third: the tap path into the reader menu. The page-turn tap
+// zones are the outer horizontal thirds, so the centred rectangle stays free.
+inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager& input) {
+  if (!input.hasTouch() || !SETTINGS.tapForReaderMenu) return false;
+  int x = 0;
+  int y = 0;
+  if (!input.wasScreenTapped(x, y)) return false;
+  const int width = renderer.getScreenWidth();
+  const int height = renderer.getScreenHeight();
+  const int zoneWidth = width / 3;
+  const int zoneHeight = height / 3;
+  return x >= zoneWidth && x < width - zoneWidth && y >= zoneHeight && y < height - zoneHeight;
+}
+
+// Reader menu opens on the menu edge-swipe or a centre-third tap. With touch
+// reader controls Off the reading surface ignores touch entirely, menu
+// included, so a stray brush cannot open it; the menu stays reachable through
+// the Confirm button (and, on X4 Pro, the capacitive Home key).
+inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
+  if (!SETTINGS.touchReaderControls) return false;
+  return (input.hasTouch() && input.wasMenuGesture()) || isTouchMenuTap(renderer, input);
+}
+
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   const int freq = SETTINGS.getRefreshFrequency();
   if (freq == 0) {
