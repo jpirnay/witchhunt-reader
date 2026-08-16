@@ -244,10 +244,53 @@ Not captured, same cause as on X4: the `[HW]` device-detection lines. They are
 emitted before USB-CDC re-enumerates after reset, so a capture over the device's
 own USB always misses them. A UART adapter would be needed.
 
-### ⬜ X4 Pro / T5S3 — will not boot yet
+### ⚙️ X4 Pro — first flash 2026-08-16: got to the home screen, then boot-looped
 
-`HalDisplay` still holds the C3 display pins, `HalClock` the DS3231 address, and
-X4 Pro needs the SDMMC mount path. That is the rest of B.
+**Two single-core assumptions, both fixed, both found only by flashing.** Neither
+is board-specific and neither was caused by this branch.
+
+The crash was `assert failed: spinlock_acquire spinlock.h:84 (lock)`, symbolized
+against a SHA-matched ELF to:
+
+```
+spinlock_acquire <- xPortEnterCriticalTimeout
+  <- ActivityManager::requestUpdate()   ActivityManager.cpp:526 / :518
+  <- Activity::requestUpdate()          Activity.cpp:9
+  <- HomeActivity::onEnter()            HomeActivity.cpp:715
+```
+
+1. **`taskENTER_CRITICAL(nullptr)`** — four sections, eight calls, pre-existing.
+   The single-core C3 port ignores the mux and just disables interrupts, so a
+   null pointer is harmless there; the dual-core S3 does a real
+   `spinlock_acquire()` and asserts the lock is non-null. Fixed with one
+   file-static `portMUX_TYPE` (`bf8b25b3`).
+2. **`xTaskCreate` for the render task** — lets the scheduler place it on either
+   core. Now `xTaskCreatePinnedToCore(..., 1)` on dual-core parts (`edf203e3`),
+   to keep long renders and cover decodes off CPU 0's idle watchdog, where the
+   Arduino loop and system/WiFi tasks also live.
+
+**Both were already solved on `upstream/develop`**, which was flashed on the same
+board as a control and booted. Their `ActivityManager.cpp` has the identical
+static `portMUX_TYPE` and the identical pinning with the same stated reason.
+Keeping a known-good upstream build to hand turned a guess into a comparison and
+is worth repeating for the next S3 problem.
+
+**What the crash location already proves.** Reaching `HomeActivity::onEnter()`
+means the X4 Pro had initialised the display, mounted SD and routed into the home
+screen. The board profile, the profile-sourced SPI pins and the SDMMC storage
+path all worked; it died on portable FreeRTOS code, not on anything
+board-specific.
+
+**Not yet re-flashed with the fixes.** Expected on the next attempt, neither a
+regression: possible orientation/mirroring wrongness (the profile ships
+`NO_FLIP` with the panel mount marked `PENDING hardware validation`) and a
+nonsense battery reading (the CW2017 is still driven by the BQ27220 register
+path — the known gap above).
+
+### ⬜ T5S3 — not flashed
+
+Nothing board-specific is known to block it; the same two dual-core fixes above
+apply to any S3 board, so it is worth a try whenever convenient.
 
 ---
 
