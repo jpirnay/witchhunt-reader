@@ -488,19 +488,35 @@ baseline, from the reordered globals); x4pro RAM 66,640 / Flash 6,173,358.
 The touch code is unreferenced until phase 3 wires it up, so the linker still
 drops most of it.
 
-### Phase 3 — Reader touch
+### Phase 3 — Reader touch ⚙️ CODE COMPLETE, UNVALIDATED (`968a8493`, `013f343c`)
 
-Port `ReaderUtils::detectTouchPageTurn` / `isTouchMenuGesture`, the
-`TOUCH_READER_CONTROLS` enum, and `tapForReaderMenu`, including the later fixes on
-the branch (`2a3f08dd` vertical bounds, `6bf0dd74` inverted tap, `c0b2d3c2`
-menu-tap toggle). Wire the settings screen with `tr(STR_*)` keys via
-`scripts/gen_i18n.py`.
+- ✅ `ReaderUtils::detectTouchPageTurn` / `isTouchMenuTap` / `isTouchMenuGesture`.
+- ✅ `TOUCH_READER_CONTROLS` (off / tap / swipe / inverted) + `tapForReaderMenu`,
+  with `tr(STR_*)` keys through `scripts/gen_i18n.py`. Includes the later
+  branch fixes: menu-zone vertical bounds, inverted tap, menu-tap toggle.
+- ✅ Page turns wired into all three readers next to `detectTiltPageTurn()`;
+  EPUB reader menu on centre tap / top-edge swipe.
+- ✅ `wasTouchActivity()` feeds the inactivity timer, so a tapping reader
+  cannot fall asleep mid-chapter.
 
-Also: route `wasTouchActivity()` into whatever path `wasAnyPressed()` feeds, so
-touch resets the idle/sleep timer.
+**Settings visibility became capability-based here.** `SettingDeviceTarget
+{BOTH, X3, X4}` resolved through `deviceIsX3()`, which cannot answer "has a
+touch panel" and silently mis-answers on any third board. Replaced with
+`SettingRequires {Nothing, TouchPanel, TiltSensor, SelectableGrayscaleLut}`,
+resolved once in `getSettingsList()` from the HAL and `BoardConfig::ACTIVE`.
+Confirmed to reproduce shipped behaviour exactly — X3 (UC8253 + Qmi8658) keeps
+fast-AA and tilt, X4 (SSD1677, no IMU) keeps neither. This is B0's
+capability-predicate idea applied to the one place phase 3 forced the issue;
+the remaining 49 `deviceIsX3()` call sites are still workstream B0's job.
 
-Gate: on device, the reader is fully navigable by touch alone. This is the phase
-that makes the two touch boards genuinely usable.
+Gate: **NOT MET — on device, the reader is fully navigable by touch alone.**
+Nothing here has run on hardware, and it cannot until workstream B makes an S3
+board boot. Treat all of phase 3 as unvalidated.
+
+Known gap: `wasHomeKeyTapped()` / `wasHomeKeyLongPressed()` are exposed through
+`HalGPIO` and reachable via `wasHomeGesture()` / `wasHomeKeyHold()`, but nothing
+consumes them yet. Open question 4 wanted phase 3 to cover the X4 Pro Home key;
+that is still outstanding and matters, because the board has no back button.
 
 ### Phase 4 — Lists and chrome (the decision point)
 
