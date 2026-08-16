@@ -60,4 +60,35 @@ inline void tapToLogical(const int orientation, const int panelWidth, const int 
   }
 }
 
+// Band hit-test shared by MappedInputManager's rowTouch() and colTouch().
+//
+// Both ask the same question on perpendicular axes: "which equal-sized band
+// along one axis does this point fall in, given it is within bounds on the
+// other?" Rows pass along=y/across=x, columns pass along=x/across=y. Factoring
+// it here removes the duplicated arithmetic and, more usefully, makes the
+// geometry testable without HalGPIO or a renderer.
+//
+//   along       coordinate on the banded axis (y for rows, x for columns)
+//   across      coordinate on the perpendicular axis
+//   start       where band 0 begins on the banded axis (top / left)
+//   step        band pitch, including any gap between bands
+//   count       number of bands
+//   acrossStart/acrossEnd  half-open bounds on the perpendicular axis
+//   extent      hit depth within each step; 0 = the whole step (no gap band).
+//               Non-zero excludes the gap between rows, so a tap that lands
+//               between two rows selects neither rather than the one above it.
+//
+// Returns false and leaves `index` untouched when the point misses.
+inline bool bandHit(const int along, const int across, const int start, const int step, const int count,
+                    const int acrossStart, const int acrossEnd, const int extent, int& index) {
+  if (step <= 0 || count <= 0) return false;
+  if (across < acrossStart || across >= acrossEnd) return false;
+  if (along < start) return false;
+  const int band = (along - start) / step;
+  if (band >= count) return false;
+  if (extent > 0 && (along - start) % step >= extent) return false;
+  index = band;
+  return true;
+}
+
 }  // namespace touchtransform

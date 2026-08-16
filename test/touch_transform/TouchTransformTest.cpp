@@ -134,4 +134,100 @@ TEST(TouchTransform, OppositeOrientationsDiffer) {
   EXPECT_NE(portrait.y, inverted.y);
 }
 
+// --- Band hit-test (rowTouch / colTouch arithmetic) --------------------------
+// The second half of the phase-2 gate. rowTouch and colTouch are the same test
+// on perpendicular axes, so these cover both.
+
+namespace {
+// Row-shaped call: band along y, bounded on x.
+bool rowHit(const int x, const int y, const int top, const int rowStep, const int rowCount, int& row,
+            const int xStart = 0, const int xEnd = 480, const int rowHeight = 0) {
+  return touchtransform::bandHit(y, x, top, rowStep, rowCount, xStart, xEnd, rowHeight, row);
+}
+}  // namespace
+
+TEST(BandHit, SelectsTheRowContainingThePoint) {
+  int row = -1;
+  EXPECT_TRUE(rowHit(100, 200, 200, 40, 5, row));
+  EXPECT_EQ(row, 0);
+
+  EXPECT_TRUE(rowHit(100, 239, 200, 40, 5, row));
+  EXPECT_EQ(row, 0) << "last pixel of row 0 still belongs to row 0";
+
+  EXPECT_TRUE(rowHit(100, 240, 200, 40, 5, row));
+  EXPECT_EQ(row, 1) << "first pixel of row 1";
+
+  EXPECT_TRUE(rowHit(100, 399, 200, 40, 5, row));
+  EXPECT_EQ(row, 4) << "last pixel of the last row";
+}
+
+TEST(BandHit, RejectsAboveTheBandAndPastTheLastRow) {
+  int row = -1;
+  EXPECT_FALSE(rowHit(100, 199, 200, 40, 5, row)) << "one pixel above the first row";
+  EXPECT_FALSE(rowHit(100, 400, 200, 40, 5, row)) << "one pixel past the last row";
+  EXPECT_FALSE(rowHit(100, 10000, 200, 40, 5, row));
+}
+
+TEST(BandHit, RejectsOutsideTheCrossAxisBounds) {
+  int row = -1;
+  EXPECT_TRUE(rowHit(40, 210, 200, 40, 5, row, 40, 300));
+  EXPECT_FALSE(rowHit(39, 210, 200, 40, 5, row, 40, 300)) << "xStart is inclusive";
+  EXPECT_FALSE(rowHit(300, 210, 200, 40, 5, row, 40, 300)) << "xEnd is exclusive";
+  EXPECT_TRUE(rowHit(299, 210, 200, 40, 5, row, 40, 300));
+}
+
+// A non-zero extent is what stops a tap in the gap between rows from selecting
+// the row above it -- the reason the parameter exists.
+TEST(BandHit, ExtentExcludesTheGapBetweenRows) {
+  int row = -1;
+  // 40px pitch, 30px of drawn row, 10px gap.
+  EXPECT_TRUE(rowHit(100, 229, 200, 40, 5, row, 0, 480, 30));
+  EXPECT_EQ(row, 0);
+  EXPECT_FALSE(rowHit(100, 230, 200, 40, 5, row, 0, 480, 30)) << "first gap pixel selects nothing";
+  EXPECT_FALSE(rowHit(100, 239, 200, 40, 5, row, 0, 480, 30)) << "last gap pixel selects nothing";
+  EXPECT_TRUE(rowHit(100, 240, 200, 40, 5, row, 0, 480, 30)) << "next row starts again";
+  EXPECT_EQ(row, 1);
+}
+
+TEST(BandHit, ZeroExtentMeansTheWholeStepIsLive) {
+  int row = -1;
+  for (int y = 200; y < 240; ++y) {
+    EXPECT_TRUE(rowHit(100, y, 200, 40, 5, row)) << "y=" << y;
+    EXPECT_EQ(row, 0) << "y=" << y;
+  }
+}
+
+TEST(BandHit, DegenerateGeometryIsRejected) {
+  int row = -1;
+  EXPECT_FALSE(rowHit(100, 210, 200, 0, 5, row)) << "zero step";
+  EXPECT_FALSE(rowHit(100, 210, 200, -40, 5, row)) << "negative step";
+  EXPECT_FALSE(rowHit(100, 210, 200, 40, 0, row)) << "no rows";
+  EXPECT_FALSE(rowHit(100, 210, 200, 40, -1, row)) << "negative count";
+}
+
+TEST(BandHit, LeavesIndexUntouchedOnMiss) {
+  int row = 7;
+  EXPECT_FALSE(rowHit(100, 199, 200, 40, 5, row));
+  EXPECT_EQ(row, 7) << "a miss must not clobber the caller's selection";
+}
+
+// Columns use the identical helper with the axes swapped; verify that mapping
+// so colTouch is covered by the same arithmetic.
+TEST(BandHit, ColumnShapedCallBandsAlongX) {
+  int col = -1;
+  // Two 120px-wide buttons starting at x=60, live between y=400 and y=460.
+  const auto colHit = [&](const int x, const int y) {
+    return touchtransform::bandHit(x, y, 60, 120, 2, 400, 460, 0, col);
+  };
+  EXPECT_TRUE(colHit(60, 400));
+  EXPECT_EQ(col, 0);
+  EXPECT_TRUE(colHit(179, 459));
+  EXPECT_EQ(col, 0);
+  EXPECT_TRUE(colHit(180, 430));
+  EXPECT_EQ(col, 1);
+  EXPECT_FALSE(colHit(300, 430)) << "past the last column";
+  EXPECT_FALSE(colHit(100, 399)) << "above the live band";
+  EXPECT_FALSE(colHit(100, 460)) << "below the live band";
+}
+
 }  // namespace

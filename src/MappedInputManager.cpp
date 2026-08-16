@@ -2,6 +2,7 @@
 
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
+#include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
 
@@ -203,14 +204,10 @@ bool MappedInputManager::wasTapInRect(const int x, const int y, const int width,
 MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int top, const int rowStep,
                                                           const int rowCount, const int xStart, const int xEnd,
                                                           const int rowHeight) const {
-  if (rowStep <= 0 || rowCount <= 0) return RowTouch::None;
+  // Rows band along y, bounded on x. Arithmetic lives in touchtransform so it
+  // can be host-tested (see test/touch_transform).
   const auto hit = [&](const int x, const int y) {
-    if (x < xStart || x >= xEnd || y < top) return false;
-    const int r = (y - top) / rowStep;
-    if (r >= rowCount) return false;
-    if (rowHeight > 0 && (y - top) % rowStep >= rowHeight) return false;
-    row = r;
-    return true;
+    return touchtransform::bandHit(y, x, top, rowStep, rowCount, xStart, xEnd, rowHeight, row);
   };
   int x = 0;
   int y = 0;
@@ -222,14 +219,9 @@ MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int to
 MappedInputManager::RowTouch MappedInputManager::colTouch(int& col, const int left, const int colStep,
                                                           const int colCount, const int yStart, const int yEnd,
                                                           const int colWidth) const {
-  if (colStep <= 0 || colCount <= 0) return RowTouch::None;
+  // Columns are the same test with the axes swapped: band along x, bounded on y.
   const auto hit = [&](const int x, const int y) {
-    if (y < yStart || y >= yEnd || x < left) return false;
-    const int c = (x - left) / colStep;
-    if (c >= colCount) return false;
-    if (colWidth > 0 && (x - left) % colStep >= colWidth) return false;
-    col = c;
-    return true;
+    return touchtransform::bandHit(x, y, left, colStep, colCount, yStart, yEnd, colWidth, col);
   };
   int x = 0;
   int y = 0;
