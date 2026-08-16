@@ -165,6 +165,13 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 // the CSS resolver needs above the LEAN floor it drops to in arena mode. These floors cover that
 // remainder with reserve, and are reachable from the ~57 KB reading steady state — which the
 // heap-backed floors above are not, on either device.
+#ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
+#endif
+#ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
+#define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
+#endif
+
 // Free heap the deferred footnote gather needs before it will start. It opens the ZIP once per
 // spine and each open takes a 4 KB contiguous EOCD buffer plus a 1 KB stream chunk; starting it
 // without room does not merely fail, it produces a cache that records "no footnotes" for the book
@@ -174,13 +181,6 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #define FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES (48 * 1024)
 #endif
 constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES;
-
-#ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
-#endif
-#ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
-#define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
-#endif
 // Quiet period after the last page reached the screen before B may take the buffer. B's borrow
 // costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
 // only start once the reader has settled. Below this the reader is flipping (skimming, or
@@ -239,11 +239,26 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 // buffer (and possibly a pre-rendered page) resident, so pin above Background-B's idle gate.
 // Failure is recoverable — the build retries with the buffer released — so these gate "try in
 // place" rather than guaranteeing success; tune from the "Index start mem" serial logs.
+//
+// SHAPE (fixed 2026-08-15, device-measured — see heapAllowsInPlaceBuild): the free floor is the
+// MAXIMUM of the two phase peaks, not their sum. runBuildParse releases the inflate ring before
+// the parse begins, so the ring and the layout working set are never live together; adding them
+// asked for memory no build has ever needed. The bases below are the PARSE-phase floors and are
+// unchanged by that fix — only the arithmetic combining them with the ring changed, so an A/B
+// against the old behaviour reads cleanly.
 #ifndef IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES
 #define IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES (60 * 1024)
 #endif
 #ifndef IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES
 #define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
+#endif
+// Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
+// so here the sum is correct). Same value as Background-B's BG_BUILD_EXTRACT_BASE_HEAP_BYTES and
+// for the same reason — both gate an extract that runs heap-backed with the secondary framebuffer
+// resident, which is the one situation the 30 KB was measured in. Kept as its own name rather than
+// reusing B's so the two can diverge without silently retuning each other.
+#ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
+#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)
 #endif
 // CSS books need more margin to build in place: the parse resolves embedded styles, which
 // self-degrade below the runtime CSS-resolve floor (CSS_MIN_FREE_HEAP_FOR_CSS ≈ 40 KB). Since
@@ -283,16 +298,28 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 //   heapAllowsInPlaceBuild=0 css=1 ring=15799 free=71544(floor=83383) contig=59380(floor=32768)
 //
 // contig passes with 26 KB to spare; `free` fails against a floor that is UNREACHABLE (post-font
-// free peaks at ~97 KB and is ~71 KB by reader time), because the floor adds ringBytes on top of
+// free peaks at ~97 KB and is ~71 KB by reader time), because the floor added ringBytes on top of
 // a base already sized for the working set. Meanwhile the arena serves every build with
 // failedAlloc=0 at ~30 KB high-water. One line per gate, so one trace shows every decision and
-// the arithmetic behind it. Values are NOT changed in this commit — measure first.
+// the arithmetic behind it.
 //
-// HEAP_GATE_TRACE=0 compiles it out. Remove once the floors are re-derived.
-// Default OFF (2026-08-11). It did its job — it is how the unreachable X4 CSS floor (73728
-// against a heap that peaks at 71080) and B's contig-floor miss were both found. The floors have
-// not been re-derived yet, so this stays available rather than being deleted: build with
-// -DHEAP_GATE_TRACE=1 when tuning them. At ~1 Hz per waiting gate it is far too loud to leave on.
+// RESOLVED for that gate (2026-08-15): heapAllowsInPlaceBuild now takes max(parse, extract+ring)
+// instead of parse+ring — see the derivation there, and the X4 trace that measured it.
+//
+// STILL UNREACHABLE, deliberately not touched in the same change: the two Background-B
+// heap-backed gates. Same X4 trace, ~20 evaluations across one reading session:
+//   gate=bgB_waitheap     REJECT free=~57000(floor=63488) contig=25588(floor=40960)
+//   gate=bgB_cssResident  REJECT free=~56500(floor=73728) contig=25588(floor=0)
+// Neither ever admitted, on any spine, at any point. B works anyway because the BORROW gates
+// (BG_BUILD_BORROW_*, 40960/12288) are reachable and are what it actually uses — so these two
+// only bind when there is no buffer to lend, and then they refuse unconditionally. Re-deriving
+// them wants its own measurement of a heap-backed B build, which this device cannot produce
+// while the borrow keeps succeeding.
+//
+// HEAP_GATE_TRACE=0 compiles it out. Default OFF (2026-08-11). It did its job twice over — the
+// unreachable in-place floor above and B's contig-floor miss were both found with it — so it
+// stays available rather than being deleted: build with -DHEAP_GATE_TRACE=1 when tuning a floor.
+// At ~1 Hz per waiting gate it is far too loud to leave on.
 #ifndef HEAP_GATE_TRACE
 #define HEAP_GATE_TRACE 0
 #endif
@@ -1312,6 +1339,35 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         return;
       }
       if (step == Section::BuildStep::More) {
+        // Proactive low-heap guard, the mirror of Background-C's residentAbort. Only a build
+        // that is NOT in the borrowed arena allocates its working set from the heap; a borrowed
+        // one bump-allocates inside the lent region and can ride the same numbers out safely.
+        // B reaches the resident case whenever there was no buffer to lend (already released for
+        // a C build, or a realloc that never came back), and until now nothing re-checked heap
+        // between the WaitHeap entry gate and completion — so a build admitted at 48 KB could
+        // grind all the way into the fault zone. Same floors as C: this is the same situation
+        // (buffer resident in the heap, build heap-backed), and a second set of numbers for it
+        // would be a second thing to keep tuned.
+        //
+        // The action differs from C's, though, and deliberately: C rebuilds on the released path
+        // because the reader is waiting on that section. Nothing waits on B, so it discards and
+        // settles, exactly as the css-degraded case below does — Background-C builds the section
+        // released (clean) if and when the reader navigates into it.
+        if (!backgroundBorrowActive_) {
+          const uint32_t bFree = esp_get_free_heap_size();
+          const uint32_t bContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+          if (bFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES || bContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES) {
+            HEAP_GATE("bgB_residentAbort", false, bFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, bContig,
+                      RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+            LOG_INF("ERS", "Background build spine=%d low heap mid-build (free=%lu contig=%lu); discarding",
+                    targetSpine, static_cast<unsigned long>(bFree), static_cast<unsigned long>(bContig));
+            backgroundSection_->abortSectionBuild();
+            backgroundSection_.reset();
+            backgroundBuildPercent_ = -1;
+            backgroundBuildState_ = BackgroundBuildState::Settled;
+            return;
+          }
+        }
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
         // The moment the CSS resolver starts skipping lookups the result is doomed to be
         // css-degraded and discarded — bail now instead of grinding through the rest of the
@@ -1548,9 +1604,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   } else {
     navTarget.resolveInto(*section, currentSpineIndex);
   }
-  if (section) {
-    navTarget = NavigationTarget::makePage(section->currentPage);
-  }
+  anchorNavTargetToCurrentPage();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   buildingPopupShown_ = false;
@@ -1641,6 +1695,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                     : std::nullopt;
             if (resolvedPage) {
               section->currentPage = *resolvedPage;
+              anchorNavTargetToCurrentPage();
               forceLoadLargeImages = false;
               pageHasPlaceholders = false;
             } else {
@@ -2364,6 +2419,36 @@ void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIn
   }
 }
 
+// navTarget is the anchor a section (re)build resolves into. It used to be written only when a
+// section was ENTERED and then left frozen for the whole chapter, so every mid-chapter teardown
+// re-seeded currentPage from the entry page — page 0 for a chapter reached by reading forward.
+// The reader landed back at the top of the chapter, and the next render persisted that to
+// progress.bin (issue #147). Four teardowns can fire during ordinary reading:
+//
+//   - fallbackToReleasedRebuild(): a Background-C build aborting mid-build on low heap, or
+//     finishing truncated / CSS-degraded — the common one, since the reader is turning pages
+//     through a live build the whole time it runs;
+//   - renderNormalPass(): loadPageFromSectionFile() returning null (deserialize OOM, bad seek);
+//   - both footnote-preview gather triggers, which drop the section to rebuild it previews-ON.
+//
+// None of them can be expected to remember the position individually, so keep the anchor live
+// instead: after this call navTarget names what is on screen, and any teardown lands back there.
+void EpubReaderActivity::anchorNavTargetToCurrentPage() {
+  if (!section) {
+    return;
+  }
+  navTarget = NavigationTarget::makePage(section->currentPage);
+  // Carrying the page count lets resolveInto() rescale proportionally when the rebuild
+  // repaginates rather than landing on a raw index — the previews-ON variant does exactly
+  // that (it bakes preview text into the layout). Only meaningful once the count is final:
+  // during a build pageCount is "pages written so far", and rescaling a partial count
+  // against the finished one would throw the position far past where the reader was.
+  if (!section->hasActiveBuild() && section->pageCount > 0) {
+    navTarget.cachedPageCount = section->pageCount;
+    navTarget.cachedSpineIdx = currentSpineIndex;
+  }
+}
+
 bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
   if (!epub || !section) {
     return false;
@@ -2402,6 +2487,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     // first post-build render overwrites with the real count. Skipped when the back-cross branch
     // reset the section (position resolves when the previous spine loads).
     if (section) {
+      // Mid-build turns are exactly the case the anchor was losing: a build that then falls
+      // back to the released path restarts this chapter from navTarget.
+      anchorNavTargetToCurrentPage();
       pendingProgressSave.spineIndex = currentSpineIndex;
       pendingProgressSave.page = section->currentPage;
       pendingProgressSave.pageCount = 0;
@@ -2455,6 +2543,9 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     }
   }
 
+  // Only the within-section branches above reach here with a section still loaded; the
+  // cross-spine branches set their own target and reset it, and this no-ops for them.
+  anchorNavTargetToCurrentPage();
   lastPageTurnTime = millis();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
@@ -2550,6 +2641,10 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
             pageTurnStatsWindow.turns, preRenderedPage.pageIndex);
     logPageTurnWindowIfReady();
     section->currentPage = preRenderedPage.pageIndex;
+    // This fast path advances the page without going through stepPageState(), so it owes the
+    // anchor update too — otherwise every pre-rendered turn (the common case) leaves navTarget
+    // behind on the page the section was entered at.
+    anchorNavTargetToCurrentPage();
     preRenderedPage.ready = false;
     usePreRenderedBuffer = true;
     sessionPagesAdvanced++;
@@ -2948,8 +3043,26 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // straight to the released path instead of starting a resident build that is doomed to the
   // low-heap abort (~1.4 s of popup/setup/abort/re-setup waste, observed heap dip to <8 KB free).
   const uint32_t ringBytes = static_cast<uint32_t>(std::min<size_t>(32768, inflatedSize));
+  // max(), not sum: the build's two phases have disjoint peaks (runBuildParse releases the
+  // inflate ring before the CSS-resolving parse starts), so the ring and the layout working set
+  // are never live at the same time. This is the same shape Background-B's heap-backed gate has
+  // always used; only this one summed them.
+  //
+  // Device-measured on X4 (2026-08-15, HEAP_GATE_TRACE, book cache deleted to force builds):
+  //   spine 14  ring=27875  free=62468  old floor=95459   arena high-water 39268/48000, failedAlloc=0
+  //   spine 16  ring=32768  free=61580  old floor=100352  arena high-water 44148/48000, failedAlloc=0
+  // Total heap on that device is 265120 and free never exceeds ~69 KB at reader time, so the old
+  // floor could not be met by any book on any page — it was a constant false, not a tuning. That
+  // also made RESIDENT_BUILD_ABORT_* dead code, since reaching it requires IncrementalResident.
+  //
+  // NOTE the CSS base still (correctly) rejects both of those builds at ~62 KB free: a heap-backed
+  // parse there would dip under the runtime CSS-resolve floor (~40 KB) and come out degraded. The
+  // fix is not "let more builds go resident" — it is "let this gate be answerable at all". What it
+  // changes in practice is the NON-CSS case, where the floor drops from 60 KB + ring (up to 92 KB,
+  // unreachable) to a flat 60 KB, which the ~62-69 KB reading heap can actually clear.
   const uint32_t freeFloor =
-      (embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES) + ringBytes;
+      std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
+                         IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
   const uint32_t contigFloor = std::max<uint32_t>(
       embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
       ringBytes + 8 * 1024);
@@ -3447,7 +3560,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
   navTarget.resolveInto(*section, currentSpineIndex);
   LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
-  navTarget = NavigationTarget::makePage(section->currentPage);
+  anchorNavTargetToCurrentPage();
   forceLoadLargeImages = false;
   pageHasPlaceholders = false;
   return true;
@@ -3484,13 +3597,68 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     auto p = section->loadPageFromSectionFile();
     lastRenderStats.pageLoadMs = millis() - pageLoadStart;
     if (!p) {
-      LOG_ERR("ERS", "Failed to load page from SD - clearing section cache");
-      section->clearCache();
-      section.reset();
-      requestUpdate();  // Try again after clearing cache
-                        // TODO: prevent infinite loop if the page keeps failing to load for some reason
+      // Escalate in two steps instead of assuming the cache is damaged. The dominant reason
+      // this returns null is Page::deserialize failing to allocate under pressure — the file
+      // on disk is fine, and clearing it charges a full chapter re-index for one failed malloc.
+      // See the pageLoadFail* latch for the state machine.
+      if (pageLoadFailSpine_ != currentSpineIndex || pageLoadFailPage_ != section->currentPage) {
+        pageLoadFailSpine_ = currentSpineIndex;
+        pageLoadFailPage_ = section->currentPage;
+        pageLoadFailStage_ = 1;
+      } else if (pageLoadFailStage_ < 2) {
+        pageLoadFailStage_ = 2;
+      } else {
+        pageLoadFailStage_ = 3;
+      }
       automaticPageTurnActive = false;
+      if (pageLoadFailStage_ == 1) {
+        // Transient hypothesis: hand back everything the reader is holding that nobody is
+        // waiting on, then reload the section from the SAME cache file. The evictions are the
+        // ones reallocSecondaryEvictingCaches() already trusts for the harder case (a 48 KB
+        // contiguous request): font page slots are rebuilt by the next prewarm regardless, the
+        // CSS caches reload lazily from SD, and Background-B's lookahead section is pure
+        // speculation that re-probes on its own cadence. navTarget carries the position, so the
+        // re-entry costs a LUT re-read, not a rebuild.
+        LOG_ERR("ERS", "Page %d load failed (spine %d, free=%lu); evicting caches and reloading section",
+                section->currentPage, currentSpineIndex, static_cast<unsigned long>(esp_get_free_heap_size()));
+        if (FontCacheManager* fontCache = renderer.getFontCacheManager()) {
+          fontCache->clearCache();
+        }
+        if (epub && epub->getCssParser()) {
+          epub->getCssParser()->clearCaches(/*evictEverything=*/true);
+        }
+        resetBackgroundBuild();
+        section.reset();
+        requestUpdate();
+        return;
+      }
+      if (pageLoadFailStage_ == 2) {
+        // Failed again at the same page after a cache eviction and a fresh LUT read. That does
+        // not prove the file is damaged — the heap may simply still be short — but the transient
+        // hypothesis has had its chance, so fall through to what this site always did. The free
+        // figure in both log lines is what tells the two apart after the fact.
+        LOG_ERR("ERS", "Page %d load failed again (spine %d, free=%lu); clearing section cache and rebuilding",
+                section->currentPage, currentSpineIndex, static_cast<unsigned long>(esp_get_free_heap_size()));
+        section->clearCache();
+        section.reset();
+        requestUpdate();
+        return;
+      }
+      // Stage 3: a freshly rebuilt cache cannot serve this page either. Re-entering would loop
+      // forever (the old TODO at this call site), so stop and show the empty-chapter screen —
+      // the reader can still navigate out with the section left intact.
+      LOG_ERR("ERS", "Page %d unreadable after rebuild (spine %d); giving up on this page", section->currentPage,
+              currentSpineIndex);
+      renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+      renderStatusBar();
+      renderer.displayBuffer();
       return;
+    }
+    // Loaded: retire any escalation recorded against this page.
+    if (pageLoadFailStage_ != 0) {
+      pageLoadFailSpine_ = -1;
+      pageLoadFailPage_ = -1;
+      pageLoadFailStage_ = 0;
     }
 
     // Collect footnotes from the loaded page
@@ -4899,6 +5067,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
                                          : std::nullopt;
                                  if (resolvedPage) {
                                    section->currentPage = *resolvedPage;
+                                   anchorNavTargetToCurrentPage();
                                    forceLoadLargeImages = false;
                                    pageHasPlaceholders = false;
                                  } else {
@@ -4934,6 +5103,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
             if (newSpineIndex == currentSpineIndex) {
               if (const auto resolvedPage = section->getPageForTocIndex(nextTocIndex)) {
                 section->currentPage = *resolvedPage;
+                anchorNavTargetToCurrentPage();
                 forceLoadLargeImages = false;
                 pageHasPlaceholders = false;
               }

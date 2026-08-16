@@ -421,10 +421,31 @@ const char* HalGPIO::wakeVerdictName(WakeVerdict verdict) {
 }
 
 HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs) {
+  // How long the pin must stay HIGH before we conclude the press really ENDED. Long,
+  // because concluding it wrongly refuses the wake: a contact bounce mid-hold would return
+  // ReleasedEarly and drop the device back into sleep with the user's finger still on the
+  // button.
   constexpr unsigned long BOUNCE_TOLERANCE_MS = 100;
+  // How long the pin must stay HIGH before a following press counts as the SECOND CLICK of
+  // a double rather than the same press bouncing. Much shorter than the tolerance above,
+  // and deliberately so: the two thresholds guard opposite errors. Concluding "second
+  // click" wrongly only accepts a wake the user was asking for anyway, so this side can
+  // afford to be generous, while the reject side cannot.
+  //
+  // It has to be short. At 100 ms — when this decision shared BOUNCE_TOLERANCE_MS — a
+  // second press landing inside the tolerance window never reached the release branch at
+  // all: it just refreshed lastSeenPressed, so the gate saw ONE continuous press and then
+  // rejected it as ReleasedEarly. A brisk double-click could not wake the device, while
+  // the awake FSM (5 ms InputManager debounce) accepted the very same gesture as the
+  // double-click that put it to sleep. 30 ms clears typical contact bounce (10-50 ms is
+  // the range waitForStablePowerRelease() is written against) and sits well under the
+  // ~60 ms floor of a deliberate double-click.
+  constexpr unsigned long RELEASE_DEBOUNCE_MS = 30;
   constexpr unsigned long POLL_INTERVAL_MS = 10;
   // Mirrors ButtonEventManager::DOUBLE_WINDOW_MS so a double-click-to-sleep gesture
-  // wakes on the same cadence it was configured with.
+  // wakes on the same cadence it was configured with. Measured from the first HIGH sample,
+  // like the awake FSM measures from the release edge — not from the sample that confirms
+  // the release, which would shift the whole window BOUNCE_TOLERANCE_MS late.
   constexpr unsigned long DOUBLE_WINDOW_MS = 300;
 
   // Must be called before any long-running init (it is the first statement of setup()) so a short
@@ -455,28 +476,37 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
   // followed by a second press within DOUBLE_WINDOW_MS is a double click; otherwise it's
   // a short tap. Whichever it turns out to be, accept it only if that gesture is enabled.
   unsigned long lastSeenPressed = millis();
+  unsigned long releaseSeenAt = 0;  // first HIGH sample of the current release; 0 while held
   while (true) {
     const unsigned long now = millis();
+    const uint16_t heldMs = stamp(lastSeenPressed - gateStart);
     if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
+      if (releaseSeenAt != 0) {
+        // The pin went HIGH and is LOW again: either the second click of a double, or the
+        // first press bouncing. The gap decides.
+        if (gestures.doubleClick && now - releaseSeenAt >= RELEASE_DEBOUNCE_MS) {
+          return {WakeVerdict::DoubleClick, stamp(now), heldMs};
+        }
+        releaseSeenAt = 0;  // bounce — still the same press
+      }
       lastSeenPressed = now;
       if (gestures.longHold && now >= requiredDurationMs) {
         return {WakeVerdict::LongHold, stamp(now), stamp(now - gateStart)};
       }
-    } else if (now - lastSeenPressed >= BOUNCE_TOLERANCE_MS) {
+    } else {
+      if (releaseSeenAt == 0) {
+        releaseSeenAt = now;
+      }
+      const unsigned long releasedFor = now - releaseSeenAt;
       // Released before the long-hold threshold. A double-click gesture gets one more
-      // chance: a second press within the window after this release.
-      const uint16_t heldMs = stamp(lastSeenPressed - gateStart);
+      // chance: a second press within the window after this release, handled above.
       if (!gestures.doubleClick) {
-        return {WakeVerdict::ReleasedEarly, stamp(now), heldMs};
-      }
-      const unsigned long releaseTime = now;
-      while (millis() - releaseTime < DOUBLE_WINDOW_MS) {
-        if (digitalRead(InputManager::POWER_BUTTON_PIN) == LOW) {
-          return {WakeVerdict::DoubleClick, stamp(millis()), heldMs};
+        if (releasedFor >= BOUNCE_TOLERANCE_MS) {
+          return {WakeVerdict::ReleasedEarly, stamp(now), heldMs};
         }
-        delay(POLL_INTERVAL_MS);
+      } else if (releasedFor >= DOUBLE_WINDOW_MS) {
+        return {WakeVerdict::NoSecondPress, stamp(now), heldMs};
       }
-      return {WakeVerdict::NoSecondPress, stamp(millis()), heldMs};
     }
     delay(POLL_INTERVAL_MS);
   }

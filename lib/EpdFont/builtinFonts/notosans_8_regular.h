@@ -3,6 +3,7 @@
  * name: notosans_8_regular
  * size: 8
  * mode: 1-bit
+ * hinting: auto (FT_LOAD_FORCE_AUTOHINT — grid-fits stems to whole pixels)
  * Command used: fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf
  */
 #pragma once

@@ -437,7 +437,18 @@ class CrossPointSettings {
   // Get singleton instance
   static CrossPointSettings& getInstance() { return instance; }
 
+  // How long the power button must be held to put the device to sleep, measured from the
+  // press edge in loop(). Device-measured at 401-410 ms of real hold on X3 and X4.
   static constexpr uint16_t getPowerButtonDuration() { return 400; }
+
+  // The same gesture in the other direction, but the wake gate compares against millis()
+  // — time since app start, not since the press (see HalGPIO::verifyPowerButtonWakeup).
+  // The press that caused the wake began before the app did, so the ROM and second-stage
+  // bootloader are already part of the user's hold and nothing charges for them: the real
+  // hold is prelude + this value. Shortened from the sleep threshold to claw some of that
+  // asymmetry back, and deliberately not shortened further — the gate's job is to reject a
+  // stray pocket press, and the prelude is the only margin left doing that.
+  static constexpr uint16_t getPowerWakeHoldDuration() { return 300; }
   int getReaderFontId() const;
   int getTxtReaderFontId() const;
   // Pure built-in lookup (size enum + family enum -> font ID). Independent of

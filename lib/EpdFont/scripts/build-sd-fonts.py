@@ -198,9 +198,6 @@ def build_family(
     cmd.extend(["--name", name])
     cmd.extend(["--output-dir", str(output_dir) + "/"])
 
-    if family.get("force_autohint", False):
-        cmd.append("--force-autohint")
-
     # Run fontconvert_sdcard.py
     start = time.monotonic()
     try:
