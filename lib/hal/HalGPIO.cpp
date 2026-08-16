@@ -1,4 +1,5 @@
 #include <BoardConfig.h>
+#include <HalCapabilities.h>
 #include <HalGPIO.h>
 #include <HalI2cBus.h>
 #include <Logging.h>
