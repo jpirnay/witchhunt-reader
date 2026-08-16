@@ -142,6 +142,8 @@ false on the C3. ~199 KB flash still free.
 **This validates the pin-sourcing approach itself**, not just these four commits:
 reading pins and capabilities out of the board profile produces a working device
 on the shipped hardware. The rest of workstream B can proceed on that basis.
+Combined with the X3 results below, **B0 is fully validated — every converted
+predicate has been exercised on both its true and false arm.**
 
 Transitively also exercised: the `master` 2.23 merge, touch phases 1–3 (inert on
 C3 but compiled in), and `HalI2cBus` (a no-op `Lock` there, which the
@@ -199,13 +201,39 @@ top of ~532 bytes, and 4096 was chosen because it is what the SDK sizes its own
 2048 free, 4096 was the right call; if it barely moves, the bump could be
 revisited.
 
-### ⬜ X3 (C3) — not flashed
+### ✅ X3 (C3) — flashed 2026-08-16, PASSED
 
-X3 is the more informative C3 target for what remains, because it is the board
-where the converted predicates return **true**: it has the BQ27220 gauge (so
-`hasI2cFuelGauge()` drives `Wire.begin()` from the profile), the DS3231, the
-QMI8658, and the UC8253 that actually needs the half-refresh settle. X4 exercised
-the false arm of every one of those.
+X3 is the board where every converted predicate returns **true**, so between the
+two C3 boards **both arms of all four are now verified on hardware**:
+
+| Check | Result | What it validates |
+|---|---|---|
+| `[CLK] DS3231 Hardware via I2C found.` | ✅ | `rtcType() == Ds3231` true arm (X4 logged "board has no DS3231") |
+| `[CLK] Got time from DS3231. Last deep sleep 0s` | ✅ | **the strongest single result** — see below |
+| Tilt entries present in Settings → Controls | ✅ | `SettingRequires::TiltSensor` true arm (absent on X4) |
+| Fast AA present under Reader → Font | ✅ | `SettingRequires::SelectableGrayscaleLut` true arm |
+| No ghosting when paging | ✅ | `panelNeedsHalfRefreshSettle()` true arm — X3 genuinely needs the settle passes |
+| Charging indicator | ✅ | (still SOF-ambiguous with a data cable, as on X4) |
+| No I2C errors anywhere in the log | ✅ | no `lock == NULL`, no bus failures |
+
+**Why "Got time from DS3231" is the key line.** `Wire.begin()` is called by
+`HalPowerManager::begin()` under `hasI2cFuelGauge()`, using pins taken from the
+**board profile** (`gauge.i2cSda=20, i2cScl=0, i2cHz=400000`) rather than the old
+`X3_I2C_*` macros. `HalClock` then talks to the DS3231 at 0x68 over that same
+already-initialised bus. A successful time read therefore proves the
+profile-sourced pins are correct end to end — and the serial timestamps switched
+to wall-clock (`19:06:09`) as a result, which is a second, independent tell.
+
+That is `1c3a43ea`'s `Wire.begin()` conversion validated on the only board that
+can validate it.
+
+**Sampler stack on X3: `high-water=1508 bytes free`** of 2048, i.e. a ~540-byte
+peak — within 8 bytes of the X4 figure. The ~532-540 byte baseline holds across
+both C3 boards and both input topologies (ADC ladder on X3, same on X4).
+
+Not captured, same cause as on X4: the `[HW]` device-detection lines. They are
+emitted before USB-CDC re-enumerates after reset, so a capture over the device's
+own USB always misses them. A UART adapter would be needed.
 
 ### ⬜ X4 Pro / T5S3 — will not boot yet
 
