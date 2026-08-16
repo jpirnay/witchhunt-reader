@@ -1,8 +1,9 @@
 # Touch input migration — investigation and plan
 
 Date: 2026-08-14 (last updated 2026-08-16)
-Status: **phases 1–2 implemented** (2026-08-16), phase 3 onward still proposal.
-Nothing has run on hardware — every gate below is build- or host-test-measured.
+Status: **phases 1–3 implemented** (2026-08-16), phase 4 onward still proposal.
+**Nothing has run on hardware.** Phases 1–2 met their gates (build deltas, host
+tests); phase 3's gate is a device test and is NOT met — see the phase 3 note.
 Scope: **workstream C** of
 [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md) — read that
 first for sequencing.
