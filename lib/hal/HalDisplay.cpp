@@ -1,3 +1,4 @@
+#include <BoardConfig.h>
 #include <BootHeapProbe.h>
 #include <HalCapabilities.h>
 #include <HalDisplay.h>
@@ -13,9 +14,36 @@ static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
 static BootHeapProbe s_probePostDisplay(1);
 
-#define SD_SPI_MISO 7
+// Display pins come from the board profile rather than the C3 macros in
+// HalGPIO.h. Verified identical for the C3 before converting: X3, X3-UC8279 and
+// X4 all specify {8, 10, 21, 4, 5, 6} = {sclk, mosi, cs, dc, rst, busy}.
+//
+// SUBTLETY, and the reason for the static_assert below. `display` is a GLOBAL,
+// so this constructor runs during static init — long before gpio.begin() calls
+// BoardConfig::selectDevice(). At that point BoardConfig::ACTIVE still holds
+// DEFAULT_DEVICE (for the dual C3 binary, the X4 profile), not the
+// runtime-detected board.
+//
+// That is safe here only because every profile that can share one binary agrees
+// on the display pins. Reading ACTIVE is itself sound at this point — it is an
+// inline variable with a constexpr initialiser, so it is constant-initialised
+// and immune to static-init order — but its VALUE is the default, not the
+// detection result. Anything that differs per board within a binary must be
+// read in begin(), not here.
+#if FREEINK_DEVICE_X3 && FREEINK_DEVICE_X4
+static_assert(BoardConfig::XTEINK_X3.display.sclk == BoardConfig::XTEINK_X4.display.sclk &&
+                  BoardConfig::XTEINK_X3.display.mosi == BoardConfig::XTEINK_X4.display.mosi &&
+                  BoardConfig::XTEINK_X3.display.cs == BoardConfig::XTEINK_X4.display.cs &&
+                  BoardConfig::XTEINK_X3.display.dc == BoardConfig::XTEINK_X4.display.dc &&
+                  BoardConfig::XTEINK_X3.display.rst == BoardConfig::XTEINK_X4.display.rst &&
+                  BoardConfig::XTEINK_X3.display.busy == BoardConfig::XTEINK_X4.display.busy,
+              "X3 and X4 ship in one binary but disagree on display pins; HalDisplay's constructor "
+              "runs before selectDevice() and would latch the wrong ones");
+#endif
 
-HalDisplay::HalDisplay() : einkDisplay(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY) {}
+HalDisplay::HalDisplay()
+    : einkDisplay(BoardConfig::ACTIVE.display.sclk, BoardConfig::ACTIVE.display.mosi, BoardConfig::ACTIVE.display.cs,
+                  BoardConfig::ACTIVE.display.dc, BoardConfig::ACTIVE.display.rst, BoardConfig::ACTIVE.display.busy) {}
 
 HalDisplay::~HalDisplay() {}
 
