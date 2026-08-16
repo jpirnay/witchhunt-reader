@@ -1341,7 +1341,13 @@ void loop() {
             case ButtonEventManager::PressType::Double:
               return SETTINGS.btnDoublePower;
             case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongPower;
+              // Unreachable, and left that way on purpose. The power-hold timer above
+              // sleeps the device at getPowerButtonDuration() (400 ms), so the press is
+              // long gone before ButtonEventManager's LONG_PRESS_MS (1000 ms) could emit a
+              // Long for Power. btnLongPower survives only as the settings screen's way of
+              // stating "Long press: Sleep" (SettingsList.h gives it that single option and
+              // no selector); dispatching it here would imply it were configurable.
+              break;
           }
           break;
         default:
