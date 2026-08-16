@@ -76,6 +76,8 @@ so `FREEINK_FRONTLIGHT_LS` is available later.
 | `x4pro` | **SUCCESS** 766 s | 66,408 | 6,198,074 — **94.6 %** |
 | `lilygo_t5s3` | **NOT BUILT SINCE THE FIX** | — | — |
 
+*(Historical, as measured on 08-15. Superseded by the two tables below.)*
+
 X4 Pro links — the first S3 build ever to do so in this repo. It would **not
 boot**: none of the pin/peripheral de-hardcoding is done (see next section).
 
@@ -164,7 +166,8 @@ code first. **Implemented 2026-08-16** — the reasoning below is kept because i
 is still the rule for every new call site; see "What B0 actually landed" after
 it for the outcome.
 
-`HalGPIO::DeviceType { X4, X3 }` + `deviceIsX3()` has **49 call sites**, and
+`HalGPIO::DeviceType { X4, X3 }` + `deviceIsX3()` had **38 call sites** when this
+was written (the "49" in the 08-15 draft was a miscount; 34 remain after B0), and
 `deviceIsX3()` is a stand-in for six unrelated questions: hardware-RTC presence,
 RTC-survives-deep-sleep, "has a DS3231 at 0x68", screen-tall-enough-for-a-hint,
 physical-front-button-positions, and panel-needs-half-refresh-settle.
