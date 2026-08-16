@@ -1,7 +1,9 @@
 # Multi-board bring-up — handover, 2026-08-15
 
 *State (updated 2026-08-16): branch `fix/s3-build-config`, pushed. `master` (2.23)
-has been merged in; all three envs build. **Nothing has been run on hardware.***
+merged in; all three envs build. Workstream **A done**, **C phases 1-3 done**,
+**B0 done**, **B started**. **Nothing has been run on hardware — and the next
+step should not be taken until something has.** See "Flash before continuing".*
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -16,12 +18,34 @@ run on hardware.** Both boards are on the desk; neither has been flashed.
 
 ## Landed
 
+**Workstream A — build (2026-08-15):**
+
 ```
 59189129  docs: bring the bring-up plan in line with what shipped
 8803b7a0  chore: bump freeink-sdk 56efd2e -> 76e61c4
 02c324cc  fix: split arch-specific HAL code so the S3 boards link
 b4b94068  fix: split build flags per MCU family so S3 envs build
 f666334b  docs: plan multi-board bring-up for X4 Pro and LilyGo T5S3
+```
+
+**2026-08-16 — master merged, then workstreams C and B:**
+
+```
+d0867add  Merge branch 'master' into fix/s3-build-config   (2.23, SDK -> cc89c653)
+
+           workstream C — touch (see the touch doc for detail)
+cfd00bf8  feat(hal): HalGPIO touch passthrough                       phase 1
+4ab2c188  feat(gfx): panel-native -> logical touch transform + tests  phase 2
+7d59e493  feat(input): MappedInputManager touch layer                 phase 2
+82be8458  fix(hal): I2C bus mutex + sampler stack 2048->4096          P1
+6990c4b1  test(input): rowTouch/colTouch band arithmetic              phase 2
+968a8493  feat(reader): touch reading controls + capability settings  phase 3
+013f343c  feat(reader): wire page turns, menu gesture, idle timer     phase 3
+
+           workstream B — board de-hardcoding
+b5341302  feat(hal): board capability predicates                      B0 step 1
+2799b34f  refactor(hal): route the safe deviceIsX3() sites            B0 step 2
+1c3a43ea  refactor(hal): SPI/battery/gauge-I2C pins from the profile  B
 ```
 
 **b4b94068 — workstream A.** `[base]` carried the C3 device set
@@ -83,12 +107,62 @@ separately.
 x4pro (the S3 carries one board profile; the C3 links both SSD1677 and UC8253).
 Any *shared* addition is charged against the C3's 177 KB.
 
+### After workstreams C and B (2026-08-16, final)
+
+| Env | Result | RAM | Flash |
+|---|---|---|---|
+| `default` (C3) | **SUCCESS** | 56,700 | 6,350,011 — **96.9 %** |
+| `x4pro` | **SUCCESS** | 66,656 | 6,174,590 — **94.2 %** |
+
+Cumulative C3 cost of everything on 2026-08-16 (touch phases 1-3 + B0 + B) is
+**+418 bytes flash and +8 bytes RAM** over the post-merge baseline — most of it
+the touch call sites, which compile in even though every touch predicate folds to
+false on the C3. ~199 KB flash still free.
+
+670 host tests pass (`cd test/build_test && ctest -j4`), including the 15 new
+`test/touch_transform` cases.
+
 ---
 
-## Pick up here — B0, the board concept
+## Flash before continuing
+
+**This is now the blocking step, and it is cheap.**
+
+`1c3a43ea` changed how the *shipped* C3 sets up its display SPI bus, its ADC
+battery pin and its fuel-gauge I2C. Every value was verified against the board
+profiles one by one, but a wrong SPI pin is a **black screen, not a compile
+error**, and nothing here has booted.
+
+Flash an **X4 or X3** on `1c3a43ea` and check:
+
+1. It boots and renders the home screen (validates `SPI.begin` from the profile).
+2. SD mounts and a book opens (same bus).
+3. Battery percentage is sane — on X3 that exercises the gauge I2C pins, on X4
+   the ADC pin.
+4. USB connect/disconnect is still detected.
+5. Settings → Controls shows what it always did: X3 keeps Fast AA and the tilt
+   entries, X4 has neither, neither shows touch settings. (This is a *prediction*
+   from the profiles, not an observation.)
+6. It boots at all after the `main.cpp` global reorder — `GfxRenderer` now
+   constructs before `MappedInputManager`, which shifts static-init order in the
+   TU that `BootHeapProbe` slots 4/5 bracket.
+
+If that passes, the pin-sourcing approach is validated and the rest of B gets
+much cheaper. If it fails, the bisect range is three small commits
+(`b5341302`, `2799b34f`, `1c3a43ea`) rather than a dozen.
+
+**Do not flash X4 Pro or T5S3 yet.** They still will not boot: `HalDisplay` holds
+the C3 display pins, `HalClock` the DS3231 address, and X4 Pro needs the SDMMC
+mount path. That is the rest of B.
+
+---
+
+## B0 — the board concept ✅ DONE (`b5341302`, `2799b34f`)
 
 The single most important idea in this work, and the reason not to write X4 Pro
-code first.
+code first. **Implemented 2026-08-16** — the reasoning below is kept because it
+is still the rule for every new call site; see "What B0 actually landed" after
+it for the outcome.
 
 `HalGPIO::DeviceType { X4, X3 }` + `deviceIsX3()` has **49 call sites**, and
 `deviceIsX3()` is a stand-in for six unrelated questions: hardware-RTC presence,
@@ -120,24 +194,97 @@ key on `ACTIVE.displayController` **with a comment saying why**.
 come out byte-identical, which makes a clean gate; (2) convert only the ~15 sites
 where X4 Pro's answer differs from X4's; (3) rename the residue to say "panel".
 
+### What B0 actually landed
+
+Steps 1 and 2 are done; step 3 (renaming the residue) is not.
+
+`lib/hal/HalCapabilities.h` holds the predicates. Step 1 came out
+**byte-identical on both targets**, exactly as the gate demanded. Step 2 converted
+seven sites for **−2 bytes** on C3.
+
+Predicate values were verified against the SDK profiles rather than assumed —
+this table is the evidence that the C3 cannot have regressed:
+
+| Predicate | X3 | X4 | X4 Pro |
+|---|---|---|---|
+| `hasTiltSensor` | Qmi8658 ✓ | none ✗ | None ✗ |
+| `hasI2cFuelGauge` | 0x55 ✓ | `NO_GAUGE` ✗ | **0x63 ✓** |
+| `rtcType() == Ds3231` | ✓ | None ✗ | Pcf8563 ✗ |
+| `panelNeedsHalfRefreshSettle` | UC8253 ✓ | SSD1677 ✗ | SSD1677 ✗ |
+
+Every X3/X4 column reproduces what `deviceIsX3()` returned. The X4 Pro column is
+the class of bug this removes.
+
+**Converted:** `HalTiltSensor::begin`, the `HalClock` DS3231 probe,
+`HalPowerManager::begin` and its battery-path assert, and the three `HalDisplay`
+half-refresh settle guards.
+
+**One trap worth remembering.** `HalClock` asks `rtcType() == Ds3231`, *not*
+`hasHardwareRtc()`. The latter is **true** on X4 Pro, whose BM8563 is
+PCF8563-register-compatible and would return garbage under DS3231 register
+offsets — so the obvious capability fix would have been the subtly wrong one.
+Presence and protocol are different questions. The same trap applies to the fuel
+gauge (see below).
+
+**Deliberately not converted**, each needing its own reasoning: the GPIO13
+battery-latch predicate (Xteink-specific; the SDK models it as `power.latch0`),
+the dual X3+X4 runtime detection and `selectDevice()` calls (genuine board
+identity — `deviceIsX3()` is the right question there), and the USB-poll
+interval. `SettingDeviceTarget` was separately replaced by `SettingRequires`
+during touch phase 3; see the touch doc.
+
 Fold in the deliberate follow-up from `02c324cc`: the deep-sleep **wake level is
 hardcoded LOW** and should read `BoardConfig::ACTIVE.input.powerActiveHigh`. Left
 out on purpose — every board we build is active-LOW, so it was behaviour risk to
 the shipped C3 for no present gain.
 
-## Then B — de-hardcode the HAL (the real work)
+## Then B — de-hardcode the HAL (the real work) ⚙️ STARTED
 
 Each must read `BoardConfig::ACTIVE` instead of the C3 macros in `HalGPIO.h:9-44`:
 
-| Site | Current | Needs |
-|---|---|---|
-| `HalDisplay.cpp:17` | `EInkDisplay(EPD_SCLK, EPD_MOSI, …)` | board display pins |
-| `HalGPIO.cpp:150` | `SPI.begin(EPD_SCLK, SPI_MISO, …)` | board SPI pins |
-| `HalGPIO.cpp:153-154` | `pinMode(BAT_GPIO0)`, `pinMode(UART0_RXD)` | board battery / USB detect |
-| `HalGPIO.cpp:531` | `digitalRead(UART0_RXD)` | per-board USB detection |
-| `HalPowerManager.cpp:24` | `Wire.begin(X3_I2C_SDA, …)` | board I2C bus(es) |
-| `HalPowerManager.cpp:344` | `BatteryMonitor(BAT_GPIO0)` | X4 Pro has a CW2017 gauge |
-| `HalClock.cpp:19` | `DS3231_ADDRESS = 0x68` | X4 Pro is BM8563 @ 0x51 |
+| Site | Current | Needs | State |
+|---|---|---|---|
+| `HalGPIO.cpp` | `SPI.begin(EPD_SCLK, SPI_MISO, …)` | board SPI pins | ✅ `1c3a43ea` |
+| `HalGPIO.cpp` | `pinMode(BAT_GPIO0)`, `pinMode(UART0_RXD)` | board battery / USB detect | ✅ `1c3a43ea` |
+| `HalPowerManager.cpp` | `Wire.begin(X3_I2C_SDA, …)` | board I2C bus(es) | ✅ `1c3a43ea` |
+| `HalDisplay.cpp:17` | `EInkDisplay(EPD_SCLK, EPD_MOSI, …)` | board display pins | ⬜ next |
+| `HalGPIO.cpp:531` | `digitalRead(UART0_RXD)` | per-board USB detection | ⬜ |
+| `HalPowerManager.cpp:344` | `BatteryMonitor(BAT_GPIO0)` | X4 Pro has a CW2017 gauge | ⬜ |
+| `HalClock.cpp:19` | `DS3231_ADDRESS = 0x68` | X4 Pro is BM8563 @ 0x51 | ⬜ |
+
+### What `1c3a43ea` landed, and the two bugs it found
+
+Every macro was checked against the X3/X4 profiles before converting, so the C3
+drives exactly the pins it always did:
+
+```
+EPD_SCLK  8 = display.sclk      SPI_MISO   7 = sd.miso
+EPD_MOSI 10 = display.mosi      BAT_GPIO0  0 = batteryAdc
+EPD_CS   21 = display.cs        UART0_RXD 20 = usbDetect
+X3_I2C_SDA/SCL/FREQ 20/0/400000 = batteryGauge.i2cSda/i2cScl/i2cHz
+```
+
+Two gates that looked like device checks were really **pin-conflict** checks, and
+both were latent X4 Pro bugs:
+
+- The ADC-battery `pinMode` was gated on `deviceIsX4()`. On an S3 build
+  `_deviceType` is never assigned — the C3 fingerprint probe is skipped by
+  `if constexpr (buildTargetsXteinkC3())` — so it **defaults to `X4` and the test
+  is true on X4 Pro**, whose `batteryAdc` is `PIN_UNASSIGNED`. It would have
+  called `pinMode(-1)` at boot. Now gated on `hasAdcBattery()`.
+- The USB-detect `pinMode` had the same gate. The real constraint is that the pin
+  must not be shared with the fuel-gauge I2C bus: X3 lists `usbDetect = GPIO20`,
+  which is also its gauge SDA and must stay an I2C line. X4 has no gauge and owns
+  GPIO20; X4 Pro leaves `usbDetect` unassigned.
+
+**That `_deviceType` default is worth internalising**: on any S3 board every
+surviving `deviceIsX4()` reads true and every `deviceIsX3()` reads false, silently.
+
+**Not converted, on purpose: the gauge read protocol.** `I2C_ADDR_BQ27220` and the
+`BQ27220_*_REG` offsets stay hardcoded. X4 Pro's CW2017 answers at a different
+address with different registers, so taking only the address from the profile
+would talk BQ27220 registers to a CW2017 — the same presence-vs-protocol trap as
+DS3231-vs-BM8563. Both gauges need their own read path.
 
 X4 Pro also mounts SD over **SDMMC**, not SPI (`USE_BLOCK_DEVICE_INTERFACE=1` is
 already in its env) — that reaches into `HalStorage`.
@@ -152,24 +299,33 @@ already in its env) — that reaches into `HalStorage`.
    Recommendation in the plan: enable but *don't spend* — divergent allocation
    policy per board would make every heap bug board-specific and strand the
    accumulated C3 heap knowledge.
-2. **Touch P1 — who services the I2C?** Our `HalGPIO` runs a background
-   `btnsample` task (prio 2, 2 KB stack, 10 ms) that calls `inputMgr.update()`;
-   on a touch board that silently puts GT911 I2C on that task, while `HalClock`
-   drives the RTC over `Wire` from the loop task. **Upstream has no sampler at
-   all**, so there is nothing to copy. Preferred: keep touch off the sampler and
-   rely on the SDK's `popTouchTap`/`popSwipe` queues; fallback is a HAL I2C mutex.
-   **Narrowed 2026-08-16:** upstream added a `batteryGauge.i2cBus` field
-   (`a5109872`) that moves the gauge to `Wire1` on Sticky specifically to keep it
-   off the GT911's bus — but the SDK's `XTEINK_X4_PRO` profile wires **GT911
-   (0x5D), CW2017 gauge (0x63) and BM8563 RTC (0x51) all to bus 0** on SDA39/SCL38.
-   Bus separation is therefore **not available on the lead board**; it really is
-   sampler-split or mutex. Carry `i2cBus` anyway for LilyGo/Sticky.
+2. ~~**Touch P1 — who services the I2C?**~~ **CLOSED 2026-08-16, implemented in
+   `82be8458`.** Resolved as a HAL-owned I2C mutex (`lib/hal/HalI2cBus.h`) plus a
+   sampler stack bump 2048 → 4096 under `FREEINK_CAP_TOUCH`. Two findings forced
+   it: `InputManager::serviceTouch()` is **private** and `update()` always
+   services touch, so buttons and touch cannot be split across tasks without an
+   SDK change; and the `XTEINK_X4_PRO` profile wires **GT911 (0x5D), CW2017 gauge
+   (0x63) and BM8563 RTC (0x51) all to bus 0** on SDA39/SCL38, so upstream's
+   `batteryGauge.i2cBus`/`Wire1` separation (`a5109872`) is unavailable on the
+   lead board. Note the SDK *does* ship a sampler — `beginAsync()` runs task
+   `fi_input` at a 4096 stack — which is where the 4096 figure comes from; the
+   earlier "upstream has no sampler, nothing to copy" note was wrong about the
+   SDK. Full reasoning in the touch doc §5. Carry `i2cBus` anyway for
+   LilyGo/Sticky. Re-measure `samplerStackHighWater()` on real hardware — 4096 is
+   the SDK's number for its own task, not a measurement of ours.
 3. **FUI adoption** (touch doc §3). Upstream replaced `MenuListActivity` with
    `UiListActivity` on FreeInkUI and their touch stack sits on top of it. It is a
    per-screen opt-in mixin, so incremental — but 34 of our 76 activities have no
    upstream counterpart. Explicitly *not* blocking board support.
 4. **`FREEINK_FRONTLIGHT_LS`** — port with the frontlight work, or earlier?
-5. `papermono` / `sticky` in scope at all?
+5. ~~`papermono` / `sticky` in scope at all?~~ **Answered 2026-08-16: no — X4 Pro
+   and T5S3 only.** Fewer board profiles linked, less flash, and no envs we cannot
+   validate on hardware.
+6. **When does the X4 Pro fuel gauge and RTC get a driver?** Both are currently
+   *correctly skipped* rather than wrong: `HalClock` gates on
+   `rtcType() == Ds3231` and the gauge read path is still BQ27220-specific. X4 Pro
+   therefore has no battery reading and no hardware clock until someone writes the
+   CW2017 and BM8563 paths. Not blocking "boots, mounts SD, renders a page".
 
 ---
 
