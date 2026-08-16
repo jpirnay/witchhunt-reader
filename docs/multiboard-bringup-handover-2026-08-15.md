@@ -367,10 +367,27 @@ Each must read `BoardConfig::ACTIVE` instead of the C3 macros in `HalGPIO.h:9-44
 | `HalGPIO.cpp` | `SPI.begin(EPD_SCLK, SPI_MISO, …)` | board SPI pins | ✅ `1c3a43ea` |
 | `HalGPIO.cpp` | `pinMode(BAT_GPIO0)`, `pinMode(UART0_RXD)` | board battery / USB detect | ✅ `1c3a43ea` |
 | `HalPowerManager.cpp` | `Wire.begin(X3_I2C_SDA, …)` | board I2C bus(es) | ✅ `1c3a43ea` |
-| `HalDisplay.cpp:17` | `EInkDisplay(EPD_SCLK, EPD_MOSI, …)` | board display pins | ⬜ next |
-| `HalGPIO.cpp:531` | `digitalRead(UART0_RXD)` | per-board USB detection | ⬜ |
-| `HalPowerManager.cpp:344` | `BatteryMonitor(BAT_GPIO0)` | X4 Pro has a CW2017 gauge | ⬜ |
-| `HalClock.cpp:19` | `DS3231_ADDRESS = 0x68` | X4 Pro is BM8563 @ 0x51 | ⬜ |
+| `HalDisplay.cpp:17` | `EInkDisplay(EPD_SCLK, EPD_MOSI, …)` | board display pins | ✅ `748a7dd1` |
+| `HalGPIO.cpp:531` | `digitalRead(UART0_RXD)` | per-board USB detection | ✅ `6f4e640f` |
+| `HalPowerManager.cpp:344` | `BatteryMonitor(BAT_GPIO0)` | ADC pin from profile | ✅ `6f4e640f` |
+| `HalClock.cpp:19` | `DS3231_ADDRESS = 0x68` | address from profile | ✅ `6f4e640f` |
+
+**Every pin and address in the original B table is now sourced from
+`BoardConfig::ACTIVE`.** The C3 macros in `HalGPIO.h:9-44` remain defined but are
+no longer read by the HAL.
+
+### What is left in B
+
+| Item | Why it is not done |
+|---|---|
+| `HalStorage` SDMMC mount for X4 Pro | The largest remaining piece. X4 Pro's card is silent to SPI-mode CMD0; it needs `SdmmcBlockDevice` (1-bit, slot 1, CLK41/CMD42/DAT0 40) and the GPIO5 active-LOW power-enable pulse. `USE_BLOCK_DEVICE_INTERFACE=1` is already in its env. |
+| CW2017 gauge driver | X4 Pro reports no battery today. The read path is still BQ27220-specific (`I2C_ADDR_BQ27220`, `BQ27220_*_REG`); the gauge address alone is not enough. |
+| BM8563 RTC driver | X4 Pro has no hardware clock today. `HalClock` correctly *skips* rather than mis-drives it, so this is missing function, not a bug. |
+| `HalDisplay::begin()`'s `setDisplayX3()` | Still `deviceIsX3()`, and arguably correctly so — it selects the X3 panel facade within the dual C3 binary, which is board identity rather than capability. Revisit only if a non-Xteink UC8253 board appears. |
+| Deep-sleep wake level | Still hardcoded LOW; should read `input.powerActiveHigh`. Deliberate hold-over from `02c324cc` — every board we build is active-LOW, so converting is behaviour risk to the shipped C3 for no present gain. |
+
+**The milestone to aim at is unchanged: X4 Pro boots, mounts SD, renders a page.**
+Storage is the blocker; the pins underneath it are now in place.
 
 ### What `1c3a43ea` landed, and the two bugs it found
 
