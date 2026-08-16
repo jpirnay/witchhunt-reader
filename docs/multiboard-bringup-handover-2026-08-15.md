@@ -1,6 +1,7 @@
 # Multi-board bring-up — handover, 2026-08-15
 
-*State: branch `fix/s3-build-config`, 5 commits ahead of `master`, **not pushed**.*
+*State (updated 2026-08-16): branch `fix/s3-build-config`, pushed. `master` (2.23)
+has been merged in; all three envs build. **Nothing has been run on hardware.***
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -53,6 +54,23 @@ so `FREEINK_FRONTLIGHT_LS` is available later.
 
 X4 Pro links — the first S3 build ever to do so in this repo. It would **not
 boot**: none of the pin/peripheral de-hardcoding is done (see next section).
+
+### Re-measured 2026-08-16, after merging `master` into this branch
+
+`master` (2.23) merged in cleanly — the only overlapping file was
+`platformio.ini`, and only its `version =` line. The submodule bump to
+`cc89c653` came with it.
+
+| Env | Result | RAM | Flash |
+|---|---|---|---|
+| `default` (C3) | **SUCCESS** | 56,692 | 6,349,593 — **96.9 %** |
+| `x4pro` | **SUCCESS** | 66,624 | 6,172,882 — **94.2 %** |
+| `lilygo_t5s3` | **SUCCESS** | 66,628 | 6,174,219 — **94.2 %** |
+
+**All three envs now link**, including LilyGo T5S3 for the first time since
+workstream A. C3 flash **improved to ~204 KB free** (from 177 KB) — master's
+font regeneration under `7897f54f`/`3934b192` more than paid for the merge.
+C3 RAM +216 B, from master's power-button wake work.
 
 **C3 delta: +94 bytes flash, RAM unchanged.** Attributed to the SDK bump, not the
 HAL fix — SDK #39 adds 14 lines to the shared
@@ -140,6 +158,12 @@ already in its env) — that reaches into `HalStorage`.
    drives the RTC over `Wire` from the loop task. **Upstream has no sampler at
    all**, so there is nothing to copy. Preferred: keep touch off the sampler and
    rely on the SDK's `popTouchTap`/`popSwipe` queues; fallback is a HAL I2C mutex.
+   **Narrowed 2026-08-16:** upstream added a `batteryGauge.i2cBus` field
+   (`a5109872`) that moves the gauge to `Wire1` on Sticky specifically to keep it
+   off the GT911's bus — but the SDK's `XTEINK_X4_PRO` profile wires **GT911
+   (0x5D), CW2017 gauge (0x63) and BM8563 RTC (0x51) all to bus 0** on SDA39/SCL38.
+   Bus separation is therefore **not available on the lead board**; it really is
+   sampler-split or mutex. Carry `i2cBus` anyway for LilyGo/Sticky.
 3. **FUI adoption** (touch doc §3). Upstream replaced `MenuListActivity` with
    `UiListActivity` on FreeInkUI and their touch stack sits on top of it. It is a
    per-screen opt-in mixin, so incremental — but 34 of our 76 activities have no
@@ -151,6 +175,17 @@ already in its env) — that reaches into `HalStorage`.
 
 ## Gotchas that cost time
 
+- **`platformio.local.ini` silently breaks the C3 build after `b4b94068`.** That
+  file is gitignored, is listed in `extra_configs`, and typically overrides
+  `[env:default]` with `build_flags = ${base.build_flags} …`. Since workstream A
+  moved the `FREEINK_DEVICE_*` set out of `[base]` into `[c3]`/`[s3]`, any local
+  override that extends `[base]` now compiles with **no device selected** and
+  dies in `BoardConfig.h` with *"no device selected"* **and** *"all selected
+  devices must share one MCU family"* at once — a confusing pair that looks like
+  a submodule or toolchain problem, not a local-config one. Fix: use
+  `${c3.build_flags}`. Anyone with a local ini hits this on their first pull of
+  the branch; the 08-15 numbers above were measured on Windows, where no such
+  file existed.
 - **`pio run ... | tail` reports `tail`'s exit code.** A failed build shows
   "exited with code 0". Always grep the output for `SUCCESS` / `FAILED`, or don't
   pipe.
@@ -170,11 +205,15 @@ already in its env) — that reaches into `HalStorage`.
 ## Verification recipe
 
 ```bash
-PIO="$HOME/.platformio/penv/Scripts/pio.exe"   # not on PATH
+PIO="$HOME/.platformio/penv/Scripts/pio.exe"   # Windows; not on PATH
+PIO="$HOME/.platformio/penv/bin/pio"           # Linux
 "$PIO" run -e default      # C3 regression gate — MUST stay green
 "$PIO" run -e x4pro
-"$PIO" run -e lilygo_t5s3  # never built since workstream A
+"$PIO" run -e lilygo_t5s3
 ```
+
+Check `platformio.local.ini` first (see gotchas) — on Linux it is the most
+likely reason a build fails for reasons that have nothing to do with your change.
 
 Cold builds are ~13 min each; run them backgrounded. Gate for any B0/B change is
 **zero flash/RAM delta on `env:default`** — B0 in particular should be
@@ -182,12 +221,18 @@ byte-identical, since it only adds unused accessors.
 
 ## Reference
 
-- Upstream touch/board branch: `upstream/feat-x4-papermono-support`
-  (crosspoint-reader). Their `HalGPIO` touch passthrough and
-  `MappedInputManager(gpio, renderer)` are the port targets for workstream C.
+- Upstream touch/board branches (**corrected 2026-08-16**):
+  `feat-x4-papermono-support` has been **deleted**. The touch stack —
+  `HalGPIO` passthrough, `MappedInputManager(gpio, renderer)`, `UiListActivity`,
+  `ReaderUtils` — is now on **`upstream/develop`** (mainline). The active board
+  branch is **`upstream/feat-touch`**, 42 commits ahead of develop, and it
+  carries reference implementations for most of the workstream-B table above
+  (SPI init `28d8ad56`, USB detect `c812091a`, battery `6acecd8e`, RTC/IMU HAL
+  `06ff5aa4`, multi-I2C `a5109872`, LilyGo T5S3 `526cf1b6`). See §0.2 of the
+  touch doc — **B is cheaper than this handover assumed.**
 - crosspoint PR **#3032** — frontlight survives light sleep; **replaces** the old
   mutual exclusion. Do not port the exclusion as the design.
 - SDK PRs **#38** (`FREEINK_X4PRO_FAST_DU_SHORTCUT`, opt-in, left off — validate
   on hardware first) and **#39** (RC_FAST frontlight + EpdBus BUSY grace).
-- Our fork vs `upstream/develop`: **2944 ahead / 1142 behind**. We are an
-  independent product, not a tracking fork.
+- Our fork vs `upstream/develop`: **2973 ahead / 1153 behind** (2026-08-16). We
+  are an independent product, not a tracking fork.

@@ -1,16 +1,28 @@
 # Touch input migration — investigation and plan
 
-Date: 2026-08-14 (last updated 2026-08-15)
+Date: 2026-08-14 (last updated 2026-08-16)
 Status: proposal, nothing implemented
 Scope: **workstream C** of
 [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md) — read that
-first for sequencing. Touch is not on the critical path; the HAL de-hardcoding is.
-Reference: `upstream/feat-x4-papermono-support` (crosspoint-reader), `upstream/develop`
+first for sequencing.
+Reference: **`upstream/develop`** (crosspoint-reader) — the touch stack is now
+mainline there — plus **`upstream/feat-touch`** for the in-flight board work.
+
+> **2026-08-16 revision.** Three premises of the 2026-08-14 draft have changed.
+> Read §0 before the rest of the document.
+>
+> 1. `upstream/feat-x4-papermono-support` **no longer exists**. The whole touch
+>    stack merged to `upstream/develop`; the active branch is now `feat-touch`.
+> 2. The SDK bump to `cc89c653` added **multi-touch** and **list layout
+>    feedback + row rectangles**. The latter materially weakens **P2**.
+> 3. **Touch is on the critical path for X4 Pro after all** — the board has no
+>    back and no confirm button. The line struck from the scope note above was
+>    wrong.
 
 ## Summary
 
 This is **not** a greenfield design. Upstream has already built a complete touch
-stack on `feat-x4-papermono-support`, and the FreeInk SDK carries the drivers and
+stack (now merged to `upstream/develop` — see §0.1), and the FreeInk SDK carries the drivers and
 geometry underneath it. Our fork consumes none of it — `grep -ril touch src/ lib/`
 returns nothing.
 
@@ -19,7 +31,8 @@ take*, because their touch layer sits on top of a UI refactor
 (**"convert all lists and tabs to FUI" #2957**, 89 files, +5649/−3570) that is
 already merged to their **develop** mainline and that our fork has not taken.
 
-Our divergence from `upstream/develop` is **2944 ahead / 1142 behind**.
+Our divergence from `upstream/develop` is **2973 ahead / 1153 behind**
+(measured 2026-08-16; was 2944/1142 on 08-14).
 
 The recommendation below is: **port upstream's input layers verbatim (phases 0–3),
 then adopt FUI incrementally from phase 4 onward.** The input layers are not an
@@ -27,6 +40,146 @@ alternative to FUI — `UiAppHost::routeTouch()` takes a `MappedInputManager`, s
 they are its prerequisite under any strategy. FUI itself is already proven on the
 C3, is a per-screen opt-in mixin rather than a cutover, and solves the e-paper
 tap-feedback problem a bolt-on approach would leave us to invent. See §3.
+
+---
+
+## 0. What changed since 2026-08-14
+
+### 0.1 The reference branch moved to mainline
+
+`upstream/feat-x4-papermono-support` has been **deleted upstream**. Every file
+this plan names as a port target now lives on `upstream/develop`:
+
+```
+src/MappedInputManager.{h,cpp}      src/activities/UiListActivity.{h,cpp}
+src/activities/reader/ReaderUtils.h  (detectTouchPageTurn, isTouchMenuGesture)
+```
+
+Verified on `upstream/develop` (2026-08-16): the constructor is
+`MappedInputManager(HalGPIO& gpio, const GfxRenderer& renderer)`, and
+`SwipeDir`, `RowTouch`, `rowTouch`/`colTouch`, `wasTapInRect`, `wasScreen*`,
+`wasBackGesture`/`wasHomeGesture`/`wasMenuGesture`/`wasLightPanelGesture`/
+`wasHomeKeyHold` are all present exactly as §1 describes. **§1 remains accurate —
+only the branch name in it is stale.**
+
+FUI adoption on develop: **41** files use `UiListActivity`/`UiTabListActivity`,
+**21** use `UiAppHost`.
+
+*Consequence:* the port is now against a maintained mainline rather than a
+side branch that could be rebased or abandoned. This is a straight improvement
+to the risk profile of phases 1–3, and it removes the "reference diff may
+disappear" concern from the phase-4b argument.
+
+### 0.2 `upstream/feat-touch` — 42 commits ahead of develop
+
+This is where the board work is happening, and it overlaps our **workstream B**
+far more than it overlaps workstream C. Reference commits for the B table in
+[the handover](multiboard-bringup-handover-2026-08-15.md):
+
+| Commit | Subject | Our B-table site |
+|---|---|---|
+| `28d8ad56` | Fix SPI bus initialization for non-C3 boards | `HalGPIO.cpp:150` |
+| `c812091a` | Make USB detection pin configurable | `HalGPIO.cpp:531` |
+| `6acecd8e` | Use board config for battery monitoring setup | `HalPowerManager.cpp:344` |
+| `06ff5aa4` | Add SDK RTC and IMU hardware abstraction support | `HalClock.cpp:19` |
+| `a5109872` | Support multi-I2C + ESP32-S3 USB logging | see P1 |
+| `61cb4946` | Fix I2C init ordering for the dual X3+X4 binary | C3 regression risk |
+| `9b7b9e90` | Skip X3 fingerprint probe on non-C3 boards | `HalGPIO::begin()` |
+| `526cf1b6` | Add touch gesture support **and LilyGo T5 S3 board** | our second board |
+| `e103cdfd` | UI scaling for touch vs button devices | phase 5 |
+| `57c389c0` | Add touch-down visual feedback to settings menus | **P2** |
+
+Most of these are 10–30 line commits against the exact call sites the handover
+lists as unported. **Workstream B is substantially cheaper than the handover
+assumes** — it is now largely a review-and-adapt job, not original work.
+
+`61cb4946` deserves separate attention: it is a **C3 fix**, not board work.
+Upstream found that the dual X3+X4 binary left the X4 profile active through
+`powerManager`/`clock`/`tilt` `begin()`, so `Wire` was never re-initialised
+after the detection probe and every X3 I2C read failed with `lock == NULL`.
+Whether our fork has the same latent bug is worth checking on its own merits,
+independently of any board work.
+
+### 0.3 SDK `76e61c4` → `cc89c653` — two touch-relevant additions
+
+**Multi-touch (`410d0ab`).** Purely additive; the single-contact contract is
+unchanged.
+
+```cpp
+static constexpr uint8_t MAX_TOUCH_CONTACTS = 4;
+bool supportsMultiTouch() const;            // GT911 only
+TouchSnapshot getTouchSnapshot() const;     // fixed-size, allocation-free
+bool wasMultiTouchSwipe(uint8_t& contactCount, float& nxStart, …, unsigned long& durationMs) const;
+bool popMultiTouchSwipe(…);                 // dedicated queue — popSwipe() never sees these
+```
+
+Two behaviours matter more than the API:
+
+- A `touchMultiContactSequence` latch **suppresses the single-contact
+  classifiers until full release**, so a two-finger gesture cannot emit a
+  spurious tap or swipe. This is defensive work we would otherwise have had to
+  do ourselves in `MappedInputManager`.
+- `FreeInkUIInputManager::snapshotFrom()` now gates `touchHeld` on
+  `isTouchHeldAt()` so a staggered multi-contact sequence cannot become a UI
+  drag.
+
+Pinches, rotations, diagonal motion and ambiguous contact matching are
+explicitly **rejected** by the SDK — it reports centroid translation only.
+
+*Recommendation:* **do not plan a feature around multi-touch.** It changes
+nothing in phases 0–5, and the SCOPE.md test does not obviously pass for a
+reading device. Note it, take the free robustness, revisit only if a concrete
+need appears. It does not belong in this plan's phases.
+
+**List layout feedback + row rectangles (`bb48403`, `cc89c65`).** This is the
+consequential one.
+
+```cpp
+struct ListNav {
+  int  pageRows() const;                       // MEASURED page size, not the estimate
+  bool rowRectFor(int index, Rect* out) const; // rect of a drawn row
+  static constexpr uint8_t MAX_ROW_RECTS = 16;
+  bool consumeRebuildNeeded();
+  void onListRendered(uint16_t effectiveTop, int drawn, bool selectedDrawn, …);
+};
+```
+
+`list()` now reports its actual layout back through `props.nav`, so
+variable-height rows (wrapped labels, subtitles) no longer let the selection
+sit on a never-drawn row, and `scrollBy` clamps against the measured page size
+rather than the fixed-height estimate. Two new host tests cover it
+(`testListNavLayoutFeedback`, `testListNavConvergesThroughRealList`).
+
+**Why this matters to the phase-4 decision:** `rowRectFor()` gives the caller
+the exact rectangle of a row, which is precisely the primitive needed to paint
+and refresh *only* the rows a selection change touched. Combined with upstream's
+`57c389c0` (touch-down visual feedback), the "we would have to invent tap
+feedback ourselves" objection in **P2** is now answered inside the layer phase 4b
+adopts — and answered with something bounded to a partial refresh rather than a
+full-screen one. See the revised P2 in §5.
+
+### 0.4 X4 Pro has no back and no confirm button
+
+From the SDK's `XTEINK_X4_PRO` profile (hardware-confirmed, not RE guesswork):
+
+```
+// {back, confirm, left, right, up, down, power, powerActiveHigh}
+{PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, 0, 7, 3, false},
+```
+
+Two physical nav keys (Up=GPIO0, Down=GPIO7) plus Power=GPIO3. The profile
+comment is explicit: *"back/confirm come from the GT911 (touch + the capacitive
+Home key)."*
+
+**So on the lead bring-up board, touch is not an enhancement — it is the only
+way to confirm or go back.** The board can reach the handover's milestone
+("boots, mounts SD, renders a page") without touch, but it cannot be *navigated*
+without it. Phase 3 is therefore the point at which X4 Pro becomes a usable
+device, and workstream C stops being parallel-optional work.
+
+This does not reorder B before C — B still gates booting at all — but it does
+mean **C must complete for the board to ship**, and the two should be planned as
+one delivery rather than as a critical path plus a nice-to-have.
 
 ---
 
@@ -249,7 +402,7 @@ throwaway. The genuine fork in the road is phase 4 — lists — where the choic
   mandatory, not advisory, and FUI adoption needs a flash budget agreed up front.
   See the flash section in
   [multi-board-bringup](multi-board-bringup-2026-08-14.md).
-- Adopting FUI aligns *one layer*. It does not by itself close a 2944/1142
+- Adopting FUI aligns *one layer*. It does not by itself close a 2973/1153
   divergence, and shouldn't be sold as if it does.
 
 ### The rule that makes this safe
@@ -266,15 +419,28 @@ work becoming waste.
 
 ### Phase 0 — Bring-up and decisions (blocking)
 
-- Port `env:x4pro` (and `papermono` if the board is in play) from upstream's
-  `platformio.ini`. We already have `env:lilygo_t5s3`.
+- ~~Port `env:x4pro`~~ — **done** (workstream A, `b4b94068`).
+- ~~Confirm the primary bring-up board~~ — **X4 Pro**, and §0.4 makes that
+  binding: it has no back/confirm button.
 - Add `FreeInkUI=symlink://freeink-sdk/libs/ui/FreeInkUI` to `lib_deps`.
 - Verify GT911 enumerates on T5S3 and X4 Pro; log raw contacts.
 - **Resolve I2C ownership (see §5, P1).** Cross-cutting — deciding it late means
-  reworking phases 1–2.
-- Confirm the primary bring-up board (X4 Pro or T5S3).
+  reworking phases 1–2. §5 now rules out bus separation on X4 Pro, so this is a
+  straight choice between resolution 1 and 2.
 
 Deliverable: raw contacts in the serial log. No UI.
+
+**Build state (2026-08-16, after merging master into `fix/s3-build-config`):**
+
+| Env | Result | RAM | Flash |
+|---|---|---|---|
+| `default` (C3) | SUCCESS | 56,692 | 6,349,593 — 96.9 % |
+| `x4pro` | SUCCESS | 66,624 | 6,172,882 — 94.2 % |
+| `lilygo_t5s3` | SUCCESS | 66,628 | 6,174,219 — 94.2 % |
+
+All three envs link. C3 flash is **~204 KB free**, better than the 177 KB the
+08-14 draft budgeted against — master's font regeneration recovered ~27 KB. The
+flash caution in §3 still applies, but with slightly more room than stated.
 
 ### Phase 1 — `HalGPIO` touch passthrough
 
@@ -403,11 +569,58 @@ Two workable resolutions, in preference order:
 Option 1 needs a check that `InputManager` tolerates button and touch servicing on
 different tasks; if it does not, option 2 is the fallback.
 
+**Update 2026-08-16 — there is no third option on X4 Pro.** Upstream *does* now
+have a multi-I2C mechanism (`a5109872`): `BoardProfile::batteryGauge.i2cBus`
+selects `Wire` or `Wire1`, and on **Sticky** the fuel gauge is moved to `Wire1`
+"so it doesn't fight the GT911 touch, which owns `Wire`". That looks like a clean
+escape from bus contention — but it does not apply to our lead board.
+
+The SDK's `XTEINK_X4_PRO` profile puts **all three peripherals on bus 0**:
+
+| Device | Addr | Bus | Pins |
+|---|---|---|---|
+| GT911 touch | `0x5D` (alt `0x14`) | 0 (`Wire`) | SDA 39 / SCL 38 @ 400 kHz |
+| CW2017 fuel gauge | `0x63` | 0 (`Wire`) | SDA 39 / SCL 38 @ 400 kHz |
+| BM8563 RTC (PCF8563-compatible) | `0x51` | 0 (`Wire`) | SDA 39 / SCL 38 @ 400 kHz |
+
+The profile comments say so directly — the RTC is "on the shared touch bus", and
+the gauge is on "the SHARED touch/RTC bus … Wire". The X4 Pro silicon exposes a
+second I2C controller, but the *board* wires all three devices to one pair of
+pins, so `i2cBus` cannot separate them.
+
+Therefore **P1 must be resolved by resolution 1 or 2 — bus separation is not
+available on X4 Pro.** Resolution 1 remains preferred. The `i2cBus` field is
+still worth carrying when we port the battery work (`6acecd8e`), because LilyGo
+and Sticky can use it; it just does not rescue the lead board.
+
+Note also that with three devices on one 400 kHz bus, the *combined* traffic
+matters: a GT911 contact read at the sampler's 10 ms cadence is far more bus
+traffic than the RTC and gauge polls put together. Whichever resolution is
+chosen, the touch poll interval should be a tuned number, not inherited from the
+button sampler's 10 ms by accident.
+
 **P2 — No hover, no free feedback.** A finger on glass gives no confirmation, and
 on e-paper acknowledgement costs a refresh (~200 ms fast, 1–2 s full). Upstream
 answers this with FUI's tap-flash (`clearTapFlash`, `setFlash`) — which is *inside*
 the layer we are deferring. Under Option B we need our own answer in phase 4.
 This is the most likely place for Option B to feel worse than upstream.
+
+**Downgraded 2026-08-16.** Two things landed that make this cheaper on both
+paths:
+
+- SDK `cc89c653` adds `ListNav::rowRectFor(index, &rect)` — the exact rectangle
+  of any drawn row, up to `MAX_ROW_RECTS = 16`, with an honest `false` when a row
+  wasn't tracked so the caller can fall back to a full repaint. That is the
+  primitive a tap-flash needs: invert one row's rect and issue a partial refresh
+  bounded to it, instead of a full-screen update.
+- Upstream `57c389c0` ("Add touch-down visual feedback to settings menus") is a
+  worked example of the same idea applied to non-FUI screens.
+
+So P2 is no longer "invent it ourselves" under 4a — it is "port `57c389c0`'s
+approach", and under 4b it is free. **P2 is no longer a serious argument for
+choosing 4b over 4a.** The remaining arguments for 4b (doing `MenuListActivity`'s
+8 subclasses once rather than twice, and staying on a maintained mainline) are
+unaffected and still stand.
 
 **P3 — Accidental touch while reading.** A thumb resting on the panel cannot
 misfire a button but can misfire a capacitive panel. Upstream's answer is
@@ -415,7 +628,7 @@ misfire a button but can misfire a capacitive panel. Upstream's answer is
 `suppressTouchContact()` is available for consuming a contact.
 
 **P4 — Drift.** Every phase we implement differently from upstream widens a fork
-that is already 2944/1142 diverged. Hence the rule: **names and signatures copied
+that is already 2973/1153 diverged. Hence the rule: **names and signatures copied
 verbatim**, differences confined to *which* layers we take, never *what they look
 like*.
 
@@ -435,11 +648,17 @@ Phase 6 is where this could become a general-purpose touch UI framework. Stop at
 
 1. **P1** — answered: upstream has no sampler, so there is nothing to copy. We must
    pick resolution 1 or 2 in §5 ourselves. Needs a read of `InputManager` to confirm
-   button/touch servicing can be split across tasks.
-2. **P2** — only live if phase 4a is chosen for lists. Under 4b, FUI's
-   `setFlash`/`clearTapFlash` answers it.
-3. **Phase 4 split** — 4a or 4b for the lists? This is the real decision in the
-   document; everything before it is unconditional.
+   button/touch servicing can be split across tasks. **Narrowed 2026-08-16**:
+   upstream's `i2cBus`/`Wire1` separation is confirmed *unavailable* on X4 Pro
+   (all three devices on bus 0), so it really is 1-or-2. Still the top open item.
+2. ~~**P2**~~ — **downgraded 2026-08-16.** `ListNav::rowRectFor()` (SDK
+   `cc89c653`) plus upstream `57c389c0` give a bounded partial-refresh tap flash
+   on *either* path. No longer a decision driver.
+3. **Phase 4 split** — 4a or 4b for the lists? Still the real decision, but the
+   grounds have shifted: P2 no longer favours 4b, while the touch stack landing
+   on mainline `develop` (§0.1) *does* favour it — reference diffs are now stable
+   rather than hostage to a feature branch. Net: unchanged recommendation
+   (4a for chrome, 4b for lists), stronger reason.
 4. ~~Primary bring-up board?~~ **Answered: X4 Pro**, which also has the capacitive
    Home key the T5S3 lacks — so phase 3 should cover `wasHomeKeyTapped()` /
    `wasHomeKeyLongPressed()`, not just tap/swipe.
@@ -448,6 +667,11 @@ Phase 6 is where this could become a general-purpose touch UI framework. Stop at
    is parked (2026-08-14), so nothing needs sequencing around it. The phase 4
    decision is now purely about long-term maintainability and flash budget.
 
+7. **Multi-touch** (SDK `410d0ab`) — recommendation in §0.3 is to take the free
+   robustness and plan no feature around it. Confirm that is acceptable, or say
+   what a two-finger gesture would be *for* on a reader.
+
 Phase 0 also no longer needs to add `env:x4pro` or fix the S3 build — workstream A
-did both, and the `freeink-sdk` submodule is now at `76e61c4`. What remains of
-phase 0 is the GT911 bring-up itself and the P1 decision.
+did both, and the `freeink-sdk` submodule is now at **`cc89c653`** (was `76e61c4`;
+bumped when master merged in on 2026-08-16). What remains of phase 0 is the GT911
+bring-up itself and the P1 decision.
