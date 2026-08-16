@@ -804,7 +804,24 @@ void EpubReaderActivity::loop() {
     }
   }
 
+  // A centre-third tap, or the top-edge menu swipe, opens the reader menu.
+  // Kept next to the page-turn zones so both touch paths live in one place; the
+  // zones do not overlap (outer thirds vs centre), so the order is not
+  // load-bearing. Inert unless the board has touch and the user left touch
+  // reading controls on.
+  if (ReaderUtils::isTouchMenuGesture(renderer, mappedInput)) {
+    openReaderMenu();
+    return;
+  }
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
+  // Touch page turns join tilt here rather than in the button event queue: both
+  // are gesture sources the queue does not carry, and both must lose to an
+  // explicit button press. Inert on non-touch boards and when the user has set
+  // touchReaderControls to Off.
+  const ReaderUtils::TouchPageTurn touchTurn = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  prevTriggered = prevTriggered || touchTurn.prev;
+  nextTriggered = nextTriggered || touchTurn.next;
   if (!prevTriggered && !nextTriggered) {
     if (!buttonPrevTurn && !buttonNextTurn) {
       // Input-idle and no page turn pending: hand the idle slice to the background

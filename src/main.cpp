@@ -1199,9 +1199,15 @@ void loop() {
     }
   }
 
-  // Check for any user activity (button press or release) or active background work
+  // Check for any user activity (button press or release, screen touch) or
+  // active background work.
+  //
+  // wasTouchActivity() is the touch analogue of wasAnyPressed/Released and must
+  // be here: on a touch board a user can read a whole chapter by tapping and
+  // never press a button, and without this the device would sleep under their
+  // finger. Always false on non-touch boards.
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity() ||
+  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
