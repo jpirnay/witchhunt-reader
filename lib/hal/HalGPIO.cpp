@@ -149,15 +149,36 @@ void HalGPIO::begin() {
     }
   }
 
-  // inputMgr.begin() is board-generic (it reads BoardConfig::ACTIVE.input). The
-  // rest below is still hardcoded to C3 Xteink pin macros — bringing up another
-  // board means sourcing these from BoardConfig::ACTIVE.display too.
+  // All board-generic now: inputMgr.begin() already read BoardConfig::ACTIVE.input,
+  // and the bus/pin setup below reads the active profile rather than the C3
+  // Xteink macros in HalGPIO.h. Verified pin-for-pin against the X3/X4 profiles
+  // before converting, so the C3 drives exactly the pins it always did:
+  //   EPD_SCLK 8 = display.sclk, EPD_MOSI 10 = display.mosi, EPD_CS 21 =
+  //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
+  //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
-  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
+  const BoardConfig::DisplayPins& display = BoardConfig::ACTIVE.display;
+  // Display and SD share one SPI bus, so MISO comes from the SD pins — the panel
+  // is write-only and has none of its own.
+  SPI.begin(display.sclk, BoardConfig::ACTIVE.sd.miso, display.mosi, display.cs);
 
-  if (deviceIsX4()) {
-    pinMode(BAT_GPIO0, INPUT);
-    pinMode(UART0_RXD, INPUT);
+  // ADC battery sense. Gated on the board actually reading its battery that way:
+  // on a fuel-gauge board the same GPIO is the gauge's I2C bus (on X3, BAT_GPIO0
+  // is X3_I2C_SCL), so configuring it as an ADC input would break the bus. This
+  // replaces a deviceIsX4() test that would have been TRUE on X4 Pro — whose
+  // batteryAdc is PIN_UNASSIGNED — and driven pinMode(-1).
+  if (HalCapabilities::hasAdcBattery()) {
+    pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
+  }
+
+  // USB-presence detect. The pin must exist AND not be shared with the fuel-gauge
+  // I2C bus: X3 lists usbDetect = GPIO20, which is also its gauge SDA, so it must
+  // stay an I2C line. X4 has no gauge and owns GPIO20 outright; X4 Pro leaves
+  // usbDetect unassigned because the pin has not been identified yet.
+  const int8_t usbDetect = BoardConfig::ACTIVE.usbDetect;
+  const BoardConfig::BatteryGaugeConfig& gauge = BoardConfig::ACTIVE.batteryGauge;
+  if (usbDetect != BoardConfig::PIN_UNASSIGNED && usbDetect != gauge.i2cSda && usbDetect != gauge.i2cScl) {
+    pinMode(usbDetect, INPUT);
   }
 }
 

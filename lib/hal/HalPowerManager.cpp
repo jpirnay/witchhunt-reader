@@ -22,9 +22,19 @@ void HalPowerManager::begin() {
   if (HalCapabilities::hasI2cFuelGauge()) {
     // Boards with an I2C fuel gauge read charge over the bus rather than from an
     // ADC divider (X3 has a BQ27220 at 0x55, X4 Pro a CW2017 at 0x63; X4 has
-    // none and uses BAT_GPIO0).
-    // I2C init must come AFTER gpio.begin() so early hardware detection/probes are finished.
-    Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
+    // none and uses BAT_GPIO0). Pins/frequency come from the profile, not the X3
+    // macros: X3's gauge is on SDA20/SCL0 at 400 kHz, X4 Pro's CW2017 on
+    // SDA39/SCL38. Verified identical to the old X3_I2C_* values for the C3
+    // before converting. Must run AFTER gpio.begin() so the early hardware
+    // detection probes are finished.
+    //
+    // NOTE the gauge PROTOCOL is still BQ27220-specific (I2C_ADDR_BQ27220 and
+    // the BQ27220_*_REG offsets below). X4 Pro's CW2017 answers at a different
+    // address with different registers, so it needs its own read path -- taking
+    // the address from the profile alone would talk BQ27220 registers to a
+    // CW2017, the same trap as DS3231-vs-BM8563 in HalClock.
+    const BoardConfig::BatteryGaugeConfig& gauge = BoardConfig::ACTIVE.batteryGauge;
+    Wire.begin(gauge.i2cSda, gauge.i2cScl, gauge.i2cHz);
     Wire.setTimeOut(4);
     _batteryUseI2C = true;
   } else {
