@@ -342,6 +342,27 @@ static bool loadSleepFrameBuffer() {
 // back into deep sleep before the user sees the page.
 static unsigned long allowSleepAt = 0;
 
+// ---- Leftover wake-press guard ---------------------------------------------------------
+// The wake press is usually STILL HELD when setup() finishes. Nothing on screen confirms
+// that the gesture was accepted (a reader resume deliberately paints nothing until the page
+// lands — see BootResume::ReaderResume), so the user keeps holding "to be sure".
+//
+// setup() used to answer that by blocking on gpio.waitForStablePowerRelease(). That charged
+// the user's finger straight to the boot: measured on X4, the `rel` phase cost 1290 ms and
+// 3050 ms on two long-hold wakes, against 200 ms — the stability tail alone — on a wake the
+// user had already released. Same firmware, same book: 6.8 s to the page versus 3.9 s. The
+// hold was not slow to *register*, it was slow because holding is what stalled the boot.
+//
+// So boot no longer waits. This latch swallows the leftover press from the main loop
+// instead, which preserves the one thing the wait was for: the release bounce (10-50 ms on
+// these switches, well past InputManager's 5 ms debounce) must not reach the press-type FSM
+// as a second click, which on a device with double-click-to-sleep configured would put it
+// straight back to sleep.
+//
+// Serviced by serviceBootPowerRelease(), defined below markBootPhase().
+static bool bootPowerReleasePending = false;
+static unsigned long bootPowerHighSince = 0;
+
 static void logStartupMemory(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t minFree = esp_get_minimum_free_heap_size();
@@ -444,6 +465,37 @@ static void logBootSummary() {
           HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
           CrossPointSettings::getPowerButtonDuration());
   logBootTrace();
+}
+
+// Poll the raw power pin and keep the boot press away from the event system until it has
+// been released for RELEASE_STABLE_MS. See the latch's declaration for why boot no longer
+// blocks on this. Call once per loop tick, after ButtonEventManager has drained the sampler
+// queue and before any power handling.
+static void serviceBootPowerRelease() {
+  if (!bootPowerReleasePending) return;
+  // Same window waitForStablePowerRelease() used; the raw pin is read directly for the same
+  // reason it did — the 5 ms debounce is too short for mechanical release bounce.
+  constexpr unsigned long RELEASE_STABLE_MS = 200;
+  const unsigned long now = millis();
+  if (digitalRead(InputManager::POWER_BUTTON_PIN) == HIGH) {
+    if (bootPowerHighSince == 0) bootPowerHighSince = now;
+  } else {
+    bootPowerHighSince = 0;
+  }
+  // Unconditional, including on the tick that clears the latch: drain() resets every FSM and
+  // flushes the sampler's edge queue plus the pending press/release bits, so neither the boot
+  // press, its release, nor the bounce that follows can be seen by loop() or by an activity.
+  // It also keeps gpio.wasPressed(BTN_POWER) false, which is what stops the hold-to-sleep
+  // timer in loop() from ever starting on the wake press.
+  buttonEventManager.drain();
+  if (bootPowerHighSince != 0 && now - bootPowerHighSince >= RELEASE_STABLE_MS) {
+    bootPowerReleasePending = false;
+    // Stamped here rather than in setup(), so `rel` in the boot trace still reports how long
+    // the user kept holding past the point the device was ready — it just no longer costs
+    // that time. Read it back with CMD:BOOTLOG, which now prints it after the fact.
+    markBootPhase(BootPhase::PowerRelease);
+    LOG_DBG("MAIN", "Wake press released at %lu ms (boot was not blocked on it)", now);
+  }
 }
 
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
@@ -1013,15 +1065,12 @@ void setup() {
   markBootPhase(BootPhase::ActivityRoute);
   logStartupMemory("after_activity_route");
 
-  // Ensure we're not still holding the power button before leaving setup.
-  // waitForStablePowerRelease protects against switch bounce that might register as a false double-press.
+  // The wake press may still be held. Arm the latch that swallows it (and its release
+  // bounce) from the main loop rather than blocking here — see bootPowerReleasePending.
   // Skip on silent reboot: the firmware triggered the restart, so the button isn't held.
   if (!isSilentReboot) {
-    gpio.waitForStablePowerRelease();
-    // Stamped after the wait, so `rel` minus `route` is how long the user kept holding
-    // past the point the device was ready — the other half of the "how long should I
-    // hold this?" question.
-    markBootPhase(BootPhase::PowerRelease);
+    bootPowerReleasePending = true;
+    bootPowerHighSince = 0;
   }
   // All boot-time power-button handling (which drives inputMgr.update() directly)
   // is done — hand button sampling to the background sampler so presses are caught
@@ -1049,6 +1098,8 @@ void loop() {
 
   gpio.update();
   buttonEventManager.update();
+  // Must follow the drain above and precede every power consumer below.
+  serviceBootPowerRelease();
   HalClock::updatePeriodic();
   halTiltSensor.update(static_cast<CrossPointTiltPageTurn::Value>(SETTINGS.tiltPageTurn),
                        static_cast<CrossPointOrientation::Value>(SETTINGS.orientation),
@@ -1459,7 +1510,11 @@ void loop() {
     // Two-stage idle backoff, ported from crosspoint-reader PR #2525 (Brian Pugh /
     // @BrianPugh), which measured 9.68 mA -> 2.78 mA idle on an X3 with a PPK2.
     const unsigned long idleMs = millis() - lastActivityTime;
-    if (idleMs >= HalPowerManager::IDLE_LIGHT_SLEEP_MS) {
+    // A still-held wake press is flushed before it reaches lastActivityTime, so the loop
+    // reads as idle while the finger is down. Light sleep arms the power pin as a LEVEL
+    // wake, which an already-LOW pin satisfies immediately: the chip would spin through
+    // arm/sleep/reject/disarm every tick for as long as the user holds. Poll instead.
+    if (idleMs >= HalPowerManager::IDLE_LIGHT_SLEEP_MS && !bootPowerReleasePending) {
       // Idle: light-sleep between polls instead of busy-delaying. Race-to-sleep —
       // run the brief wake windows at the normal clock, not LOW_POWER_FREQ. The
       // board's sleep-floor current is paid per millisecond regardless of CPU
