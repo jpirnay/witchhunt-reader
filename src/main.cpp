@@ -52,14 +52,17 @@
 // Static-init heap probes bracketing this TU's globals (slots 4/5); see BootHeapProbe.h.
 static BootHeapProbe s_probeMainFirst(4);
 #endif
-MappedInputManager mappedInputManager(gpio);
+// Declared before mappedInputManager: the mapper holds a renderer reference for
+// the live-orientation touch transform, and globals in one TU are constructed in
+// declaration order.
+GfxRenderer renderer(display);
+MappedInputManager mappedInputManager(gpio, renderer);
 ButtonEventManager buttonEventManager(mappedInputManager);
 
 // Lets lib-layer long tasks (image decoders) bail out mid-work so a queued button
 // press is serviced on the next main-loop pass. Installed once in setup().
 static bool hasPendingButtonInput() { return mappedInputManager.hasPendingInput(); }
 ButtonEventManager& globalButtonEvents() { return buttonEventManager; }
-GfxRenderer renderer(display);
 ActivityManager activityManager(renderer, mappedInputManager);
 FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
