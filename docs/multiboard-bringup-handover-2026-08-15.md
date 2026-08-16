@@ -147,15 +147,31 @@ Transitively also exercised: the `master` 2.23 merge, touch phases 1–3 (inert 
 C3 but compiled in), and `HalI2cBus` (a no-op `Lock` there, which the
 byte-identical build already implied).
 
-**Still unverified on X4**, both cheap to check next time it is in hand:
+**Also confirmed on device:** Settings → Controls shows only the physical button
+entries — **no tilt entries** — which is exactly what `SettingRequires::TiltSensor`
+should produce on a board with no IMU. That is the `SettingRequires` refactor
+(`968a8493`) verified on hardware, not just predicted. The Fast AA toggle lives
+under Reader → Font, not Controls, and rides the same mechanism, so it is treated
+as low-risk rather than separately checked.
 
-- **USB connect/disconnect** updates the charging state. The `usbDetect` pinMode
-  moved from a `deviceIsX4()` test to a gauge-bus pin-conflict test; the values
-  are right on paper but nothing has plugged a cable in.
-- **Settings → Controls** shows no Fast AA, no tilt and no touch entries on X4.
-  This is still a *prediction* from the board profiles rather than an
-  observation — it is the one claim in the `SettingRequires` refactor
-  (`968a8493`) that has not been eyeballed.
+**Still unverified on X4: USB electrical detect.** The `usbDetect` pinMode moved
+from a `deviceIsX4()` test to a gauge-bus pin-conflict test, and nothing has
+exercised the GPIO20 read.
+
+Two things make this awkward to test, both worth knowing before trying:
+
+1. **On X4 the serial log goes over the same USB.** Unplugging to test detection
+   drops the connection you would be watching it on. The observable is visual —
+   the lightning bolt in the battery icon, drawn from `gpio.isUsbConnected()` in
+   `BaseTheme`/`LyraTheme` — not a log line. There is no serial logging of USB
+   state transitions at all.
+2. **A data cable makes the test inconclusive.** Detection is
+   `usbSofActive || usbElectricalConnected`: the SOF (USB-serial-JTAG frame)
+   path alone reports connected, so the bolt appears whether or not the GPIO20
+   read works.
+
+**The isolating test is a charge-only cable** (power, no data): SOF stays
+inactive, so the bolt depends entirely on the converted GPIO path.
 
 ### ⬜ X3 (C3) — not flashed
 
