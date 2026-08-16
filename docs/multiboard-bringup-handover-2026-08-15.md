@@ -380,14 +380,31 @@ no longer read by the HAL.
 
 | Item | Why it is not done |
 |---|---|
-| `HalStorage` SDMMC mount for X4 Pro | The largest remaining piece. X4 Pro's card is silent to SPI-mode CMD0; it needs `SdmmcBlockDevice` (1-bit, slot 1, CLK41/CMD42/DAT0 40) and the GPIO5 active-LOW power-enable pulse. `USE_BLOCK_DEVICE_INTERFACE=1` is already in its env. |
+| ~~`HalStorage` SDMMC mount for X4 Pro~~ | **Corrected 2026-08-16: little or nothing to do.** The SDK already handles it — `SDCardManager` is device-agnostic and selects the backend from `FREEINK_SD_SDMMC`, which is **auto-true for `FREEINK_DEVICE_X4PRO`**; `SdmmcBlockDevice` drives the `sd.powerEnable` (GPIO5, active-LOW) pulse itself; and `USE_BLOCK_DEVICE_INTERFACE=1` is already in the env. `HalStorage` only ever calls `SDCard.begin()` and backend-neutral methods. Earlier drafts called this "the largest remaining piece" — that was inferred from the plan, not from reading the SDK. **Unknown until hardware: whether it actually mounts.** |
 | CW2017 gauge driver | X4 Pro reports no battery today. The read path is still BQ27220-specific (`I2C_ADDR_BQ27220`, `BQ27220_*_REG`); the gauge address alone is not enough. |
 | BM8563 RTC driver | X4 Pro has no hardware clock today. `HalClock` correctly *skips* rather than mis-drives it, so this is missing function, not a bug. |
 | `HalDisplay::begin()`'s `setDisplayX3()` | Still `deviceIsX3()`, and arguably correctly so — it selects the X3 panel facade within the dual C3 binary, which is board identity rather than capability. Revisit only if a non-Xteink UC8253 board appears. |
 | Deep-sleep wake level | Still hardcoded LOW; should read `input.powerActiveHigh`. Deliberate hold-over from `02c324cc` — every board we build is active-LOW, so converting is behaviour risk to the shipped C3 for no present gain. |
 
 **The milestone to aim at is unchanged: X4 Pro boots, mounts SD, renders a page.**
-Storage is the blocker; the pins underneath it are now in place.
+With the pin work done and storage handled by the SDK, there may be **no known
+code blocker left** — the next honest step is to flash an X4 Pro and find out
+what actually breaks, rather than to keep writing code against guesses.
+
+### Found while checking storage: a spurious lock coupling on SDMMC boards
+
+`HalStorage::StorageLock` takes `HalSpiBus::Lock` as its first member, so **every
+SD operation holds the SPI bus lock**. That is correct on the C3, where the panel
+and the SD card genuinely share one bus. On X4 Pro the SD card is on SDMMC and
+shares nothing with the display, so the coupling is spurious: SD reads would
+serialize against panel refreshes for no reason.
+
+Not fixed yet, deliberately. It is a **performance** issue, not correctness, on a
+board that does not boot yet, and the fix is more invasive than it looks —
+`spiLock` is a RAII member whose declaration order is load-bearing (see the
+comment in `HalStorage.cpp`), so making it conditional means an optional member
+rather than an `if`. The gate would be `BoardConfig::ACTIVE.sdmmc.busWidth == 0`
+(i.e. "SD really is on the SPI bus"), which is identity on the C3.
 
 ### What `1c3a43ea` landed, and the two bugs it found
 
