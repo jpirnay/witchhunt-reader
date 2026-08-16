@@ -6,6 +6,7 @@
 #include <Memory.h>
 #include <SdCardFont.h>
 #include <SmallCaps.h>
+#include <TouchTransform.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 
@@ -2806,6 +2807,29 @@ int GfxRenderer::getScreenHeight() const {
       return panelHeight;
   }
   return panelWidth;
+}
+
+// Inverse of rotateCoordinates: panel-native normalized touch -> logical px.
+// Ported from upstream/develop so the layers above stay diff-comparable. Clamp
+// first, then rotate, so an out-of-range report from the controller can never
+// produce an off-screen logical point.
+//
+// One deliberate difference from upstream: our `orientation` member is a
+// std::atomic<int>, not a plain enum, so this reads it once through
+// getOrientation() instead of switching on the member directly. Reading it once
+// also keeps the transform self-consistent if the reader rotates mid-call.
+// The transform itself lives in TouchTransform.h so it can be host-tested
+// without Arduino; keep the two orientation orders in lockstep.
+static_assert(static_cast<int>(GfxRenderer::Portrait) == touchtransform::Portrait &&
+                  static_cast<int>(GfxRenderer::LandscapeClockwise) == touchtransform::LandscapeClockwise &&
+                  static_cast<int>(GfxRenderer::PortraitInverted) == touchtransform::PortraitInverted &&
+                  static_cast<int>(GfxRenderer::LandscapeCounterClockwise) == touchtransform::LandscapeCounterClockwise,
+              "touchtransform::Orientation must mirror GfxRenderer::Orientation");
+
+void GfxRenderer::tapToLogical(const float nx, const float ny, int& outX, int& outY) const {
+  // Read the atomic orientation once so the transform stays self-consistent
+  // even if the reader rotates the screen mid-call.
+  touchtransform::tapToLogical(static_cast<int>(getOrientation()), panelWidth, panelHeight, nx, ny, outX, outY);
 }
 
 static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, int lx, int ly, int lw, int lh,

@@ -227,6 +227,20 @@ class GfxRenderer {
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
+  // Map a touch point from normalized PANEL-NATIVE coordinates (0..1, the frame
+  // InputManager reports in, per the BoardConfig touch contract) to LOGICAL
+  // screen pixels under the renderer's live orientation.
+  //
+  // The renderer is the only authority on the orientation actually on screen —
+  // the reader rotates it and restores portrait on exit — so the touch
+  // transform is read from it rather than from the persisted setting. This is
+  // the same discipline setStripReversedPredicate already applies to the front
+  // buttons, and it is why MappedInputManager holds a renderer reference.
+  //
+  // Output is clamped to the panel, so a caller always gets an on-screen point.
+  // Ported verbatim from upstream/develop; see
+  // docs/touch-input-migration-2026-08-14.md phase 2.
+  void tapToLogical(float nx, float ny, int& outX, int& outY) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —
