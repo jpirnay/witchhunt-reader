@@ -1,6 +1,7 @@
 #include "HalPowerManager.h"
 
 #include <BoardConfig.h>
+#include <HalCapabilities.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
@@ -18,8 +19,10 @@ HalPowerManager powerManager;  // Singleton instance
 static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
-  if (gpio.deviceIsX3()) {
-    // X3 uses an I2C fuel gauge for battery monitoring.
+  if (HalCapabilities::hasI2cFuelGauge()) {
+    // Boards with an I2C fuel gauge read charge over the bus rather than from an
+    // ADC divider (X3 has a BQ27220 at 0x55, X4 Pro a CW2017 at 0x63; X4 has
+    // none and uses BAT_GPIO0).
     // I2C init must come AFTER gpio.begin() so early hardware detection/probes are finished.
     Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
     Wire.setTimeOut(4);
@@ -337,7 +340,7 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   // Guard against an X3 board mistakenly taking the ADC path: BAT_GPIO0 is
   // reused as X3_I2C_SCL on X3, so reading it as ADC would collide with the
   // fuel-gauge bus. _batteryUseI2C must match the detected device type.
-  assert(_batteryUseI2C == gpio.deviceIsX3());
+  assert(_batteryUseI2C == HalCapabilities::hasI2cFuelGauge());
   if (_batteryUseI2C) {
     const unsigned long now = millis();
     if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {

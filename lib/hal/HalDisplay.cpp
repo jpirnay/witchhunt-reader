@@ -1,4 +1,5 @@
 #include <BootHeapProbe.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -84,7 +85,7 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
 }
 
 void HalDisplay::requestResync(uint8_t settlePasses) {
-  if (gpio.deviceIsX3() && settlePasses > pendingX3SettlePasses) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && settlePasses > pendingX3SettlePasses) {
     pendingX3SettlePasses = settlePasses;
   }
 }
@@ -95,7 +96,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
     einkDisplay.requestResync(pendingX3SettlePasses);
@@ -120,7 +121,7 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
     einkDisplay.requestResync(pendingX3SettlePasses);

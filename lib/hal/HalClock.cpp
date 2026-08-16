@@ -1,6 +1,7 @@
 #include "HalClock.h"
 
 #include <Arduino.h>
+#include <HalCapabilities.h>
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
@@ -270,8 +271,12 @@ static bool initExternalRTC() {
   if (initialized) return exists;
   initialized = true;
 
-  if (!gpio.deviceIsX3()) {
-    LOG_DBG("CLK", "Skipping DS3231 init on non-X3 board");
+  // Specifically a DS3231, not merely "some RTC": X4 Pro has a BM8563 at 0x51
+  // which is PCF8563-register-compatible and would return garbage if driven with
+  // DS3231 register offsets. Asking hasHardwareRtc() here would be the subtly
+  // wrong fix -- it is true on X4 Pro. Driving a BM8563 is separate work.
+  if (HalCapabilities::rtcType() != BoardConfig::RtcType::Ds3231) {
+    LOG_DBG("CLK", "Skipping DS3231 init: board has no DS3231");
     return false;
   }
 

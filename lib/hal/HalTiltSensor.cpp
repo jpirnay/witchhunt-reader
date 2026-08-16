@@ -1,5 +1,6 @@
 #include "HalTiltSensor.h"
 
+#include <HalCapabilities.h>
 #include <Logging.h>
 
 HalTiltSensor halTiltSensor;
@@ -51,7 +52,9 @@ bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
 }
 
 void HalTiltSensor::begin() {
-  if (!gpio.deviceIsX3()) {
+  // Tilt needs an IMU, not an X3 specifically. X3 carries a QMI8658; X4 and
+  // X4 Pro carry none, so both correctly skip.
+  if (!HalCapabilities::hasTiltSensor()) {
     _available = false;
     return;
   }
