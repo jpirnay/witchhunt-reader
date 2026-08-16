@@ -1,7 +1,8 @@
 # Touch input migration — investigation and plan
 
 Date: 2026-08-14 (last updated 2026-08-16)
-Status: proposal, nothing implemented
+Status: **phases 1–2 implemented** (2026-08-16), phase 3 onward still proposal.
+Nothing has run on hardware — every gate below is build- or host-test-measured.
 Scope: **workstream C** of
 [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md) — read that
 first for sequencing.
@@ -442,28 +443,50 @@ All three envs link. C3 flash is **~204 KB free**, better than the 177 KB the
 08-14 draft budgeted against — master's font regeneration recovered ~27 KB. The
 flash caution in §3 still applies, but with slightly more room than stated.
 
-### Phase 1 — `HalGPIO` touch passthrough
+### Phase 1 — `HalGPIO` touch passthrough ✅ DONE (`cfd00bf8`)
 
-Port upstream's ~10 methods verbatim. Everything inside `#if FREEINK_CAP_TOUCH`
-with inert `false`-returning stubs otherwise, so callers need no ifdefs and C3
-builds pay nothing.
+Port upstream's ~10 methods verbatim. ~~Everything inside `#if FREEINK_CAP_TOUCH`
+with inert `false`-returning stubs otherwise~~ — **not needed**: every
+`InputManager` touch method is already `#if FREEINK_CAP_TOUCH` guarded *inside
+the SDK* and compiles to an inert `false`/`0`, so plain passthroughs cost the C3
+nothing and callers still need no ifdefs.
 
-Gate: `pio run -e default` (C3) flash/RAM delta is **zero**.
+Gate: `pio run -e default` (C3) flash/RAM delta is **zero**. **Met exactly** —
+RAM 56,692 / Flash 6,349,593, byte-identical; x4pro +4 bytes.
 
-### Phase 2 — `MappedInputManager` touch layer (the core port)
+### Phase 2 — `MappedInputManager` touch layer ✅ DONE (`4ab2c188`, `7d59e493`, `82be8458`, `6990c4b1`)
 
-Port upstream's header and implementation:
+- ✅ Constructor gains `const GfxRenderer&`; `main.cpp` declares `renderer`
+  before `mappedInputManager` (globals in one TU construct in declaration order).
+- ✅ `GfxRenderer::tapToLogical()` — the transform itself, which our fork
+  lacked. Math extracted to an Arduino-free `TouchTransform.h` so it is
+  host-testable, with a `static_assert` keeping the orientation orders in step.
+- ✅ Full touch API + `SwipeDir` + `RowTouch` + back/menu/home/home-key gestures.
+- ✅ Geometry from FreeInkUI (`edgeSwipe`, `swipeDirection`) — linked via
+  `lib_deps`, not copied.
+- ✅ P1: `HalI2cBus` mutex + sampler stack 2048 → 4096 under `FREEINK_CAP_TOUCH`.
+- ⚠️ **`Button` enum extension deliberately deferred.** Upstream's
+  `Screen*`/`Nav*` names and `mapScreenDirection()` key on a
+  `frontButtonFollowOrientation` setting our fork does not have (we use
+  `setStripReversedPredicate`). The touch API does not need them, and adding a
+  setting is a scope call. `ButtonEventManager::NUM_BUTTONS` therefore stays 9
+  and the press-type FSM is untouched — which is what the audit was protecting.
 
-- Constructor gains `const GfxRenderer&` (mechanical change in `main.cpp`).
-- `Button` enum extension — additive, but audit `ButtonEventManager::NUM_BUTTONS`
-  / `ALL_BUTTONS` (currently 9): the new `Screen*`/`Nav*` names are touch-derived
-  and must **not** join the press-type FSM.
-- Full touch API + `SwipeDir` + `RowTouch` + the named semantic gestures.
-- Geometry from FreeInkUI (`edgeSwipe`, `touchToLogical`, `Rect`) — linked, not
-  copied.
+Also not ported, with reasons: `wasLightPanelGesture` (no `HalFrontlight` in this
+fork — belongs with the frontlight work), `wasPowerConfirmClick` (depends on
+`SETTINGS.shortPwrBtn`), and the `rememberTouchHeldTime`/`getHeldTime` override
+(would change button held-time behaviour on the shipped C3).
 
 Gate: host unit tests for the orientation transform in all four orientations, and
-for `rowTouch` band arithmetic. This is pure logic; it should not need hardware.
+for `rowTouch` band arithmetic. **Met** — `test/touch_transform`, 15 tests,
+470/470 suite green. `rowTouch`/`colTouch` now share one `bandHit()` helper
+(same question on perpendicular axes), which is what made the arithmetic
+testable without HalGPIO or a renderer.
+
+Final sizes: C3 RAM 56,692 / Flash 6,349,601 (**+8 bytes** over the merge
+baseline, from the reordered globals); x4pro RAM 66,640 / Flash 6,173,358.
+The touch code is unreferenced until phase 3 wires it up, so the linker still
+drops most of it.
 
 ### Phase 3 — Reader touch
 
