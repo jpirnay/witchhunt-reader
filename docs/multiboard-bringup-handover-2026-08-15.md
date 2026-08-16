@@ -2,9 +2,9 @@
 
 *State (updated 2026-08-16): branch `fix/s3-build-config`, pushed. `master` (2.23)
 merged in; all three envs build. Workstream **A done**, **C phases 1-3 done**,
-**B0 done**, **B in progress**. **First hardware validation passed on X4** —
-see "Device validation" below. The S3 boards remain unflashed and will not yet
-boot.*
+**B0 done**, **B pin work done and hardware-validated on both C3 boards**
+(see "Device validation"). The S3 boards remain unflashed; there is no longer a
+known code blocker to trying one.*
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -230,6 +230,15 @@ can validate it.
 **Sampler stack on X3: `high-water=1508 bytes free`** of 2048, i.e. a ~540-byte
 peak — within 8 bytes of the X4 figure. The ~532-540 byte baseline holds across
 both C3 boards and both input topologies (ADC ladder on X3, same on X4).
+
+**Re-flashed on `6f4e640f` (2026-08-16): no regressions.** That closes the one
+gap left by the earlier runs — `748a7dd1` (display pins from the profile) and
+`6f4e640f` (RTC address, USB-detect pin, battery ADC pin) had been
+build-verified only. X3 is the right board to have confirmed them on: it is the
+one that actually drives the DS3231 at the profile-sourced address, over the
+profile-sourced I2C pins.
+
+**Every workstream-B commit is therefore now hardware-validated on the C3.**
 
 Not captured, same cause as on X4: the `[HW]` device-detection lines. They are
 emitted before USB-CDC re-enumerates after reset, so a capture over the device's
