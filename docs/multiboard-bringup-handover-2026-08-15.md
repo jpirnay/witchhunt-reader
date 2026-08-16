@@ -173,6 +173,32 @@ Two things make this awkward to test, both worth knowing before trying:
 **The isolating test is a charge-only cable** (power, no data): SOF stays
 inactive, so the bolt depends entirely on the converted GPIO path.
 
+Attempted 2026-08-16 with the normal data cable: the charging indicator **did**
+appear, so nothing is broken end to end — but the serial capture was live at the
+time, meaning USB frames were flowing and `usbSofActive` was true by
+construction. Inconclusive for the GPIO path, so this stays open.
+
+### Sampler stack — measured baseline for P1
+
+From the same session:
+
+```
+[MEM] btnSampler stack high-water=1516 bytes free (min ever)
+```
+
+The C3 sampler is 2048 bytes (the bump to 4096 is `FREEINK_CAP_TOUCH`-gated, so
+the C3 is unaffected), which means a **measured peak of ~532 bytes** on the
+button-only path. Note the code comment in `startInputSampler()` cites ~380 bytes
+from an older measurement — the real figure is ~40 % higher, so the "4x headroom"
+claim there is really closer to 3.8x.
+
+This is the number to compare against when `samplerStackHighWater()` is finally
+read on an X4 Pro: whatever `serviceTouch()`'s GT911 I2C path costs, it stacks on
+top of ~532 bytes, and 4096 was chosen because it is what the SDK sizes its own
+`update()`-calling task at. If the touch-board high-water lands anywhere near
+2048 free, 4096 was the right call; if it barely moves, the bump could be
+revisited.
+
 ### ⬜ X3 (C3) — not flashed
 
 X3 is the more informative C3 target for what remains, because it is the board
