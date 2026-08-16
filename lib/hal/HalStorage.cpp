@@ -1,6 +1,7 @@
 #define HAL_STORAGE_IMPL
 #include "HalStorage.h"
 
+#include <BoardConfig.h>
 #include <FS.h>  // need to be included before SdFat.h for compatibility with FS.h's File class
 #include <HalClock.h>
 #include <Logging.h>
@@ -10,6 +11,7 @@
 #include <cassert>
 #include <ctime>
 #include <new>
+#include <optional>
 
 #include "HalSpiBus.h"
 
@@ -58,9 +60,21 @@ bool HalStorage::ready() const { return SDCard.ready(); }
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
+// True when the SD card really is on the SPI bus the display also uses. Native
+// SDMMC boards (X4 Pro: 1-bit slot 1, CLK41/CMD42/DAT0 40) share nothing with
+// the panel, so serializing their card against panel refreshes is pure
+// contention for no safety benefit.
+static bool sdSharesDisplaySpiBus() { return BoardConfig::ACTIVE.sdmmc.busWidth == 0; }
+
 class HalStorage::StorageLock {
  public:
-  StorageLock() { xSemaphoreTake(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
+  StorageLock()
+      // Conditional in the member-init list, not the body, so the SPI lock is
+      // still acquired BEFORE storageMutex when it is taken at all — see the
+      // ordering note below.
+      : spiLock(sdSharesDisplaySpiBus() ? std::optional<HalSpiBus::Lock>(std::in_place) : std::nullopt) {
+    xSemaphoreTake(HalStorage::getInstance().storageMutex, portMAX_DELAY);
+  }
   ~StorageLock() { xSemaphoreGive(HalStorage::getInstance().storageMutex); }
 
  private:
@@ -68,7 +82,13 @@ class HalStorage::StorageLock {
   // the bus stays locked for the whole SD operation, and the lock order is
   // always SPI-outer/storage-inner, matching display code (which takes only the
   // SPI lock). Do not reorder this below any other member.
-  HalSpiBus::Lock spiLock;
+  //
+  // Engaged only when the card is actually on that bus. On the C3 it always is,
+  // so this is behaviour-identical there; on an SDMMC board it is disengaged and
+  // SD I/O no longer waits behind a 1-2 s panel refresh. Upstream has no
+  // equivalent coupling at all — HalSpiBus is fork-local, added because our
+  // display and SD genuinely share one bus on the C3.
+  std::optional<HalSpiBus::Lock> spiLock;
 };
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
