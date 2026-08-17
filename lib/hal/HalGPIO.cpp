@@ -222,6 +222,32 @@ void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
 // the sampler is up. inputMgr.update() does the ADC read and must run OUTSIDE the
 // critical section (analogRead may take the ADC driver mutex). Only the latching
 // of the results into the shared accumulators/queue is done under inputMux_.
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+// Names for the raw BTN_* indices, for the bring-up trace below. Raw hardware
+// indices, NOT the user's remapped logical roles — the point is to see what the
+// hardware reported before any mapping.
+static const char* buttonTraceName(uint8_t idx) {
+  switch (idx) {
+    case HalGPIO::BTN_BACK:
+      return "BACK";
+    case HalGPIO::BTN_CONFIRM:
+      return "CONFIRM";
+    case HalGPIO::BTN_LEFT:
+      return "LEFT";
+    case HalGPIO::BTN_RIGHT:
+      return "RIGHT";
+    case HalGPIO::BTN_UP:
+      return "UP";
+    case HalGPIO::BTN_DOWN:
+      return "DOWN";
+    case HalGPIO::BTN_POWER:
+      return "POWER";
+    default:
+      return "?";
+  }
+}
+#endif
+
 void HalGPIO::sampleOnce() {
   {
     // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
@@ -259,6 +285,33 @@ void HalGPIO::sampleOnce() {
     if (released & (1u << i)) pushEdgeLocked(i, false, now);
   }
   portEXIT_CRITICAL(&inputMux_);
+
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // Raw button trace for board bring-up. Deliberately placed AFTER the critical
+  // section: logging inside portENTER_CRITICAL would run with interrupts
+  // disabled and can trip the interrupt watchdog, which is exactly the failure
+  // this kind of tracing is meant to help diagnose.
+  //
+  // This is the LOWEST level our firmware sees — straight off InputManager,
+  // before ButtonEventManager's press-type FSM and before any activity. So a
+  // press that appears here but produces no UI response is being consumed
+  // higher up, while a press that never appears here never reached us at all.
+  // That distinction is the whole point.
+  //
+  // Covers every source InputManager reports, including buttons behind an I2C
+  // expander via setButtonHook() (the T5S3's user button arrives as BTN_DOWN),
+  // which the SDK's own readButtonAdc() diagnostic cannot see — that one is
+  // specific to the Xteink ADC ladder and reports raw = -1 elsewhere.
+  if (pressed != 0 || released != 0) {
+    for (uint8_t i = 0; i <= BTN_POWER; i++) {
+      const bool down = (pressed & (1u << i)) != 0;
+      const bool up = (released & (1u << i)) != 0;
+      if (!down && !up) continue;
+      LOG_INF("BTN", "%s idx=%u (%s) live=0x%02X t=%lums", down ? "DOWN  " : "UP    ", i, buttonTraceName(i), live,
+              static_cast<unsigned long>(now));
+    }
+  }
+#endif
 }
 
 void HalGPIO::samplerTask(void* arg) {
