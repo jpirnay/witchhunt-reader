@@ -136,15 +136,6 @@ class HalGPIO {
   bool homeKeyDrivesBack_ = false;
   bool homeKeyHeld_ = false;
 
-  // Hold-to-Up on boards with a Down button but no Up (set in begin()). The raw
-  // DOWN edges are withheld until the gesture resolves: a short press replays them
-  // as DOWN, a hold emits UP instead. downConsumedAsUp_ marks a hold that has
-  // already produced its UP, so the eventual release replays nothing.
-  bool downHoldDrivesUp_ = false;
-  bool downHeld_ = false;
-  bool downConsumedAsUp_ = false;
-  uint32_t downPressMs_ = 0;
-
   // Edge detection for the BUTTON_TRACE touch line, so a resting finger logs once
   // rather than every sampler pass. Bring-up scaffolding; goes with the trace.
   bool touchTraceWasHeld_ = false;

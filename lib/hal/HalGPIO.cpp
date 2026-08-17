@@ -128,13 +128,6 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 
 }  // namespace
 
-// How long BTN_DOWN must be held before it is spent as an UP instead, on boards
-// with no Up button. Deliberately below ButtonEventManager::LONG_PRESS_MS (1000 ms,
-// src/ButtonEventManager.h) so it resolves before the system long-press would, and
-// well above a page-turn tap: the gesture has to feel like a decision, not a slow
-// tap. Duplicated rather than included because lib/hal must not depend on src/.
-static constexpr uint32_t DOWN_HOLD_UP_MS = 600;
-
 void HalGPIO::begin() {
   // Both probes below poke C3 hardware — the X3/X4 fingerprint reads C3 pins and
   // applyXteinkDisplayController() drives the Xteink display bus — so they must
@@ -206,15 +199,6 @@ void HalGPIO::begin() {
   if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
     LOG_INF("HW", "Capacitive home key routed: tap->%s hold->%s", homeKeyDrivesConfirm_ ? "CONFIRM" : "(has pin)",
             homeKeyDrivesBack_ ? "BACK" : "(has pin)");
-  }
-
-  // Hold the Down button to get Up, on boards that have no Up button at all.
-  // The T5S3 has exactly one nav key (the PCA9535 "IO48", delivered as BTN_DOWN
-  // through InputManager::setButtonHook), so without this a list can only ever be
-  // scrolled one way. Boards with a real Up pin are untouched.
-  downHoldDrivesUp_ = BoardConfig::ACTIVE.input.up == BoardConfig::PIN_UNASSIGNED;
-  if (downHoldDrivesUp_) {
-    LOG_INF("HW", "No Up button: holding Down emits UP after %u ms", DOWN_HOLD_UP_MS);
   }
 
   // USB-presence detect. The pin must exist AND not be shared with the fuel-gauge
@@ -349,54 +333,6 @@ void HalGPIO::sampleOnce() {
   // Because the long event arrives mid-hold and is never followed by a tap, BACK
   // is emitted at that instant and the gesture is then closed out; a stray tap
   // afterwards finds no open press and is ignored.
-  // Hold Down -> Up, for boards whose only nav key is Down.
-  //
-  // The raw DOWN edges are WITHHELD until the gesture resolves, the same shape as
-  // the home key above: a press alone cannot tell a page turn from a scroll-up, and
-  // emitting DOWN immediately would fire the page turn before the hold could be
-  // recognised. Deferring costs nothing in practice -- a page turn is classified on
-  // RELEASE anyway (ButtonEventManager sees press+release together and the reader's
-  // turn happens there), so the button feels exactly as it did.
-  //
-  // The level IS still asserted while the gesture is undecided: isPressed(Down) is
-  // what aaPreemptedByNavigation() reads to know a turn is coming, and suppressing
-  // that would let an AA pass start under a finger that is about to turn the page.
-  //
-  // Known cost: hasPendingInput() reads the pressed accumulator, not the level, so
-  // a long task (image decode) no longer aborts on the press edge -- it aborts on
-  // release, up to DOWN_HOLD_UP_MS later. Acceptable on a board with PSRAM where
-  // those tasks are short; revisit if a decode ever feels sticky here.
-  if (downHoldDrivesUp_) {
-    const bool downPressed = (pressed & (1u << BTN_DOWN)) != 0;
-    const bool downReleased = (released & (1u << BTN_DOWN)) != 0;
-    pressed &= ~(1u << BTN_DOWN);
-    released &= ~(1u << BTN_DOWN);
-    live &= ~(1u << BTN_DOWN);
-
-    if (downPressed) {
-      downHeld_ = true;
-      downConsumedAsUp_ = false;
-      downPressMs_ = now;
-    }
-    if (downHeld_ && !downConsumedAsUp_ && now - downPressMs_ >= DOWN_HOLD_UP_MS) {
-      // The hold is long enough: spend it as a complete UP click and let the
-      // eventual release replay nothing.
-      downConsumedAsUp_ = true;
-      pressed |= (1u << BTN_UP);
-      released |= (1u << BTN_UP);
-    }
-    if (downHeld_ && downReleased) {
-      downHeld_ = false;
-      if (!downConsumedAsUp_) {
-        pressed |= (1u << BTN_DOWN);
-        released |= (1u << BTN_DOWN);
-      }
-    }
-    if (downHeld_ && !downConsumedAsUp_) {
-      live |= (1u << BTN_DOWN);
-    }
-  }
-
   if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
     if (inputMgr.wasHomeKeyPressed()) {
       homeKeyHeld_ = true;
