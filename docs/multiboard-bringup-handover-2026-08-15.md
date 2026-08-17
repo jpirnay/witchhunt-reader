@@ -352,7 +352,7 @@ first on the next board.
 |---|---|---|
 | BOOT | GPIO0 | the power button, by SDK design → `BTN_POWER` ✓ |
 | "IO48" | **PCA9535 I2C expander** (the label is silkscreen, not the wiring) | user button → `BTN_DOWN` ✓ |
-| **Home key** | **GT911 capacitive**, status bit `0x10` | → `BTN_CONFIRM` ✓ **device-validated 2026-08-17** |
+| **Home key** | **GT911 capacitive**, status bit `0x10` | tap → `BTN_CONFIRM`, hold → `BTN_BACK` ✓ **device-validated 2026-08-17** |
 | PWR | **unknown** — not on any pin we sample, and the vendor documents no function | see below |
 | RST | hardware reset | ✓ reboots correctly since `17df518a` |
 
@@ -364,15 +364,28 @@ was already wrong about IO48's wiring. It was found by trace, not by reading:
 driver level and was discarded at every consumer. **Treat vendor button lists as
 a lower bound and probe the hardware.**
 
-The vendor wiki says only *"Buttons: RST + BOOT + IO48 + PWR"* with **no
-functional description**, and their reference firmware
-(`examples/factory/main/utilities.h`) defines only `BOARD_BOOT_BTN (0)` and
-`BOARD_PCA9535_INT (38)`. So PWR is not readable by firmware, but *why* is
-unestablished. Working hypothesis: the board carries a BQ25896 charger (0x6B),
-whose `/QON` pin is the conventional place to wire a power button for ship-mode
-exit and power-path control. **Testable without a schematic:** on battery with
-USB unplugged, hold PWR ~10 s — a hard power-off, revived by a press, confirms
-`/QON`. The schematic is not in the vendor repo.
+**PWR resolved from the schematic (2026-08-17).** The vendor repo *does* carry a
+pin map — `docs/pinmap.md` in
+[`Xinyuan-LilyGO/T5S3-4.7-e-paper-PRO`](https://github.com/Xinyuan-LilyGO/T5S3-4.7-e-paper-PRO),
+compiled from `hardware/T5 E-paper S3 Pro V1.0 24-12-24.pdf`. It lists exactly
+three buttons, and **PWR is not among them**:
+
+| Vendor entry | Mapping |
+|---|---|
+| `PIN_BOOT` | GPIO0 — *"low level enters download mode"* |
+| `PIN_RESET_EN` | the `EN` pin — *"Not a regular GPIO"* |
+| `PIN_PCA9535_BUTTON` | **PCA9535 IO1_2**, board net `BUTTON`, *"On-board function button `S3`"* — this is the "IO48" silkscreen |
+
+So PWR is genuinely not MCU-readable: it appears on no GPIO and on no expander
+line. The `/QON` hypothesis stays the best explanation — BQ25896 at `0x6B` is
+confirmed present on schematic page 1 — but it remains **unproven**, and the
+10 s hold-on-battery test is still the way to settle it. Stop spending time
+trying to read PWR in firmware; the schematic says there is nothing to read.
+
+**Correction to an earlier claim in this document:** it said the schematic was
+not in the vendor repo. It is — as `docs/pinmap.md` and `docs/pin_define.md`.
+Note `raw.githubusercontent.com` was rate-limited (429) when fetching these;
+`gh api repos/.../contents/<path> --jq .content | base64 -d` works.
 
 **Three software-visible inputs, one of which is power.** The home key lifts the
 board from unusable to navigable, but touch phase 4 remains mandatory — see the
@@ -416,18 +429,39 @@ fire `Long`. Device trace confirming both:
 
 #### Still open on the T5S3
 
-- **No Back button — activities cannot be exited.** The most pressing usability
-  gap. Note there is **no `BTN_BACK` action** in `BUTTON_ACTION`, and those
-  actions are reader-scoped anyway, so this cannot be fixed with a setting; Back
-  must be produced at the input-mapping layer. `Button::Back` resolves through
-  `SETTINGS.frontButtonBack` to raw index `BTN_BACK = 0`, so the same synthesis
-  the home key uses would reach every activity. Candidates: home-key **long** →
-  Back (no cost to the click, but spends the long gesture), home-key **double** →
-  Back (costs every single click a 300 ms `DOUBLE_WINDOW_MS` delay, since
-  `hasDoubleAction()` defers the Short), IO48 long → Back, or touch phase 4.
+- ~~**No Back button — activities cannot be exited.**~~ **ADDRESSED 2026-08-17:**
+  home-key **hold → `BTN_BACK`**, tap → `BTN_CONFIRM`. Worth recording *why* that
+  shape: there is **no `BTN_BACK` action** in `BUTTON_ACTION` and those actions
+  are reader-scoped, so a setting could not have fixed it — Back had to be
+  produced at the input-mapping layer, where `Button::Back` resolves through
+  `SETTINGS.frontButtonBack` to raw index `BTN_BACK = 0`. Double-click was
+  rejected: any double action makes `hasDoubleAction()` defer *every* single
+  click by `DOUBLE_WINDOW_MS` (300 ms), a large regression to the primary action
+  on a panel that refreshes in ~500 ms. **The SDK already had this pattern** —
+  `InputStyle::DigitalConfirmBackHold` / `InputManager::updateConfirmBackHold()`
+  (M5 PaperColor): hold asserts BACK, and CONFIRM is emitted on release only if
+  the hold did not happen. That style cannot be selected here (it drives a real
+  `input.confirm` GPIO, and runs below where our synthetic key enters), so its
+  semantics are reproduced rather than reused. Touch phase 4 remains the real
+  answer; three inputs will always be cramped.
 - **Ghosting artifacts in the Reader** (observed 2026-08-17, first reader entry
   on this board). Not yet investigated; the panel is `LgfxEpd`, a different path
   from the SSD1677 boards where the `panelNeedsHalfRefreshSettle()` work was done.
+- **The board HAS a hardware RTC and our profile says it does not.** The vendor
+  schematic shows **`PCF8563TS` at `0x51`** (page 3 / U3); the README's product
+  table says `PCF85063`, and the vendor's own notes say to prefer the schematic.
+  Our profile uses `NO_SENSORS`, i.e. `RtcType::None`, so `hasHardwareRtc()` is
+  false and the board keeps time in software. The SDK enum **already has
+  `RtcType::Pcf8563`**, so this is a profile fix, not a driver port — likely the
+  cheapest real capability win available on this board. (The boot log's
+  *"Skipping DS3231 init: board has no DS3231"* is correct but misleading: the
+  board has an RTC, just not that one.)
+- **A frontlight exists and is unused.** `BL_EN` = **GPIO11**, driving a
+  `PT4103B23F` enable. Nothing in our profile references it.
+- **LoRa/GPS share a 3.3V rail gated by PCA9535 `IO0_0`** (`LORA_EN`), off by
+  default. Relevant background to the SD/SPI bus work: `BoardT5S3::begin()`
+  deselects the LoRa CS, and the rail being unpowered is a second reason the bus
+  behaves.
 
 - **PWR's actual function** (above).
 - **The 20 MHz SD clamp is unproven.** SD may work purely because

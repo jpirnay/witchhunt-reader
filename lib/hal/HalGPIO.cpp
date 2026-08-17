@@ -185,14 +185,20 @@ void HalGPIO::begin() {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
 
-  // Route the capacitive home key to BTN_CONFIRM only where that button is
-  // otherwise unreachable. Both conditions matter: a board without a home key has
-  // nothing to route, and a board with a real Confirm pin must not have it
-  // shadowed by synthetic edges. Evaluated once here, after the board profile is
-  // final (including any runtime corrections).
-  homeKeyDrivesConfirm_ = BoardConfig::hasHomeKey() && BoardConfig::ACTIVE.input.confirm == BoardConfig::PIN_UNASSIGNED;
-  if (homeKeyDrivesConfirm_) {
-    LOG_INF("HW", "Capacitive home key routed to CONFIRM (board has no Confirm pin)");
+  // Route the capacitive home key to the nav buttons this board physically
+  // lacks: tap -> CONFIRM, hold -> BACK. Each role is resolved separately rather
+  // than from HalCapabilities::hasBackAndConfirmButtons(), which is false when
+  // EITHER pin is missing: a board with a real Back pin but no Confirm pin must
+  // keep its real Back and gain only the synthetic Confirm. A board with no home
+  // key has nothing to route at all. Evaluated once here, after the board profile
+  // is final (including any runtime corrections).
+  if (BoardConfig::hasHomeKey()) {
+    homeKeyDrivesConfirm_ = BoardConfig::ACTIVE.input.confirm == BoardConfig::PIN_UNASSIGNED;
+    homeKeyDrivesBack_ = BoardConfig::ACTIVE.input.back == BoardConfig::PIN_UNASSIGNED;
+  }
+  if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
+    LOG_INF("HW", "Capacitive home key routed: tap->%s hold->%s", homeKeyDrivesConfirm_ ? "CONFIRM" : "(has pin)",
+            homeKeyDrivesBack_ ? "BACK" : "(has pin)");
   }
 
   // USB-presence detect. The pin must exist AND not be shared with the fuel-gauge
@@ -258,12 +264,6 @@ static const char* buttonTraceName(uint8_t idx) {
 }
 #endif
 
-// How long the synthetic CONFIRM level is held after the SDK reports a home-key
-// long press, so ButtonEventManager classifies it Long rather than Short. Must
-// be >= ButtonEventManager::LONG_PRESS_MS (1000 ms, src/ButtonEventManager.h);
-// duplicated rather than included because lib/hal must not depend on src/.
-static constexpr uint32_t HOME_KEY_LONG_HOLD_MS = 1000;
-
 void HalGPIO::sampleOnce() {
   {
     // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
@@ -307,35 +307,49 @@ void HalGPIO::sampleOnce() {
   // Setting the bits here feeds both: the loop below derives the edges from
   // pressed/released for free, exactly as it does for a real button.
   //
-  // Edge synthesis, given InputManager exposes only one-shot events and keeps
-  // touchHomeKeyDown private:
-  //   press   -> wasHomeKeyPressed()
-  //   release -> wasHomeKeyTapped(), or wasHomeKeyLongPressed()
-  // wasHomeKeyLongPressed() fires WHILE the key is still held and no tap follows
-  // it, so it cannot be released on the spot: the SDK's long threshold is
-  // shorter than ButtonEventManager::LONG_PRESS_MS, and an immediate release
-  // would be classified Short -- the opposite of what the user did. Instead the
-  // level stays asserted until our own threshold passes, which lets the FSM's
-  // applyTimeout() fire Long while held; the later release edge lands in Idle
-  // and is ignored, precisely as it is for a real long-pressed button.
-  if (homeKeyDrivesConfirm_) {
+  // One key, two roles: TAP -> CONFIRM, HOLD -> BACK. The board has no Back
+  // button at all, so without this an activity cannot be exited -- the single
+  // worst usability gap on it.
+  //
+  // This mirrors the SDK's own InputManager::updateConfirmBackHold() (the
+  // InputStyle::DigitalConfirmBackHold layout, used by the M5 PaperColor):
+  // a hold asserts BACK, and CONFIRM is emitted on release ONLY if the hold did
+  // not happen. That layout cannot simply be selected here -- it drives
+  // BoardConfig::ACTIVE.input.confirm, a real GPIO this board does not have,
+  // and it runs inside InputManager, below the point where our synthetic key
+  // enters -- but its semantics are the right ones and are reproduced exactly.
+  //
+  // Both roles are emitted as a complete press+release in a single pass. That is
+  // deliberate: InputManager gives us discrete one-shot events, not a level, and
+  // "the gesture finished" is the only moment we can identify with certainty.
+  // A Back click and a Confirm click are what activities consume, so a momentary
+  // pair is sufficient and avoids inventing a hold the hardware never reports.
+  //
+  // Event vocabulary, given InputManager keeps touchHomeKeyDown private:
+  //   wasHomeKeyPressed()     -> gesture started (role still unknown)
+  //   wasHomeKeyTapped()      -> short release  => CONFIRM
+  //   wasHomeKeyLongPressed() -> fires WHILE still held, ~700 ms, and no tap
+  //                              follows it                => BACK
+  // Because the long event arrives mid-hold and is never followed by a tap, BACK
+  // is emitted at that instant and the gesture is then closed out; a stray tap
+  // afterwards finds no open press and is ignored.
+  if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
     if (inputMgr.wasHomeKeyPressed()) {
-      pressed |= (1u << BTN_CONFIRM);
       homeKeyHeld_ = true;
-      homeKeyLongPending_ = false;
-      homeKeyPressMs_ = now;
     }
     if (homeKeyHeld_ && inputMgr.wasHomeKeyLongPressed()) {
-      homeKeyLongPending_ = true;
-    }
-    const bool holdSatisfied = now - homeKeyPressMs_ >= HOME_KEY_LONG_HOLD_MS;
-    if (homeKeyHeld_ && (inputMgr.wasHomeKeyTapped() || (homeKeyLongPending_ && holdSatisfied))) {
-      released |= (1u << BTN_CONFIRM);
       homeKeyHeld_ = false;
-      homeKeyLongPending_ = false;
+      if (homeKeyDrivesBack_) {
+        pressed |= (1u << BTN_BACK);
+        released |= (1u << BTN_BACK);
+      }
     }
-    if (homeKeyHeld_) {
-      live |= (1u << BTN_CONFIRM);
+    if (homeKeyHeld_ && inputMgr.wasHomeKeyTapped()) {
+      homeKeyHeld_ = false;
+      if (homeKeyDrivesConfirm_) {
+        pressed |= (1u << BTN_CONFIRM);
+        released |= (1u << BTN_CONFIRM);
+      }
     }
   }
 
