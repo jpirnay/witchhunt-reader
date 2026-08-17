@@ -145,6 +145,10 @@ class HalGPIO {
   bool downConsumedAsUp_ = false;
   uint32_t downPressMs_ = 0;
 
+  // Edge detection for the BUTTON_TRACE touch line, so a resting finger logs once
+  // rather than every sampler pass. Bring-up scaffolding; goes with the trace.
+  bool touchTraceWasHeld_ = false;
+
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
   static void samplerTask(void* arg);

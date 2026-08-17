@@ -431,6 +431,27 @@ void HalGPIO::sampleOnce() {
   portEXIT_CRITICAL(&inputMux_);
 
 #if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // Raw touch trace, same purpose as the button trace below and the same
+  // reasoning about placement. Uses isTouchHeldAt(), which is const and does NOT
+  // consume: the tap/long-press events are one-shot and belong to their real
+  // consumers, so observing them here would steal them.
+  //
+  // This answers the first bring-up question -- is the panel reporting contact at
+  // all -- separately from the second, whether anything acts on it. Logged on
+  // transition only, so a resting finger does not flood the log.
+  if (BoardConfig::hasTouch()) {
+    float tnx = 0.0f, tny = 0.0f;
+    const bool held = inputMgr.isTouchHeldAt(tnx, tny);
+    if (held != touchTraceWasHeld_) {
+      touchTraceWasHeld_ = held;
+      if (held) {
+        LOG_INF("TCH", "contact DOWN at nx=%.3f ny=%.3f t=%lums", tnx, tny, static_cast<unsigned long>(now));
+      } else {
+        LOG_INF("TCH", "contact UP t=%lums", static_cast<unsigned long>(now));
+      }
+    }
+  }
+
   // Raw button trace for board bring-up. Deliberately placed AFTER the critical
   // section: logging inside portENTER_CRITICAL would run with interrupts
   // disabled and can trip the interrupt watchdog, which is exactly the failure
