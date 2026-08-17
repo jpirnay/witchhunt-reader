@@ -28,53 +28,6 @@
 // pixel-identical.
 namespace ButtonHintLayout {
 
-// A hint box placed against the key it describes, for boards that have no
-// four-button strip. `vertical` marks an edge-mounted key whose label must be
-// drawn rotated, as the X3 side hints already are.
-struct HintBox {
-  bool present = false;
-  int x = 0;
-  int y = 0;
-  int w = 0;
-  int h = 0;
-  bool vertical = false;
-};
-
-// Resolve an anchor into a box. `hw`/`hh` size a bottom-edge box, `vw`/`vh` an
-// edge-mounted one. Fractions are measured from the bottom for the side edges and
-// from the left along the bottom, matching ButtonGeometry.
-inline HintBox boxFor(const ButtonGeometry::Anchor& a, int screenW, int screenH, int hw, int hh, int vw, int vh,
-                      int margin = 4) {
-  HintBox b;
-  if (!a.present()) return b;
-  b.present = true;
-  switch (a.edge) {
-    case ButtonGeometry::Edge::Bottom:
-      b.w = hw;
-      b.h = hh;
-      b.x = static_cast<int>(a.fraction * static_cast<float>(screenW)) - hw / 2;
-      b.y = screenH - hh;
-      break;
-    case ButtonGeometry::Edge::Left:
-    case ButtonGeometry::Edge::Right:
-      b.w = vw;
-      b.h = vh;
-      b.vertical = true;
-      b.x = a.edge == ButtonGeometry::Edge::Left ? margin : screenW - margin - vw;
-      // fraction is measured UP from the bottom; the box is centred on the key.
-      b.y = screenH - static_cast<int>(a.fraction * static_cast<float>(screenH)) - vh / 2;
-      break;
-    case ButtonGeometry::Edge::None:
-      b.present = false;
-      return b;
-  }
-  if (b.x < 0) b.x = 0;
-  if (b.y < 0) b.y = 0;
-  if (b.x + b.w > screenW) b.x = screenW - b.w;
-  if (b.y + b.h > screenH) b.y = screenH - b.h;
-  return b;
-}
-
 // Panel widths whose layouts were hand-tuned on hardware, in the reader's
 // portrait frame: the X4 (and X3-in-X4-mode) at 480, the X3 at 528.
 inline constexpr int TUNED_WIDTH_X4 = 480;
