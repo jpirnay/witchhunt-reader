@@ -85,6 +85,40 @@ LGFX genuinely composes from `fb`, and it was being handed a plane.
 become a capability once the SDK has one. It is listed here as a known debt, not
 as the finished shape.
 
+## Predicted: the AA push mode does not follow the BW base mode
+
+Found by asking whether the two-phase model is even right for this controller.
+It is: `display()` fills the canvas B/W and pushes it, `displayGray()` re-composes
+the *same* canvas with the LSB/MSB planes and pushes again, and `Panel_EPD`'s
+per-pixel diff means only the changed (anti-aliased edge) pixels are driven. That
+is a sound superimpose model and matches how the reader drives it.
+
+The flaw is the mode pairing. `displayGray()` hardcodes `epd_fast`, while
+`display()` uses `epdModeFor(mode)`:
+
+| Refresh | phase 1 (BW) | phase 2 (AA) | |
+|---|---|---|---|
+| FAST | `epd_fast` | `epd_fast` | match — only AA edges driven |
+| HALF | `epd_text` | `epd_fast` | **mismatch** |
+| FULL | `epd_text` | `epd_fast` | **mismatch** |
+
+`displayGray()`'s own comment states the consequence: *"Panel_EPD's per-pixel diff
+keys on the epd_mode LUT offset, so switching modes here would re-drive every
+pixel (full-screen inversion flash)."* So on every HALF or FULL page — one in
+`refreshFrequency`, default 15 — the AA pass should flash the whole screen.
+
+**Predicted, not yet observed**: it has been invisible because the AA pass never
+reached the panel until 230e3f50. Expect it on roughly every fifteenth page.
+
+Two ways to fix, in preference order:
+
+1. **SDK (correct):** have the driver remember the epd_mode of its last base push
+   and reuse it in `displayGray()`, so the diff baseline always matches. Small and
+   local to `LgfxEpdDriver`.
+2. **Firmware (workaround):** skip the grayscale overlay when the page's base was
+   displayed with HALF/FULL. Costs AA on those pages, which is a visible
+   inconsistency, so it is second choice.
+
 ## Direction
 
 1. **SDK — split `PanelSel` from the buffer/baseline model.** The questions
