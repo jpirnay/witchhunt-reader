@@ -51,6 +51,14 @@ class HalDisplay {
   // CPU/RAM-only work — no display or SPI-bus access, same task as trigger.
   // On X3 the trigger falls back to triggerDisplay() and finish is a no-op.
   void triggerDisplayAsync(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+
+  // Whether triggerDisplayAsync() actually returns while the waveform runs on
+  // this panel, rather than falling back to a blocking refresh. False on drivers
+  // that cannot overlap (PanelDriver's default, e.g. LgfxEpd and Paper Mono) and
+  // while an inversion is pending. Callers that spend the gap on real work --
+  // the reader's inline AA -- must ask this rather than infer it from the board,
+  // or they pay the plane/gray/restore cost with no overlap to hide it in.
+  bool supportsAsyncRefresh() const;
   void finishDisplayAsync();
   bool isRefreshPending() const;
   bool isRedRamSynced() const;

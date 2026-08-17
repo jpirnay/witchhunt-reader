@@ -444,9 +444,41 @@ fire `Long`. Device trace confirming both:
   `input.confirm` GPIO, and runs below where our synthetic key enters), so its
   semantics are reproduced rather than reused. Touch phase 4 remains the real
   answer; three inputs will always be cramped.
-- **Ghosting artifacts in the Reader** (observed 2026-08-17, first reader entry
-  on this board). Not yet investigated; the panel is `LgfxEpd`, a different path
-  from the SSD1677 boards where the `panelNeedsHalfRefreshSettle()` work was done.
+- **Ghosting artifacts in the Reader** (observed 2026-08-17). One concrete cause
+  found and fixed; whether it was *the* cause needs a device check.
+
+  **The reader was running inline AA on a panel that cannot overlap.** The
+  strategy choice was `!renderer.isX3()` — "anything that is not an X3 is an X4" —
+  so the T5S3 took the inline path, whose entire premise is that the LSB plane
+  render happens *inside* a running waveform. `LgfxEpdDriver` does not override
+  `PanelDriver::supportsAsyncDisplay()`, so it inherits `false`: the board paid
+  the plane / gray-flush / restore writes additively against a blocking refresh.
+  Confirmed live in the boot log (`Inline AA: planes=80ms gray=659ms restore=55ms`).
+
+  Now gated on `renderer.supportsAsyncRefresh()`, which is an exact mirror of the
+  SDK's own fallback conditions in `displayAsyncImpl()` (`_inverted ||
+  _inversionDirty`, or a driver that cannot overlap). Effect by board:
+
+  | Board | Before | After |
+  |---|---|---|
+  | X3 | deferred | deferred (unchanged) |
+  | X4 normal | inline, genuinely overlapping | unchanged |
+  | **X4 inverted** | inline, but the SDK silently blocked | **deferred** — cost was being paid for nothing |
+  | **T5S3** | inline, driver cannot overlap | **deferred** |
+
+  Note the X4 dark-mode case fell out of the same bug and is worth watching for
+  in any X4 ghosting reports.
+
+  **Checked and cleared:** `syncRedRamFromFrameBuffer()` looked like a second
+  suspect (it is gated `!isX3()`, so the T5S3 runs it), but
+  `PanelDriver::seedPreviousFrame()` is a no-op the LGFX driver does not override,
+  so it only sets an advisory flag. Left alone deliberately.
+
+  **Also relevant if this is not enough:** the vendor drives this glass with
+  FastEPD (`bb_epdiy`), which exposes `BB_MODE_1BPP` / `BB_MODE_4BPP` switching
+  and rect-scoped `fullUpdate()` / `partialUpdate()`. The freeink SDK has **no**
+  FastEPD support at all, so that would be a parallel display backend, not a
+  tweak — but its vocabulary is exactly what ghosting work tends to need.
 - ~~**The board HAS a hardware RTC and our profile says it does not.**~~
   **IMPLEMENTED 2026-08-17, awaiting device validation.** The vendor schematic
   shows **`PCF8563TS` at `0x51`** (page 3 / U3); the README's `PCF85063` is wrong

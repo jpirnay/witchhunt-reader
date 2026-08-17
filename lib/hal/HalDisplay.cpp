@@ -246,6 +246,8 @@ void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
 
+bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
+
 void HalDisplay::finishDisplayAsync() {
   HalSpiBus::Lock spiLock;
   einkDisplay.finishDisplayAsync();

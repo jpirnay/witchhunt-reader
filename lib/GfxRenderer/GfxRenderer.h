@@ -278,6 +278,11 @@ class GfxRenderer {
   void setSingleBufferFastDiff(bool enabled) const { display.setSingleBufferFastDiff(enabled); }
   bool isX3() const { return display.deviceIsX3(); }
 
+  // True when triggerDisplayAsync() genuinely overlaps the waveform on this
+  // panel. Ask this before spending the async gap on work; see
+  // HalDisplay::supportsAsyncRefresh.
+  bool supportsAsyncRefresh() const { return display.supportsAsyncRefresh(); }
+
   // Non-blocking display split.
   // triggerDisplay() sends pixels, issues the refresh command and returns
   // immediately — the waveform runs in hardware. frameBuffer is safe to

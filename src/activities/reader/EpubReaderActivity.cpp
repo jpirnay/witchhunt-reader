@@ -4267,12 +4267,29 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // X3's deferred pass needs no equivalent gate and keeps its original arming: it is only
   // ever run from the idle loop (which a pending turn makes unreachable) and pageTurn()
   // clears it, so it is already cancellable by design.
-  const bool aaPreempted = aaEnabledForThisRender && !renderer.isX3() && aaPreemptedByNavigation();
+  // Inline AA only makes sense on a panel that can actually overlap: its whole
+  // premise is that the LSB plane render happens *inside* a running waveform. Ask
+  // the driver, not the board.
+  //
+  // This was `!renderer.isX3()`, i.e. "everything that is not an X3 is an X4".
+  // On the T5S3 that is false twice over: LgfxEpdDriver does not override
+  // PanelDriver::supportsAsyncDisplay() and so cannot overlap at all, yet the
+  // board took the inline path and paid the plane / gray flush / restore writes
+  // additively, with a blocking refresh underneath. A suspected contributor to the
+  // ghosting seen there.
+  //
+  // X3 is still excluded by name: it *can* refresh asynchronously, but keeps its
+  // deferred pass for scheduling reasons of its own (the _refreshPending guards
+  // above). That is a separate question and needs its own predicate before the
+  // name can go.
+  const bool inlineAaAvailable = renderer.supportsAsyncRefresh() && !renderer.isX3();
+  const bool aaPreempted = aaEnabledForThisRender && inlineAaAvailable && aaPreemptedByNavigation();
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
   }
-  const bool inlineAaThisRender = aaEnabledForThisRender && !renderer.isX3() && !aaPreempted;
-  const bool deferredAaThisRender = aaEnabledForThisRender && renderer.isX3();
+  const bool inlineAaThisRender = aaEnabledForThisRender && inlineAaAvailable && !aaPreempted;
+  // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
+  const bool deferredAaThisRender = aaEnabledForThisRender && !inlineAaAvailable;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
   if (inlineAaThisRender) {
     renderer.triggerDisplayAsync(pageRefreshMode);
@@ -4331,9 +4348,11 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, gt.planesMs, 0,
                               gt.displayMs,  gt.restoreMs,         millis() - t0};
   } else if (deferredAaThisRender) {
-    // Deferred grayscale (X3): store context before releasing the lock, so
-    // loop() can run the AA pass once the waveform ends. The page is kept
-    // alive via shared_ptr.
+    // Deferred grayscale: store context before releasing the lock, so loop() can
+    // run the AA pass once the waveform ends. The page is kept alive via
+    // shared_ptr. Used by the X3 and by any panel that cannot overlap the plane
+    // work with the waveform (see inlineAaAvailable above) -- the machinery here
+    // is board-agnostic; only the choice to use it was ever board-specific.
     pendingGrayscale_.active = true;
     pendingGrayscale_.page = std::move(page);
     pendingGrayscale_.fontId = getEffectiveReaderFontId();
