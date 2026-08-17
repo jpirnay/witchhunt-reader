@@ -4393,7 +4393,22 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // result is discarded — no correctness issue.
   if (!preRenderedPage.ready && section && section->currentPage + 1 < section->pageCount) {
     pendingPreRender = true;
-    requestUpdate();
+    // Do NOT request the update while a deferred AA is owed: isUpdateSuperseded()
+    // is true from the moment requestUpdate() sets its flag, and
+    // aaPreemptedByNavigation() reads that as "this page is on its way out", so
+    // the AA armed a few lines above would abort before rendering anything
+    // useful. The post-AA hook in runDeferredGrayscalePass() re-requests it once
+    // the pass has finished, which is what pendingPreRender is carried for.
+    //
+    // The X3 only survived this by timing: it holds _refreshPending for its
+    // multi-second waveform, so the render task consumed this request and the
+    // "PreRender deferred: AA owed" guard shelved it before the pass could start.
+    // A panel whose refresh completes promptly (T5S3) starts the AA while the
+    // flag is still set and kills it -- every page, "gray=0ms", ~90 ms of plane
+    // work discarded and no anti-aliasing on screen at all.
+    if (!pendingGrayscale_.active) {
+      requestUpdate();
+    }
   }
 
   // Release the render lock NOW — the waveform is running in hardware and
