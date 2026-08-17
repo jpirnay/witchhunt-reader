@@ -157,10 +157,36 @@ void HalGPIO::begin() {
   //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
   //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
+
+  // Bring up the shared SPI bus, taking each pin from whichever peripheral
+  // actually defines it.
+  //
+  // On the C3 the panel and the SD card share one bus and the PANEL owns its
+  // pins: display.sclk/mosi/cs are set, and the SD entry contributes only MISO
+  // (the panel is write-only) and its own CS. On the T5S3 the panel is not on
+  // SPI at all — it is a parallel LGFX bus, so every display pin is
+  // PIN_UNASSIGNED — and the SD card carries the full set itself
+  // (SCLK14 MISO21 MOSI13 CS12). Passing the display's unassigned pins there
+  // made SPI.begin() fail outright with "Attaching pins to SPI failed".
+  //
+  // So: prefer the display's pin, fall back to the SD's. That reproduces the C3
+  // exactly (display pins win, since they are assigned) and gives the T5S3 its
+  // SD bus.
   const BoardConfig::DisplayPins& display = BoardConfig::ACTIVE.display;
-  // Display and SD share one SPI bus, so MISO comes from the SD pins — the panel
-  // is write-only and has none of its own.
-  SPI.begin(display.sclk, BoardConfig::ACTIVE.sd.miso, display.mosi, display.cs);
+  const BoardConfig::SdPins& sd = BoardConfig::ACTIVE.sd;
+  const auto pinOr = [](const int8_t preferred, const int8_t fallback) {
+    return preferred != BoardConfig::PIN_UNASSIGNED ? preferred : fallback;
+  };
+  const int8_t spiSclk = pinOr(display.sclk, sd.sclk);
+  const int8_t spiMosi = pinOr(display.mosi, sd.mosi);
+  const int8_t spiCs = pinOr(display.cs, sd.cs);
+  if (spiSclk != BoardConfig::PIN_UNASSIGNED && spiMosi != BoardConfig::PIN_UNASSIGNED) {
+    SPI.begin(spiSclk, sd.miso, spiMosi, spiCs);
+  } else {
+    // Neither peripheral puts anything on SPI (a board whose panel is parallel
+    // and whose card is SDMMC). Starting the bus would only fail.
+    LOG_INF("HW", "No SPI peripherals on this board; skipping SPI.begin()");
+  }
 
   // ADC battery sense. Gated on the board actually reading its battery that way:
   // on a fuel-gauge board the same GPIO is the gauge's I2C bus (on X3, BAT_GPIO0
