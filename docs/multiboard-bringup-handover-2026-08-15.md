@@ -444,8 +444,24 @@ fire `Long`. Device trace confirming both:
   `input.confirm` GPIO, and runs below where our synthetic key enters), so its
   semantics are reproduced rather than reused. Touch phase 4 remains the real
   answer; three inputs will always be cramped.
-- **Ghosting artifacts in the Reader** (observed 2026-08-17). One concrete cause
-  found and fixed; whether it was *the* cause needs a device check.
+- **Reader display defects (2026-08-17).** Three separate causes, found in order
+  by fixing each and seeing what the next symptom revealed. **The page inversion
+  is DEVICE-VALIDATED as fixed**; whether any ghosting remains beyond it is still
+  open.
+
+  | # | Symptom | Cause | State |
+  |---|---|---|---|
+  | 1 | AA cost paid with no benefit | inline AA on a panel that cannot overlap (`LgfxEpdDriver` inherits `supportsAsyncDisplay() == false`) | fixed, `fcc8c542` |
+  | 2 | `Deferred AA ABORTED … gray=0ms` every page | deferred AA preempted by the queued pre-render; the two guards that prevent this were spelled `isX3()` | fixed, `60e94aaf` |
+  | 3 | **whole page inverted, text gone, only AA marks visible** | `displayGray()`'s `fb` read by LGFX as the BW base, but the caller leaves the last *plane* there | **fixed + validated, `aab44e55`** |
+
+  Each fix exposed the next: #1 moved the board onto the deferred path, which
+  revealed #2; #2 let the pass actually run, which revealed #3. Worth remembering
+  as a debugging shape — on a board this far from the one the code was written
+  for, a fix that "does nothing visible" may simply have uncovered the next layer.
+
+  See `docs/display-capability-audit-2026-08-17.md` for why all three share a root
+  cause (`PanelSel` defaulting to X4 as the buffer/baseline model).
 
   **The reader was running inline AA on a panel that cannot overlap.** The
   strategy choice was `!renderer.isX3()` — "anything that is not an X3 is an X4" —

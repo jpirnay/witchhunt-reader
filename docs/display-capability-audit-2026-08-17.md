@@ -77,8 +77,13 @@ written against, the argument was dead. On LGFX that paints the background black
 and leaves only the AA marks: the reported inversion.
 
 Worked around in `HalDisplay::displayGrayBuffer()` by reseeding the write buffer
-from the on-screen frame, gated on the controller. **That gate is itself a
-name-check** and should become a capability once the SDK has one.
+from the on-screen frame, gated on the controller. **DEVICE-VALIDATED
+2026-08-17: the inversion is gone.** That confirms the reading of the contract —
+LGFX genuinely composes from `fb`, and it was being handed a plane.
+
+**That gate is itself a name-check** (`displayController == LgfxEpd`) and should
+become a capability once the SDK has one. It is listed here as a known debt, not
+as the finished shape.
 
 ## Direction
 
