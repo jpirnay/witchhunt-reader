@@ -855,6 +855,20 @@ void setup() {
   // The proper fix is upstream — set hasHomeKey = true in LILYGO_T5_PRO_GT911 —
   // and this override goes when that lands.
   BoardConfig::ACTIVE.touch.hasHomeKey = true;
+
+  // Second profile correction: the board has a battery-backed RTC and the SDK
+  // profile declares NO_SENSORS. The vendor schematic (page 3 / U3) shows a
+  // PCF8563TS at 0x51 on the shared main I2C bus — GPIO39/40, the same bus as the
+  // touch controller and the fuel gauge. The vendor README calls it a PCF85063;
+  // their own pinmap notes say to prefer the schematic and the mounted part.
+  //
+  // Without this the reader keeps time in software only and loses it whenever
+  // power is actually cut, rather than merely deep-sleeping.
+  BoardConfig::ACTIVE.sensors.i2cSda = BoardConfig::ACTIVE.touch.sda;
+  BoardConfig::ACTIVE.sensors.i2cScl = BoardConfig::ACTIVE.touch.scl;
+  BoardConfig::ACTIVE.sensors.i2cHz = 400000;
+  BoardConfig::ACTIVE.sensors.rtcAddr = 0x51;
+  BoardConfig::ACTIVE.sensors.rtcType = BoardConfig::RtcType::Pcf8563;
 #endif
 
   HalSystem::begin();

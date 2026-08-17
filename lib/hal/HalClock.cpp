@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
+#include <Rtc.h>  // SDK driver, used for the PCF8563 family (DS3231 is handled inline below)
 #include <WiFi.h>
 #include <Wire.h>  // Needed for I2C communication with the RTC
 #include <esp_private/esp_clk.h>
@@ -260,9 +261,22 @@ static time_t nvsReadSyncTime() {
 static bool initExternalRTC();
 static float readExternalTemp();
 
+// The SDK RTC driver, for the PCF8563 family only. Function-local so it is
+// constructed on first use rather than during static init, where the I2C bus is
+// not up yet. Only reached when rtcType() == Pcf8563.
+static freeink::Rtc& externalRtc() {
+  static freeink::Rtc rtc;
+  return rtc;
+}
+
 static float readChipTemperatureC() {
   // ESP32 and ESP32-C3 use the internal ADC temperature sensor.
-  if (initExternalRTC()) {
+  //
+  // Specifically Ds3231, not merely "an external RTC is present": the DS3231
+  // carries a temperature register at 0x11 and the PCF8563 family carries no
+  // temperature sensor at all, so widening this with the RTC gate would read a
+  // nonexistent register and report noise as the device temperature.
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Ds3231 && initExternalRTC()) {
     return readExternalTemp();
   }
   return (float)temperatureRead();
@@ -276,12 +290,19 @@ static bool initExternalRTC() {
   if (initialized) return exists;
   initialized = true;
 
-  // Specifically a DS3231, not merely "some RTC": X4 Pro has a BM8563 at 0x51
-  // which is PCF8563-register-compatible and would return garbage if driven with
-  // DS3231 register offsets. Asking hasHardwareRtc() here would be the subtly
-  // wrong fix -- it is true on X4 Pro. Driving a BM8563 is separate work.
+  // Two families, two drivers. The DS3231 is probed and driven inline below.
+  // The PCF8563 family (T5S3's PCF8563TS, X4 Pro's BM8563 -- both at 0x51) is
+  // register-incompatible with it and would return garbage if driven with DS3231
+  // offsets, so it goes through the SDK's Rtc lib, which already implements it.
+  // Dispatching on rtcType rather than hasHardwareRtc() is what keeps those apart.
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    HalI2cBus::Lock i2cLock;
+    exists = externalRtc().begin();
+    LOG_INF("CLK", exists ? "PCF8563 RTC found via SDK driver." : "No PCF8563 RTC found.");
+    return exists;
+  }
   if (HalCapabilities::rtcType() != BoardConfig::RtcType::Ds3231) {
-    LOG_DBG("CLK", "Skipping DS3231 init: board has no DS3231");
+    LOG_DBG("CLK", "Skipping external RTC init: board profile declares none");
     return false;
   }
 
@@ -299,10 +320,25 @@ static bool initExternalRTC() {
   return exists;
 }
 
-// Write full date+time to DS3231 (all 7 registers)
+// Write full date+time to the external RTC (DS3231: all 7 registers inline;
+// PCF8563 family: delegated to the SDK driver). Both are operated in UTC.
 static void writeExternalRTC(time_t t) {
   struct tm timeinfo;
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
+
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    freeink::Rtc::DateTime dt;
+    dt.year = static_cast<uint16_t>(timeinfo.tm_year + 1900);
+    dt.month = static_cast<uint8_t>(timeinfo.tm_mon + 1);
+    dt.day = static_cast<uint8_t>(timeinfo.tm_mday);
+    dt.hour = static_cast<uint8_t>(timeinfo.tm_hour);
+    dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
+    dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
+    dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);  // both are 0 = Sunday
+    HalI2cBus::Lock i2cLock;
+    externalRtc().set(dt);
+    return;
+  }
 
   HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(ds3231Address());
@@ -317,8 +353,27 @@ static void writeExternalRTC(time_t t) {
   Wire.endTransmission();
 }
 
-// Read time from DS3231
+// Read time from the external RTC. Returns 0 when the time cannot be trusted --
+// the callers treat 0 as "no usable RTC time", so a stopped oscillator must not
+// surface as a valid timestamp. The SDK driver already reports that case by
+// returning false on the PCF8563's VL flag.
 static time_t readExternalRTC() {
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    freeink::Rtc::DateTime dt;
+    HalI2cBus::Lock i2cLock;
+    if (!externalRtc().now(dt)) return 0;
+
+    struct tm timeinfo = {};
+    timeinfo.tm_year = static_cast<int>(dt.year) - 1900;
+    timeinfo.tm_mon = static_cast<int>(dt.month) - 1;
+    timeinfo.tm_mday = dt.day;
+    timeinfo.tm_hour = dt.hour;
+    timeinfo.tm_min = dt.minute;
+    timeinfo.tm_sec = dt.second;
+    timeinfo.tm_isdst = 0;
+    return timegm_compat(&timeinfo);
+  }
+
   HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(ds3231Address());
   Wire.write(0x00);

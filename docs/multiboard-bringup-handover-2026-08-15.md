@@ -447,17 +447,35 @@ fire `Long`. Device trace confirming both:
 - **Ghosting artifacts in the Reader** (observed 2026-08-17, first reader entry
   on this board). Not yet investigated; the panel is `LgfxEpd`, a different path
   from the SSD1677 boards where the `panelNeedsHalfRefreshSettle()` work was done.
-- **The board HAS a hardware RTC and our profile says it does not.** The vendor
-  schematic shows **`PCF8563TS` at `0x51`** (page 3 / U3); the README's product
-  table says `PCF85063`, and the vendor's own notes say to prefer the schematic.
-  Our profile uses `NO_SENSORS`, i.e. `RtcType::None`, so `hasHardwareRtc()` is
-  false and the board keeps time in software. The SDK enum **already has
-  `RtcType::Pcf8563`**, so this is a profile fix, not a driver port — likely the
-  cheapest real capability win available on this board. (The boot log's
-  *"Skipping DS3231 init: board has no DS3231"* is correct but misleading: the
-  board has an RTC, just not that one.)
-- **A frontlight exists and is unused.** `BL_EN` = **GPIO11**, driving a
-  `PT4103B23F` enable. Nothing in our profile references it.
+- ~~**The board HAS a hardware RTC and our profile says it does not.**~~
+  **IMPLEMENTED 2026-08-17, awaiting device validation.** The vendor schematic
+  shows **`PCF8563TS` at `0x51`** (page 3 / U3); the README's `PCF85063` is wrong
+  and the vendor's own notes say to prefer the schematic.
+
+  **This was NOT the profile-only fix it first looked like** — worth recording,
+  because the same trap is waiting for the next board. `HalClock` does not use the
+  SDK's `Rtc` lib at all: it carries its own DS3231 implementation, and
+  `initExternalRTC()` guards on `rtcType() == Ds3231` precisely so a PCF8563 at
+  0x51 is not driven with DS3231 register offsets. Setting the profile alone
+  changes nothing — the board is still skipped. It took three pieces:
+
+  | Piece | Why |
+  |---|---|
+  | `sensors` override in `main.cpp` | pins 39/40, `rtcAddr 0x51`, `RtcType::Pcf8563` |
+  | `-DFREEINK_CAP_RTC=1` in the env | the SDK's default list omits `LILYGO`, so `Rtc` linked **stub bodies** and `begin()` always returned false |
+  | `Rtc` in `lib_deps` + `HalClock` dispatch | the lib was never linked; the DS3231 path is left byte-for-byte untouched, so X3 is unaffected |
+
+  `readChipTemperatureC()` also had to stay DS3231-only: it reads the DS3231's
+  temperature register, which the PCF8563 family does not have.
+- **A frontlight exists and is very likely already working — test it.**
+  `BL_EN` = **GPIO11**, driving a `PT4103B23F` enable. Correcting an earlier note
+  in this document that said nothing referenced it: `LILYGO_T5S3` already carries
+  `{11, 5000, 8, true}` (PWM 5 kHz / 8-bit, active-high), and
+  `FREEINK_CAP_FRONTLIGHT` already lists `FREEINK_DEVICE_LILYGO`, so
+  `hasFrontlight()` should be true and the brightness UI should appear. **Nothing
+  to implement — this needs a device check, not code.** Note the vendor's own
+  factory example defines `BOARD_BL_EN (11)` and never drives it, so if the
+  hardware turns out to be unpopulated on some revision, that is the tell.
 - **LoRa/GPS share a 3.3V rail gated by PCA9535 `IO0_0`** (`LORA_EN`), off by
   default. Relevant background to the SD/SPI bus work: `BoardT5S3::begin()`
   deselects the LoRa CS, and the rail being unpowered is a second reason the bus
