@@ -1,11 +1,24 @@
 # Multi-board bring-up — handover, 2026-08-15
 
-*State (updated 2026-08-17): branch `fix/s3-build-config`, pushed. `master` (2.23)
-merged in; all three envs build. Workstream **A done**, **C phases 1-3 done**,
+*State (updated 2026-08-17, end of day): branch `fix/s3-build-config`, pushed at
+`7040ef1d`. `master` (2.23) merged in; all three envs build. Workstream **A done**,
+**C phases 1-3 done + phase 4a (hint strip) done and device-validated**,
 **B0 done**, **B pin work done and hardware-validated on both C3 boards**.
-**The LilyGo T5S3 BOOTS AND RUNS** — first S3 board in a working state.
+**The LilyGo T5S3 BOOTS AND RUNS** and is now navigable by finger.
 X4 Pro reached the home-screen activity, surfaced three real bugs, then became
 unflashable. See "Device validation".*
+
+***SDK: the fork pin is GONE.*** `Free-Ink/freeink-sdk#47` merged as `28c72f4`;
+`.gitmodules` tracks **upstream `main`** again and the submodule points at that
+merge. Three runtime profile overrides in `main.cpp` (home key, PCF8563 RTC,
+bezel insets) were deleted because the merged `LILYGO_T5_PRO_GT911` carries them —
+all three confirmed on hardware afterwards. One workaround is deliberately kept;
+see "Kept on purpose" below.
+
+***Separate branch, unmerged:*** `fix/157-paired-void-tags` off **master** carries
+`0ce96d66`, the void-element parser fix. Not S3 work and not on this branch — it
+is the higher-impact of the two open branches, since it makes a whole class of
+XHTML books openable at all.
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -67,6 +80,56 @@ edf203e3  fix(activity): pin the render task to a core on dual-core
 552d48f4  feat(hal): raw button trace for board bring-up
 17df518a  fix(power): don't mistake a hardware reset for a power wake
 ```
+
+**2026-08-17 (later) — reader/display fixes, touch phase 4a, SDK repoint:**
+
+```
+           reader + display, all found from device logs
+aab44e55  fix(sdk): grayscale composes onto the base canvas   <-- page inversion
+b2bac24e  fix(reader): rebuild a cached section truncated to zero pages
+a5132a25  fix(reader): repaint on leaving the menu, and drop the stale AA
+6b36a5ce  perf(home): drop the unconditional second render on Home entry
+81213e70  fix(diag): record the refresh mode on the trigger path too
+1f50407c  fix(diag): stop the wake trace saturating after 65 s of uptime
+
+           workstream C — touch phase 4a
+066a6d02  feat(touch): make the button-hint strip tappable
+66d5e181  fix(touch): hit-test the hint strip in all four orientations
+
+           SDK
+7040ef1d  chore(sdk): track upstream freeink-sdk main now that #47 is merged
+```
+
+**7040ef1d — the fork pin is gone.** `Free-Ink/freeink-sdk#47` merged as
+`28c72f4`, so `.gitmodules` points back at upstream `main`. Moving to main's tip
+also took four upstream commits: multi-touch rotation gestures (`89f18f1`),
+windowed list rendering (`cc15c5a`), **removal of row-rectangle tracking**
+(`310ec61`), and a revert of SSD1677 factory-grayscale detection (`5dd02bc`).
+`5dd02bc` touches the X4's controller so it was checked rather than assumed — it
+removes `supportsFactoryGrayscale()`, which this firmware never called.
+
+Three runtime overrides were deleted from `main.cpp` (`hasHomeKey`, PCF8563
+sensors, bezel insets); the merged `LILYGO_T5_PRO_GT911` carries all three, and a
+device log confirmed each independently afterwards. `310ec61` matters beyond the
+build: it deletes `ListNav::rowRectFor()`, which the touch plan cited as the
+answer to **P2** (bounded partial-refresh tap flash) — that primitive no longer
+exists, and the touch doc is corrected.
+
+**066a6d02 / 66d5e181 — touch phase 4a.** The four button hints are now tap
+targets on every screen that draws them, with no per-screen work: `mapLabels()`
+emits its labels in `{BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT}` order and
+permutes only the text, so hint box *i* is raw button *i* on every board and under
+every remapping. Device-validated on the T5S3 — which matters most there, since it
+displays four hints behind two physical buttons. Detail in the touch doc.
+
+**81213e70 / 1f50407c — two pieces of instrumentation were lying.**
+`getLastRefreshMode()` was only assigned in `displayBuffer()`/`refreshDisplay()`,
+never in `triggerDisplay*()`, which is the path full page renders take — so every
+such `Page summary:` reported the *previous* paint's mode. And `WakeTrace` stored
+absolute `millis()` in `uint16` with a saturating cast, so past 65.5 s of uptime
+every stamp pinned to 65535 and `open=` — the one figure the trace exists to
+produce — read 0. Both had been feeding diagnoses on this branch; fix the
+instrument before trusting the next reading from it.
 
 **b4b94068 — workstream A.** `[base]` carried the C3 device set
 (`FREEINK_DEVICE_X4/X3`), the X4 SPI overclock, and `WOLFSSL_SP_RISCV32`; every
@@ -495,8 +558,25 @@ fire `Long`. Device trace confirming both:
   and rect-scoped `fullUpdate()` / `partialUpdate()`. The freeink SDK has **no**
   FastEPD support at all, so that would be a parallel display backend, not a
   tweak — but its vocabulary is exactly what ghosting work tends to need.
+- **The deferred AA delays the next-page pre-render, so quick turns always miss.**
+  New 2026-08-17, from a device log; not a regression, a standing property that
+  only becomes visible on a panel whose AA pass is slow. Per page the order is
+  `display → deferred AA (~605 ms) → pre-render (~53 ms)`, so for ~600 ms after
+  every page there is nothing pre-rendered. A turn inside that window logs
+  `pendingPreRender=1 hit=0` and pays a full render (~670 ms) instead of a buffer
+  swap (~580 ms); one log went `2/6` at a normal reading cadence, where an earlier
+  session on the *same build* reached `7/7` purely because the taps were slower.
+
+  **Candidate fix: pre-render first, then the AA.** The pre-render is
+  latency-critical and cheap; the AA is a nicety that is already deferred and
+  would start ~53 ms later. Not done — the current order exists because the AA
+  planes and a pre-rendered page compete for the same heap, which is a real
+  constraint on the C3 (`PRE_RENDER_MIN_FREE_HEAP_BYTES` 56 KB of ~380 KB). Needs
+  a C3 heap check and a device test, not an inference from one log. Full
+  measurements in
+  [background-rendering.md](background-rendering.md) → "A — next-page pre-render".
 - ~~**The board HAS a hardware RTC and our profile says it does not.**~~
-  **IMPLEMENTED 2026-08-17, awaiting device validation.** The vendor schematic
+  **IMPLEMENTED 2026-08-17, DEVICE-VALIDATED.** The vendor schematic
   shows **`PCF8563TS` at `0x51`** (page 3 / U3); the README's `PCF85063` is wrong
   and the vendor's own notes say to prefer the schematic.
 
@@ -509,7 +589,7 @@ fire `Long`. Device trace confirming both:
 
   | Piece | Why |
   |---|---|
-  | `sensors` override in `main.cpp` | pins 39/40, `rtcAddr 0x51`, `RtcType::Pcf8563` |
+  | ~~`sensors` override in `main.cpp`~~ **now upstream** (#47) | pins 39/40, `rtcAddr 0x51`, `RtcType::Pcf8563` |
   | `-DFREEINK_CAP_RTC=1` in the env | the SDK's default list omits `LILYGO`, so `Rtc` linked **stub bodies** and `begin()` always returned false |
   | `Rtc` in `lib_deps` + `HalClock` dispatch | the lib was never linked; the DS3231 path is left byte-for-byte untouched, so X3 is unaffected |
 
@@ -528,6 +608,26 @@ fire `Long`. Device trace confirming both:
   default. Relevant background to the SD/SPI bus work: `BoardT5S3::begin()`
   deselects the LoRa CS, and the rail being unpowered is a second reason the bus
   behaves.
+
+- **Kept on purpose: the LgfxEpd write-buffer reseed.** `HalDisplay::displayGrayBuffer()`
+  reseeds the write buffer from the on-screen frame before the grayscale flush. That
+  existed because `LgfxEpdDriver::displayGray()` rebuilt every pixel from its `fb`
+  argument, and the caller leaves the last *plane* there — defect #3 above. **#47
+  changed the driver to `(void)fb; overlayCanvasGray();`,** so the reseed no longer
+  serves the purpose it was written for and looks deletable.
+
+  It is deliberately still there. The reseed touches the **host** write framebuffer,
+  which is a different object from the LGFX canvas the overlay composes onto, and
+  whether the plane-restore step in `renderGrayscalePlanesSequential()` leans on it
+  cannot be decided off the panel. Cost is one buffer copy per AA pass on one board;
+  the cost of being wrong is the page-inversion bug returning. **Remove it behind a
+  device test, not behind an argument.** The comment at the call site says the same.
+- **`[ERR] [PWR] Lock already held, ignore` is benign.** `HalPowerManager::Lock`
+  permits one holder; the render task takes one around `render()` and the reader
+  takes another inside. The inner lock sets `valid = false` and its destructor is a
+  no-op, so the outer lock survives — correct, just logged at `ERR` where it reads
+  like a fault. Pre-existing; unrelated to any S3 work. Only worth touching if the
+  log noise starts hiding something.
 
 - **PWR's actual function** (above).
 - **The 20 MHz SD clamp is unproven.** SD may work purely because

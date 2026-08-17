@@ -152,3 +152,38 @@ On the T5S3 these run with PSRAM and no RED plane, i.e. with neither of the two
 pressures they were designed around. Whether the release/realloc dance should
 happen there **at all** is an open question, not just a question of which mode it
 picks. Worth answering before adding more per-state special cases.
+
+---
+
+## Status update, 2026-08-17 (end of day)
+
+**The SDK-side half of this audit landed upstream.** `Free-Ink/freeink-sdk#47`
+merged as `28c72f4`; this repo's submodule tracks upstream `main` again and the
+temporary fork pin is gone. What that brought:
+
+- `LgfxEpdDriver::displayGray()` no longer treats its `fb` argument as a base to
+  rebuild from — it is now `(void)fb; overlayCanvasGray();`, composing onto the
+  live canvas and darkening only plane-selected pixels. This is the fix for "the
+  bug that prompted this", and it is device-validated.
+- The merged `LILYGO_T5_PRO_GT911` profile carries the home key, PCF8563 RTC and
+  bezel insets, so the three runtime overrides that shadowed it in `main.cpp` are
+  deleted.
+
+**Still open from this document, unchanged:**
+
+- **`PanelSel` still conflates driver selection with the buffer/baseline model**
+  (§"The root cause of the class"). #47 fixed one symptom; the split proposed
+  under "Direction" was not attempted.
+- **The predicted AA-push/BW-base mode mismatch** (§"Predicted") remains
+  unobserved and unfixed — it needs a HALF or FULL page on an LGFX panel to
+  surface.
+- **The framebuffer lifecycle map** (§ above) is still not done.
+
+**One firmware-side workaround is deliberately retained.** `HalDisplay::displayGrayBuffer()`
+still reseeds the write buffer from the on-screen frame on `LgfxEpd`. After #47 the
+driver never reads that buffer, so the reseed no longer serves its stated purpose —
+but it touches the *host* framebuffer, a different object from the LGFX canvas the
+overlay composes onto, and whether the plane-restore step depends on it cannot be
+settled off the panel. It costs one buffer copy per AA pass on one board; being
+wrong costs the page-inversion bug again. Remove it behind a device test, not an
+argument. The call-site comment says the same.

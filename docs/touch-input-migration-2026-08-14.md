@@ -1,11 +1,14 @@
 # Touch input migration — investigation and plan
 
-Date: 2026-08-14 (last updated 2026-08-16)
-Status: **phases 1–3 implemented** (2026-08-16); **phase 3 device-validated 2026-08-17**
-(T5S3: touch page turns + centre-tap menu); **phase 4a hint strip implemented 2026-08-17**,
-unvalidated. Phase 4b (lists) and 5–6 still proposal.
-**Nothing has run on hardware.** Phases 1–2 met their gates (build deltas, host
-tests); phase 3's gate is a device test and is NOT met — see the phase 3 note.
+Date: 2026-08-14 (last updated 2026-08-17)
+Status: **phases 1–3 done and DEVICE-VALIDATED** on the T5S3 (touch page turns,
+centre-tap menu). **Phase 4a — the button-hint strip — done and DEVICE-VALIDATED**
+(2026-08-17); the rest of 4a (tab bar, central back/home gestures, P2 tap feedback)
+and **phase 4b (lists)** are not started. Phases 5–6 still proposal.
+
+The "nothing has run on hardware" caveat that stood here through 2026-08-16 is
+retired: the T5S3 boots, and touch is the primary way it is navigated. Phases 1–2
+met their build/host gates; phase 3's device gate is now met.
 Scope: **workstream C** of
 [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md) — read that
 first for sequencing.
@@ -522,9 +525,11 @@ fast-AA and tilt, X4 (SSD1677, no IMU) keeps neither. This is B0's
 capability-predicate idea applied to the one place phase 3 forced the issue;
 the remaining 49 `deviceIsX3()` call sites are still workstream B0's job.
 
-Gate: **NOT MET — on device, the reader is fully navigable by touch alone.**
-Nothing here has run on hardware, and it cannot until workstream B makes an S3
-board boot. Treat all of phase 3 as unvalidated.
+Gate: **MET (2026-08-17).** On the T5S3 the reader is navigable by touch: outer-third
+taps turn pages and a centre tap opens the menu, both confirmed in device logs
+(`[TCH] contact DOWN at nx=… ny=…` followed by `PageTurn summary: hit=1`). Combined
+with the phase-4a hint strip and the capacitive home key, the board is usable
+without ever pressing a physical nav key.
 
 Known gap: `wasHomeKeyTapped()` / `wasHomeKeyLongPressed()` are exposed through
 `HalGPIO` and reachable via `wasHomeGesture()` / `wasHomeKeyHold()`, but nothing
@@ -533,7 +538,7 @@ that is still outstanding and matters, because the board has no back button.
 
 ### Phase 4 — Lists and chrome (the decision point)
 
-**4a chrome: hint strip DONE (unvalidated on hardware).** `drawButtonHints` now records
+**4a chrome: hint strip DONE and DEVICE-VALIDATED (2026-08-17).** `drawButtonHints` now records
 the geometry it painted (`ButtonHintStrip.h`), and `ActivityManager::dispatchHintStripTap()`
 turns a tap on a box into the button press it depicts. Notes:
 
@@ -577,6 +582,34 @@ converts.
 `UiListActivity` + `UIThemeTokens`, convert the highest-traffic lists first,
 using the 42 shared activities as reference diffs. Slower to first light, but
 every converted screen is finished rather than revisited.
+
+> **Scouting notes, 2026-08-17.** A first pass at 4b was started and stopped
+> before any code was written. Three facts worth having before the next attempt:
+>
+> 1. **The port targets are small and fetchable.** `git fetch upstream develop`
+>    works; the pieces are `src/components/UiAppHost.{h,cpp}` (~77 lines),
+>    `UiAppHelpers.h` (202), `UIThemeTokens.h` (40), `UIScale.h` (24),
+>    `src/activities/UiListActivity.{h,cpp}` (93 + 167). That is the whole
+>    infrastructure — the weight is all in screen conversion, as §3 says.
+>
+> 2. **`UIThemeTokens.h` does not fit our themes.** It reads twelve `ThemeMetrics`
+>    fields; **eleven do not exist in this fork.** Only `headerHeight` does.
+>    Missing: `listRowGap`, `listRowRadius`, `listInset`, `listSidePadding`,
+>    `listSelectionStyle`, `listScrollWidth`, `listScrollSide`,
+>    `headerSidePadding`, `headerUnderlineSize`, `headerTitleAlign`,
+>    `listTitleBold`. So 4b does not begin with "port a header" — it begins with
+>    adding a list-shape vocabulary to `BaseMetrics`/`LyraMetrics` and choosing
+>    values for **each** of our four themes. This is the concrete form of §3's
+>    "not a clean cherry-pick — a re-implementation against our themes".
+>
+> 3. **The flash budget is still unmeasured, and it is the real gate.** C3 sits at
+>    **97.0 %** (6,355,463 of 6,553,600 — ~198 KB free) as of `7040ef1d`. §3 calls
+>    the single-`FreeInkApp<24,6>`-instantiation discipline mandatory for exactly
+>    this reason. **Measure one converted screen before converting eighteen** — a
+>    spike that instantiates the app and one list screen, built for `env:default`,
+>    answers whether 4b is possible at all on the shipped board.
+>
+> Nothing was committed from this pass.
 
 Recommendation: **4a for the button-hint strip and tab bar** (they are trivial
 `colTouch` targets and will likely never justify a FUI screen), **4b for the
