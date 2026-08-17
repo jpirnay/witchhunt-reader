@@ -60,6 +60,28 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // defined semantics rather than relying on compiler behavior for a plain int.
   const LockMode mode = currentLockMode.load(std::memory_order_relaxed);
 
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+  // CPU frequency scaling is disabled on PSRAM boards.
+  //
+  // On the ESP32-S3 the PSRAM clock is derived from the CPU/APB clock, so
+  // changing the CPU frequency while anything is touching PSRAM corrupts those
+  // accesses. On the T5S3 that is not a corner case: the 960x540 framebuffer
+  // lives in PSRAM, so the render path is in it more or less continuously.
+  //
+  // Observed on hardware as a TG1WDT_SYS_RST immediately after the
+  // "Going to low-power mode" line, on four consecutive boots and then
+  // intermittently -- intermittent because it depends on what is mid-access when
+  // the switch happens, which is exactly the signature of this hazard rather
+  // than of a logic bug.
+  //
+  // The cost is idle power on a board that has 8 MB of PSRAM and a wired USB
+  // port; the alternative is random resets. Revisit if ESP-IDF's dynamic
+  // frequency scaling is ever configured properly for this build (it needs the
+  // PSRAM-aware DFS path, not a bare setCpuFrequencyMhz()).
+  (void)enabled;
+  return;
+#endif
+
   if (mode == None && enabled && !isLowPower) {
     LOG_DBG("PWR", "Going to low-power mode");
     if (!setCpuFrequencyMhz(LOW_POWER_FREQ)) {
