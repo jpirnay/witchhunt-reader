@@ -117,6 +117,20 @@ struct SaxParserImpl {
   // Opt-in (see SaxParser::init): repair is for HTML-flavored documents only.
   // Strict-XML documents (EPUB3 OPF) pair <meta>...</meta> and must not be touched.
   bool voidRepairEnabled = false;
+
+  // Explicit-end-tag suppression, armed whenever a self-close is synthesized.
+  //
+  // Self-closing <meta ...> into <meta ... /> is only half the job: an XHTML
+  // document may also carry the matching </meta>, which would then close an
+  // element that is no longer open and abort the parse. So after synthesizing,
+  // watch for that end tag and drop it if it comes.
+  //
+  // Buffered rather than decided byte-by-byte because the candidate can be
+  // split across feed() chunks, and because a non-match must be replayed to
+  // yxml intact — same shape as the entity pre-processor below.
+  char voidCloseName[kElemNameLen] = {0};  // element just self-closed; "" = not armed
+  char voidCloseBuf[kElemNameLen + 4];     // candidate "</name>" bytes seen so far
+  size_t voidCloseLen = 0;                 // 0 = armed but not yet buffering
 };
 
 // ---------------------------------------------------------------------------
@@ -329,12 +343,15 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
   // PIs and DOCTYPE are left completely alone (identified by the byte right
   // after '<' and never tracked here), so this can't disturb them.
   //
-  // Caveat: a document that pairs a void element with a real end tag
-  // (<br>...</br>, valid but essentially never emitted by real tools) will
-  // have the opening tag self-closed here, turning the later </br> into a
-  // mismatched close — a parse error, not silent corruption. Given how rare
-  // that pairing is against how common bare <br>/<hr> is, this trade favours
-  // the common case.
+  // A document that pairs a void element with a real end tag (<meta ...></meta>)
+  // is handled too: synthesizing the self-close arms voidCloseName, and the
+  // matching end tag is dropped in feed() before yxml sees it.
+  //
+  // That pairing was once written off here as "essentially never emitted by real
+  // tools". It is not rare at all — XHTML 1.1 requires a void element to either
+  // self-close or be paired, so converters targeting it emit the paired form, and
+  // a FictionBook->XHTML book whose every content file began
+  // <meta ...></meta><link ...></link> failed to open on every single spine.
   // ---------------------------------------------------------------------------
   auto tagScanByte = [&](uint8_t c) -> bool {
     using TagScan = SaxParserImpl::TagScan;
@@ -382,6 +399,12 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       impl->tagScan = TagScan::kNone;
       if (impl->tagIsVoid && !impl->tagPrevSlash) {
         impl->truncFlags |= SaxParser::kVoidTagRepaired;
+        // Arm end-tag suppression: having just made this element self-closing, a
+        // matching </name> in the source would now close nothing. See the
+        // voidCloseName block in feed().
+        strncpy(impl->voidCloseName, impl->tagNameBuf, kElemNameLen - 1);
+        impl->voidCloseName[kElemNameLen - 1] = '\0';
+        impl->voidCloseLen = 0;
         return feedByte('/');  // synthesize self-close before the caller feeds the real '>'
       }
       return true;
@@ -394,6 +417,71 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
     if (stopped_) break;
 
     const uint8_t c = buf[i];
+
+    // ---------------------------------------------------------------------------
+    // Explicit end tag after a synthesized self-close
+    //
+    // tagScanByte() rewrites <meta ...> into <meta ... />. If the document also
+    // supplies </meta> -- which XHTML 1.1 output does routinely, since there a void
+    // element must either self-close or be paired -- that end tag now closes an
+    // element that is no longer open, and yxml aborts the whole document. Observed
+    // on a FictionBook->XHTML conversion whose every content file opens with
+    // <meta ...></meta><link ...></link>, making the book unopenable.
+    //
+    // So drop the end tag that belongs to a self-close we synthesized. Only that
+    // one: the name must match, and anything else disarms. A partial candidate is
+    // replayed byte-for-byte, so a non-match costs nothing.
+    // ---------------------------------------------------------------------------
+    if (impl->voidCloseName[0] != '\0') {
+      if (impl->voidCloseLen == 0) {
+        // Armed, nothing buffered yet. Whitespace between the two tags is
+        // insignificant and passes through; anything else that is not the start of
+        // a tag means the end tag is not coming.
+        if (c == '<') {
+          impl->voidCloseBuf[impl->voidCloseLen++] = '<';
+          continue;
+        }
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+          impl->voidCloseName[0] = '\0';
+        }
+      } else {
+        const size_t pos = impl->voidCloseLen;
+        const size_t nameLen = strlen(impl->voidCloseName);
+        char expect;
+        if (pos == 1) {
+          expect = '/';
+        } else if (pos - 2 < nameLen) {
+          expect = impl->voidCloseName[pos - 2];
+        } else {
+          expect = '>';
+        }
+        const char cl = (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : static_cast<char>(c);
+        const char el = (expect >= 'A' && expect <= 'Z') ? static_cast<char>(expect + 32) : expect;
+        if (cl == el) {
+          if (expect == '>') {
+            // Complete match — drop the buffered "</name>" entirely.
+            impl->voidCloseLen = 0;
+            impl->voidCloseName[0] = '\0';
+            continue;
+          }
+          if (impl->voidCloseLen < sizeof(impl->voidCloseBuf)) {
+            impl->voidCloseBuf[impl->voidCloseLen++] = static_cast<char>(c);
+          }
+          continue;
+        }
+        // Not our end tag. Replay what was withheld through the normal path (the
+        // scanner must see these bytes too — the candidate may itself have been the
+        // start of a tag), then fall through and process c as usual.
+        for (size_t j = 0; j < impl->voidCloseLen && !stopped_; ++j) {
+          const uint8_t b = static_cast<uint8_t>(impl->voidCloseBuf[j]);
+          if (!tagScanByte(b)) return false;
+          if (!feedByte(b)) return false;
+        }
+        impl->voidCloseLen = 0;
+        impl->voidCloseName[0] = '\0';
+        if (stopped_) break;
+      }
+    }
 
     if (!tagScanByte(c)) return false;
     if (stopped_) break;
