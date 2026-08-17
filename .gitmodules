@@ -1,4 +1,9 @@
 [submodule "freeink-sdk"]
 	path = freeink-sdk
-	url = https://github.com/Free-Ink/freeink-sdk.git
-	branch = main
+	# TEMPORARY: pinned to our fork while Free-Ink/freeink-sdk#47 is open.
+	# That branch carries the LilyGo T5S3 profile corrections and the LGFX
+	# grayscale fixes; upstream main does NOT contain the pinned commit, so
+	# pointing back before the PR merges would break `git submodule update`.
+	# REVERT to Free-Ink/freeink-sdk + main once #47 lands.
+	url = https://github.com/jpirnay/freeink-sdk.git
+	branch = feat/lilygo-t5s3-fixes
