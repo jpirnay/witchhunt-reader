@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include "components/themes/ButtonGeometry.h"
+
 // Where the four bottom button hints sit.
 //
 // This used to be `gpio.deviceIsX3() ? x3Positions : x4Positions`, which put every
@@ -35,13 +37,12 @@ inline constexpr int TUNED_WIDTH_X3 = 528;
 // `tunedX4` / `tunedX3` are the theme's measured layouts for those widths.
 inline void positions(int screenWidth, int buttonWidth, const int (&tunedX4)[4], const int (&tunedX3)[4],
                       int (&out)[4]) {
-  const int* tuned = nullptr;
-  if (screenWidth == TUNED_WIDTH_X4) {
-    tuned = tunedX4;
-  } else if (screenWidth == TUNED_WIDTH_X3) {
-    tuned = tunedX3;
-  }
-  if (tuned != nullptr) {
+  // Whether this board uses the historic four-button strip is a property of the
+  // board, so ask ButtonGeometry rather than inferring it from the panel width.
+  // Width still selects WHICH tuned set, because the two strip boards differ only
+  // in how wide their panel is.
+  if (ButtonGeometry::forActiveBoard().legacyStrip) {
+    const int* tuned = screenWidth == TUNED_WIDTH_X3 ? tunedX3 : tunedX4;
     for (int i = 0; i < 4; ++i) out[i] = tuned[i];
     return;
   }
