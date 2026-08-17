@@ -238,6 +238,14 @@ void HalDisplay::setSingleBufferFastDiff(bool enabled) {
 
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+
+  // Record here too, not just in displayBuffer/refreshDisplay. The reader fires full
+  // page renders through this path (triggerWithRefreshCycle), so without this
+  // getLastRefreshMode() reports whatever the previous displayBuffer() did and the
+  // "Page summary: refresh=..." line describes the wrong paint entirely.
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
   LOG_DBG("DISP", "#%lu triggerDisplay mode=%s", static_cast<unsigned long>(++panelSeq),
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
@@ -257,6 +265,10 @@ void HalDisplay::completeDisplay() {
 // driving SPI.
 void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
   LOG_DBG("DISP", "#%lu triggerDisplayAsync mode=%s", static_cast<unsigned long>(++panelSeq),
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);

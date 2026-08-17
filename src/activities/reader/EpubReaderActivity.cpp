@@ -5111,8 +5111,15 @@ void EpubReaderActivity::openReaderMenu() {
         // And repaint. Every other sub-activity handler here already requests an
         // update (book info, reading stats, chapter selection); the menu's did not,
         // so a plain Back left the menu on screen until something else happened to
-        // trigger a render -- and left the HALF override armed by
-        // enforceExitFullRefresh() above unconsumed, which is what it exists for.
+        // trigger a render.
+        //
+        // Note this repaint goes out on the normal refresh cycle, usually FAST. The
+        // enforceExitFullRefresh() above does NOT cover it: that override is one-shot
+        // and the menu's own first paint consumes it on the way in, which is what it
+        // is there for. Coming back from a full-screen menu to text on a fast LUT is
+        // the ghosting-prone direction, so arming a second HALF here is defensible --
+        // held off because a HALF costs ~1.5 s on the 960x540 panel and no ghosting
+        // has actually been reported on this transition.
         requestUpdate();
       });
 }
