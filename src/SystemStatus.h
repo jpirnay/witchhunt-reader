@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <FlashFontPartition.h>
+#include <HalCapabilities.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <WiFi.h>
@@ -50,7 +51,7 @@ inline const char* displayControllerName(BoardConfig::DisplayController controll
 struct SystemStatus {
   const char* version;
   const char* displaySdk;         // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
-  const char* deviceType;         // "X3" or "X4"
+  const char* deviceType;         // display name of the active board, e.g. "X4", "T5 S3 Pro"
   const char* displayController;  // panel controller silicon resolved at boot, e.g. "UC8253"
   uint16_t displayWidth;          // Native panel width in pixels (long edge)
   uint16_t displayHeight;         // Native panel height in pixels (short edge)
@@ -92,15 +93,18 @@ struct SystemStatus {
     SystemStatus s;
     s.version = CROSSPOINT_VERSION;
     s.displaySdk = CROSSPOINT_DISPLAY_SDK;
-    if (gpio.deviceIsX3()) {
-      s.deviceType = "X3";
-      s.displayWidth = 792;
-      s.displayHeight = 528;
-    } else {
-      s.deviceType = "X4";
-      s.displayWidth = 800;
-      s.displayHeight = 480;
-    }
+    // From the active board profile, not a deviceIsX3() ternary. That ternary
+    // reported every non-X3 board as "X4 (800 x 480)" -- correct on the C3 pair
+    // it was written for, wrong on every S3 board, where deviceIsX3() is false by
+    // construction. Observed on the T5S3, which is a 960x540 LilyGo.
+    //
+    // ACTIVE is the right source on the C3 too: HalGPIO::begin() runs the X3/X4
+    // fingerprint and calls BoardConfig::selectDevice(), so the profile already
+    // reflects the detected device (including the UC8279 X3 variant) by the time
+    // this is read.
+    s.deviceType = HalCapabilities::boardDisplayName(BoardConfig::ACTIVE.board);
+    s.displayWidth = BoardConfig::ACTIVE.displayWidth;
+    s.displayHeight = BoardConfig::ACTIVE.displayHeight;
     s.displayController = displayControllerName(BoardConfig::ACTIVE.displayController);
     s.chipVersion = ESP.getChipModel();
     s.chipVersion += " rev ";

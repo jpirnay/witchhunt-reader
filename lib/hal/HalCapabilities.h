@@ -120,6 +120,45 @@ inline bool hasColorTemperature() {
   return hasFrontlight() && BoardConfig::ACTIVE.frontlight.gpioWarm != BoardConfig::PIN_UNASSIGNED;
 }
 
+// Human-readable board name for the UI. The profile's own `name` is a build
+// slug ("xteink_x4", "lilygo_t5s3") and would read badly on screen, so the
+// display spelling lives here. Deliberately exhaustive with no default: a new
+// board then fails to compile rather than silently reporting the wrong device,
+// which is exactly the failure this replaces -- the old deviceIsX3() ternary
+// called every S3 board an "X4".
+inline const char* boardDisplayName(BoardConfig::Board board) {
+  switch (board) {
+    case BoardConfig::Board::XteinkX4:
+      return "X4";
+    // Same board and glass as the X3, differing only in the panel controller,
+    // which is reported on its own row.
+    case BoardConfig::Board::XteinkX3:
+    case BoardConfig::Board::XteinkX3Uc8279:
+      return "X3";
+    case BoardConfig::Board::XteinkX4Pro:
+      return "X4 Pro";
+    case BoardConfig::Board::M5StackPaperColor:
+      return "M5Paper Color";
+    case BoardConfig::Board::MurphyM3:
+      return "Murphy M3";
+    case BoardConfig::Board::MurphyM4:
+      return "Murphy M4";
+    case BoardConfig::Board::DeLink:
+      return "de-link";
+    case BoardConfig::Board::LilyGoT5S3:
+      return "T5 S3 Pro";
+    case BoardConfig::Board::M5PaperV11:
+      return "M5Paper v1.1";
+    case BoardConfig::Board::Sticky:
+      return "Sticky";
+    case BoardConfig::Board::PaperMono:
+      return "Paper Mono";
+    case BoardConfig::Board::M5PaperS3:
+      return "M5Paper S3";
+  }
+  return "Unknown";
+}
+
 }  // namespace HalCapabilities
 
 // Boards whose support layer owns bus bring-up.
@@ -135,7 +174,6 @@ inline bool hasColorTemperature() {
 // Where such a layer exists, the HAL must NOT also start those buses: a second
 // Wire.begin() on one port breaks the ESP-IDF i2c_master driver outright, and a
 // second SPI.begin() would undo the CS deselects.
-//
 // This is a board NAME rather than a capability, deliberately and narrowly:
 // board-support glue is per-board by definition, unlike the hardware questions
 // HalCapabilities answers. Keeping it to this one macro is what stops it

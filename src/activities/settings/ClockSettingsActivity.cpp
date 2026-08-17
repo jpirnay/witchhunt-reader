@@ -1,6 +1,7 @@
 #include "ClockSettingsActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <I18n.h>
@@ -102,7 +103,11 @@ void ClockSettingsActivity::render(RenderLock&&) {
   const char* driftWarning = tr(STR_CLOCK_SETTINGS_WARNING_DRIFT);
 
   std::string warning = driftWarning;
-  if (!gpio.deviceIsX3()) {
+  // The battery warning is about keeping the MCU powered to hold the time, which
+  // only applies where there is no battery-backed RTC to hold it instead. Was
+  // `!gpio.deviceIsX3()`, i.e. "only the X3 has an RTC" -- which now shows the
+  // warning on the T5S3, whose PCF8563 makes it untrue.
+  if (!HalCapabilities::hasHardwareRtc()) {
     warning = std::string(batteryWarning) + "; " + driftWarning;
   }
 

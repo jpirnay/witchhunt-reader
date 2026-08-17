@@ -5,6 +5,7 @@
 #include <FontDecompressor.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
@@ -524,9 +525,13 @@ void enterDeepSleep(bool fromTimeout = false) {
   gpio.stopInputSampler();
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
-  // On X3 the DS3231 keeps time independently, so there's no need to keep the MCU
-  // powered during deep sleep for LP timer preservation.
-  const bool keepLpAlive = SETTINGS.useClock && !gpio.deviceIsX3();
+  // A board with a battery-backed RTC keeps time independently, so there is no
+  // need to keep the MCU powered through deep sleep just to preserve the LP timer.
+  //
+  // Was `!gpio.deviceIsX3()`, which read "only the X3 has an RTC" -- true when the
+  // X3 and X4 were the only boards. The T5S3 has a PCF8563 and would have burned
+  // deep-sleep current preserving a timer it does not need.
+  const bool keepLpAlive = SETTINGS.useClock && !HalCapabilities::hasHardwareRtc();
   HalClock::saveBeforeSleep(keepLpAlive);
   // If sleeping from a running reader the book loaded successfully, so the boot-loop
   // guard count is no longer needed. Reset it now because onExit() is never called
@@ -922,7 +927,10 @@ void setup() {
   }
 #endif
 
-  LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
+  // Same fix as SystemStatus::collectFast(): the old deviceIsX3() ternary logged
+  // "X4" on every S3 board, because deviceIsX3() is false there by construction.
+  LOG_INF("MAIN", "Hardware detect: %s (%ux%u)", HalCapabilities::boardDisplayName(BoardConfig::ACTIVE.board),
+          BoardConfig::ACTIVE.displayWidth, BoardConfig::ACTIVE.displayHeight);
   // The gate ran before Serial was open, so this is the first chance to report it. INF
   // level: a rejected wake leaves no other trace, and release builds must be able to
   // answer "why did nothing happen when I pressed power".
