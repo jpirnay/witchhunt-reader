@@ -302,6 +302,19 @@ void HalGPIO::sampleOnce() {
   // expander via setButtonHook() (the T5S3's user button arrives as BTN_DOWN),
   // which the SDK's own readButtonAdc() diagnostic cannot see — that one is
   // specific to the Xteink ADC ladder and reports raw = -1 elsewhere.
+  // GT911 capacitive home key. Traced separately because it is NOT a BTN_* index
+  // -- InputManager surfaces it through wasHomeKeyPressed()/Tapped()/LongPressed()
+  // -- and because the SDK reads its status bit (0x10) UNCONDITIONALLY, without
+  // consulting BoardConfig's touch.hasHomeKey. So detection works on any board
+  // with a GT911 even when the profile claims no key, and this trace can settle
+  // by experiment whether a given board actually has one.
+  if (inputMgr.wasHomeKeyPressed() || inputMgr.wasHomeKeyTapped() || inputMgr.wasHomeKeyLongPressed()) {
+    LOG_INF("BTN", "HOMEKEY press=%d tap=%d long=%d (profile hasHomeKey=%d) t=%lums",
+            inputMgr.wasHomeKeyPressed() ? 1 : 0, inputMgr.wasHomeKeyTapped() ? 1 : 0,
+            inputMgr.wasHomeKeyLongPressed() ? 1 : 0, BoardConfig::hasHomeKey() ? 1 : 0,
+            static_cast<unsigned long>(now));
+  }
+
   if (pressed != 0 || released != 0) {
     for (uint8_t i = 0; i <= BTN_POWER; i++) {
       const bool down = (pressed & (1u << i)) != 0;
