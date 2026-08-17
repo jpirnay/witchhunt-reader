@@ -21,49 +21,23 @@ static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
 void HalPowerManager::begin() {
   if (HalCapabilities::hasI2cFuelGauge()) {
     // Boards with an I2C fuel gauge read charge over the bus rather than from an
-    // ADC divider (X3 has a BQ27220 at 0x55, X4 Pro a CW2017 at 0x63; X4 has
-    // none and uses BAT_GPIO0). Pins/frequency come from the profile, not the X3
-    // macros: X3's gauge is on SDA20/SCL0 at 400 kHz, X4 Pro's CW2017 on
-    // SDA39/SCL38. Verified identical to the old X3_I2C_* values for the C3
-    // before converting. Must run AFTER gpio.begin() so the early hardware
-    // detection probes are finished.
+    // ADC divider (X3 has a BQ27220 at 0x55, X4 Pro a CW2017 at 0x63, T5S3 a
+    // BQ27220 at 0x55; X4 has none and uses its ADC pin).
+    //
+    // We do NOT start the bus here. That is HalI2cBus::ensureBusStarted()'s job:
+    // the gauge is one peripheral on a shared bus, not its owner, and on a touch
+    // board the SDK's InputManager has already started it. main.cpp calls the
+    // owner after gpio.begin() so the touch driver gets first claim.
     //
     // NOTE the gauge PROTOCOL is still BQ27220-specific (I2C_ADDR_BQ27220 and
     // the BQ27220_*_REG offsets below). X4 Pro's CW2017 answers at a different
     // address with different registers, so it needs its own read path -- taking
     // the address from the profile alone would talk BQ27220 registers to a
-    // CW2017, the same trap as DS3231-vs-BM8563 in HalClock.
-    const BoardConfig::BatteryGaugeConfig& gauge = BoardConfig::ACTIVE.batteryGauge;
-
-    // Only initialise the bus if nobody else already has.
-    //
-    // On a board whose touch controller sits on these same pins, the SDK's
-    // InputManager has ALREADY called Wire.begin() for the GT911 (at 100 kHz)
-    // during inputMgr.begin(), which runs earlier in setup() than this. Calling
-    // Wire.begin() a second time on one port hands the new ESP-IDF i2c_master
-    // driver a bus it already owns: the call fails and every later transaction
-    // returns ESP_ERR_INVALID_STATE (259). On X4 Pro that broke the RTC and the
-    // gauge with:
-    //   i2cWriteReadNonStop(): i2c_master_transmit_receive failed: [259]
-    //
-    // Upstream never hits this because their HalPowerManager does no Wire.begin
-    // at all. Ours needs one for the X3, where there is no touch controller and
-    // nothing else brings the bus up.
-    //
-    // Consequence when touch owns the bus: the gauge runs at the touch driver's
-    // 100 kHz rather than the profile's 400 kHz. Slower, but a fuel gauge is
-    // polled seconds apart, so it does not matter -- and correctness beats the
-    // rate. Sharing a bus means sharing its clock.
-    const BoardConfig::TouchConfig& touch = BoardConfig::ACTIVE.touch;
-    const bool touchAlreadyOwnsThisBus =
-        BoardConfig::hasTouch() && touch.sda == gauge.i2cSda && touch.scl == gauge.i2cScl;
-    if (!touchAlreadyOwnsThisBus) {
-      Wire.begin(gauge.i2cSda, gauge.i2cScl, gauge.i2cHz);
-      Wire.setTimeOut(4);
-    }
+    // CW2017, the same trap as DS3231-vs-BM8563 in HalClock. T5S3's gauge is a
+    // BQ27220, so this path suits it as-is.
     _batteryUseI2C = true;
-  } else {
-    pinMode(BAT_GPIO0, INPUT);
+  } else if (HalCapabilities::hasAdcBattery()) {
+    pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();

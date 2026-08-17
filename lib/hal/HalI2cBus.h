@@ -74,4 +74,25 @@ class HalI2cBus {
 
   static void begin() {}
 #endif
+
+ public:
+  // Bring the shared I2C bus up, once, from the active board profile.
+  //
+  // This layer owns bus INITIALISATION as well as serialization, because those
+  // are the same question: who owns the bus. Previously HalPowerManager called
+  // Wire.begin() as a side effect of setting up the fuel gauge, which is the
+  // wrong layer to decide it -- the gauge is one of several peripherals on a
+  // shared bus, not its owner.
+  //
+  // The subtle part is that we are NOT always the one who should start it. When
+  // the board has a touch controller on these pins, the SDK's InputManager has
+  // already called Wire.begin() for it during inputMgr.begin(). Starting it a
+  // second time hands the ESP-IDF i2c_master driver a port it already owns: the
+  // call fails and every later transaction returns ESP_ERR_INVALID_STATE. Both
+  // touch boards hit this -- X4 Pro shares SDA39/SCL38 between GT911, gauge and
+  // RTC; T5S3 shares SDA39/SCL40 between GT911 and its gauge.
+  //
+  // Must be called AFTER gpio.begin() (which runs inputMgr.begin()), so the
+  // touch driver has had its chance first. Idempotent.
+  static void ensureBusStarted();
 };

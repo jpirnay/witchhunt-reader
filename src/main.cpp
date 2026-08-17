@@ -796,6 +796,10 @@ void setup() {
   // lands in a touch poll. Compiles away on non-touch boards.
   HalI2cBus::begin();
   gpio.begin();
+  // Bus start-up must follow gpio.begin(): that runs inputMgr.begin(), and on a
+  // touch board the SDK's GT911 init starts the shared I2C bus itself. The owner
+  // detects that and stands down rather than re-initialising it. See HalI2cBus.h.
+  HalI2cBus::ensureBusStarted();
   powerManager.begin();
   halTiltSensor.begin();
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
