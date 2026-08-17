@@ -879,12 +879,18 @@ void setup() {
   // which BoardConfig itself documents as the value "tuned on the X4 bezel" and
   // meant to be overridden per board once measured. This case sits closer over
   // the glass at the sides than the X4's, so 3px leaves the first and last
-  // characters of every line hard to read. Widen the sides; top/bottom are fine.
+  // characters of every line hard to read.
   //
-  // Measured by eye on hardware, not from a drawing — the vendor publishes no
-  // bezel dimension. The X4 Pro's profile carries 7px sides for the same reason.
-  BoardConfig::ACTIVE.viewableInsets.left = 6;
-  BoardConfig::ACTIVE.viewableInsets.right = 6;
+  // Sides measured by eye on hardware in two passes (3 -> 6 -> 8); the vendor
+  // publishes no bezel dimension. Top and bottom confirmed fine at the default 9
+  // and 3, so they are left alone. The X4 Pro's profile carries 7px sides for the
+  // same reason, which makes 8 here unremarkable.
+  //
+  // These are in the panel's NATIVE PORTRAIT frame and getOrientedViewableTRBL()
+  // rotates them; the values were confirmed with the reader in portrait, where
+  // left/right map straight through.
+  BoardConfig::ACTIVE.viewableInsets.left = 8;
+  BoardConfig::ACTIVE.viewableInsets.right = 8;
 #endif
 
   HalSystem::begin();
