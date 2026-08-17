@@ -118,6 +118,14 @@ void HalDisplay::requestResync(uint8_t settlePasses) {
   }
 }
 
+// Every path that reaches the panel logs one line with a shared sequence number.
+// Only displayBuffer() used to log, so a second refresh arriving through
+// refreshDisplay / triggerDisplay / displayWindow was invisible -- and an
+// invisible extra refresh is exactly what "the menu update appeared twice" and a
+// doubled displayBuffer time look like from the outside. Cheap: one counter and a
+// DBG line per refresh, not per pixel.
+static uint32_t panelSeq = 0;
+
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
 
@@ -138,7 +146,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   // upgraded to HALF on a cold panel), so the mode asked for is not always what ran.
   const unsigned long refreshStart = millis();
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
-  LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms",
+  LOG_DBG("DISP", "#%lu displayBuffer mode=%s took %lu ms", static_cast<unsigned long>(++panelSeq),
           mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
           millis() - refreshStart);
 }
@@ -156,7 +164,11 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   }
   pendingX3SettlePasses = 0;
 
+  const unsigned long refreshStart = millis();
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
+  LOG_DBG("DISP", "#%lu refreshDisplay mode=%s took %lu ms", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
+          millis() - refreshStart);
 }
 
 void HalDisplay::deepSleep() {
@@ -226,6 +238,8 @@ void HalDisplay::setSingleBufferFastDiff(bool enabled) {
 
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  LOG_DBG("DISP", "#%lu triggerDisplay mode=%s", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }
 
@@ -243,6 +257,8 @@ void HalDisplay::completeDisplay() {
 // driving SPI.
 void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  LOG_DBG("DISP", "#%lu triggerDisplayAsync mode=%s", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
 
@@ -305,6 +321,7 @@ void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  LOG_DBG("DISP", "#%lu displayWindow x=%u y=%u w=%u h=%u", static_cast<unsigned long>(++panelSeq), x, y, w, h);
   einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
 }
 
