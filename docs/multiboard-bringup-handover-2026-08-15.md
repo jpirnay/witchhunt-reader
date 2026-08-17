@@ -352,8 +352,17 @@ first on the next board.
 |---|---|---|
 | BOOT | GPIO0 | the power button, by SDK design → `BTN_POWER` ✓ |
 | "IO48" | **PCA9535 I2C expander** (the label is silkscreen, not the wiring) | user button → `BTN_DOWN` ✓ |
+| **Home key** | **GT911 capacitive**, status bit `0x10` | → `BTN_CONFIRM` ✓ **device-validated 2026-08-17** |
 | PWR | **unknown** — not on any pin we sample, and the vendor documents no function | see below |
 | RST | hardware reset | ✓ reboots correctly since `17df518a` |
+
+**The home key exists, and the vendor wiki does not mention it.** The wiki's
+button list (*"RST + BOOT + IO48 + PWR"*) is not exhaustive — the same document
+was already wrong about IO48's wiring. It was found by trace, not by reading:
+`BoardConfig`'s `LILYGO_T5_PRO_GT911` also leaves `touch.hasHomeKey` false, while
+`InputManager` reads the GT911 key bit unconditionally, so the key worked at the
+driver level and was discarded at every consumer. **Treat vendor button lists as
+a lower bound and probe the hardware.**
 
 The vendor wiki says only *"Buttons: RST + BOOT + IO48 + PWR"* with **no
 functional description**, and their reference firmware
@@ -365,11 +374,60 @@ exit and power-path control. **Testable without a schematic:** on battery with
 USB unplugged, hold PWR ~10 s — a hard power-off, revived by a press, confirms
 `/QON`. The schematic is not in the vendor repo.
 
-**Two software-visible buttons, one of which is power.** That makes touch phase 4
-mandatory on this board rather than the "decision point" the touch plan still
-calls it.
+**Three software-visible inputs, one of which is power.** The home key lifts the
+board from unusable to navigable, but touch phase 4 remains mandatory — see the
+Back gap below.
+
+#### The home key → CONFIRM routing, and the input path it exposed
+
+Routed in `HalGPIO::sampleOnce()` when the board has a home key **and** leaves
+`input.confirm` unassigned, so a board with a real Confirm pin is never shadowed.
+`ButtonEventManager`'s existing FSM then supplies click / double / long for free.
+
+**The bug worth remembering.** The first attempt pushed synthetic edges into the
+raw edge queue only. It looked correct, logged correctly, and did nothing —
+because the firmware has *two* input paths:
+
+| Path | Read via | Consumers |
+|---|---|---|
+| Edge queue | `popRawEdge()` → `ButtonEventManager` | `RecentBooksActivity`, `SliderPickerActivity`, `BmpViewerActivity`, … |
+| **Level/edge bitmask** | `wasPressed()` / `wasReleased()` / `isPressed()` | ~15 activities incl. `MenuListActivity` — i.e. the whole settings tree, and `HomeActivity` |
+
+`HomeActivity` reads `wasReleased(Button::Confirm)`, so it never saw the key. The
+fix injects the key into the level/edge accumulators **before they are latched**,
+so both paths see it and the edge loop derives edges for free, exactly as for a
+real button. **A synthetic input must be injected as low as the real ones are, or
+it is only half-connected.**
+
+The long press needed one extra turn: the SDK reports its long press *while the
+key is still held* (~700 ms) and no tap follows, so releasing on that signal
+classifies as Short — the opposite of the gesture. The synthetic level is instead
+held until our own `LONG_PRESS_MS` (1000 ms) elapses, letting `applyTimeout()`
+fire `Long`. Device trace confirming both:
+
+```
+[11506] HOMEKEY press=1 → DOWN idx=1 (CONFIRM) live=0x02
+[11546] HOMEKEY tap=1   → UP   idx=1           live=0x00   → Home ▸ FileBrowser
+[32686] HOMEKEY press=1 → DOWN idx=1           live=0x02
+[33385] HOMEKEY long=1  held=1                             ← SDK long at ~700 ms
+[33691] Exiting FileBrowser ▸ Reader                       ← classified Long
+[33696] UP idx=1                                           ← released at ~1010 ms
+```
 
 #### Still open on the T5S3
+
+- **No Back button — activities cannot be exited.** The most pressing usability
+  gap. Note there is **no `BTN_BACK` action** in `BUTTON_ACTION`, and those
+  actions are reader-scoped anyway, so this cannot be fixed with a setting; Back
+  must be produced at the input-mapping layer. `Button::Back` resolves through
+  `SETTINGS.frontButtonBack` to raw index `BTN_BACK = 0`, so the same synthesis
+  the home key uses would reach every activity. Candidates: home-key **long** →
+  Back (no cost to the click, but spends the long gesture), home-key **double** →
+  Back (costs every single click a 300 ms `DOUBLE_WINDOW_MS` delay, since
+  `hasDoubleAction()` defers the Short), IO48 long → Back, or touch phase 4.
+- **Ghosting artifacts in the Reader** (observed 2026-08-17, first reader entry
+  on this board). Not yet investigated; the panel is `LgfxEpd`, a different path
+  from the SSD1677 boards where the `panelNeedsHalfRefreshSettle()` work was done.
 
 - **PWR's actual function** (above).
 - **The 20 MHz SD clamp is unproven.** SD may work purely because
@@ -678,6 +736,16 @@ already in its env) — that reaches into `HalStorage`.
 
 ## Gotchas that cost time
 
+- **`Failed to install Python dependencies into penv` is not about your penv.**
+  The pioarduino platform pins `platformio` to a GitHub zip, but that zip installs
+  as `pioarduino` / `pioarduino-core` — **never** as `platformio`. The lookup in
+  `penv_setup.py::get_packages_to_install()` therefore never matches, so the zip
+  is re-downloaded on *every* build until GitHub answers **429** and the build
+  dies with that message. The real error is invisible because the platform sends
+  the install's stderr to `DEVNULL`. Workaround needing no changes:
+  `unshare -rn "$PIO" run -e lilygo_t5s3` (deps are already present, so the
+  skipped fetch is a no-op). Permanent fix is a one-block patch to that file in
+  `~/.platformio` — **a platform update reverts it.**
 - **`platformio.local.ini` silently breaks the C3 build after `b4b94068`.** That
   file is gitignored, is listed in `extra_configs`, and typically overrides
   `[env:default]` with `build_flags = ${base.build_flags} …`. Since workstream A

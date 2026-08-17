@@ -185,6 +185,16 @@ void HalGPIO::begin() {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
 
+  // Route the capacitive home key to BTN_CONFIRM only where that button is
+  // otherwise unreachable. Both conditions matter: a board without a home key has
+  // nothing to route, and a board with a real Confirm pin must not have it
+  // shadowed by synthetic edges. Evaluated once here, after the board profile is
+  // final (including any runtime corrections).
+  homeKeyDrivesConfirm_ = BoardConfig::hasHomeKey() && BoardConfig::ACTIVE.input.confirm == BoardConfig::PIN_UNASSIGNED;
+  if (homeKeyDrivesConfirm_) {
+    LOG_INF("HW", "Capacitive home key routed to CONFIRM (board has no Confirm pin)");
+  }
+
   // USB-presence detect. The pin must exist AND not be shared with the fuel-gauge
   // I2C bus: X3 lists usbDetect = GPIO20, which is also its gauge SDA, so it must
   // stay an I2C line. X4 has no gauge and owns GPIO20 outright; X4 Pro leaves
@@ -248,6 +258,12 @@ static const char* buttonTraceName(uint8_t idx) {
 }
 #endif
 
+// How long the synthetic CONFIRM level is held after the SDK reports a home-key
+// long press, so ButtonEventManager classifies it Long rather than Short. Must
+// be >= ButtonEventManager::LONG_PRESS_MS (1000 ms, src/ButtonEventManager.h);
+// duplicated rather than included because lib/hal must not depend on src/.
+static constexpr uint32_t HOME_KEY_LONG_HOLD_MS = 1000;
+
 void HalGPIO::sampleOnce() {
   {
     // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
@@ -272,6 +288,56 @@ void HalGPIO::sampleOnce() {
   }
   const uint32_t now = millis();
   const unsigned long held = inputMgr.getHeldTime();
+
+  // Capacitive home key -> synthetic CONFIRM button.
+  //
+  // Boards with a GT911 home key (T5S3, X4 Pro) leave input.confirm unassigned:
+  // their whole nav cluster is PIN_UNASSIGNED and confirm was meant to come from
+  // touch. That leaves the home key as the only spare input on a board that has
+  // barely any, so feed it in as BTN_CONFIRM rather than inventing a new logical
+  // button.
+  //
+  // Injected here, into the level/edge accumulators BEFORE they are latched,
+  // rather than as a bare edge-queue push. The firmware has two input paths and
+  // a key that drives only one of them is half-dead:
+  //   - the edge queue, which ButtonEventManager turns into press types
+  //     (RecentBooksActivity, SliderPickerActivity, BmpViewerActivity, ...)
+  //   - the wasPressed()/isPressed() bitmask, polled directly by ~15 activities
+  //     including MenuListActivity, i.e. the entire settings tree
+  // Setting the bits here feeds both: the loop below derives the edges from
+  // pressed/released for free, exactly as it does for a real button.
+  //
+  // Edge synthesis, given InputManager exposes only one-shot events and keeps
+  // touchHomeKeyDown private:
+  //   press   -> wasHomeKeyPressed()
+  //   release -> wasHomeKeyTapped(), or wasHomeKeyLongPressed()
+  // wasHomeKeyLongPressed() fires WHILE the key is still held and no tap follows
+  // it, so it cannot be released on the spot: the SDK's long threshold is
+  // shorter than ButtonEventManager::LONG_PRESS_MS, and an immediate release
+  // would be classified Short -- the opposite of what the user did. Instead the
+  // level stays asserted until our own threshold passes, which lets the FSM's
+  // applyTimeout() fire Long while held; the later release edge lands in Idle
+  // and is ignored, precisely as it is for a real long-pressed button.
+  if (homeKeyDrivesConfirm_) {
+    if (inputMgr.wasHomeKeyPressed()) {
+      pressed |= (1u << BTN_CONFIRM);
+      homeKeyHeld_ = true;
+      homeKeyLongPending_ = false;
+      homeKeyPressMs_ = now;
+    }
+    if (homeKeyHeld_ && inputMgr.wasHomeKeyLongPressed()) {
+      homeKeyLongPending_ = true;
+    }
+    const bool holdSatisfied = now - homeKeyPressMs_ >= HOME_KEY_LONG_HOLD_MS;
+    if (homeKeyHeld_ && (inputMgr.wasHomeKeyTapped() || (homeKeyLongPending_ && holdSatisfied))) {
+      released |= (1u << BTN_CONFIRM);
+      homeKeyHeld_ = false;
+      homeKeyLongPending_ = false;
+    }
+    if (homeKeyHeld_) {
+      live |= (1u << BTN_CONFIRM);
+    }
+  }
 
   portENTER_CRITICAL(&inputMux_);
   liveState_ = live;
@@ -309,9 +375,10 @@ void HalGPIO::sampleOnce() {
   // with a GT911 even when the profile claims no key, and this trace can settle
   // by experiment whether a given board actually has one.
   if (inputMgr.wasHomeKeyPressed() || inputMgr.wasHomeKeyTapped() || inputMgr.wasHomeKeyLongPressed()) {
-    LOG_INF("BTN", "HOMEKEY press=%d tap=%d long=%d (profile hasHomeKey=%d) t=%lums",
+    LOG_INF("BTN", "HOMEKEY press=%d tap=%d long=%d | hasHomeKey=%d confirmPin=%d route=%d held=%d t=%lums",
             inputMgr.wasHomeKeyPressed() ? 1 : 0, inputMgr.wasHomeKeyTapped() ? 1 : 0,
             inputMgr.wasHomeKeyLongPressed() ? 1 : 0, BoardConfig::hasHomeKey() ? 1 : 0,
+            static_cast<int>(BoardConfig::ACTIVE.input.confirm), homeKeyDrivesConfirm_ ? 1 : 0, homeKeyHeld_ ? 1 : 0,
             static_cast<unsigned long>(now));
   }
 

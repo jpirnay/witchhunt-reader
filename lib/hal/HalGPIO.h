@@ -128,6 +128,17 @@ class HalGPIO {
   uint8_t snapPressed_ = 0;
   uint8_t snapReleased_ = 0;
 
+  // True when the capacitive home key is routed to BTN_CONFIRM (set in begin();
+  // see the synthesis block in sampleOnce). The rest track the synthetic hold:
+  // homeKeyHeld_ is the level reported through isPressed(BTN_CONFIRM),
+  // homeKeyPressMs_ is when it went down, and homeKeyLongPending_ marks a hold
+  // the SDK has already called "long" but whose level we keep asserted until our
+  // own LONG_PRESS_MS elapses, so the press classifies as Long and not Short.
+  bool homeKeyDrivesConfirm_ = false;
+  bool homeKeyHeld_ = false;
+  bool homeKeyLongPending_ = false;
+  uint32_t homeKeyPressMs_ = 0;
+
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
   static void samplerTask(void* arg);

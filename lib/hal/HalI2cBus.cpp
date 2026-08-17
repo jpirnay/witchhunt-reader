@@ -60,28 +60,6 @@ void HalI2cBus::ensureBusStarted() {
   if (started) return;
   started = true;
 
-#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
-  // SDK profile correction: the T5S3 HAS a capacitive home key, but
-  // BoardConfig's LILYGO_T5_PRO_GT911 leaves touch.hasHomeKey at its false
-  // default.
-  //
-  // Proven on hardware with the BUTTON_TRACE build:
-  //   [BTN] HOMEKEY press=1 tap=0 long=0 (profile hasHomeKey=0)
-  //   [BTN] HOMEKEY press=0 tap=1 long=0 (profile hasHomeKey=0)
-  //
-  // InputManager reads the GT911's key status bit (0x10) unconditionally, so
-  // detection always worked; it is the CONSUMERS that are gated —
-  // MappedInputManager::wasHomeGesture() and wasHomeKeyHold() both test
-  // gpio.hasHomeKey(), so every press was discarded. On a board with one free
-  // button that is a real loss: the home key is the natural "exit to home".
-  //
-  // Patched at runtime rather than in the submodule so the fix is not lost on
-  // the next SDK bump. The proper fix is upstream — set hasHomeKey = true in
-  // LILYGO_T5_PRO_GT911 — and this override should go when that lands.
-  BoardConfig::ACTIVE.touch.hasHomeKey = true;
-  LOG_INF("I2C", "Board profile corrected: touch.hasHomeKey = true (SDK profile omits it; verified on hardware)");
-#endif
-
   // Which pins do our own (non-touch) peripherals need? The gauge and the
   // sensor block each carry their own copy; take whichever is populated. They
   // agree on every board we ship -- one physical bus -- and a board that ever

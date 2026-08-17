@@ -833,6 +833,28 @@ void setup() {
   // InputManager::setButtonHook(). Without it the board has no working buttons
   // at all and an uncontested SPI bus. Placement matches upstream/feat-touch.
   BoardT5S3::begin();
+
+  // SDK profile correction, and it MUST happen before gpio.begin().
+  //
+  // The T5S3 has a capacitive home key, but BoardConfig's LILYGO_T5_PRO_GT911
+  // leaves touch.hasHomeKey at its false default. Proven on hardware with the
+  // BUTTON_TRACE build:
+  //   [BTN] HOMEKEY press=1 tap=0 long=0 (profile hasHomeKey=0)
+  //
+  // InputManager reads the GT911 key bit (0x10) unconditionally, so detection
+  // always worked; the CONSUMERS are gated on the profile flag —
+  // MappedInputManager::wasHomeGesture()/wasHomeKeyHold(), and HalGPIO's
+  // home-key-to-CONFIRM routing, which latches its decision in begin().
+  //
+  // Placed here rather than in a HAL begin() for exactly that reason: a first
+  // attempt applied it in HalI2cBus::ensureBusStarted(), which runs AFTER
+  // gpio.begin(), so the routing had already been disabled by the stale flag
+  // while the trace (read live) showed the corrected value. Board-profile
+  // corrections belong with board bring-up, before anything reads the profile.
+  //
+  // The proper fix is upstream — set hasHomeKey = true in LILYGO_T5_PRO_GT911 —
+  // and this override goes when that lands.
+  BoardConfig::ACTIVE.touch.hasHomeKey = true;
 #endif
 
   HalSystem::begin();
