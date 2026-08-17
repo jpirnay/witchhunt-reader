@@ -167,10 +167,10 @@ class GfxRenderer {
         textDarkness(1) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
 
-  static constexpr int VIEWABLE_MARGIN_TOP = 9;
-  static constexpr int VIEWABLE_MARGIN_RIGHT = 3;
-  static constexpr int VIEWABLE_MARGIN_BOTTOM = 3;
-  static constexpr int VIEWABLE_MARGIN_LEFT = 3;
+  // Bezel insets live in BoardProfile::viewableInsets and are read by
+  // getOrientedViewableTRBL(). The constants that used to sit here duplicated the
+  // profile's own defaults, which is how every board ended up with the X4's bezel
+  // geometry; keeping them would leave two sources of truth for one measurement.
 
   // Setup
   void begin();  // must be called right after display.begin()

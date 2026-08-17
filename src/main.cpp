@@ -874,6 +874,17 @@ void setup() {
   BoardConfig::ACTIVE.sensors.i2cHz = 400000;
   BoardConfig::ACTIVE.sensors.rtcAddr = 0x51;
   BoardConfig::ACTIVE.sensors.rtcType = BoardConfig::RtcType::Pcf8563;
+
+  // Third profile correction: bezel insets. ViewableInsets defaults to {9,3,3,3},
+  // which BoardConfig itself documents as the value "tuned on the X4 bezel" and
+  // meant to be overridden per board once measured. This case sits closer over
+  // the glass at the sides than the X4's, so 3px leaves the first and last
+  // characters of every line hard to read. Widen the sides; top/bottom are fine.
+  //
+  // Measured by eye on hardware, not from a drawing — the vendor publishes no
+  // bezel dimension. The X4 Pro's profile carries 7px sides for the same reason.
+  BoardConfig::ACTIVE.viewableInsets.left = 6;
+  BoardConfig::ACTIVE.viewableInsets.right = 6;
 #endif
 
   HalSystem::begin();

@@ -1,5 +1,6 @@
 #include "GfxRenderer.h"
 
+#include <BoardConfig.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
@@ -3324,30 +3325,40 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
 }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
+  // Bezel overlap comes from the board profile, not from constants here.
+  //
+  // BoardProfile::viewableInsets exists precisely for this and documents itself
+  // as "the value CrossPoint historically hardcoded for every board (tuned on the
+  // X4 bezel) — override per profile as boards are measured". We were still using
+  // the hardcoded copy, so every board inherited the X4's bezel geometry however
+  // differently its own case sits over the glass. The profile defaults are the
+  // same {9,3,3,3}, so this is behaviour-identical until a profile says otherwise.
+  const BoardConfig::ViewableInsets& in = BoardConfig::ACTIVE.viewableInsets;
+  const int top = in.top, right = in.right, bottom = in.bottom, left = in.left;
   switch (getOrientation()) {
     case Portrait:
-      *outTop = VIEWABLE_MARGIN_TOP;
-      *outRight = VIEWABLE_MARGIN_RIGHT;
-      *outBottom = VIEWABLE_MARGIN_BOTTOM;
-      *outLeft = VIEWABLE_MARGIN_LEFT;
+      *outTop = top;
+      *outRight = right;
+      *outBottom = bottom;
+      *outLeft = left;
       break;
     case LandscapeClockwise:
-      *outTop = VIEWABLE_MARGIN_LEFT;
-      *outRight = VIEWABLE_MARGIN_TOP;
-      *outBottom = VIEWABLE_MARGIN_RIGHT;
-      *outLeft = VIEWABLE_MARGIN_BOTTOM;
+      *outTop = left;
+      *outRight = top;
+      *outBottom = right;
+      *outLeft = bottom;
       break;
     case PortraitInverted:
-      *outTop = VIEWABLE_MARGIN_BOTTOM;
-      *outRight = VIEWABLE_MARGIN_LEFT;
-      *outBottom = VIEWABLE_MARGIN_TOP;
-      *outLeft = VIEWABLE_MARGIN_RIGHT;
+      *outTop = bottom;
+      *outRight = left;
+      *outBottom = top;
+      *outLeft = right;
       break;
     case LandscapeCounterClockwise:
-      *outTop = VIEWABLE_MARGIN_RIGHT;
-      *outRight = VIEWABLE_MARGIN_BOTTOM;
-      *outBottom = VIEWABLE_MARGIN_LEFT;
-      *outLeft = VIEWABLE_MARGIN_TOP;
+      *outTop = right;
+      *outRight = bottom;
+      *outBottom = left;
+      *outLeft = top;
       break;
   }
 }
