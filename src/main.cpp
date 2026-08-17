@@ -839,58 +839,11 @@ void setup() {
   // at all and an uncontested SPI bus. Placement matches upstream/feat-touch.
   BoardT5S3::begin();
 
-  // SDK profile correction, and it MUST happen before gpio.begin().
-  //
-  // The T5S3 has a capacitive home key, but BoardConfig's LILYGO_T5_PRO_GT911
-  // leaves touch.hasHomeKey at its false default. Proven on hardware with the
-  // BUTTON_TRACE build:
-  //   [BTN] HOMEKEY press=1 tap=0 long=0 (profile hasHomeKey=0)
-  //
-  // InputManager reads the GT911 key bit (0x10) unconditionally, so detection
-  // always worked; the CONSUMERS are gated on the profile flag —
-  // MappedInputManager::wasHomeGesture()/wasHomeKeyHold(), and HalGPIO's
-  // home-key-to-CONFIRM routing, which latches its decision in begin().
-  //
-  // Placed here rather than in a HAL begin() for exactly that reason: a first
-  // attempt applied it in HalI2cBus::ensureBusStarted(), which runs AFTER
-  // gpio.begin(), so the routing had already been disabled by the stale flag
-  // while the trace (read live) showed the corrected value. Board-profile
-  // corrections belong with board bring-up, before anything reads the profile.
-  //
-  // The proper fix is upstream — set hasHomeKey = true in LILYGO_T5_PRO_GT911 —
-  // and this override goes when that lands.
-  BoardConfig::ACTIVE.touch.hasHomeKey = true;
-
-  // Second profile correction: the board has a battery-backed RTC and the SDK
-  // profile declares NO_SENSORS. The vendor schematic (page 3 / U3) shows a
-  // PCF8563TS at 0x51 on the shared main I2C bus — GPIO39/40, the same bus as the
-  // touch controller and the fuel gauge. The vendor README calls it a PCF85063;
-  // their own pinmap notes say to prefer the schematic and the mounted part.
-  //
-  // Without this the reader keeps time in software only and loses it whenever
-  // power is actually cut, rather than merely deep-sleeping.
-  BoardConfig::ACTIVE.sensors.i2cSda = BoardConfig::ACTIVE.touch.sda;
-  BoardConfig::ACTIVE.sensors.i2cScl = BoardConfig::ACTIVE.touch.scl;
-  BoardConfig::ACTIVE.sensors.i2cHz = 400000;
-  BoardConfig::ACTIVE.sensors.rtcAddr = 0x51;
-  BoardConfig::ACTIVE.sensors.rtcType = BoardConfig::RtcType::Pcf8563;
-
-  // Third profile correction: bezel insets. ViewableInsets defaults to {9,3,3,3},
-  // which BoardConfig itself documents as the value "tuned on the X4 bezel" and
-  // meant to be overridden per board once measured. This case sits closer over
-  // the glass at the sides than the X4's, so 3px leaves the first and last
-  // characters of every line hard to read.
-  //
-  // Sides measured by eye on hardware in two passes (3 -> 6 -> 8); the vendor
-  // publishes no bezel dimension. Top and bottom confirmed fine at the default 9
-  // and 3, so they are left alone. The X4 Pro's profile carries 7px sides for the
-  // same reason, which makes 8 here unremarkable.
-  //
-  // These are in the panel's NATIVE PORTRAIT frame and getOrientedViewableTRBL()
-  // rotates them; the values were confirmed with the reader in portrait, where
-  // left/right map straight through.
-  BoardConfig::ACTIVE.viewableInsets.left = 8;
-  BoardConfig::ACTIVE.viewableInsets.right = 8;
+  // The board-profile corrections that used to live here (capacitive home key,
+  // PCF8563 RTC, bezel insets) are now upstream in LILYGO_T5_PRO_GT911 via
+  // Free-Ink/freeink-sdk#47, so the overrides are gone. BoardT5S3::begin() above
+  // still has to run before gpio.begin(), because it owns the shared I2C bring-up
+  // and the SD SPI bus and registers the PCA9535 button hook.
 #endif
 
   HalSystem::begin();

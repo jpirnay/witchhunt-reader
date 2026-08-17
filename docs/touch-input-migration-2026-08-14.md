@@ -138,6 +138,16 @@ need appears. It does not belong in this plan's phases.
 **List layout feedback + row rectangles (`bb48403`, `cc89c65`).** This is the
 consequential one.
 
+> **Superseded 2026-08-17.** Upstream `310ec61` ("Remove row rectangle tracking
+> from list component") **deleted `rowRectFor()` and `MAX_ROW_RECTS`** again, and
+> `cc15c5a` replaced them with windowed list rendering. Both are in
+> `Free-Ink/freeink-sdk` main as of the #47 merge, which this repo now tracks. So
+> the P2 downgrade below rests on a primitive that no longer exists: bounded
+> partial-refresh tap flash is **not** available from the SDK today, and P2 is back
+> to "port upstream `57c389c0`'s approach" under 4a or "inherit whatever FUI does"
+> under 4b. The rest of this subsection is kept as the record of why the phase-4
+> recommendation was written the way it was.
+
 ```cpp
 struct ListNav {
   int  pageRows() const;                       // MEASURED page size, not the estimate

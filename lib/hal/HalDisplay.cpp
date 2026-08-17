@@ -317,14 +317,27 @@ void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   // in controller RAM and the BW page is retained by the panel -- so nothing ever
   // noticed that the buffer holds a plane rather than a page.
   //
-  // LgfxEpdDriver has no controller-side image to fall back on: fillCanvasGray()
-  // rebuilds every pixel from the base, mapping a clear base bit to kGrayBlack.
-  // Handed a text-only plane it therefore paints the whole background black and
-  // leaves only the AA marks standing -- exactly the inversion seen on the T5S3.
+  // LgfxEpdDriver USED TO have no controller-side image to fall back on:
+  // fillCanvasGray() rebuilt every pixel from the base, mapping a clear base bit to
+  // kGrayBlack, so a text-only plane painted the whole background black and left
+  // only the AA marks standing -- the inversion first seen on the T5S3.
   //
   // Reseed the write buffer from the on-screen frame first, so the base is the BW
   // page the panel is actually showing. Gated on the controller so the panels that
   // ignore the argument do not pay a full-buffer copy per AA pass.
+  //
+  // NOTE (Free-Ink/freeink-sdk#47, merged): the driver no longer reads `fb` at all
+  // -- displayGray() is now `(void)fb; overlayCanvasGray();`, composing onto LGFX's
+  // live canvas. So this reseed no longer serves the purpose it was written for and
+  // is a candidate for deletion.
+  //
+  // Kept for now deliberately, not by oversight. The reseed touches the HOST write
+  // framebuffer, which is a different object from the LGFX canvas the overlay
+  // composes onto, and whether the plane-restore step in
+  // GfxRenderer::renderGrayscalePlanesSequential() leans on it cannot be settled
+  // without the panel. The cost is one buffer copy per AA pass on one board; the
+  // downside if the reasoning is wrong is the inversion bug coming back. Remove it
+  // behind a device test, not behind an argument.
   if (BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::LgfxEpd) {
     einkDisplay.syncWriteBufferFromActive();
   }
