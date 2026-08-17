@@ -3358,7 +3358,29 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   probeParams.viewportHeight = viewportHeight;
   probeParams.embeddedStyle = embeddedStyle;
   probeParams.imageRendering = imageRendering;
-  const bool cacheHit = !resumeBackgroundBuild && section->loadSectionFile(probeParams);
+  bool cacheHit = !resumeBackgroundBuild && section->loadSectionFile(probeParams);
+
+  // A cache written by an interrupted build is marked truncated (parseComplete was
+  // false when it was persisted). With at least one page that is still readable and
+  // the mitigation hint tells the user. With ZERO pages it is unusable AND
+  // unrecoverable: loadSectionFile() returns true, so this counts as a hit, nothing
+  // rebuilds it, and the chapter renders "No pages to render" on every open for as
+  // long as the file exists. Seen on the T5S3, where Background-B builds are
+  // preempted often enough to leave one behind:
+  //   Deserialization succeeded: 0 pages
+  //   Cache found, skipping build...
+  //   Section 6 is truncated; showing mitigation hint
+  //   No pages to render
+  // Both in-session build paths already discard a truncated result and rebuild
+  // (see fallbackToReleasedRebuild and the Background-B branch); only a cache read
+  // from disk on a cold open lacked the same treatment. Drop the file so the miss
+  // is permanent rather than repeated on the next open.
+  if (cacheHit && section->isTruncatedCache() && section->pageCount == 0) {
+    LOG_INF("ERS", "Section %d: cached file is truncated with 0 pages; discarding and rebuilding", currentSpineIndex);
+    section->clearCache();
+    cacheHit = false;
+  }
+
   const bool cssFallbackRebuild = cacheHit && section->isEmbeddedStyleFallback();
   const bool needBuild = resumeBackgroundBuild || !cacheHit || cssFallbackRebuild;
   // The decisive fact for wake-latency work: a probe that hits means the section cost is a
