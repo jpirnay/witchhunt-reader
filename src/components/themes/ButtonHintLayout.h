@@ -3,6 +3,9 @@
 #include <cstddef>
 
 #include "components/themes/ButtonGeometry.h"
+// Where the strip LANDED, for touch. Kept separate (and Arduino-free) from where the boxes
+// GO, which is what this header decides; included here so themes get both from one include.
+#include "components/themes/ButtonHintStrip.h"
 
 // Where the four bottom button hints sit.
 //

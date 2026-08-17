@@ -558,6 +558,20 @@ void HalGPIO::updateUsbState(const unsigned long now) {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
+void HalGPIO::injectPress(const uint8_t buttonIndex) {
+  if (buttonIndex > BTN_POWER) return;
+  // Press and release share a timestamp, so ButtonEventManager classifies this as a
+  // Short press -- the right reading of a tap. A hold cannot be expressed this way and
+  // is not meant to be: the strip shows one label per button, not two.
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&inputMux_);
+  accumPressed_ |= (1u << buttonIndex);
+  accumReleased_ |= (1u << buttonIndex);
+  pushEdgeLocked(buttonIndex, true, now);
+  pushEdgeLocked(buttonIndex, false, now);
+  portEXIT_CRITICAL(&inputMux_);
+}
+
 bool HalGPIO::isPressed(uint8_t buttonIndex) const { return (snapState_ & (1u << buttonIndex)) != 0; }
 
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return (snapPressed_ & (1u << buttonIndex)) != 0; }

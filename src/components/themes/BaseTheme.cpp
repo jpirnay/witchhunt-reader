@@ -174,6 +174,18 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
                               buttonPositions);
   const char* labels[] = {btn1, btn2, btn3, btn4};
 
+  // Publish the geometry for touch. Recorded from the same values the draw uses, so the
+  // tap target cannot drift from the painted box.
+  ButtonHintStrip::Strip strip;
+  strip.y = pageHeight - buttonY;
+  strip.height = buttonHeight;
+  strip.width = buttonWidth;
+  for (int i = 0; i < 4; i++) {
+    strip.x[i] = buttonPositions[i];
+    strip.active[i] = labels[i] != nullptr && labels[i][0] != '\0';
+  }
+  ButtonHintStrip::record(strip);
+
   for (int i = 0; i < 4; i++) {
     // Only draw if the label is non-empty
     if (labels[i] != nullptr && labels[i][0] != '\0') {

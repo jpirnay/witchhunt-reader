@@ -164,6 +164,17 @@ class HalGPIO {
 
   // Button input methods
   void update();
+  // Synthesize a complete press+release of a raw button from something that is not a
+  // button -- currently a tap on the on-screen hint strip, which is the only way to
+  // reach Back/Confirm on a board whose nav cluster is PIN_UNASSIGNED.
+  //
+  // Same mechanism the capacitive home key uses inside update() (accumulators plus a
+  // matching edge pair, so both the wasPressed()/wasReleased() bitmask consumers and
+  // ButtonEventManager's press-type FSM see it), lifted to a public entry point for
+  // callers outside this class. Takes a RAW index, not a logical Button: remapping is
+  // applied downstream, so an injected BTN_BACK follows the user's button mapping
+  // exactly as the physical key would.
+  void injectPress(uint8_t buttonIndex);
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;

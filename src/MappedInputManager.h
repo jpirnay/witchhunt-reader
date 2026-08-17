@@ -112,6 +112,11 @@ class MappedInputManager {
   // raw edge from the sampler queue to the logical button(s) it drives.
   uint8_t rawIndex(Button button) const;
 
+  // Synthesize a press of a RAW hardware button. For inputs that stand in for a button
+  // without being one -- a tap on the on-screen hint strip. Raw rather than logical so
+  // the user's button remapping still applies, exactly as for the physical key.
+  void injectRawPress(uint8_t rawButtonIndex) const;
+
   // Drain one queued raw button edge from the background sampler (FIFO). Returns
   // false when empty. Used by ButtonEventManager to drive its press-type FSM.
   bool popRawEdge(HalGPIO::ButtonEdge& out) const { return gpio.popButtonEdge(out); }

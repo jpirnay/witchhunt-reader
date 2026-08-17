@@ -15,6 +15,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "components/themes/ButtonHintStrip.h"
 #include "home/FileBrowserActivity.h"
 #include "home/GlobalBookmarksActivity.h"
 #include "home/HomeActivity.h"
@@ -194,6 +195,7 @@ void ActivityManager::loop() {
   if (!drainInput && currentActivity) {
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     currentActivity->loop();
+    dispatchHintStripTap();
   }
 
   if (SETTINGS.useClock && HalClock::isSynced()) {
@@ -541,6 +543,40 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
   if (currentActivity && currentActivity->isReaderActivity()) {
     currentActivity->onButtonAction(action);
   }
+}
+
+void ActivityManager::dispatchHintStripTap() {
+  if (!mappedInput.hasTouch()) return;
+
+  // Nothing painted a strip on this screen, so there is nothing here a tap could mean.
+  // Checked before touching the tap queue: the tap belongs to whoever else wants it.
+  if (!ButtonHintStrip::hasStrip()) return;
+
+  // The strip is recorded in Portrait logical px -- both drawButtonHints() implementations
+  // force Portrait for the duration of the draw. tapToLogical() resolves against the LIVE
+  // orientation, so the two frames only agree while the screen is portrait. Every
+  // hint-drawing screen is (the few that rotate, e.g. Weather, restore before returning),
+  // but verify rather than assume: a mismatch would silently map taps to the wrong box.
+  if (renderer.getOrientation() != GfxRenderer::Orientation::Portrait) return;
+
+  // Deliberately runs AFTER currentActivity->loop(). wasScreenTapped() consumes, so giving
+  // the activity first refusal makes the strip a strict fallback: a screen that handles the
+  // tap itself (reader page turns, and the list rows of phase 4b) has already claimed it and
+  // this call finds nothing. The flip side is that on a hint-drawing screen a tap no one
+  // claimed is consumed here even when it misses every box -- which is correct, since by
+  // this point nothing else wanted it.
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTapped(x, y)) return;
+
+  const int hint = ButtonHintStrip::hitTest(x, y);
+  if (hint < 0) return;
+
+  // hitTest returns the raw hardware button index directly: mapLabels() emits the four
+  // labels in {BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT} order and permutes only the text,
+  // so box i is button i on every board and under every remapping.
+  mappedInput.injectRawPress(static_cast<uint8_t>(hint));
+  LOG_DBG("TCH", "Hint strip tap at (%d,%d) -> raw button %d", x, y, hint);
 }
 
 void ActivityManager::requestUpdate(bool immediate) {

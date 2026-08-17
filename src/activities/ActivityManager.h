@@ -181,6 +181,12 @@ class ActivityManager {
   // only when the current activity is a reader; others are no-ops in other contexts.
   void dispatchButtonAction(CrossPointSettings::BUTTON_ACTION action);
 
+  // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
+  // four labels at the bottom work as touch targets on every screen that draws them. Runs
+  // after the current activity's loop() so screens that handle touch themselves win; see
+  // the definition for why that ordering matters.
+  void dispatchHintStripTap();
+
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
   void requestUpdate(bool immediate = false);

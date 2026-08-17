@@ -1,7 +1,9 @@
 # Touch input migration — investigation and plan
 
 Date: 2026-08-14 (last updated 2026-08-16)
-Status: **phases 1–3 implemented** (2026-08-16), phase 4 onward still proposal.
+Status: **phases 1–3 implemented** (2026-08-16); **phase 3 device-validated 2026-08-17**
+(T5S3: touch page turns + centre-tap menu); **phase 4a hint strip implemented 2026-08-17**,
+unvalidated. Phase 4b (lists) and 5–6 still proposal.
 **Nothing has run on hardware.** Phases 1–2 met their gates (build deltas, host
 tests); phase 3's gate is a device test and is NOT met — see the phase 3 note.
 Scope: **workstream C** of
@@ -520,6 +522,35 @@ consumes them yet. Open question 4 wanted phase 3 to cover the X4 Pro Home key;
 that is still outstanding and matters, because the board has no back button.
 
 ### Phase 4 — Lists and chrome (the decision point)
+
+**4a chrome: hint strip DONE (unvalidated on hardware).** `drawButtonHints` now records
+the geometry it painted (`ButtonHintStrip.h`), and `ActivityManager::dispatchHintStripTap()`
+turns a tap on a box into the button press it depicts. Notes:
+
+- **No per-screen work.** `mapLabels()` emits its four labels in
+  `{BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT}` order and permutes only the *text*, so hint
+  box *i* is raw button *i* on every board and under every remapping. All ~95
+  `drawButtonHints` call sites became tappable without being touched.
+- **Synthesis, not a parallel path.** The tap injects a raw press through
+  `HalGPIO::injectPress()` — the same accumulator+edge mechanism the capacitive home key
+  already uses (device-validated) — so both the `wasPressed()` bitmask consumers and
+  `ButtonEventManager`'s press-type FSM see an ordinary Short press.
+- **Dispatch runs AFTER `currentActivity->loop()`**, because `wasScreenTapped()` consumes.
+  That makes the strip a strict fallback: a screen handling touch itself (reader page turns;
+  the list rows of 4b) claims the tap first and this finds nothing.
+- **Invalidated on every activity transition** (`Activity::onEnter`/`onExit`) so a screen
+  drawing no hints cannot inherit the previous screen's boxes.
+- Gate: host tests for the band arithmetic — `test/button_hint_strip`, 9 tests, 479/479 green.
+  They caught that the tuned X4 positions overlap by 1 px (box 0 spans 25..130, box 1 starts
+  at 130); the tie-break to the lower index is now pinned rather than accidental.
+- Cost on C3: **+40 bytes RAM, +888 bytes flash.**
+- Still open in 4a: the **tab bar** (`colTouch`), central `wasBackGesture()`/`wasHomeGesture()`
+  dispatch, and P2 tap feedback (port upstream `57c389c0`'s approach).
+- Known gap: the strip is recorded in Portrait logical px and the dispatcher bails unless the
+  live orientation is Portrait. Every hint-drawing screen is portrait today, so this costs
+  nothing; a rotated UI screen would simply not have tappable hints rather than mis-map them.
+
+The list half (4b) is unstarted. What follows is the original plan.
 
 Two ways to spend this phase. Both are legitimate; pick one deliberately.
 
