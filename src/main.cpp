@@ -14,6 +14,10 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <HalTiltSensor.h>
+// Board-support layer, linked only into the LilyGo env (see its lib_deps).
+#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
+#include <BoardT5S3.h>
+#endif
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
@@ -716,6 +720,40 @@ static HalGPIO::WakeGestures wakeGestureFromSettings() {
 }
 
 void setup() {
+#ifdef ENABLE_SERIAL_LOG
+  // Earliest possible Serial setup, and UNCONDITIONAL — see the isUsbConnected()
+  // gate further down, which sizes the transfer buffers but must NOT gate this.
+  // A board with no usbDetect pin (T5S3: usbDetect = PIN_UNASSIGNED) can never
+  // satisfy that gate from electrical detection, so Serial.begin() never ran
+  // there and no log line could reach the host however the transport was set.
+  //
+  // The 250 ms stall lets the USB Serial/JTAG peripheral finish power-on and the
+  // host complete enumeration before we touch CDC state; without it a cold boot
+  // races and the board has to be physically replugged before logs flow (a warm
+  // reboot hides this, because USB is already enumerated). Ported from
+  // upstream/feat-touch, which carries the same reasoning.
+  delay(250);
+  Serial.begin(115200);
+#endif
+#if defined(ENABLE_SERIAL_LOG) && defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+  // FIRST STATEMENT IN setup(), AND LOAD-BEARING. Do not move it later or raise
+  // the value.
+  //
+  // HWCDC's default TX timeout is 100 ms, and a log write blocks for it whenever
+  // no host is draining the endpoint. On a transport that writes unconditionally
+  // (FREEINK_LOG_TRANSPORT_USB_CDC_WRITE — the T5S3, where HWCDC's `operator
+  // bool` reads false under a monitor, so the readiness guard cannot be used),
+  // that is per log line. A boot's worth of them blocks long enough to trip the
+  // INTERRUPT watchdog: TG1WDT_SYS_RST before one line reaches the wire.
+  //
+  // This previously sat ~126 lines into setup(), after gpio.begin() and several
+  // markBootPhase()/LOG_ calls — i.e. after the damage was already done, which is
+  // exactly how it looked like a hang rather than a logging problem. It is also
+  // deliberately outside the isUsbConnected() gate further down: the T5S3 has no
+  // usbDetect pin, so that gate can read false precisely when this matters.
+  // CDC_ON_BOOT means the core has already begun Serial, so this is valid here.
+  logSerial.setTxTimeoutMs(1);
+#endif
   markBootPhase(BootPhase::SetupEntry);
   // Load just the settings we need before any other init, so the wake gesture mirrors
   // whichever press type(s) the user configured to put the device to sleep.
@@ -786,6 +824,16 @@ void setup() {
   if (silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SERIAL_TRANSFER) {
     setSerialWireMuted(true);
   }
+
+#if defined(FREEINK_DEVICE_LILYGO) && FREEINK_DEVICE_LILYGO
+  // LilyGo T5S3 board-support, FIRST: its begin() owns the shared I2C bring-up
+  // and the SD SPI bus, deselects the LoRa radio that shares that bus (an
+  // undriven CS there corrupts SD transactions), disables LoRa/GPS, configures
+  // the BOOT button, and registers the PCA9535 expander's user button through
+  // InputManager::setButtonHook(). Without it the board has no working buttons
+  // at all and an uncontested SPI bus. Placement matches upstream/feat-touch.
+  BoardT5S3::begin();
+#endif
 
   HalSystem::begin();
   // Create the shared-SPI-bus mutex before anything can touch the panel or the

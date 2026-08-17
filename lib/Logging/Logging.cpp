@@ -1,8 +1,11 @@
 #include "Logging.h"
 
+#include <BoardConfig.h>
 #include <HalClock.h>
+#include <esp_rom_sys.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 
 #define MAX_ENTRY_LEN 256
@@ -77,8 +80,32 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
     }
   }
   va_end(args);
-  if (logSerial && !serialWireMuted) {
-    logSerial.print(buf);
+  // Log transport, chosen by the board profile (FREEINK_LOG_TRANSPORT).
+  //
+  // Boards with the same MCU expose logs differently, and getting this wrong is
+  // silent: on the LilyGo T5S3 every LOG_* line was dropped because HWCDC's
+  // `operator bool` reads false under `pio device monitor`, so the `if
+  // (logSerial)` guard below never fired. The board looked mute during bring-up
+  // while the Arduino core's own log_e() still came through, which is a
+  // thoroughly confusing symptom.
+  //
+  // serialWireMuted is honoured on every path: it is how the serial-transfer
+  // activity keeps log noise out of a binary protocol stream.
+  if (!serialWireMuted) {
+#if FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_ROM_PRINTF
+    // IDF/ROM console: the most robust path when the USB bridge is external
+    // (Sticky) and Arduino's Serial object is not the thing being monitored.
+    esp_rom_printf("%s", buf);
+#elif FREEINK_LOG_TRANSPORT == FREEINK_LOG_TRANSPORT_USB_CDC_WRITE
+    // Native USB CDC: write unconditionally. Deliberately NOT guarded on
+    // `logSerial`, which is the whole point — the readiness check is the bug on
+    // this transport, not a safeguard.
+    logSerial.write(reinterpret_cast<const uint8_t*>(buf), strlen(buf));
+#else
+    if (logSerial) {
+      logSerial.print(buf);
+    }
+#endif
   }
   addToLogRingBuffer(buf);
 }

@@ -77,7 +77,10 @@ void SerialTransferActivity::onEnter() {
 void SerialTransferActivity::onExit() {
   device_.setStatusCallback(nullptr, nullptr);
   setSerialWireMuted(false);
-  logSerial.setTxTimeoutMs(100);  // restore HWCDC default (exit reboot also resets it)
+  // Restore the firmware's baseline, NOT HWCDC's 100 ms default: on transports
+  // that write unconditionally, 100 ms per line blocks long enough to trip the
+  // interrupt watchdog. See the setTxTimeoutMs call in main.cpp setup().
+  logSerial.setTxTimeoutMs(1);
   // Clear the arm first, in case silentRestart() below no-ops (e.g. a deep sleep
   // is already in progress), so we don't wake back into this activity.
   disarmSerialTransferReboot();
