@@ -2,9 +2,10 @@
 
 *State (updated 2026-08-16): branch `fix/s3-build-config`, pushed. `master` (2.23)
 merged in; all three envs build. Workstream **A done**, **C phases 1-3 done**,
-**B0 done**, **B pin work done and hardware-validated on both C3 boards**
-(see "Device validation"). The S3 boards remain unflashed; there is no longer a
-known code blocker to trying one.*
+**B0 done**, **B pin work done and hardware-validated on both C3 boards**.
+**X4 Pro has been flashed** — it reached the home-screen activity and surfaced
+three real bugs (two dual-core, one I2C), all fixed; it then became unflashable,
+so **T5S3 is the lead S3 target**. See "Device validation".*
 
 Targets: **Xteink X4 Pro** (lead) and **LilyGo T5S3**, both ESP32-S3 (Xtensa).
 Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
@@ -12,9 +13,10 @@ Shipped product is X3/X4 (ESP32-C3, RISC-V) and must not regress.
 Plan: [multi-board-bringup-2026-08-14.md](multi-board-bringup-2026-08-14.md).
 Touch (workstream C): [touch-input-migration-2026-08-14.md](touch-input-migration-2026-08-14.md).
 
-Everything below is build-measured unless it says otherwise. The **X4 (C3) has
-now been flashed and passes** (see "Device validation"); the two S3 boards are on
-the desk and neither has been flashed.
+Everything below is build-measured unless it says otherwise. **X4 and X3 (both
+C3) have been flashed and pass**; **X4 Pro has been flashed** and got as far as
+the home-screen activity before the bugs below; **T5S3 has not been flashed yet**
+and is now the lead S3 target.
 
 ---
 
@@ -48,6 +50,14 @@ cfd00bf8  feat(hal): HalGPIO touch passthrough                       phase 1
 b5341302  feat(hal): board capability predicates                      B0 step 1
 2799b34f  refactor(hal): route the safe deviceIsX3() sites            B0 step 2
 1c3a43ea  refactor(hal): SPI/battery/gauge-I2C pins from the profile  B
+748a7dd1  refactor(hal): display pins from the profile                 B
+6f4e640f  refactor(hal): RTC addr / USB detect / battery ADC pin       B
+
+           found by flashing an X4 Pro — all three are S3-only failures
+bf8b25b3  fix(activity): real mux for the cross-task critical sections
+edf203e3  fix(activity): pin the render task to a core on dual-core
+2756237b  fix(hal): only take the SPI lock when SD is on that bus
+3b394eff  refactor(hal): HalI2cBus owns I2C bus start-up
 ```
 
 **b4b94068 — workstream A.** `[base]` carried the C3 device set
