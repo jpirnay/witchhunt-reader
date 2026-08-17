@@ -280,6 +280,26 @@ void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrays
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  // Give the driver a real BW base when it actually reads one.
+  //
+  // displayGrayBuffer() hands the driver `frameBuffer`, and the plane dance in
+  // GfxRenderer::renderGrayscalePlanesSequential() leaves the LAST PLANE there:
+  // it clears to 0x00, renders text-only, copies the plane out, and calls this.
+  // Ssd1677Driver::displayGray() opens with `(void)fb` -- the planes are already
+  // in controller RAM and the BW page is retained by the panel -- so nothing ever
+  // noticed that the buffer holds a plane rather than a page.
+  //
+  // LgfxEpdDriver has no controller-side image to fall back on: fillCanvasGray()
+  // rebuilds every pixel from the base, mapping a clear base bit to kGrayBlack.
+  // Handed a text-only plane it therefore paints the whole background black and
+  // leaves only the AA marks standing -- exactly the inversion seen on the T5S3.
+  //
+  // Reseed the write buffer from the on-screen frame first, so the base is the BW
+  // page the panel is actually showing. Gated on the controller so the panels that
+  // ignore the argument do not pay a full-buffer copy per AA pass.
+  if (BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::LgfxEpd) {
+    einkDisplay.syncWriteBufferFromActive();
+  }
   einkDisplay.displayGrayBuffer(turnOffScreen);
 }
 
