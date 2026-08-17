@@ -487,8 +487,44 @@ fire `Long`. Device trace confirming both:
   40 MHz test before treating the clamp as required.
 - **`BUTTON_TRACE=1` is bring-up scaffolding** in the LilyGo env and should come
   out once input work is settled. It costs the C3 nothing.
-- **`Hardware detect: X4` is logged on this board** — a stale `deviceIsX3()`
-  ternary in `main.cpp`. Cosmetic, but it misleads anyone reading a T5S3 log.
+- ~~**`Hardware detect: X4` is logged on this board.**~~ **FIXED 2026-08-17**
+  (`57e3606b`), together with System Information reporting *"X4 (800 x 480)"* on a
+  960x540 board. Both read the profile now, via
+  `HalCapabilities::boardDisplayName()`.
+
+#### The `deviceIsX3()` audit (2026-08-17)
+
+Prompted by asking whether *all* call sites had been dealt with. They had not —
+~20 remain. The breakdown matters more than the count:
+
+**Falsified by giving this board a capability.** Adding the PCF8563 broke two
+conditions that spelled "has an RTC" as `!deviceIsX3()` — `main.cpp`'s
+`keepLpAlive` (burning deep-sleep current to preserve a timer the RTC makes
+redundant) and `ClockSettingsActivity`'s battery warning (untrue here). Both now
+use `hasHardwareRtc()`. **This is the B0 thesis demonstrating itself**: the
+conflation does not fail when the board is added, it fails later, when the board
+gains a capability the name-based condition never anticipated.
+
+**Live UI bugs, not yet fixed** — all need a device to verify visually:
+
+| Site | Effect on the T5S3 |
+|---|---|
+| `LyraTheme.cpp:401`, `BaseTheme.cpp:171` | `x3ButtonPositions : x4ButtonPositions` — gets X4 hint positions computed for an 800x480 four-button board |
+| `RecentBooksActivity.cpp:444,625` | prints `Up+L` / `Left+L` / `Right+L` hints for buttons this board does not have |
+| `UITheme.cpp:155-182`, `KeyboardEntryActivity.cpp:363` | layout branches keyed on the board name |
+
+**Legitimate, leave alone:** `HalGPIO.cpp:140,147` (the fingerprint feeding
+`selectDevice()` — the actual identity use B0 said would stay), `529/776/836`
+(X3-specific USB poll and wake behaviour), and `HalPowerManager.cpp:323` (guarded
+by `isXteinkDevice()` first, so S3-safe).
+
+**One trap.** `SettingsActivity.cpp:390` and `SettingsSubmenuActivity.cpp:117` use
+`deviceIsX3() && needsHalfRefresh`, and `panelNeedsHalfRefreshSettle()` was
+created for exactly them — but the conversion is **not** behaviour-preserving on
+the **UC8279 X3 variant**: the old code settles, the predicate does not. That is
+probably the *correct* fix (the settle is UC8253 silicon behaviour, not an X3
+property) but it changes a validated board, so it needs an X3 in hand. Left
+unconverted on purpose.
 - **`-DFREEINK_LGFX_EPD_CONFIG`** — we set it, upstream does not. Harmless so far.
 
 ### ⬜ (superseded) T5S3 — not flashed, and now the lead S3 target
