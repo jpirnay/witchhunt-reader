@@ -13,8 +13,12 @@
 // likely to be wrong and the part hardest to check on a device.
 //
 // Coordinates are PORTRAIT logical px: both drawButtonHints() implementations force Portrait
-// for the duration of the draw and restore afterwards, so that is the frame these numbers
-// are in. A reader must confirm the live orientation matches before hit-testing.
+// for the duration of the draw and restore afterwards, so that is the frame these numbers are
+// in, whatever the screen is rotated to. A hit test must therefore resolve its tap into the
+// Portrait frame as well -- GfxRenderer::tapToLogical(Orientation, ...) exists for exactly
+// that -- rather than against the live orientation. Doing so makes the strip tappable in all
+// four orientations; matching against live coords would only work while the screen is
+// portrait, and would silently hit the wrong box otherwise.
 //
 // Index i is raw hardware button i. mapLabels() emits the four labels in
 // {BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT} order and permutes only the text, so a hit

@@ -2830,7 +2830,12 @@ static_assert(static_cast<int>(GfxRenderer::Portrait) == touchtransform::Portrai
 void GfxRenderer::tapToLogical(const float nx, const float ny, int& outX, int& outY) const {
   // Read the atomic orientation once so the transform stays self-consistent
   // even if the reader rotates the screen mid-call.
-  touchtransform::tapToLogical(static_cast<int>(getOrientation()), panelWidth, panelHeight, nx, ny, outX, outY);
+  tapToLogical(getOrientation(), nx, ny, outX, outY);
+}
+
+void GfxRenderer::tapToLogical(const Orientation orientation, const float nx, const float ny, int& outX,
+                               int& outY) const {
+  touchtransform::tapToLogical(static_cast<int>(orientation), panelWidth, panelHeight, nx, ny, outX, outY);
 }
 
 static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, int lx, int ly, int lw, int lh,

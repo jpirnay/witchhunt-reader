@@ -241,6 +241,12 @@ class GfxRenderer {
   // Ported verbatim from upstream/develop; see
   // docs/touch-input-migration-2026-08-14.md phase 2.
   void tapToLogical(float nx, float ny, int& outX, int& outY) const;
+  // Same, but into an EXPLICIT orientation's frame rather than the live one. For geometry
+  // that was drawn in a fixed frame regardless of how the screen is rotated -- the button
+  // hint strip, which forces Portrait for the duration of its draw. Asking for the tap in
+  // the frame the boxes were recorded in is what makes the hit test orientation-independent
+  // instead of only correct while the screen happens to be portrait.
+  void tapToLogical(Orientation orientation, float nx, float ny, int& outX, int& outY) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —

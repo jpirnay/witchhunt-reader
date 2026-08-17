@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "TouchTransform.h"
 #include "components/themes/ButtonHintStrip.h"
 
 namespace {
@@ -107,6 +108,52 @@ TEST(ButtonHintStrip, RecordThenHitTestThroughSharedState) {
   ButtonHintStrip::invalidate();
   EXPECT_FALSE(ButtonHintStrip::hasStrip());
   EXPECT_EQ(-1, ButtonHintStrip::hitTest(s.x[0] + 1, s.y + 1));
+}
+
+// The strip is recorded in the Portrait frame however the screen is rotated, because
+// drawButtonHints() forces Portrait for its draw. So the dispatcher resolves the tap into the
+// Portrait frame too, and the same finger on the same glass must select the same box in all
+// four orientations. This is the property that lets the dispatcher carry no orientation guard.
+TEST(ButtonHintStrip, SamePhysicalTapHitsSameBoxInEveryOrientation) {
+  // T5S3: 960x540 native panel, 540x960 portrait logical frame, Lyra even-spread boxes.
+  constexpr int panelWidth = 960;
+  constexpr int panelHeight = 540;
+  Strip s;
+  s.y = 960 - 30;
+  s.height = 30;
+  s.width = 80;
+  s.x[0] = 44;
+  s.x[1] = 168;
+  s.x[2] = 292;
+  s.x[3] = 416;
+  for (bool& a : s.active) a = true;
+
+  // Taken from a device log: this contact resolved to portrait (481,937) = box 3.
+  constexpr float nx = 0.977f;
+  constexpr float ny = 0.108f;
+
+  const int orientations[] = {
+      touchtransform::Portrait,
+      touchtransform::LandscapeClockwise,
+      touchtransform::PortraitInverted,
+      touchtransform::LandscapeCounterClockwise,
+  };
+  for (const int live : orientations) {
+    (void)live;  // the live orientation is deliberately NOT consulted
+    int x = 0;
+    int y = 0;
+    touchtransform::tapToLogical(touchtransform::Portrait, panelWidth, panelHeight, nx, ny, x, y);
+    EXPECT_EQ(3, ButtonHintStrip::hitTestIn(s, x, y)) << "portrait-frame tap resolved to (" << x << "," << y << ")";
+  }
+
+  // And the reason the guard was wrong to begin with: resolving the SAME contact against a
+  // rotated live frame lands somewhere else entirely, which is what a live-orientation hit
+  // test would have compared against the portrait boxes.
+  int lx = 0;
+  int ly = 0;
+  touchtransform::tapToLogical(touchtransform::LandscapeClockwise, panelWidth, panelHeight, nx, ny, lx, ly);
+  EXPECT_NE(-1, ButtonHintStrip::hitTestIn(s, 481, 937));  // portrait resolution hits
+  EXPECT_EQ(-1, ButtonHintStrip::hitTestIn(s, lx, ly));    // landscape resolution does not
 }
 
 // A strip whose labels are all empty is not a strip: skipping the tap queue entirely on

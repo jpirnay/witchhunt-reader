@@ -1,6 +1,7 @@
 #pragma once
 
 #include <HalGPIO.h>
+#include <TouchTransform.h>
 
 class GfxRenderer;
 namespace freeink {
@@ -63,6 +64,13 @@ class MappedInputManager {
   // to false), so callers need no #ifdefs.
   bool hasTouch() const;
   bool wasScreenTapped(int& x, int& y) const;
+  // Same, resolved against an EXPLICIT orientation instead of the live one. For chrome that
+  // is drawn in a fixed frame however the screen is rotated -- the button hint strip forces
+  // Portrait for its draw, so hit-testing it means asking for the tap in Portrait too.
+  // Consumes the tap exactly as wasScreenTapped() does. Takes touchtransform::Orientation
+  // rather than GfxRenderer::Orientation so this header keeps its forward declaration; the
+  // two enums are static_asserted to agree in GfxRenderer.cpp.
+  bool wasScreenTappedIn(touchtransform::Orientation orientation, int& x, int& y) const;
   bool wasScreenTouchDown(int& x, int& y) const;
   // One-shot long-press from the SDK classifier, fired WHILE the finger is
   // still down. Consuming it suppresses the rest of the contact — its continued

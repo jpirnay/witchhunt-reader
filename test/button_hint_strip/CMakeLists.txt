@@ -4,6 +4,7 @@ add_executable(ButtonHintStripTest
 
 target_include_directories(ButtonHintStripTest PRIVATE
   ${REPO_ROOT}/src
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_link_libraries(ButtonHintStripTest PRIVATE

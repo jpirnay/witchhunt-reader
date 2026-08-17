@@ -546,9 +546,13 @@ turns a tap on a box into the button press it depicts. Notes:
 - Cost on C3: **+40 bytes RAM, +888 bytes flash.**
 - Still open in 4a: the **tab bar** (`colTouch`), central `wasBackGesture()`/`wasHomeGesture()`
   dispatch, and P2 tap feedback (port upstream `57c389c0`'s approach).
-- Known gap: the strip is recorded in Portrait logical px and the dispatcher bails unless the
-  live orientation is Portrait. Every hint-drawing screen is portrait today, so this costs
-  nothing; a rotated UI screen would simply not have tappable hints rather than mis-map them.
+- **Orientation-independent.** The strip is recorded in the Portrait frame (drawButtonHints
+  forces Portrait for its draw) whatever the screen is rotated to, so the dispatcher resolves
+  the tap into the *Portrait* frame too rather than the live one. `touchtransform::tapToLogical`
+  always took orientation as a parameter; only `GfxRenderer`'s convenience wrapper pinned it to
+  the live value, so this added `tapToLogical(Orientation, ...)` and
+  `MappedInputManager::wasScreenTappedIn(...)` beside it. An earlier draft carried a
+  "bail unless live orientation is Portrait" guard instead — wrong fix, removed.
 
 The list half (4b) is unstarted. What follows is the original plan.
 

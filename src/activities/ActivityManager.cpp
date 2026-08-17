@@ -552,22 +552,21 @@ void ActivityManager::dispatchHintStripTap() {
   // Checked before touching the tap queue: the tap belongs to whoever else wants it.
   if (!ButtonHintStrip::hasStrip()) return;
 
-  // The strip is recorded in Portrait logical px -- both drawButtonHints() implementations
-  // force Portrait for the duration of the draw. tapToLogical() resolves against the LIVE
-  // orientation, so the two frames only agree while the screen is portrait. Every
-  // hint-drawing screen is (the few that rotate, e.g. Weather, restore before returning),
-  // but verify rather than assume: a mismatch would silently map taps to the wrong box.
-  if (renderer.getOrientation() != GfxRenderer::Orientation::Portrait) return;
-
   // Deliberately runs AFTER currentActivity->loop(). wasScreenTapped() consumes, so giving
   // the activity first refusal makes the strip a strict fallback: a screen that handles the
   // tap itself (reader page turns, and the list rows of phase 4b) has already claimed it and
   // this call finds nothing. The flip side is that on a hint-drawing screen a tap no one
   // claimed is consumed here even when it misses every box -- which is correct, since by
   // this point nothing else wanted it.
+  // Ask for the tap in the PORTRAIT frame, not the live one. Both drawButtonHints()
+  // implementations force Portrait for the duration of their draw, so that is the frame the
+  // recorded boxes live in; resolving the tap the same way makes the hit test correct in all
+  // four orientations rather than only while the screen happens to be portrait. The
+  // underlying transform has always taken orientation as a parameter -- only GfxRenderer's
+  // convenience wrapper pinned it to the live value.
   int x = 0;
   int y = 0;
-  if (!mappedInput.wasScreenTapped(x, y)) return;
+  if (!mappedInput.wasScreenTappedIn(touchtransform::Portrait, x, y)) return;
 
   const int hint = ButtonHintStrip::hitTest(x, y);
   if (hint < 0) return;
