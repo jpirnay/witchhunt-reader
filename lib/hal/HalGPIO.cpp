@@ -759,7 +759,28 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   // matched nothing and fell through to Other, so setup() skipped the hold verification entirely
   // and any tap woke the device. Plugging USB does not pull this pin low, so the AfterUSBPower
   // case below (POWERON + USB) is unaffected.
-  if ((wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected) ||
+  // The POWERON arm below infers "the user pressed power" from "we booted with
+  // no USB". That inference needs BOTH of the things it assumes:
+  //
+  //  - a power path the button actually gates, so that being powered at all
+  //    implies a press (the C3's GPIO13 battery latch), and
+  //  - a trustworthy USB-detect signal, since the whole test is !usbConnected.
+  //
+  // The T5S3 has neither. Its profile leaves usbDetect PIN_UNASSIGNED, so
+  // isUsbConnected() reports false even on USB power, and its power path is the
+  // PMIC/PWR button rather than the BOOT button the profile maps as `power`. The
+  // result was that pressing the hardware RST button -- a POWERON-class reset
+  // with usbConnected forced false -- was classified as a power-button wake,
+  // failed the wake gate (the button is not held during a reset), and sent the
+  // device straight back to deep sleep in setup(). It looked like RST bricking
+  // the board; it was RST being mistaken for a spurious power press.
+  //
+  // So require a usable USB-detect signal before trusting the inference. A GPIO
+  // deep-sleep wake needs no such caveat: the pin was physically pulled low, so
+  // it is a press by definition on any board.
+  const bool canTrustUsbDetect = BoardConfig::ACTIVE.usbDetect != BoardConfig::PIN_UNASSIGNED;
+  if ((wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected &&
+       canTrustUsbDetect) ||
       (wakeupCause == ESP_SLEEP_WAKEUP_GPIO && resetReason == ESP_RST_DEEPSLEEP)) {
     return WakeupReason::PowerButton;
   }
