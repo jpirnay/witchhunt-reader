@@ -158,35 +158,23 @@ void HalGPIO::begin() {
   //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
 
-  // Bring up the shared SPI bus, taking each pin from whichever peripheral
-  // actually defines it.
+  // Pre-claim the shared SPI bus with the C3's display + SD pins.
   //
-  // On the C3 the panel and the SD card share one bus and the PANEL owns its
-  // pins: display.sclk/mosi/cs are set, and the SD entry contributes only MISO
-  // (the panel is write-only) and its own CS. On the T5S3 the panel is not on
-  // SPI at all — it is a parallel LGFX bus, so every display pin is
-  // PIN_UNASSIGNED — and the SD card carries the full set itself
-  // (SCLK14 MISO21 MOSI13 CS12). Passing the display's unassigned pins there
-  // made SPI.begin() fail outright with "Attaching pins to SPI failed".
+  // C3 ONLY, and the reason is subtle: SPIClass::begin() early-returns once the
+  // bus is started, so whoever calls first wins the pin assignment. On the C3
+  // the panel and the card share one bus and nothing else claims it, so this
+  // pre-claim is correct and load-bearing. On every other board someone better
+  // informed gets there first -- the SDK's display driver, SDCardManager, or a
+  // board-support layer (the T5S3's BoardT5S3::begin(), which also deselects the
+  // LoRa radio sharing that bus before starting it). Pre-claiming here would
+  // stick on the wrong pins and undo those deselects.
   //
-  // So: prefer the display's pin, fall back to the SD's. That reproduces the C3
-  // exactly (display pins win, since they are assigned) and gives the T5S3 its
-  // SD bus.
+  // Pins come from the active profile rather than the EPD_* macros; verified
+  // equal on the C3 (display.sclk 8 / mosi 10 / cs 21, sd.miso 7).
+#if FREEINK_MCU_C3
   const BoardConfig::DisplayPins& display = BoardConfig::ACTIVE.display;
-  const BoardConfig::SdPins& sd = BoardConfig::ACTIVE.sd;
-  const auto pinOr = [](const int8_t preferred, const int8_t fallback) {
-    return preferred != BoardConfig::PIN_UNASSIGNED ? preferred : fallback;
-  };
-  const int8_t spiSclk = pinOr(display.sclk, sd.sclk);
-  const int8_t spiMosi = pinOr(display.mosi, sd.mosi);
-  const int8_t spiCs = pinOr(display.cs, sd.cs);
-  if (spiSclk != BoardConfig::PIN_UNASSIGNED && spiMosi != BoardConfig::PIN_UNASSIGNED) {
-    SPI.begin(spiSclk, sd.miso, spiMosi, spiCs);
-  } else {
-    // Neither peripheral puts anything on SPI (a board whose panel is parallel
-    // and whose card is SDMMC). Starting the bus would only fail.
-    LOG_INF("HW", "No SPI peripherals on this board; skipping SPI.begin()");
-  }
+  SPI.begin(display.sclk, BoardConfig::ACTIVE.sd.miso, display.mosi, BoardConfig::ACTIVE.sd.cs);
+#endif
 
   // ADC battery sense. Gated on the board actually reading its battery that way:
   // on a fuel-gauge board the same GPIO is the gauge's I2C bus (on X3, BAT_GPIO0

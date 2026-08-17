@@ -31,6 +31,25 @@ bool HalStorage::begin() {
     storageMutex = xSemaphoreCreateMutex();
     assert(storageMutex != nullptr);
   }
+  // SD-over-SPI clock ceiling on the S3 boards.
+  //
+  // The SDK defaults to 40 MHz whenever a profile leaves sd.spiHz at 0. That is
+  // proven on the C3, whose wiring and card socket we have years of field data
+  // for, but nothing has validated it on an S3 board -- and 40 MHz is at the top
+  // of what SD-over-SPI tolerates, so a marginal card or trace shows up as a
+  // mount failure rather than as degraded throughput.
+  //
+  // Hold the S3 boards at 20 MHz until someone measures otherwise. This only
+  // touches profiles that expressed no preference; a profile that sets spiHz
+  // explicitly is left alone, so raising it later is a one-value profile change
+  // rather than an edit here.
+#if !FREEINK_MCU_C3
+  if (BoardConfig::ACTIVE.sd.spiHz == 0) {
+    BoardConfig::ACTIVE.sd.spiHz = 20000000;
+    LOG_INF("SD", "SPI clock held at 20 MHz on this board (SDK default is 40 MHz, unvalidated here)");
+  }
+#endif
+
   {
     // SD init drives the shared bus, so it must be serialized against the
     // display too - the render task is already running by this point.

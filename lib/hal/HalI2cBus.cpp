@@ -1,5 +1,6 @@
 #include "HalI2cBus.h"
 
+#include <HalCapabilities.h>
 #include <Logging.h>
 #include <Wire.h>
 
@@ -82,6 +83,11 @@ void HalI2cBus::ensureBusStarted() {
     // Nothing of ours lives on I2C (X4). Leave the bus alone entirely.
     return;
   }
+
+#if BOARD_SUPPORT_OWNS_BUSES
+  LOG_INF("I2C", "Bus owned by the board-support layer; not re-initialising");
+  return;
+#endif
 
   // The SDK's InputManager already started this bus for the touch controller.
   // Starting it again would break it -- see the header.

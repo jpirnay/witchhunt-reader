@@ -121,3 +121,23 @@ inline bool hasColorTemperature() {
 }
 
 }  // namespace HalCapabilities
+
+// Boards whose support layer owns bus bring-up.
+//
+// The LilyGo T5S3 ships a board-support library (freeink-sdk BoardT5S3) whose
+// begin() owns BOTH bus inits: beginI2C() starts Wire on the board's pins, and
+// prepareSdBus() drives LORA_CS and SD_CS HIGH before SPI.begin(). That
+// deselect matters — the board puts a LoRa radio on the SD's SPI bus, and an
+// undriven chip select there corrupts SD transactions. It also configures the
+// BOOT button and registers the PCA9535 expander's user button through
+// InputManager::setButtonHook().
+//
+// Where such a layer exists, the HAL must NOT also start those buses: a second
+// Wire.begin() on one port breaks the ESP-IDF i2c_master driver outright, and a
+// second SPI.begin() would undo the CS deselects.
+//
+// This is a board NAME rather than a capability, deliberately and narrowly:
+// board-support glue is per-board by definition, unlike the hardware questions
+// HalCapabilities answers. Keeping it to this one macro is what stops it
+// spreading into the conflation B0 removed.
+#define BOARD_SUPPORT_OWNS_BUSES (FREEINK_DEVICE_LILYGO)
