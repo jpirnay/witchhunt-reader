@@ -297,7 +297,83 @@ regression: possible orientation/mirroring wrongness (the profile ships
 nonsense battery reading (the CW2017 is still driven by the BQ27220 register
 path — the known gap above).
 
-### ⬜ T5S3 — not flashed, and now the lead S3 target
+### ✅ T5S3 — BOOTS AND RUNS (2026-08-17)
+
+The first S3 board to reach a working state. Boots, mounts SD, drives the panel,
+reaches the home screen, runs stably, logs, and both software-visible buttons
+work.
+
+| Evidence | Value |
+|---|---|
+| Heap with PSRAM live | `free=8,662,104` vs `325,956` internal |
+| Largest contiguous block | `contig=6,160,372` |
+| Boot to `setup_complete` | ~3.4 s (`paint+2672` dominates — a full panel refresh) |
+| Sampler stack peak | **2088 bytes** (`high-water=2008 free` of 4096) |
+
+**That stack number retroactively justifies the P1 bump.** The old size was 2048;
+this board peaks at 2088. It would have overflowed. On the C3 the same path peaks
+at ~540 bytes, so the GT911 servicing costs ~1120 bytes more — the 4096 was
+necessary, not cautious.
+
+#### Six fixes it took to get here
+
+| Fix | Commit | Why the C3 never showed it |
+|---|---|---|
+| PSRAM (`qio_opi` + `BOARD_HAS_PSRAM`) | `26c47e57` | C3 has no PSRAM; this board's 960x540 framebuffer cannot fit in internal RAM |
+| Serial init + log transport + TX timeout | `7c9f6623` | C3 has a usbDetect pin, so `Serial.begin()` ran; and its transport is plain `SERIAL` |
+| `BoardT5S3::begin()` never called | `7a420191` | C3 has no board-support layer, no I2C expander, no LoRa on the SD bus |
+| No CPU frequency scaling on PSRAM boards | `0a0851eb` | PSRAM clock derives from CPU/APB; C3 has no PSRAM to corrupt |
+| SPI bus pins from the right peripheral | `138f47d6` | C3's panel owns the bus pins; T5S3's panel is parallel and the SD owns them |
+| RST misread as a power-button wake | `17df518a` | C3 has usbDetect, so the `!usbConnected` inference is sound there |
+
+**The pattern is worth internalising: every one was C3-shaped reasoning that held
+on two boards and failed silently on a third.** That is the same defect B0
+removed from `deviceIsX3()`, reappearing in build flags, bus ownership, power
+management and wake classification. Expect more of it, and expect it to look like
+a hardware fault rather than a logic bug.
+
+**Method note.** Nearly every fix came from diffing against `upstream/feat-touch`
+or reading the SDK's own `docs/lilygo-t5s3-support.md` — not from reasoning about
+symptoms. Six rounds were spent debugging blind because the board produced no log
+output at all; the single highest-value action was making logging work. Do that
+first on the next board.
+
+#### Button map (vendor-verified)
+
+| Button | Connection | Status |
+|---|---|---|
+| BOOT | GPIO0 | the power button, by SDK design → `BTN_POWER` ✓ |
+| "IO48" | **PCA9535 I2C expander** (the label is silkscreen, not the wiring) | user button → `BTN_DOWN` ✓ |
+| PWR | **unknown** — not on any pin we sample, and the vendor documents no function | see below |
+| RST | hardware reset | ✓ reboots correctly since `17df518a` |
+
+The vendor wiki says only *"Buttons: RST + BOOT + IO48 + PWR"* with **no
+functional description**, and their reference firmware
+(`examples/factory/main/utilities.h`) defines only `BOARD_BOOT_BTN (0)` and
+`BOARD_PCA9535_INT (38)`. So PWR is not readable by firmware, but *why* is
+unestablished. Working hypothesis: the board carries a BQ25896 charger (0x6B),
+whose `/QON` pin is the conventional place to wire a power button for ship-mode
+exit and power-path control. **Testable without a schematic:** on battery with
+USB unplugged, hold PWR ~10 s — a hard power-off, revived by a press, confirms
+`/QON`. The schematic is not in the vendor repo.
+
+**Two software-visible buttons, one of which is power.** That makes touch phase 4
+mandatory on this board rather than the "decision point" the touch plan still
+calls it.
+
+#### Still open on the T5S3
+
+- **PWR's actual function** (above).
+- **The 20 MHz SD clamp is unproven.** SD may work purely because
+  `BoardT5S3::begin()` deselects the LoRa radio sharing the SD SPI bus. Worth one
+  40 MHz test before treating the clamp as required.
+- **`BUTTON_TRACE=1` is bring-up scaffolding** in the LilyGo env and should come
+  out once input work is settled. It costs the C3 nothing.
+- **`Hardware detect: X4` is logged on this board** — a stale `deviceIsX3()`
+  ternary in `main.cpp`. Cosmetic, but it misleads anyone reading a T5S3 log.
+- **`-DFREEINK_LGFX_EPD_CONFIG`** — we set it, upstream does not. Harmless so far.
+
+### ⬜ (superseded) T5S3 — not flashed, and now the lead S3 target
 
 **Refocused here 2026-08-16** after the X4 Pro became unflashable mid-session
 (recovery: hold BOOT/GPIO0 while resetting to force ROM download mode, then
