@@ -287,10 +287,57 @@ regression: possible orientation/mirroring wrongness (the profile ships
 nonsense battery reading (the CW2017 is still driven by the BQ27220 register
 path — the known gap above).
 
-### ⬜ T5S3 — not flashed
+### ⬜ T5S3 — not flashed, and now the lead S3 target
 
-Nothing board-specific is known to block it; the same two dual-core fixes above
-apply to any S3 board, so it is worth a try whenever convenient.
+**Refocused here 2026-08-16** after the X4 Pro became unflashable mid-session
+(recovery: hold BOOT/GPIO0 while resetting to force ROM download mode, then
+`esptool.py erase_flash` — note GPIO0 is also the Up nav key on that board).
+
+T5S3 starts from a much better place than the X4 Pro did: both dual-core fixes
+(`bf8b25b3`, `edf203e3`) apply to it, and the I2C ownership fix below was never
+X4-Pro-specific.
+
+What differs from X4 Pro, and why most of it is *easier*:
+
+| Aspect | X4 Pro | T5S3 |
+|---|---|---|
+| SD | native SDMMC | **SPI** (SCLK14 MISO21 MOSI13 CS12) — the path the C3 has always used |
+| Display | SSD1677 over SPI | **`LgfxEpd`**, parallel bus, **no SPI display pins** |
+| Gauge | CW2017 @ 0x63 — needs a new driver | **BQ27220 @ 0x55** — the same chip as the X3, so the existing read path should suit it as-is |
+| RTC | BM8563 — needs a new driver | none (`NO_SENSORS`) |
+| Touch | GT911 SDA39/SCL38, shared with gauge+RTC | GT911 SDA39/SCL40, **shared with the gauge** |
+
+**Watch first if the screen stays blank.** The profile leaves every display pin
+`PIN_UNASSIGNED` because the panel is on a parallel bus inside `LgfxEpdCon`.
+`HalDisplay`'s constructor still hands those unassigned pins to `EInkDisplay`.
+That is harmless *if* the LGFX path ignores them — which has not been verified.
+
+## The I2C bus-ownership fix (`3b394eff`)
+
+Worth understanding before the next S3 flash, because both touch boards hit it.
+
+X4 Pro failed every I2C transaction with `ESP_ERR_INVALID_STATE` (259). Cause: a
+double `Wire.begin()` on one port. The SDK's `InputManager` starts the bus for a
+GT911 (`InputManager.cpp:1034`, at 100 kHz) during `inputMgr.begin()`, and our
+`HalPowerManager::begin()` then started it again for the fuel gauge on the same
+pins. The new ESP-IDF `i2c_master` driver fails the second call and leaves the
+port unusable.
+
+Invisible on the C3: no touch controller, so ours is the only `Wire.begin()` —
+and there it is genuinely needed, since nothing else brings the bus up for the
+X3's BQ27220 and DS3231. Upstream never hits it because their
+`HalPowerManager` does no `Wire.begin()` at all.
+
+The first fix gated the call. That was a patch in the wrong layer: it left a
+single peripheral deciding the fate of a shared bus. `HalI2cBus` already owned
+bus *serialization*, so it now owns *initialisation* too —
+`HalI2cBus::ensureBusStarted()`, called from `main.cpp` right after
+`gpio.begin()` so the touch driver gets first claim. It stands down when touch
+already owns those pins and starts the bus otherwise.
+
+Consequence where touch owns the bus: the gauge runs at the touch driver's
+100 kHz rather than the profile's 400 kHz. Immaterial for a peripheral polled
+seconds apart — sharing a bus means sharing its clock.
 
 ---
 
