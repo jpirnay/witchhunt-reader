@@ -396,6 +396,57 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int buttonHeight = LyraMetrics::values.buttonHintsHeight;
   constexpr int buttonY = LyraMetrics::values.buttonHintsHeight;  // Distance from bottom
   constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
+
+  // Boards with no four-button strip get their hints placed against the keys they
+  // describe instead of in a row. Two physical keys carry all four actions here --
+  // tap and hold of each -- so a row of four boxes would imply four keys that do
+  // not exist, and put them nowhere near the ones that do.
+  const ButtonGeometry::Layout geom = ButtonGeometry::forActiveBoard();
+  if (!geom.legacyStrip && (geom.confirm.present() || geom.down.present())) {
+    const int screenW = renderer.getScreenWidth();
+    const auto pair = [&](const char* tap, const char* hold) {
+      std::string s = tap != nullptr ? tap : "";
+      if (hold != nullptr && hold[0] != '\0') {
+        if (!s.empty()) s += "  ";
+        s += "\xE2\x97\x8B";  // ○ marks the hold action
+        s += hold;
+      }
+      return s;
+    };
+
+    // btn1=back, btn2=confirm, btn3=previous/up, btn4=next/down (after mapLabels'
+    // strip-order remap). The home key taps to confirm and holds to go back; the
+    // nav key taps to page forward and holds to go up.
+    const std::string homeLabel = pair(btn2, btn1);
+    const std::string navLabel = pair(btn4, btn3);
+
+    const ButtonHintLayout::HintBox home =
+        ButtonHintLayout::boxFor(geom.confirm, screenW, pageHeight, buttonWidth * 2, buttonHeight,
+                                 LyraMetrics::values.buttonHintsHeight, buttonWidth * 2);
+    const ButtonHintLayout::HintBox nav =
+        ButtonHintLayout::boxFor(geom.down, screenW, pageHeight, buttonWidth * 2, buttonHeight,
+                                 LyraMetrics::values.buttonHintsHeight, buttonWidth * 2);
+
+    const auto draw = [&](const ButtonHintLayout::HintBox& b, const std::string& label) {
+      if (!b.present || label.empty()) return;
+      renderer.fillRoundedRect(b.x, b.y, b.w, b.h, cornerRadius, Color::White);
+      renderer.drawRoundedRect(b.x, b.y, b.w, b.h, 1, cornerRadius, true, true, true, true, true);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, label.c_str());
+      if (b.vertical) {
+        // Edge-mounted key: the label runs along the edge, as the X3 side hints do.
+        const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+        renderer.drawTextRotated90CW(SMALL_FONT_ID, b.x + (b.w - textHeight) / 2, b.y + (b.h + textWidth) / 2,
+                                     label.c_str());
+      } else {
+        renderer.drawText(SMALL_FONT_ID, b.x + (b.w - 1 - textWidth) / 2, b.y + textYOffset, label.c_str());
+      }
+    };
+    draw(home, homeLabel);
+    draw(nav, navLabel);
+
+    renderer.setOrientation(orig_orientation);
+    return;
+  }
   // Hand-tuned for the widths named in ButtonHintLayout; other panels spread evenly.
   constexpr int x4ButtonPositions[] = {58, 146, 254, 342};
   constexpr int x3ButtonPositions[] = {65, 157, 291, 383};
