@@ -5098,6 +5098,22 @@ void EpubReaderActivity::openReaderMenu() {
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }
+
+        // A deferred AA armed before the menu opened belongs to a frame that is no
+        // longer on screen. Running it now would composite this page's text planes
+        // over whatever the menu left behind: on LGFX panels displayGray() overlays
+        // the live canvas rather than rebuilding from a base buffer, so a stale pass
+        // corrupts the current image outright. Observed as an unreadable screen on
+        // leaving the menu, with the AA landing ~14 s and nine menu refreshes after
+        // the page it was computed for.
+        pendingGrayscale_ = {};
+
+        // And repaint. Every other sub-activity handler here already requests an
+        // update (book info, reading stats, chapter selection); the menu's did not,
+        // so a plain Back left the menu on screen until something else happened to
+        // trigger a render -- and left the HALF override armed by
+        // enforceExitFullRefresh() above unconsumed, which is what it exists for.
+        requestUpdate();
       });
 }
 
