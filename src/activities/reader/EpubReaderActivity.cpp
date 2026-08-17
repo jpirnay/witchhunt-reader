@@ -988,9 +988,10 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // so the buffer state is now correct for a pre-render. On X3, render() holds off the
   // PreRender pass while a deferred AA is owed (see the guard there); kick it now so a
   // pre-render armed during that window actually runs against the freshly-settled buffer.
-  // X4 never holds off the pre-render (the guard is X3-only there), so this re-request
-  // would just be a redundant trigger — skip it to keep X4's refresh sequence unchanged.
-  if (renderer.isX3() && pendingPreRender) {
+  // A panel that runs AA inline never holds off the pre-render, so this re-request
+  // would just be a redundant trigger there — skip it to keep that refresh sequence
+  // unchanged.
+  if (usesDeferredAa() && pendingPreRender) {
     requestUpdate();
   }
 }
@@ -3870,18 +3871,23 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // proceeds against the correct buffer state. Guard only the pre-render: a real
   // page turn (usePreRenderedBuffer / Normal) must still render immediately.
   //
-  // X3 only: this ordering hazard exists because X3 keeps _refreshPending asserted
-  // for the whole multi-second waveform, which blocks runDeferredGrayscalePass()
-  // (it self-gates on !isRefreshPending()) and lets the pre-render slip in ahead of
-  // the AA. X4 clears _refreshPending inline in triggerDisplay(), so the deferred AA
-  // — which serviceBackgroundWork() runs first — always completes before any
-  // pre-render; the guard is unnecessary there and reordering its differential
-  // refresh / RED-RAM baseline only reintroduces ghosting.
-  if (renderer.isX3() && pendingGrayscale_.active && pendingPreRender && !usePreRenderedBuffer &&
+  // Deferred-AA panels only. On the X3 the hazard is that it keeps _refreshPending
+  // asserted for the whole multi-second waveform, which blocks
+  // runDeferredGrayscalePass() (it self-gates on !isRefreshPending()) and lets the
+  // pre-render slip in ahead of the AA. A panel running AA inline never needs this:
+  // it clears _refreshPending in triggerDisplay(), so the deferred AA — which
+  // serviceBackgroundWork() runs first — always completes before any pre-render, and
+  // reordering its differential refresh / RED-RAM baseline only reintroduces ghosting.
+  //
+  // Generalised from `renderer.isX3()` after the T5S3 moved onto the deferred path:
+  // without this guard its AA was preempted by the queued pre-render on EVERY page
+  // ("Deferred AA ABORTED: planes=35ms gray=0ms"), so the anti-aliasing was computed
+  // and thrown away every time. The guard belongs to deferring, not to the X3.
+  if (usesDeferredAa() && pendingGrayscale_.active && pendingPreRender && !usePreRenderedBuffer &&
       classifyRenderPass() == RenderPass::PreRender) {
     // Logged so the pre-render chain has no silent link left: a deferred pass that is
     // held here and then never re-kicked is otherwise indistinguishable from one that was
-    // never armed. Fires at most once or twice per page, X3 only.
+    // never armed. Fires at most once or twice per page, on deferred-AA panels only.
     LOG_DBG("ERS", "PreRender deferred: AA owed");
     return;
   }
@@ -4282,7 +4288,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // deferred pass for scheduling reasons of its own (the _refreshPending guards
   // above). That is a separate question and needs its own predicate before the
   // name can go.
-  const bool inlineAaAvailable = renderer.supportsAsyncRefresh() && !renderer.isX3();
+  const bool inlineAaAvailable = !usesDeferredAa();
   const bool aaPreempted = aaEnabledForThisRender && inlineAaAvailable && aaPreemptedByNavigation();
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
@@ -4501,6 +4507,12 @@ void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orien
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
   // Status bar intentionally omitted — superimposed at display time with live values.
+}
+
+bool EpubReaderActivity::usesDeferredAa() const {
+  // Inline AA hides its LSB plane render inside a running waveform, so it needs a
+  // panel that can actually overlap. X3 can, but defers anyway (see the header).
+  return !(renderer.supportsAsyncRefresh() && !renderer.isX3());
 }
 
 bool EpubReaderActivity::aaPreemptedByNavigation() const {

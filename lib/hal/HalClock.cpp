@@ -710,7 +710,7 @@ void restore() {
       setSystemClock(rtcTime);
       rtcEpoch = rtcTime;
       clockApproximate = false;
-      LOG_INF("CLK", "Got time from DS3231. Last deep sleep %us", lastSleepSec);
+      LOG_INF("CLK", "Got time from hardware RTC. Last deep sleep %us", lastSleepSec);
       return;
     }
   }
@@ -812,7 +812,7 @@ void updatePeriodic() {
       if (rtcTime > 1577836800) {  // Check if time is after 2020 (plausible timestamp)
         lastPeriodicUpdateMs = nowMs;
         setSystemClock(rtcTime);
-        LOG_DBG("CLK", "Systemtime has been taken from DS3231");
+        LOG_DBG("CLK", "Systemtime has been taken from the hardware RTC");
       }
     }
     return;
@@ -951,7 +951,7 @@ bool applyClientTime(time_t timestamp) {
   // Persist to RTC if available (X3 only)
   if (initExternalRTC()) {
     writeExternalRTC(timestamp);
-    LOG_DBG("CLK", "Persisted client time to DS3231 RTC");
+    LOG_DBG("CLK", "Persisted client time to the hardware RTC");
   }
 
   // Also persist to NVS
