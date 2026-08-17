@@ -3361,4 +3361,17 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
       *outLeft = top;
       break;
   }
+
+  // One-shot per (orientation, insets) combination. The profile values are in the
+  // panel's NATIVE PORTRAIT frame and are rotated above, so a change to `left`
+  // does not necessarily move the screen's left edge -- in landscape it moves the
+  // top. This logs both halves so the mapping can be checked against the device
+  // instead of inferred.
+  static int lastKey = -1;
+  const int key = (static_cast<int>(getOrientation()) << 24) | (top << 16) | (right << 8) | left;
+  if (key != lastKey) {
+    lastKey = key;
+    LOG_INF("GFX", "Viewable insets: profile T%d R%d B%d L%d, orientation=%d -> screen T%d R%d B%d L%d", top, right,
+            bottom, left, static_cast<int>(getOrientation()), *outTop, *outRight, *outBottom, *outLeft);
+  }
 }

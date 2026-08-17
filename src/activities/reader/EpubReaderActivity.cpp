@@ -2892,10 +2892,24 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
   const int statusBarTopHeight = UITheme::getStatusBarTopHeight(automaticPageTurnActive);
   const int statusBarBottomHeight = UITheme::getStatusBarBottomHeight(automaticPageTurnActive);
 
+  const int bezelLeft = orientedMarginLeft, bezelRight = orientedMarginRight;
   orientedMarginTop += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarTopHeight);
   orientedMarginLeft += SETTINGS.screenMargin;
   orientedMarginRight += SETTINGS.screenMargin;
   orientedMarginBottom += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarBottomHeight);
+
+  // One-shot per distinct result. The bezel inset is only one of two terms here:
+  // SETTINGS.screenMargin is added on top, so a few pixels of inset change can be
+  // invisible next to a large user margin. Logging both terms and the total says
+  // which one actually governs the edge the reader sees.
+  static int lastMarginKey = -1;
+  const int marginKey = (orientedMarginLeft << 16) | (orientedMarginRight << 8) | SETTINGS.screenMargin;
+  if (marginKey != lastMarginKey) {
+    lastMarginKey = marginKey;
+    LOG_INF("ERS", "Reader margins: bezel L%d R%d + screenMargin %d = L%d R%d (screen %dx%d)", bezelLeft, bezelRight,
+            static_cast<int>(SETTINGS.screenMargin), orientedMarginLeft, orientedMarginRight, renderer.getScreenWidth(),
+            renderer.getScreenHeight());
+  }
 
   RenderLayout layout;
   layout.marginTop = orientedMarginTop;
