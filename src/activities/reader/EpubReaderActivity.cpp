@@ -1856,7 +1856,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       onGoHome();
       return;
     }
-    case EpubReaderMenuActivity::MenuAction::READING_STATS: {
+    case EpubReaderMenuActivity::MenuAction::READING_STATS_FOR_BOOK: {
       // Jump to this book's detail screen using the same filename-hash docId
       // the session was opened with. The in-flight session's time isn't
       // visible here — it lands in the store only when end() runs on reader

@@ -52,6 +52,8 @@ void ReadingSessionTracker::updateProgress(uint8_t progress) {
 void ReadingSessionTracker::markFinished() {
   if (!active) return;
   const int64_t walltime = HalClock::isSynced() ? static_cast<int64_t>(HalClock::now()) : 0;
+  // Book exit is the only moment the history has to be in RAM; pull it in, merge, write, drop.
+  const ReadingStatsStore::ScopedLoad statsLoad;
   READING_STATS.markFinished(docId, title, author, static_cast<time_t>(walltime));
   if (!READING_STATS.saveToFile()) {
     LOG_ERR("RST", "saveToFile failed (markFinished) doc=%s title=%s author=%s wall=%lld", docId.c_str(), title.c_str(),
@@ -78,6 +80,8 @@ void ReadingSessionTracker::end() {
           pagesTurnedThisSession, lastKnownProgress, (long long)walltime);
 
   if (!docId.empty()) {
+    // See markFinished(): the store is loaded only for this merge-and-save, then released.
+    const ReadingStatsStore::ScopedLoad statsLoad;
     READING_STATS.recordSession(docId, title, author, seconds, pagesTurnedThisSession, lastKnownProgress,
                                 static_cast<time_t>(walltime));
     if (!READING_STATS.saveToFile()) {

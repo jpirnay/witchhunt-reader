@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ReadingStats.h"
 #include "activities/Activity.h"
 
 // Phase-1 reading-stats screen. Read-only summary of the per-book and global
@@ -17,6 +18,10 @@ class ReadingStatsActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // The history is not resident while reading (see ReadingStatsStore::ScopedLoad); this screen
+  // holds it for exactly as long as the activity exists.
+  ReadingStatsStore::ScopedLoad statsLoad_;
+
   // Last millis() at which we refreshed the live "this session" block.
   // We only redraw once per second to avoid hammering the e-ink panel.
   uint32_t lastLiveRefreshMs = 0;

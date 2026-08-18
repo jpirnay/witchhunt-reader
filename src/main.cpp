@@ -1013,9 +1013,22 @@ void setup() {
   markBootPhase(BootPhase::FirstPaint);
 
   HalClock::restore();
+  // Split checkpoints: two boots of the same firmware differed by 14780 B of free heap and, far
+  // more importantly, by largest8 65524 vs 26612 at after_activity_route — and the only thing
+  // that differed was the reading-stats file (1 book / 110 s vs 36 books / 100788 s). Boot min
+  // free was 30044 against 69932, so the load also peaks ~40 KB transiently. That contig gap is
+  // what decides whether a big chapter's section build finishes or aborts, so it needs to be
+  // attributable to one of these three stores rather than inferred across boots.
+  logStartupMemory("before_stores");
   RECENT_BOOKS.loadFromFile();
+  logStartupMemory("after_recent_books");
   GLOBAL_BOOKMARKS.load();
-  READING_STATS.loadFromFile();
+  logStartupMemory("after_bookmarks");
+  // READING_STATS is deliberately NOT loaded here. Nothing on the reading path needs the history
+  // — the session tracker accumulates in its own members and only touches the store at book exit
+  // — while keeping it resident cost, measured on X4 with 36 books, ~15 KB of heap and dropped
+  // largest8 from 65524 to 26612 before the first book was even opened. Consumers load it for
+  // the duration they need it (ReadingStatsStore::ScopedLoad) and release it after.
   markBootPhase(BootPhase::StoreLoad);
 
   if (recoveryFirmwareMode) {
