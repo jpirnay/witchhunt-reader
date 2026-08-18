@@ -796,9 +796,30 @@ if compress:
         (0xFFFD, 0xFFFD),   # Replacement Character
     ]
 
-    # 64 KB cap: large enough to hold any single built-in font group with headroom,
-    # small enough to be a comfortable transient malloc on the ESP32-C3.
-    GROUP_MAX_UNCOMPRESSED_BYTES = 65536
+    # 8 KB cap. The decompressor has to inflate a whole group into one contiguous
+    # transient malloc to reach even a single glyph (FontDecompressor::getBitmap and
+    # prewarmCache), so this cap IS the peak transient allocation of text rendering.
+    # At 64 KB it was never reached, and the script boundaries alone left Cyrillic at
+    # 33-49 KB depending on size/style: measured on X4, a reader entry with
+    # contig=28660 could not allocate 39746 for group 5 and dropped glyphs from the
+    # page. Mid-build draws see contig as low as 11252, which 8 KB clears and 12 KB
+    # does not.
+    #
+    # Cost, measured over all 40 compressed built-in fonts (zopfli both sides):
+    #   cap    compressed total   delta      peak transient
+    #   64 KB  1264010 (shipped)  --         up to 49166
+    #   12 KB  1342653            +6.2%      12288
+    #    8 KB  1372716            +8.6%       8192
+    #    6 KB  1403850           +11.1%       6144
+    # 6 KB and below do not fit the app partition. The flash goes on Huffman-table
+    # restarts and lost cross-chunk context; per-glyph streams (the obvious next step)
+    # cost +102% with DEFLATE, which is why upstream's GlyphStream PR needed a trained
+    # range coder -- and paid for it with a 2x page render.
+    #
+    # Chunking also cuts CPU: glyphs stay in codepoint order, so the core Cyrillic run
+    # U+0410-U+044F lands in ~2 chunks and a Russian page never inflates the rest of
+    # the block at all.
+    GROUP_MAX_UNCOMPRESSED_BYTES = 8192
 
     def get_script_group(code_point):
         for i, (start, end) in enumerate(SCRIPT_GROUP_RANGES):
