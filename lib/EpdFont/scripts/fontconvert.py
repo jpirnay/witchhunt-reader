@@ -948,15 +948,21 @@ if compress:
     print("};\n")
 
 if kern_map:
-    print(f"static const EpdKernClassEntry {font_name}KernLeftClasses[] = {{")
-    for cp, cls in kern_left_classes:
-        print(f"    {{ 0x{cp:04X}, {cls} }}, // {cp_label(cp)}")
-    print("};\n")
-
-    print(f"static const EpdKernClassEntry {font_name}KernRightClasses[] = {{")
-    for cp, cls in kern_right_classes:
-        print(f"    {{ 0x{cp:04X}, {cls} }}, // {cp_label(cp)}")
-    print("};\n")
+    # Split class maps: codepoints in one array, class IDs in a parallel one. Same 3 bytes per
+    # entry as the packed EpdKernClassEntry, but the binary search only reads codepoints, so
+    # keeping the payload out of the searched array shrinks its footprint by a third and makes
+    # every read naturally aligned. Measured -13 to -14% on the class lookup, which is ~96% of
+    # getKerning(). SD-card fonts keep the packed form (fontconvert_sdcard.py) because .cpfont
+    # stores it verbatim and maps it in place.
+    for side, entries in (("Left", kern_left_classes), ("Right", kern_right_classes)):
+        print(f"static const uint16_t {font_name}Kern{side}Codepoints[] = {{")
+        for chunk in chunks([cp for cp, _ in entries], 12):
+            print("    " + ", ".join(f"0x{cp:04X}" for cp in chunk) + ",")
+        print("};\n")
+        print(f"static const uint8_t {font_name}Kern{side}ClassIds[] = {{")
+        for chunk in chunks([cls for _, cls in entries], 16):
+            print("    " + ", ".join(f"{cls:3d}" for cls in chunk) + ",")
+        print("};\n")
 
     # Sparse (CSR) kerning. The dense leftClass x rightClass matrix is overwhelmingly zero —
     # measured 86.6% across the built-in set — and at 40 fonts the dense form cost ~583 KB of
@@ -1026,8 +1032,12 @@ else:
 # glyphToGroup (not used for script-grouped fonts)
 print("    nullptr,")
 if kern_map:
-    print(f"    {font_name}KernLeftClasses,")
-    print(f"    {font_name}KernRightClasses,")
+    print("    nullptr,  // kernLeftClasses: built-in fonts use the split arrays below")
+    print("    nullptr,  // kernRightClasses")
+    print(f"    {font_name}KernLeftCodepoints,")
+    print(f"    {font_name}KernLeftClassIds,")
+    print(f"    {font_name}KernRightCodepoints,")
+    print(f"    {font_name}KernRightClassIds,")
     print("    nullptr,  // kernMatrix: built-in fonts use the sparse form below")
     print(f"    {font_name}KernRowOffsets,")
     print(f"    {font_name}KernSparseCols,")
@@ -1037,12 +1047,8 @@ if kern_map:
     print(f"    {kern_left_class_count},")
     print(f"    {kern_right_class_count},")
 else:
-    print(f"    nullptr,")
-    print(f"    nullptr,")
-    print(f"    nullptr,")
-    print(f"    nullptr,")
-    print(f"    nullptr,")
-    print(f"    nullptr,")
+    for _ in range(10):
+        print(f"    nullptr,")
     print(f"    0,")
     print(f"    0,")
     print(f"    0,")
