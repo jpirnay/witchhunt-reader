@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "ReadingStats.h"
 #include "activities/Activity.h"
 
 // Phase-2 sub-screen: per-book reading stats with a 30-day sparkline keyed on
@@ -18,5 +19,8 @@ class ReadingStatsBookDetailActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // Resolved against the store on every render, so the store has to stay loaded for the screen.
+  ReadingStatsStore::ScopedLoad statsLoad_;
+
   std::string docId;
 };

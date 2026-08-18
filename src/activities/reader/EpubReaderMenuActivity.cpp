@@ -418,7 +418,7 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
     case StrId::STR_GO_HOME_BUTTON:
       return MenuAction::GO_HOME;
     case StrId::STR_READING_STATS_FOR_THIS_BOOK:
-      return MenuAction::READING_STATS;
+      return MenuAction::READING_STATS_FOR_BOOK;
     case StrId::STR_BOOK_INFO:
       return MenuAction::BOOK_INFO;
     default:

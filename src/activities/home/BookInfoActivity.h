@@ -6,8 +6,12 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "ReadingStats.h"
 
 class BookInfoActivity final : public Activity {
+  // findBook() below needs the history; hold it for this screen only.
+  ReadingStatsStore::ScopedLoad statsLoad_;
+
   const std::string filePath;
 
   // Metadata populated in onEnter

@@ -17,6 +17,10 @@ class ReadingStatsBookListActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  // Holds the history resident for this activity's lifetime — sortedBooks below points into
+  // ReadingStatsStore::books, so the store must outlive them.
+  ReadingStatsStore::ScopedLoad statsLoad_;
+
   // Cached pointers into ReadingStatsStore::books, sorted by totalSeconds desc.
   // Rebuilt on onEnter() so the list reflects the latest state even after a
   // session has been recorded between visits.

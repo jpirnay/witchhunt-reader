@@ -64,6 +64,20 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
 #endif
 
+// Reading an image header straight out of the ZIP (ImageDecoderFactory::getDimensionsFromZipEntry)
+// spins up a ~32 KB inflate ring. That is the ONLY allocation in image handling large enough to
+// threaten a parse, so it is the only thing gated on heap — see the image branch in startElement.
+// Sized ring + slack rather than reusing the text-layout floors, which are far too permissive for
+// a 32 KB request and were never chosen with one in mind.
+#ifndef EHP_IMAGE_HEADER_MIN_FREE_HEAP
+#define EHP_IMAGE_HEADER_MIN_FREE_HEAP (40 * 1024)
+#endif
+#ifndef EHP_IMAGE_HEADER_MIN_MAX_ALLOC
+#define EHP_IMAGE_HEADER_MIN_MAX_ALLOC (34 * 1024)
+#endif
+constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_FREE_HEAP;
+constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_MAX_ALLOC;
+
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_ALLOC;
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
@@ -467,7 +481,13 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   // Soft low-memory zone: keep parsing in degraded mode and only hard-abort when
   // both free and contiguous heap fall to critical levels.
   if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD && maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) {
-    lowMemoryImageFallback = true;
+    // Deliberately does NOT latch image handling off any more. This gate trips on a transient dip
+    // — and trips often, because the soft floor (12 * 1024) is a value the allocator can never
+    // report: every largest-free-block it returns is 512k - 12, so the neighbours are 12276 and
+    // 12788 and the effective floor is the latter. A single 12-bytes-short reading used to
+    // disable images for the REST OF THE CHAPTER, and because the parse writes the section cache,
+    // that alt-text stood in for every later image until the cache was invalidated. Image cost is
+    // now judged where it is actually incurred (heapAllowsImageHeaderRead).
     LOG_DBG("EHP", "Low heap (%u free, %u max alloc) before %s; continuing in degraded mode", freeHeap, maxAllocHeap,
             phase);
     return true;
@@ -478,6 +498,17 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   layoutFailed = true;
   saxParser_.stop();
   return false;
+}
+
+bool ChapterHtmlSlimParser::heapAllowsImageHeaderRead() const {
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER && maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER;
+  if (!ok) {
+    LOG_DBG("EHP", "Skipping ZIP image-header read (%u free, %u max alloc); image falls back to alt text", freeHeap,
+            maxAllocHeap);
+  }
+  return ok;
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
@@ -1324,11 +1355,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       if (!src.empty() && self->imageRendering != 1) {
         LOG_TRC("EHP", "Found image: src=%s", src.c_str());
 
-        if (self->lowMemoryImageFallback) {
-          handleImageFallback();
-          return;
-        }
-
         {
           // Resolve the image path relative to the HTML file
           std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->contentBase + src));
@@ -1362,7 +1388,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 dimsOk = true;
               }
             }
-            if (!dimsOk) {
+            if (!dimsOk && self->heapAllowsImageHeaderRead()) {
+              // Only reached when neither the tag nor the manifest could supply dimensions. On
+              // refusal dimsOk stays false and the code below already falls through to
+              // handleImageFallback(), so a tight heap degrades exactly this image and no other.
               dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
             }
             if (dimsOk) {

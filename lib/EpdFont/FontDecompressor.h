@@ -61,6 +61,7 @@ class FontDecompressor {
     uint32_t pageBufferBytes = 0;  // pageBuffer allocation
     uint32_t pageGlyphsBytes = 0;  // pageGlyphs lookup table allocation
     uint32_t peakTempBytes = 0;    // largest temp buffer in prewarm or getBitmap miss
+    uint16_t arenaTemps = 0;       // group inflates served by the slot arena instead of the heap
     uint32_t getBitmapTimeUs = 0;  // cumulative getBitmap time (micros)
     uint32_t getBitmapCalls = 0;   // number of getBitmap calls
 

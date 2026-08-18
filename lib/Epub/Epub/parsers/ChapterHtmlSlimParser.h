@@ -166,7 +166,6 @@ class ChapterHtmlSlimParser final : public Print {
   std::string contentBase;
   std::string imageBasePath;
   int imageCounter = 0;
-  bool lowMemoryImageFallback = false;
 
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
@@ -381,6 +380,10 @@ class ChapterHtmlSlimParser final : public Print {
   void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
   CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;
   bool ensureHeapForTextLayout(const char* phase);
+  // Whether the heap can afford the ~32 KB inflate ring a ZIP image-header read needs. Checked at
+  // the call site, never latched: the heap recovers between pages, and a single dip must not
+  // disable images for the rest of the chapter (that result gets baked into the section cache).
+  bool heapAllowsImageHeaderRead() const;
   void startNewTextBlock(const BlockStyle& blockStyle);
   bool flushPartWordBuffer();
   void makePages();

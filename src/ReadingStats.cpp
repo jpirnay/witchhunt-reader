@@ -217,11 +217,19 @@ uint32_t ReadingStatsStore::estimateRemainingSeconds(const std::string& docId, f
 }
 
 bool ReadingStatsStore::saveToFile() const {
+  // Refuse to write from a released store: books/globalDays are empty then, and a save would
+  // truncate the file to "no history". Every mutator goes through ensureLoaded() first, so
+  // reaching here unloaded is a bug in the caller, not a state to persist.
+  if (!loaded_) {
+    LOG_ERR("RST", "saveToFile refused: store not loaded (would erase history)");
+    return false;
+  }
   Storage.mkdir("/.crosspoint");
   return JsonSettingsIO::saveReadingStats(*this, READING_STATS_FILE);
 }
 
 bool ReadingStatsStore::loadFromFile() {
+  loaded_ = true;  // an absent or empty file is a legitimately empty history, not a failure to load
   if (!Storage.exists(READING_STATS_FILE)) {
     return false;
   }
@@ -230,4 +238,32 @@ bool ReadingStatsStore::loadFromFile() {
     return false;
   }
   return JsonSettingsIO::loadReadingStats(*this, json.c_str());
+}
+
+bool ReadingStatsStore::ensureLoaded() {
+  if (loaded_) {
+    return true;
+  }
+  loadFromFile();
+  LOG_DBG("RST", "Store loaded on demand (%zu books, free=%lu contig=%lu)", books.size(),
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  return loaded_;
+}
+
+void ReadingStatsStore::release() {
+  if (!loaded_) {
+    return;
+  }
+  // clear() keeps capacity, which is the whole cost here — 36 books measured at ~15 KB standing
+  // plus a per-book days vector each. Swap with an empty temporary so the buffers actually go
+  // back to the heap.
+  std::vector<BookReadingStats>().swap(books);
+  std::vector<DayBucket>().swap(globalDays);
+  globalTotalSeconds = 0;
+  globalTotalSessions = 0;
+  globalTotalPagesTurned = 0;
+  loaded_ = false;
+  LOG_DBG("RST", "Store released (free=%lu contig=%lu)", static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
 }

@@ -148,6 +148,19 @@ constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN
 // from churn, plus a one-page cliff from the mid-build render's font page slots (fixed in
 // 040b2c1b). Kept rather than deleted because the cliff is only partly closed and the next
 // attempt needs exactly these numbers again: build with -DSCT_HEAP_TRACE=1.
+//
+// Run 2026-08-18 (X4, 241 KB Cyrillic chapter, 262 pages, cold build): the parse ends ~9 KB and
+// ~65 blocks above where it started while contig steps down in exact 1024-byte units — doubling
+// reallocs of containers held for the whole parse, not a single cliff (the low-water probe found
+// no transient below 27 KB across the entire feed). The `retained:` line added below names only
+// ~2.9 KB of it (anchors 784 B, paraLut 2096 B, pageBreakLabels 0); the other ~6 KB is still
+// unattributed, with the two CssStyle unordered_map caches the prime suspect.
+//
+// Left unfixed on purpose: the dominant term was never the parse. It was the heap the build
+// STARTED from — the reading-stats store cost ~15 KB and dropped largest8 65524 -> 26612 before
+// the reader opened anything. With that made lazy the same chapter builds from contig 49140,
+// finishes all 262 pages in 15.9 s, and logs ZERO "degraded mode" lines where it previously
+// logged hundreds and then aborted. Revisit only if a chapter starts failing from a healthy heap.
 #ifndef SCT_HEAP_TRACE
 #define SCT_HEAP_TRACE 0
 #endif
@@ -1264,6 +1277,25 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   // Write anchor-to-page map for fragment navigation (TOC + footnote targets)
   const uint32_t anchorMapOffset = file.position();
   const auto& anchors = visitor.getAnchors();
+
+#if SCT_HEAP_TRACE
+  // Which retained container accounts for the parse's growth? The per-page trace shows the parse
+  // ending ~9 KB and ~65 blocks above where it started while contig falls ~11 KB, so something is
+  // held for the whole parse and reallocated as it grows. These are the three that scale with the
+  // chapter rather than with the page being laid out; sizes are logged once, at the only point
+  // where all of them are still alive. Temporary, same lifetime as SCT_HEAP_TRACE.
+  {
+    const size_t anchorBytes = anchors.size() * sizeof(std::pair<std::string, uint16_t>);
+    const size_t labelBytes = visitor.getPageBreakLabels().size() * sizeof(std::pair<uint16_t, std::string>);
+    const size_t lutBytes = visitor.getParagraphLutPerPage().size() * 8;
+    LOG_INF("HEAP", "spine=%d retained: anchors=%u (~%uB) pageBreakLabels=%u (~%uB) paraLut=%u (~%uB) lut=%u (~%uB)",
+            spineIndex, static_cast<unsigned>(anchors.size()), static_cast<unsigned>(anchorBytes),
+            static_cast<unsigned>(visitor.getPageBreakLabels().size()), static_cast<unsigned>(labelBytes),
+            static_cast<unsigned>(visitor.getParagraphLutPerPage().size()), static_cast<unsigned>(lutBytes),
+            static_cast<unsigned>(lut.size()), static_cast<unsigned>(lut.size() * sizeof(uint32_t)));
+  }
+#endif
+
   serialization::writePod(file, static_cast<uint16_t>(anchors.size()));
   for (const auto& [anchor, page] : anchors) {
     serialization::writeString(file, anchor);

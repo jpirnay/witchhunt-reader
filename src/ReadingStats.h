@@ -137,6 +137,41 @@ class ReadingStatsStore {
 
   bool saveToFile() const;
   bool loadFromFile();
+
+  // Lazy lifecycle. The store used to be loaded at boot and kept resident for the whole session;
+  // measured on X4, 36 books cost ~15 KB standing and dropped the largest free block from 65524
+  // to 26612 before the reader had opened anything — which is the difference between a large
+  // chapter's section build finishing and aborting. Nothing needs the history while reading: the
+  // session tracker accumulates entirely in its own members and only touches the store at
+  // markFinished()/end(). So callers now load it for as long as they need it and release it after.
+  //
+  // Consumers: the stats screens, BookInfo, the Home themes' ETA badge, and the session tracker
+  // on book exit. Read accessors on a released store return empty/zero, which renders as "no
+  // history" rather than misreporting — but that is a caller bug, so load before you read.
+  bool ensureLoaded();
+  void release();
+  bool isLoaded() const { return loaded_; }
+
+  // RAII wrapper for the load-use-release cycle. Releases only if it did the loading, so a nested
+  // scope (Home's ETA badge inside an already-loaded stats screen) does not pull the store out
+  // from under its owner.
+  class ScopedLoad {
+   public:
+    ScopedLoad() : ownedLoad_(!ReadingStatsStore::getInstance().isLoaded()) {
+      ReadingStatsStore::getInstance().ensureLoaded();
+    }
+    ~ScopedLoad() {
+      if (ownedLoad_) ReadingStatsStore::getInstance().release();
+    }
+    ScopedLoad(const ScopedLoad&) = delete;
+    ScopedLoad& operator=(const ScopedLoad&) = delete;
+
+   private:
+    bool ownedLoad_;
+  };
+
+ private:
+  bool loaded_ = false;
 };
 
 #define READING_STATS ReadingStatsStore::getInstance()
