@@ -9,6 +9,66 @@
 #include <cstdlib>
 #include <cstring>
 
+namespace {
+
+// One group's inflate buffer, for the duration of one decompress-and-extract.
+//
+// Prefers the slot arena when one is installed, because the moment this allocation fails is
+// precisely the moment the arena exists and is half empty: a page drawn *during* a section build.
+// Measured X4 2026-08-18, mid-build draw with the framebuffer lent to the build — four
+// consecutive refusals (7796, 8110, 8184, 8145 bytes) against contig 14324, while the borrowed
+// 48000-byte region the slots were already drawing from had room for all of them. The slots moved
+// there for the same reason (see FontCacheManager::ScopedSlotArena); the group temp was simply
+// left behind on the heap.
+//
+// Falls back to the heap when there is no arena (the ordinary foreground draw) or when the build
+// has the arena filled, so this can only ever turn a failure into a success.
+class GroupTemp {
+ public:
+  GroupTemp(BuildArena* arena, const uint32_t bytes) {
+    if (arena && arena->valid()) {
+      // Nested inside the page-wide block ScopedSlotArena holds. Released before this object
+      // dies, so the newest-first ordering release() enforces always holds.
+      block_ = arena->reserveBlock();
+      if (block_.valid()) {
+        buf_ = static_cast<uint8_t*>(arena->alloc(bytes));
+        if (buf_) {
+          arena_ = arena;
+          return;
+        }
+        arena->release(block_);
+      }
+    }
+    buf_ = static_cast<uint8_t*>(malloc(bytes));
+  }
+  ~GroupTemp() {
+    if (arena_) {
+      arena_->release(block_);
+    } else {
+      free(buf_);
+    }
+  }
+  GroupTemp(const GroupTemp&) = delete;
+  GroupTemp& operator=(const GroupTemp&) = delete;
+
+  uint8_t* get() const { return buf_; }
+  bool fromArena() const { return arena_ != nullptr; }
+
+ private:
+  BuildArena* arena_ = nullptr;
+  BuildArena::Block block_;
+  uint8_t* buf_ = nullptr;
+};
+
+// Room left in an installed arena, for the OOM diagnostics: distinguishes "no arena here" from
+// "arena was there and full", which are different bugs with the same symptom.
+uint32_t arenaHeadroom(const BuildArena* arena) {
+  if (!arena || !arena->valid()) return 0;
+  return static_cast<uint32_t>(arena->capacity() - arena->used());
+}
+
+}  // namespace
+
 FontDecompressor::~FontDecompressor() { deinit(); }
 
 bool FontDecompressor::init() {
@@ -211,19 +271,22 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
     return nullptr;
   }
 
-  uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
+  GroupTemp temp(slotArena_, group.uncompressedSize);
+  uint8_t* groupBuf = temp.get();
   if (!groupBuf) {
     // Logged once per size class per pass; the running total goes out in logStats().
-    LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u fallback; skipping this size and larger for the pass",
-            group.uncompressedSize, groupIndex);
+    LOG_ERR("FDC",
+            "OOM: cannot allocate %lu bytes for group %u fallback (arena headroom %lu); skipping this size and larger "
+            "for the pass",
+            group.uncompressedSize, groupIndex, arenaHeadroom(slotArena_));
     stats.fallbackOomBytes = group.uncompressedSize;
     stats.fallbackOomGlyphs++;
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
+  if (temp.fromArena()) stats.arenaTemps++;
 
   if (!decompressGroup(fontData, groupIndex, groupBuf, group.uncompressedSize)) {
-    free(groupBuf);
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
@@ -240,7 +303,6 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
   }
 
   compactSingleGlyph(&groupBuf[alignedOff], _fallbackCache[lruIndex].buffer, glyph->width, glyph->height);
-  free(groupBuf);
 
   _fallbackCache[lruIndex].fontData = fontData;
   _fallbackCache[lruIndex].glyphIndex = glyphIndex;
@@ -612,11 +674,12 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     }
   }
 
-  // Step 4: For each unique group, malloc a transient buffer, decompress, extract needed glyphs, free.
-  // One malloc/free per group per prewarm call. Groups are visited in sorted order, so
-  // only one group buffer is alive at a time — peak heap = page buffer + largest single group.
+  // Step 4: For each unique group, take a transient buffer (arena first, else heap — see
+  // GroupTemp), decompress, extract needed glyphs, release. Groups are visited in sorted order,
+  // so only one group buffer is alive at a time — peak = page buffer + largest single group.
   uint32_t writeOffset = 0;
   int missed = 0;
+  uint8_t arenaTempCount = 0;
 
   for (uint8_t g = 0; g < groupCount; g++) {
     uint16_t groupIdx = neededGroups[g];
@@ -624,16 +687,29 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 
     if (group.uncompressedSize > stats.peakTempBytes) stats.peakTempBytes = group.uncompressedSize;
 
-    uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
+    // Glyphs this group owes the page, so a refusal reports what the reader actually loses
+    // rather than counting groups. Computed up front: the extraction loop below is what would
+    // otherwise clear them, and on the failure paths it never runs.
+    uint16_t owed = 0;
+    for (uint16_t i = 0; i < slot.glyphCount; i++) {
+      if (slot.glyphs[i].groupIndex == groupIdx && slot.glyphs[i].bufferOffset == UINT32_MAX) owed++;
+    }
+
+    GroupTemp temp(slotArena_, group.uncompressedSize);
+    uint8_t* groupBuf = temp.get();
     if (!groupBuf) {
-      LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u during prewarm", group.uncompressedSize, groupIdx);
-      missed++;
+      LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u during prewarm (arena headroom %lu, %u glyphs lost)",
+              group.uncompressedSize, groupIdx, arenaHeadroom(slotArena_), owed);
+      missed += owed;
       continue;
+    }
+    if (temp.fromArena()) {
+      stats.arenaTemps++;
+      arenaTempCount++;
     }
 
     if (!decompressGroup(fontData, groupIdx, groupBuf, group.uncompressedSize)) {
-      free(groupBuf);
-      missed++;
+      missed += owed;
       continue;
     }
 
@@ -648,12 +724,21 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
       slot.glyphs[i].bufferOffset = writeOffset;
       writeOffset += glyph.dataLength;
     }
-
-    free(groupBuf);
   }
 
   LOG_TRC("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
           missed);
+
+  // Positive evidence that the arena path did something — only a draw racing a section build can
+  // produce it (see GroupTemp), and it is silent on every ordinary page.
+  //
+  // Logged here rather than in logStats() because logStats() is only ever called from
+  // renderContents(); displayBuildPage() — the one function that draws mid-build and the only
+  // one that installs the slot arena — never calls it, so a stats-time report could not fire for
+  // the very case this counter exists to prove.
+  if (arenaTempCount > 0) {
+    LOG_DBG("FDC", "prewarm: %u/%u group inflate(s) from the slot arena", arenaTempCount, groupCount);
+  }
 
   return missed;
 }
@@ -677,8 +762,8 @@ void FontDecompressor::logStats(const char* label) {
   LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
           total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
   LOG_TRC("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
-  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
-          stats.pageGlyphsBytes, stats.peakTempBytes);
+  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu arenaTemps=%u", label, stats.pageBufferBytes,
+          stats.pageGlyphsBytes, stats.peakTempBytes, stats.arenaTemps);
 
   // getBitmap timing is the exception: a prewarm that missed its font sends every glyph down the
   // hot-group path at thousands of us each (measured 5642 us/glyph against 1 us prewarmed), and
