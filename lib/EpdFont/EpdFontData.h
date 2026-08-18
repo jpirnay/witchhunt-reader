@@ -122,7 +122,23 @@ typedef struct {
   const uint16_t* glyphToGroup;               ///< Per-glyph group ID (nullptr for contiguous-group fonts)
   const EpdKernClassEntry* kernLeftClasses;   ///< Sorted left-side class map (nullptr if none)
   const EpdKernClassEntry* kernRightClasses;  ///< Sorted right-side class map (nullptr if none)
-  const int8_t* kernMatrix;              ///< Flat leftClassCount x rightClassCount matrix, 4.4 fixed-point in pixels
+  const int8_t* kernMatrix;  ///< Flat leftClassCount x rightClassCount matrix, 4.4 fixed-point in pixels
+  /// Sparse (CSR) kerning — the built-in fonts use this instead of `kernMatrix`, which is left
+  /// null for them. Measured across the built-in set, 504682 of 583049 dense entries are zero
+  /// (86.6%), so storing only the non-zero ones costs ~165 KB where the dense matrices cost
+  /// ~583 KB. Values are identical, so layout and pagination are unaffected.
+  ///
+  /// SD-card fonts keep using `kernMatrix`: the .cpfont format stores the dense matrix verbatim
+  /// and is memory-mapped in place (see the static_asserts in SdCardFont.cpp), so switching them
+  /// would break every font file already on a user's card. getKerning() reads whichever is
+  /// present, so the two representations coexist with one branch.
+  ///
+  /// kernRowOffsets has kernLeftClassCount + 1 entries; row `l` occupies
+  /// [kernRowOffsets[l], kernRowOffsets[l+1]) in the other two arrays, sorted ascending by
+  /// column so the lookup can binary-search it.
+  const uint16_t* kernRowOffsets;        ///< nullptr when this font uses the dense matrix
+  const uint8_t* kernSparseCols;         ///< 0-based right class of each stored entry
+  const int8_t* kernSparseValues;        ///< 4.4 fixed-point value of each stored entry
   uint16_t kernLeftEntryCount;           ///< Entries in kernLeftClasses
   uint16_t kernRightEntryCount;          ///< Entries in kernRightClasses
   uint8_t kernLeftClassCount;            ///< Number of distinct left classes (matrix rows)

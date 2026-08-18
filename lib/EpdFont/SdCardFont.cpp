@@ -56,6 +56,9 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
   s.miniData.kernLeftClasses = nullptr;
   s.miniData.kernRightClasses = nullptr;
   s.miniData.kernMatrix = nullptr;
+  s.miniData.kernRowOffsets = nullptr;  // SD fonts are always dense; see EpdFontData::kernRowOffsets
+  s.miniData.kernSparseCols = nullptr;
+  s.miniData.kernSparseValues = nullptr;
   s.miniData.kernLeftEntryCount = 0;
   s.miniData.kernRightEntryCount = 0;
   s.miniData.kernLeftClassCount = 0;
@@ -63,6 +66,9 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
   s.stubData.kernLeftClasses = nullptr;
   s.stubData.kernRightClasses = nullptr;
   s.stubData.kernMatrix = nullptr;
+  s.stubData.kernRowOffsets = nullptr;
+  s.stubData.kernSparseCols = nullptr;
+  s.stubData.kernSparseValues = nullptr;
   s.stubData.kernLeftEntryCount = 0;
   s.stubData.kernRightEntryCount = 0;
   s.stubData.kernLeftClassCount = 0;
@@ -235,6 +241,12 @@ void SdCardFont::applyKernLigaturePointers(const PerStyle& s, EpdFontData& data)
   data.kernLeftClasses = s.miniKernLeftClasses;
   data.kernRightClasses = s.miniKernRightClasses;
   data.kernMatrix = s.miniKernMatrix;
+  // The .cpfont format stores a dense matrix and is mapped in place, so SD fonts never use the
+  // sparse form the built-in fonts switched to. Set explicitly rather than relying on the
+  // caller's initialisation: getKerning() picks the representation by which pointer is non-null.
+  data.kernRowOffsets = nullptr;
+  data.kernSparseCols = nullptr;
+  data.kernSparseValues = nullptr;
   data.kernLeftEntryCount = s.miniKernLeftEntryCount;
   data.kernRightEntryCount = s.miniKernRightEntryCount;
   data.kernLeftClassCount = s.miniKernLeftClassCount;

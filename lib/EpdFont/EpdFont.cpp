@@ -113,13 +113,39 @@ static uint8_t lookupKernClass(const EpdKernClassEntry* entries, const uint16_t 
 }
 
 int8_t EpdFont::getKerning(const uint32_t leftCp, const uint32_t rightCp) const {
-  if (!data->kernMatrix) {
+  if (!data->kernMatrix && !data->kernRowOffsets) {
     return 0;
   }
   const uint8_t lc = lookupKernClass(data->kernLeftClasses, data->kernLeftEntryCount, leftCp);
   if (lc == 0) return 0;
   const uint8_t rc = lookupKernClass(data->kernRightClasses, data->kernRightEntryCount, rightCp);
   if (rc == 0) return 0;
+
+  // Sparse (built-in fonts): scan the row. See EpdFontData::kernRowOffsets.
+  //
+  // Cost, host-measured against the real notosans_18_regular tables with the real function
+  // (min of 9 runs): +6.2-6.9% on the mix real text produces, +11.0-12.9% when every pair has
+  // both classes. Small because the row access is not where the time goes — the two
+  // lookupKernClass binary searches above are ~96% of this function (59.4 ns of 61.7 ns dense),
+  // and they are identical in both representations. That buys ~415 KB of flash.
+  if (data->kernRowOffsets) {
+    const uint16_t begin = data->kernRowOffsets[lc - 1];
+    const uint16_t end = data->kernRowOffsets[lc];
+    const auto target = static_cast<uint8_t>(rc - 1);
+    const uint8_t* cols = data->kernSparseCols;
+    // Linear scan with an early exit, not a binary search: rows hold 14.5 entries on average
+    // across the built-in set, short enough that the scan measured faster (worst-case mix +11%
+    // over dense against +19% for std::lower_bound). It should widen on the C3, which reads
+    // these arrays through the flash cache — the scan walks forwards through a cache line while
+    // the search jumps around it.
+    for (uint16_t i = begin; i < end; i++) {
+      if (cols[i] == target) return data->kernSparseValues[i];
+      if (cols[i] > target) break;  // sorted ascending, so past the target means absent
+    }
+    return 0;
+  }
+
+  // Dense (SD-card fonts, mapped straight out of the .cpfont).
   return data->kernMatrix[(lc - 1) * data->kernRightClassCount + (rc - 1)];
 }
 
