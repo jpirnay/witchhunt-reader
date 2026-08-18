@@ -237,6 +237,54 @@ TEST(EpdFont, KernLookupSparseHandlesMissingEntries) {
   EXPECT_EQ(sparse.getKerning('T', 'x'), 0);   // no right class at all
 }
 
+// The class maps above are the PACKED form, which only SD-card fonts use now. Built-in fonts
+// ship the split arrays, so the same coexistence check the matrix gets applies here too.
+namespace {
+const uint16_t kKernLeftCps[] = {0x54, 0x6F};
+const uint8_t kKernLeftIds[] = {1, 2};
+const uint16_t kKernRightCps[] = {0x61, 0x6F};
+const uint8_t kKernRightIds[] = {1, 2};
+
+EpdFontData makeSplitClassFontData() {
+  EpdFontData d = kTestFontData;
+  d.kernLeftClasses = nullptr;  // force the split path
+  d.kernRightClasses = nullptr;
+  d.kernLeftCodepoints = kKernLeftCps;
+  d.kernLeftClassIds = kKernLeftIds;
+  d.kernRightCodepoints = kKernRightCps;
+  d.kernRightClassIds = kKernRightIds;
+  return d;
+}
+}  // namespace
+
+TEST(EpdFont, KernSplitClassMapMatchesPacked) {
+  const EpdFontData splitData = makeSplitClassFontData();
+  EpdFont split(&splitData);
+  for (const uint32_t left : {'T', 'a', 'o', 'x', 'z'}) {
+    for (const uint32_t right : {'T', 'a', 'o', 'x', 'z'}) {
+      EXPECT_EQ(split.getKerning(left, right), testFont().getKerning(left, right))
+          << "pair " << static_cast<char>(left) << static_cast<char>(right);
+    }
+  }
+}
+
+TEST(EpdFont, KernSplitClassMapWithSparseMatrix) {
+  // The combination the built-in fonts actually ship: split class maps AND a sparse matrix.
+  EpdFontData d = makeSplitClassFontData();
+  d.kernMatrix = nullptr;
+  d.kernRowOffsets = kKernRowOffsetsFull;
+  d.kernSparseCols = kKernSparseColsFull;
+  d.kernSparseValues = kKernSparseValuesFull;
+  EpdFont shipped(&d);
+
+  EXPECT_EQ(shipped.getKerning('T', 'a'), -5);
+  EXPECT_EQ(shipped.getKerning('T', 'o'), -7);
+  EXPECT_EQ(shipped.getKerning('o', 'a'), -2);
+  EXPECT_EQ(shipped.getKerning('o', 'o'), -3);
+  EXPECT_EQ(shipped.getKerning('a', 'o'), 0);  // no left class
+  EXPECT_EQ(shipped.getKerning('T', 'x'), 0);  // no right class
+}
+
 TEST(EpdFont, KernLookupEmptyRowIsZero) {
   // Left class 1 stores nothing (offsets 0,0) — an empty range must not read past its row.
   static const uint16_t rowOffsets[] = {0, 0, 1};
