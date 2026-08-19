@@ -1389,18 +1389,61 @@ size_t Epub::readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, c
   return got;
 }
 
-bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
-  if (itemHref.empty() || destPath.empty()) return false;
+bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena) const {
+  const std::string path = FsHelpers::normalisePath(itemHref);
+  ZipFile zip(filepath);
+  primeZip(zip);
+
+  // EntryReader is the only deflate path in ZipFile that can take an arena; readFileToStream
+  // always mallocs. Same 1 KB chunk size as that path, so the SD write pattern is unchanged.
+  ZipFile::EntryReader reader(zip, 1024, arena);
+  const bool opened = reader.open(path.c_str());
+  adoptZipDetails(zip);
+  if (!opened) return false;
+
+  // Staging buffer on the stack rather than from the arena: the reader holds an arena block
+  // until close(), and a nested block would have to be released before it (BuildArena is LIFO).
+  // 512 B is nothing against the ~8 KB task stack, and this runs once per image, ever.
+  uint8_t buffer[512];
+  bool done = false;
+  while (!done) {
+    size_t produced = 0;
+    if (!reader.step(buffer, sizeof(buffer), &produced, &done)) {
+      LOG_ERR("EBP", "Arena extract failed mid-stream: %s", path.c_str());
+      return false;
+    }
+    if (produced > 0 && out.write(buffer, produced) != produced) {
+      LOG_ERR("EBP", "Failed to write all extracted bytes: %s", path.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
   FsFile destFile;
   if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
     LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
     return false;
   }
-  const bool ok = readItemContentsToStream(itemHref, destFile, 1024);
+  const bool ok = arena ? readItemContentsToStreamWithArena(itemHref, destFile, arena)
+                        : readItemContentsToStream(itemHref, destFile, 1024);
   destFile.flush();
   destFile.close();
   if (!ok) Storage.remove(destPath.c_str());
   return ok;
+}
+
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
+  if (itemHref.empty() || destPath.empty()) return false;
+  if (arena) {
+    if (extractItemToFileOnce(itemHref, destPath, arena)) return true;
+    // EntryReader does NOT fall back to the heap once it has been given an arena — a short
+    // arena just makes open() fail. Retry on the heap so passing one can only ever add a way
+    // to succeed. extractItemToFileOnce() removed the partial file, so this starts clean.
+    LOG_DBG("EBP", "Arena extract failed for %s, retrying on the heap", itemHref.c_str());
+  }
+  return extractItemToFileOnce(itemHref, destPath, nullptr);
 }
 
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {

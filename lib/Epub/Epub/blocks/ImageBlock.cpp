@@ -42,7 +42,14 @@ bool ImageBlock::ensureExtracted() const {
   }
   LOG_TRC("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
   Epub epub(epubFilePath_, "/.crosspoint");
-  if (!epub.extractItemToFile(epubEntryPath_, imagePath)) {
+  // Extraction runs inside the reader's warm pass, which has already borrowed the secondary
+  // framebuffer as image_scratch for the decoders — but the ZIP inflate ring was the one 32 KB
+  // contiguous block in the image path still taken from the heap, and it is the first to fail
+  // when the heap is fragmented. Device-measured on X4 at contig=13300: every image on the page
+  // logged "Failed to init inflate reader" and rendered as nothing at all. The extract finishes
+  // and gives the block back before the decode starts, so the two never overlap in the arena.
+  BuildArena* const arena = image_scratch::canServe(Epub::EXTRACT_ARENA_BYTES) ? image_scratch::get() : nullptr;
+  if (!epub.extractItemToFile(epubEntryPath_, imagePath, arena)) {
     LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
     return false;
   }

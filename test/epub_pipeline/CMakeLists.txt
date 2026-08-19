@@ -90,6 +90,7 @@ add_executable(EpubPipelineTest
   MetadataSidecarTest.cpp
   SidecarFilesTest.cpp
   SectionAbortTest.cpp
+  ImageExtractionTest.cpp
   ${PIPELINE_SOURCES}
 )
 target_include_directories(EpubPipelineTest PRIVATE ${PIPELINE_INCLUDES})

@@ -204,13 +204,20 @@ class Section {
   // between build slices, never concurrently with a slice on another task. Returns nullptr
   // on error. pageIndex must be < activeBuildPageCount().
   std::unique_ptr<Page> loadPageFromActiveBuild(uint16_t pageIndex);
-  // Pre-decode every image in the section into its .pxc cache while heap is
-  // maximally contiguous (secondary display buffer still released). Skips images
-  // that are already cached or would show as a placeholder. The decode writes
-  // pixels into the framebuffer as a side effect; call renderer.clearScreen()
-  // afterward. forceLoad mirrors the effectiveForceLoad rule used at render time.
-  // alsoWarmGrayscale additionally decodes the 4-level Bayer variant the AA grayscale
-  // planes replay; see Page::warmImageCaches.
+  // Pre-decode every image in the section into its .pxc cache. Skips images that are
+  // already cached or would show as a placeholder. The decode writes pixels into the
+  // framebuffer as a side effect; call renderer.clearScreen() afterward. forceLoad
+  // mirrors the effectiveForceLoad rule used at render time. alsoWarmGrayscale
+  // additionally decodes the 4-level Bayer variant the AA grayscale planes replay;
+  // see Page::warmImageCaches.
+  //
+  // NOT part of the normal open path: a section only needs image DIMENSIONS to lay out,
+  // and those come from the ZIP entry header. Decoding a whole section up front cost 72 s
+  // before the first page on an image-heavy book (X4), for pages the reader may never turn
+  // to; the per-page warm in renderContents does the same work with the same policy, on
+  // demand, borrowing the framebuffer as its arena. The one remaining caller is the
+  // pre-reboot heap-recovery pass, which deliberately warms everything so the next boot can
+  // render images with no decoder at all.
   void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true,
                           bool alsoWarmGrayscale = false);
   bool isTruncatedCache() const { return truncatedCache; }

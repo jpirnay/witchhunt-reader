@@ -403,10 +403,20 @@ class RowScaler {
   }
 
  private:
+  // 16.16 source position for one output row/column.
+  //
+  // The intermediate MUST be 64-bit. `*` binds tighter than `<<`, so the product is formed first
+  // and then shifted; in 32 bits that wraps as soon as outputIndex * (sourceSize - 1) reaches
+  // 65536 — for a 1920x2708 progressive cover scaled to 382x540 that is output row 194 of 540.
+  // Past the wrap, lowerY collapses to ~0, submit()'s "have we reached this source row yet" test
+  // passes for every remaining row at once, and they all get emitted from the last decoded row:
+  // the top third of the image decodes correctly and the rest is that one row repeated.
+  // The RESULT always fits in uint32 ((sourceSize - 1) << 16 <= 0xFFFF0000); only the
+  // intermediate needs the wider type.
   static uint32_t mapCoordinate(uint16_t outputIndex, uint16_t outputSize, uint16_t sourceSize) {
     if (outputSize <= 1 || sourceSize <= 1) return 0;
     if (outputIndex + 1 == outputSize) return static_cast<uint32_t>(sourceSize - 1) << 16;
-    return (static_cast<uint32_t>(outputIndex) * (sourceSize - 1) << 16) / (outputSize - 1);
+    return static_cast<uint32_t>((static_cast<uint64_t>(outputIndex) * (sourceSize - 1) << 16) / (outputSize - 1));
   }
 
   static uint8_t interpolate(uint8_t first, uint8_t second, uint32_t fraction) {
