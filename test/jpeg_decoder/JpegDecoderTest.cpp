@@ -261,6 +261,60 @@ TEST(ProgressiveJpegDc, DecodesFirstScanIntoResizedRows) {
   EXPECT_LT(capture.pixels[16 * 48 + 4], capture.pixels[16 * 48 + 20]);
 }
 
+// ---------------------------------------------------------------------------
+// RowScaler::mapCoordinate computed `outputIndex * (sourceSize - 1) << 16` in 32 bits.
+// `*` binds tighter than `<<`, so the product was formed first and the shift overflowed
+// once it reached 65536; the source position then wrapped to near zero, submit()'s
+// "have we reached this source row yet" test passed for every remaining output row at
+// once, and they were all emitted from the last decoded row. On a real 1920x2708
+// progressive cover scaled to a 540-row thumbnail that meant 194 correct rows followed
+// by 346 copies of one row. Both axes were affected; one test each.
+// ---------------------------------------------------------------------------
+TEST(ProgressiveJpegDc, TallImageDoesNotRepeatRowsPastOverflow) {
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(fixture("progressive_tall.jpg")));
+
+  ProgressiveRows capture;
+  ProgressiveJpegDc::DecodeOptions options;
+  options.outputWidth = 8;
+  options.outputHeight = 540;  // 339 DC rows: the wrap began at output row 194
+  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
+  file.close();
+
+  ASSERT_EQ(result, ProgressiveJpegDc::Result::Ok) << ProgressiveJpegDc::resultName(result);
+  ASSERT_EQ(capture.height, 540);
+
+  // The source is a black-to-white gradient top to bottom, so the output has to keep
+  // getting brighter all the way down. The bug froze it at the value of row ~193.
+  const auto row = [&](int y) { return capture.pixels[static_cast<size_t>(y) * capture.width]; };
+  EXPECT_LT(row(0), row(193));
+  EXPECT_LT(row(193), row(300));
+  EXPECT_LT(row(300), row(539));
+  EXPECT_GT(row(539), 200);  // reaches white rather than freezing at ~36% grey
+}
+
+TEST(ProgressiveJpegDc, WideImageDoesNotRepeatColumnsPastOverflow) {
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(fixture("progressive_wide.jpg")));
+
+  ProgressiveRows capture;
+  ProgressiveJpegDc::DecodeOptions options;
+  options.outputWidth = 382;  // 240 DC columns: the wrap began at output column 275
+  options.outputHeight = 8;
+  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
+  file.close();
+
+  ASSERT_EQ(result, ProgressiveJpegDc::Result::Ok) << ProgressiveJpegDc::resultName(result);
+  ASSERT_EQ(capture.width, 382);
+
+  // Left-to-right gradient, read across the first output row.
+  const auto col = [&](int x) { return capture.pixels[static_cast<size_t>(x)]; };
+  EXPECT_LT(col(0), col(274));
+  EXPECT_LT(col(274), col(330));
+  EXPECT_LT(col(330), col(381));
+  EXPECT_GT(col(381), 200);
+}
+
 TEST(ProgressiveJpegDc, RejectsBaselineWithoutEmittingRows) {
   FsFile file;
   ASSERT_TRUE(file.openForRead(fixture("contrast_420.jpg")));

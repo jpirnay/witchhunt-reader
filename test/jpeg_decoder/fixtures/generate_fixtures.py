@@ -17,6 +17,14 @@ Fixtures:
                      used as the golden image for the clamp test.
     progressive_420.jpg Progressive 4:2:0 JPEG with broad tonal regions. Its
                                          first DC scan is sufficient for a recognizable preview.
+  progressive_tall.jpg   Progressive, 16x2712 (339 DC rows) with a vertical gradient.
+                     Guards the RowScaler::mapCoordinate 32-bit overflow: scaled to a
+                     540-row thumbnail, `outputIndex * (sourceSize-1) << 16` wrapped from
+                     output row 194 on, and every row after it was emitted from the last
+                     decoded row. 339 DC rows is what a real 2708px-tall cover produces.
+  progressive_wide.jpg   Progressive, 1920x16 (240 DC columns) with a horizontal gradient.
+                     Same overflow on the COLUMN axis: at 382 output columns it wrapped
+                     from column 275 on.
 """
 import os
 from PIL import Image, ImageDraw
@@ -63,6 +71,28 @@ d.rectangle([W // 2, 0, W - 1, H // 2 - 1], fill=(0, 0, 0))
 d.rectangle([W // 2, H // 2, W - 1, H - 1], fill=(255, 255, 255))
 im.save(os.path.join(HERE, "progressive_420.jpg"), "JPEG", quality=92,
         subsampling=2, progressive=True, optimize=False)
+
+# --- progressive_tall.jpg / progressive_wide.jpg : mapCoordinate overflow guards ---
+# Narrow/short on the other axis so the DC block count that matters is large while the
+# committed file stays a few KB. Smooth gradients keep every DC block distinct, which is
+# what makes "this row repeats the previous one" detectable.
+def save_progressive(im, name):
+    im.convert("RGB").save(os.path.join(HERE, name), "JPEG", quality=92,
+                           subsampling=2, progressive=True, optimize=False)
+
+W, H = 16, 2712                                   # 339 DC rows, as a 2708px cover produces
+im = Image.new("L", (W, H))
+d = ImageDraw.Draw(im)
+for y in range(H):
+    d.line([(0, y), (W, y)], fill=int(255 * y / (H - 1)))
+save_progressive(im, "progressive_tall.jpg")
+
+W, H = 1920, 16                                   # 240 DC columns
+im = Image.new("L", (W, H))
+d = ImageDraw.Draw(im)
+for x in range(W):
+    d.line([(x, 0), (x, H - 1)], fill=int(255 * x / (W - 1)))
+save_progressive(im, "progressive_wide.jpg")
 
 print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):
