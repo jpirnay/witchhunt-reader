@@ -1429,14 +1429,23 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 }
 
                 if (hasCssHeight && hasCssWidth && dims.width > 0 && dims.height > 0) {
-                  // Both CSS height and width set: resolve both, then clamp to
-                  // current container preserving requested ratio.
+                  // Both CSS height and width set: resolve both, fit the image inside that box,
+                  // then clamp to the current container.
                   displayHeight = static_cast<int>(
                       imgStyle.imageHeight.toPixels(emSize, static_cast<float>(self->viewportHeight)) + 0.5f);
                   displayWidth =
                       static_cast<int>(imgStyle.imageWidth.toPixels(emSize, static_cast<float>(containerWidth)) + 0.5f);
                   if (displayHeight < 1) displayHeight = 1;
                   if (displayWidth < 1) displayWidth = 1;
+                  // A browser stretches the image to fill a box of a different ratio. We
+                  // deliberately do not: the decoders scale each axis independently and would
+                  // honour it, so a stylesheet we only partly understand (no min-/max-width, no
+                  // box model) could hand us a box that squashes the picture. Fit inside the
+                  // requested box and keep the source ratio.
+                  const float boxScale = std::min(static_cast<float>(displayWidth) / dims.width,
+                                                  static_cast<float>(displayHeight) / dims.height);
+                  displayWidth = std::max(1, static_cast<int>(dims.width * boxScale + 0.5f));
+                  displayHeight = std::max(1, static_cast<int>(dims.height * boxScale + 0.5f));
                   if (displayWidth > containerWidth || displayHeight > self->viewportHeight) {
                     float scaleX =
                         (displayWidth > containerWidth) ? static_cast<float>(containerWidth) / displayWidth : 1.0f;

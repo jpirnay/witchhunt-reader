@@ -31,7 +31,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 66;  // bumped: table rows stream into fragments (layout change)
+constexpr uint8_t SECTION_FILE_VERSION = 67;  // bumped: img boxes honour `auto` and keep the source aspect ratio
                                               // v64: main-text font-size normalization
                                               // v63: drop-cap float zones + ink-metric cap placement
                                               // (62 was consumed by an earlier iteration of this feature)
