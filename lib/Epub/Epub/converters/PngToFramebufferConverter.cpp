@@ -271,11 +271,10 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     if (dstWidth < 1) dstWidth = 1;
     if (dstHeight < 1) dstHeight = 1;
   }
-  // Aspect ratio is preserved by the caller's sizing, so a single factor maps both axes.
-  const float scale = (float)dstWidth / srcWidth;
-
-  LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth, dstHeight,
-          scale, info.colorType, info.bitDepth);
+  // No single scale factor: the axes map independently below (Bresenham across, pull-per-row
+  // down), so nothing here relies on the caller having handed us an aspect-correct box.
+  LOG_TRC("PNG", "PNG %dx%d -> %dx%d (scale %.2fx%.2f), colorType=%d bitDepth=%d", srcWidth, srcHeight, dstWidth,
+          dstHeight, (float)dstWidth / srcWidth, (float)dstHeight / srcHeight, info.colorType, info.bitDepth);
 
   auto grayLine = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[srcWidth]);
   if (!grayLine) {
@@ -316,26 +315,35 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   pw.init(renderer);
 
   bool ok = true;
-  int lastDstY = -1;
+  int decodedSrcY = -1;  // source row currently held in grayLine
   const unsigned long decodeStart = millis();
 
-  for (int srcY = 0; srcY < srcHeight; srcY++) {
-    const int dstY = (int)(srcY * scale);
-    const bool collapsedRow = dstY == lastDstY;
-    if (!(collapsedRow ? decoder->skipRow() : decoder->nextRow(grayLine.get()))) {
-      LOG_ERR("PNG", "Decode failed at row %d", srcY);
-      ok = false;
-      break;
-    }
-    // Feed the WDT periodically: a large image can take seconds to inflate.
-    if ((srcY & 31) == 0) esp_task_wdt_reset();
-
-    if (collapsedRow) continue;
-    if (dstY >= dstHeight) break;
-    lastDstY = dstY;
-
+  // Driven by the DESTINATION rows, pulling the source row each one needs. Deriving dstY from
+  // srcY (the obvious direction) leaves output rows unwritten whenever dstHeight differs from
+  // srcHeight * scale — one row to integer rounding, or everything below the picture when the
+  // caller passes a box of another aspect ratio. An unwritten row is not merely missing: it is
+  // filled in by PixelCache and baked into the .pxc, so it is replayed under the image on every
+  // later view (and before PixelCache::FILL_BYTE that fill was black). Pulling also makes an
+  // upscale replicate rows instead of leaving gaps between them.
+  for (int dstY = 0; dstY < dstHeight; dstY++) {
     const int outY = config.y + dstY;
     if (outY >= screenHeight) break;
+
+    const int wantSrcY = (int)((int64_t)dstY * srcHeight / dstHeight);
+    while (decodedSrcY < wantSrcY) {
+      // Only the row about to be drawn needs its pixels. The ones a downscale collapses still
+      // have to be inflated — DEFLATE is sequential — but not converted.
+      const bool needPixels = (decodedSrcY + 1 == wantSrcY);
+      if (!(needPixels ? decoder->nextRow(grayLine.get()) : decoder->skipRow())) {
+        LOG_ERR("PNG", "Decode failed at row %d", decodedSrcY + 1);
+        ok = false;
+        break;
+      }
+      decodedSrcY++;
+      // Feed the WDT periodically: a large image can take seconds to inflate.
+      if ((decodedSrcY & 31) == 0) esp_task_wdt_reset();
+    }
+    if (!ok) break;
 
     pw.beginRow(outY);
 

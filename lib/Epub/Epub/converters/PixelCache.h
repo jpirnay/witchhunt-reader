@@ -32,8 +32,8 @@
 // memory usage", crosspoint-reader/crosspoint-reader#2230) — reworked against
 // this fork's HalFile/FsFile storage layer and DirectCacheWriter interface.
 struct PixelCache {
-  uint8_t* buffer;   // band buffer: (bandRows + 1) rows; last row kept zeroed
-  uint8_t* zeroRow;  // points at the spare zeroed row, for gap/clip fill
+  uint8_t* buffer;   // band buffer: (bandRows + 1) rows; last row kept at FILL_BYTE
+  uint8_t* fillRow;  // points at the spare pre-filled row, for gap/clip fill
   int width;
   int height;
   int bytesPerRow;
@@ -46,9 +46,17 @@ struct PixelCache {
   std::string cachePathStr;
   bool ok;
 
+  // Byte the band is (re)filled with: four pixels of value 3. 3 is the only value DirectPixelWriter
+  // treats as "leave alone" in every render mode, so any pixel the decode never covers stays page
+  // white. Filling with 0 instead made every uncovered pixel BLACK — and because those pixels are
+  // written to the .pxc, one short decode (a box whose aspect ratio the decoder cannot fill, a
+  // row lost to integer rounding, an image clipped by the screen) was replayed as a black band
+  // under the picture on every later view of the page.
+  static constexpr uint8_t FILL_BYTE = 0xFF;
+
   PixelCache()
       : buffer(nullptr),
-        zeroRow(nullptr),
+        fillRow(nullptr),
         width(0),
         height(0),
         bytesPerRow(0),
@@ -70,7 +78,9 @@ struct PixelCache {
   // The low bits are the format version: bump when the *pixel content* semantics
   // change (e.g. the MCU-order dither fix), not just on code refactors — cached
   // files persist on SD across firmware updates and are replayed without re-decode.
-  static constexpr uint16_t PXC_MAGIC = 0x8002;
+  // v3: uncovered pixels are white (FILL_BYTE) instead of black — see FILL_BYTE. Existing
+  //     caches carry the black band baked in, so they have to be re-decoded.
+  static constexpr uint16_t PXC_MAGIC = 0x8003;
   static constexpr size_t PXC_HEADER_BYTES = 6;  // magic + width + height
 
   // Open the cache file, write the header, and allocate a band buffer big enough
@@ -109,8 +119,8 @@ struct PixelCache {
       LOG_ERR("IMG", "OOM cache band: %u bytes", (unsigned)bufSize);
       return false;
     }
-    memset(buffer, 0, bufSize);
-    zeroRow = buffer + (size_t)bandRows * bytesPerRow;
+    memset(buffer, FILL_BYTE, bufSize);
+    fillRow = buffer + (size_t)bandRows * bytesPerRow;
 
     if (!Storage.openFileForWrite("IMG", cachePath, file)) {
       LOG_ERR("IMG", "Failed to open cache file for writing: %s", cachePath.c_str());
@@ -146,7 +156,7 @@ struct PixelCache {
 
     for (int r = bandStart; r < newTopRow; ++r) {
       const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
+      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : fillRow;
       if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         ok = false;
@@ -155,12 +165,12 @@ struct PixelCache {
     }
     flushedRows = newTopRow;
     bandStart = newTopRow;
-    memset(buffer, 0, (size_t)bandRows * bytesPerRow);  // fresh band (gaps stay black)
+    memset(buffer, FILL_BYTE, (size_t)bandRows * bytesPerRow);  // fresh band (gaps stay white)
     return true;
   }
 
-  // Flush the final band and zero-fill any rows never covered (image clipped by
-  // the screen), then close the file.
+  // Flush the final band and fill any rows never covered (image clipped by the
+  // screen, or a decode that produced fewer rows than the box), then close the file.
   bool finalize() {
     if (!ok) {
       abort();
@@ -168,7 +178,7 @@ struct PixelCache {
     }
     for (int r = flushedRows; r < height; ++r) {
       const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
+      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : fillRow;
       if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         abort();
