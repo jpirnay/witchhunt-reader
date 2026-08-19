@@ -3232,24 +3232,22 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     checkHeapIntegrity("after_createSectionFile_retry");
   }
 
-  // Eager image pre-decode only on the released path (it needs the freed headroom).
-  // warmAllImageCaches writes pixels into the framebuffer as a side effect; clearScreen()
-  // follows. In-place builds skip this — images decode lazily at first render, where
-  // renderContents releases + reallocs the buffer per image page on demand.
-  if (createOk && released) {
-    const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-    const uint32_t warmStart = millis();
-    // Warm the AA grayscale variant here too: this is the released-buffer path, the point of
-    // maximum contiguous heap. Skipping it would push that decode into renderContents' own warm
-    // pass on the first image page, where headroom is worse.
-    section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true,
-                                /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing());
-    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu contig=%lu)", millis() - warmStart,
-            esp_get_free_heap_size(),
-            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-    renderer.clearScreen();
-    checkHeapIntegrity("after_warmAllImageCaches");
-  }
+  // No eager image pre-decode here. Only the dimensions are needed to lay a section out, and
+  // those come from the ZIP entry header at parse time (ImageDecoderFactory::getDimensions-
+  // FromZipEntry) — nothing about building the section requires an image to be extracted.
+  //
+  // This pass used to decode EVERY image in the section while the framebuffer was released, on
+  // the theory that this is the point of maximum contiguous heap and renderContents' own warm
+  // pass would have less headroom. That premise is stale: the per-page warm now BORROWS the
+  // secondary framebuffer as a decode arena rather than competing for contiguous heap
+  // (docs/memory-allocation-strategy.md §9.3, device-measured on both panels), and it applies
+  // exactly the same force-load / monochrome / grayscale policy this pass did.
+  //
+  // What it cost was time to first page: measured on X4, 72 s before anything appeared — 11
+  // pages of images, each decoded twice (1-bit plane plus the AA grayscale plane) at ~0.6-3.2 s
+  // per decode, whether or not the reader ever turned to those pages. Per-image cost is
+  // unchanged and still amortised by the .pxc; it is now paid by the page that needs it.
+  // In-place builds have always behaved this way.
 
   // Restore the secondary buffer only if we released it. The realloc gives a white baseline that
   // no longer matches the panel, so arm a one-shot half-refresh (X4 only). The in-place path
