@@ -1001,6 +1001,23 @@ void setup() {
       // the page instead of an interstitial. Still re-arms the splash for the next plain boot.
       APP_STATE.showBootScreen = true;
       APP_STATE.saveToFile();
+      // Because nothing painted, that first render lands on a panel still holding the sleep image
+      // while begin() has just cleared the SDK's RED-RAM diff buffer — and seamless=true above
+      // skipped the resync that would otherwise rebase it. A FAST refresh only flips the pixels
+      // the SDK thinks changed, so the page composites over the sleep screen instead of replacing
+      // it (issue #158). Same failure and the same one-shot cure as the Silent branch above.
+      //
+      // This does NOT cost the wake an extra refresh: it upgrades the page's OWN paint from FAST
+      // to HALF rather than adding an interstitial, so the bargain this branch exists to make is
+      // intact. X3 was never affected — Uc8253X3Driver arms _initialFullSyncsRemaining = 1, so its
+      // first refresh drives every pixel whatever mode it asks for — and is unchanged by this.
+      //
+      // The override is renderer-level, so whichever activity paints first consumes it. That also
+      // covers the routes where a ReaderResume boot lands on Home instead: Back held at boot,
+      // readerActivityLoadCount > 0 after a reader crash, or a quick-resume sleep whose frame file
+      // is missing. On the cache-miss path the indexing popup clears it on X4 and re-arms
+      // forceHalfRefreshAfterPopup_ for the content page, which is the intended handoff.
+      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
       break;
     case BootResume::Splash:
       activityManager.goToBoot();
