@@ -314,6 +314,15 @@ bool isZeroHeightSpacerParagraph(const char* name, const std::string& styleAttr)
   return hasZeroHeight && hasZeroMargin && hasZeroBorder;
 }
 
+namespace {
+// Half-width, in percent, of the "this is really body text" band around 100%.
+// Wide when font-size normalization is on (publisher near-body sizing snaps to native
+// glyphs), otherwise a tight float-rounding cleanup. Shared by the per-word channel
+// (updateEffectiveInlineStyle) and the block channel (normalizeFontSizeForElement) so a
+// publisher's near-body size is treated the same whichever one it arrives on.
+constexpr int nearBodyDeadZonePct(const bool normalizationEnabled) { return normalizationEnabled ? 10 : 3; }
+}  // namespace
+
 // Update effective bold/italic/underline based on block style and inline style stack
 void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // Start with block-level styles
@@ -375,7 +384,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // outside the band and survive. Deliberate <10% per-word gradients lose their faintest
   // steps, an accepted trade for body-text comfort. When disabled, only a tight ±3% band
   // is applied (float-rounding cleanup), so publisher near-body wrappers are preserved.
-  const int deadZone = fontSizeNormalization ? 10 : 3;
+  const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
   if (sizePct >= 100 - deadZone && sizePct <= 100 + deadZone) {
     sizePct = 100;
   }
@@ -462,8 +471,30 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   if (hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName)) {
     normalized.fontSizeMultiplier = 1.0f;
   }
-  if (hasMainTextFontSizeBaseline_ && isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0) {
+  const bool blockLevel = isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0;
+  if (hasMainTextFontSizeBaseline_ && blockLevel) {
     normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+  }
+  // Block twin of the per-word near-body snap in updateEffectiveInlineStyle. The same
+  // publisher sizing arrives either as a <span style="font-size:1.1em"> wrapping the
+  // paragraph or as the paragraph's own class (`p.body { font-size: 1.1em }`), and the
+  // two must land identically — otherwise a whole book's prose renders as resampled
+  // glyphs (or, via FontSizeLadder, on the wrong sibling font) with normalization on.
+  // Applied here, on the element's own size, so a nested run keeps its size relative to
+  // the now-body block: a 0.8 footnote span inside a 1.1 paragraph resolves to 0.8, not
+  // 0.88. Headings are exempt: a heading is meant to stand apart from the prose, so the
+  // size its author gave it is kept even when the margin is slim — the point of the band
+  // is to spare BODY text a scale nobody asked for, not to flatten the page's hierarchy.
+  // (The main-text baseline division above still applies to them, as it always has.)
+  if (blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS)) {
+    const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
+    // Rounded to integer percent like the per-word channel (applyCssFontSizeToEntry), so the
+    // same declared size lands the same side of the band edge on either channel — a float
+    // 1.1em multiplies out a hair either side of 110.
+    const int pct = static_cast<int>(normalized.fontSizeMultiplier * 100.0f + 0.5f);
+    if (pct >= 100 - deadZone && pct <= 100 + deadZone) {
+      normalized.fontSizeMultiplier = 1.0f;
+    }
   }
   return normalized;
 }
