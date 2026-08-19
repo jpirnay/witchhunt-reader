@@ -76,7 +76,13 @@ class Activity {
 
   // Start a new activity without destroying the current one
   // Note: requestUpdate() will be invoked automatically once resultHandler finishes
-  void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler);
+  //
+  // Virtual because a suspended activity keeps whatever it was holding: the stack keeps this
+  // object alive but stops calling loop(), so any background work it owns freezes in place
+  // without releasing its resources. An activity that lends out a shared resource must hand it
+  // back here — see EpubReaderActivity, whose look-ahead build borrows the display's secondary
+  // framebuffer and silently degraded every refresh the child activity drew.
+  virtual void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler);
 
   // Set the result to be passed back to the previous activity when this activity finishes
   void setResult(ActivityResult&& result);

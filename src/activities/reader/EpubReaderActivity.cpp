@@ -1002,6 +1002,31 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   return p;
 }
 
+void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,
+                                                ActivityResultHandler resultHandler) {
+  // See the header: B's borrow must not outlive the reader being the top activity, or every
+  // redraw the child makes runs a HALF waveform. No-op unless B currently holds the block.
+  //
+  // endBackgroundBorrow() rather than resetBackgroundBuild(): the former discards only a build
+  // that is still live, and keeps a COMPLETED one for buildSection() to adopt. Resetting would
+  // throw that finished section away and make the next page turn rebuild it — paying for the
+  // refresh fix with a page-turn stall.
+  if (backgroundBorrowActive_) {
+    LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
+            activity ? activity->getName().c_str() : "<null>");
+  }
+  // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps
+  // losing the race against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the
+  // spine to the foreground once it is hit. An overlay opening says nothing about whether the
+  // parse fits between two turns, so letting it burn that budget would mean two visits to the
+  // reader menu permanently demote the next section to a blocking Background-C build with its
+  // popup. Restore the count so B resumes with exactly the budget it had.
+  const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+  endBackgroundBorrow();
+  backgroundPreemptCount_ = preemptionsBeforeOverlay;
+  Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
+}
+
 void EpubReaderActivity::resetBackgroundBuild() {
   endBackgroundBorrow();       // returns the lent buffer (and aborts the build) if B held it
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
