@@ -719,22 +719,143 @@ if args.zopfli and not compress:
     sys.exit(1)
 
 
-def deflate_raw(data):
+def deflate_raw(data, wbits=15, force_zlib=False):
     """Raw-DEFLATE compress `data` (no zlib/gzip wrapper), decodable on-device by
     uzlib via inflate(wbits=-15). Uses Zopfli when --zopfli is set (a few percent
     smaller than zlib -9, much slower — fine at font-generation time), else zlib -9.
     Zopfli's Python binding only emits zlib-wrapped output, so strip the 2-byte
     header and 4-byte adler32 trailer to recover the raw DEFLATE block. A round-trip
-    assert guards against any wrapper-format surprise."""
-    if args.zopfli:
+    assert guards against any wrapper-format surprise.
+
+    `wbits` bounds how far back the encoder may reference, which is what bounds the
+    decoder's ring (see measure_ring). Zopfli has no such knob — its window is a
+    compile-time constant — so force_zlib selects the bounded encoder instead."""
+    if args.zopfli and not force_zlib:
         import zopfli.zlib
         wrapped = zopfli.zlib.compress(bytes(data))
         raw = wrapped[2:-4]  # drop zlib CMF/FLG header + adler32 trailer
     else:
-        compressor = zlib.compressobj(level=9, wbits=-15)
+        compressor = zlib.compressobj(level=9, wbits=-wbits)
         raw = compressor.compress(bytes(data)) + compressor.flush()
     assert zlib.decompress(raw, -15) == bytes(data), "raw-DEFLATE round-trip failed"
     return raw
+
+
+# --- Back-reference distance measurement -------------------------------------------------
+#
+# EpdFontGroup::ringBytes is the RAM the on-device decoder needs to stream a group, and it is
+# the largest back-reference the finished stream actually contains — not the group size and not
+# 2^wbits, both of which overstate it. So measure the real streams.
+#
+# It has to be read out of the bitstream. Probing by decompressing at a small -wbits does NOT
+# work: zlib-ng (which ships with Python 3.14) does not enforce the window on raw inflate and
+# happily decodes a stream with a verified 24 KB reference at wbits=9.
+
+_LEN_EXTRA = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0]
+_DIST_BASE = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,
+              1025,1537,2049,3073,4097,6145,8193,12289,16385,24577]
+_DIST_EXTRA = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13]
+_CLEN_ORDER = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]
+
+
+class _BitReader:
+    def __init__(self, data):
+        self.d, self.pos = data, 0
+
+    def bit(self):
+        b = (self.d[self.pos >> 3] >> (self.pos & 7)) & 1
+        self.pos += 1
+        return b
+
+    def bits(self, n):
+        v = 0
+        for i in range(n):
+            v |= self.bit() << i
+        return v
+
+
+def _huffman(lengths):
+    """Canonical Huffman code lengths -> {(bit_length, code): symbol}."""
+    maxlen = max(lengths) if lengths else 0
+    bl_count = [0] * (maxlen + 1)
+    for l in lengths:
+        if l:
+            bl_count[l] += 1
+    code, next_code = 0, [0] * (maxlen + 2)
+    for b in range(1, maxlen + 1):
+        code = (code + bl_count[b - 1]) << 1
+        next_code[b] = code
+    table = {}
+    for sym, l in enumerate(lengths):
+        if l:
+            table[(l, next_code[l])] = sym
+            next_code[l] += 1
+    return table
+
+
+def _decode_sym(br, table):
+    code, length = 0, 0
+    while True:
+        code = (code << 1) | br.bit()
+        length += 1
+        if (length, code) in table:
+            return table[(length, code)]
+        if length > 15:
+            raise ValueError("corrupt Huffman code while measuring ring size")
+
+
+_FIXED_LIT = _huffman([8] * 144 + [9] * 112 + [7] * 24 + [8] * 8)
+_FIXED_DIST = _huffman([5] * 30)
+
+
+def measure_ring(raw):
+    """Largest back-reference distance in a raw-DEFLATE stream, i.e. the smallest ring that
+    decodes it. 0 when the stream is pure literals."""
+    br = _BitReader(raw)
+    best = 0
+    while True:
+        final = br.bit()
+        btype = br.bits(2)
+        if btype == 0:                      # stored
+            br.pos = (br.pos + 7) & ~7
+            n = br.bits(16)
+            br.bits(16)
+            br.pos += n * 8
+        else:
+            if btype == 1:
+                lit, dist = _FIXED_LIT, _FIXED_DIST
+            elif btype == 2:
+                hlit, hdist, hclen = br.bits(5) + 257, br.bits(5) + 1, br.bits(4) + 4
+                cl = [0] * 19
+                for i in range(hclen):
+                    cl[_CLEN_ORDER[i]] = br.bits(3)
+                cl_tab = _huffman(cl)
+                lengths = []
+                while len(lengths) < hlit + hdist:
+                    s = _decode_sym(br, cl_tab)
+                    if s < 16:
+                        lengths.append(s)
+                    elif s == 16:
+                        lengths += [lengths[-1]] * (br.bits(2) + 3)
+                    elif s == 17:
+                        lengths += [0] * (br.bits(3) + 3)
+                    else:
+                        lengths += [0] * (br.bits(7) + 11)
+                lit = _huffman(lengths[:hlit])
+                dist = _huffman(lengths[hlit:hlit + hdist])
+            else:
+                raise ValueError("reserved DEFLATE block type")
+            while True:
+                sym = _decode_sym(br, lit)
+                if sym == 256:
+                    break
+                if sym < 256:
+                    continue
+                br.bits(_LEN_EXTRA[sym - 257])
+                ds = _decode_sym(br, dist)
+                best = max(best, _DIST_BASE[ds] + br.bits(_DIST_EXTRA[ds]))
+        if final:
+            return best
 
 
 def to_byte_aligned(packed, width, height):
@@ -796,30 +917,45 @@ if compress:
         (0xFFFD, 0xFFFD),   # Replacement Character
     ]
 
-    # 8 KB cap. The decompressor has to inflate a whole group into one contiguous
-    # transient malloc to reach even a single glyph (FontDecompressor::getBitmap and
-    # prewarmCache), so this cap IS the peak transient allocation of text rendering.
-    # At 64 KB it was never reached, and the script boundaries alone left Cyrillic at
-    # 33-49 KB depending on size/style: measured on X4, a reader entry with
-    # contig=28660 could not allocate 39746 for group 5 and dropped glyphs from the
-    # page. Mid-build draws see contig as low as 11252, which 8 KB clears and 12 KB
-    # does not.
+    # The decoder streams a group through a ring of EpdFontGroup::ringBytes and compacts each
+    # glyph out of the passing bytes (FontDecompressor::GroupStream), so its peak transient is
+    # the largest back-reference the stream contains -- NOT the group's uncompressed size. That
+    # decoupling is what these two constants express, and they now do different jobs:
     #
-    # Cost, measured over all 40 compressed built-in fonts (zopfli both sides):
-    #   cap    compressed total   delta      peak transient
-    #   64 KB  1264010 (shipped)  --         up to 49166
-    #   12 KB  1342653            +6.2%      12288
-    #    8 KB  1372716            +8.6%       8192
-    #    6 KB  1403850           +11.1%       6144
-    # 6 KB and below do not fit the app partition. The flash goes on Huffman-table
-    # restarts and lost cross-chunk context; per-glyph streams (the obvious next step)
-    # cost +102% with DEFLATE, which is why upstream's GlyphStream PR needed a trained
-    # range coder -- and paid for it with a 2x page render.
+    #   GROUP_RING_MAX_BYTES        bounds RAM.  Enforced per group by picking an encoding whose
+    #                               measured distances fit, and by splitting the group when no
+    #                               encoding does.
+    #   GROUP_MAX_UNCOMPRESSED_BYTES bounds CPU. A glyph is reached by decoding forward from the
+    #                               group start, so this caps the worst-case decode to reach one
+    #                               glyph. It no longer has anything to do with RAM.
     #
-    # Chunking also cuts CPU: glyphs stay in codepoint order, so the core Cyrillic run
-    # U+0410-U+044F lands in ~2 chunks and a Russian page never inflates the rest of
-    # the block at all.
-    GROUP_MAX_UNCOMPRESSED_BYTES = 8192
+    # Sizing the ring, measured over all 40 compressed built-in fonts (2026-08-19):
+    #   ring    compressed total   vs shipped
+    #   32 KB   1264010            -7.9%       (= the old uncapped 64 KB-group build)
+    #    8 KB   1350611            -1.6%
+    #    4 KB   1404302            +2.3%
+    #    2 KB   1442752            +5.1%
+    # Against the mechanism this replaces -- capping the GROUP -- the ring is strictly the
+    # better dial: capping charged +2.3% (1403850) for a 6 KB transient, where the ring buys a
+    # 4 KB transient for the same flash, and at an equal 8 KB transient it hands 22 KB back.
+    #
+    # 4 KB halves the peak transient against the 8 KB group cap it replaces. Mid-build draws
+    # have been measured with contig as low as 11252, so the margin roughly triples.
+    #
+    # The question this answers was raised by crosspoint-reader PR #3083 ("compress built-in
+    # fonts with per-glyph GlyphStream codec", Sung-jin Brian Hong / @serialx), which attacks the
+    # same transient-allocation problem by giving every glyph its own independently decodable
+    # stream. None of that code is used here and the approach is deliberately different: measured
+    # on this corpus, per-glyph DEFLATE costs +99.9% flash with no dictionary and +41.0% with the
+    # best shared dictionary (8 KB). That cost is exactly why #3083 needed a trained range coder,
+    # and it paid for that with a 2x page render on its author's own device measurement. Bounding
+    # the window keeps the codec we already ship and needs no per-glyph framing at all.
+    GROUP_RING_MAX_BYTES = 4096
+    GROUP_MAX_UNCOMPRESSED_BYTES = 65536
+
+    # zlib refuses raw windows below 2^9, and a group split to GROUP_RING_MAX_BYTES can never
+    # reference further back than its own length, so a fitting encoding always exists.
+    assert GROUP_RING_MAX_BYTES >= 512, "no encoder can honour a ring below 512 bytes"
 
     def get_script_group(code_point):
         for i, (start, end) in enumerate(SCRIPT_GROUP_RANGES):
@@ -827,7 +963,14 @@ if compress:
                 return i
         return -1
 
-    groups = []  # list of (first_glyph_index, glyph_count)
+    # Byte-aligned payload per glyph, kept so a run can be re-split at glyph boundaries below.
+    aligned_of = [
+        to_byte_aligned(packed, props.width, props.height) if props.width > 0 and props.height > 0 else b''
+        for props, packed in all_glyphs
+    ]
+
+    # Split on script boundaries, then on the CPU cap.
+    runs = []  # list of (first_glyph_index, glyph_count)
     current_group_id = None
     group_start = 0
     group_count = 0
@@ -835,7 +978,7 @@ if compress:
 
     for i, (props, _) in enumerate(all_glyphs):
         sg = get_script_group(props.code_point)
-        glyph_aligned_size = ((props.width + 3) // 4) * props.height if props.width > 0 and props.height > 0 else 0
+        glyph_aligned_size = len(aligned_of[i])
         if glyph_aligned_size > GROUP_MAX_UNCOMPRESSED_BYTES:
             raise ValueError(
                 f"Glyph {i} (code point U+{props.code_point:04X}) single aligned size "
@@ -845,7 +988,7 @@ if compress:
 
         if sg != current_group_id or size_overflow:
             if group_count > 0:
-                groups.append((group_start, group_count))
+                runs.append((group_start, group_count))
             current_group_id = sg
             group_start = i
             group_count = 1
@@ -855,24 +998,61 @@ if compress:
             group_uncompressed += glyph_aligned_size
 
     if group_count > 0:
-        groups.append((group_start, group_count))
+        runs.append((group_start, group_count))
 
-    # Compress each group
-    compressed_groups = []  # list of (compressed_bytes, uncompressed_size, glyph_count, first_glyph_index)
+    def encode_block(blob):
+        """Smallest raw-DEFLATE encoding of `blob` whose back-references fit the ring ceiling,
+        as (raw, ring). Zopfli first — it wins outright whenever its distances happen to fit —
+        then progressively tighter bounded-window zlib. wbits=10 caps distances at 1024, so a
+        fitting candidate always exists."""
+        best = None
+        candidates = ([(15, False)] if args.zopfli else []) + [(w, True) for w in (15, 14, 13, 12, 11, 10)]
+        for wbits, force_zlib in candidates:
+            raw = deflate_raw(blob, wbits=wbits, force_zlib=force_zlib)
+            ring = min(measure_ring(raw), len(blob))
+            if ring > GROUP_RING_MAX_BYTES:
+                continue
+            if best is None or len(raw) < len(best[0]):
+                best = (raw, ring)
+        assert best is not None, "no encoding fits the ring ceiling (should be unreachable)"
+        return best
+
+    def encode_run(first_idx, count):
+        """One script run -> [(first_idx, count, raw, ring)].
+
+        Kept whole when a fitting encoding is small enough, else split into ring-sized pieces,
+        which lets each piece use unbounded zopfli again (a stream cannot reference further back
+        than its own start). Whichever is smaller wins; both honour the ring ceiling."""
+        whole_raw, whole_ring = encode_block(b''.join(aligned_of[first_idx:first_idx + count]))
+
+        pieces = []  # (first_idx, count, blob)
+        piece_start, piece = first_idx, bytearray()
+        for gi in range(first_idx, first_idx + count):
+            if piece and len(piece) + len(aligned_of[gi]) > GROUP_RING_MAX_BYTES:
+                pieces.append((piece_start, gi - piece_start, bytes(piece)))
+                piece_start, piece = gi, bytearray()
+            piece.extend(aligned_of[gi])
+        pieces.append((piece_start, first_idx + count - piece_start, bytes(piece)))
+
+        if len(pieces) == 1:
+            return [(first_idx, count, whole_raw, whole_ring)]
+        split = [(s, c) + encode_block(b) for s, c, b in pieces]
+        if sum(len(r) for _, _, r, _ in split) < len(whole_raw):
+            return split
+        return [(first_idx, count, whole_raw, whole_ring)]
+
+    groups = [g for first_idx, count in runs for g in encode_run(first_idx, count)]
+
+    # Emit: assign each glyph its within-group packed offset and concatenate the streams.
+    compressed_groups = []  # (compressed_bytes, uncompressed_size, glyph_count, first_glyph_index, ring)
     compressed_bitmap_data = []
-    compressed_offset = 0
-
-    # Also build modified glyph props with within-group offsets
     modified_glyph_props = list(glyph_props)
 
-    for first_idx, count in groups:
-        # Concatenate bitmap data for this group
+    for first_idx, count, compressed, ring in groups:
         packed_len = 0
-        group_aligned = bytearray()
+        uncompressed_size = 0
         for gi in range(first_idx, first_idx + count):
-            props, packed = all_glyphs[gi]
-            # Update glyph's dataOffset to be within-group offset (packed offset)
-            within_group_offset = packed_len
+            _, packed = all_glyphs[gi]
             old_props = modified_glyph_props[gi]
             modified_glyph_props[gi] = GlyphProps(
                 width=old_props.width,
@@ -881,23 +1061,24 @@ if compress:
                 left=old_props.left,
                 top=old_props.top,
                 data_length=old_props.data_length,
-                data_offset=within_group_offset,
+                data_offset=packed_len,  # within-group packed offset
                 code_point=old_props.code_point,
             )
             packed_len += len(packed)
-            group_aligned.extend(to_byte_aligned(packed, old_props.width, old_props.height))
+            uncompressed_size += len(aligned_of[gi])
 
-        # Compress byte-aligned data with raw DEFLATE (no zlib/gzip header)
-        compressed = deflate_raw(group_aligned)
-
-        compressed_groups.append((compressed, len(group_aligned), count, first_idx))
+        assert ring <= GROUP_RING_MAX_BYTES, f"group at {first_idx} needs a {ring}-byte ring"
+        compressed_groups.append((compressed, uncompressed_size, count, first_idx, ring))
         compressed_bitmap_data.extend(compressed)
-        compressed_offset += len(compressed)
 
     glyph_props = modified_glyph_props
     total_compressed = len(compressed_bitmap_data)
     total_uncompressed = len(glyph_data)
-    print(f"// Compression: {total_uncompressed} -> {total_compressed} bytes ({100*total_compressed/total_uncompressed:.1f}%), {len(groups)} groups", file=sys.stderr)
+    peak_ring = max(r for _, _, _, _, r in compressed_groups)
+    peak_group = max(u for _, u, _, _, _ in compressed_groups)
+    print(f"// Compression: {total_uncompressed} -> {total_compressed} bytes "
+          f"({100*total_compressed/total_uncompressed:.1f}%), {len(groups)} groups, "
+          f"peak ring {peak_ring} B (group {peak_group} B)", file=sys.stderr)
 
 print(f"""/**
  * generated by fontconvert.py
@@ -942,8 +1123,8 @@ print ("};\n");
 if compress:
     print(f"static const EpdFontGroup {font_name}Groups[] = {{")
     compressed_offset = 0
-    for compressed, uncompressed_size, count, first_idx in compressed_groups:
-        print(f"    {{ {compressed_offset}, {len(compressed)}, {uncompressed_size}, {count}, {first_idx} }},")
+    for compressed, uncompressed_size, count, first_idx, ring in compressed_groups:
+        print(f"    {{ {compressed_offset}, {len(compressed)}, {uncompressed_size}, {count}, {ring}, {first_idx} }},")
         compressed_offset += len(compressed)
     print("};\n")
 

@@ -83,7 +83,26 @@ typedef struct {
   uint32_t compressedSize;    ///< Compressed DEFLATE stream size
   uint32_t uncompressedSize;  ///< Decompressed size
   uint16_t glyphCount;        ///< Number of glyphs in this group
-  uint32_t firstGlyphIndex;   ///< First glyph index in the global glyph array
+  /// Bytes of decoded history this group's DEFLATE stream can reach back into — i.e. the
+  /// largest back-reference distance the encoder actually emitted, which fontconvert.py
+  /// measures by parsing the finished stream.
+  ///
+  /// This is what the decoder has to hold in RAM, and it is NOT uncompressedSize: the group
+  /// is streamed through a ring of exactly this size and each glyph is compacted straight out
+  /// of the stream (FontDecompressor::GroupStream), so the group never exists in memory at
+  /// once. Decoupling the two is the whole point — the group may be as large as compression
+  /// likes while the transient allocation stays small and, unlike a malloc sized by the data,
+  /// predictable.
+  ///
+  /// 0 means "not measured" and the decoder falls back to uncompressedSize, which is always
+  /// safe (a reference can never outrun the bytes produced so far). That keeps fonts generated
+  /// before this field was added decodable.
+  ///
+  /// Sits here rather than at the end on purpose: it fills the padding hole after glyphCount,
+  /// so the struct is still 20 bytes and the table costs no extra flash (static_assert in
+  /// FontDecompressor.cpp).
+  uint16_t ringBytes;
+  uint32_t firstGlyphIndex;  ///< First glyph index in the global glyph array
 } EpdFontGroup;
 
 /// Glyph interval structure

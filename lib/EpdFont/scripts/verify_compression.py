@@ -28,15 +28,17 @@ def parse_uint8_array(text):
 
 
 def parse_groups(text):
-    """Parse EpdFontGroup array entries: { compressedOffset, compressedSize, uncompressedSize, glyphCount, firstGlyphIndex }"""
+    """Parse EpdFontGroup array entries:
+    { compressedOffset, compressedSize, uncompressedSize, glyphCount, ringBytes, firstGlyphIndex }"""
     groups = []
-    for match in re.finditer(r'\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}', text):
+    for match in re.finditer(r'\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\}', text):
         groups.append({
             'compressedOffset': int(match.group(1)),
             'compressedSize': int(match.group(2)),
             'uncompressedSize': int(match.group(3)),
             'glyphCount': int(match.group(4)),
-            'firstGlyphIndex': int(match.group(5)),
+            'ringBytes': int(match.group(5)),
+            'firstGlyphIndex': int(match.group(6)),
         })
     return groups
 

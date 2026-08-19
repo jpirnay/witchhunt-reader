@@ -25,7 +25,7 @@ ALL_H = os.path.join(BUILTIN_DIR, "all.h")
 # Byte width of each array element type emitted by fontconvert.py.
 ELEM_BYTES = {
     "uint8_t": 1, "int8_t": 1, "uint16_t": 2, "int16_t": 2, "uint32_t": 4, "int32_t": 4,
-    "EpdGlyph": 16, "EpdFontGroup": 18, "EpdUnicodeInterval": 12,
+    "EpdGlyph": 16, "EpdFontGroup": 20, "EpdUnicodeInterval": 12,
     "EpdKernClassEntry": 3, "EpdLigaturePair": 8,
 }
 ARRAY_RE = re.compile(

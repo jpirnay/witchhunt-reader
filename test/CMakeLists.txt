@@ -92,6 +92,7 @@ add_subdirectory(png_decoder)
 # After zip_entry_reader: reuses its inflate_reader_host target.
 add_subdirectory(book_metadata_cache)
 add_subdirectory(uzlib_lzcopy)
+add_subdirectory(font_group_stream)
 add_subdirectory(gif_decoder)
 add_subdirectory(jpeg_decoder)
 add_subdirectory(serial_transfer)

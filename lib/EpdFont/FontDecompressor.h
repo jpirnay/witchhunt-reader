@@ -60,8 +60,13 @@ class FontDecompressor {
     uint16_t uniqueGroupsAccessed = 0;
     uint32_t pageBufferBytes = 0;  // pageBuffer allocation
     uint32_t pageGlyphsBytes = 0;  // pageGlyphs lookup table allocation
-    uint32_t peakTempBytes = 0;    // largest temp buffer in prewarm or getBitmap miss
-    uint16_t arenaTemps = 0;       // group inflates served by the slot arena instead of the heap
+    uint32_t peakTempBytes = 0;    // largest ring held at once, in prewarm or a getBitmap miss
+    uint16_t arenaTemps = 0;       // group rings served by the slot arena instead of the heap
+    // Streaming stops at the last glyph a page actually wants, where the old whole-group inflate
+    // always decoded to the end. These two make that saving visible: streamed/group is the
+    // fraction of the group the page really paid for.
+    uint32_t streamedBytes = 0;
+    uint32_t groupBytes = 0;
     uint32_t getBitmapTimeUs = 0;  // cumulative getBitmap time (micros)
     uint32_t getBitmapCalls = 0;   // number of getBitmap calls
 
@@ -82,7 +87,6 @@ class FontDecompressor {
 
  private:
   Stats stats;
-  InflateReader inflateReader;
   BuildArena* slotArena_ = nullptr;  // not owned; see setSlotArena
 
   // Page buffer slots: each style gets its own flat glyph buffer with sorted lookup.
@@ -134,7 +138,55 @@ class FontDecompressor {
   void freePageBuffer();
   uint16_t getGroupIndex(const EpdFontData* fontData, uint32_t glyphIndex);
   uint32_t getAlignedOffset(const EpdFontData* fontData, uint16_t groupIndex, uint32_t glyphIndex);
-  bool decompressGroup(const EpdFontData* fontData, uint16_t groupIndex, uint8_t* outBuf, uint32_t outSize);
-  static void compactSingleGlyph(const uint8_t* alignedSrc, uint8_t* packedDst, uint8_t width, uint8_t height);
   static int32_t findGlyphIndex(const EpdFontData* fontData, uint32_t codepoint);
+
+ public:
+  // A group being read one glyph at a time, without ever holding the whole group.
+  //
+  // The group's DEFLATE stream is decoded through a caller-supplied ring of
+  // EpdFontGroup::ringBytes (the largest back-reference the encoder emitted), and each glyph
+  // is compacted out of the passing byte stream. So the transient cost of reaching a glyph is
+  // the ring, not the group's uncompressed size, and a group may grow as large as compression
+  // wants without costing the reader a byte more RAM.
+  //
+  // Glyphs must be requested in ascending alignedOffset — a stream cannot rewind. Within one
+  // group that is the same as ascending glyph index (the aligned layout follows glyph order),
+  // which is the order both call sites already iterate in. A backwards request is refused
+  // rather than silently mis-decoded.
+  //
+  // Public only so the host test can exercise it directly; nothing outside this class and its
+  // test constructs one.
+  class GroupStream {
+   public:
+    // `ring` must be at least ringBytesFor(group) bytes and stay alive for the whole stream.
+    bool begin(const EpdFontData* fontData, const EpdFontGroup& group, uint8_t* ring, uint32_t ringBytes);
+
+    // Compact one glyph from the stream into `packedDst` (glyph.dataLength bytes).
+    // Zero-size glyphs consume nothing and succeed.
+    bool extractGlyph(uint32_t alignedOffset, const EpdGlyph& glyph, uint8_t* packedDst);
+
+    // Bytes of the group decoded so far — the CPU actually spent, for stats.
+    uint32_t consumed() const { return pos_; }
+
+   private:
+    // Discard forward to `offset`, which is where the early-out lives: the stream is never
+    // read past the last glyph the page asked for.
+    bool skipTo(uint32_t offset);
+    bool readExact(uint8_t* dest, uint32_t len);
+
+    InflateReader reader_;
+    uint32_t pos_ = 0;    // absolute position in the decompressed group
+    uint32_t limit_ = 0;  // group.uncompressedSize; reads past it are a stream error
+  };
+
+  // RAM a group costs to read: its measured ring, or the whole group for fonts generated
+  // before ringBytes existed. Never more than the group, since a back-reference cannot
+  // outrun the bytes produced so far.
+  static uint32_t ringBytesFor(const EpdFontGroup& group);
+
+ private:
+  // Widest byte-aligned row any glyph can have: width is a uint8_t, and a byte-aligned row is
+  // ceil(width/4) bytes, so 64 is a hard bound rather than a corpus measurement. Small enough
+  // that both the compaction row buffer and the skip sink live on the stack.
+  static constexpr uint16_t MAX_ROW_STRIDE = 64;
 };
