@@ -811,6 +811,28 @@ class EpubReaderActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&& lock) override;
+
+  // Hands Background-B's borrow back before a child activity (the reader menu and everything
+  // reachable from it) is pushed on top.
+  //
+  // While a child is on top the stack keeps this object alive but stops calling loop(), so B
+  // makes no progress — yet it still holds the display's secondary framebuffer as its build
+  // arena. With no differential baseline the driver promotes every FAST refresh to HALF
+  // (FreeInkDisplay::resolveRefreshMode), so each of the child's redraws costs ~1700 ms instead
+  // of ~500. Measured X4 2026-08-19: four consecutive menu redraws at 1755 ms each, back to
+  // 476 ms on the first refresh after the borrow was returned.
+  //
+  // Nothing is lost. This is the same endBackgroundBorrow() the first render after the overlay
+  // closes would call anyway (via recoverSecondaryBufferIfNeeded), only earlier — and it was
+  // frozen for the whole overlay regardless. A build still in flight is discarded and re-probed
+  // exactly as it would have been; a COMPLETED one survives for buildSection() to adopt, which
+  // is why this is not resetBackgroundBuild().
+  //
+  // Background-C is deliberately left alone: it builds the section the reader is waiting on, the
+  // buffer is released (not borrowed) to give that build headroom, and reclaiming it here would
+  // starve a build the user is actively waiting for. That case still degrades refreshes, and the
+  // DISP log now says so out loud.
+  void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
   bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
   // Hold full speed while a section build is in flight. A build only ever runs during reader
