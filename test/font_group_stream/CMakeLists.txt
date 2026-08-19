@@ -13,6 +13,8 @@ add_executable(FontGroupStreamTest
 target_include_directories(FontGroupStreamTest PRIVATE
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/lib/EpdFont/builtinFonts
+  # FontDecompressor.h only, for HOT_GLYPH_BUF_SIZE — the .cpp is deliberately not linked.
+  ${REPO_ROOT}/lib/InflateReader
 )
 target_link_libraries(FontGroupStreamTest PRIVATE
   crosspoint_test_common

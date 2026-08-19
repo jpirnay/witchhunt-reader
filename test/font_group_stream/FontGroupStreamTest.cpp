@@ -21,11 +21,16 @@
 #include <vector>
 
 #include "EpdFontData.h"
+#include "FontDecompressor.h"
 #include "uzlib.h"
 
 // A real generated font: 15 groups, uncompressed sizes up to ~25 KB, rings measured from the
 // finished DEFLATE streams by fontconvert.py.
 #include "notosans_14_regular.h"
+
+// The font with the largest glyph in the built-in set (54x38, 513 packed bytes), which used to
+// overflow HOT_GLYPH_BUF_SIZE by one byte.
+#include "bookerly_18_bolditalic.h"
 
 namespace {
 
@@ -114,6 +119,36 @@ TEST(FontGroupStream, RingIsSmallerThanTheGroup) {
   // GROUP_RING_MAX_BYTES in fontconvert.py. The converter enforces it; this is the on-device
   // half of that contract, and it is what bounds the transient allocation.
   EXPECT_LE(peakRing, 4096u) << "a group exceeds the ring ceiling the decoder budgets for";
+}
+
+// Every glyph must fit the fallback cache slot. A glyph that does not is not a crash and not a
+// test failure anywhere else — getBitmap simply refuses it and the character renders blank on
+// any page whose prewarm missed it, which is how one 513-byte glyph went unnoticed against a
+// 512-byte buffer. fontconvert.py enforces the same bound when generating; this is the shipped-
+// data side of that contract, so a hand-edited or stale header cannot reintroduce it.
+TEST(FontGroupStream, EveryGlyphFitsTheFallbackSlot) {
+  struct FontUnderTest {
+    const char* name;
+    const EpdGlyph* glyphs;
+    size_t count;
+  };
+  const FontUnderTest fonts[] = {
+      {"bookerly_18_bolditalic", bookerly_18_bolditalicGlyphs,
+       sizeof(bookerly_18_bolditalicGlyphs) / sizeof(bookerly_18_bolditalicGlyphs[0])},
+      {"notosans_14_regular", notosans_14_regularGlyphs,
+       sizeof(notosans_14_regularGlyphs) / sizeof(notosans_14_regularGlyphs[0])},
+  };
+
+  for (const auto& f : fonts) {
+    uint16_t largest = 0;
+    for (size_t i = 0; i < f.count; i++) {
+      largest = std::max(largest, f.glyphs[i].dataLength);
+      ASSERT_LE(f.glyphs[i].dataLength, FontDecompressor::HOT_GLYPH_BUF_SIZE)
+          << f.name << " glyph " << i << " (" << +f.glyphs[i].width << "x" << +f.glyphs[i].height
+          << ") cannot be served by the fallback cache and will render blank";
+    }
+    EXPECT_GT(largest, 0u) << f.name << " has no glyph data";
+  }
 }
 
 // A ring too small must fail loudly. This is what stops a bad ringBytes from turning into

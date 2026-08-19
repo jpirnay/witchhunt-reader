@@ -16,6 +16,19 @@ class FontDecompressor {
   // fallback for the whole page.
   static constexpr uint8_t MAX_PAGE_SLOTS = 4;
 
+  // Largest packed single glyph the per-glyph fallback cache can serve, and so the largest a
+  // generated font may contain. Measured over the built-in set (45260 glyphs, 2026-08-19): the
+  // largest is 513 bytes (bookerly_18_bolditalic, 54x38) and the next is 507 — so the previous
+  // 512 refused exactly one glyph, by one byte, and it rendered blank on every page whose
+  // prewarm missed it. 576 clears the corpus with headroom.
+  //
+  // Not free: this is .bss multiplied by FALLBACK_CACHE_SLOTS, i.e. 256 bytes off the heap
+  // ceiling (see the sizing note there). That is why it is not simply set to something generous.
+  // fontconvert.py mirrors this constant and refuses to generate a font that would overflow it,
+  // so the next oversized glyph is a build error rather than an invisible blank; the host test
+  // checks the shipped fonts against it from the other side.
+  static constexpr uint16_t HOT_GLYPH_BUF_SIZE = 576;
+
   FontDecompressor() = default;
   ~FontDecompressor();
 
@@ -112,7 +125,6 @@ class FontDecompressor {
   uint8_t pageSlotCount = 0;
   uint32_t pageSlotTick_ = 0;
 
-  static constexpr uint16_t HOT_GLYPH_BUF_SIZE = 512;  // largest packed single glyph
   // A 1-slot LRU is pathological: consecutive distinct glyphs evict each other every time, so
   // the fallback degenerates to a full group inflate per glyph. Measured X3 on a page whose
   // prewarm missed its heading size: 16 getBitmap calls, 121007 us total (7562 us/call),

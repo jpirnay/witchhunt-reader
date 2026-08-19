@@ -27,6 +27,11 @@ args = parser.parse_args()
 
 GlyphProps = namedtuple("GlyphProps", ["width", "height", "advance_x", "left", "top", "data_length", "data_offset", "code_point"])
 
+# Must match FontDecompressor::HOT_GLYPH_BUF_SIZE. A glyph that packs larger than this cannot be
+# served by the device's per-glyph fallback cache and renders blank whenever the page prewarm
+# misses it, so the check below refuses to generate one.
+HOT_GLYPH_BUF_SIZE = 576
+
 font_stack = [freetype.Face(f) for f in args.fontstack]
 is2Bit = args.is2Bit
 size = args.size
@@ -332,6 +337,21 @@ for i_start, i_end in intervals:
             code_point = code_point,
         )
         total_size += len(packed)
+
+        # The on-device fallback path (FontDecompressor::getBitmap, taken when a glyph missed
+        # the page prewarm) compacts a glyph into a fixed FallbackSlot buffer of
+        # HOT_GLYPH_BUF_SIZE bytes and gives up if it does not fit -- so an oversized glyph does
+        # not fail here, it silently renders BLANK on the device. Catching it at generation time
+        # is the only place it is visible. Went unnoticed until 2026-08-19, when exactly one
+        # glyph in the built-in set (bookerly_18_bolditalic 54x38) was found to overflow a
+        # 512-byte buffer by a single byte.
+        if len(packed) > HOT_GLYPH_BUF_SIZE:
+            print(f"Error: glyph U+{code_point:04X} ({bitmap.width}x{bitmap.rows}) packs to {len(packed)} bytes, "
+                  f"over HOT_GLYPH_BUF_SIZE={HOT_GLYPH_BUF_SIZE}; raise it in lib/EpdFont/FontDecompressor.h "
+                  f"(costs FALLBACK_CACHE_SLOTS x the increase in .bss) and update this constant",
+                  file=sys.stderr)
+            sys.exit(1)
+
         all_glyphs.append((glyph, packed))
 
 # pipe seems to be a good heuristic for the "real" descender
