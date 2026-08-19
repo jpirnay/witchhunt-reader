@@ -109,9 +109,28 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   // upgraded to HALF on a cold panel), so the mode asked for is not always what ran.
   const unsigned long refreshStart = millis();
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
-  LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms",
-          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
-          millis() - refreshStart);
+  const unsigned long refreshMs = millis() - refreshStart;
+  const char* const modeName =
+      mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL");
+
+  // The X4 differential keeps its previous-frame baseline in the host-managed secondary buffer,
+  // so a FAST requested without one is promoted to HALF inside the driver
+  // (FreeInkDisplay::resolveRefreshMode) — roughly 500 ms becoming 1700 ms. That used to be
+  // invisible: the line read "mode=FAST took 1755 ms", which reads as a stuck panel rather than
+  // a promotion, and cost a whole debugging session when Background-B's borrow of the secondary
+  // buffer degraded every refresh behind the reader menu.
+  //
+  // The two flags are reported rather than the resolved mode on purpose: resolveRefreshMode() is
+  // internal to the driver, and re-deriving its verdict here would be a second copy of the rule
+  // that can drift from the first. These are the inputs it decides on, which is enough to explain
+  // the duration without asserting what the driver did.
+  if (mode == RefreshMode::FAST_REFRESH && gpio.deviceIsX4() && !einkDisplay.hasSecondaryBuffer() &&
+      !einkDisplay.singleBufferFastDiff()) {
+    LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms (no diff baseline: secondary=0 fastDiff=0 -> driver runs HALF)",
+            modeName, refreshMs);
+  } else {
+    LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms", modeName, refreshMs);
+  }
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
