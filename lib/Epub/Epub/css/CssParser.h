@@ -75,7 +75,9 @@ class CssParser {
   //      pageBreakBefore/After — the same dropped-through-the-cache defect as v13, so
   //      stylesheet-driven list markers and page breaks now actually reach the parser.
   // v15: rules with no renderer-supported declarations are omitted from the cache.
-  static constexpr uint8_t CSS_CACHE_VERSION = 15;
+  // v16: img width/height record an explicit `auto` (and honour !important), so a later
+  //      `height: auto` in the cascade clears an earlier length instead of being dropped.
+  static constexpr uint8_t CSS_CACHE_VERSION = 16;
 
   // Retained RAM per rule in disk-backed lookup mode (the sorted SelectorEntry index).
   // Heap gates (Section::heapAllowsEmbeddedStyle) size their contiguous-block floor
@@ -309,6 +311,9 @@ class CssParser {
   static CssLength interpretLength(std::string_view val);
   /** Returns true only when a numeric length was parsed (e.g. 2em, 50%). False for auto/inherit/initial. */
   static bool tryInterpretLength(std::string_view val, CssLength& out);
+  /** width:/height: on an image. Returns true when the declaration applies, with `out` holding
+   *  either the length or the CssUnit::Auto marker; false for values we ignore. */
+  static bool interpretImageSize(std::string_view val, CssLength& out);
 
   // String utilities
   static std::string normalized(const std::string& s);
