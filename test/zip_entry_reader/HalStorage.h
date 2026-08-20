@@ -54,6 +54,13 @@ class HalFile : public Print {
     return fp_ != nullptr;
   }
 
+  // Mirrors HalStorage::openFileForUpdate: existing file, read+write, no truncation.
+  bool openForUpdate(const std::string& path) {
+    close();
+    fp_ = fopen(path.c_str(), "r+b");
+    return fp_ != nullptr;
+  }
+
   bool close() {
     if (fp_) {
       fclose(fp_);
@@ -131,6 +138,8 @@ class HalStorage {
   bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
   bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
   bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
+  bool openFileForUpdate(const char*, const std::string& path, HalFile& f) { return f.openForUpdate(path); }
+  bool openFileForUpdate(const char*, const char* path, HalFile& f) { return f.openForUpdate(path); }
   bool exists(const char* path) { return std::filesystem::exists(path); }
   // Mirrors the device HalStorage: stream a whole file into a Print sink in
   // chunks. Epub::applyMetadataSidecar() feeds ContentOpfParser through this,
