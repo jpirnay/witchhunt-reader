@@ -86,23 +86,26 @@ class WifiSelectionActivity final : public Activity {
   // Connection timeouts
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
   static constexpr unsigned long AUTO_CYCLE_TIMEOUT_MS = 5000;
-  // Faster timeout for the first hint-based attempt before falling back to full scan.
-  // Hint-based connect on the correct channel usually completes in <2 s; if it doesn't,
-  // the AP has likely moved (mesh roam, channel change) so it's cheaper to bail and rescan.
-  static constexpr unsigned long HINT_ATTEMPT_TIMEOUT_MS = 3000;
+  // Connect-time scan budget, applied via esp_wifi_set_scan_parameters() (see applyScanBudget()).
+  // Scan duration is CHANNELS x DWELL and independent of SSID density; 80 ms puts a 13-channel
+  // sweep at ~1040 ms against ~1560 ms at the IDF default of 120 ms, while keeping margin for an
+  // AP that is slow to answer a probe. Too short lands back in NO_AP_FOUND plus a driver retry.
+  static constexpr uint32_t SCAN_ACTIVE_DWELL_MAX_MS = 80;
+  static constexpr uint32_t SCAN_PASSIVE_DWELL_MS = 200;
+  // Documented minimum; only relevant while already associated, which this path is not.
+  static constexpr uint8_t SCAN_HOME_CHAN_DWELL_MS = 30;
+
   unsigned long connectionStartTime = 0;
 
-  // BSSID/channel hint used on the current attempt (channel==0 means no hint).
-  uint8_t currentAttemptBssid[6] = {0};
-  uint8_t currentAttemptChannel = 0;
+  // Set by the STA_CONNECTED handler; read by the disconnect log to tell a mid-connect failure
+  // apart from a drop after association.
   volatile bool currentAttemptAssociated = false;
-  // Whether we've already done the silent fallback retry without the hint for this
-  // user-initiated connection. Prevents loops if the AP genuinely isn't reachable.
-  bool hintFallbackDone = false;
 
   // WiFi event handler IDs so we can deregister on exit.
   uint16_t evtIdConnected = 0;
   uint16_t evtIdGotIp = 0;
+  uint16_t evtIdStaStart = 0;
+  uint16_t evtIdDisconnected = 0;
 
   void renderNetworkList() const;
   void renderPasswordEntry() const;
@@ -120,10 +123,11 @@ class WifiSelectionActivity final : public Activity {
   void selectNetwork(int index);
   void attemptConnection();
   void checkConnectionStatus();
-  // Issues WiFi.begin() either with the cached BSSID/channel hint (fast path) or without
-  // (full scan fallback). `useHint=false` clears currentAttemptChannel so the success path
-  // doesn't double-store the same hint.
-  void issueWifiBegin(bool useHint);
+  // Issues WiFi.begin() with a full, signal-sorted scan. See the definition for why the cached
+  // channel/BSSID hint that used to shortcut this was removed.
+  void issueWifiBegin();
+  // Bound the connect-time scan; see the definition.
+  void applyScanBudget();
   // Prepares the WiFi stack for a connect attempt: ensures STA mode and a clean state,
   // sets a deterministic hostname. Skips the expensive disconnect(true,true) when WiFi
   // is already idle so the warm reconnect path doesn't pay an NVS-erase cost.

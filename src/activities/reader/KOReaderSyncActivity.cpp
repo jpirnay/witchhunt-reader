@@ -1,5 +1,6 @@
 #include "KOReaderSyncActivity.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -630,6 +631,23 @@ void KOReaderSyncActivity::onExit() {
   if (wifiActivated) {
     WiFi.disconnect(false);
     delay(30);
+    // The reboot stays, and it is now a measured decision rather than an inherited one.
+    //
+    // The old rationale -- "a WiFi session fragments the heap past rebuilding the reader in
+    // place" -- turned out to be wrong on wolfSSL: contig runs 61428 -> 61428 -> 61428 across a
+    // push, and only ~6 KB is lost across a pull. Rebuilding in place genuinely works, and is
+    // faster (792 ms to first page against 2023 ms via the reboot).
+    //
+    // What kills it is a different number. A full esp_wifi_stop + deinit still ends
+    // ~20.5 KB below the pre-WiFi free-heap baseline, measured at -20560 / -20588 / -20644 across
+    // three sessions -- consistent enough to look like a one-time netif/event-loop cost rather
+    // than a per-session leak, but never proven so, and 20 KB is a large permanent narrowing on a
+    // 380 KB device. Reclaiming the framebuffer late also leaves contig at 25588 against 65524
+    // on a clean boot, which is below what an image decode needs.
+    //
+    // So: the reboot is not paying for fragmentation during the session, it is paying for a heap
+    // that never fully comes back. Until that ~20 KB is identified, rebooting is the cheaper
+    // trade. Do not remove this on the strength of the contig numbers alone.
     switch (postAction_) {
       case KOReaderSyncPostAction::Home:
       case KOReaderSyncPostAction::OpdsSearch:
