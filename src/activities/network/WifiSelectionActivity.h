@@ -86,10 +86,23 @@ class WifiSelectionActivity final : public Activity {
   // Connection timeouts
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
   static constexpr unsigned long AUTO_CYCLE_TIMEOUT_MS = 5000;
-  // Faster timeout for the first hint-based attempt before falling back to full scan.
-  // Hint-based connect on the correct channel usually completes in <2 s; if it doesn't,
-  // the AP has likely moved (mesh roam, channel change) so it's cheaper to bail and rescan.
-  static constexpr unsigned long HINT_ATTEMPT_TIMEOUT_MS = 3000;
+  // Backstop for the hint attempt before falling back to a full scan.
+  //
+  // The premise this was built on ("hint-based connect completes in <2 s") does not hold on real
+  // APs. Measured on an X4 across six sessions, association is 2517/2518/2535/2569/2571/2615 ms
+  // and is INDIFFERENT to the hint and to the scan method -- the scan is not what dominates it,
+  // auth/assoc is. At 3000 ms that left ~400 ms of margin over the normal case, so ordinary
+  // jitter tripped it and paid the timeout plus a full re-association (~6.6 s vs ~3.6 s).
+  //
+  // A stale hint no longer needs a timeout to be detected: since issueWifiBegin() uses
+  // WIFI_FAST_SCAN for hinted attempts, an AP that has moved off the cached channel yields
+  // NO_AP_FOUND -> WL_NO_SSID_AVAIL almost immediately and trips the hintHardFail path instead.
+  // This value now only catches an attempt that hangs without ever reporting a hard status, so
+  // it belongs well clear of normal association time rather than just above it.
+  //
+  // Safe to enlarge: the fallback resets connectionStartTime, so it gets its own full
+  // CONNECTION_TIMEOUT_MS budget and this does not eat into it.
+  static constexpr unsigned long HINT_ATTEMPT_TIMEOUT_MS = 8000;
   unsigned long connectionStartTime = 0;
 
   // BSSID/channel hint used on the current attempt (channel==0 means no hint).
