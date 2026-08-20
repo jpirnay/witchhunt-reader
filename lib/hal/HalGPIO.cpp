@@ -337,6 +337,8 @@ bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return (snapReleased_ & (
 
 bool HalGPIO::wasAnyReleased() const { return snapReleased_ != 0; }
 
+bool HalGPIO::isAnyPressed() const { return snapState_ != 0; }
+
 bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
 unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }

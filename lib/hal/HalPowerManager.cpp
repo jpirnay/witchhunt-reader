@@ -68,6 +68,35 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // Otherwise, no change needed
 }
 
+void HalPowerManager::ensureFullSpeedForRadio() {
+  if (normalFreq <= 0) {
+    return;  // begin() not called yet — nothing to restore to
+  }
+  // Clear BOTH downclock owners before touching the frequency. The idle governor
+  // (isLowPower) and the waveform hook (waveformLowPower_) track their drops separately, and
+  // whichever one is live would otherwise restore or re-drop the clock behind the radio's back.
+  xSemaphoreTake(modeMutex, portMAX_DELAY);
+  const bool wasIdleLow = isLowPower;
+  const bool wasWaveformLow = waveformLowPower_;
+  isLowPower = false;
+  waveformLowPower_ = false;
+  xSemaphoreGive(modeMutex);
+
+  const int current = getCpuFrequencyMhz();
+  if (current >= normalFreq) {
+    return;  // already at full speed; nothing to do beyond the flag reconciliation above
+  }
+  if (setCpuFrequencyMhz(normalFreq)) {
+    LOG_INF("PWR", "CPU %d -> %d MHz for radio bring-up (idleLow=%d waveformLow=%d)", current, normalFreq,
+            wasIdleLow ? 1 : 0, wasWaveformLow ? 1 : 0);
+  } else {
+    // Worth an error rather than a debug line: WiFi association from a 10 MHz clock does not
+    // fail cleanly, it hangs, and this is the only place that would have seen it coming.
+    LOG_ERR("PWR", "Failed to restore %d MHz before radio bring-up (still %d MHz) — WiFi may hang", normalFreq,
+            current);
+  }
+}
+
 void HalPowerManager::enterWaveformWait() {
   if (normalFreq <= 0) {
     return;  // begin() not called yet — nothing to restore to

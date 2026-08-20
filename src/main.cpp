@@ -1223,7 +1223,14 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || halTiltSensor.hadActivity() ||
+  // isAnyPressed() alongside the edge checks: a button that is DOWN produces no press/release
+  // edges, so an edge-only test reads a held finger as an idle device. With IDLE_DOWNCLOCK_MS at
+  // 500 ms and ButtonEventManager's long-press at 1000 ms, every long press used to cross the
+  // idle threshold mid-hold — the CPU dropped to 10 MHz and the action the long press triggered
+  // then ran there. Harmless for most actions, fatal for one: a long press that brings WiFi up
+  // (reader -> KOReader sync) reached WiFi.begin() at 10 MHz and wedged. Holding a button is
+  // user activity by any reasonable reading, so count it as such.
+  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.isAnyPressed() || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
