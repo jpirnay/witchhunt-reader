@@ -192,6 +192,53 @@ def fp4_from_design_units(du, scale):
     raw = round(du * scale * 16)
     return max(-128, min(127, raw))
 
+# Unicode Default_Ignorable_Code_Point ranges (BMP), which must never produce ink.
+#
+# These are formatting controls: the text layer acts on them, the renderer must not draw
+# them. Fonts do not agree about that. Bookerly maps U+200C..U+200F to real outlines
+# (gid 1855-1858, verified with FreeType against Bookerly-Regular.ttf), so load_glyph()
+# below accepted them, FT_LOAD_RENDER rasterised them, and advance_x came from
+# linearHoriAdvance -- which is correctly 0. The result was a glyph that PAINTS AND DOES
+# NOT ADVANCE THE PEN, so the next character overprints it. 41 of 46 generated builtin
+# font headers carried at least one such glyph (e.g. bookerly_14_regular U+200C: 2x24 px,
+# advance 0). Books watermarked with zero-width steganography turn that into thousands of
+# stacked marks per chapter.
+#
+# Two rules, both required:
+#   1. never rasterise one   -- emit a 0x0 / advance-0 / no-bitmap entry instead
+#   2. never drop one from an interval -- EpdFont::getGlyph() falls back to
+#      REPLACEMENT_GLYPH (U+FFFD) for an uncovered codepoint, which would swap invisible
+#      ink for a visible box. They must stay in the interval table AS empty glyphs.
+#
+# U+00AD SOFT HYPHEN is deliberately NOT here: it is Default_Ignorable, but this firmware
+# breaks lines on it and must draw a hyphen when it does.
+DEFAULT_IGNORABLE_RANGES = (
+    (0x034F, 0x034F),  # combining grapheme joiner
+    (0x061C, 0x061C),  # Arabic letter mark
+    (0x115F, 0x1160),  # Hangul choseong/jungseong fillers
+    (0x17B4, 0x17B5),  # Khmer inherent vowels
+    (0x180B, 0x180F),  # Mongolian variation selectors + FVS
+    (0x200B, 0x200F),  # ZWSP, ZWNJ, ZWJ, LRM, RLM
+    (0x202A, 0x202E),  # bidi embedding/override
+    (0x2060, 0x2064),  # word joiner, invisible operators
+    (0x2065, 0x2065),  # unassigned, reserved ignorable
+    (0x206A, 0x206F),  # deprecated format characters
+    (0x3164, 0x3164),  # Hangul filler
+    (0xFE00, 0xFE0F),  # variation selectors 1-16
+    (0xFEFF, 0xFEFF),  # zero-width no-break space / BOM
+    (0xFFA0, 0xFFA0),  # halfwidth Hangul filler
+    (0xFFF0, 0xFFF8),  # unassigned, reserved ignorable
+)
+
+def is_default_ignorable(code_point):
+    """True for codepoints that must render as nothing, whatever the font says."""
+    for lo, hi in DEFAULT_IGNORABLE_RANGES:
+        if lo <= code_point <= hi:
+            return True
+        if code_point < lo:
+            break
+    return False
+
 def chunks(l, n):
     for i in range(0, len(l), n):
         yield l[i:i + n]
@@ -219,6 +266,11 @@ for i_start, i_end in unmerged_intervals:
 for i_start, i_end in unvalidated_intervals:
     start = i_start
     for code_point in range(i_start, i_end + 1):
+        # Keep default-ignorables in the interval even when the font has no cmap entry for
+        # them: a gap here sends getGlyph() to REPLACEMENT_GLYPH (U+FFFD) and draws a box
+        # where the text layer expects nothing. They are emitted as empty glyphs below.
+        if is_default_ignorable(code_point):
+            continue
         face = load_glyph(code_point)
         if face is None:
             if start < code_point:
@@ -235,6 +287,25 @@ all_glyphs = []
 
 for i_start, i_end in intervals:
     for code_point in range(i_start, i_end + 1):
+        # Formatting controls never carry ink. Emit the empty glyph directly rather than
+        # asking FreeType, which happily rasterises whatever outline the font maps them to
+        # (see DEFAULT_IGNORABLE_RANGES). advance_x 0 is what these codepoints already
+        # report via linearHoriAdvance, so nothing about line layout changes -- only the
+        # bitmap goes away. That also means regenerating a font with this fix in place
+        # cannot repaginate a book.
+        if is_default_ignorable(code_point):
+            all_glyphs.append((GlyphProps(
+                width = 0,
+                height = 0,
+                advance_x = 0,
+                left = 0,
+                top = 0,
+                data_length = 0,
+                data_offset = total_size,
+                code_point = code_point,
+            ), bytes()))
+            continue
+
         face = load_glyph(code_point)
         bitmap = face.glyph.bitmap
 

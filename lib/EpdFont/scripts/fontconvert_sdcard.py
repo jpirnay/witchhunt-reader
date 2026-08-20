@@ -82,6 +82,25 @@ INTERVAL_PRESETS = {
 }
 
 
+# Unicode Default_Ignorable_Code_Point ranges (BMP) — must never produce ink.
+# Kept byte-identical to DEFAULT_IGNORABLE_RANGES in fontconvert.py; see the long
+# explanation there for why fonts cannot be trusted to leave these blank.
+DEFAULT_IGNORABLE_RANGES = (
+    (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x2064),
+    (0x2065, 0x2065), (0x206A, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+)
+
+def is_default_ignorable(code_point):
+    """True for codepoints that must render as nothing, whatever the font says."""
+    for lo, hi in DEFAULT_IGNORABLE_RANGES:
+        if lo <= code_point <= hi:
+            return True
+        if code_point < lo:
+            break
+    return False
+
 def resolve_intervals(preset_str):
     """Resolve comma-separated preset names into a merged, sorted, deduplicated interval list."""
     all_intervals = []
@@ -636,6 +655,10 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0):
     for i_start, i_end in intervals:
         start = i_start
         for code_point in range(i_start, i_end + 1):
+            # Kept even when the font has no cmap entry: a gap sends getGlyph() to
+            # REPLACEMENT_GLYPH (U+FFFD) and draws a box. Emitted empty below.
+            if is_default_ignorable(code_point):
+                continue
             f = load_glyph(code_point)
             if f is None:
                 if start < code_point:
@@ -654,6 +677,12 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0):
 
     for i_start, i_end in intervals:
         for code_point in range(i_start, i_end + 1):
+            # Formatting controls carry no ink, whatever outline the font maps them to.
+            if is_default_ignorable(code_point):
+                glyph = GlyphProps(0, 0, 0, 0, 0, 0, total_bitmap_size, code_point)
+                all_glyphs.append((glyph, b''))
+                continue
+
             f = load_glyph(code_point)
             if f is None:
                 glyph = GlyphProps(0, 0, 0, 0, 0, 0, total_bitmap_size, code_point)
