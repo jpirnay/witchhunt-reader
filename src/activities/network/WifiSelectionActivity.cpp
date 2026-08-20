@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <HTTPClient.h>
 #include <HalClock.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <NetworkClient.h>
@@ -357,6 +358,14 @@ void WifiSelectionActivity::attemptConnection() {
 }
 
 void WifiSelectionActivity::prepareForConnect() {
+  // Before anything touches the radio. WiFi does not work below 80 MHz on this SoC and the idle
+  // governor parks the CPU at 10 MHz, so association from there hangs rather than failing — the
+  // observed symptom was a dead device after a long-press into KOReader sync, whose hold crossed
+  // the idle threshold before the action fired. main.cpp now keeps the clock up while a button is
+  // held, which removes that particular trigger; this stays as the guarantee at the point that
+  // actually depends on it, for every other way the clock could be low when we get here.
+  powerManager.ensureFullSpeedForRadio();
+
   WiFi.persistent(false);  // Credentials are managed by WifiCredentialStore; suppress SDK NVS auto-connect
 
   // Only switch mode if we're not already STA — the mode setter touches the netif and

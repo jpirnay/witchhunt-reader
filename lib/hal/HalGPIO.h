@@ -157,6 +157,10 @@ class HalGPIO {
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
+  // True while ANY button is currently held down. Distinct from wasAnyPressed(), which is
+  // edge-triggered and therefore false for every loop iteration after the initial press —
+  // a held button looks exactly like an idle device to an edge-only check.
+  bool isAnyPressed() const;
   // True while a raw button-state change is still inside the debounce window.
   // The idle loop polls fast while this is set so the confirming sample lands
   // ~10 ms after the first; at the light-sleep cadence a short tap can
