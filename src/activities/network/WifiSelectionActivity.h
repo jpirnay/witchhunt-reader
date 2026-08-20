@@ -116,6 +116,8 @@ class WifiSelectionActivity final : public Activity {
   // WiFi event handler IDs so we can deregister on exit.
   uint16_t evtIdConnected = 0;
   uint16_t evtIdGotIp = 0;
+  uint16_t evtIdStaStart = 0;
+  uint16_t evtIdDisconnected = 0;
 
   void renderNetworkList() const;
   void renderPasswordEntry() const;

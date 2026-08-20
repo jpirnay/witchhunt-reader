@@ -605,6 +605,10 @@ void KOReaderSyncActivity::onEnter() {
   // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
   trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_wifi");
+  // Baseline for the teardown probe in onExit(). Captured here, after the trim and before the
+  // radio comes up, so the comparison isolates what the WiFi/TLS session itself did to the heap.
+  heapBeforeWifiFree_ = esp_get_free_heap_size();
+  heapBeforeWifiContig_ = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
 
   // Check if already connected (e.g. from settings page auth)
   if (WiFi.status() == WL_CONNECTED) {
@@ -630,6 +634,7 @@ void KOReaderSyncActivity::onExit() {
   if (wifiActivated) {
     WiFi.disconnect(false);
     delay(30);
+    logWifiTeardownHeapProbe();
     switch (postAction_) {
       case KOReaderSyncPostAction::Home:
       case KOReaderSyncPostAction::OpdsSearch:
@@ -652,6 +657,49 @@ void KOReaderSyncActivity::onExit() {
         break;
     }
   }
+}
+
+// Measures whether a WiFi/TLS session really does leave the heap unusable.
+//
+// The silent reboot below exists because of a learning that a network session fragments the heap
+// past the point where the reader can be rebuilt in place. That was established BEFORE the TLS
+// stack changed from mbedtls to wolfSSL, so the premise is inherited rather than measured, and it
+// is expensive: every sync costs a full reboot plus a cold book reopen.
+//
+// This does the teardown the reboot would otherwise make unnecessary -- stop and deinit the
+// driver, not just disconnect -- and reports the result against the pre-WiFi baseline. Read the
+// contig figure, not free: fragmentation is the claim under test, and the reader needs a ~48-52 KB
+// contiguous block for its secondary framebuffer. If contig comes back to roughly its
+// before-WiFi value, the reboot is buying nothing on this stack and can go.
+//
+// Measurement only: the reboot still happens immediately after, so behaviour is unchanged whatever
+// the numbers say.
+void KOReaderSyncActivity::logWifiTeardownHeapProbe() {
+#if LOG_LEVEL < 1
+  // Nothing can report the result, so don't pay for it: the teardown below costs ~150 ms and
+  // exists purely to be measured. The reboot that follows makes it redundant either way.
+  return;
+#else
+  const uint32_t freeBeforeTeardown = esp_get_free_heap_size();
+  const uint32_t contigBeforeTeardown = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+
+  // WIFI_OFF routes through esp_wifi_stop() + esp_wifi_deinit(), which is what actually returns
+  // the driver's buffers; WiFi.disconnect() above only drops the association.
+  WiFi.mode(WIFI_OFF);
+  delay(100);  // let the driver's deferred frees land before sampling
+
+  const uint32_t freeAfter = esp_get_free_heap_size();
+  const uint32_t contigAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+
+  LOG_INF("KOSync", "WiFi teardown heap probe: free %lu -> %lu -> %lu | contig %lu -> %lu -> %lu",
+          static_cast<unsigned long>(heapBeforeWifiFree_), static_cast<unsigned long>(freeBeforeTeardown),
+          static_cast<unsigned long>(freeAfter), static_cast<unsigned long>(heapBeforeWifiContig_),
+          static_cast<unsigned long>(contigBeforeTeardown), static_cast<unsigned long>(contigAfter));
+  LOG_INF("KOSync",
+          "WiFi teardown recovery: free %+ld contig %+ld vs before-WiFi baseline (reader needs ~49152 contig)",
+          static_cast<long>(freeAfter) - static_cast<long>(heapBeforeWifiFree_),
+          static_cast<long>(contigAfter) - static_cast<long>(heapBeforeWifiContig_));
+#endif
 }
 
 void KOReaderSyncActivity::closeCancelled() {

@@ -64,6 +64,27 @@ void WifiSelectionActivity::onEnter() {
         LOG_DBG("WIFI", "EVT got_ip at %lu ms", millis() - connectionStartTime);
       },
       ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  // STA_START = the driver finished esp_wifi_start() (PHY init + RF calibration). Splits
+  // driver bring-up from the scan/auth/assoc that follows it, which the association timestamp
+  // alone cannot: measured begin->associated is a flat ~2.5 s regardless of scan method, hint,
+  // or RSSI, and that invariance is what this pair exists to explain.
+  evtIdStaStart = WiFi.onEvent(
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+        LOG_DBG("WIFI", "EVT sta_start at %lu ms (driver up; scan/auth begins here)", millis() - connectionStartTime);
+      },
+      ARDUINO_EVENT_WIFI_STA_START);
+  // The one that should settle it. A cost that flat across every configuration looks like a
+  // fixed retry/backoff rather than a negotiation, and a retry means a disconnect event with a
+  // reason code. If nothing fires between begin() and STA_CONNECTED, the ~2.5 s is genuinely
+  // the AP taking that long and there is nothing here to win; if AUTH_EXPIRE / ASSOC_EXPIRE /
+  // HANDSHAKE_TIMEOUT shows up mid-connect, that names the second we are paying for.
+  evtIdDisconnected = WiFi.onEvent(
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+        const uint8_t reason = info.wifi_sta_disconnected.reason;
+        LOG_DBG("WIFI", "EVT disconnected at %lu ms: reason=%u (%s) assoc=%d", millis() - connectionStartTime, reason,
+                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0);
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   // Load saved WiFi credentials - SD card operations need lock as we use SPI
   // for both
@@ -135,6 +156,14 @@ void WifiSelectionActivity::onExit() {
   if (evtIdGotIp != 0) {
     WiFi.removeEvent(evtIdGotIp);
     evtIdGotIp = 0;
+  }
+  if (evtIdStaStart != 0) {
+    WiFi.removeEvent(evtIdStaStart);
+    evtIdStaStart = 0;
+  }
+  if (evtIdDisconnected != 0) {
+    WiFi.removeEvent(evtIdDisconnected);
+    evtIdDisconnected = 0;
   }
 
   LOG_DBG("WIFI", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
