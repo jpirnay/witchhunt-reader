@@ -2766,15 +2766,16 @@ bool ChapterHtmlSlimParser::finalize() {
   // truncated (dropped) the excess. Surface it so out-of-bounds documents are
   // diagnosable rather than failing invisibly (e.g. XPath/anchor drift). Also
   // surfaces voidTag: the source had an HTML-style unclosed void element
-  // (<br>, <hr>, ...) that the parser auto-closed rather than failing on.
+  // (<br>, <hr>, ...) that the parser auto-closed rather than failing on, and
+  // trailingData: the file had padding bytes after </html> that were ignored.
   if (const uint32_t trunc = saxParser_.truncationFlags()) {
     LOG_DBG("EHP",
             "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d "
-            "maxDepth=%d voidTag=%d",
+            "maxDepth=%d voidTag=%d trailingData=%d",
             static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
             (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
             (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0,
-            (trunc & SaxParser::kVoidTagRepaired) != 0);
+            (trunc & SaxParser::kVoidTagRepaired) != 0, (trunc & SaxParser::kTrailingDataIgnored) != 0);
   }
 
   // Process last page if there is still text. Done unconditionally so that a partial
