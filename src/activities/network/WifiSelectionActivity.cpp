@@ -384,9 +384,10 @@ void WifiSelectionActivity::prepareForConnect() {
     WiFi.disconnect(true, true);
   }
 
-  // Scan all channels so networks with multiple APs use the strongest matching
-  // BSSID instead of the first match found by the framework's default fast scan.
-  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  // Sort ranks the results a full scan collected, so it is meaningful only under
+  // WIFI_ALL_CHANNEL_SCAN and can be set once here. The SCAN METHOD is deliberately NOT set
+  // here any more -- it is chosen per attempt in issueWifiBegin(), because the hinted and
+  // unhinted attempts need opposite ones. See the comment there.
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
   // Use stable base MAC so hostname suffix is deterministic across WiFi states.
@@ -440,15 +441,33 @@ void WifiSelectionActivity::issueWifiBegin(bool useHint) {
   // Reset to DHCP in case a previous attempt left a static config behind.
   WiFi.config(IPAddress(), IPAddress(), IPAddress(), IPAddress());
 
+  // The scan method is per-attempt, and it is what makes the hint mean anything at all.
+  //
+  // WIFI_ALL_CHANNEL_SCAN scans EVERY channel and collects all matching APs before connecting --
+  // that is its purpose, and it is what setSortMethod() ranks. conf.sta.channel cannot
+  // short-circuit it (Arduino folds channel, bssid and scan_method into one wifi_config_t; see
+  // STA.cpp), so under it the cached channel/BSSID saved nothing. Measured on device: hinted
+  // association 2517/2518/2535 ms vs unhinted 2569/2571 ms -- the same full scan either way,
+  // ~40 ms apart. The hint then had to finish that scan inside HINT_ATTEMPT_TIMEOUT_MS (3000 ms)
+  // with only ~480 ms to spare, and ordinary jitter tipped it into the fallback, which costs the
+  // whole timeout PLUS a fresh association (~6.6 s observed, against ~3.6 s unhinted).
+  //
+  // WIFI_FAST_SCAN stops at the first matching AP and confines the scan to conf.sta.channel,
+  // which is what the cache exists to supply. A hint that has gone stale (AP moved channel, mesh
+  // roam) now fails FAST rather than burning the timeout, and the fallback re-issues with the
+  // full scan -- so the two paths finally have the scan behaviour each was written for.
+  const bool hinted = currentAttemptChannel != 0;
+  WiFi.setScanMethod(hinted ? WIFI_FAST_SCAN : WIFI_ALL_CHANNEL_SCAN);
+
   const char* pwd = (selectedRequiresPassword && !enteredPassword.empty()) ? enteredPassword.c_str() : nullptr;
   const unsigned long preBeginMs = millis() - connectionStartTime;
-  if (currentAttemptChannel != 0) {
-    LOG_DBG("WIFI", "WiFi.begin -> %s ch=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x dhcp=yes (pre-begin %lu ms)",
+  if (hinted) {
+    LOG_DBG("WIFI", "WiFi.begin -> %s ch=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x scan=fast dhcp=yes (pre-begin %lu ms)",
             selectedSSID.c_str(), currentAttemptChannel, currentAttemptBssid[0], currentAttemptBssid[1],
             currentAttemptBssid[2], currentAttemptBssid[3], currentAttemptBssid[4], currentAttemptBssid[5], preBeginMs);
     WiFi.begin(selectedSSID.c_str(), pwd, currentAttemptChannel, currentAttemptBssid, true);
   } else {
-    LOG_DBG("WIFI", "WiFi.begin -> %s (no hint, pre-begin %lu ms)", selectedSSID.c_str(), preBeginMs);
+    LOG_DBG("WIFI", "WiFi.begin -> %s (no hint, scan=all-channel, pre-begin %lu ms)", selectedSSID.c_str(), preBeginMs);
     if (pwd) {
       WiFi.begin(selectedSSID.c_str(), pwd);
     } else {
