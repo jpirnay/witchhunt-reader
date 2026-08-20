@@ -795,6 +795,51 @@ bool isSynced() {
 
 bool isApproximate() { return clockApproximate; }
 
+bool isPlausibleForTls() {
+  // Lower bound: comfortably after the newest curated root's notBefore, so any clock at or
+  // past it satisfies every one of them. Upper bound: the curated set's latest notAfter is
+  // 2038, so cap below that — a wildly-wrong FUTURE clock breaks notAfter just as effectively
+  // as 1970 breaks notBefore, and must also be treated as "needs SNTP".
+  constexpr time_t MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01 00:00:00 UTC
+  constexpr time_t MAX_PLAUSIBLE_EPOCH = 2114380800;  // 2037-01-01 00:00:00 UTC
+  const time_t nowEpoch = time(nullptr);
+  return nowEpoch >= MIN_PLAUSIBLE_EPOCH && nowEpoch < MAX_PLAUSIBLE_EPOCH;
+}
+
+bool ensureUsableForTls(const char* preferredServer) {
+  if (isPlausibleForTls()) {
+    // Deliberately no SNTP round-trip here even when the clock is only "approximate": the
+    // cert-date check passes anywhere inside the roots' validity window, so an NVS-restored
+    // clock that is hours out still verifies. Syncing anyway would cost ~5 s (and an
+    // intermittent timeout) on every cold start that already had a good-enough time, and would
+    // churn the heap right before the handshake's peak allocations.
+    return true;
+  }
+
+  // Rate-limit FAILED attempts instead of latching "attempted" forever. A one-shot latch means
+  // a single call made before the radio was ready disables the sync for the rest of the
+  // session, and every later TLS connect then fails to load its trust store with no way back.
+  constexpr unsigned long RETRY_MIN_INTERVAL_MS = 30000;
+  static unsigned long lastAttemptMs = 0;
+  static bool everAttempted = false;
+  const unsigned long nowMs = millis();
+  if (everAttempted && (nowMs - lastAttemptMs) < RETRY_MIN_INTERVAL_MS) {
+    return false;
+  }
+  everAttempted = true;
+  lastAttemptMs = nowMs;
+
+  LOG_INF("CLK", "Clock unset/implausible for TLS (epoch %lld); running SNTP before the handshake",
+          static_cast<long long>(time(nullptr)));
+  char err[64] = {0};
+  if (!syncNtp(err, sizeof(err), preferredServer)) {
+    LOG_ERR("CLK", "SNTP failed (%s) — the TLS trust store will not load until the clock is set", err);
+    return false;
+  }
+  LOG_INF("CLK", "SNTP complete; epoch now %lld", static_cast<long long>(time(nullptr)));
+  return isPlausibleForTls();
+}
+
 time_t lastSyncTime() { return nvsReadSyncTime(); }
 
 uint32_t lastSleepSeconds() { return lastSleepSec; }

@@ -72,6 +72,7 @@ bool SecureHttpClient::ensureConnected(const Url& u) {
   if (u.https()) {
     _secure.setCACert(_rootCA);
     _secure.setAllowInsecureFallback(_allowInsecureFallback);
+    _secure.setAllowCertificateDateErrors(_allowCertificateDateErrors);
     _secure.setTimeout(_timeoutMs / 1000);
     if (!_secure.connect(u.host.c_str(), u.port)) {
       LOG_ERR("HTTP", "https connect failed: %s:%u", u.host.c_str(), u.port);

@@ -32,52 +32,12 @@ std::string extractHostFromUrl(const std::string& url) {
   return url.substr(hostStart, hostEnd - hostStart);
 }
 
-// wolfSSL rejects certs whose notBefore lies in the future of the device
-// clock (ASN_BEFORE_DATE_E), and expired ones (ASN_AFTER_DATE_E). The
-// ESP32-C3 has no battery-backed RTC, so cold-boot clocks default to 1970
-// (or, if HalClock restored from NVS, a stale "last known" time that may
-// still predate the cert's notBefore). Fix it once per process before the
-// first https request by running SNTP — WiFi is already up by the time
-// runGet() is called, so this is essentially free. Subsequent calls reuse
-// whatever the first attempt produced.
-constexpr time_t MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01 00:00:00 UTC
-// Upper bound: a clock far in the future also fails cert notAfter checks. Our
-// curated roots' latest notAfter is 2038; cap at 2037 so a wildly-wrong future
-// clock still triggers SNTP rather than silently breaking verification.
-constexpr time_t MAX_PLAUSIBLE_EPOCH = 2114380800;  // 2037-01-01 00:00:00 UTC
-bool clockPlausibleForTls() {
-  const time_t now = time(nullptr);
-  return now >= MIN_PLAUSIBLE_EPOCH && now < MAX_PLAUSIBLE_EPOCH;
-}
-
-bool ensureClockForTls() {
-  static bool attempted = false;
-  if (attempted) return clockPlausibleForTls();
-  attempted = true;
-
-  // A plausible epoch is sufficient for TLS cert-date validation even if
-  // HalClock flags it "approximate" (restored from NVS on this RTC-less C3):
-  // wolfSSL's notBefore/notAfter check passes for any time within the certs'
-  // validity window, so an approximate-but-in-range clock verifies fine. This
-  // avoids a 5 s SNTP round-trip (and its intermittent timeouts) on every cold
-  // start when NVS already holds a good-enough time. Only sync when the clock
-  // is genuinely unset or out of the plausible range.
-  if (clockPlausibleForTls()) {
-    if (HalClock::isApproximate()) {
-      LOG_INF("HTTP", "Clock approximate but plausible (epoch %ld); skipping SNTP for TLS",
-              static_cast<long>(time(nullptr)));
-    }
-    return true;
-  }
-  LOG_INF("HTTP", "Clock unset/implausible (epoch %ld); running SNTP before TLS", static_cast<long>(time(nullptr)));
-  char err[64] = {0};
-  if (!HalClock::syncNtp(err, sizeof(err), SETTINGS.ntpServer)) {
-    LOG_ERR("HTTP", "SNTP sync failed: %s — TLS verification may fail until clock is set", err);
-    return false;
-  }
-  LOG_INF("HTTP", "SNTP sync complete; epoch now %ld", static_cast<long>(time(nullptr)));
-  return true;
-}
+// Clock guard for TLS. The plausibility window and the SNTP retry policy now live in
+// HalClock (isPlausibleForTls / ensureUsableForTls) so every TLS entry point shares one rule —
+// this used to be a private copy here, which is why the KOReader paths never got it. Returns
+// whether full certificate date validation is possible; false means the caller should tolerate
+// date errors (and only date errors) for this request.
+bool ensureClockForTls() { return HalClock::ensureUsableForTls(SETTINGS.ntpServer); }
 
 // Per-request timeout handed to SecureHttpClient::setTimeout(). 60s gives slow
 // servers room to send their first headers; SecureHttpClient reuses it as the
@@ -99,13 +59,15 @@ bool isRedirect(int status) {
 
 // Runs once per http call (or once per session for reused sessions): logs
 // heap stats and ensures the wall clock is set so TLS cert-date validation
-// can succeed. Shared by both TLS backends.
-void logPreCallContext(const std::string& url) {
+// can succeed. Shared by both TLS backends. Returns false when https was requested and the
+// clock could not be established — the caller then permits date errors alone.
+bool logPreCallContext(const std::string& url) {
   LOG_DBG("HTTP", "Heap free: %u, largest block: %u", esp_get_free_heap_size(),
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
   if (url.compare(0, 8, "https://") == 0) {
-    ensureClockForTls();
+    return ensureClockForTls();
   }
+  return true;
 }
 
 // One-shot streaming GET over SecureNet (wolfSSL). Fills the Sink and emits
@@ -114,7 +76,7 @@ void logPreCallContext(const std::string& url) {
 // (except where the caller disables it, e.g. OTA).
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
                                            const std::string& password, Sink& sink, bool allowInsecureFallback) {
-  logPreCallContext(url);
+  const bool clockReady = logPreCallContext(url);
   const unsigned long startMs = millis();
   LOG_DBG("HTTP", "Phase start @%lums heap=%u largest=%u", millis() - startMs, esp_get_free_heap_size(),
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
@@ -122,6 +84,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   crosspoint::SecureHttpClient http;
   http.setCACert(CROSSPOINT_ROOTS_PEM);
   http.setAllowInsecureFallback(allowInsecureFallback);
+  http.setAllowCertificateDateErrors(!clockReady);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   if (!username.empty() && !password.empty()) {
@@ -200,14 +163,17 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
                                                     const std::string& username, const std::string& password,
                                                     Sink& sink, bool allowInsecureFallback) {
   auto* impl = session.impl();
+  // Evaluated on every call, not just when the session is created: a session opened before the
+  // clock was set must not keep that verdict for the rest of its life (nor the reverse).
+  const bool clockReady = logPreCallContext(url);
   if (!impl->http) {
-    logPreCallContext(url);
     impl->http = std::make_unique<crosspoint::SecureHttpClient>();
     impl->http->setCACert(CROSSPOINT_ROOTS_PEM);
     impl->http->setTimeout(HTTP_TIMEOUT_MS);
     impl->http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   }
   impl->http->setAllowInsecureFallback(allowInsecureFallback);
+  impl->http->setAllowCertificateDateErrors(!clockReady);
   impl->http->clearHeaders();
   if (!username.empty() && !password.empty()) {
     impl->http->setBasicAuth(username, password);

@@ -9,6 +9,8 @@
 #include <wolfssl/error-ssl.h>  // VERIFY_CERT_ERROR, DOMAIN_NAME_MISMATCH (SSL-layer codes)
 #include <wolfssl/ssl.h>
 
+#include <ctime>  // time() for the clock reported alongside a cert-date load failure
+
 // The Arduino-wolfSSL library's logging.c references this hook, normally defined
 // in the library's wolfssl.h sketch glue (not compiled in a PlatformIO lib build),
 // so we provide it. Signature must match wolfcrypt/logging.h exactly (int return).
@@ -76,6 +78,19 @@ bool isVerificationError(int err) {
       return false;
   }
 }
+
+// Installed as wolfSSL's verify callback only when the caller could not obtain a trustworthy
+// clock. wolfSSL calls it for every verification failure; accept precisely the two
+// validity-window errors and pass everything else (chain, signature, trust anchor, hostname)
+// straight through as the failure it is.
+int allowCertificateDateErrors(int preverify, WOLFSSL_X509_STORE_CTX* store) {
+  if (preverify == 0 && store != nullptr && (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E)) {
+    LOG_INF("TLS", "Ignoring certificate date error %d (no trusted clock); chain and hostname still verified",
+            store->error);
+    return 1;
+  }
+  return preverify;
+}
 }  // namespace
 
 // One handshake attempt at a fixed verification level and TLS method.
@@ -91,13 +106,31 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
   _ctx = ctx;
 
   if (verifyPeer && !_insecure && _rootCA) {
-    if (wolfSSL_CTX_load_verify_buffer(ctx, reinterpret_cast<const unsigned char*>(_rootCA), strlen(_rootCA),
-                                       WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
-      LOG_ERR("TLS", "load_verify_buffer failed for curated roots");
+    // The roots are date-checked AS THEY LOAD, not only during the handshake: plain
+    // load_verify_buffer() passes WOLFSSL_LOAD_VERIFY_DEFAULT_FLAGS (== WOLFSSL_LOAD_FLAG_NONE),
+    // so a cold-booted RTC-less board sitting at 1970 sees every curated root's notBefore as
+    // "in the future" and loads none of them. WOLFSSL_LOAD_FLAG_DATE_ERR_OKAY switches the parse
+    // to VERIFY_SKIP_DATE, which suppresses the notBefore/notAfter test and nothing else — the
+    // signature and structural checks are unchanged (wolfcrypt/src/asn.c, `cert->badDate`).
+    const word32 loadFlags =
+        _allowCertificateDateErrors ? WOLFSSL_LOAD_FLAG_DATE_ERR_OKAY : WOLFSSL_LOAD_VERIFY_DEFAULT_FLAGS;
+    const int loadRet = wolfSSL_CTX_load_verify_buffer_ex(ctx, reinterpret_cast<const unsigned char*>(_rootCA),
+                                                          strlen(_rootCA), WOLFSSL_FILETYPE_PEM, 0, loadFlags);
+    if (loadRet != WOLFSSL_SUCCESS) {
+      // Report the wolfSSL code and the epoch together. This failure happens before the
+      // handshake, so it leaves no verification error for connect() to classify and used to
+      // surface as a bare "connect failed" — with -150/-151 and a 1970 timestamp side by side,
+      // "the clock is wrong" is readable straight off the log.
+      LOG_ERR("TLS", "load_verify_buffer failed for curated roots: err=%d epoch=%lld (dateErrorsAllowed=%d)", loadRet,
+              static_cast<long long>(time(nullptr)), _allowCertificateDateErrors ? 1 : 0);
+      if (loadRet == ASN_BEFORE_DATE_E || loadRet == ASN_AFTER_DATE_E) {
+        LOG_ERR("TLS", "  -> the device clock is outside the roots' validity window; sync NTP before connecting");
+      }
       stop();
       return 0;
     }
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, nullptr);
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER,
+                           _allowCertificateDateErrors ? allowCertificateDateErrors : nullptr);
   } else {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
   }

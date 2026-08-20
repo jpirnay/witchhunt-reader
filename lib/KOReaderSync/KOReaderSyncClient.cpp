@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <CrossPointRoots.h>
+#include <HalClock.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <WiFi.h>
@@ -263,6 +264,13 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   // insecure fallback) and passes http through a plain WiFiClient. Tiny JSON
   // payloads, so the small-buffer intent of the old 1 KB config is naturally met.
   http->setCACert(CROSSPOINT_ROOTS_PEM);
+  // Last-resort clock guard. The activities are expected to have run
+  // HalClock::ensureUsableForTls() once WiFi came up (they have SETTINGS and therefore the
+  // configured NTP server; this library does not). Asking here as well means a caller that
+  // forgets does not get the old failure mode — a trust store that refuses to load, reported as
+  // a bare "connect failed" with no verification error behind it. Chain, signature and hostname
+  // stay fully enforced either way; only the validity window is waived.
+  http->setAllowCertificateDateErrors(!HalClock::isPlausibleForTls());
   http->setTimeout(5000);
   http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   http->clearHeaders();
