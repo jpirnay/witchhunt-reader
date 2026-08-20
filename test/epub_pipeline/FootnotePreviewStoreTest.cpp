@@ -47,6 +47,13 @@ uintmax_t storeSize(const Epub& epub) {
   return ec ? 0 : size;
 }
 
+// Layout of the store's fixed part: a 12-byte header, then the resolved-spine bitmap, then the
+// blob. Spelled out here rather than shared with the implementation so that a format change has
+// to be made deliberately in two places instead of silently agreeing with itself.
+constexpr size_t kHeaderBytes = 12;
+constexpr size_t kResolvedBitmapBytes = 64;
+constexpr size_t kBlobStart = kHeaderBytes + kResolvedBitmapBytes;
+
 // Every note text the store holds, in blob order. Reading the format here rather than through
 // Lookup keeps the test honest about what actually landed on disk.
 std::vector<std::string> storeTexts(const Epub& epub) {
@@ -54,12 +61,12 @@ std::vector<std::string> storeTexts(const Epub& epub) {
   std::ifstream in(epub.getCachePath() + FootnotePreviews::CACHE_FILENAME, std::ios::binary);
   if (!in) return texts;
   const std::string bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-  if (bytes.size() < 12) return texts;
+  if (bytes.size() < kBlobStart) return texts;
   uint16_t count = 0;
   uint32_t indexOffset = 0;
   memcpy(&count, bytes.data() + 6, sizeof(count));
   memcpy(&indexOffset, bytes.data() + 8, sizeof(indexOffset));
-  size_t off = 12;
+  size_t off = kBlobStart;
   for (uint16_t i = 0; i < count && off + 2 <= indexOffset; ++i) {
     uint16_t len = 0;
     memcpy(&len, bytes.data() + off, sizeof(len));
@@ -236,4 +243,45 @@ TEST(FootnotePreviewStore, SlicedBuildMatchesTheBlockingBuild) {
   EXPECT_EQ(storeTexts(*slicedEpub), storeTexts(*blockingEpub));
   EXPECT_EQ(sliced.pageCount, blocking.pageCount);
   EXPECT_GT(storeTexts(*slicedEpub).size(), 0u);
+}
+
+// The resolved bit is what lets a build skip the resolver entirely, and what Background-B reads
+// to decide a spine is safe to pre-build without doing resolver work on the loop task. Both rest
+// on it meaning "scanned, nothing outstanding" — so a chapter with NO notes has to answer true as
+// well, or a book without footnotes would look permanently unresolved and never get look-ahead.
+TEST(FootnotePreviewStore, MarksSpinesResolvedIncludingOnesWithoutNotes) {
+  const std::string cacheDir = freshDir("resolved_bits");
+  auto epub = openBook(kCorpusEpub, cacheDir);
+
+  EXPECT_FALSE(FootnotePreviews::spineResolved(epub->getCachePath(), kChapterSpine));
+  EXPECT_FALSE(FootnotePreviews::spineResolved(epub->getCachePath(), kNotesSpine));
+
+  ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, kChapterSpine));
+  EXPECT_TRUE(FootnotePreviews::spineResolved(epub->getCachePath(), kChapterSpine));
+  EXPECT_FALSE(FootnotePreviews::spineResolved(epub->getCachePath(), kNotesSpine));
+
+  // notes.xhtml carries note bodies and no callers of its own. Nothing to store, bit set anyway.
+  ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, kNotesSpine));
+  EXPECT_TRUE(FootnotePreviews::spineResolved(epub->getCachePath(), kNotesSpine));
+}
+
+// With the bit set the resolver must not read the document at all — not the banked XHTML, not the
+// archive. Removing both is the only way to assert that from outside, and it is the property the
+// per-build cost rests on: before the bit existed, every rebuild re-scanned the whole spine with a
+// 9.2 KB parser just to discover nothing was missing.
+TEST(FootnotePreviewStore, ResolvedSpineIsNotScannedAgain) {
+  const std::string cacheDir = freshDir("no_rescan");
+  const std::string epubCopy = cacheDir + "/book.epub";
+  fs::copy_file(kCorpusEpub, epubCopy);
+  auto epub = openBook(epubCopy, cacheDir);
+
+  ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, kChapterSpine));
+  const std::vector<std::string> resolved = storeTexts(*epub);
+  ASSERT_FALSE(resolved.empty());
+
+  fs::remove(epubCopy);
+  fs::remove(Section::sectionHtmlCachePath(epub->getCachePath(), kChapterSpine));  // if it was banked
+
+  EXPECT_TRUE(FootnotePreviews::resolveSpine(*epub, kChapterSpine));
+  EXPECT_EQ(storeTexts(*epub), resolved);
 }

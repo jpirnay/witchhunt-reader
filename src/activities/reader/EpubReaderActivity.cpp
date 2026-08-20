@@ -1234,6 +1234,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // already-built runway counts toward the budget
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
+      } else if (getEffectiveInlineFootnotePreviews() &&
+                 !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine)) {
+        // This spine still owes the resolver work: its links have never been scanned, so a build
+        // of it would have to scan the document and stream every note file it points at, inside
+        // ONE loop-task slice. Look-ahead is not worth a stall the reader can feel mid-page.
+        // Leave the spine to the foreground build, which does the same work behind the "Indexing"
+        // popup, and move the cursor on. Costs the look-ahead exactly once per chapter with
+        // notes: the foreground build sets the bit, and B pre-builds it freely from then on.
+        LOG_DBG("ERS", "Background build spine=%d skipped: footnote previews not resolved yet", targetSpine);
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
         // The inflate ring is sized to the entry, so the extraction heap gate needs the
         // uncompressed size (one central-dir scan, once per target spine).

@@ -21,11 +21,20 @@
 namespace {
 
 constexpr uint32_t CACHE_MAGIC = 0x31504E46;  // "FNP1"
-constexpr uint16_t CACHE_VERSION = 1;
+// 2: added the resolved-spine bitmap. A v1 store is discarded rather than migrated — it
+// rebuilds a spine at a time as the reader moves, so there is nothing to preserve.
+constexpr uint16_t CACHE_VERSION = 2;
 constexpr size_t STREAM_CHUNK_BYTES = 1024;
 constexpr size_t MAX_HREF_BYTES = 191;
 constexpr uint32_t HEADER_BYTES = 12;    // magic + version + count + indexOffset
 constexpr uint32_t INDEX_ROW_BYTES = 8;  // keyHash + blobOffset
+// Bitmap of spines whose links have been scanned and whose every target is stored. Sits between
+// the header and the blob, one bit per spine, so the answer costs a 76-byte read. Fixed size: a
+// book with more spines than this simply has no bits and behaves as it did before, re-scanning
+// on each build. 512 covers every book in the corpus by a wide margin (the largest is 30).
+constexpr uint32_t RESOLVED_BITMAP_BYTES = 64;
+constexpr int RESOLVED_BITMAP_SPINES = static_cast<int>(RESOLVED_BITMAP_BYTES) * 8;
+constexpr uint32_t BLOB_START = HEADER_BYTES + RESOLVED_BITMAP_BYTES;
 constexpr size_t MAX_MARKER_BYTES = 15;
 
 uint32_t fnv1a32(const char* s) {
@@ -417,6 +426,25 @@ namespace FootnotePreviews {
 
 bool cacheExists(const std::string& bookCachePath) { return Storage.exists((bookCachePath + CACHE_FILENAME).c_str()); }
 
+bool spineResolved(const std::string& bookCachePath, const int spineIndex) {
+  if (spineIndex < 0 || spineIndex >= RESOLVED_BITMAP_SPINES) {
+    return false;  // outside the bitmap: never claim resolved, so the build still scans
+  }
+  FsFile file;
+  if (!Storage.openFileForRead("FNP", bookCachePath + CACHE_FILENAME, file)) {
+    return false;
+  }
+  uint32_t magic = 0;
+  uint16_t version = 0;
+  serialization::readPod(file, magic);
+  serialization::readPod(file, version);
+  uint8_t byte = 0;
+  const bool ok = magic == CACHE_MAGIC && version == CACHE_VERSION &&
+                  file.seekSet(HEADER_BYTES + static_cast<uint32_t>(spineIndex / 8)) && file.read(&byte, 1) == 1;
+  file.close();
+  return ok && (byte & (1u << (spineIndex % 8))) != 0;
+}
+
 namespace {
 
 // The store's on-disk shape is unchanged from the one-shot design: a header, a blob of
@@ -429,8 +457,9 @@ class Store {
   std::string path_;
   FsFile file_;
   NoThrowArray<IndexRow> index_;
-  uint32_t blobEnd_ = HEADER_BYTES;  // where the next blob record goes
-  size_t existing_ = 0;              // rows present before this pass
+  uint8_t resolved_[RESOLVED_BITMAP_BYTES] = {};
+  uint32_t blobEnd_ = BLOB_START;  // where the next blob record goes
+  size_t existing_ = 0;            // rows present before this pass
 
  public:
   // Reads an existing store, or starts an empty one. False means "cannot work with this store"
@@ -451,12 +480,16 @@ class Store {
     serialization::readPod(file_, indexOffset);
     const uint32_t expectedEnd = indexOffset + static_cast<uint32_t>(count) * INDEX_ROW_BYTES;
     if (magic != CACHE_MAGIC || version != CACHE_VERSION || count > FootnotePreviews::MAX_ENTRIES ||
-        expectedEnd != file_.size() || indexOffset < HEADER_BYTES) {
+        expectedEnd != file_.size() || indexOffset < BLOB_START) {
       LOG_ERR("FNP", "Store is not usable (magic=%08lx version=%u count=%u); starting a new one",
               static_cast<unsigned long>(magic), version, count);
       file_.close();
       Storage.remove(path.c_str());
       return index_.reserve(32);
+    }
+    if (file_.read(resolved_, RESOLVED_BITMAP_BYTES) != static_cast<int>(RESOLVED_BITMAP_BYTES)) {
+      file_.close();
+      return false;
     }
     blobEnd_ = indexOffset;
     if (!index_.reserve(count > 0 ? count : 32) || !file_.seekSet(indexOffset)) {
@@ -486,18 +519,27 @@ class Store {
   bool full() const { return index_.size() >= FootnotePreviews::MAX_ENTRIES; }
   size_t added() const { return index_.size() - existing_; }
 
+  static bool inBitmap(const int spineIndex) { return spineIndex >= 0 && spineIndex < RESOLVED_BITMAP_SPINES; }
+  bool isResolved(const int spineIndex) const {
+    return inBitmap(spineIndex) && (resolved_[spineIndex / 8] & (1u << (spineIndex % 8))) != 0;
+  }
+  void markResolved(const int spineIndex) {
+    if (inBitmap(spineIndex)) resolved_[spineIndex / 8] |= static_cast<uint8_t>(1u << (spineIndex % 8));
+  }
+
   // Opens the file positioned where the old index started: the first blob written here lands on
   // top of it, which is safe because the index is in RAM until commit() writes it back.
   bool beginAppend() {
     const bool opened = Storage.exists(path_.c_str()) ? Storage.openFileForUpdate("FNP", path_, file_)
                                                       : Storage.openFileForWrite("FNP", path_, file_);
     if (!opened) return false;
-    if (blobEnd_ == HEADER_BYTES) {
-      // Fresh store: lay down a placeholder header, patched by commit().
+    if (blobEnd_ == BLOB_START) {
+      // Fresh store: lay down a placeholder header and an empty bitmap, patched by commit().
       serialization::writePod(file_, CACHE_MAGIC);
       serialization::writePod(file_, CACHE_VERSION);
       serialization::writePod(file_, static_cast<uint16_t>(0));
       serialization::writePod(file_, static_cast<uint32_t>(0));
+      file_.write(resolved_, RESOLVED_BITMAP_BYTES);
     }
     return file_.seekSet(blobEnd_);
   }
@@ -525,6 +567,7 @@ class Store {
     serialization::writePod(file_, CACHE_VERSION);
     serialization::writePod(file_, static_cast<uint16_t>(index_.size()));
     serialization::writePod(file_, blobEnd_);
+    file_.write(resolved_, RESOLVED_BITMAP_BYTES);
     file_.close();
     return true;
   }
@@ -538,11 +581,32 @@ class Store {
   }
 };
 
+// Sets a spine's bit and writes the store back. Used on the paths that have nothing to append —
+// a chapter with no notes, or one whose notes are all stored already — where commit() is just the
+// bitmap write plus an unchanged index.
+bool markSpineResolved(Store& store, const int spineIndex) {
+  if (store.isResolved(spineIndex) || !Store::inBitmap(spineIndex)) {
+    return true;
+  }
+  if (!store.beginAppend()) {
+    return false;
+  }
+  store.markResolved(spineIndex);
+  return store.commit();
+}
+
 }  // namespace
 
 bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtmlPath) {
   const uint32_t startMs = millis();
   const std::string storePath = epub.getCachePath() + CACHE_FILENAME;
+
+  // Already done, in this session or an earlier one: no scan, no parser, no file reads beyond
+  // one 13-byte peek. Without this every rebuild of a spine — a font change, a variant miss —
+  // re-scanned the whole document with a 9.2 KB parser only to learn that nothing was missing.
+  if (spineResolved(epub.getCachePath(), spineIndex)) {
+    return true;
+  }
 
   auto chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
   if (!chunk) {
@@ -577,14 +641,18 @@ bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtm
       return false;
     }
   }
-  if (targets.size() == 0) {
-    return true;  // no notes in this chapter; nothing to resolve and nothing to write
-  }
-
   Store store;
   if (!store.open(storePath)) {
     LOG_ERR("FNP", "Could not open the preview store");
     return false;
+  }
+
+  // A chapter with no notes still gets its bit, and that matters: the bit means "scanned, nothing
+  // outstanding", not "has notes". Background-B reads it to decide whether a spine is safe to
+  // build without doing this work itself, and a book without footnotes must not look permanently
+  // unresolved to it.
+  if (targets.size() == 0) {
+    return markSpineResolved(store, spineIndex);
   }
 
   // Drop what is already known. A spine resolved in an earlier session lands here with every
@@ -648,6 +716,7 @@ bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtm
     }
   }
   const size_t added = store.added();
+  store.markResolved(spineIndex);
   if (!store.commit()) {
     LOG_ERR("FNP", "Could not write the preview store");
     return false;

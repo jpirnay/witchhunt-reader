@@ -52,6 +52,15 @@ constexpr size_t MIN_SUBTREE_BYTES = 8;  // below this, an id'd element is treat
 // True when the book's preview store exists (cheap existence probe).
 bool cacheExists(const std::string& bookCachePath);
 
+// True when this spine's links have been scanned and every note they point at is stored — i.e.
+// building it needs no resolve work at all. Costs one small read. Note the question is "is there
+// anything outstanding", NOT "does it have notes": a chapter without footnotes answers true.
+//
+// Background-B uses it to stay out of the resolver: look-ahead runs on the loop task in slices,
+// and a resolve that has documents to stream does not fit in one. B skips a spine that answers
+// false and leaves it to the foreground build, which already shows a popup while it works.
+bool spineResolved(const std::string& bookCachePath, int spineIndex);
+
 // Most footnote-shaped links one spine may contribute in a single pass. 8 bytes each, so the
 // scan's own footprint is bounded at 1 KB however many notes a chapter carries; links past the
 // cap keep their plain marker and stay navigable. A chapter with more than this many notes does
