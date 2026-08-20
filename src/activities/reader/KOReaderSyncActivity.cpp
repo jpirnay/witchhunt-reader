@@ -683,6 +683,29 @@ void KOReaderSyncActivity::onExit() {
   }
 }
 
+// DISPROVEN ON DEVICE 2026-08-20 -- KOSYNC_TEST_KEEP_FB does not work. Kept, with the numbers,
+// so the idea is not re-derived from the same wrong reasoning.
+//
+// The mistake was measuring FREE heap when the binding constraint is CONTIGUOUS heap. The sync
+// has two hard contiguous gates and they are both larger than what is left once WiFi is up:
+//   - the EPUB inflate ring for progress mapping: 32768 bytes
+//   - the TLS handshake:                          26624 bytes
+// With the framebuffer kept resident: free 81192 before WiFi -> 24960 after, contig 20468. Both
+// gates failed in the same run:
+//   [ERR] [ZIP]    Failed to init inflate reader
+//   [ERR] [KOX]    Failed to decompress spine=5 to temp file
+//   [ERR] [KOSync] Insufficient contiguous heap for TLS: 19444 available, 26624 required
+// The push never happened, and the progress mapping silently degraded to a coarse xpath
+// (/body/DocFragment[6]/body instead of .../div[1]/p[14]) -- the lossy percentage-only fallback
+// ensureRemotePositionMapped() warns about. So the release is load-bearing, not over-provisioning.
+//
+// What survives is the shape of the original idea: those two gates are exactly the "who would use
+// it" answer, and they are SEQUENTIAL (ensureRemotePositionMapped() tears the TLS session down
+// before mapping, precisely so the inflate can have the contiguous heap). A 48 KB region could
+// serve the 32 KB inflate ring and then the 26.6 KB handshake -- but that needs real plumbing
+// (Epub already takes an external BuildArena; wolfSSL needs WOLFSSL_STATIC_MEMORY +
+// wolfSSL_CTX_load_static_memory, not currently enabled), not merely declining to release.
+//
 // Font cache always; the secondary framebuffer only when it is actually needed gone.
 //
 // trimMemoryForNetworkSession() releases the ~48 KB framebuffer, and its header explains why:
@@ -698,10 +721,9 @@ void KOReaderSyncActivity::onExit() {
 // across the whole session, but reallocating the framebuffer afterwards leaves contig at 25588
 // against 65524 on a clean boot. That gap is what the post-sync reboot has really been covering.
 //
-// Keeping it resident is strictly better than lending it out when there is no borrower: the
-// display keeps anti-aliasing and normal differential refresh for the sync screens, there is
-// nothing to hand back, and returnSecondaryBuffer()/reallocSecondaryBuffer() never enter the
-// picture. Behind a flag until the WiFi-bring-up half of the trade is measured on device.
+// Keeping it resident LOOKED strictly better than lending it out when there is no borrower --
+// the display would keep anti-aliasing and normal refresh, and nothing would need handing back.
+// The device disagreed; see the disproof above.
 void KOReaderSyncActivity::trimForNetwork() {
 #ifdef KOSYNC_TEST_KEEP_FB
   if (auto* fontCache = renderer.getFontCacheManager()) {
