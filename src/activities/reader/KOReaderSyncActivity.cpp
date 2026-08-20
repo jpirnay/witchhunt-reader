@@ -635,6 +635,28 @@ void KOReaderSyncActivity::onExit() {
     WiFi.disconnect(false);
     delay(30);
     logWifiTeardownHeapProbe();
+#ifdef KOSYNC_TEST_NO_REBOOT
+    // Experiment: skip the post-sync reboot so a SECOND sync can run in the same boot, which is
+    // the only way to tell a one-time cost from a per-session leak. It also tests the thing the
+    // reboot exists for, directly -- resumeReader() has already queued goToReader(), so returning
+    // here rebuilds the reader in place on a heap that has just hosted a WiFi/TLS session.
+    //
+    // Restoring the secondary framebuffer is part of the experiment, not incidental:
+    // trimMemoryForNetworkSession() released it with no realloc pairing precisely because every
+    // caller reboots (see its header). Without this the reader would come back in degraded
+    // single-buffer mode and the measurement would not represent the steady state we are asking
+    // about. Whether this realloc SUCCEEDS is itself a headline result -- it is the ~48-52 KB
+    // contiguous request that the fragmentation claim was always about.
+    LOG_INF("KOSync", "TEST: skipping the post-sync reboot; rebuilding the reader in place");
+    if (!renderer.hasSecondaryBuffer()) {
+      const bool ok = renderer.reallocSecondaryBuffer();
+      renderer.setSingleBufferFastDiff(!ok);
+      LOG_INF("KOSync", "TEST: secondary framebuffer realloc -> %s (free=%lu contig=%lu)", ok ? "OK" : "FAILED",
+              static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    }
+    return;
+#else
     switch (postAction_) {
       case KOReaderSyncPostAction::Home:
       case KOReaderSyncPostAction::OpdsSearch:
@@ -656,6 +678,7 @@ void KOReaderSyncActivity::onExit() {
         silentRestartToReader();
         break;
     }
+#endif
   }
 }
 
@@ -691,13 +714,22 @@ void KOReaderSyncActivity::logWifiTeardownHeapProbe() {
   const uint32_t freeAfter = esp_get_free_heap_size();
   const uint32_t contigAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
 
-  LOG_INF("KOSync", "WiFi teardown heap probe: free %lu -> %lu -> %lu | contig %lu -> %lu -> %lu",
-          static_cast<unsigned long>(heapBeforeWifiFree_), static_cast<unsigned long>(freeBeforeTeardown),
-          static_cast<unsigned long>(freeAfter), static_cast<unsigned long>(heapBeforeWifiContig_),
-          static_cast<unsigned long>(contigBeforeTeardown), static_cast<unsigned long>(contigAfter));
+  // Counts WiFi sessions within THIS boot. The whole point of the no-reboot experiment is
+  // whether the free-heap shortfall is paid once (netif / default event loop, created once and
+  // never destroyed) or on every session (a real leak, which would make removing the reboot a
+  // slow bleed). Session 2's delta against session 1 is the answer.
+  static uint8_t sessionInBoot = 0;
+  ++sessionInBoot;
+
+  LOG_INF("KOSync", "WiFi teardown heap probe [session %u]: free %lu -> %lu -> %lu | contig %lu -> %lu -> %lu",
+          static_cast<unsigned>(sessionInBoot), static_cast<unsigned long>(heapBeforeWifiFree_),
+          static_cast<unsigned long>(freeBeforeTeardown), static_cast<unsigned long>(freeAfter),
+          static_cast<unsigned long>(heapBeforeWifiContig_), static_cast<unsigned long>(contigBeforeTeardown),
+          static_cast<unsigned long>(contigAfter));
   LOG_INF("KOSync",
-          "WiFi teardown recovery: free %+ld contig %+ld vs before-WiFi baseline (reader needs ~49152 contig)",
-          static_cast<long>(freeAfter) - static_cast<long>(heapBeforeWifiFree_),
+          "WiFi teardown recovery [session %u]: free %+ld contig %+ld vs before-WiFi baseline (reader needs ~49152 "
+          "contig)",
+          static_cast<unsigned>(sessionInBoot), static_cast<long>(freeAfter) - static_cast<long>(heapBeforeWifiFree_),
           static_cast<long>(contigAfter) - static_cast<long>(heapBeforeWifiContig_));
 #endif
 }
