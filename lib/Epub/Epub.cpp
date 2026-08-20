@@ -32,6 +32,10 @@
 namespace {
 
 // Wrapper around ImageFormatDetector that reads from file and seeks to origin
+// Bytes detectCoverImageFormat() sniffs. Also the threshold at which "this is not a format we
+// support" becomes a PERMANENT answer rather than "the extractor hasn't got that far yet".
+constexpr uint32_t COVER_FORMAT_SNIFF_BYTES = 8;
+
 ImageFormatDetector::Format detectCoverImageFormat(FsFile& imageFile) {
   if (!imageFile || !imageFile.seek(0)) {
     return ImageFormatDetector::Format::Unknown;
@@ -1014,6 +1018,24 @@ bool Epub::coverImageCachedValidOnly() const {
   return nonEmpty && fmt != ImageFormatDetector::Format::Unknown;
 }
 
+bool Epub::coverImageCachedButUnsupported() const {
+  const auto coverCachePath = getCoverImageCachePath();
+  if (!Storage.exists(coverCachePath.c_str())) return false;
+  FsFile existing;
+  if (!Storage.openFileForRead("EBP", coverCachePath, existing)) {
+    existing.close();
+    return false;  // can't open to validate — treat as transient, not as a permanent verdict
+  }
+  const uint32_t size = existing.size();
+  const auto fmt = detectCoverImageFormat(existing);
+  existing.close();
+  // detectCoverImageFormat sniffs the first 8 bytes only, and those are the first bytes the
+  // sliced extractor writes — so a PARTIALLY extracted PNG/JPEG/GIF already sniffs correctly
+  // and never reaches this verdict. Requiring the full 8 bytes is what keeps a mid-extraction
+  // file (0..7 bytes on disk) from being condemned as undecodable.
+  return size >= COVER_FORMAT_SNIFF_BYTES && fmt == ImageFormatDetector::Format::Unknown;
+}
+
 bool Epub::coverImageCachedAndValid(bool allowExtract) const {
   // Fast path: already-extracted and valid — no inflate needed in either mode.
   if (coverImageCachedValidOnly()) return true;
@@ -1220,6 +1242,17 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
     return ThumbResult::StructurallyAbsent;
   }
 
+  // An extracted-but-undecodable cover is structural, and must be answered BEFORE the
+  // transient bail below: coverImageCachedAndValid() reports false for it exactly as it does
+  // for a not-yet-extracted cover, so without this the caller re-runs the extractor, gets the
+  // same bytes, and defers again — forever (observed: a .png that is really an AVIF, re-inflated
+  // from the ZIP every ~1.3 s). The unsupported-format branch further down never sees it.
+  if (coverImageCachedButUnsupported()) {
+    LOG_ERR("EBP", "Cached cover.img is not a supported format for h=%d — writing structural sentinel", height);
+    writeThumbSentinel(getThumbBmpPath(height));
+    return ThumbResult::StructurallyAbsent;
+  }
+
   if (!coverImageCachedAndValid(allowExtract)) {
     // cover.img not yet extracted (or extraction failed transiently). No sentinel — let the
     // sliced extractor produce it, or retry next pass/boot. The caller counts these.
@@ -1292,6 +1325,14 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract) con
   // since no amount of extraction or retry can conjure a cover that the OPF doesn't declare.
   if (getCoverItemHref().empty()) {
     LOG_DBG("EBP", "No cover item for %dx%d — writing structural sentinel", width, height);
+    writeThumbSentinel(getThumbBmpPath(width, height));
+    return ThumbResult::StructurallyAbsent;
+  }
+
+  // See the h= overload above: extracted-but-undecodable must be answered before the transient
+  // bail, or the extractor is re-run forever on bytes that can never decode.
+  if (coverImageCachedButUnsupported()) {
+    LOG_ERR("EBP", "Cached cover.img is not a supported format for %dx%d — writing structural sentinel", width, height);
     writeThumbSentinel(getThumbBmpPath(width, height));
     return ThumbResult::StructurallyAbsent;
   }

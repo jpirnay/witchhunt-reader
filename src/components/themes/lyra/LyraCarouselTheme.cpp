@@ -375,7 +375,11 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
       FsFile file;
       if (Storage.openFileForRead("HOME", thumbPath, file)) {
         Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        // The no-cover marker must never be drawn — scaling a 1x1 BMP into the tile would paint a
+        // solid block. Leaving hasCover/tilePending false drops through to the no-cover tile below,
+        // which is a better picture than the blank box the old slot-sized placeholder produced.
+        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
           // Height always fills the tile. Only crop horizontally if the cover is
           // wider than the tile; narrow covers get white space on the sides.
           const float bmpRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
@@ -426,6 +430,17 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
                                  /*roundTopRight=*/false, /*roundBottomLeft=*/roundLeft,
                                  /*roundBottomRight=*/roundRight, Color::Black);
         renderer.drawIcon(CoverIcon, x + maxW / 2 - 16, y + 8, 32, 32);
+        // Name the book inside the tile. The centre tile also carries author/title underneath, but
+        // the two SIDE tiles have no label at all — without this a coverless book is unidentifiable
+        // until it is scrolled into the centre. Drawn in the white upper third, under the icon.
+        const int titleY = y + 8 + 32 + 4;
+        const int titleLineH = renderer.getLineHeight(SMALL_FONT_ID);
+        // Keep inside the white band: the black block starts at maxH/3.
+        if (titleY + titleLineH <= y + maxH / 3) {
+          const std::string tileTitle = renderer.truncatedText(SMALL_FONT_ID, book.title.c_str(), maxW - 8);
+          const int tileTitleW = renderer.getTextWidth(SMALL_FONT_ID, tileTitle.c_str());
+          renderer.drawText(SMALL_FONT_ID, x + (maxW - tileTitleW) / 2, titleY, tileTitle.c_str(), true);
+        }
       }
     }
     return true;

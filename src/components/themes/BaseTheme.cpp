@@ -462,7 +462,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     FsFile file;
     if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
       Bitmap bitmap(file);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+      // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
+      // Falling through to the existing no-cover branch shows the theme's own tile instead.
+      if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+          !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
         hasCoverImage = true;
         const int imgWidth = bitmap.getWidth();
         const int imgHeight = bitmap.getHeight();
@@ -513,7 +516,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       FsFile file;
       if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
         Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
+        // Falling through to the existing no-cover branch shows the theme's own tile instead.
+        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
           LOG_DBG("THEME", "Rendering bmp");
 
           renderer.fillRect(bookX, bookY, bookWidth, bookHeight, false);

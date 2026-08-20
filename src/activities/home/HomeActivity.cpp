@@ -196,7 +196,7 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
     bool allWritten = !slots.empty();
     for (const auto& slot : slots) {
       if (!ReaderActivity::isCoverThumbComplete(slot.path, slot.width, slot.height) &&
-          !ReaderActivity::writeCoverPlaceholderBmp(slot.path, slot.width, slot.height)) {
+          !ReaderActivity::writeCoverPlaceholderBmp(slot.path)) {
         allWritten = false;
       }
     }

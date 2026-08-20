@@ -175,6 +175,10 @@ class Epub {
   bool ensureCoverImageCached() const;
   // True if cover.img is already extracted and a supported format (no ZIP inflate).
   bool coverImageCachedValidOnly() const;
+  // True if cover.img is on disk with a complete header that is NOT a format we decode.
+  // Distinguishes "not extracted yet" (retry) from "extracted, undecodable" (give up):
+  // coverImageCachedValidOnly() answers false for both, which would otherwise loop forever.
+  bool coverImageCachedButUnsupported() const;
   // True if cover.img is usable now. allowExtract=false never inflates — it only reports
   // whether an already-cached cover.img exists, deferring extraction to a sliced session.
   bool coverImageCachedAndValid(bool allowExtract) const;
