@@ -667,3 +667,123 @@ TEST(SaxParser, PairedBrAndImgInBodyAreDropped) {
   EXPECT_TRUE(sawTwo);
   EXPECT_TRUE(sawAfter);
 }
+
+// ---------------------------------------------------------------------------
+// Trailing data after the root element (crosspoint-reader#3134)
+// ---------------------------------------------------------------------------
+
+TEST(SaxParser, TrailingPaddingBytesAfterRootAreIgnored) {
+  // Real EPUBs carry padding bytes after </html>. Every callback must still fire,
+  // the parse must succeed, and the repair must be reported.
+  const std::string xml = std::string("<html><body>hello</body></html>") + std::string(3, '\x05');
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  EXPECT_TRUE(p.feed(bytes, xml.size()));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTrailingDataIgnored);
+
+  ASSERT_EQ(c.events.size(), 5u);
+  EXPECT_EQ(c.events[2].text, "hello");
+  EXPECT_EQ(c.events[4].type, Event::Type::End);
+  EXPECT_EQ(c.events[4].name, "html");
+}
+
+TEST(SaxParser, TrailingDataToleranceAppliesToStrictParsers) {
+  // The latch is the root element close, not a tag name, so the strict-XML
+  // parsers (OPF, NCX, container, page-map, OPDS) get the same tolerance.
+  const std::string xml = std::string("<package><metadata/></package>") + std::string(2, '\x02');
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  EXPECT_TRUE(p.feed(bytes, xml.size()));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTrailingDataIgnored);
+  EXPECT_TRUE(p.isStopped());
+}
+
+TEST(SaxParser, TrailingDataInASeparateFeedIsIgnored) {
+  // The padding usually arrives in the last chunk of the streamed spine, after
+  // the chunk that closed the root — and every later chunk must be a no-op too.
+  const char* doc = "<html><body>hi</body></html>";
+  const char* pad = "\x10\x10\x10";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  ASSERT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(doc), strlen(doc)));
+  const size_t eventsAtRootClose = c.events.size();
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(pad), strlen(pad)));
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(pad), strlen(pad)));
+  EXPECT_TRUE(p.finalize());
+
+  EXPECT_EQ(c.events.size(), eventsAtRootClose);  // no callbacks after the root closed
+}
+
+TEST(SaxParser, MalformedMarkupBeforeRootCloseStillFails) {
+  // The tolerance must not swallow a real error inside the document: the same
+  // class of syntax error one tag earlier is corruption, not trailing junk.
+  const char* xml = "<html><body>hello</body></wrong></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_FALSE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_STRNE(p.errorString(), "");
+}
+
+TEST(SaxParser, SiblingAfterRootCloseIsIgnoredNotParsed) {
+  // A well-formed-looking second root is still past the end of the document.
+  // yxml rejects it; we stop there rather than failing the whole parse.
+  const char* xml = "<html><body>hi</body></html><html><body>ignored</body></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_TRUE(p.finalize());
+  for (const auto& e : c.events) {
+    EXPECT_NE(e.text, "ignored");
+  }
+}
+
+TEST(SaxParser, TrailingWhitespaceKeepsFlagsClear) {
+  // Whitespace after the root is legal XML: no error, and nothing to report.
+  const char* xml = "<html><body>hi</body></html>\n\n";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_EQ(p.truncationFlags(), 0u);
+  EXPECT_FALSE(p.isStopped());
+}
+
+TEST(SaxParser, DeepNestingDoesNotLatchRootClosedEarly) {
+  // The latch counts opens/closes without a capacity limit, unlike the fixed
+  // kMaxDepth name stack: a document nested past that stack must NOT look like
+  // it closed its root partway through, or later corruption would be ignored.
+  std::string xml = "<r>";
+  constexpr int kDeep = 64;  // <r> plus this many: deeper than the element-name stack
+  for (int i = 0; i < kDeep; ++i) xml += "<d>";
+  for (int i = 0; i < kDeep; ++i) xml += "</d>";
+  xml += "</wrong>";  // corruption INSIDE <r>, must still fail
+  xml += "</r>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  EXPECT_FALSE(p.feed(reinterpret_cast<const uint8_t*>(xml.data()), xml.size()));
+}

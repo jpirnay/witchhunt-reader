@@ -85,6 +85,14 @@ struct SaxParserImpl {
   char elemStack[kMaxDepth][kElemNameLen];
   size_t elemDepth = 0;
 
+  // Open-element count and root-closed latch, for the trailing-data tolerance in
+  // dispatchToken(). Deliberately NOT elemDepth: that one stops growing at
+  // kMaxDepth (the name stack is fixed-capacity) while still counting every
+  // close, so an over-deep document would drive it to zero -- and latch the root
+  // as closed -- with real elements still open. This counter has no capacity.
+  size_t openElems = 0;
+  bool rootClosed = false;
+
   // Running byte offset (updated once per yxml_parse call).
   uint32_t byteOffset = 0;
 
@@ -264,6 +272,31 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
     }
     impl->byteOffset = static_cast<uint32_t>(impl->x.total);
     if (r < 0) {
+      // ---------------------------------------------------------------------------
+      // Trailing non-XML data after the root element
+      //
+      // Real EPUBs turn up with padding bytes (\x05\x05..., \x02\x02, \x10\x10...)
+      // appended after </html>. Browsers and HTML parsers ignore anything past the
+      // root close; yxml is a strict XML engine and reports a syntax error, which
+      // fails the whole chapter parse even though every byte of content was already
+      // delivered. On this firmware that lands as a section cache marked
+      // truncatedCache, so the finished build is discarded, rebuilt on the released
+      // path and the reading position resets -- for every spine of the book.
+      //
+      // Once the root element has closed the document is complete, so treat any
+      // error past that point as end-of-input: stop (no further callbacks, and
+      // finalize() reports success) and record the repair for the caller's log.
+      //
+      // Ported from crosspoint-reader#3134 by Yo'av Moshe (@bjesus), which fixed the
+      // same failure in their expat backend by latching on </html>. The latch here
+      // is the root element close instead of a tag name, so it covers the OPF, NCX,
+      // nav and page-map parsers too.
+      // ---------------------------------------------------------------------------
+      if (impl->rootClosed) {
+        impl->truncFlags |= SaxParser::kTrailingDataIgnored;
+        stopped_ = true;
+        return true;
+      }
       errorLine_ = static_cast<int>(impl->x.line);
       errorString_ = "yxml parse error";
       return false;
@@ -272,6 +305,7 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       case YXML_ELEMSTART:
         if (impl->inOpeningTag) fireStart(impl);
         flushChar(impl);
+        ++impl->openElems;
         if (strlen(impl->x.elem) > kElemNameLen - 1) impl->truncFlags |= SaxParser::kTruncElemName;
         strncpy(impl->pendingElem, impl->x.elem, kElemNameLen - 1);
         impl->pendingElem[kElemNameLen - 1] = '\0';
@@ -311,6 +345,7 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
           impl->endCb(impl->userData, impl->elemStack[impl->elemDepth - 1]);
         }
         if (impl->elemDepth > 0) --impl->elemDepth;
+        if (impl->openElems > 0 && --impl->openElems == 0) impl->rootClosed = true;
         break;
       case YXML_PISTART:
       case YXML_PICONTENT:
