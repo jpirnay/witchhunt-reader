@@ -4,7 +4,10 @@
 // it is NOT part of the shipping firmware and has no callers otherwise.
 #if defined(SECURENET_SELFTEST)
 
+#include <HalClock.h>
 #include <Logging.h>
+
+#include <ctime>
 
 #include "CrossPointRoots.h"
 #include "SecureHttpClient.h"
@@ -27,9 +30,20 @@ void secureNetSelfTest() {
       "https://sync.koreader.rocks/",
       "https://timeapi.io/api/time/current/zone?timeZone=UTC",
   };
+  // The measurement env can be run straight off a cold boot, where an RTC-less board sits at
+  // 1970 and the curated roots fail to LOAD (their notBefore reads as "in the future"). Without
+  // this every host below reports a connect failure that says nothing about reachability — the
+  // thing this self-test exists to measure.
+  const bool clockReady = HalClock::ensureUsableForTls();
+  if (!clockReady) {
+    LOG_INF("SNTST", "No trusted clock (epoch %lld); tolerating certificate date errors only",
+            static_cast<long long>(time(nullptr)));
+  }
+
   for (const char* url : kHosts) {
     SecureHttpClient http;
     http.setCACert(CROSSPOINT_ROOTS_PEM);
+    http.setAllowCertificateDateErrors(!clockReady);
     http.setTimeout(15000);
     const int status = http.GET(url);
     LOG_INF("SNTST", "GET %s -> status=%d insecure=%d bodyLen=%u", url, status,

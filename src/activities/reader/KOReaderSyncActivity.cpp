@@ -32,6 +32,11 @@ void logSyncMemSnapshot(const char* stage) {
   LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
 }
 
+// Freshness policy, on top of HalClock::ensureUsableForTls()'s correctness floor. The floor
+// guarantees only "inside the certs' validity window", which is all TLS needs; this additionally
+// keeps the timestamp we upload to the sync server from drifting. Note the two answer different
+// questions — an unset clock reads as `now <= 0` here, but it is ensureUsableForTls() that makes
+// the handshake possible at all, so this must never be the only guard before a TLS call.
 bool shouldSyncNtpNow() {
   const time_t lastSync = HalClock::lastSyncTime();
   const time_t now = HalClock::now();
@@ -70,6 +75,11 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   } else {
     LOG_DBG("KOSync", "Skipping NTP sync (recently synced)");
   }
+  // Independent of the freshness policy above: guarantee the clock is at least inside the
+  // certificate validity window, or the trust store will not load. Cheap when the sync above
+  // just ran (one time() comparison) and it is what makes this path's safety deliberate rather
+  // than a side effect of shouldSyncNtpNow() happening to return true on an unset clock.
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
 
   {
     RenderLock lock(*this);

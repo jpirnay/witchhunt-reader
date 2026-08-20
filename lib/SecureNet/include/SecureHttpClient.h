@@ -44,6 +44,8 @@ class SecureHttpClient {
   // --- configuration (before request) ---
   void setCACert(const char* rootCA) { _rootCA = rootCA; }
   void setAllowInsecureFallback(bool allow) { _allowInsecureFallback = allow; }
+  // See SecureClient::setAllowCertificateDateErrors().
+  void setAllowCertificateDateErrors(bool allow) { _allowCertificateDateErrors = allow; }
   void setTimeout(uint32_t ms) { _timeoutMs = ms; }
   void setUserAgent(const std::string& ua) { _userAgent = ua; }
   void setBasicAuth(const std::string& user, const std::string& pass) {
@@ -146,6 +148,7 @@ class SecureHttpClient {
   // config
   const char* _rootCA = nullptr;
   bool _allowInsecureFallback = true;
+  bool _allowCertificateDateErrors = false;
   uint32_t _timeoutMs = 15000;
   std::string _userAgent = "CrossPoint-ESP32";
   std::string _user;

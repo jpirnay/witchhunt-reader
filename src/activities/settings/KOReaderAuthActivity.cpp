@@ -1,10 +1,12 @@
 #include "KOReaderAuthActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
 
+#include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncClient.h"
 #include "MappedInputManager.h"
@@ -36,6 +38,14 @@ void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
     }
   }
   requestUpdateAndWait();  // show status before blocking TLS call
+
+  // Set the clock before the first TLS connect. This is what was missing: unlike the sync
+  // activity (and HttpDownloader) this path went straight from "WiFi up" to a wolfSSL connect,
+  // and on these RTC-less boards a cold boot that discarded a stale NVS epoch is sitting at
+  // 1970 — which puts every curated root's notBefore in the future and makes the trust store
+  // fail to LOAD, long before any certificate is seen. Not fatal if it fails: SecureClient then
+  // waives certificate dates only, keeping chain/signature/hostname checks intact.
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
 
   if (mode == Mode::REGISTER) {
     performRegistration();
