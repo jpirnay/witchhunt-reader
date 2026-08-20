@@ -264,8 +264,15 @@ bool ReaderActivity::isCoverThumbComplete(const std::string& path, int expectedW
   return ok;
 }
 
-bool ReaderActivity::writeCoverPlaceholderBmp(const std::string& path, int width, int height) {
-  if (width <= 0 || height <= 0) return false;
+bool ReaderActivity::writeCoverPlaceholderBmp(const std::string& path) {
+  // A 1x1 marker, not a slot-sized picture. The old full-size version wrote an empty framed box
+  // that every theme then blitted over the tile — so a book whose cover we gave up on rendered
+  // WORSE than a book with no cover at all, which gets the theme's proper no-cover tile. The
+  // marker keeps the on-disk bookkeeping (complete BMP => isCoverThumbComplete => never
+  // re-decoded, and smaller than any slot so it never trips the oversize regeneration path)
+  // while letting the themes recognise it and draw that tile. Also 62 bytes instead of ~23 KB.
+  const int width = UITheme::COVER_PLACEHOLDER_DIM;
+  const int height = UITheme::COVER_PLACEHOLDER_DIM;
   const int rowBytes = ((width + 31) / 32) * 4;  // 1-bit rows padded to 4 bytes
   uint8_t row[256];                              // cover thumbs are <=464px wide (rowBytes<=60)
   if (rowBytes > static_cast<int>(sizeof(row))) return false;
@@ -303,17 +310,10 @@ bool ReaderActivity::writeCoverPlaceholderBmp(const std::string& path, int width
   const uint8_t white[4] = {255, 255, 255, 0};  // palette index 1 = white
   f.write(black, 4);
   f.write(white, 4);
-  // Pixel rows (top-down): white interior (bit 1) with a 1px black frame (bit 0). A 1-bit BMP draws
-  // only its dark pixels, so this renders as an empty framed box — a clear "no cover" placeholder.
-  const int lastBit = width - 1;
+  // Pixel rows (top-down). Nothing here is ever displayed — the themes branch on the 1x1 size
+  // before drawing — so the pixel is simply white (bit 1) to keep the file a well-formed BMP.
   for (int y = 0; y < height; y++) {
-    if (y == 0 || y == height - 1) {
-      memset(row, 0x00, rowBytes);  // full black border row
-    } else {
-      memset(row, 0xFF, rowBytes);                                                           // white
-      row[0] = static_cast<uint8_t>(row[0] & 0x7F);                                          // black left edge (col 0)
-      row[lastBit / 8] = static_cast<uint8_t>(row[lastBit / 8] & ~(0x80 >> (lastBit % 8)));  // right edge
-    }
+    memset(row, 0xFF, rowBytes);
     f.write(row, rowBytes);
   }
   f.close();

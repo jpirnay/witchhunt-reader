@@ -144,7 +144,7 @@ bool RecentBooksActivity::loadNextCover() {
         // Otherwise write a valid placeholder BMP so future scans treat the book as resolved and stop
         // re-opening the EPUB. (A transient post-failure retry — wasPostFailure — is skipped here too.)
         if (ReaderActivity::sidecarCoverPath(book.path).empty() &&
-            ReaderActivity::writeCoverPlaceholderBmp(thumbPath, tw, th)) {
+            ReaderActivity::writeCoverPlaceholderBmp(thumbPath)) {
           LOG_DBG("RBA", "No extractable cover for %s — wrote placeholder", book.path.c_str());
           RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
           book.coverBmpPath = placeholder;
