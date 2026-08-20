@@ -491,10 +491,28 @@ void WifiSelectionActivity::issueWifiBegin(bool useHint) {
   const char* pwd = (selectedRequiresPassword && !enteredPassword.empty()) ? enteredPassword.c_str() : nullptr;
   const unsigned long preBeginMs = millis() - connectionStartTime;
   if (hinted) {
-    LOG_DBG("WIFI", "WiFi.begin -> %s ch=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x scan=fast dhcp=yes (pre-begin %lu ms)",
+    // Channel only -- deliberately NOT the BSSID, even though we have one cached.
+    //
+    // Pinning conf.sta.bssid_set made the first attempt fragile for no gain. Device capture:
+    //   WiFi.begin -> PYSY ch=11 bssid=f0:9f:... scan=fast
+    //   EVT disconnected at 2462 ms: reason=201 (NO_AP_FOUND)
+    //   EVT associated at 2614 ms
+    // The AP was plainly there -- the driver's own retry associated 150 ms later -- but the
+    // BSSID-pinned probe on that channel got no answer and burned the ~2.4 s scan timeout first.
+    // It is a coin flip: the same build associated in 201 ms on a run where the pinned probe
+    // happened to hit. That is the whole of the "mysterious flat ~2.5 s association", and our
+    // HINT_ATTEMPT_TIMEOUT_MS never sees it because the driver's internal retry rescues it.
+    //
+    // The channel is the half that earns its keep: it avoids sweeping 13 channels. Matching any
+    // BSSID for this SSID on that channel is strictly more robust, costs nothing on a
+    // single-AP network, and is the correct behaviour for mesh/roaming, where the cached radio
+    // is exactly the one that may have gone away.
+    LOG_DBG("WIFI",
+            "WiFi.begin -> %s ch=%d (cached bssid %02x:%02x:%02x:%02x:%02x:%02x not pinned) scan=fast "
+            "dhcp=yes (pre-begin %lu ms)",
             selectedSSID.c_str(), currentAttemptChannel, currentAttemptBssid[0], currentAttemptBssid[1],
             currentAttemptBssid[2], currentAttemptBssid[3], currentAttemptBssid[4], currentAttemptBssid[5], preBeginMs);
-    WiFi.begin(selectedSSID.c_str(), pwd, currentAttemptChannel, currentAttemptBssid, true);
+    WiFi.begin(selectedSSID.c_str(), pwd, currentAttemptChannel, nullptr, true);
   } else {
     LOG_DBG("WIFI", "WiFi.begin -> %s (no hint, scan=all-channel, pre-begin %lu ms)", selectedSSID.c_str(), preBeginMs);
     if (pwd) {

@@ -1,5 +1,6 @@
 #include "KOReaderSyncActivity.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -88,7 +89,7 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   requestUpdate();
 
   logSyncMemSnapshot("before_performSync");
-  trimMemoryForNetworkSession(renderer, "KOSync");
+  trimForNetwork();
   logSyncMemSnapshot("after_trim_before_performSync");
 
   performSync();
@@ -519,7 +520,7 @@ void KOReaderSyncActivity::performUpload() {
 
   // Sync UI rendering can repopulate glyph caches after the initial GET / compare
   // phase, so trim again right before the upload request.
-  trimMemoryForNetworkSession(renderer, "KOSync");
+  trimForNetwork();
   logSyncMemSnapshot("after_trim_before_updateProgress");
 
   // Capture upload-phase memory separately from fetch phase to diagnose failures
@@ -603,7 +604,7 @@ void KOReaderSyncActivity::onEnter() {
   // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
   // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
   // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
-  trimMemoryForNetworkSession(renderer, "KOSync");
+  trimForNetwork();
   logSyncMemSnapshot("after_trim_before_wifi");
   // Baseline for the teardown probe in onExit(). Captured here, after the trim and before the
   // radio comes up, so the comparison isolates what the WiFi/TLS session itself did to the heap.
@@ -648,7 +649,7 @@ void KOReaderSyncActivity::onExit() {
     // about. Whether this realloc SUCCEEDS is itself a headline result -- it is the ~48-52 KB
     // contiguous request that the fragmentation claim was always about.
     LOG_INF("KOSync", "TEST: skipping the post-sync reboot; rebuilding the reader in place");
-    if (!renderer.hasSecondaryBuffer()) {
+    if (!renderer.hasSecondaryBuffer()) {  // no-op when the borrow path already handed it back
       const bool ok = renderer.reallocSecondaryBuffer();
       renderer.setSingleBufferFastDiff(!ok);
       LOG_INF("KOSync", "TEST: secondary framebuffer realloc -> %s (free=%lu contig=%lu)", ok ? "OK" : "FAILED",
@@ -680,6 +681,38 @@ void KOReaderSyncActivity::onExit() {
     }
 #endif
   }
+}
+
+// Font cache always; the secondary framebuffer only when it is actually needed gone.
+//
+// trimMemoryForNetworkSession() releases the ~48 KB framebuffer, and its header explains why:
+// WiFi bring-up is allocation-heavy and phy_init has been seen aborting on RF calibration memory
+// with the buffer resident. But that is a general contract for network activities, and this one
+// does not fit it. Measured here: 130508 free with it released against a WiFi+TLS peak of
+// ~54.5 KB, i.e. ~76 KB of headroom -- the sync is over-provisioned by roughly the size of the
+// buffer it gives up.
+//
+// And giving it up is not free. Nothing in a sync USES that memory (the web server genuinely
+// does -- it releases BOTH buffers and never draws again), so releasing only buys a reclaim
+// later, and the reclaim is what damages the heap layout: contig is 61428 -> 61428 -> 61428
+// across the whole session, but reallocating the framebuffer afterwards leaves contig at 25588
+// against 65524 on a clean boot. That gap is what the post-sync reboot has really been covering.
+//
+// Keeping it resident is strictly better than lending it out when there is no borrower: the
+// display keeps anti-aliasing and normal differential refresh for the sync screens, there is
+// nothing to hand back, and returnSecondaryBuffer()/reallocSecondaryBuffer() never enter the
+// picture. Behind a flag until the WiFi-bring-up half of the trade is measured on device.
+void KOReaderSyncActivity::trimForNetwork() {
+#ifdef KOSYNC_TEST_KEEP_FB
+  if (auto* fontCache = renderer.getFontCacheManager()) {
+    fontCache->clearCache();
+  }
+  LOG_INF("KOSync", "TEST: keeping the secondary framebuffer resident (hasSecondary=%d free=%lu contig=%lu)",
+          renderer.hasSecondaryBuffer() ? 1 : 0, static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+#else
+  trimMemoryForNetworkSession(renderer, "KOSync");
+#endif
 }
 
 // Measures whether a WiFi/TLS session really does leave the heap unusable.

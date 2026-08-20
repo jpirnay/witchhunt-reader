@@ -122,6 +122,7 @@ class KOReaderSyncActivity final : public Activity {
   // WiFi.getMode() because intermediate paths call esp_wifi_stop() to drop the
   // radio while user reads the result, which makes WiFi.getMode() return WIFI_MODE_NULL.
   bool wifiActivated = false;
+
   // Pre-WiFi heap baseline for logWifiTeardownHeapProbe(), captured in onEnter() after the trim.
   uint32_t heapBeforeWifiFree_ = 0;
   uint32_t heapBeforeWifiContig_ = 0;
@@ -156,6 +157,9 @@ class KOReaderSyncActivity final : public Activity {
   void closeCancelled();
   // Diagnostic only (see the definition): does a full WiFi teardown give the heap back?
   void logWifiTeardownHeapProbe();
+  // Pre-network memory trim for this activity (see the definition for why it is not simply
+  // trimMemoryForNetworkSession).
+  void trimForNetwork();
   void resumeReader(KOReaderSyncOutcomeState outcome, const SyncResult* appliedResult = nullptr);
   bool ensureEpubLoadedForMapping();
   void releaseEpubForMapping();
