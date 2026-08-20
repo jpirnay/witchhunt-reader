@@ -49,7 +49,16 @@ static time_t timegm_compat(const struct tm* tm) {
 // ---- RTC-memory state (survives deep sleep, not cold boot) ----------------
 
 static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1D;
-static constexpr uint32_t CLOCK_RTC_FLAG_LP_VALID = 0x00000001u;
+// Set when the LP timer will KEEP RUNNING from this capture until the next restore(), so the
+// elapsed-time correction in restore() is usable. That is true for every reboot (a CPU reset
+// leaves the RTC domain running) and for a deep sleep that holds the clock rail up; it is false
+// only for a deep sleep that powers the rail down (X3, or useClock off).
+//
+// Previously named ..._LP_VALID and set only from saveBeforeSleep(), which made it mean "the LP
+// timer survives the upcoming SLEEP". restore() reads it as "the LP timer is usable NOW", and
+// those differ for a reboot -- which is how syncNtp()'s capture(false) came to strand the clock
+// on the uncorrected NVS path after every silent restart.
+static constexpr uint32_t CLOCK_RTC_FLAG_LP_CONTINUOUS = 0x00000001u;
 
 // Temperature drift model for ESP32 RTC-based timekeeping.
 //
@@ -76,6 +85,13 @@ RTC_NOINIT_ATTR static float rtcTemperatureC;  // captured chip temperature at s
 RTC_NOINIT_ATTR static uint32_t rtcStateChecksum;
 
 static bool clockApproximate = true;
+
+// True when the clock was seeded from an NVS epoch too old to be shown to the user (see the
+// stale branch in restore()). The wall clock IS set in that case -- a last-known-good time is a
+// usable LOWER BOUND for certificate validity windows, cache TTLs and session timestamps, all of
+// which previously got 1970 instead -- but the UI must not present it as the time of day.
+// Cleared by a successful NTP sync.
+static bool clockStaleRestore = false;
 
 // How long the deep sleep that this boot woke from lasted, in seconds; 0 when it
 // cannot be established. Set once by restore(), reported on the System Information
@@ -449,7 +465,8 @@ static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
 }
 
 /// Capture current time + LP timer into RTC memory, and epoch into NVS.
-static void capture(bool lpValid) {
+/// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
+static void capture(bool lpContinuous) {
   rtcEpoch = time(nullptr);
   // Update DS3231 only when the current time is authoritative.
   if (initExternalRTC() && !clockApproximate) {
@@ -459,7 +476,7 @@ static void capture(bool lpValid) {
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTemperatureC = readChipTemperatureC();
   rtcClockMagic = CLOCK_RTC_MAGIC;
-  rtcClockFlags = lpValid ? CLOCK_RTC_FLAG_LP_VALID : 0;
+  rtcClockFlags = lpContinuous ? CLOCK_RTC_FLAG_LP_CONTINUOUS : 0;
   rtcStateChecksum = computeRtcStateChecksum();
   nvsWrite(rtcEpoch);
   nvsWriteSleepMark(rtcEpoch);
@@ -553,7 +570,21 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
 
   // NTP sync yields authoritative time; allow DS3231 to be updated.
   clockApproximate = false;
-  capture(false);
+  clockStaleRestore = false;
+  // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
+  // across which the RTC domain and the LP timer keep running, so restore() can and should apply
+  // the elapsed correction -- or a deep sleep, which re-captures through saveBeforeSleep() with
+  // the real rail state and supersedes this.
+  //
+  // With false, every silentRestart() after a sync (and there is one after every KOReader sync,
+  // web-server exit, font download, OTA and heap recovery) fell through to the uncorrected NVS
+  // path and set the clock back to this instant, discarding everything since. Device evidence:
+  // never once "Restored from RTC + LP timer" across dozens of boots, always "Restored from NVS
+  // ... (no elapsed correction)", with the clock visibly stepping backwards over the reboot
+  // (13:06:52 -> 13:05:21). The losses compound per reboot and surfaced as a 45%-slow clock
+  // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
+  // floor -- the drift learner was measuring reboot count, not temperature.
+  capture(true);
   nvsWriteSyncTime(rtcEpoch);
 
   float currentTemp = rtcTemperatureC;
@@ -644,7 +675,7 @@ void restore() {
   }
 
   rtcDriftScale = nvsReadDriftScale();
-  const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_VALID) != 0;
+  const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_CONTINUOUS) != 0;
   if (rtcValid() && lpValid) {
     // RTC memory survived — we woke from deep sleep.
     //
@@ -702,10 +733,22 @@ void restore() {
   time_t epoch = nvsRead();
   if (epoch > 0) {
     time_t lastSync = nvsReadSyncTime();
-    if (lastSync > 0 && (epoch - lastSync) > STALE_THRESHOLD_S) {
-      LOG_ERR("CLK", "NVS epoch %lld is stale (last NTP sync %lld, %lld h ago), discarding", (long long)epoch,
-              (long long)lastSync, (long long)((epoch - lastSync) / 3600));
-      return;
+    const bool stale = (lastSync > 0 && (epoch - lastSync) > STALE_THRESHOLD_S);
+    if (stale) {
+      // Previously this returned, leaving the clock at 1970. That protected the DISPLAY from
+      // showing a badly drifted time, which is right -- but it threw the value away for everyone
+      // else, and on these RTC-less boards the machine uses care more than the UI does. A stale
+      // epoch is still a sound lower bound: it cannot make a certificate's notBefore look
+      // unreached (which 1970 does, and which stops the whole TLS trust store from loading), and
+      // it keeps cache TTLs and session timestamps in the right century.
+      //
+      // So set the clock and drop only the authority: clockStaleRestore suppresses the time of
+      // day in the UI until an NTP sync replaces it.
+      clockStaleRestore = true;
+      LOG_ERR("CLK",
+              "NVS epoch %lld is stale (last NTP sync %lld, %lld h ago); using it as a lower bound, "
+              "not for display",
+              (long long)epoch, (long long)lastSync, (long long)((epoch - lastSync) / 3600));
     }
     setSystemClock(epoch);
     rtcEpoch = epoch;
@@ -790,7 +833,12 @@ void updatePeriodic() {
 }
 
 bool isSynced() {
-  return time(nullptr) > 1577836800;  // > 2020-01-01
+  // Deliberately false for a stale restore even though the clock IS set. Every caller of this is
+  // asking "may I present or record this as the time?", and a lower bound is not that. Keeping
+  // the answer no preserves the previous behaviour exactly at all of them -- status bars, reading
+  // stats timestamps, updatePeriodic()'s drift nudge -- while time() itself now returns something
+  // usable for the machine checks that read it directly (isPlausibleForTls, cache TTLs).
+  return time(nullptr) > 1577836800 && !clockStaleRestore;  // > 2020-01-01
 }
 
 bool isApproximate() { return clockApproximate; }
@@ -865,6 +913,8 @@ void formatTime(char* buf, size_t bufSize, bool use24h) {
     snprintf(buf, bufSize, "%s%d:%02d%s", prefix, hour, timeinfo.tm_min, ampm);
   }
 }
+
+bool isStaleRestore() { return clockStaleRestore; }
 
 void formatLogTime(char* buf, size_t bufSize) {
   if (!isSynced()) {
