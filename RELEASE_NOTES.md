@@ -2,17 +2,35 @@
 
 User-facing changes only. Full commit history is in git log.
 
+## 2.24 — 2026-08-20
+
+- Fix: wide images were shown with a large black bar underneath, and other pictures came out stretched or squashed. Six separate problems in how images are sized and drawn are fixed, including a cover that looked right at the top and repeated a single line for the rest of the way down.
+- Chapters full of pictures now open straight away. They used to spend up to a minute preparing every image in the chapter, including ones on pages you never reach.
+- Fix: pictures could stop appearing for the rest of a book after a brief moment of low memory.
+- Fix: some books would not open at all — every chapter failed. They open normally now.
+- Fix: Cyrillic text was missing letters.
+- Fix: "Normalize font size" had no effect on books that set their text size in a stylesheet. Those books stayed slightly off the size you chose and looked a little blurred. Headings still keep the size their publisher gave them.
+- The first footnote in a book no longer sets off "Gathering footnotes" and then "Indexing". Notes are prepared one chapter at a time now, so jumping to a note and back is immediate, and books whose later chapters you never open no longer pay for them. Previews also read better — no stray link or heading text mixed in — and coming back from a note returns you to the paragraph you were reading rather than roughly the right page.
+- The reader menu, table of contents, footnote list and bookmarks are about three times quicker to open and to move around in.
+- Fixed two freezes that could only be cleared with the reset button: one after a long press — most often when starting a KOReader sync from inside a book — and one when opening the menu, contents, footnote list or bookmarks. Two unexpected restarts around footnotes are fixed as well.
+- Fix: waking straight back into a book could draw the page on top of the sleep image instead of replacing it (X4).
+- Fix: signing in to a KOReader server failed after the device had been fully switched off, with an error that gave no clue why.
+- Fix: the clock on X4 lost time badly. Several ordinary actions — finishing a sync, leaving the web server, downloading a font, installing an update — restart the device quietly in the background, and each one set the clock back to when it last checked the time. It now keeps the time across those restarts.
+- Wi-Fi now always connects to the strongest access point. It could previously pick a distant one when several share a network name, take six or seven seconds, or report "no access point found" and quietly try again. Connecting takes about three seconds and behaves the same way every time.
+- Fix: on the newer X4 units with the updated screen, the display was upside down and quick page refreshes showed nothing at all.
+- Reading statistics are only loaded when you open a screen that shows them, which leaves more memory free while you read.
+- The firmware went from almost completely full to about 93% of the space available, mostly by storing the fonts more compactly. Nothing about the fonts themselves changed. This is what made room for the fixes above.
+- Upgrade notes: chapters are re-indexed once the first time you open each book, because of the image and text-size fixes above — your place in every book is kept. Pictures are prepared again for the same reason, so the first look at an illustrated chapter is a little slower than the second. If your X4's clock has been badly wrong, it will put itself right the next time the device is online.
+
 ## 2.23 — 2026-08-16
 
 - Fix: letters were unevenly thick within the same word (#149). The reader fonts were built without grid-fitting their stems, so an identical stem shipped as 3 pixels of ink in one letter and 4 in the next — at Bookerly 14 it split `b d f i n r u` from the rest of the alphabet. All 40 built-in reader faces (Bookerly and Noto Sans, 10-18pt, four styles each) and 24 of the 28 SD card font families are rebuilt. Letter *spacing* is untouched, so no book repaginates and no reading position moves.
 - Waking from sleep is faster and less fussy. The boot no longer runs behind your finger — it used to stop and wait for the power button to be released, and since nothing on screen confirms the press was accepted, people held on, which is exactly what made it slow (measured on X4: 3.9s to a visible page instead of 6.8s). The hold needed to wake is also shorter, and a quick double-click now wakes the device, which it previously refused even though a double-click is what put it to sleep.
-- Fix: "Normalize font size" only caught half the cases. It snapped a near-body size wrapped around the text (`<span style="font-size:0.92em">`) but not the same size stated on the paragraph itself (`p.body { font-size: 1.1em }`), and a book written the second way had its entire main text held slightly off your chosen size and drawn as stretched glyphs instead of a real font. Both forms now snap. Sizes that are genuinely different — footnotes, captions, asides — keep their size exactly as before; headings are left alone whatever size they were given, so they still stand out; and turning the setting off still preserves what the publisher asked for.
-- Fix: waking straight back into a book could paint the page on top of the sleep image instead of replacing it (#158, X4). The wake deliberately skips the boot splash so the page itself gets the panel's one expensive refresh — but that first page paint was then a fast differential against a diff buffer the display reset had just cleared, so it only flipped the pixels it believed had changed and the sleep screen showed through. It is now a clean paint: the same single refresh, not an extra one.
 - Fix: reading could jump back to the start of the chapter (#147). The anchor a chapter rebuild resolves into was written once when the chapter was entered and then left frozen, so any mid-chapter rebuild — a background build aborting on low memory, a footnote gather, a failed page load — dropped you at the top of the chapter, and the next page render saved that position, so it survived a reboot. The anchor now follows the page you are actually on.
 - Fix: a single failed allocation while turning a page deleted the chapter's cache and re-indexed the whole chapter. The cache file is almost always intact in that case; the reader now frees what nobody is waiting on and re-reads the same file, and only rebuilds if that fails too.
 - Read-ahead and in-place chapter builds are admitted by a memory check that was asking for more than any build has ever needed, so it could never pass. The check is corrected; the safety margins themselves are unchanged.
 - The SD card font "Readerly" is replaced by "Libron" from the same author under the same licence — Readerly was withdrawn upstream and could no longer be built. Its listing also claimed Cyrillic coverage it never had.
-- Upgrade notes: the built-in fonts come with the firmware, but SD card fonts are files on your card — Settings → Fonts will now offer an update for every family you have installed, and the fix only applies once you take it. Readerly is no longer in the catalogue; an installed copy keeps working, but Libron is its replacement. Chapters are re-indexed once on first open because of the font-size fix above; your place in the book is kept.
+- Upgrade notes: the built-in fonts come with the firmware, but SD card fonts are files on your card — Settings → Fonts will now offer an update for every family you have installed, and the fix only applies once you take it. Readerly is no longer in the catalogue; an installed copy keeps working, but Libron is its replacement.
 
 ## 2.22 — 2026-08-14
 
