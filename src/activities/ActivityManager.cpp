@@ -93,7 +93,15 @@ void ActivityManager::renderTaskLoop() {
     RenderLock lock;
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
+      // Publish "a pass is in flight" from INSIDE the lock, so a transition holding the mutex
+      // can read it as proof that no pass can begin behind its back. It stays set across the
+      // window where render() drops the mutex (renderContents' pre-waveform unlock), which is
+      // exactly the window a plain RenderLock cannot see — see RenderLock(ExclusiveActivityAccess).
+      renderPassActive.store(true, std::memory_order_release);
       currentActivity->render(std::move(lock));
+      // Cleared unconditionally on every exit path of render(): the call cannot throw
+      // (-fno-exceptions) and every `return` inside it lands here.
+      renderPassActive.store(false, std::memory_order_release);
       // Always-on guard (cheap; one read): warn once if the render task's stack high-water gets
       // dangerously thin. The render task's stack abuts the heap top — an overflow spills into
       // the heap and shows up as an unrelated corruption assert. Tracks the running minimum so
@@ -184,7 +192,9 @@ void ActivityManager::loop() {
 
   while (pendingAction != PendingAction::None) {
     if (pendingAction == PendingAction::Pop) {
-      RenderLock lock;
+      // Exclusive: this branch destroys currentActivity, so it must also outwait an
+      // in-flight render pass, not just the mutex.
+      RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
 
       if (!currentActivity) {
         // Should never happen in practice
@@ -243,7 +253,10 @@ void ActivityManager::loop() {
 
     } else if (pendingActivity) {
       // Current activity has requested a new activity to be launched
-      RenderLock lock;
+      // Exclusive: the Replace path destroys currentActivity (and the Push path hands it to the
+      // stack while the render task may still hold a pointer to it), so both need the render
+      // pass to have finished, not merely the mutex to be free.
+      RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
 
       const bool enteringReader = pendingActivity->isReaderActivity();
       const bool exitingReader = currentActivity && currentActivity->isReaderActivity();
@@ -586,6 +599,52 @@ RenderLock::RenderLock([[maybe_unused]] Activity&) {
   isLocked = true;
 }
 
+RenderLock::RenderLock(ExclusiveActivityAccess) {
+  // This waits for the render task to leave render(). Called FROM the render task it would wait
+  // on itself forever, so state the invariant rather than leaving a future misuse to present as
+  // an unexplained freeze — which is the exact class of bug this constructor exists to remove.
+  assert(xTaskGetCurrentTaskHandle() != activityManager.renderTaskHandle &&
+         "RenderLock(ExclusiveActivityAccess) must not be taken on the render task");
+
+  // See the header for why the mutex alone is not enough. Take it, and only keep it if no
+  // render pass is in flight; otherwise hand it straight back so the render task can finish.
+  constexpr TickType_t RETRY_DELAY_TICKS = 1;
+  constexpr unsigned long SLOW_WAIT_WARN_MS = 5000;
+  const unsigned long start = millis();
+  bool warned = false;
+  bool waited = false;
+  while (true) {
+    xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
+    if (!activityManager.renderPassActive.load(std::memory_order_acquire)) {
+      isLocked = true;
+      // Only ever logged when we actually had to wait, so it is silent on the common path and
+      // one line per genuinely-overlapping transition otherwise. That line IS the evidence this
+      // guard exists for: it marks a transition that arrived while the render task was inside
+      // render() — the interleaving that used to run the activity's destructor (or race
+      // endBackgroundBorrow()) out from under a pass still using the object. Compiled out at
+      // LOG_LEVEL=0, so it costs nothing in a release build.
+      if (waited) {
+        LOG_DBG("ACT", "Transition waited %lums for an in-flight render pass (activity teardown deferred)",
+                millis() - start);
+      }
+      return;
+    }
+    waited = true;
+    // The render task is in its mid-pass unlocked window and wants the mutex back. Give it up
+    // and yield: a plain retry at equal priority could re-win the mutex before the render task
+    // is scheduled, so the vTaskDelay is load-bearing, not a politeness.
+    xSemaphoreGive(activityManager.renderingMutex);
+    vTaskDelay(RETRY_DELAY_TICKS);
+    // A pass that never ends means a wedged panel or a stuck build slice, not lock contention.
+    // Say so once rather than looking like an unexplained freeze — this wait blocks activity
+    // transitions, so it is the first thing a "device hung on Back" report would land on.
+    if (!warned && millis() - start > SLOW_WAIT_WARN_MS) {
+      warned = true;
+      LOG_ERR("ACT", "Activity transition waiting >%lums for the in-flight render pass to finish", SLOW_WAIT_WARN_MS);
+    }
+  }
+}
+
 RenderLock::~RenderLock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);
@@ -606,5 +665,11 @@ void RenderLock::unlock() {
  *
  * @return true if renderingMutex is busy, otherwise false.
  *
+ * Asks the mutex for its holder rather than peeking it as a queue. xQueuePeek() is not defined
+ * for mutex-type queues: it reinterprets the holder/recursion union as queue pointers, and on a
+ * free mutex it also pops a task off xTasksWaitingToReceive — waking a waiter that then finds
+ * the mutex still unavailable. It happened to be harmless for a plain (non-recursive) mutex,
+ * but it is unsupported API use in the reader's hottest polling path, and the holder query
+ * answers exactly the same question legally.
  */
-bool RenderLock::peek() { return xQueuePeek(activityManager.renderingMutex, NULL, 0) != pdTRUE; };
+bool RenderLock::peek() { return xSemaphoreGetMutexHolder(activityManager.renderingMutex) != nullptr; };
