@@ -89,7 +89,7 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   requestUpdate();
 
   logSyncMemSnapshot("before_performSync");
-  trimForNetwork();
+  trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_performSync");
 
   performSync();
@@ -520,7 +520,7 @@ void KOReaderSyncActivity::performUpload() {
 
   // Sync UI rendering can repopulate glyph caches after the initial GET / compare
   // phase, so trim again right before the upload request.
-  trimForNetwork();
+  trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_updateProgress");
 
   // Capture upload-phase memory separately from fetch phase to diagnose failures
@@ -604,12 +604,8 @@ void KOReaderSyncActivity::onEnter() {
   // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
   // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
   // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
-  trimForNetwork();
+  trimMemoryForNetworkSession(renderer, "KOSync");
   logSyncMemSnapshot("after_trim_before_wifi");
-  // Baseline for the teardown probe in onExit(). Captured here, after the trim and before the
-  // radio comes up, so the comparison isolates what the WiFi/TLS session itself did to the heap.
-  heapBeforeWifiFree_ = esp_get_free_heap_size();
-  heapBeforeWifiContig_ = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
 
   // Check if already connected (e.g. from settings page auth)
   if (WiFi.status() == WL_CONNECTED) {
@@ -635,29 +631,23 @@ void KOReaderSyncActivity::onExit() {
   if (wifiActivated) {
     WiFi.disconnect(false);
     delay(30);
-    logWifiTeardownHeapProbe();
-#ifdef KOSYNC_TEST_NO_REBOOT
-    // Experiment: skip the post-sync reboot so a SECOND sync can run in the same boot, which is
-    // the only way to tell a one-time cost from a per-session leak. It also tests the thing the
-    // reboot exists for, directly -- resumeReader() has already queued goToReader(), so returning
-    // here rebuilds the reader in place on a heap that has just hosted a WiFi/TLS session.
+    // The reboot stays, and it is now a measured decision rather than an inherited one.
     //
-    // Restoring the secondary framebuffer is part of the experiment, not incidental:
-    // trimMemoryForNetworkSession() released it with no realloc pairing precisely because every
-    // caller reboots (see its header). Without this the reader would come back in degraded
-    // single-buffer mode and the measurement would not represent the steady state we are asking
-    // about. Whether this realloc SUCCEEDS is itself a headline result -- it is the ~48-52 KB
-    // contiguous request that the fragmentation claim was always about.
-    LOG_INF("KOSync", "TEST: skipping the post-sync reboot; rebuilding the reader in place");
-    if (!renderer.hasSecondaryBuffer()) {  // no-op when the borrow path already handed it back
-      const bool ok = renderer.reallocSecondaryBuffer();
-      renderer.setSingleBufferFastDiff(!ok);
-      LOG_INF("KOSync", "TEST: secondary framebuffer realloc -> %s (free=%lu contig=%lu)", ok ? "OK" : "FAILED",
-              static_cast<unsigned long>(esp_get_free_heap_size()),
-              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-    }
-    return;
-#else
+    // The old rationale -- "a WiFi session fragments the heap past rebuilding the reader in
+    // place" -- turned out to be wrong on wolfSSL: contig runs 61428 -> 61428 -> 61428 across a
+    // push, and only ~6 KB is lost across a pull. Rebuilding in place genuinely works, and is
+    // faster (792 ms to first page against 2023 ms via the reboot).
+    //
+    // What kills it is a different number. A full esp_wifi_stop + deinit still ends
+    // ~20.5 KB below the pre-WiFi free-heap baseline, measured at -20560 / -20588 / -20644 across
+    // three sessions -- consistent enough to look like a one-time netif/event-loop cost rather
+    // than a per-session leak, but never proven so, and 20 KB is a large permanent narrowing on a
+    // 380 KB device. Reclaiming the framebuffer late also leaves contig at 25588 against 65524
+    // on a clean boot, which is below what an image decode needs.
+    //
+    // So: the reboot is not paying for fragmentation during the session, it is paying for a heap
+    // that never fully comes back. Until that ~20 KB is identified, rebooting is the cheaper
+    // trade. Do not remove this on the strength of the contig numbers alone.
     switch (postAction_) {
       case KOReaderSyncPostAction::Home:
       case KOReaderSyncPostAction::OpdsSearch:
@@ -679,114 +669,7 @@ void KOReaderSyncActivity::onExit() {
         silentRestartToReader();
         break;
     }
-#endif
   }
-}
-
-// DISPROVEN ON DEVICE 2026-08-20 -- KOSYNC_TEST_KEEP_FB does not work. Kept, with the numbers,
-// so the idea is not re-derived from the same wrong reasoning.
-//
-// The mistake was measuring FREE heap when the binding constraint is CONTIGUOUS heap. The sync
-// has two hard contiguous gates and they are both larger than what is left once WiFi is up:
-//   - the EPUB inflate ring for progress mapping: 32768 bytes
-//   - the TLS handshake:                          26624 bytes
-// With the framebuffer kept resident: free 81192 before WiFi -> 24960 after, contig 20468. Both
-// gates failed in the same run:
-//   [ERR] [ZIP]    Failed to init inflate reader
-//   [ERR] [KOX]    Failed to decompress spine=5 to temp file
-//   [ERR] [KOSync] Insufficient contiguous heap for TLS: 19444 available, 26624 required
-// The push never happened, and the progress mapping silently degraded to a coarse xpath
-// (/body/DocFragment[6]/body instead of .../div[1]/p[14]) -- the lossy percentage-only fallback
-// ensureRemotePositionMapped() warns about. So the release is load-bearing, not over-provisioning.
-//
-// What survives is the shape of the original idea: those two gates are exactly the "who would use
-// it" answer, and they are SEQUENTIAL (ensureRemotePositionMapped() tears the TLS session down
-// before mapping, precisely so the inflate can have the contiguous heap). A 48 KB region could
-// serve the 32 KB inflate ring and then the 26.6 KB handshake -- but that needs real plumbing
-// (Epub already takes an external BuildArena; wolfSSL needs WOLFSSL_STATIC_MEMORY +
-// wolfSSL_CTX_load_static_memory, not currently enabled), not merely declining to release.
-//
-// Font cache always; the secondary framebuffer only when it is actually needed gone.
-//
-// trimMemoryForNetworkSession() releases the ~48 KB framebuffer, and its header explains why:
-// WiFi bring-up is allocation-heavy and phy_init has been seen aborting on RF calibration memory
-// with the buffer resident. But that is a general contract for network activities, and this one
-// does not fit it. Measured here: 130508 free with it released against a WiFi+TLS peak of
-// ~54.5 KB, i.e. ~76 KB of headroom -- the sync is over-provisioned by roughly the size of the
-// buffer it gives up.
-//
-// And giving it up is not free. Nothing in a sync USES that memory (the web server genuinely
-// does -- it releases BOTH buffers and never draws again), so releasing only buys a reclaim
-// later, and the reclaim is what damages the heap layout: contig is 61428 -> 61428 -> 61428
-// across the whole session, but reallocating the framebuffer afterwards leaves contig at 25588
-// against 65524 on a clean boot. That gap is what the post-sync reboot has really been covering.
-//
-// Keeping it resident LOOKED strictly better than lending it out when there is no borrower --
-// the display would keep anti-aliasing and normal refresh, and nothing would need handing back.
-// The device disagreed; see the disproof above.
-void KOReaderSyncActivity::trimForNetwork() {
-#ifdef KOSYNC_TEST_KEEP_FB
-  if (auto* fontCache = renderer.getFontCacheManager()) {
-    fontCache->clearCache();
-  }
-  LOG_INF("KOSync", "TEST: keeping the secondary framebuffer resident (hasSecondary=%d free=%lu contig=%lu)",
-          renderer.hasSecondaryBuffer() ? 1 : 0, static_cast<unsigned long>(esp_get_free_heap_size()),
-          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-#else
-  trimMemoryForNetworkSession(renderer, "KOSync");
-#endif
-}
-
-// Measures whether a WiFi/TLS session really does leave the heap unusable.
-//
-// The silent reboot below exists because of a learning that a network session fragments the heap
-// past the point where the reader can be rebuilt in place. That was established BEFORE the TLS
-// stack changed from mbedtls to wolfSSL, so the premise is inherited rather than measured, and it
-// is expensive: every sync costs a full reboot plus a cold book reopen.
-//
-// This does the teardown the reboot would otherwise make unnecessary -- stop and deinit the
-// driver, not just disconnect -- and reports the result against the pre-WiFi baseline. Read the
-// contig figure, not free: fragmentation is the claim under test, and the reader needs a ~48-52 KB
-// contiguous block for its secondary framebuffer. If contig comes back to roughly its
-// before-WiFi value, the reboot is buying nothing on this stack and can go.
-//
-// Measurement only: the reboot still happens immediately after, so behaviour is unchanged whatever
-// the numbers say.
-void KOReaderSyncActivity::logWifiTeardownHeapProbe() {
-#if LOG_LEVEL < 1
-  // Nothing can report the result, so don't pay for it: the teardown below costs ~150 ms and
-  // exists purely to be measured. The reboot that follows makes it redundant either way.
-  return;
-#else
-  const uint32_t freeBeforeTeardown = esp_get_free_heap_size();
-  const uint32_t contigBeforeTeardown = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-
-  // WIFI_OFF routes through esp_wifi_stop() + esp_wifi_deinit(), which is what actually returns
-  // the driver's buffers; WiFi.disconnect() above only drops the association.
-  WiFi.mode(WIFI_OFF);
-  delay(100);  // let the driver's deferred frees land before sampling
-
-  const uint32_t freeAfter = esp_get_free_heap_size();
-  const uint32_t contigAfter = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-
-  // Counts WiFi sessions within THIS boot. The whole point of the no-reboot experiment is
-  // whether the free-heap shortfall is paid once (netif / default event loop, created once and
-  // never destroyed) or on every session (a real leak, which would make removing the reboot a
-  // slow bleed). Session 2's delta against session 1 is the answer.
-  static uint8_t sessionInBoot = 0;
-  ++sessionInBoot;
-
-  LOG_INF("KOSync", "WiFi teardown heap probe [session %u]: free %lu -> %lu -> %lu | contig %lu -> %lu -> %lu",
-          static_cast<unsigned>(sessionInBoot), static_cast<unsigned long>(heapBeforeWifiFree_),
-          static_cast<unsigned long>(freeBeforeTeardown), static_cast<unsigned long>(freeAfter),
-          static_cast<unsigned long>(heapBeforeWifiContig_), static_cast<unsigned long>(contigBeforeTeardown),
-          static_cast<unsigned long>(contigAfter));
-  LOG_INF("KOSync",
-          "WiFi teardown recovery [session %u]: free %+ld contig %+ld vs before-WiFi baseline (reader needs ~49152 "
-          "contig)",
-          static_cast<unsigned>(sessionInBoot), static_cast<long>(freeAfter) - static_cast<long>(heapBeforeWifiFree_),
-          static_cast<long>(contigAfter) - static_cast<long>(heapBeforeWifiContig_));
-#endif
 }
 
 void KOReaderSyncActivity::closeCancelled() {
