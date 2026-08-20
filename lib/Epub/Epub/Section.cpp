@@ -273,11 +273,13 @@ std::string Section::getSectionFilePath(uint32_t propertyHash) const {
   return epub->getCachePath() + "/sections/" + buf + ".bin";
 }
 
-std::string Section::getSectionHtmlCachePath() const {
+std::string Section::sectionHtmlCachePath(const std::string& bookCachePath, const int spineIndex) {
   char buf[32];
   snprintf(buf, sizeof(buf), "html_%d", spineIndex);
-  return epub->getCachePath() + "/sections/" + buf + ".bin";
+  return bookCachePath + "/sections/" + buf + ".bin";
 }
+
+std::string Section::getSectionHtmlCachePath() const { return sectionHtmlCachePath(epub->getCachePath(), spineIndex); }
 
 std::string Section::getImageBasePath(uint32_t propertyHash) const {
   char buf[32];
@@ -722,6 +724,10 @@ struct Section::BuildState {
   // downgrade. Lets stepSectionBuild detect a stale partial build (variant changed)
   // without a heap-forced no-CSS build reading as a mismatch against its own request.
   uint32_t requestedHash = 0;
+  // True once the between-phases step has run: note previews resolved and the layout parser
+  // initialised. runBuildParse is re-entered on every slice, so without this the resolve would
+  // re-scan the whole spine each time phase (b) yielded.
+  bool visitorReady = false;
   // Parse-result flags, set by runBuildParse and consumed by runBuildFinalize.
   bool streamOk = false;
   bool finalizeOk = false;
@@ -738,6 +744,33 @@ struct Section::BuildState {
 Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRenderer& renderer)
     : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
 Section::~Section() { abortSectionBuild(); }
+
+void Section::resolveInlineFootnotePreviews(BuildState& st) {
+  if (!st.params.inlineFootnotePreviews) {
+    return;
+  }
+  // Cheap when there is nothing to do: a spine whose notes were resolved in an earlier session
+  // re-scans its own links from the banked XHTML — an SD read and a SAX walk, no inflate — finds
+  // every target already stored, and appends nothing.
+  const uint32_t startMs = millis();
+  const std::string banked = st.useTempExtract ? st.tempPath : std::string();
+  if (!FootnotePreviews::resolveSpine(*epub, spineIndex, banked)) {
+    // The store is untouched, so the only cost is that some notes in THIS build stay plain
+    // markers until the spine is built again. Deliberately not fatal: a chapter that renders
+    // with unexpanded markers is worth far more to the reader than a chapter that fails.
+    LOG_ERR("SCT", "Footnote previews unresolved for spine %d; markers stay plain in this build", spineIndex);
+  }
+  st.footnotePreviewLookup = makeUniqueNoThrow<FootnotePreviews::Lookup>();
+  if (st.footnotePreviewLookup && st.footnotePreviewLookup->open(epub->getCachePath(), epub.get(), spineIndex)) {
+    st.visitor->setInlineFootnotePreviews(st.footnotePreviewLookup.get());
+  } else {
+    st.footnotePreviewLookup.reset();  // no notes anywhere in this book yet, or store unreadable
+  }
+  const uint32_t ms = millis() - startMs;
+  if (ms > 0) {
+    LOG_INF("SCT", "createSectionFile spine=%d footnote previews resolved in %ums", spineIndex, ms);
+  }
+}
 
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
@@ -777,7 +810,6 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
-  sawFootnote_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -879,28 +911,13 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
-  // Inline footnote previews come from the book-level footnotes.bin gathered up front
-  // (foreground, EpubReaderActivity). Missing/empty cache: build proceeds without
-  // previews — the reader guarantees the gather ran before any preview-enabled build.
-  if (p.inlineFootnotePreviews) {
-    st.footnotePreviewLookup = makeUniqueNoThrow<FootnotePreviews::Lookup>();
-    if (st.footnotePreviewLookup && st.footnotePreviewLookup->open(epub->getCachePath(), epub.get(), spineIndex)) {
-      st.visitor->setInlineFootnotePreviews(st.footnotePreviewLookup.get());
-    } else {
-      LOG_DBG("SCT", "Footnote preview cache unavailable for spine %d; building without previews", spineIndex);
-      st.footnotePreviewLookup.reset();
-    }
-  }
+  // Inline footnote previews are NOT wired up here: the note text this spine needs may not be
+  // in the store yet, and resolving it needs the spine's inflated XHTML — which phase (a) is
+  // about to produce. See resolveInlineFootnotePreviews(), called between the phases.
 
-  if (!st.visitor->setup(st.inflatedSize)) {
-    LOG_ERR("SCT", "Failed to set up chapter parser");
-    file.close();
-    Storage.remove(filePath.c_str());
-    if (st.cssParser) {
-      st.cssParser->clear();
-    }
-    return BuildPhaseResult::Failed;
-  }
+  // The layout parser is NOT initialised here. Its yxml state is ~10 KB, and the note-preview
+  // resolve that runs between the phases needs a SAX parser of its own; initialising this one
+  // first would put both on the heap at once for no reason. See runBuildParse.
   st.setupMs = millis() - phaseSetupStart;
   SCT_TRACE_HEAP(spineIndex, "after_setup");
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
@@ -1083,10 +1100,31 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     }
   }
 
+  // The gap between the phases: the whole document is on SD, and ALL ZIP state was just
+  // released, so this is both the only moment the note text can be resolved from a local file
+  // and the widest the heap gets during a build. Preview text is a layout input — it changes
+  // line breaking — so it has to be in place before the visitor sees the first byte, or this
+  // spine would be cached under the previews-on hash while showing bare markers.
+  //
+  // The resolve's SAX parser is created and destroyed inside this block, and the layout parser
+  // is only initialised after it: ~10 KB of yxml state each, and never both at once. Guarded to
+  // run a single time — phase (b) yields per slice and re-enters from the top of this function.
+  if (!streamFailed && !st.visitorReady) {
+    st.visitorReady = true;
+    resolveInlineFootnotePreviews(st);
+    if (!st.visitor->setup(st.inflatedSize)) {
+      LOG_ERR("SCT", "Failed to set up chapter parser");
+      file.close();
+      Storage.remove(filePath.c_str());
+      if (st.cssParser) {
+        st.cssParser->clear();
+      }
+      return BuildPhaseResult::Failed;
+    }
+  }
+
   // Phase (b): feed the visitor — from the temp file (sliced path, no ZIP state live)
-  // or straight from the inflate stream (blocking path). Inline footnote previews need
-  // no prepass here: the visitor resolves them against the book-level footnotes.bin
-  // lookup opened in runBuildSetup.
+  // or straight from the inflate stream (blocking path).
   if (!streamFailed) {
     if (st.useTempExtract) {
 #ifdef BENCH_EXTRACT_PROFILE
@@ -1443,13 +1481,6 @@ void Section::setExternalBuildScratch(BuildArena* scratch) {
   }
 }
 
-// Live while the build runs (read straight off the parser so the reader can poll between
-// steps), latched into sawFootnote_ so it survives buildState_ teardown at Done.
-bool Section::sawFootnote() const {
-  if (buildState_ && buildState_->visitor && buildState_->visitor->sawFootnote()) return true;
-  return sawFootnote_;
-}
-
 bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool arenaBacked) {
   // An arena-backed build takes the ruleset from the BUILD ARENA, not the heap, so no heap
   // floor applies to it. Measured X3 (alice, 94 rules): the resident ruleset costs 752 index
@@ -1570,8 +1601,6 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
       continue;
     }
 
-    // Latch before the parser goes away, so callers can still ask after Done.
-    if (buildState_->visitor && buildState_->visitor->sawFootnote()) sawFootnote_ = true;
     buildState_.reset();
     return fin == BuildPhaseResult::Done ? BuildStep::Done : BuildStep::Failed;
   }

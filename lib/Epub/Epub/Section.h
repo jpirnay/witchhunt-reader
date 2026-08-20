@@ -33,9 +33,6 @@ class Section {
   // usable but visually degraded; background callers discard it so the foreground
   // blocking path (more headroom) rebuilds it clean.
   bool cssLowHeapDegraded_ = false;
-  // Latched from the parser during the build; survives buildState_ teardown so callers can
-  // still read it after Done. See sawFootnote().
-  bool sawFootnote_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -79,6 +76,10 @@ class Section {
   // live state retained in BuildState for the next call.
   BuildPhaseResult runBuildParse(BuildState& st, uint32_t budgetMs);
   BuildPhaseResult runBuildFinalize(BuildState& st);
+  // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
+  // live: makes sure every note this spine references has its text in the book's preview store,
+  // then points the visitor at it. Never fails the build — see the definition.
+  void resolveInlineFootnotePreviews(BuildState& st);
 
   // Open the section file and seek to the first paragraph LUT entry, validating the header
   // and LUT bounds against fileSize. On success, returns true with `outLutStart` set to the
@@ -102,6 +103,12 @@ class Section {
   void evictOldVariants() const;
 
  public:
+  // Naming convention behind getSectionHtmlCachePath(), exposed so code that does not own a
+  // Section can find a spine's inflated XHTML — FootnotePreviews reads it instead of
+  // re-inflating the ZIP entry. Says nothing about whether the file exists or is complete;
+  // callers must validate its size against the spine's inflated size, as the builder does.
+  static std::string sectionHtmlCachePath(const std::string& bookCachePath, int spineIndex);
+
   uint16_t pageCount = 0;
   int currentPage = 0;
 
@@ -225,10 +232,6 @@ class Section {
   // True when the last build's CSS resolution hit low-heap skips (styles silently
   // missing from the cached pages). Only meaningful right after a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
-  // True once the build has seen a footnote link in this spine. Live during the build (the
-  // reader polls it between steps to abandon a previews-less build early) and still valid
-  // after it finishes.
-  bool sawFootnote() const;
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced
   // caller (Background-B) abort early instead of finishing a build it will discard. False when

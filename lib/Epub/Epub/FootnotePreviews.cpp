@@ -11,10 +11,12 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <vector>
+#include <memory>
+#include <type_traits>
 
 #include "../Epub.h"
 #include "FootnoteShape.h"
+#include "Section.h"
 
 namespace {
 
@@ -22,6 +24,8 @@ constexpr uint32_t CACHE_MAGIC = 0x31504E46;  // "FNP1"
 constexpr uint16_t CACHE_VERSION = 1;
 constexpr size_t STREAM_CHUNK_BYTES = 1024;
 constexpr size_t MAX_HREF_BYTES = 191;
+constexpr uint32_t HEADER_BYTES = 12;    // magic + version + count + indexOffset
+constexpr uint32_t INDEX_ROW_BYTES = 8;  // keyHash + blobOffset
 constexpr size_t MAX_MARKER_BYTES = 15;
 
 uint32_t fnv1a32(const char* s) {
@@ -51,10 +55,67 @@ const char* getAttribute(const char** atts, const char* name) {
   return nullptr;
 }
 
+// Growable array with NO-THROW allocation, for the four collections the gather builds.
+//
+// std::vector cannot be used here: the firmware compiles -fno-exceptions, so a growth the heap
+// cannot satisfy throws bad_alloc straight into std::terminate -> abort(). Device-observed on a
+// 30-spine book with 155 note targets: at spine 29 the target list tried to grow from 2048 to
+// 4096 bytes, failed, and took the firmware down mid-gather (the "Gathering footnotes" popup was
+// on screen at the time).
+//
+// push() returns false instead, and a pass that cannot complete leaves the store exactly as it
+// was rather than persisting a truncated answer — the reader gets plain markers for that spine
+// and the next build of it tries again.
+template <typename T>
+class NoThrowArray {
+  static_assert(std::is_trivially_copyable<T>::value, "grows by memcpy");
+
+  std::unique_ptr<T[]> data_;
+  size_t size_ = 0;
+  size_t capacity_ = 0;
+
+ public:
+  bool reserve(const size_t want) {
+    if (want <= capacity_) return true;
+    auto grown = makeUniqueNoThrow<T[]>(want);
+    if (!grown) return false;
+    if (size_ > 0) memcpy(grown.get(), data_.get(), size_ * sizeof(T));
+    data_ = std::move(grown);
+    capacity_ = want;
+    return true;
+  }
+  bool push(const T& value) {
+    if (size_ == capacity_ && !reserve(capacity_ > 0 ? capacity_ * 2 : 16)) return false;
+    data_[size_++] = value;
+    return true;
+  }
+  void pop() {
+    if (size_ > 0) --size_;
+  }
+  size_t size() const { return size_; }
+  const T& operator[](const size_t i) const { return data_[i]; }
+  T* begin() { return data_.get(); }
+  T* end() { return data_.get() + size_; }
+  const T* begin() const { return data_.get(); }
+  const T* end() const { return data_.get() + size_; }
+};
+
+// 8 bytes, and deliberately no fragment string: Pass B matches an element's id by hashing it the
+// same way (makeKeyHash) rather than by comparing text, so the fragments never have to be held in
+// RAM at all. At 155 targets that is 1.2 KB instead of the ~5 KB a vector of std::string cost.
+// It does mean a 32-bit collision between a note anchor and ANY other id in the same document
+// shows the wrong preview text — the format already accepts that risk between note anchors, and
+// the odds do not meaningfully change by widening the pool.
 struct Target {
   uint32_t keyHash;
   uint16_t spineIndex;
-  std::string fragment;
+};
+
+// One row of the on-disk index, sorted by key so Lookup can binary-search it.
+struct IndexRow {
+  uint32_t keyHash;
+  uint32_t blobOffset;
+  bool operator<(const IndexRow& other) const { return keyHash < other.keyHash; }
 };
 
 // Pass A: SAX scan of one spine document collecting footnote-shaped link targets.
@@ -62,7 +123,8 @@ class LinkScanner {
   SaxParser parser_;
   const Epub& epub_;
   const int spineIndex_;
-  std::vector<Target>& targets_;
+  NoThrowArray<Target>& targets_;
+  bool oom_ = false;
   int depth_ = 0;
   int linkDepth_ = -1;
   bool linkIsNoteref_ = false;
@@ -117,7 +179,7 @@ class LinkScanner {
     self->text_[self->textLen_] = '\0';
     const bool qualifies =
         self->linkIsNoteref_ || (!self->textOverflow_ && FootnoteShape::isMarkerText(self->text_, self->textLen_));
-    if (qualifies && self->targets_.size() < FootnotePreviews::MAX_ENTRIES) {
+    if (qualifies && self->targets_.size() < FootnotePreviews::MAX_TARGETS_PER_SPINE) {
       const char* hash = strchr(self->href_, '#');
       const char* fragment = hash + 1;  // '#' presence checked at startElement
       if (*fragment != '\0') {
@@ -127,8 +189,8 @@ class LinkScanner {
           const uint32_t keyHash = makeKeyHash(targetSpine, fragment);
           const bool seen = std::any_of(self->targets_.begin(), self->targets_.end(),
                                         [&](const Target& t) { return t.keyHash == keyHash; });
-          if (!seen) {
-            self->targets_.push_back({keyHash, static_cast<uint16_t>(targetSpine), std::string(fragment)});
+          if (!seen && !self->targets_.push({keyHash, static_cast<uint16_t>(targetSpine)})) {
+            self->oom_ = true;  // caller abandons the gather; see NoThrowArray
           }
         }
       }
@@ -137,8 +199,9 @@ class LinkScanner {
   }
 
  public:
-  LinkScanner(const Epub& epub, const int spineIndex, std::vector<Target>& targets)
+  LinkScanner(const Epub& epub, const int spineIndex, NoThrowArray<Target>& targets)
       : epub_(epub), spineIndex_(spineIndex), targets_(targets) {}
+  bool outOfMemory() const { return oom_; }
   // Scans chapter XHTML (HTML-flavored): enable bare-void-tag repair.
   bool setup() { return parser_.init(this, startElement, endElement, characterData, nullptr, true); }
   bool feed(const uint8_t* data, const size_t size) { return parser_.feed(data, size); }
@@ -153,32 +216,49 @@ class LinkScanner {
 //    or the NEXT wanted anchor starts (sequential rearnote lists).
 class NoteCapturer {
  public:
-  using EmitFn = std::function<void(size_t targetIdx, const char* text, size_t len)>;
+  using EmitFn = std::function<void(uint32_t keyHash, const char* text, size_t len)>;
 
  private:
   SaxParser parser_;
-  const std::vector<Target>& targets_;
-  const std::vector<size_t>& wanted_;  // indexes into targets_, all for this spine
+  const int spineIndex_;                  // the document being scanned; anchors the id hashes
+  const NoThrowArray<uint32_t>& wanted_;  // key hashes of the targets that live in this spine
   EmitFn emit_;
   int depth_ = 0;
   int captureDepth_ = -1;  // depth of the id'd element while capturing, -1 = idle
+  int skipDepth_ = -1;     // depth of a chrome element being skipped over, -1 = not skipping
   bool tailMode_ = false;  // id element closed short; capturing following siblings
-  size_t activeIdx_ = 0;   // targets_ index being captured
+  size_t activeIdx_ = 0;   // wanted_ index being captured
   char text_[FootnotePreviews::MAX_TEXT_BYTES + 1] = {};
   size_t textLen_ = 0;
   bool truncated_ = false;
 
+  // Hash the id exactly as Pass A hashed the href fragment that points at it, so the two sides
+  // cannot drift — the same rule the key comment states. Costs one snprintf per id'd element,
+  // and saves holding every fragment string in RAM for the whole gather.
   int findWanted(const char* id) const {
     if (!id || *id == '\0') return -1;
-    for (const size_t idx : wanted_) {
-      if (targets_[idx].fragment == id) return static_cast<int>(idx);
+    const uint32_t key = makeKeyHash(spineIndex_, id);
+    for (size_t i = 0; i < wanted_.size(); ++i) {
+      if (wanted_[i] == key) return static_cast<int>(i);
     }
     return -1;
+  }
+
+  // Chrome inside a note container that is not part of the note's prose: the number repeated as
+  // a heading, and the "back to the text" link most converters append. Both are noise in a
+  // preview — the reader is looking at the marker already, and a preview reading
+  // "1 Or, if you are a believer in Omnianism, the Pole. note_1" (Small Gods, device-observed)
+  // spends a third of its width saying nothing. The capture root itself is never skipped: in the
+  // Calibre pattern the anchor IS an <a>.
+  static bool isChrome(const char* name) {
+    if (strcmp(name, "a") == 0) return true;
+    return name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0';
   }
 
   void beginCapture(const size_t targetIdx, const int idDepth) {
     activeIdx_ = targetIdx;
     captureDepth_ = idDepth;
+    skipDepth_ = -1;
     tailMode_ = false;
     textLen_ = 0;
     truncated_ = false;
@@ -192,12 +272,13 @@ class NoteCapturer {
       text_[textLen_ - 1] = '.';
     }
     text_[textLen_] = '\0';
-    if (textLen_ > 0) emit_(activeIdx_, text_, textLen_);
+    if (textLen_ > 0) emit_(wanted_[activeIdx_], text_, textLen_);
     captureDepth_ = -1;
+    skipDepth_ = -1;
     tailMode_ = false;
   }
 
-  static void startElement(void* ctx, const char*, const char** atts) {
+  static void startElement(void* ctx, const char* name, const char** atts) {
     auto* self = static_cast<NoteCapturer*>(ctx);
     const int wantedIdx = self->findWanted(getAttribute(atts, "id"));
     if (wantedIdx >= 0) {
@@ -205,13 +286,15 @@ class NoteCapturer {
       // lists it is also what terminates the previous note's tail capture.
       if (self->captureDepth_ >= 0) self->finishCapture();
       self->beginCapture(static_cast<size_t>(wantedIdx), self->depth_);
+    } else if (self->captureDepth_ >= 0 && self->skipDepth_ < 0 && isChrome(name)) {
+      self->skipDepth_ = self->depth_;
     }
     ++self->depth_;
   }
 
   static void characterData(void* ctx, const char* text, const int length) {
     auto* self = static_cast<NoteCapturer*>(ctx);
-    if (self->captureDepth_ < 0) return;
+    if (self->captureDepth_ < 0 || self->skipDepth_ >= 0) return;
     for (int i = 0; i < length; ++i) {
       const bool space = isSpaceChar(text[i]);
       if (space && (self->textLen_ == 0 || self->text_[self->textLen_ - 1] == ' ')) continue;
@@ -227,6 +310,10 @@ class NoteCapturer {
     auto* self = static_cast<NoteCapturer*>(ctx);
     --self->depth_;
     if (self->captureDepth_ < 0) return;
+    if (self->skipDepth_ >= 0) {
+      if (self->depth_ == self->skipDepth_) self->skipDepth_ = -1;
+      return;  // chrome closes before anything else is decided
+    }
     if (!self->tailMode_ && self->depth_ == self->captureDepth_) {
       // The id'd element itself closed. Enough subtree text = container pattern, done;
       // near-empty = inline anchor pattern, keep capturing the following siblings.
@@ -242,8 +329,8 @@ class NoteCapturer {
   }
 
  public:
-  NoteCapturer(const std::vector<Target>& targets, const std::vector<size_t>& wanted, EmitFn emit)
-      : targets_(targets), wanted_(wanted), emit_(std::move(emit)) {}
+  NoteCapturer(const int spineIndex, const NoThrowArray<uint32_t>& wanted, EmitFn emit)
+      : spineIndex_(spineIndex), wanted_(wanted), emit_(std::move(emit)) {}
   // Scans chapter XHTML (HTML-flavored): enable bare-void-tag repair.
   bool setup() { return parser_.init(this, startElement, endElement, characterData, nullptr, true); }
   bool feed(const uint8_t* data, const size_t size) { return parser_.feed(data, size); }
@@ -257,23 +344,71 @@ class NoteCapturer {
 // SAX-level errors are tolerated (consumer keeps whatever it saw — same policy as the
 // section parser, which survives loose real-world HTML).
 template <typename Consumer>
-bool streamSpineEntry(ZipFile& zip, const std::string& href, uint8_t* chunk, Consumer& consumer) {
+bool streamSpineEntry(ZipFile& zip, const std::string& href, uint8_t* chunk, Consumer& consumer, FsFile* bank) {
   ZipFile::EntryReader reader(zip, STREAM_CHUNK_BYTES);
   if (!reader.open(FsHelpers::normalisePath(href).c_str())) {
     return false;
   }
   bool done = false;
+  bool malformed = false;
   while (!done) {
     size_t produced = 0;
     if (!reader.step(chunk, STREAM_CHUNK_BYTES, &produced, &done)) {
       return false;
     }
-    if (produced > 0 && !consumer.feed(chunk, produced)) {
-      break;  // malformed markup mid-stream: keep partial results
+    if (produced > 0) {
+      // Bank the inflated bytes as we pass them on, in the same file the section builder writes
+      // and validates by size. A note document is rarely a chapter anyone reads, so without this
+      // every chapter pointing into it would inflate it again.
+      if (bank) bank->write(chunk, produced);
+      if (!consumer.feed(chunk, produced)) {
+        malformed = true;  // malformed markup mid-stream: keep partial results
+        break;
+      }
     }
   }
   consumer.finalize();
+  // A banked file is only usable if it is complete: the builder's staleness test is a size
+  // match, and a short file would be re-inflated anyway. Nothing to do here — the caller closes
+  // it and a partial write simply fails that test later.
+  (void)malformed;
   return true;
+}
+
+// Feeds one spine document to a SAX consumer, preferring the inflated XHTML the section builder
+// already left on SD (sections/html_<spine>.bin, keyed on the spine alone) over re-opening and
+// re-inflating the ZIP entry. Every spine the reader has actually built is sitting there in plain
+// text: inflating it again repeats work a build just did, and needs the ZIP's 4 KB EOCD window
+// plus a ~32 KB inflate ring at exactly the moment — mid-read, framebuffer resident — the heap can
+// least afford them. Same staleness test as the builder: a size mismatch means partial or
+// out-of-date, so fall back to the ZIP (and leave the file alone; the next build re-validates it).
+template <typename Consumer>
+bool streamSpineDocument(Epub& epub, ZipFile& zip, const int spineIndex, const std::string& bankedHtmlPath,
+                         uint8_t* chunk, Consumer& consumer, const bool bankIt = false) {
+  size_t inflatedSize = 0;
+  const std::string htmlPath =
+      bankedHtmlPath.empty() ? Section::sectionHtmlCachePath(epub.getCachePath(), spineIndex) : bankedHtmlPath;
+  if (epub.getSpineItemInflatedSize(spineIndex, &inflatedSize) && inflatedSize > 0) {
+    FsFile html;
+    if (Storage.openFileForRead("FNP", htmlPath, html)) {
+      if (html.size() == inflatedSize) {
+        while (true) {
+          const int n = html.read(chunk, STREAM_CHUNK_BYTES);
+          if (n <= 0) break;
+          if (!consumer.feed(chunk, static_cast<size_t>(n))) break;  // malformed: keep partial results
+        }
+        consumer.finalize();
+        html.close();
+        return true;
+      }
+      html.close();
+    }
+  }
+  FsFile bank;
+  const bool banking = bankIt && Storage.openFileForWrite("FNP", htmlPath, bank);
+  const bool ok = streamSpineEntry(zip, epub.getSpineItem(spineIndex).href, chunk, consumer, banking ? &bank : nullptr);
+  if (banking) bank.close();
+  return ok;
 }
 
 }  // namespace
@@ -282,10 +417,132 @@ namespace FootnotePreviews {
 
 bool cacheExists(const std::string& bookCachePath) { return Storage.exists((bookCachePath + CACHE_FILENAME).c_str()); }
 
-bool gather(Epub& epub, const std::function<void(int)>& progressFn) {
-  const std::string cachePath = epub.getCachePath() + CACHE_FILENAME;
-  const int spineCount = epub.getSpineItemsCount();
+namespace {
+
+// The store's on-disk shape is unchanged from the one-shot design: a header, a blob of
+// length-prefixed texts, then the hash index sorted by key. What is new is that it GROWS —
+// each resolve pass writes its blobs over the old index and then writes a merged index after
+// them. That keeps lookups exactly as cheap as before (binary search in the file, nothing
+// resident) at the cost of holding the index — 8 bytes per entry, 4 KB at the cap — for the
+// length of one append.
+class Store {
+  std::string path_;
+  FsFile file_;
+  NoThrowArray<IndexRow> index_;
+  uint32_t blobEnd_ = HEADER_BYTES;  // where the next blob record goes
+  size_t existing_ = 0;              // rows present before this pass
+
+ public:
+  // Reads an existing store, or starts an empty one. False means "cannot work with this store"
+  // — the caller leaves the file alone.
+  bool open(const std::string& path) {
+    path_ = path;
+    if (!Storage.exists(path.c_str())) {
+      return index_.reserve(32);
+    }
+    if (!Storage.openFileForRead("FNP", path, file_)) {
+      return false;
+    }
+    uint32_t magic = 0, indexOffset = 0;
+    uint16_t version = 0, count = 0;
+    serialization::readPod(file_, magic);
+    serialization::readPod(file_, version);
+    serialization::readPod(file_, count);
+    serialization::readPod(file_, indexOffset);
+    const uint32_t expectedEnd = indexOffset + static_cast<uint32_t>(count) * INDEX_ROW_BYTES;
+    if (magic != CACHE_MAGIC || version != CACHE_VERSION || count > FootnotePreviews::MAX_ENTRIES ||
+        expectedEnd != file_.size() || indexOffset < HEADER_BYTES) {
+      LOG_ERR("FNP", "Store is not usable (magic=%08lx version=%u count=%u); starting a new one",
+              static_cast<unsigned long>(magic), version, count);
+      file_.close();
+      Storage.remove(path.c_str());
+      return index_.reserve(32);
+    }
+    blobEnd_ = indexOffset;
+    if (!index_.reserve(count > 0 ? count : 32) || !file_.seekSet(indexOffset)) {
+      file_.close();
+      return false;
+    }
+    for (uint16_t i = 0; i < count; ++i) {
+      uint32_t row[2] = {0, 0};
+      if (file_.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) {
+        file_.close();
+        return false;
+      }
+      index_.push({row[0], row[1]});
+    }
+    existing_ = index_.size();
+    file_.close();
+    return true;
+  }
+
+  bool contains(const uint32_t keyHash) const {
+    for (const IndexRow& row : index_) {
+      if (row.keyHash == keyHash) return true;
+    }
+    return false;
+  }
+
+  bool full() const { return index_.size() >= FootnotePreviews::MAX_ENTRIES; }
+  size_t added() const { return index_.size() - existing_; }
+
+  // Opens the file positioned where the old index started: the first blob written here lands on
+  // top of it, which is safe because the index is in RAM until commit() writes it back.
+  bool beginAppend() {
+    const bool opened = Storage.exists(path_.c_str()) ? Storage.openFileForUpdate("FNP", path_, file_)
+                                                      : Storage.openFileForWrite("FNP", path_, file_);
+    if (!opened) return false;
+    if (blobEnd_ == HEADER_BYTES) {
+      // Fresh store: lay down a placeholder header, patched by commit().
+      serialization::writePod(file_, CACHE_MAGIC);
+      serialization::writePod(file_, CACHE_VERSION);
+      serialization::writePod(file_, static_cast<uint16_t>(0));
+      serialization::writePod(file_, static_cast<uint32_t>(0));
+    }
+    return file_.seekSet(blobEnd_);
+  }
+
+  void addNote(const uint32_t keyHash, const char* text, const size_t len) {
+    if (full()) return;
+    serialization::writePod(file_, static_cast<uint16_t>(len));
+    file_.write(reinterpret_cast<const uint8_t*>(text), len);
+    index_.push({keyHash, blobEnd_});
+    blobEnd_ += static_cast<uint32_t>(sizeof(uint16_t) + len);
+  }
+
+  // Writes the merged index and patches the header. Also the rollback path: called with nothing
+  // added it simply restores the file to what it was, which is why a failed pass costs the
+  // reader nothing but the time.
+  bool commit() {
+    std::sort(index_.begin(), index_.end());
+    if (!file_.seekSet(blobEnd_)) return false;
+    for (const IndexRow& row : index_) {
+      serialization::writePod(file_, row.keyHash);
+      serialization::writePod(file_, row.blobOffset);
+    }
+    if (!file_.seekSet(0)) return false;
+    serialization::writePod(file_, CACHE_MAGIC);
+    serialization::writePod(file_, CACHE_VERSION);
+    serialization::writePod(file_, static_cast<uint16_t>(index_.size()));
+    serialization::writePod(file_, blobEnd_);
+    file_.close();
+    return true;
+  }
+
+  void abandon() {
+    // Drop only what THIS pass appended, then write the old index back so the store stays
+    // exactly as complete as it was. The trailing blobs we already wrote are overwritten by the
+    // index or left as an unreferenced gap; either way the file stays valid.
+    while (index_.size() > existing_) index_.pop();
+    commit();
+  }
+};
+
+}  // namespace
+
+bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtmlPath) {
   const uint32_t startMs = millis();
+  const std::string storePath = epub.getCachePath() + CACHE_FILENAME;
 
   auto chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
   if (!chunk) {
@@ -293,102 +550,112 @@ bool gather(Epub& epub, const std::function<void(int)>& progressFn) {
     return false;
   }
 
+  // Reuse the book's cached central-directory details: without this every pass re-scans for the
+  // EOCD record, a 4 KB contiguous allocation before a single byte is read. Spines served from
+  // banked XHTML never touch the ZIP at all.
   ZipFile zip(epub.getPath());
+  epub.primeZip(zip);
 
-  // Pass A: collect footnote-shaped link targets from every spine document.
-  int spinesScanned = 0;
-  std::vector<Target> targets;
-  targets.reserve(64);  // typical books have dozens of notes; grows to MAX_ENTRIES worst case
-  for (int i = 0; i < spineCount; ++i) {
-    LinkScanner scanner(epub, i, targets);
+  // Pass A — this spine's callers, from the XHTML the build just banked.
+  NoThrowArray<Target> targets;
+  if (!targets.reserve(16)) {
+    LOG_ERR("FNP", "OOM: cannot allocate the target list");
+    return false;
+  }
+  {
+    LinkScanner scanner(epub, spineIndex, targets);
     if (!scanner.setup()) {
-      LOG_ERR("FNP", "Link scanner setup failed (spine=%d)", i);
+      LOG_ERR("FNP", "Link scanner setup failed (spine=%d)", spineIndex);
       return false;
     }
-    if (!streamSpineEntry(zip, epub.getSpineItem(i).href, chunk.get(), scanner)) {
-      LOG_ERR("FNP", "Failed to stream spine %d for link scan", i);
-      // Unreadable entry: skip it; other chapters' notes still gather.
-    } else {
-      ++spinesScanned;
+    if (!streamSpineDocument(epub, zip, spineIndex, bankedHtmlPath, chunk.get(), scanner)) {
+      LOG_ERR("FNP", "Could not read spine %d for its link scan", spineIndex);
+      return false;
     }
-    if (progressFn) progressFn((i + 1) * 60 / spineCount);
+    if (scanner.outOfMemory()) {
+      LOG_ERR("FNP", "OOM growing the target list for spine %d", spineIndex);
+      return false;
+    }
+  }
+  if (targets.size() == 0) {
+    return true;  // no notes in this chapter; nothing to resolve and nothing to write
   }
 
-  // Every spine failed to open — almost certainly transient heap exhaustion (the ZIP reader
-  // could not even get its 4 KB EOCD buffer), not a book without notes. Writing a cache here
-  // would record "0 previews" as a permanent, authoritative answer: cacheExists() would report
-  // ready on every later open, so the book's footnotes would stay dead until someone deleted
-  // the cache directory. Fail instead, so the caller can retry when there is memory again.
-  if (spineCount > 0 && spinesScanned == 0) {
-    LOG_ERR("FNP", "No spine could be read (0/%d); not writing a cache", spineCount);
+  Store store;
+  if (!store.open(storePath)) {
+    LOG_ERR("FNP", "Could not open the preview store");
     return false;
   }
 
-  // Pass B: capture the note text at each wanted anchor, one stream per target spine,
-  // writing the blob as we go. Header is a placeholder until count/indexOffset are known.
-  FsFile out;
-  if (!Storage.openFileForWrite("FNP", cachePath, out)) {
-    LOG_ERR("FNP", "Cannot open %s for write", cachePath.c_str());
+  // Drop what is already known. A spine resolved in an earlier session lands here with every
+  // target present and stops, having cost one SAX walk over a local file.
+  NoThrowArray<Target> missing;
+  if (!missing.reserve(targets.size())) {
     return false;
   }
-  serialization::writePod(out, CACHE_MAGIC);
-  serialization::writePod(out, CACHE_VERSION);
-  serialization::writePod(out, static_cast<uint16_t>(0));
-  serialization::writePod(out, static_cast<uint32_t>(0));
-
-  std::vector<std::pair<uint32_t, uint32_t>> index;  // keyHash -> blobOffset
-  index.reserve(targets.size());
-
-  std::vector<uint16_t> spines;
-  spines.reserve(targets.size());
   for (const Target& t : targets) {
-    if (std::find(spines.begin(), spines.end(), t.spineIndex) == spines.end()) spines.push_back(t.spineIndex);
+    if (!store.contains(t.keyHash)) missing.push(t);
   }
-  std::sort(spines.begin(), spines.end());
+  if (missing.size() == 0) {
+    LOG_DBG("FNP", "Spine %d: all %u note targets already resolved", spineIndex, static_cast<uint32_t>(targets.size()));
+    return true;
+  }
+  if (store.full()) {
+    LOG_ERR("FNP", "Preview store is at its %u-entry cap; spine %d keeps plain markers",
+            static_cast<uint32_t>(FootnotePreviews::MAX_ENTRIES), spineIndex);
+    return true;  // not a failure: the book is simply larger than the budget
+  }
 
-  for (size_t s = 0; s < spines.size(); ++s) {
-    std::vector<size_t> wanted;
-    for (size_t t = 0; t < targets.size(); ++t) {
-      if (targets[t].spineIndex == spines[s]) wanted.push_back(t);
+  // Pass B — one stream per distinct note document, capturing the anchors this spine wants.
+  NoThrowArray<uint16_t> noteSpines;
+  if (!noteSpines.reserve(missing.size())) {
+    return false;
+  }
+  for (const Target& t : missing) {
+    if (std::find(noteSpines.begin(), noteSpines.end(), t.spineIndex) == noteSpines.end()) {
+      noteSpines.push(t.spineIndex);
     }
-    NoteCapturer capturer(targets, wanted, [&](const size_t targetIdx, const char* text, const size_t len) {
-      const uint32_t offset = static_cast<uint32_t>(out.position());
-      serialization::writePod(out, static_cast<uint16_t>(len));
-      out.write(reinterpret_cast<const uint8_t*>(text), len);
-      index.emplace_back(targets[targetIdx].keyHash, offset);
+  }
+
+  if (!store.beginAppend()) {
+    LOG_ERR("FNP", "Could not open the preview store for append");
+    return false;
+  }
+  for (size_t s = 0; s < noteSpines.size(); ++s) {
+    NoThrowArray<uint32_t> wanted;
+    if (!wanted.reserve(missing.size())) {
+      store.abandon();
+      return false;
+    }
+    for (const Target& t : missing) {
+      if (t.spineIndex == noteSpines[s]) wanted.push(t.keyHash);
+    }
+    NoteCapturer capturer(noteSpines[s], wanted, [&](const uint32_t keyHash, const char* text, const size_t len) {
+      store.addNote(keyHash, text, len);
     });
     if (!capturer.setup()) {
-      LOG_ERR("FNP", "Note capturer setup failed (spine=%u)", spines[s]);
-      break;
+      LOG_ERR("FNP", "Note capturer setup failed (spine=%u)", noteSpines[s]);
+      store.abandon();
+      return false;
     }
-    if (!streamSpineEntry(zip, epub.getSpineItem(spines[s]).href, chunk.get(), capturer)) {
-      LOG_ERR("FNP", "Failed to stream spine %u for note capture", spines[s]);
+    // A note document the reader has already visited is banked like any other spine; one that
+    // has not is streamed from the ZIP and banked on the way past, so the next chapter that
+    // points into it pays an SD read instead of an inflate.
+    if (!streamSpineDocument(epub, zip, noteSpines[s], {}, chunk.get(), capturer, /*bankIt=*/true)) {
+      LOG_ERR("FNP", "Could not read note document %u", noteSpines[s]);
+      store.abandon();
+      return false;
     }
-    if (progressFn) progressFn(60 + static_cast<int>((s + 1) * 39 / spines.size()));
   }
-
-  std::sort(index.begin(), index.end());
-  const uint32_t indexOffset = static_cast<uint32_t>(out.position());
-  for (const auto& [hash, offset] : index) {
-    serialization::writePod(out, hash);
-    serialization::writePod(out, offset);
-  }
-  if (!out.seekSet(0)) {
-    out.close();
-    Storage.remove(cachePath.c_str());
-    LOG_ERR("FNP", "Header rewrite seek failed; cache discarded");
+  const size_t added = store.added();
+  if (!store.commit()) {
+    LOG_ERR("FNP", "Could not write the preview store");
     return false;
   }
-  serialization::writePod(out, CACHE_MAGIC);
-  serialization::writePod(out, CACHE_VERSION);
-  serialization::writePod(out, static_cast<uint16_t>(index.size()));
-  serialization::writePod(out, indexOffset);
-  out.close();
-
-  LOG_INF("FNP", "Gathered %u footnote previews (%u link targets, %u note files) in %lums",
-          static_cast<uint32_t>(index.size()), static_cast<uint32_t>(targets.size()),
-          static_cast<uint32_t>(spines.size()), millis() - startMs);
-  if (progressFn) progressFn(100);
+  epub.adoptZipDetails(zip);
+  LOG_INF("FNP", "Spine %d: resolved %u of %u note targets from %u document(s) in %lums", spineIndex,
+          static_cast<uint32_t>(added), static_cast<uint32_t>(missing.size()), static_cast<uint32_t>(noteSpines.size()),
+          millis() - startMs);
   return true;
 }
 
@@ -407,7 +674,7 @@ bool Lookup::open(const std::string& bookCachePath, const Epub* epub, const int 
   serialization::readPod(file_, version);
   serialization::readPod(file_, count);
   serialization::readPod(file_, indexOffset);
-  const uint32_t expectedEnd = indexOffset + static_cast<uint32_t>(count) * sizeof(IndexEntry);
+  const uint32_t expectedEnd = indexOffset + static_cast<uint32_t>(count) * INDEX_ENTRY_BYTES;
   if (magic != CACHE_MAGIC || version != CACHE_VERSION || count > MAX_ENTRIES || expectedEnd != file_.size()) {
     LOG_ERR("FNP", "Invalid footnotes.bin (magic=%08lx version=%u count=%u); previews skipped",
             static_cast<unsigned long>(magic), version, count);
@@ -418,19 +685,8 @@ bool Lookup::open(const std::string& bookCachePath, const Epub* epub, const int 
     file_.close();
     return false;  // valid-but-empty: nothing to look up, keep the parser fast path off
   }
-  index_ = makeUniqueNoThrow<IndexEntry[]>(count);  // 8 B/entry, <= 4 KB at MAX_ENTRIES
-  if (!index_) {
-    LOG_ERR("FNP", "OOM: cannot allocate %u-entry preview index", count);
-    file_.close();
-    return false;
-  }
-  if (!file_.seekSet(indexOffset) || file_.read(reinterpret_cast<uint8_t*>(index_.get()), count * sizeof(IndexEntry)) !=
-                                         static_cast<int>(count * sizeof(IndexEntry))) {
-    LOG_ERR("FNP", "Failed to read preview index");
-    index_.reset();
-    file_.close();
-    return false;
-  }
+  // No allocation: find() searches the index where it lies.
+  indexOffset_ = indexOffset;
   entryCount_ = count;
   return true;
 }
@@ -447,17 +703,21 @@ bool Lookup::find(const char* href, std::string& outText) {
   }
   const uint32_t keyHash = makeKeyHash(targetSpine, hash + 1);
 
-  int lo = 0, hi = entryCount_ - 1;
+  // Binary search the on-disk index. Written as two u32 per row, so one 8-byte read is one row.
+  int lo = 0, hi = static_cast<int>(entryCount_) - 1;
   uint32_t blobOffset = 0;
   bool found = false;
   while (lo <= hi) {
     const int mid = lo + (hi - lo) / 2;
-    if (index_[mid].keyHash == keyHash) {
-      blobOffset = index_[mid].blobOffset;
+    uint32_t row[2] = {0, 0};
+    if (!file_.seekSet(indexOffset_ + static_cast<uint32_t>(mid) * INDEX_ENTRY_BYTES)) return false;
+    if (file_.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) return false;
+    if (row[0] == keyHash) {
+      blobOffset = row[1];
       found = true;
       break;
     }
-    if (index_[mid].keyHash < keyHash) {
+    if (row[0] < keyHash) {
       lo = mid + 1;
     } else {
       hi = mid - 1;

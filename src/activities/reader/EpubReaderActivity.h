@@ -547,9 +547,18 @@ class EpubReaderActivity final : public Activity {
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
+  // Where a footnote jump came FROM, so page-back returns to the caller instead of to the
+  // previous page (objective: a note is a detour, not a place in the reading order). Anchored on
+  // the caller's paragraph rather than its page number: any repagination between the jump and the
+  // return — a font change made from inside the note, a background rebuild — moves page numbers,
+  // and landing a page or two off is exactly the disorientation the return is meant to prevent.
+  // pageNumber/pageCount stay as the proportional fallback for a spine with no paragraph LUT.
   struct SavedPosition {
-    int spineIndex;
-    int pageNumber;
+    int spineIndex = 0;
+    int pageNumber = 0;
+    int pageCount = 0;
+    uint16_t paragraphIndex = 0;
+    bool hasParagraph = false;
   };
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
@@ -563,25 +572,10 @@ class EpubReaderActivity final : public Activity {
   // retrying once before reporting failure. Shared by the post-build and opportunistic
   // recovery paths.
   bool reallocSecondaryEvictingCaches();
-  // One-time foreground gather of the book-level footnote preview cache (footnotes.bin),
-  // with a "Gathering footnotes" popup. No-op when previews are effectively off or the
-  // cache already exists. Returns true when the cache is usable.
-  bool ensureFootnotePreviewCache();
-  // Polled between build slices. If `target`'s build has seen a footnote and previews are wanted
-  // but not yet gathered, gathers them and returns true — meaning the caller must discard the
-  // section, whose cache variant has just changed from previews-OFF to previews-ON.
-  bool gatherFootnotesIfBuildNeedsThem(const Section* target);
-  // True when currentPageFootnotes holds at least one link the gatherer would collect. Gates
-  // the cached-section fallback trigger; see the definition for why it is shape-only.
-  bool pageHasFootnoteShapedLink() const;
-  // True once footnotes.bin is known to exist for this book (primed in onEnter, set by
-  // ensureFootnotePreviewCache). Feeds makeSectionBuildParams(), so it selects the section
-  // cache VARIANT: sections built before the gather are keyed previews-OFF and are rebuilt
-  // once it flips. Background-B is no longer gated on it.
-  bool footnotePreviewCacheReady_ = false;
-  // One gather attempt per reader session. Without this a book whose gather fails would retry
-  // the whole-book scan on every page turn that shows a footnote.
-  bool footnotePreviewGatherAttempted_ = false;
+  // Note text for each of currentPageFootnotes, for the footnote list activity (empty strings
+  // where the store has no entry). A pure read: note text is resolved by the section build that
+  // needs it, never by opening the list.
+  std::vector<std::string> footnotePreviewsForCurrentPage();
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.
