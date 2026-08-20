@@ -154,6 +154,40 @@ constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
 
+// Length in bytes of the Default_Ignorable UTF-8 sequence starting at s[i], or 0 if there
+// isn't one. Every BMP default-ignorable encodes as 2 bytes (U+034F, U+061C) or 3 bytes, so
+// only those two forms are decoded.
+//
+// A sequence that runs past `len` returns 0 rather than matching on a prefix: the text handler
+// is fed in chunks and may split a codepoint at the boundary. Answering "not ignorable" there
+// is the safe direction — the bytes stay in the word buffer and the next chunk completes them,
+// which is exactly what the U+00A0 / U+202F checks further down already do.
+int defaultIgnorableLen(const char* s, const int i, const int len) {
+  const auto b0 = static_cast<uint8_t>(s[i]);
+  // All default-ignorables are >= U+034F, whose lead byte is 0xCD. Anything below that (ASCII,
+  // Latin-1 supplement, Latin Extended-A) cannot be one, and that is nearly every byte here.
+  if (b0 < 0xCD) return 0;
+
+  if ((b0 & 0xE0) == 0xC0) {  // 2-byte form
+    if (i + 1 >= len) return 0;
+    const auto b1 = static_cast<uint8_t>(s[i + 1]);
+    if ((b1 & 0xC0) != 0x80) return 0;
+    const uint32_t cp = ((b0 & 0x1Fu) << 6) | (b1 & 0x3Fu);
+    return utf8IsDefaultIgnorable(cp) ? 2 : 0;
+  }
+
+  if ((b0 & 0xF0) == 0xE0) {  // 3-byte form
+    if (i + 2 >= len) return 0;
+    const auto b1 = static_cast<uint8_t>(s[i + 1]);
+    const auto b2 = static_cast<uint8_t>(s[i + 2]);
+    if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) return 0;
+    const uint32_t cp = ((b0 & 0x0Fu) << 12) | ((b1 & 0x3Fu) << 6) | (b2 & 0x3Fu);
+    return utf8IsDefaultIgnorable(cp) ? 3 : 0;
+  }
+
+  return 0;
+}
+
 bool hasAttributeToken(const char* value, const char* token) {
   if (!value || !token) return false;
   const size_t tokenLen = strlen(token);
@@ -2239,6 +2273,12 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
     bool overflow = false;
     for (; i < len; i++) {
       if (isWhitespace(s[i])) continue;
+      // Same reason as in the word flow below: a formatting control must not become the
+      // drop cap. A watermarked chapter can open with a run of them.
+      if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+        i += ignorableLen - 1;
+        continue;
+      }
       if (self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;
@@ -2296,6 +2336,21 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       // Whitespace is a real word boundary — reset continuation state
       self->nextWordContinues = false;
       // Skip the whitespace char
+      continue;
+    }
+
+    // Drop Default_Ignorable formatting controls before they can become text.
+    //
+    // Unlike the no-break spaces below these produce NO token at all: they are not word
+    // boundaries (so the surrounding text stays one word — "wor<ZWJ>d" is "word"), they carry no
+    // width, and they must not reach the renderer. See utf8IsDefaultIgnorable for why this is
+    // load-bearing rather than cosmetic on watermarked books.
+    //
+    // NOTE: this also drops U+200B ZERO WIDTH SPACE, which in correct typography is a break
+    // OPPORTUNITY. That is not a regression — isWhitespace() above is ASCII-only, so U+200B has
+    // never been a break opportunity in this parser. Making it one is a separate improvement.
+    if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+      i += ignorableLen - 1;  // loop's ++i consumes the last byte
       continue;
     }
 
