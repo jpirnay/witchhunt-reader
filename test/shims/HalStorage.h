@@ -123,6 +123,8 @@ class HalStorage {
   bool openFileForRead(const char*, const char*, HalFile&) { return false; }
   bool openFileForRead(const char*, const std::string&, HalFile&) { return false; }
   bool openFileForRead(const char*, const String&, HalFile&) { return false; }
+  bool openFileForUpdate(const char*, const char*, HalFile&) { return false; }
+  bool openFileForUpdate(const char*, const std::string&, HalFile&) { return false; }
   bool openFileForWrite(const char*, const char*, HalFile&) { return false; }
   bool openFileForWrite(const char*, const std::string&, HalFile&) { return false; }
   bool openFileForWrite(const char*, const String&, HalFile&) { return false; }

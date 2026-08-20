@@ -13,7 +13,6 @@
 #include <cctype>
 
 #include "../../Epub.h"
-#include "../FootnoteShape.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
@@ -1754,8 +1753,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
-      self->currentFootnoteIsNoteref =
-          FootnoteShape::isNoterefTagged(getAttribute(atts, "epub:type"), getAttribute(atts, "role"));
 
       // Apply underline style to visually indicate the link
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -2501,23 +2498,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
-      // Earliest possible signal that this book needs footnote previews. Latched (never
-      // cleared) so a caller can act on it the moment it appears rather than after the whole
-      // spine is laid out — which for a whole-book-in-one-spine EPUB is minutes of work.
-      //
-      // Gated on the SAME shape test the gatherer applies, not on "is an internal link":
-      // pendingFootnotes above is deliberately broad (every internal link is navigable), but a
-      // Calibre HTML table of contents is 20 chapter links and zero footnotes, and triggering
-      // the whole-book two-pass gather on it cost ~2.8 s behind a popup at book open for an
-      // empty cache. See FootnoteShape.h.
-      if (self->currentFootnoteIsNoteref ||
-          FootnoteShape::isMarkerText(self->currentFootnote.number, self->currentFootnoteLinkTextLen)) {
-        self->sawFootnote_ = true;
-      }
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {
-      // Membership in the book-level preview cache is the gate: the gatherer only
-      // stored targets of footnote-shaped links, so any resolving href — same-file or
+      // Membership in the preview store is the gate: only targets of footnote-shaped links
+      // are ever resolved into it, so any resolving href — same-file or
       // cross-file ("../Text/notes.xhtml#n3", Calibre filepos anchors) — is a real note.
       std::string preview;
       if (self->inlineFootnotePreviews->find(self->currentFootnote.href, preview)) {
