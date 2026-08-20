@@ -73,6 +73,18 @@ void updatePeriodic();
 /// may have drifted.  Cleared on NTP sync.
 bool isApproximate();
 
+/// True when the clock was seeded from an NVS epoch older than the staleness threshold.
+///
+/// The wall clock IS set in that case, deliberately: a last-known-good time is a sound LOWER
+/// BOUND, and the machine uses on these RTC-less boards need one. 1970 is not a neutral fallback
+/// — it makes every curated TLS root's notBefore look unreached, so the trust store fails to load
+/// and https stops working entirely (see HalClock::isPlausibleForTls). Cache TTLs and session
+/// timestamps degrade the same way.
+///
+/// What a stale epoch is NOT is a time of day, so formatTime() shows "--:--" while this is set.
+/// Cleared by a successful NTP sync.
+bool isStaleRestore();
+
 /// True when the system clock sits inside the window where TLS certificate
 /// date validation can succeed.
 ///
