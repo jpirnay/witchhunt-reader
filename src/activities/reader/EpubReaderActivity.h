@@ -510,6 +510,13 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool finishedBookActivityStarted_ = false;
+  // Armed by renderFinishedBookPass() (render task), consumed by loop() (loop task). The launch
+  // itself must not run on the render task: it ends in pushActivity(), which writes
+  // ActivityManager's pendingActivity/pendingAction — and loop() reads and std::move()s those
+  // with no lock at all, because the invariant they rely on is "only the loop task touches
+  // them", not "the render lock covers them". A unique_ptr assigned from one task while another
+  // moves it is a double-free waiting to happen.
+  bool finishedBookLaunchPending_ = false;
   // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
   // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
   int finishedBookSyncSpineIndex_ = 0;
@@ -581,8 +588,11 @@ class EpubReaderActivity final : public Activity {
   RenderLayout computeRenderLayout() const;
   // Select which pass this render() invocation should run, from pending flags + reader state.
   RenderPass classifyRenderPass() const;
-  // FinishedBook pass: transition to the finished-book flow. Consumes the lock.
-  void renderFinishedBookPass(RenderLock& lock, int spineCount);
+  // FinishedBook pass: arm the transition to the finished-book flow. Runs under the render
+  // lock and keeps it; the launch itself is deferred to the loop task (see the pair below).
+  void renderFinishedBookPass(int spineCount);
+  // Loop-task half of renderFinishedBookPass(): performs the launch it armed.
+  void serviceFinishedBookLaunch();
   // PreRender pass (Background A): render the next page's content into the framebuffer only.
   void renderPreRenderPass(const RenderLayout& layout);
   // BufferDisplay pass: framebuffer already holds the next page; add status bar + flush.

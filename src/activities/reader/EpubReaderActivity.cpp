@@ -655,10 +655,13 @@ void EpubReaderActivity::onExit() {
     secondaryBorrowed_ = false;
     secondaryBufferDegraded_ = false;
     LOG_INF("ERS", "onExit: returned secondary buffer borrowed by Background-C");
-  }
-  // Background-C may instead have RELEASED the secondary buffer for headroom; the build is now
-  // aborted, so restore the global "buffer resident" invariant before the next activity renders.
-  if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
+  } else if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
+    // Background-C may INSTEAD have RELEASED the secondary buffer for headroom; the build is now
+    // aborted, so restore the global "buffer resident" invariant before the next activity renders.
+    // `else if` because borrowed and released are alternatives, never both: returning a borrow
+    // above already makes the buffer resident. That used to be expressed by the borrow branch
+    // clearing secondaryBufferDegraded_, which left this branch's reachability depending on a
+    // flag write two lines up rather than on the state it actually tests.
     if (reallocSecondaryEvictingCaches()) {
       LOG_INF("ERS", "onExit: restored secondary buffer released by Background-C");
     }
@@ -690,6 +693,15 @@ void EpubReaderActivity::loop() {
   if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
     pendingProgressSave.pending.store(false, std::memory_order_relaxed);
     saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+  }
+
+  // Deferred by the render task (renderFinishedBookPass) because it ends in pushActivity().
+  // After the progress flush and before input handling: this is the reader's LAST loop() pass —
+  // the launch pushes it onto the activity stack, which stops loop() being called — so anything
+  // still owed must be flushed above, and nothing below it will run again.
+  if (finishedBookLaunchPending_) {
+    serviceFinishedBookLaunch();
+    return;
   }
 
   if (inputDrainGuard.shouldDrain(mappedInput)) {
@@ -1011,19 +1023,30 @@ void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& acti
   // that is still live, and keeps a COMPLETED one for buildSection() to adopt. Resetting would
   // throw that finished section away and make the next page turn rebuild it — paying for the
   // refresh fix with a page-turn stall.
-  if (backgroundBorrowActive_) {
-    LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
-            activity ? activity->getName().c_str() : "<null>");
+  //
+  // Under the render lock, like every other endBackgroundBorrow() call site. This runs on the
+  // loop task, and the render task calls the same function from recoverSecondaryBufferIfNeeded()
+  // at the top of every render(). Its `if (!backgroundBorrowActive_) return;` is a plain bool,
+  // not a guard against concurrency: unlocked, both tasks pass it and both run the teardown —
+  // double-destroying backgroundSection_ and buildScratch_ (two frees into TLSF, which corrupts
+  // the free list and hangs a later malloc) while returnSecondaryBuffer() memcpy's 48 KB into a
+  // framebuffer the render task is using.
+  {
+    RenderLock lock(*this);
+    if (backgroundBorrowActive_) {
+      LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
+              activity ? activity->getName().c_str() : "<null>");
+    }
+    // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps
+    // losing the race against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the
+    // spine to the foreground once it is hit. An overlay opening says nothing about whether the
+    // parse fits between two turns, so letting it burn that budget would mean two visits to the
+    // reader menu permanently demote the next section to a blocking Background-C build with its
+    // popup. Restore the count so B resumes with exactly the budget it had.
+    const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+    endBackgroundBorrow();
+    backgroundPreemptCount_ = preemptionsBeforeOverlay;
   }
-  // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps
-  // losing the race against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the
-  // spine to the foreground once it is hit. An overlay opening says nothing about whether the
-  // parse fits between two turns, so letting it burn that budget would mean two visits to the
-  // reader menu permanently demote the next section to a blocking Background-C build with its
-  // popup. Restore the count so B resumes with exactly the budget it had.
-  const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
-  endBackgroundBorrow();
-  backgroundPreemptCount_ = preemptionsBeforeOverlay;
   Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
 }
 
@@ -2941,7 +2964,7 @@ EpubReaderActivity::RenderPass EpubReaderActivity::classifyRenderPass() const {
   return RenderPass::Normal;
 }
 
-void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spineCount) {
+void EpubReaderActivity::renderFinishedBookPass(const int spineCount) {
   // Immediately transition to finished-book flow instead of showing an end-of-book screen
   if (finishedBookActivityStarted_) {
     return;
@@ -2952,7 +2975,19 @@ void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spin
   finishedBookSyncSpineIndex_ = lastSpineIndex;
   finishedBookSyncPage_ = 0;
   finishedBookSyncPageCount_ = 0;
-  lock.unlock();
+  // Arm only; loop() performs the launch on the loop task (see finishedBookLaunchPending_).
+  // This pass used to drop the render lock and call launchFinishedBookFlow() from here, which
+  // both mutated ActivityManager's pending-activity state from the wrong task and did SD work
+  // (findNextBookInDirectory) on the render task's stack. The lock is now simply kept: nothing
+  // below it is long-running any more.
+  finishedBookLaunchPending_ = true;
+}
+
+void EpubReaderActivity::serviceFinishedBookLaunch() {
+  if (!finishedBookLaunchPending_ || !epub) {
+    return;
+  }
+  finishedBookLaunchPending_ = false;
   BookFinished::launchFinishedBookFlow(
       *this, renderer, mappedInput, epub->getPath(), epub->getSeries(), epub->getSeriesIndex(), epub->getAuthor(),
       [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this,
@@ -3835,9 +3870,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   clampSpineIndex(spineCount);
 
-  // The finished-book pass needs no layout/stats setup and consumes the lock itself.
+  // The finished-book pass needs no layout/stats setup, and only arms a flag — the lock stays
+  // held for the rest of this call and is released by the render task as usual.
   if (currentSpineIndex == spineCount) {
-    renderFinishedBookPass(lock, spineCount);
+    renderFinishedBookPass(spineCount);
     return;
   }
 
@@ -4381,6 +4417,19 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // frameBuffer is already swapped. The loop task gets full CPU during the
   // waveform for input handling and pre-render scheduling.
   lock.unlock();
+
+#ifdef ERS_TEST_WIDEN_RENDER_WINDOW_MS
+  // TEST HOOK — never defined by any environment in platformio.ini. Holds the mid-render
+  // unlocked window open so a transition requested during it deterministically overlaps a live
+  // render pass, which is otherwise a ~1-2 s target that has to be hit by hand. Validates
+  // RenderLock(ExclusiveActivityAccess): with the guard, the transition logs
+  // "Transition waited Nms" and proceeds safely; swap the two ExclusiveActivityAccess call
+  // sites in ActivityManager::loop() back to the plain constructor and the same gesture runs
+  // the activity's destructor while this pass is still using `this`.
+  // Build with: PLATFORMIO_BUILD_FLAGS=-DERS_TEST_WIDEN_RENDER_WINDOW_MS=4000 pio run
+  LOG_INF("ERS", "TEST: holding the mid-render unlocked window open for %d ms", ERS_TEST_WIDEN_RENDER_WINDOW_MS);
+  delay(ERS_TEST_WIDEN_RENDER_WINDOW_MS);
+#endif
 
   // Sleep until BUSY deasserts, then do post-waveform SPI work (DTM1 resync
   // on X3, conditioning passes, flag updates). SPI ownership transfers back
