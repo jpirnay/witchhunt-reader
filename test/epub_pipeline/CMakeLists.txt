@@ -90,6 +90,7 @@ add_executable(EpubPipelineTest
   MetadataSidecarTest.cpp
   SidecarFilesTest.cpp
   SectionAbortTest.cpp
+  FootnotePreviewStoreTest.cpp
   ImageExtractionTest.cpp
   ${PIPELINE_SOURCES}
 )

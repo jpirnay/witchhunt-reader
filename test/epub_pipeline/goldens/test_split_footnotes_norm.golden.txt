@@ -1,0 +1,233 @@
+BOOK title=Split Footnotes lang=en spine=6 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=10 footnotes=3
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=141 s=1 z=100 t=Chapter
+   W x=269 s=1 z=100 t=One
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=The
+   W x=60 s=0 z=100 t=city
+   W x=106 s=0 z=100 t=watch
+   W x=168 s=0 z=100 t=had
+   W x=215 s=0 z=100 t=a
+   W x=242 s=0 z=100 t=proud
+   W x=302 s=0 z=100 t=tradition
+   W x=385 s=4 z=100 t=[1]
+   W x=420 s=2 z=100 t=(The
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=2 z=100 t=Patrician
+   W x=98 s=2 z=100 t=had
+   W x=147 s=2 z=100 t=a
+   W x=176 s=2 z=100 t=broad
+   W x=239 s=2 z=100 t=and
+   W x=287 s=2 z=100 t=comprehensive
+   W x=424 s=2 z=100 t=view
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=2 z=100 t=of
+   W x=32 s=2 z=100 t=the
+   W x=73 s=2 z=100 t=world,
+   W x=134 s=2 z=100 t=which
+   W x=187 s=2 z=100 t=is
+   W x=212 s=2 z=100 t=to
+   W x=244 s=2 z=100 t=say
+   W x=283 s=2 z=100 t=a
+   W x=305 s=2 z=100 t=short
+   W x=366 s=2 z=100 t=one.)
+   W x=430 s=0 z=100 t=of
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=arriving
+   W x=83 s=0 z=100 t=shortly
+   W x=160 s=0 z=100 t=after
+   W x=218 s=0 z=100 t=the
+   W x=258 s=0 z=100 t=event,
+   W x=326 s=0 z=100 t=which
+   W x=378 s=0 z=100 t=the
+   W x=418 s=0 z=100 t=Guild
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=of
+   W x=37 s=0 z=100 t=Thieves
+   W x=100 s=4 z=100 t=[2]
+   W x=136 s=2 z=100 t=(Or
+   W x=178 s=2 z=100 t=would
+   W x=239 s=2 z=100 t=have
+   W x=299 s=2 z=100 t=done,
+   W x=362 s=2 z=100 t=if
+   W x=393 s=2 z=100 t=anyone
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=had
+   W x=43 s=2 z=100 t=thought
+   W x=132 s=2 z=100 t=to
+   W x=165 s=2 z=100 t=ask
+   W x=205 s=2 z=100 t=him
+   W x=244 s=2 z=100 t=first.)
+   W x=320 s=0 z=100 t=considered
+   W x=418 s=0 z=100 t=only
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=sporting.
+   W x=92 s=0 z=100 t=Dwarfs
+   W x=157 s=0 z=100 t=were
+   W x=198 s=0 z=100 t=of
+   W x=229 s=0 z=100 t=course
+   W x=294 s=0 z=100 t=another
+   W x=377 s=0 z=100 t=matter
+   W x=436 s=4 z=100 t=[3]
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=2 z=100 t=(This
+   W x=55 s=2 z=100 t=is
+   W x=81 s=2 z=100 t=not
+   W x=125 s=2 z=100 t=true
+   W x=174 s=2 z=100 t=of
+   W x=207 s=2 z=100 t=dwarfs,
+   W x=279 s=2 z=100 t=who
+   W x=320 s=2 z=100 t=measure
+   W x=399 s=2 z=100 t=height
+  LINE y=230 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=from
+   W x=46 s=2 z=100 t=the
+   W x=83 s=2 z=100 t=ground
+   W x=150 s=2 z=100 t=up
+   W x=173 s=2 z=100 t=like
+   W x=211 s=2 z=100 t=everyone
+   W x=295 s=2 z=100 t=else.)
+   W x=359 s=0 z=100 t=entirely.
+  FN n=1 href=note1.xhtml#note_1
+  FN n=2 href=note2.xhtml#note_2
+  FN n=3 href=note3.xhtml#note_3
+SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=2
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=144 s=1 z=100 t=Chapter
+   W x=272 s=1 z=100 t=Two
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=Assassination
+   W x=166 s=0 z=100 t=was
+   W x=217 s=0 z=100 t=a
+   W x=253 s=0 z=100 t=licensed
+   W x=345 s=0 z=100 t=profession
+   W x=437 s=4 z=100 t=[4]
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=2 z=100 t=(Assassins
+   W x=107 s=2 z=100 t=are,
+   W x=158 s=2 z=100 t=however,
+   W x=248 s=2 z=100 t=extremely
+   W x=341 s=2 z=100 t=polite
+   W x=407 s=2 z=100 t=about
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=it.)
+   W x=52 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Ankh-Morpork,
+   W x=213 s=0 z=100 t=and
+   W x=258 s=0 z=100 t=the
+   W x=303 s=0 z=100 t=Patrician
+   W x=384 s=4 z=100 t=[1]
+   W x=418 s=2 z=100 t=(The
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=Patrician
+   W x=92 s=2 z=100 t=had
+   W x=135 s=2 z=100 t=a
+   W x=158 s=2 z=100 t=broad
+   W x=215 s=2 z=100 t=and
+   W x=257 s=2 z=100 t=comprehensive
+   W x=388 s=2 z=100 t=view
+   W x=432 s=2 z=100 t=of
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=2 z=100 t=the
+   W x=39 s=2 z=100 t=world,
+   W x=98 s=2 z=100 t=which
+   W x=149 s=2 z=100 t=is
+   W x=172 s=2 z=100 t=to
+   W x=202 s=2 z=100 t=say
+   W x=239 s=2 z=100 t=a
+   W x=259 s=2 z=100 t=short
+   W x=318 s=2 z=100 t=one.)
+   W x=380 s=0 z=100 t=approved
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=of
+   W x=28 s=0 z=100 t=licences.
+  FN n=4 href=note4.xhtml#note_4
+  FN n=1 href=note1.xhtml#note_1
+SPINE 2 href=OEBPS/note1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=225 s=1 z=100 t=1
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=The
+   W x=53 s=0 z=100 t=Patrician
+   W x=142 s=0 z=100 t=had
+   W x=182 s=0 z=100 t=a
+   W x=202 s=0 z=100 t=broad
+   W x=256 s=0 z=100 t=and
+   W x=295 s=0 z=100 t=comprehensive
+   W x=423 s=0 z=100 t=view
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=of
+   W x=28 s=0 z=100 t=the
+   W x=65 s=0 z=100 t=world,
+   W x=122 s=0 z=100 t=which
+   W x=171 s=0 z=100 t=is
+   W x=192 s=0 z=100 t=to
+   W x=220 s=0 z=100 t=say
+   W x=255 s=0 z=100 t=a
+   W x=273 s=0 z=100 t=short
+   W x=330 s=0 z=100 t=one.
+   W x=378 s=4 z=100 t=note_1
+  FN n=note_1 href=chapter1.xhtml#note_1_back
+SPINE 3 href=OEBPS/note2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=224 s=1 z=100 t=2
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=Or
+   W x=43 s=0 z=100 t=would
+   W x=98 s=0 z=100 t=have
+   W x=152 s=0 z=100 t=done,
+   W x=209 s=0 z=100 t=if
+   W x=234 s=0 z=100 t=anyone
+   W x=306 s=0 z=100 t=had
+   W x=347 s=0 z=100 t=thought
+   W x=434 s=0 z=100 t=to
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=ask
+   W x=35 s=0 z=100 t=him
+   W x=69 s=0 z=100 t=first.
+   W x=128 s=4 z=100 t=note_2
+  FN n=note_2 href=chapter1.xhtml#note_2_back
+SPINE 4 href=OEBPS/note3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=223 s=1 z=100 t=3
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=This
+   W x=61 s=0 z=100 t=is
+   W x=86 s=0 z=100 t=not
+   W x=129 s=0 z=100 t=true
+   W x=177 s=0 z=100 t=of
+   W x=209 s=0 z=100 t=dwarfs,
+   W x=280 s=0 z=100 t=who
+   W x=320 s=0 z=100 t=measure
+   W x=398 s=0 z=100 t=height
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=from
+   W x=46 s=0 z=100 t=the
+   W x=83 s=0 z=100 t=ground
+   W x=150 s=0 z=100 t=up
+   W x=173 s=0 z=100 t=like
+   W x=211 s=0 z=100 t=everyone
+   W x=295 s=0 z=100 t=else.
+   W x=347 s=4 z=100 t=note_3
+  FN n=note_3 href=chapter1.xhtml#note_3_back
+SPINE 5 href=OEBPS/note4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=1
+   W x=223 s=1 z=100 t=4
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=Assassins
+   W x=106 s=0 z=100 t=are,
+   W x=149 s=0 z=100 t=however,
+   W x=231 s=0 z=100 t=extremely
+   W x=316 s=0 z=100 t=polite
+   W x=374 s=0 z=100 t=about
+   W x=431 s=0 z=100 t=it.
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=4 z=100 t=note_4
+  FN n=note_4 href=chapter2.xhtml#note_4_back

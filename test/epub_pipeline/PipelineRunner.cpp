@@ -109,7 +109,8 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     return false;
   }
   epub->loadImageManifest();
-  FootnotePreviews::gather(*epub);
+  // No up-front gather any more: each section build resolves the notes its own spine references,
+  // between the extract and the layout parse. The dump therefore exercises the real ordering.
 
   out << "BOOK title=" << epub->getTitle() << " lang=" << epub->getLanguage() << " spine=" << epub->getSpineItemsCount()
       << " toc=" << epub->getTocItemsCount() << " reliableToc=" << (epub->hasReliableToc() ? 1 : 0) << "\n";
