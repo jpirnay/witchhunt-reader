@@ -70,6 +70,7 @@ add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParse
 add_subdirectory(buffered_io)
 add_subdirectory(natural_sort)
 add_subdirectory(list_layout)
+add_subdirectory(cover_grid_layout)
 add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
 add_subdirectory(url_utils)
