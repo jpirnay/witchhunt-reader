@@ -1,0 +1,4 @@
+entry_count=3003
+first_word=Aaaa
+last_word=zzwr
+chunk_length=4096
