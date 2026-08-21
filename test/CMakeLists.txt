@@ -103,5 +103,6 @@ add_subdirectory(epub_pipeline)
 add_subdirectory(memory_arena)
 add_subdirectory(content_bin)
 add_subdirectory(default_ignorable)
+add_subdirectory(glyph_fallback)
 # After zip_entry_reader: reuses its inflate_reader_host target and HalStorage shim.
 add_subdirectory(dictionary)
