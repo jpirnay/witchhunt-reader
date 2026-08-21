@@ -21,13 +21,8 @@
 // and looks distinct from the book, which is the right signal for an overlay.
 //
 // The cost is that a reader using Extra Large text still gets a 14pt
-// definition. Under OMIT_FONTS only Bookerly 14 is registered, so fall back to
-// it -- that build has no IPA glyphs at all and relies on GlyphFallback.
-#ifdef OMIT_FONTS
-#define DICTIONARY_FONT_ID BOOKERLY_14_FONT_ID
-#else
+// definition.
 #define DICTIONARY_FONT_ID NOTOSANS_14_FONT_ID
-#endif
 
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain text,
