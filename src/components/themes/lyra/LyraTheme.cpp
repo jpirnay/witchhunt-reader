@@ -262,14 +262,33 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }
 
+BaseTheme::WrappedListStyle LyraTheme::wrappedListStyle() const {
+  WrappedListStyle style;
+  style.hPadding = hPaddingInSelection;
+  style.iconSize = listIconSize;
+  style.titleTextOffsetY = 7;  // matches the single-line rows drawn by drawList below
+  style.cornerRadius = cornerRadius;
+  style.scrollBarWidth = LyraMetrics::values.scrollBarWidth;
+  style.scrollBarRightOffset = LyraMetrics::values.scrollBarRightOffset;
+  style.selectionIsBlack = false;  // light-gray pill, text stays black
+  style.fullWidthSelection = false;
+  return style;
+}
+
 void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
-                         const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
+                         const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                         ListViewState* view) const {
+  if (view != nullptr && view->wraps() && rowSubtitle == nullptr && rowValue == nullptr) {
+    drawWrappedList(renderer, rect, itemCount, selectedIndex, rowTitle, rowIcon, *view);
+    return;
+  }
   int rowHeight =
       (rowSubtitle != nullptr) ? LyraMetrics::values.listWithSubtitleRowHeight : LyraMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
+  if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {

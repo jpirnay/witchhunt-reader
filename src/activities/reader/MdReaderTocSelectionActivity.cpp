@@ -57,8 +57,10 @@ void MdReaderTocSelectionActivity::loop() {
     }
   }
 
-  buttonNavigator.onNextList(selectorIndex, totalItems, [this] { requestUpdate(); });
-  buttonNavigator.onPreviousList(selectorIndex, totalItems, [this] { requestUpdate(); });
+  // Up/Down step one chapter, Left/Right jump a screenful — a book with hundreds of chapters is
+  // otherwise only crossable by holding a button down.
+  buttonNavigator.onNextList(selectorIndex, totalItems, [this] { requestUpdate(); }, pageItems);
+  buttonNavigator.onPreviousList(selectorIndex, totalItems, [this] { requestUpdate(); }, pageItems);
 }
 
 void MdReaderTocSelectionActivity::render(RenderLock&&) {
@@ -91,7 +93,12 @@ void MdReaderTocSelectionActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, drawX, displayY, title.c_str(), !isSelected);
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  // Left/Right page when there is more than one page to cross, and fall back to stepping (which is
+  // what ButtonNavigator::nextPageIndex does on a short list) when there is not.
+  const bool pages = totalItems > pageItems;
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), pages ? tr(STR_LIST_PAGE_PREV) : tr(STR_DIR_UP),
+                            pages ? tr(STR_LIST_PAGE_NEXT) : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

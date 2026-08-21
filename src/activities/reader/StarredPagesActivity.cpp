@@ -96,15 +96,17 @@ void StarredPagesActivity::loop() {
       return;
     }
 
-    if (totalItems > 0 &&
-        (ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
+    // Left/Right only, matching the hints this screen draws (Rename / Delete on the front strip).
+    // The PageBack/PageForward names that used to be matched here are the SIDE buttons under
+    // another name (see ButtonEventManager's aliasing note) — the same buttons that scroll the
+    // list, so pressing Up to move the selection also opened the rename keyboard.
+    if (totalItems > 0 && ev.button == MappedInputManager::Button::Left &&
         ev.type == ButtonEventManager::PressType::Short) {
       startRename();
       return;
     }
 
-    if (totalItems > 0 &&
-        (ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
+    if (totalItems > 0 && ev.button == MappedInputManager::Button::Right &&
         ev.type == ButtonEventManager::PressType::Short) {
       deleteSelected();
       return;
@@ -113,8 +115,13 @@ void StarredPagesActivity::loop() {
 
   if (totalItems == 0) return;
 
-  buttonNavigator.onNextList(selectorIndex, totalItems, [this] { requestUpdate(); });
-  buttonNavigator.onPreviousList(selectorIndex, totalItems, [this] { requestUpdate(); });
+  // Step on Up/Down only: Left/Right are this screen's rename and delete (handled above), so they
+  // cannot also drive the list — binding them here made a single press both move the selection and
+  // fire the action. The page jump is the double-click on Up/Down.
+  buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectorIndex, totalItems,
+                             [this] { requestUpdate(); });
+  buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectorIndex, totalItems,
+                                 [this] { requestUpdate(); });
 }
 
 void StarredPagesActivity::render(RenderLock&&) {

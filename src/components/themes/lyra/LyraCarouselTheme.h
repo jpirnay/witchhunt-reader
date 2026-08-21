@@ -85,7 +85,14 @@ class LyraCarouselTheme : public LyraTheme {
                 const std::function<std::string(int index)>& rowTitle,
                 const std::function<std::string(int index)>& rowSubtitle,
                 const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
-                bool highlightValue) const override;
+                bool highlightValue, ListViewState* view) const override;
+
+ protected:
+  // Same geometry as Lyra, but the carousel's selected row is a solid black bar with the text and
+  // icon knocked out of it.
+  WrappedListStyle wrappedListStyle() const override;
+
+ public:
   void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                   bool selected) const override;
 };

@@ -83,6 +83,21 @@ class ButtonEventManager {
   // both names of an aliased pair, so one physical button always has one wait policy.
   bool hasDoubleAction(Button button) const;
 
+  // Raw record of a button's press-down edges, for code that classifies taps itself instead of
+  // consuming Short/Double events — ButtonNavigator's list paging, which must keep firing on the
+  // press edge and so cannot wait out a double-click window.
+  //
+  // All three come from the background sampler: `count` rises once per debounced press-down
+  // edge even when several land inside one loop tick, and the timestamps are when the sampler saw
+  // the presses, not when the loop got round to them. Measuring a double-tap any other way means
+  // measuring the redraw that happened in between — an e-ink refresh alone outlasts the window.
+  struct PressLog {
+    uint16_t count = 0;              // press-down edges since the last drain()
+    unsigned long lastPressMs = 0;   // most recent press-down
+    unsigned long priorPressMs = 0;  // the one before it
+  };
+  [[nodiscard]] PressLog pressLog(Button button) const;
+
  private:
   static constexpr int NUM_BUTTONS = 9;
   static constexpr Button ALL_BUTTONS[NUM_BUTTONS] = {
@@ -98,6 +113,11 @@ class ButtonEventManager {
     State state = State::Idle;
     unsigned long pressDownTime = 0;  // when the current (or first) press started
     unsigned long releaseTime = 0;    // when the first release happened (for double-click window)
+    // Independent of the FSM above: every press-down edge is counted and timed, whatever state
+    // the machine is in and whatever it decides to do with it. See pressLog().
+    unsigned long loggedPressMs = 0;
+    unsigned long priorLoggedPressMs = 0;
+    uint16_t pressCount = 0;
   };
 
   PerButton buttons[NUM_BUTTONS];

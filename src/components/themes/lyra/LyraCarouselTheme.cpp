@@ -606,11 +606,25 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
 // ---------------------------------------------------------------------------
 // List — solid black highlight, inverted text and icons on selected row
 // ---------------------------------------------------------------------------
+BaseTheme::WrappedListStyle LyraCarouselTheme::wrappedListStyle() const {
+  WrappedListStyle style = LyraTheme::wrappedListStyle();
+  style.cornerRadius = kCornerRadius;
+  style.scrollBarWidth = LyraCarouselMetrics::values.scrollBarWidth;
+  style.scrollBarRightOffset = LyraCarouselMetrics::values.scrollBarRightOffset;
+  style.selectionIsBlack = true;  // solid black bar, text and icon inverted
+  return style;
+}
+
 void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                                  const std::function<std::string(int index)>& rowTitle,
                                  const std::function<std::string(int index)>& rowSubtitle,
                                  const std::function<UIIcon(int index)>& rowIcon,
-                                 const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
+                                 const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                                 ListViewState* view) const {
+  if (view != nullptr && view->wraps() && rowSubtitle == nullptr && rowValue == nullptr) {
+    drawWrappedList(renderer, rect, itemCount, selectedIndex, rowTitle, rowIcon, *view);
+    return;
+  }
   constexpr int hPad = 8;
   constexpr int listIconSz = 24;
   constexpr int mainMenuIconSz = 32;
@@ -620,6 +634,7 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
   const int rowHeight = (rowSubtitle != nullptr) ? LyraCarouselMetrics::values.listWithSubtitleRowHeight
                                                  : LyraCarouselMetrics::values.listRowHeight;
   const int pageItems = rect.height / rowHeight;
+  if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
   if (pageItems <= 0 || itemCount <= 0) return;
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
 
