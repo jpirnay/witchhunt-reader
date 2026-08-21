@@ -140,12 +140,12 @@ bool Dictionary::ScanReader::refill() {
 int Dictionary::ScanReader::readWord(char* out, size_t outSize) {
   if (!out || outSize == 0) return -1;
   size_t written = 0;
-  bool any = false;
   for (;;) {
     if (cursor >= filled && !refill()) {
-      // EOF or IO error. A partially read word means a truncated index; treat it
-      // the way a clean EOF is treated so the caller stops scanning.
-      return any ? -1 : -1;
+      // EOF or IO error, and a word left unterminated by the end of the file is
+      // a truncated index -- reported the same way, because the caller's only
+      // sensible response to either is to stop scanning.
+      return -1;
     }
     const uint8_t* start = buf + cursor;
     const size_t avail = static_cast<size_t>(filled - cursor);
@@ -157,7 +157,6 @@ int Dictionary::ScanReader::readWord(char* out, size_t outSize) {
       written += copy;
     }
     cursor += static_cast<int>(take);
-    any = true;
     if (nul) {
       cursor++;  // step over the NUL so the stream stays in sync
       out[written] = '\0';
@@ -229,9 +228,9 @@ void Dictionary::releaseCaches() {
 
 bool Dictionary::ensureScanBuffers() {
   if (scanBuf) return true;
-  scanBuf = makeUniqueNoThrow<uint8_t[]>(2 * SCAN_BUF_BYTES);
+  scanBuf = makeUniqueNoThrow<ScanBuffers>();
   if (!scanBuf) {
-    LOG_ERR("DICT", "OOM: %u byte scan buffers", static_cast<unsigned>(2 * SCAN_BUF_BYTES));
+    LOG_ERR("DICT", "OOM: %u byte scan buffers", static_cast<unsigned>(sizeof(ScanBuffers)));
     return false;
   }
   return true;
@@ -390,7 +389,7 @@ bool Dictionary::openSession(LookupSession& session) {
   if (!buildPath(path, sizeof(path), ".idx")) return false;
   if (!Storage.openFileForRead("DICT", path, session.idx)) return false;
   session.idxSize = static_cast<uint32_t>(session.idx.fileSize());
-  session.idxScan.attach(&session.idx, scanBuf.get(), session.idxSize);
+  session.idxScan.attach(&session.idx, scanBuf->idx, session.idxSize);
 
   // The sidecar is optional and its header only has to be validated once per
   // lookup; without a usable one locate() scans from byte 0.
@@ -419,7 +418,7 @@ bool Dictionary::openSynonyms(LookupSession& session) {
     return false;
   }
   session.synSize = static_cast<uint32_t>(session.syn.fileSize());
-  session.synScan.attach(&session.syn, scanBuf.get() + SCAN_BUF_BYTES, session.synSize);
+  session.synScan.attach(&session.syn, scanBuf->syn, session.synSize);
 
   if (buildPath(path, sizeof(path), ".sidx") && Storage.openFileForRead("DICT", path, session.sidx)) {
     const SidecarHeader header = readSidecarHeader(session.sidx, SIDX_MAGIC, SAMPLE_INTERVAL);

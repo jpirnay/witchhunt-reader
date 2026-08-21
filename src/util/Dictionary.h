@@ -278,8 +278,15 @@ class Dictionary {
   bool htmlDefinitions = false;
 
   // Session-scoped buffers, taken on first use and freed by releaseCaches().
-  std::unique_ptr<uint8_t[]> scanBuf;  // 2 * SCAN_BUF_BYTES: .idx half then .syn half
-  DictZip::Scratch dzScratch;          // inflate window + cached .dz chunk table
+  // One allocation, two named halves. Previously a single array indexed by hand
+  // (`scanBuf.get() + SCAN_BUF_BYTES` for the synonym half), which read as
+  // pointer arithmetic on an untyped buffer and drew a portability warning.
+  struct ScanBuffers {
+    uint8_t idx[SCAN_BUF_BYTES];
+    uint8_t syn[SCAN_BUF_BYTES];
+  };
+  std::unique_ptr<ScanBuffers> scanBuf;
+  DictZip::Scratch dzScratch;  // inflate window + cached .dz chunk table
 
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.
