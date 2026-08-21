@@ -1042,17 +1042,32 @@ void EpubReaderActivity::suspendBackgroundWork() {
   if (backgroundWorkSuspended_) return;
   backgroundWorkSuspended_ = true;
   {
-    // Under the render lock, like every other resetBackgroundBuild() / borrow
-    // teardown: the render task calls endBackgroundBorrow() from the top of
-    // every render(), and two unlocked teardowns double-free the same Section.
+    // Under the render lock, like every other borrow teardown: the render task
+    // calls endBackgroundBorrow() from the top of every render(), and two
+    // unlocked teardowns double-free the same Section.
     RenderLock lock(*this);
-    // resetBackgroundBuild(), not endBackgroundBorrow(): the point is to give
-    // the heap back everything B is holding, INCLUDING a completed section that
-    // the ordinary overlay path deliberately keeps.
-    resetBackgroundBuild();
+    // endBackgroundBorrow(), NOT resetBackgroundBuild(). This releases what is
+    // actually large — the lent 48 KB region and the build arena inside it —
+    // and aborts only a build that is still live, which is resumable by design:
+    // abortSectionBuild() keeps a completed extraction, so the retry skips the
+    // inflate. A build that already FINISHED is left alone. Its Section is a
+    // few hundred bytes of page-offset LUT, and the work itself is not in RAM
+    // at all: the cache file on the card is the durable artifact, which is why
+    // the look-ahead's own Probe state discards the Section object the moment
+    // loadSectionFile() finds the file. Dropping it here would free nothing
+    // worth having and cost the next visit a needless re-open.
+    const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+    endBackgroundBorrow();
+    // Same reasoning as startActivityForResult's: an overlay opening says
+    // nothing about whether the parse fits between two page turns, so it must
+    // not burn the budget that makes B abandon a spine.
+    backgroundPreemptCount_ = preemptionsBeforeOverlay;
   }
-  // The pre-rendered frame lives in the secondary framebuffer, which the child
-  // is about to draw over; the flag would otherwise promise a page that is gone.
+  // Discard the pre-rendered next page: it lives in the secondary framebuffer,
+  // which the overlay is about to draw over. render()'s prologue also clears
+  // this on any pass that is not PreRender/BufferDisplay, so the flag would not
+  // survive the reader's next render either -- but doing it here means the
+  // discard does not depend on which pass that render turns out to be.
   preRenderedPage = {};
   LOG_INF("ERS", "Background work suspended for a dictionary interaction");
 }

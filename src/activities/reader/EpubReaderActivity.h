@@ -741,20 +741,22 @@ class EpubReaderActivity final : public Activity {
   // dictionary is configured. Both suspend background work for their duration.
   void openDictionary();
 
-  // Quiesce background work and hold it quiesced until resumeBackgroundWork().
+  // Quiesce background work and hold it quiesced until resumeBackgroundWork(),
+  // so a lookup does not compete with the look-ahead for a heap that is already
+  // fragmented by the time anyone reaches for a dictionary.
   //
-  // Stacking an activity already stops the reader's loop() and hands back
-  // Background-B's borrowed framebuffer, but it deliberately KEEPS a completed
-  // look-ahead section so the next page turn can adopt it. A dictionary lookup
-  // is the one overlay where that is the wrong trade: it needs a 32 KB
-  // contiguous inflate window, the definition text, and possibly a laid-out
-  // page set, all at once, on the heap a reading session has already
-  // fragmented. A finished section held "just in case" is exactly the resident
-  // block that turns those allocations into a LowMemory popup.
+  // Releases the lent 48 KB region and the build arena inside it, aborts a
+  // still-live look-ahead build, and discards the pre-rendered next page. Then
+  // latches, so nothing re-arms while the overlay is up.
   //
-  // So this drops the completed section too, and latches a flag so nothing
-  // re-arms in the gap between the child finishing and the reader's next
-  // render. The cost is that the next boundary cross rebuilds that section.
+  // Deliberately does NOT discard a look-ahead build that already finished.
+  // Section building is designed to resume from previous work: an aborted build
+  // keeps its completed extraction so the retry skips the inflate, and a
+  // finished build's real product is the cache file on the card, not the
+  // in-memory Section (which is a page-offset LUT worth a few hundred bytes).
+  // The look-ahead's own Probe state makes the point -- it drops the Section as
+  // soon as loadSectionFile() finds the file. Throwing it away here would free
+  // nothing worth having and cost the next visit a needless re-open.
   void suspendBackgroundWork();
   void resumeBackgroundWork();
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,

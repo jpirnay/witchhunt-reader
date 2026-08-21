@@ -34,7 +34,9 @@ Two ways to start a lookup while reading:
 
 Choosing it with no dictionary selected opens the picker rather than reporting the problem, so the setup above can be done from the book.
 
-While a lookup is open the reader stops all of its background work -- the look-ahead section build and the next-page pre-render -- and gives back the memory they were holding, including a look-ahead section that had already finished. A lookup needs a large contiguous block at a point in a reading session where the heap is at its most fragmented, and nothing else should be competing for it. The cost is that the next chapter boundary rebuilds that section.
+While a lookup is open the reader stops all of its background work — the look-ahead section build and the next-page pre-render — and hands back the memory they were holding: the 48 KB region the look-ahead borrows, the build arena inside it, and the pre-rendered next page. A lookup needs a large contiguous block at the point in a reading session where the heap is at its most fragmented, and nothing else should be competing for it.
+
+No completed work is thrown away. A look-ahead build that was still running is aborted, but it keeps whatever it had already extracted, so the retry after the lookup skips that step; a build that had finished is left alone, because its result is the cache file on the card rather than anything held in RAM. Background work picks up where it left off once you leave the dictionary.
 
 One word on the page becomes highlighted:
 
