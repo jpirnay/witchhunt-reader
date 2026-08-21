@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "Activity.h"
+#include "components/themes/BaseTheme.h"
 #include "settings/SettingInfo.h"
 #include "util/ButtonNavigator.h"
 
@@ -72,6 +73,8 @@ class MenuListActivity : public Activity {
   std::vector<SettingInfo> menuItems;
   std::vector<SettingInfo::SubmenuData> submenuData;
   int selectedIndex = 0;
+  // Filled in by drawMenuList: how many rows fit on screen, which is the distance Left/Right jump.
+  ListViewState listView;
   ButtonNavigator buttonNavigator;
   bool submenusPrepared = false;
 

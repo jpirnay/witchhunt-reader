@@ -59,6 +59,9 @@ class FileBrowserActivity final : public Activity {
   // Data loading
   void loadFiles();
   size_t findEntry(const std::string& name);
+  [[nodiscard]] int listPageSize() const;
+  [[nodiscard]] bool listPages() const;
+  void pageSelection(int direction);
   void sortFileList();
   std::string getFileExtension(const std::string& name) const;
   void showBrowserOptionsMenu();

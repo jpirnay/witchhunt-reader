@@ -26,11 +26,13 @@ class ButtonNavigator final {
 
   static constexpr uint16_t listDoubleClickMs = 200;
   static constexpr uint32_t listLongPressMs = 1500;
-  static constexpr int listJumpCount = 10;
 
   [[nodiscard]] bool shouldNavigateContinuously() const;
-  void onListNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, uint32_t& lastPressMs,
-                 bool& longPressFired, bool& pendingDouble, const Callback& onChange);
+  void onListNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
+                 uint32_t& lastPressMs, bool& longPressFired, bool& pendingDouble, const Callback& onChange);
+  void onListPageNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
+                     const Callback& onChange);
+  [[nodiscard]] static int effectivePageSize(int pageSize) { return pageSize > 0 ? pageSize : defaultListPageSize; }
 
  public:
   explicit ButtonNavigator(const uint16_t continuousIntervalMs = 500, const uint16_t continuousStartMs = 500)
@@ -71,12 +73,28 @@ class ButtonNavigator final {
   [[nodiscard]] static int nextPageIndex(int currentIndex, int totalItems, int itemsPerPage);
   [[nodiscard]] static int previousPageIndex(int currentIndex, int totalItems, int itemsPerPage);
 
-  // List navigation with double-click (skip 10) and long-press (jump to edge).
-  // Replaces the typical onNext/onPrevious + onContinuous pattern for drawList consumers.
-  void onNextList(int& selectedIndex, int totalItems, const Callback& onChange);
-  void onNextList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange);
-  void onPreviousList(int& selectedIndex, int totalItems, const Callback& onChange);
-  void onPreviousList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange);
+  // Rows to jump when the list has not told us how many rows are on screen. Roughly a screenful
+  // of single-line rows on every theme, and the value the double-click jump used before page size
+  // became a parameter.
+  static constexpr int defaultListPageSize = 10;
+
+  // List navigation: one item per press, a page per double-click, and the far end on a long press.
+  //
+  // Up/Down step; Left/Right jump a page. They used to be interchangeable — both pairs stepped one
+  // item — which left no way to cross a few hundred chapters or files without holding a button.
+  // `pageSize` is how many rows the list currently shows (ListViewState::visibleRows); it falls
+  // back to defaultListPageSize, and a list shorter than a page pages by a single item, so short
+  // menus behave exactly as they always did.
+  void onNextList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
+  void onPreviousList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
+
+  // Same, for lists whose Left/Right carry their own actions (the file browser's Options, the
+  // starred-pages rename/delete): only the given buttons step, and paging is reachable by
+  // double-clicking them.
+  void onNextList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange,
+                  int pageSize = 0);
+  void onPreviousList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange,
+                      int pageSize = 0);
 
   [[nodiscard]] static Buttons getNextButtons() {
     return {MappedInputManager::Button::Down, MappedInputManager::Button::Right};
@@ -84,4 +102,9 @@ class ButtonNavigator final {
   [[nodiscard]] static Buttons getPreviousButtons() {
     return {MappedInputManager::Button::Up, MappedInputManager::Button::Left};
   }
+  // The halves of the pairs above: stepping is on the side buttons, paging on the front ones.
+  [[nodiscard]] static Buttons getStepNextButtons() { return {MappedInputManager::Button::Down}; }
+  [[nodiscard]] static Buttons getStepPreviousButtons() { return {MappedInputManager::Button::Up}; }
+  [[nodiscard]] static Buttons getPageNextButtons() { return {MappedInputManager::Button::Right}; }
+  [[nodiscard]] static Buttons getPagePreviousButtons() { return {MappedInputManager::Button::Left}; }
 };

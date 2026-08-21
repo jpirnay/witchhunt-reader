@@ -225,29 +225,59 @@ int ButtonNavigator::previousPageIndex(const int currentIndex, const int totalIt
   return lastPageIndex * itemsPerPage;
 }
 
-void ButtonNavigator::onNextList(int& selectedIndex, const int totalItems, const Callback& onChange) {
-  onListNav(getNextButtons(), true, selectedIndex, totalItems, lastNextPressMs, longPressNextFired, pendingDoubleNext,
-            onChange);
+void ButtonNavigator::onNextList(int& selectedIndex, const int totalItems, const Callback& onChange,
+                                 const int pageSize) {
+  onListNav(getStepNextButtons(), true, selectedIndex, totalItems, pageSize, lastNextPressMs, longPressNextFired,
+            pendingDoubleNext, onChange);
+  onListPageNav(getPageNextButtons(), true, selectedIndex, totalItems, pageSize, onChange);
 }
 
 void ButtonNavigator::onNextList(const Buttons& buttons, int& selectedIndex, const int totalItems,
-                                 const Callback& onChange) {
-  onListNav(buttons, true, selectedIndex, totalItems, lastNextPressMs, longPressNextFired, pendingDoubleNext, onChange);
+                                 const Callback& onChange, const int pageSize) {
+  onListNav(buttons, true, selectedIndex, totalItems, pageSize, lastNextPressMs, longPressNextFired, pendingDoubleNext,
+            onChange);
 }
 
-void ButtonNavigator::onPreviousList(int& selectedIndex, const int totalItems, const Callback& onChange) {
-  onListNav(getPreviousButtons(), false, selectedIndex, totalItems, lastPreviousPressMs, longPressPreviousFired,
-            pendingDoublePrevious, onChange);
+void ButtonNavigator::onPreviousList(int& selectedIndex, const int totalItems, const Callback& onChange,
+                                     const int pageSize) {
+  onListNav(getStepPreviousButtons(), false, selectedIndex, totalItems, pageSize, lastPreviousPressMs,
+            longPressPreviousFired, pendingDoublePrevious, onChange);
+  onListPageNav(getPagePreviousButtons(), false, selectedIndex, totalItems, pageSize, onChange);
 }
 
 void ButtonNavigator::onPreviousList(const Buttons& buttons, int& selectedIndex, const int totalItems,
-                                     const Callback& onChange) {
-  onListNav(buttons, false, selectedIndex, totalItems, lastPreviousPressMs, longPressPreviousFired,
+                                     const Callback& onChange, const int pageSize) {
+  onListNav(buttons, false, selectedIndex, totalItems, pageSize, lastPreviousPressMs, longPressPreviousFired,
             pendingDoublePrevious, onChange);
 }
 
+// Left/Right: one screenful per press, held down for continuous paging. Deliberately none of the
+// press-type machinery below — a page jump wants to repeat while held, and there is nothing left
+// for a double-click or a long press to mean that a repeat does not already cover.
+void ButtonNavigator::onListPageNav(const Buttons& buttons, const bool forward, int& selectedIndex,
+                                    const int totalItems, const int pageSize, const Callback& onChange) {
+  if (!mappedInput || totalItems <= 0) return;
+
+  const int page = effectivePageSize(pageSize);
+  const auto jump = [&] {
+    const int target =
+        forward ? nextPageIndex(selectedIndex, totalItems, page) : previousPageIndex(selectedIndex, totalItems, page);
+    selectedIndex = target;
+    if (selectablePredicate && !selectablePredicate(selectedIndex)) {
+      // The page boundary can land on a separator row (settings sections). Walk on in the
+      // direction of travel — except at the top of the list, where walking further back wraps to
+      // the far end, which is the opposite of what Left should ever do.
+      const int walked = forward ? nextIndex(selectedIndex) : previousIndex(selectedIndex);
+      selectedIndex = (!forward && walked > selectedIndex) ? nextIndex(selectedIndex) : walked;
+    }
+    onChange();
+  };
+
+  onPressAndContinuous(buttons, jump);
+}
+
 void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int& selectedIndex, const int totalItems,
-                                uint32_t& lastPressMs, bool& longPressFired, bool& pendingDouble,
+                                const int pageSize, uint32_t& lastPressMs, bool& longPressFired, bool& pendingDouble,
                                 const Callback& onChange) {
   if (!mappedInput || totalItems <= 0) return;
 
@@ -294,10 +324,13 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
   pendingDouble = false;
 
   if (isDouble) {
-    // Restore to position before the first press so the total movement is exactly listJumpCount.
+    // Restore to position before the first press so the total movement is exactly one page.
     // Guard against a stale indexBeforePress if totalItems shrank since the single press stored it.
     selectedIndex = (indexBeforePress >= 0 && indexBeforePress < totalItems) ? indexBeforePress : selectedIndex;
-    for (int i = 0; i < listJumpCount; ++i) {
+    // A page, not a fixed ten: this is the only jump available on the lists whose Left/Right are
+    // taken by their own actions (the file browser), so it should match what a screenful is there.
+    const int jumpCount = effectivePageSize(pageSize);
+    for (int i = 0; i < jumpCount; ++i) {
       const int next =
           forward ? (selectablePredicate ? nextIndex(selectedIndex) : nextIndex(selectedIndex, totalItems))
                   : (selectablePredicate ? previousIndex(selectedIndex) : previousIndex(selectedIndex, totalItems));
