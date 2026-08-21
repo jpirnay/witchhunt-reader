@@ -14,15 +14,21 @@
 
 class RecentBooksActivity final : public Activity {
  public:
-  static constexpr int GRID_COLS = 3;
-  // Cell display size: how tall each thumbnail cell appears on screen.
-  static constexpr int GRID_CELL_HEIGHT = 160;
-  static constexpr int GRID_THUMB_MARGIN = 10;
-  static constexpr int GRID_LABEL_HEIGHT = 36;  // two small-font lines below each thumbnail
   // Stored BMP dimensions — shared with FinishedBookActivity so one file serves both.
-  // The grid scales this BMP down to the runtime cell width for display.
+  // The grid scales this BMP down to the runtime cell size for display (never up).
   static constexpr int GRID_THUMB_WIDTH = 220;
   static constexpr int GRID_THUMB_HEIGHT = 240;
+  // Largest cover box the grid will draw: the stored BMP height plus the 1 px frame on each side.
+  // A height-bound cover (the usual ~2:3 shape fills the slot's height, not its width) then draws
+  // 1:1 instead of being resampled — rescaling a dithered 1-bit image aliases its dither into a
+  // visible grid. Raising it means raising GRID_THUMB_HEIGHT, which is part of a cache filename
+  // (every cover regenerates) and is bounded by what the label block leaves free.
+  //
+  // Columns and rows are NOT constants: CoverGridLayout derives both from the panel and the theme
+  // metrics, so a higher-resolution device gets more cells instead of a handful of oversized ones.
+  // On the 480 px-wide X4/X3 panels that works out to 2x2 — at the previous hard-coded 3 columns a
+  // cell was ~136 px and covers drew at roughly 105x158, too small to recognise the artwork.
+  static constexpr int GRID_MAX_CELL_HEIGHT = GRID_THUMB_HEIGHT + 2;
 
  private:
   int selectorIndex = 0;
@@ -72,6 +78,8 @@ class RecentBooksActivity final : public Activity {
 
   void renderListView(RenderLock&&);
   void renderGridView(RenderLock&&);
+  // Columns currently on screen — derived from the panel size and theme metrics, not a constant.
+  int gridColumns() const;
 
  public:
   explicit RecentBooksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, int focusIndex = -1)
