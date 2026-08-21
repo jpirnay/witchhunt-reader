@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@ class HalFile : public Print {
     HalFile f;
     f.backing_ = std::move(content);
     f.hasData_ = true;
+    f.hasImpl_ = true;
     return f;
   }
 
@@ -40,6 +42,16 @@ class HalFile : public Print {
     HalFile f;
     f.hasData_ = true;
     f.writable_ = true;
+    f.hasImpl_ = true;
+    return f;
+  }
+
+  // A handle HalStorage tried to open. Device parity: HalStorage hands out an Impl even when the
+  // open FAILED, so close() is legal on it — unlike a handle nobody ever opened. The stubs below
+  // return one from every open call for exactly that reason.
+  static HalFile opened() {
+    HalFile f;
+    f.hasImpl_ = true;
     return f;
   }
 
@@ -90,8 +102,17 @@ class HalFile : public Print {
   bool getModifyDateTime(uint16_t*, uint16_t*) { return false; }
   bool isDirectory() const { return false; }
   void rewindDirectory() {}
-  bool close() { return false; }
-  HalFile openNextFile() { return HalFile{}; }
+  // Device parity, deliberately fatal: HalFile::close() asserts on a handle that was never opened
+  // (impl == nullptr), so closing one must fail here too — otherwise the bug is invisible on the
+  // host and aborts in the reader's hands. Not assert(): host tests build with NDEBUG.
+  bool close() {
+    if (!hasImpl_) {
+      std::fprintf(stderr, "HalFile::close() on a handle that was never opened — this aborts on device\n");
+      std::abort();
+    }
+    return false;
+  }
+  HalFile openNextFile() { return opened(); }
   bool isOpen() const { return hasData_; }
   operator bool() const { return hasData_; }
 
@@ -100,6 +121,7 @@ class HalFile : public Print {
   size_t pos_ = 0;
   bool hasData_ = false;
   bool writable_ = false;
+  bool hasImpl_ = false;
 };
 
 using FsFile = HalFile;
@@ -114,20 +136,44 @@ class HalStorage {
   size_t readFileToBuffer(const char*, char*, size_t, size_t = 0) { return 0; }
   bool writeFile(const char*, const String&) { return false; }
   bool ensureDirectoryExists(const char*) { return false; }
-  HalFile open(const char*, int = 0) { return HalFile{}; }
+  HalFile open(const char*, int = 0) { return HalFile::opened(); }
   bool mkdir(const char*, bool = true) { return false; }
   bool exists(const char*) { return false; }
   bool remove(const char*) { return false; }
   bool rename(const char*, const char*) { return false; }
   bool rmdir(const char*) { return false; }
-  bool openFileForRead(const char*, const char*, HalFile&) { return false; }
-  bool openFileForRead(const char*, const std::string&, HalFile&) { return false; }
-  bool openFileForRead(const char*, const String&, HalFile&) { return false; }
-  bool openFileForUpdate(const char*, const char*, HalFile&) { return false; }
-  bool openFileForUpdate(const char*, const std::string&, HalFile&) { return false; }
-  bool openFileForWrite(const char*, const char*, HalFile&) { return false; }
-  bool openFileForWrite(const char*, const std::string&, HalFile&) { return false; }
-  bool openFileForWrite(const char*, const String&, HalFile&) { return false; }
+  bool openFileForRead(const char*, const char*, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForRead(const char*, const std::string&, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForRead(const char*, const String&, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForUpdate(const char*, const char*, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForUpdate(const char*, const std::string&, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForWrite(const char*, const char*, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForWrite(const char*, const std::string&, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
+  bool openFileForWrite(const char*, const String&, HalFile& file) {
+    file = HalFile::opened();
+    return false;
+  }
   bool removeDir(const char*) { return false; }
   bool copyFile(const char*, const std::string&, const char*) { return false; }
   uint64_t sdTotalBytes() const { return 0; }
