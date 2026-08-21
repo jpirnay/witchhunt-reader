@@ -176,6 +176,26 @@ class TextBlock final : public Block {
   // with the next line.
   uint8_t maxSizePct() const;
 
+  // Screen box of one word, in the same coordinate space render(fontId, x, y)
+  // draws it in. Shares render()'s geometry rather than restating it: the
+  // effective font (a heading block draws with headingFontId), the per-word
+  // scale, the baseline alignment that shifts smaller words down, and the
+  // SUP/SUB offsets all have to agree, or a caller drawing over a word lands
+  // beside it. Used by the dictionary's word-selection overlay.
+  struct WordBox {
+    int16_t x = 0;
+    int16_t y = 0;
+    int16_t width = 0;
+    int16_t height = 0;
+    // Everything else render() needs to draw this word, so a caller repainting
+    // over it produces the same glyphs: a heading block draws with its own
+    // font, and a word may carry a style and a size scale of its own.
+    int fontId = 0;
+    EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+    float scale = 1.0f;
+  };
+  WordBox wordBox(const GfxRenderer& renderer, uint16_t i, int fontId, int x, int y) const;
+
   // Guide dots reading aid: when enabled, render() draws a small dot centered in
   // the empty space between adjacent words of a line -- never before the first
   // word or after the last. Idea from CrossInk (https://github.com/uxjulia/CrossInk),

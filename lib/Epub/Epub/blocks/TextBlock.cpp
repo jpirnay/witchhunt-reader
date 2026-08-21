@@ -226,6 +226,49 @@ uint8_t TextBlock::maxSizePct() const {
   return m;
 }
 
+// Mirrors the per-word geometry in render() below. Kept adjacent to it on
+// purpose: the two must move together.
+TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_t i, const int fontId, const int x,
+                                      const int y) const {
+  WordBox box;
+  if (!isValid || i >= numWords) return box;
+
+  const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
+  const float blockScale = renderStyle.fontSizeMultiplier;
+  const int blockAscender = (blockScale == 1.0f) ? renderer.getFontAscenderSize(effFontId)
+                                                 : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
+  int lineAscender = blockAscender;
+  if (sizesPresent) {
+    lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
+  }
+
+  const char* word = wordText(i);
+  const EpdFontFamily::Style style = wordStyle(i);
+  const float scale = wordScale(i);
+  const int ascender = (scale == blockScale) ? blockAscender : renderer.getFontAscenderSizeScaled(effFontId, scale);
+
+  int wordY = y + (lineAscender - ascender);
+  if ((style & EpdFontFamily::SUP) != 0) {
+    wordY -= blockAscender * 2 / 5;
+  } else if ((style & EpdFontFamily::SUB) != 0) {
+    wordY += blockAscender / 4;
+  }
+
+  box.fontId = effFontId;
+  box.style = style;
+  box.scale = scale;
+  box.x = static_cast<int16_t>(xposArr[i] + x);
+  box.y = static_cast<int16_t>(wordY);
+  // Scaled measurement, not getTextAdvanceX: a book with publisher font sizes
+  // gives words a per-word scale, and an unscaled width drifts wider or
+  // narrower than the glyphs actually drawn.
+  box.width = static_cast<int16_t>((scale == 1.0f) ? renderer.getTextWidth(effFontId, word, style)
+                                                   : renderer.getTextWidthScaled(effFontId, word, style, scale));
+  box.height = static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(effFontId)
+                                                    : renderer.getLineHeightScaled(effFontId, scale));
+  return box;
+}
+
 void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int x, const int y) const {
   if (!isValid) {
     LOG_ERR("TXB", "Render skipped: invalid block");
