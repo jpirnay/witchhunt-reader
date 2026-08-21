@@ -128,6 +128,17 @@ std::unique_ptr<ReaderActivity::CoverExtractSession> ReaderActivity::beginCoverE
   const std::string coverImgPath = epub.getCoverImageCachePath();
   if (epub.coverImageCachedValidOnly()) return nullptr;  // already cached
 
+  // Cover bytes already on disk that no decoder recognises must NOT be re-extracted: the ZIP entry
+  // inflates to the same bytes every time, so a caller whose ladder ends in "start an extract
+  // session" would re-inflate them forever (observed at ~1.3 s per round on an EPUB whose
+  // "cover.png" is really an AVIF). generateThumbBmp() has already written the structural sentinel
+  // for this case. The >=8-byte sniff inside coverImageCachedButUnsupported() means a partially
+  // extracted PNG/JPEG never reaches this verdict, so an interrupted extraction still resumes.
+  if (epub.coverImageCachedButUnsupported()) {
+    LOG_DBG("CEX", "Cached cover.img for %s is an unsupported format — not re-extracting", bookPath.c_str());
+    return nullptr;
+  }
+
   const std::string coverHref = epub.getCoverItemHref();
   if (coverHref.empty()) {
     LOG_DBG("CEX", "No cover item href for %s", bookPath.c_str());
