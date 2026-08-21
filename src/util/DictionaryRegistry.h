@@ -1,5 +1,7 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2583 by Uri Tauber).
+
 #include <string>
 #include <vector>
 

@@ -1,5 +1,9 @@
 #pragma once
 
+// Derived from the XHTML normalizer in crosspoint-reader PR #2836 by Uri
+// Tauber; split out here so it can be covered on the host, and extended to
+// lowercase attribute names and quote unquoted values.
+
 #include <Print.h>
 
 #include <string>

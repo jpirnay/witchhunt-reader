@@ -1,5 +1,9 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2583 by Uri Tauber, with #2706 by William
+// Floyd and #2749 by Thiago Kenji Okada). Adapted to this device: no touch
+// input, geometry from TextBlock::wordBox, and speculative resolve.
+
 #include <Epub/Page.h>
 #include <I18n.h>
 

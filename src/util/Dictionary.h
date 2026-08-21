@@ -1,5 +1,10 @@
 #pragma once
 
+// Ported from crosspoint-reader's StarDict reader (PR #2583 by Uri Tauber,
+// with #2696/#2706/#2733/#2791 by William Floyd and #2877 by Uri Tauber).
+// Reworked here for this heap: session-held inflate window, buffered index
+// scans, one descent per lookup, and no temp files. See docs/dictionary.md.
+
 #include <HalStorage.h>
 
 #include <cstdint>

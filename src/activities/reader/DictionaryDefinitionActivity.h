@@ -1,5 +1,8 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2583 by Uri Tauber, HTML layout #2836 by
+// Uri Tauber). Adapted to this device: a pinned font, and dictionary switching.
+
 #include <Epub/Page.h>
 
 #include <cstdint>

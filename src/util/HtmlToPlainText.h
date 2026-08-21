@@ -1,5 +1,7 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2836 by Uri Tauber).
+
 #include <string>
 
 // Convert an HTML fragment to readable plain text. This intentionally ignores

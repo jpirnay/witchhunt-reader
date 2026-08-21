@@ -1,5 +1,7 @@
 # Dictionary
 
+*Ported from [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), where the feature and this document originate: PR #2583 by Uri Tauber, with contributions from William Floyd, Thiago Kenji Okada, Justin Mitchell, Ryan Hitchman, Kurtis Grant, kemonine and DustinHu. Adapted here for this device — see the notes on background work, fonts and dictionary switching below.*
+
 Look up words while reading an EPUB using an offline StarDict dictionary stored on the SD card.
 
 ## Supported Format

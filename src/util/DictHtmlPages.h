@@ -1,5 +1,8 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2836 by Uri Tauber). Rewritten around our
+// streaming Print-sink parser, so the temp file it staged through is gone.
+
 #include <Epub/Page.h>
 
 #include <cstdint>

@@ -1,5 +1,9 @@
 #pragma once
 
+// Ported from crosspoint-reader (PR #2583 by Uri Tauber, OOM fix #2791 by
+// William Floyd). Reworked to inflate into a caller buffer with a
+// session-held window instead of staging through a temp file.
+
 #include <HalStorage.h>
 
 #include <cstdint>
