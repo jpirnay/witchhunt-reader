@@ -8,6 +8,7 @@
 
 #include "activities/Activity.h"
 #include "util/Dictionary.h"
+#include "util/DictionaryRegistry.h"
 
 // Word selection over the current reader page: Left/Right step through words in
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
@@ -57,6 +58,13 @@ class DictionaryWordSelectActivity final : public Activity {
   // SPECULATIVE_DEBOUNCE_MS. Index search only -- no inflate, no definition
   // buffer -- so it costs a handful of SD reads and no large allocation.
   void speculateForSelection();
+  // Move to another installed dictionary and look the same word up again.
+  // Persists the choice: this IS the dictionary setting, and a reader who
+  // switched mid-book means it.
+  void switchDictionary(int direction);
+  // The dictionaries on the card, discovered once on first need. Empty until
+  // then; a single entry means there is nothing to switch between.
+  const std::vector<DictionaryEntry>& installedDictionaries();
   int closestInRow(uint16_t row, int centerX) const;
   void moveVertical(int direction);
   void performLookup();
@@ -77,6 +85,12 @@ class DictionaryWordSelectActivity final : public Activity {
   uint16_t rowCount = 0;
 
   Dictionary dict;
+  std::vector<DictionaryEntry> dictionaries;
+  bool dictionariesDiscovered = false;
+  // Set from the definition viewer's result and acted on in loop(), not in the
+  // handler itself: the handler runs while the activity stack is being popped,
+  // and starting another activity from inside that is asking for trouble.
+  int8_t pendingDictionarySwitch = 0;
   bool dictOpenAttempted = false;
   bool dictOpenOk = false;
   bool dictNeedsIndex = false;

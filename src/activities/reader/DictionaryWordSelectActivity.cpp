@@ -10,6 +10,8 @@
 #include <cctype>
 #include <climits>
 #include <cstdlib>
+#include <cstring>
+#include <variant>
 
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
@@ -171,6 +173,47 @@ void DictionaryWordSelectActivity::speculateForSelection() {
   }
 }
 
+const std::vector<DictionaryEntry>& DictionaryWordSelectActivity::installedDictionaries() {
+  if (!dictionariesDiscovered) {
+    dictionariesDiscovered = true;
+    DictionaryRegistry::discover(dictionaries);
+  }
+  return dictionaries;
+}
+
+void DictionaryWordSelectActivity::switchDictionary(const int direction) {
+  const auto& list = installedDictionaries();
+  if (list.size() < 2) return;
+
+  int current = -1;
+  for (size_t i = 0; i < list.size(); i++) {
+    if (list[i].name == SETTINGS.dictionaryName) {
+      current = static_cast<int>(i);
+      break;
+    }
+  }
+  // An unknown current entry (the setting names a folder no longer on the card)
+  // starts the cycle at the beginning rather than refusing to move.
+  const int count = static_cast<int>(list.size());
+  const int next = (current < 0) ? 0 : ((current + direction) % count + count) % count;
+
+  strncpy(SETTINGS.dictionaryName, list[next].name.c_str(), sizeof(SETTINGS.dictionaryName) - 1);
+  SETTINGS.dictionaryName[sizeof(SETTINGS.dictionaryName) - 1] = '\0';
+  SETTINGS.saveToFile();
+
+  // Force the next lookup to open the new dictionary, and drop everything that
+  // described the old one.
+  dictOpenAttempted = false;
+  dictOpenOk = false;
+  dictNeedsIndex = false;
+  dict.releaseCaches();
+  speculation = Speculation::Unknown;
+  speculationIdx = -1;
+  speculationDisabled = false;
+
+  performLookup();
+}
+
 void DictionaryWordSelectActivity::performLookup() {
   if (SETTINGS.dictionaryName[0] == '\0') {
     popup = Popup::Error;
@@ -216,11 +259,18 @@ void DictionaryWordSelectActivity::performLookup() {
     // through the chapter parser, which wants every contiguous byte it can get.
     // The session buffers are no use while it is on top, so hand them back.
     dict.releaseCaches();
-    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
-                                                                          std::move(definition), html),
-                           [this](const ActivityResult&) {
+    // Name the dictionary for the viewer only when there is another to switch
+    // to; that is what turns its Confirm button on.
+    const bool multiple = installedDictionaries().size() > 1;
+    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(
+                               renderer, mappedInput, std::move(headword), std::move(definition), html,
+                               multiple ? std::string(SETTINGS.dictionaryName) : std::string()),
+                           [this](const ActivityResult& result) {
                              // The child overdrew the page; the snapshot no longer matches.
                              snapshotIdx = -1;
+                             if (const auto* switchRequest = std::get_if<DictionarySwitchResult>(&result.data)) {
+                               pendingDictionarySwitch = switchRequest->direction;
+                             }
                              requestUpdate();
                            });
     return;
@@ -271,6 +321,16 @@ void DictionaryWordSelectActivity::performLookup() {
 }
 
 void DictionaryWordSelectActivity::loop() {
+  // Acted on here rather than in the result handler that set it: that handler
+  // runs while the activity stack is being popped, and starting another
+  // activity from inside it would re-enter the manager mid-transition.
+  if (pendingDictionarySwitch != 0) {
+    const int direction = pendingDictionarySwitch;
+    pendingDictionarySwitch = 0;
+    switchDictionary(direction);
+    return;
+  }
+
   if (popup == Popup::NotFound || popup == Popup::Error) {
     if (millis() - popupTime >= POPUP_DURATION_MS) {
       popup = Popup::None;

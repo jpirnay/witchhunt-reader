@@ -87,14 +87,21 @@ struct FilePathResult {
   std::string path;
 };
 
+// Asks the word-selection overlay to look the same word up in another
+// dictionary. The viewer does not own a Dictionary and should not: the overlay
+// above it already has one open, and it is the one that knows the word.
+struct DictionarySwitchResult {
+  int8_t direction = 1;  // +1 = next in the discovered list, -1 = previous
+};
+
 struct StarredPageResult {
   int spineIndex = 0;
   int pageNumber = 0;
 };
 
-using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
-                 SyncResult, NetworkModeResult, FootnoteResult, FilePathResult, StarredPageResult, PrintedPageResult>;
+using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, FilePathResult,
+                                   StarredPageResult, PrintedPageResult, DictionarySwitchResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

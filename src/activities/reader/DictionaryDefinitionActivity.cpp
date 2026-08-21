@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictHtmlPages.h"
@@ -187,6 +188,19 @@ void DictionaryDefinitionActivity::loop() {
     return;
   }
 
+  // Confirm is the only button page navigation does not already own (next and
+  // previous each take two), so it cycles forward through the installed
+  // dictionaries. Forward only: with two installed that is both directions
+  // anyway, and with more it still reaches every one.
+  //
+  // The switch itself belongs to the overlay above, which owns the open
+  // Dictionary and knows the word -- this just asks, and closes.
+  if (canSwitchDictionary() && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    setResult(DictionarySwitchResult{1});
+    finish();
+    return;
+  }
+
   buttonNavigator.onNext([this] {
     if (currentPage + 1 < totalPages) {
       currentPage++;
@@ -233,12 +247,29 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   // Header: matched headword left, page counter right.
   const int headerY = metrics.topPadding;
   GUI.drawHeader(renderer, Rect{contentRect.x, headerY, contentRect.width, metrics.headerHeight}, headword.c_str());
-  if (totalPages > 1) {
-    char counter[16];
-    snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, totalPages);
-    const int counterWidth = renderer.getTextWidth(UI_10_FONT_ID, counter);
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + contentRect.width - SIDE_PADDING - counterWidth,
-                      headerY + metrics.headerHeight / 2, counter);
+
+  // Right of the header: which dictionary this came from, and which page of it.
+  // The name only appears when there is more than one installed -- otherwise it
+  // is noise, since it can neither change nor be chosen between.
+  char status[64];
+  if (canSwitchDictionary() && totalPages > 1) {
+    snprintf(status, sizeof(status), "%s  %d/%d", dictionaryName.c_str(), currentPage + 1, totalPages);
+  } else if (canSwitchDictionary()) {
+    snprintf(status, sizeof(status), "%s", dictionaryName.c_str());
+  } else if (totalPages > 1) {
+    snprintf(status, sizeof(status), "%d/%d", currentPage + 1, totalPages);
+  } else {
+    status[0] = '\0';
+  }
+  if (status[0] != '\0') {
+    // A long dictionary name would run under the headword; drop leading
+    // characters until it fits rather than overprinting.
+    const int available = contentRect.width / 2;
+    const char* shown = status;
+    while (*shown != '\0' && renderer.getTextWidth(UI_10_FONT_ID, shown) > available) shown++;
+    const int statusWidth = renderer.getTextWidth(UI_10_FONT_ID, shown);
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + contentRect.width - SIDE_PADDING - statusWidth,
+                      headerY + metrics.headerHeight / 2, shown);
   }
 
   // Body: two-pass draw inside a prewarm scope (the same pattern the reader's
@@ -252,8 +283,8 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   scope.endScanAndPrewarm();
   drawBody(fontId, contentRect.x + SIDE_PADDING, bodyStartY);
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), "", (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), canSwitchDictionary() ? tr(STR_DICTIONARY) : "",
+                                            (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

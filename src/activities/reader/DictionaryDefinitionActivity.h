@@ -30,12 +30,17 @@
 // each page renders spans of the original string, so no per-line copies are held.
 class DictionaryDefinitionActivity final : public Activity {
  public:
+  // `dictionaryName` is shown alongside the page counter and is empty when only
+  // one dictionary is installed -- which is also when Confirm does nothing, so
+  // the name and the ability to switch appear together or not at all.
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
-                                        std::string definition, bool htmlDefinition = false)
+                                        std::string definition, bool htmlDefinition = false,
+                                        std::string dictionaryName = {})
       : Activity("DictionaryDefinition", renderer, mappedInput),
         headword(std::move(headword)),
         definition(std::move(definition)),
-        htmlDefinition(htmlDefinition) {}
+        htmlDefinition(htmlDefinition),
+        dictionaryName(std::move(dictionaryName)) {}
 
   void onEnter() override;
   void loop() override;
@@ -66,6 +71,9 @@ class DictionaryDefinitionActivity final : public Activity {
   // separators) to newlines so C-string APIs see the whole text.
   std::string definition;
   const bool htmlDefinition;
+  // Empty when there is nothing to switch to.
+  const std::string dictionaryName;
+  bool canSwitchDictionary() const { return !dictionaryName.empty(); }
   // Styled path: reader-identical Pages laid out from the HTML definition.
   // Empty means the plain-text span path below is active.
   std::vector<std::unique_ptr<Page>> pages;
