@@ -50,6 +50,13 @@ class DictionaryWordSelectActivity final : public Activity {
   enum class Popup : uint8_t { None, Busy, NotFound, Error };
 
   void extractWords();
+  // Open the dictionary on first use. Idempotent; false when there is none
+  // configured or it will not open.
+  bool ensureDictionaryOpen();
+  // Resolve the highlighted word's LOCATION once the cursor has been still for
+  // SPECULATIVE_DEBOUNCE_MS. Index search only -- no inflate, no definition
+  // buffer -- so it costs a handful of SD reads and no large allocation.
+  void speculateForSelection();
   int closestInRow(uint16_t row, int centerX) const;
   void moveVertical(int direction);
   void performLookup();
@@ -73,6 +80,29 @@ class DictionaryWordSelectActivity final : public Activity {
   bool dictOpenAttempted = false;
   bool dictOpenOk = false;
   bool dictNeedsIndex = false;
+
+  // What the speculative resolve found for the word the cursor is sitting on.
+  // Two things come out of it: Confirm skips straight to reading the definition
+  // instead of searching the index again, and the highlight can show, before
+  // the user presses anything, that a word has no entry.
+  enum class Speculation : uint8_t {
+    Unknown,  // not resolved yet (still settling, or speculation is off)
+    Found,
+    Missing,  // the search reached a verdict and the word is not in the dictionary
+  };
+  static constexpr unsigned long SPECULATIVE_DEBOUNCE_MS = 300;
+  Speculation speculation = Speculation::Unknown;
+  int speculationIdx = -1;  // word `speculation` describes; -1 = none
+  DictLocation speculationLocation;
+  std::string speculationHeadword;
+  unsigned long lastMoveMs = 0;
+  // Speculation is off for this session: no dictionary, it would not open, or
+  // its index still has to be built (a multi-second pass that must stay on the
+  // explicit Confirm, behind its popup, rather than firing while idle).
+  bool speculationDisabled = false;
+  // A verdict arrived for the word the cursor is already on, so the highlight
+  // has to be redrawn even though the cursor did not move.
+  bool speculationRepaintPending = false;
 
   Popup popup = Popup::None;
   StrId popupMsg = StrId::STR_DICT_NOT_FOUND;
