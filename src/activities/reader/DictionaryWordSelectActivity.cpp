@@ -126,6 +126,51 @@ void DictionaryWordSelectActivity::moveVertical(const int direction) {
   }
 }
 
+bool DictionaryWordSelectActivity::ensureDictionaryOpen() {
+  if (dictOpenAttempted) return dictOpenOk;
+  dictOpenAttempted = true;
+  if (SETTINGS.dictionaryName[0] == '\0') return false;
+  dictOpenOk = dict.open(SETTINGS.dictionaryName);
+  // needsIndex() opens and validates the .qidx sidecar, so ask it once per open
+  // rather than once per word: the answer only changes when we build the
+  // sidecar ourselves, which only performLookup() does.
+  dictNeedsIndex = dictOpenOk && dict.needsIndex();
+  return dictOpenOk;
+}
+
+// Runs from loop() once the cursor has been still long enough, so the search is
+// paid for while the user is still reading the page rather than after they
+// commit. Deliberately does NOT build the index: that pass takes seconds on a
+// large dictionary and belongs behind Confirm's popup, not in an idle tick.
+void DictionaryWordSelectActivity::speculateForSelection() {
+  if (speculationDisabled || popup != Popup::None || words.empty()) return;
+  if (speculationIdx == selected) return;  // already resolved for this word
+  if (millis() - lastMoveMs < SPECULATIVE_DEBOUNCE_MS) return;
+
+  if (!ensureDictionaryOpen() || dictNeedsIndex) {
+    speculationDisabled = true;
+    return;
+  }
+
+  Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+  const bool found = dict.resolve(words[selected].text, speculationLocation, speculationHeadword, &result);
+  speculationIdx = selected;
+  if (found) {
+    speculation = Speculation::Found;
+  } else if (result == Dictionary::LookupResult::NotFound) {
+    speculation = Speculation::Missing;
+  } else {
+    // The search did not reach a verdict (IO error). Say nothing rather than
+    // marking a word absent, and let Confirm report the real failure.
+    speculation = Speculation::Unknown;
+  }
+  // Only the highlight style changes, and only when the answer is Missing.
+  if (speculation == Speculation::Missing) {
+    speculationRepaintPending = true;
+    requestUpdate();
+  }
+}
+
 void DictionaryWordSelectActivity::performLookup() {
   if (SETTINGS.dictionaryName[0] == '\0') {
     popup = Popup::Error;
@@ -136,14 +181,7 @@ void DictionaryWordSelectActivity::performLookup() {
   }
 
   popup = Popup::Busy;
-  if (!dictOpenAttempted) {
-    dictOpenAttempted = true;
-    dictOpenOk = dict.open(SETTINGS.dictionaryName);
-    // needsIndex() opens and validates the .qidx sidecar, so ask it once per
-    // open rather than once per word: the answer only changes when we build the
-    // sidecar ourselves, which is handled below.
-    dictNeedsIndex = dictOpenOk && dict.needsIndex();
-  }
+  ensureDictionaryOpen();
   popupMsg = dictNeedsIndex ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
@@ -157,7 +195,19 @@ void DictionaryWordSelectActivity::performLookup() {
   std::string definition;
   std::string headword;
   Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-  const bool found = ok && dict.lookup(words[selected].text, definition, headword, &result);
+  bool found = false;
+  if (ok && speculationIdx == selected && speculation != Speculation::Unknown) {
+    // The index search already ran while the cursor sat here. A hit only has to
+    // read the definition; a known miss needs no SD access at all.
+    if (speculation == Speculation::Found) {
+      headword = speculationHeadword;
+      found = dict.readResolved(speculationLocation, definition, &result);
+    } else {
+      result = Dictionary::LookupResult::NotFound;
+    }
+  } else {
+    found = ok && dict.lookup(words[selected].text, definition, headword, &result);
+  }
 
   if (found) {
     popup = Popup::None;
@@ -241,6 +291,7 @@ void DictionaryWordSelectActivity::loop() {
   if (words.empty()) return;
 
   const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
+  const int before = selected;
   if (mappedInput.wasPressed(MappedInputManager::Button::Left) && selected > 0) {
     selected--;
     requestUpdate();
@@ -252,6 +303,11 @@ void DictionaryWordSelectActivity::loop() {
   } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
     moveVertical(1);
   }
+  // Restart the debounce on every move, so holding a direction down resolves
+  // once at the end instead of at every word passed through.
+  if (selected != before) lastMoveMs = millis();
+
+  speculateForSelection();
 }
 
 // Saves the pixels under words[selected]'s highlight box, then draws the
@@ -288,11 +344,22 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
   snapshotH = static_cast<int16_t>(hh);
   snapshotIdx = saved ? selected : -1;
 
-  renderer.fillRect(hx, hy, hw, hh, true);
-  if (word.scale == 1.0f) {
-    renderer.drawText(word.fontId, word.x, word.y, word.text, false, word.style);
+  // A word the speculative resolve has already proved absent gets an outline
+  // instead of the inverse fill: the cursor is still obviously here, but the
+  // reader can see there is nothing to look up without pressing Confirm and
+  // waiting for a "Not found" popup. Anything not yet resolved keeps the plain
+  // highlight -- absence is only ever claimed on a verdict.
+  const bool known_missing = speculationIdx == selected && speculation == Speculation::Missing;
+  if (known_missing) {
+    renderer.drawRect(hx, hy, hw, hh, true);
   } else {
-    renderer.drawTextScaled(word.fontId, word.x, word.y, word.text, false, word.style, word.scale);
+    renderer.fillRect(hx, hy, hw, hh, true);
+  }
+  const bool inkBlack = known_missing;
+  if (word.scale == 1.0f) {
+    renderer.drawText(word.fontId, word.x, word.y, word.text, inkBlack, word.style);
+  } else {
+    renderer.drawTextScaled(word.fontId, word.x, word.y, word.text, inkBlack, word.style, word.scale);
   }
   return saved;
 }
@@ -319,7 +386,11 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   // holds a clean page (no popup or sub-activity since the last full repaint).
   // Restore the pixels under the old highlight, draw the new one, and push --
   // skipping the two-pass page render entirely.
-  if (popup == Popup::None && snapshotIdx >= 0 && !words.empty() && selected != snapshotIdx) {
+  // `selected != snapshotIdx` is the cursor-moved case; the snapshot is also
+  // stale when the cursor stayed put and only the speculation verdict changed,
+  // which is what repaints a word as absent a moment after landing on it.
+  const bool highlightMoved = !words.empty() && (selected != snapshotIdx || speculationRepaintPending);
+  if (popup == Popup::None && snapshotIdx >= 0 && highlightMoved) {
     // displayBuffer() ends with a buffer swap, so the write framebuffer holds
     // the frame from TWO refreshes ago -- the reader menu the overlay was
     // opened from, or an older cursor position. Patching two word boxes into
@@ -329,11 +400,21 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     // frame, so the restore only lines up after this.
     renderer.syncWriteBufferFromDisplayed();
     renderer.writeFramebufferRegion(snapshotX, snapshotY, snapshotW, snapshotH, snapshot.get());
-    // The full path's PrewarmScope cleared the glyph cache on exit; batch-load
-    // just the highlighted word's glyphs before drawing them white-on-black.
-    renderer.getFontCacheManager()->prewarmCache(
-        words[selected].fontId, words[selected].text,
-        static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[selected].style) & 0x03)));
+    // Batch-load just the highlighted word's glyphs before drawing them
+    // white-on-black. clearCache() FIRST: prewarmCache() appends into the page
+    // slots and deliberately never clears them -- that clear normally happens
+    // once per page inside endScanAndPrewarm(), which this path skips. Without
+    // it every cursor move took another ~4-5 KB slot and never gave it back,
+    // walking the heap down from ~60 KB to ~14 KB in a dozen moves and making
+    // the first lookup fail with "Low heap for N byte definition".
+    //
+    // Dropping the page's warmed glyphs costs this path nothing: it does not
+    // re-render the page, only the two word boxes and the hints.
+    auto* fcm = renderer.getFontCacheManager();
+    fcm->clearCache();
+    fcm->prewarmCache(words[selected].fontId, words[selected].text,
+                      static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[selected].style) & 0x03)));
+    speculationRepaintPending = false;
     if (drawHighlightWithSnapshot()) {
       drawHints();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -354,6 +435,7 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   if (!wordsExtracted) extractWords();
   page->render(renderer, fontId, marginLeft, marginTop);
 
+  speculationRepaintPending = false;
   if (!words.empty()) drawHighlightWithSnapshot();
   drawHints();
 
