@@ -84,9 +84,30 @@ constexpr Fallback FALLBACKS[] = {
     {0x02D0, ':'},   // ː length mark -- a triangular colon
     {0x02D1, ':'},   // ˑ half-length mark
     {0x02E1, 'l'},   // ˡ modifier l
+    // Greek letters a dictionary borrows. Only where the Latin shape really is
+    // the same letterform -- lambda is a capital A without its crossbar.
+    {0x039B, 'A'},  // Λ capital lamda
+    // Latin letters with a mark below, from Latin Extended Additional. That
+    // block is not in the built-in intervals at all (only its Vietnamese
+    // subrange is), so unlike an accented Latin-1 letter these really do arrive
+    // here, and the base letter is far better than a box.
+    {0x1E37, 'l'},  // ḷ l with dot below
+    {0x1E71, 't'},  // ṱ t with circumflex below
+    // Arrows and math operators. Noto Sans -- the font dictionary definitions
+    // are pinned to -- carries none of this block (U+2212 aside), and
+    // dictionaries lean on it structurally rather than decoratively: in PONS
+    // En-De the tilde operator alone stands in for the headword 107k times.
+    {0x2190, '<'},  // <- leftwards
+    {0x2191, '^'},  // ^ upwards
+    {0x2192, '>'},  // -> rightwards
+    {0x2193, 'v'},  // v downwards
+    {0x21C6, '>'},  // leftwards over rightwards
+    {0x222B, 'f'},  // integral -- historically a long s, conventionally an f
+    {0x223C, '~'},  // tilde operator -- an ASCII tilde is the same shape
+    {0x2248, '~'},  // almost equal to
     // Bullet shapes a dictionary uses to separate senses. U+2022 is in the
     // General Punctuation range every font here carries.
-    {0x25AA, 0x2022},  // ▪ black small square
+    {0x25AA, 0x2022},  // black small square
     {0x25AB, 0x2022},  // ▫ white small square
     {0x25C6, 0x2022},  // ◆ black diamond
     {0x25CF, 0x2022},  // ● black circle

@@ -42,10 +42,26 @@ TEST(GlyphFallback, MapsBulletShapesToABullet) {
   EXPECT_EQ(fallbackGlyphCodepoint(0x25C6), 0x2022u);
 }
 
+TEST(GlyphFallback, MapsTheSymbolsDictionariesUseAsMarkers) {
+  // Noto Sans -- the font definitions are pinned to -- ships none of the arrow
+  // or math block, and dictionaries use it structurally. The tilde operator
+  // alone stands in for the headword 107k times in PONS En-De.
+  EXPECT_EQ(fallbackGlyphCodepoint(0x223C), static_cast<uint32_t>('~'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x2248), static_cast<uint32_t>('~'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x2191), static_cast<uint32_t>('^'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x2192), static_cast<uint32_t>('>'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x222B), static_cast<uint32_t>('f'));
+  // Latin Extended Additional: only its Vietnamese subrange is shipped, so
+  // these arrive here and fall back to the base letter.
+  EXPECT_EQ(fallbackGlyphCodepoint(0x1E37), static_cast<uint32_t>('l'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x1E71), static_cast<uint32_t>('t'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x039B), static_cast<uint32_t>('A'));
+}
+
 TEST(GlyphFallback, HasNoMappingForCodepointsWithNoGoodStandIn) {
   // Greek letters IPA borrows have no Latin lookalike; a wrong guess would be
   // worse than the box, so they are deliberately absent from the table.
-  EXPECT_EQ(fallbackGlyphCodepoint(0x03B8), 0x03B8u);  // theta
+  EXPECT_EQ(fallbackGlyphCodepoint(0x03B8), 0x03B8u);  // theta -- shipped in the dictionary font
   EXPECT_EQ(fallbackGlyphCodepoint(0x00F0), 0x00F0u);  // eth -- Latin-1, always covered anyway
 }
 
