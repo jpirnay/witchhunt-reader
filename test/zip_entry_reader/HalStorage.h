@@ -22,14 +22,19 @@
 class HalFile : public Print {
  public:
   HalFile() = default;
-  ~HalFile() { close(); }
+  ~HalFile() { closeQuiet(); }
 
-  HalFile(HalFile&& o) noexcept : fp_(o.fp_) { o.fp_ = nullptr; }
+  HalFile(HalFile&& o) noexcept : fp_(o.fp_), hasImpl_(o.hasImpl_) {
+    o.fp_ = nullptr;
+    o.hasImpl_ = false;
+  }
   HalFile& operator=(HalFile&& o) noexcept {
     if (this != &o) {
-      close();
+      closeQuiet();
       fp_ = o.fp_;
+      hasImpl_ = o.hasImpl_;
       o.fp_ = nullptr;
+      o.hasImpl_ = false;
     }
     return *this;
   }
@@ -37,13 +42,15 @@ class HalFile : public Print {
   HalFile& operator=(const HalFile&) = delete;
 
   bool openForRead(const std::string& path) {
-    close();
+    closeQuiet();
+    hasImpl_ = true;
     fp_ = fopen(path.c_str(), "rb");
     return fp_ != nullptr;
   }
 
   bool openForWrite(const std::string& path) {
-    close();
+    closeQuiet();
+    hasImpl_ = true;
     const auto parent = std::filesystem::path(path).parent_path();
     if (!parent.empty()) {
       std::error_code ec;
@@ -56,17 +63,23 @@ class HalFile : public Print {
 
   // Mirrors HalStorage::openFileForUpdate: existing file, read+write, no truncation.
   bool openForUpdate(const std::string& path) {
-    close();
+    closeQuiet();
+    hasImpl_ = true;
     fp_ = fopen(path.c_str(), "r+b");
     return fp_ != nullptr;
   }
 
+  // Device parity, deliberately fatal. HalStorage gives every handle it opens an Impl — even when
+  // the open FAILED — so on device close() is fine on an opened-and-failed handle but asserts on
+  // one that was never opened at all (or was moved from). stdio cannot tell those apart, so
+  // hasImpl_ models it: without this, closing a never-opened handle is silently fine on the host
+  // and aborts in the reader's hands. Not assert(): host tests build with NDEBUG.
   bool close() {
-    if (fp_) {
-      fclose(fp_);
-      fp_ = nullptr;
+    if (!hasImpl_) {
+      std::fprintf(stderr, "HalFile::close() on a handle that was never opened — this aborts on device\n");
+      std::abort();
     }
-    return true;
+    return closeQuiet();
   }
 
   bool isOpen() const { return fp_ != nullptr; }
@@ -128,7 +141,18 @@ class HalFile : public Print {
   HalFile openNextFile() { return HalFile{}; }
 
  private:
+  // close() without the device-parity check: for the destructor and the open helpers, which must
+  // both tolerate a handle that was never opened.
+  bool closeQuiet() {
+    if (fp_) {
+      fclose(fp_);
+      fp_ = nullptr;
+    }
+    return true;
+  }
+
   FILE* fp_ = nullptr;
+  bool hasImpl_ = false;
 };
 
 using FsFile = HalFile;

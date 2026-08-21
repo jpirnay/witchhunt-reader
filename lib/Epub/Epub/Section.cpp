@@ -563,7 +563,11 @@ bool Section::loadSectionFile(const BuildParams& p) {
 }
 
 bool Section::clearCache() {
-  file.close();  // Must be closed before removal on FAT32
+  // Only close a handle we actually opened: a Section whose cache is cleared before it ever
+  // loaded or built (settings change on a freshly constructed Section) still holds the default
+  // handle, and HalFile::close() asserts on those. Same reason as the guards in runBuildSetup
+  // and abortBuild.
+  if (file) file.close();  // Must be closed before removal on FAT32
   lut.clear();
   tocBoundaries.clear();
   pageCount = 0;
@@ -806,7 +810,9 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // Reset build state — createSectionFile may be called on a Section that previously
   // loaded a cache (e.g. fallback no-CSS file). pageCount must start at 0 so that
   // onPageComplete() numbering and paragraphLutPerPage stay in lockstep.
-  file.close();
+  // "Previously loaded" is the exception, not the rule: on a first build this handle has never
+  // been opened, and closing one of those asserts inside the HAL.
+  if (file) file.close();
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
@@ -1656,7 +1662,9 @@ void Section::abortSectionBuild() {
   }
   // During a live build, `file` is the build's write handle and filePath its cache path
   // (both set by runBuildSetup). The header was never patched, so remove the file.
-  file.close();
+  // An abort before runBuildSetup got as far as opening it leaves the handle untouched, and
+  // closing an unopened handle asserts.
+  if (file) file.close();
   Storage.remove(filePath.c_str());
   if (buildState_->cssParser) {
     buildState_->cssParser->clear();
