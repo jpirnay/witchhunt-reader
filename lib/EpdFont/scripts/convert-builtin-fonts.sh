@@ -18,12 +18,45 @@ for size in ${BOOKERLY_FONT_SIZES[@]}; do
   done
 done
 
+# The phonetic alphabet a dictionary needs: IPA Extensions, the stress and
+# length marks from Spacing Modifier Letters, and the three Greek letters IPA
+# borrows.
+#
+# Only ONE face gets them, notosans_14, because the dictionary viewer pins
+# itself to that font (see DICTIONARY_FONT_ID in
+# src/activities/reader/DictionaryDefinitionActivity.h) and a definition is the
+# only text that needs the range. Giving it to all twenty Noto faces cost 124 KB
+# of flash; one size costs 26 KB. Noto Sans is also the only built-in reader
+# family whose source actually HAS the glyphs -- Bookerly is missing 9 of the 20
+# codepoints a real dictionary uses, which is why every other font relies on the
+# lookalike substitution in lib/EpdFont/GlyphFallback.h instead.
+# The whole IPA Extensions block, but only the handful of Spacing Modifier
+# Letters a transcription actually uses: taking that block whole cost 31 KB more
+# across the family for ~60 codepoints no dictionary writes.
+NOTOSANS_IPA_SIZE=14
+NOTOSANS_IPA_INTERVALS=(
+  "0x0250,0x02AF"  # IPA Extensions
+  "0x02B0,0x02B7"  # superscript modifiers, aspiration and friends
+  "0x02BC,0x02BC"  # modifier apostrophe
+  "0x02C8,0x02D1"  # stress marks and length marks
+  "0x02E1,0x02E1"  # modifier l
+  "0x03B2,0x03B2"  # beta
+  "0x03B8,0x03B8"  # theta
+  "0x03C7,0x03C7"  # chi
+)
+
 for size in ${NOTOSANS_FONT_SIZES[@]}; do
   for style in ${READER_FONT_STYLES[@]}; do
     font_name="notosans_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     font_path="../builtinFonts/source/NotoSans/NotoSans-${style}.ttf"
     output_path="../builtinFonts/${font_name}.h"
-    python fontconvert.py $font_name $size $font_path --2bit --compress --zopfli > $output_path
+    cmd=(python fontconvert.py $font_name $size $font_path --2bit --compress --zopfli)
+    if [ "$size" = "$NOTOSANS_IPA_SIZE" ]; then
+      for interval in "${NOTOSANS_IPA_INTERVALS[@]}"; do
+        cmd+=(--additional-intervals "$interval")
+      done
+    fi
+    "${cmd[@]}" > $output_path
     echo "Generated $output_path"
   done
 done

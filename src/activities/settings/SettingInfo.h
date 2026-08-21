@@ -32,6 +32,7 @@ enum class SettingAction {
   SyncTime,
   Weather,
   ReadingStats,
+  DictionarySelect,
   SleepTimeoutPicker,
   RefreshFrequencyPicker,
   KOSyncMinPagesPicker,

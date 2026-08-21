@@ -303,6 +303,28 @@ class GfxRenderer {
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;
+
+  // Save / restore a rectangle of the framebuffer, in logical (orientation-
+  // aware) coordinates. Pixels are packed 1bpp, row-major, MSB first, with a
+  // set bit meaning "dark" -- so a region needs (width*height + 7) / 8 bytes.
+  //
+  // For an overlay that repaints a small moving element over an otherwise
+  // unchanged frame: save what is under it, and restore that instead of
+  // re-rendering the whole page to erase it. The dictionary's word-selection
+  // highlight is the first caller -- without this, moving the cursor one word
+  // costs a full two-pass page render, which also reloads every SD-font glyph
+  // on the page.
+  //
+  // readFramebufferRegion returns the number of bytes written, or 0 when the
+  // rectangle is empty, off-panel, or larger than bufferSize. Restoring a
+  // region saved at a different size or position is undefined -- pass back the
+  // same rectangle.
+  size_t readFramebufferRegion(int x, int y, int width, int height, uint8_t* buffer, size_t bufferSize) const;
+  void writeFramebufferRegion(int x, int y, int width, int height, const uint8_t* buffer) const;
+
+  // Whether the pixel at logical (x, y) is dark. Bounds-checked: off-panel
+  // reads report false rather than sampling a neighbouring row.
+  bool getPixel(int x, int y) const;
   // Copy one packed 1bpp row in the device's physical portrait coordinate
   // space into the controller framebuffer. Source and framebuffer are MSB-first
   // with 0 = black, 1 = white; set invertBits when the source row uses 1 = ink.

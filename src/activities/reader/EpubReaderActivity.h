@@ -426,6 +426,9 @@ class EpubReaderActivity final : public Activity {
   //              next section in the lookahead window (or idles if the window is exhausted)
   enum class BackgroundBuildState : uint8_t { Probe, WaitHeap, Building, Settled };
   BackgroundBuildState backgroundBuildState_ = BackgroundBuildState::Probe;
+  // Set between suspendBackgroundWork() and resumeBackgroundWork(): no look-ahead
+  // build is probed, armed or stepped, and no page is pre-rendered.
+  bool backgroundWorkSuspended_ = false;
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
   // When the spine the user just entered has no cache, buildSection() starts an in-place
   // incremental build owned by `section` and hands the slicing to stepCurrentSectionBuild()
@@ -733,6 +736,29 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+
+  // Open word selection over the current page, or the dictionary picker when no
+  // dictionary is configured. Both suspend background work for their duration.
+  void openDictionary();
+
+  // Quiesce background work and hold it quiesced until resumeBackgroundWork(),
+  // so a lookup does not compete with the look-ahead for a heap that is already
+  // fragmented by the time anyone reaches for a dictionary.
+  //
+  // Releases the lent 48 KB region and the build arena inside it, aborts a
+  // still-live look-ahead build, and discards the pre-rendered next page. Then
+  // latches, so nothing re-arms while the overlay is up.
+  //
+  // Deliberately does NOT discard a look-ahead build that already finished.
+  // Section building is designed to resume from previous work: an aborted build
+  // keeps its completed extraction so the retry skips the inflate, and a
+  // finished build's real product is the cache file on the card, not the
+  // in-memory Section (which is a page-offset LUT worth a few hundred bytes).
+  // The look-ahead's own Probe state makes the point -- it drops the Section as
+  // soon as loadSectionFile() finds the file. Throwing it away here would free
+  // nothing worth having and cost the next visit a needless re-open.
+  void suspendBackgroundWork();
+  void resumeBackgroundWork();
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
                           const SyncPositionOverride* positionOverride = nullptr,
                           const SyncPostAction& postAction = {});

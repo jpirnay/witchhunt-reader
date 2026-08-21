@@ -50,6 +50,13 @@ INTERVAL_PRESETS = {
                         (0x1E00, 0x1EFF), (0x2000, 0x206F),
                         (0x0400, 0x04FF), (0x0500, 0x052F),
                         (0x1C80, 0x1C8F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F)],
+    # Pronunciation notation. Dictionaries write it in IPA Extensions plus the
+    # stress and length marks from Spacing Modifier Letters, and reach into Greek
+    # for theta and chi; the rest of IPA's letters are already in Latin-1 and
+    # Latin Extended-A/B. A dictionary using it is unreadable without these --
+    # measured on PONS En-De, U+02C8 (primary stress) alone appears 73k times.
+    "ipa":            [(0x0250, 0x02AF), (0x02B0, 0x02FF), (0x03B2, 0x03B2),
+                        (0x03B8, 0x03B8), (0x03C7, 0x03C7)],
     "greek":          [(0x0370, 0x03FF), (0x1F00, 0x1FFF)],
     "greek-letters":  [(0x0370, 0x03FF)],
     "musical-symbols": [(0x2660, 0x266F), (0x1D100, 0x1D1FF)],
@@ -72,7 +79,9 @@ INTERVAL_PRESETS = {
                     (0xFB00, 0xFB06)],
     # Greek for physics terms, math operators, geometric shapes, uncommon
     # dialogue punctuation, CJK quote marks, miscellaneous symbols (♪♫♬), dingbats.
-    "reading":     [(0x0020, 0x024F), (0x0300, 0x036F), (0x0370, 0x03FF),
+    # Runs to 0x02FF rather than 0x024F so dictionary pronunciation notation
+    # (IPA Extensions + the stress marks) renders too -- see the "ipa" preset.
+    "reading":     [(0x0020, 0x02FF), (0x0300, 0x036F), (0x0370, 0x03FF),
                     (0x0400, 0x04FF), (0x1E00, 0x1EFF), (0x2000, 0x206F),
                     (0x2070, 0x209F), (0x20A0, 0x20CF), (0x2150, 0x218F),
                     (0x2190, 0x21FF), (0x2200, 0x22FF), (0x2500, 0x257F),

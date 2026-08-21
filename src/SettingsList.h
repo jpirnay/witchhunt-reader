@@ -54,6 +54,11 @@ inline std::string getSleepTimeoutDisplay(void*) {
   return std::to_string(v) + tr(STR_MIN_SUFFIX);
 }
 
+inline std::string getDictionaryDisplay(void*) {
+  if (SETTINGS.dictionaryName[0] == '\0') return std::string(tr(STR_NONE_OPT));
+  return SETTINGS.dictionaryName;
+}
+
 inline std::string getRefreshFrequencyDisplay(void*) {
   const uint8_t v = SETTINGS.refreshFrequencyPages;
   if (v == 0) return std::string(tr(STR_NEVER));
@@ -91,7 +96,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                                StrId::STR_BTN_ACT_CYCLE_FONT_SIZE,
                                                StrId::STR_BTN_ACT_CYCLE_ORIENTATION,
                                                StrId::STR_BTN_ACT_QUICK_OVERRIDES,
-                                               StrId::STR_BTN_ACT_IGNORE};
+                                               StrId::STR_BTN_ACT_IGNORE,
+                                               StrId::STR_DICTIONARY};
 
   // Prepend the per-button default action to the shared options list.
   auto makeBtnActionOptions = [&](StrId defaultAction) {
@@ -221,6 +227,12 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                          "hyphenationEnabled", StrId::STR_CAT_READER));
   settings.push_back(SettingInfo::Toggle(StrId::STR_FONT_SIZE_NORMALIZATION, &CrossPointSettings::fontSizeNormalization,
                                          "fontSizeNormalization", StrId::STR_CAT_READER));
+  // Which StarDict dictionary word lookup uses. An Action rather than an Enum:
+  // the options are folders discovered on the SD card at open time, not a fixed
+  // list, so the picker has to scan.
+  settings.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::DictionarySelect)
+                         .withDisplayGetter(getDictionaryDisplay)
+                         .withCategory(StrId::STR_CAT_READER));
   settings.push_back(
       SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},

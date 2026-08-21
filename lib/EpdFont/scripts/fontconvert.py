@@ -996,6 +996,14 @@ if compress:
         (0x0080, 0x00FF),   # Latin-1 Supplement
         (0x0100, 0x017F),   # Latin Extended-A
         (0x0180, 0x024F),   # Latin Extended-B
+        # IPA Extensions + Spacing Modifier Letters, for dictionary pronunciation.
+        # These already grouped correctly without being listed -- an unlisted
+        # codepoint gets script id -1, and a contiguous run of them becomes one
+        # group like any other. Listed anyway so the grouping is deliberate
+        # rather than a side effect of the ranges above stopping at 0x024F, and
+        # so inserting a future range between them cannot silently split it.
+        # Verified byte-identical output before and after adding this line.
+        (0x0250, 0x02FF),
         (0x0300, 0x036F),   # Combining Diacritical Marks
         (0x0400, 0x04FF),   # Cyrillic
         (0x1EA0, 0x1EF9),   # Vietnamese Extended

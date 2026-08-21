@@ -111,6 +111,10 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasFootnotes) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_FOOTNOTES, SettingAction::None));
   }
+  // Always offered, even with no dictionary configured: choosing it then opens
+  // the picker, which is more useful than hiding the feature from the person
+  // who has not found the setting yet.
+  menuItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
 
   // --- Appearance ---
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_APPEARANCE));
@@ -391,6 +395,8 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::STAR_PAGE;
     case StrId::STR_FOOTNOTES:
       return MenuAction::FOOTNOTES;
+    case StrId::STR_DICTIONARY:
+      return MenuAction::DICTIONARY;
     case StrId::STR_AUTO_TURN_PAGES_PER_MIN:
       return MenuAction::AUTO_PAGE_TURN;
     case StrId::STR_EMBEDDED_STYLE:

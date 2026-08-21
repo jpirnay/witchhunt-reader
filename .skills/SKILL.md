@@ -43,7 +43,7 @@ find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 * MCU: ESP32-C3 (Single-core RISC-V @ 160MHz)
 * RAM: ~380KB usable (VERY LIMITED - primary project constraint)
   * **NO PSRAM**: ESP32-C3 has no PSRAM capability (unlike ESP32-S3)
-  * **Single Buffer Mode**: Only ONE 48KB framebuffer (not double-buffered)
+  * **Two 48KB framebuffers**: a write buffer plus a secondary previous-frame buffer (the latter is lent out to background work — see "Framebuffers" below)
 * Flash: 16MB (Instruction storage and static data)
 * Display: 800x480 E-Ink (Slow refresh, monochrome, 1-2s full update)
   * Framebuffer: 48,000 bytes (800 × 480 ÷ 8)
@@ -97,7 +97,6 @@ find src -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 These flags in `platformio.ini` fundamentally affect firmware behavior:
 
 ```cpp
--DEINK_DISPLAY_SINGLE_BUFFER_MODE=1  // Single framebuffer (saves 48KB RAM!)
 -DARDUINO_USB_MODE=1                 // Enable USB CDC
 -DARDUINO_USB_CDC_ON_BOOT=1          // Serial available immediately at boot
 -DXML_CONTEXT_BYTES=1024             // XML parser memory limit (EPUB parsing)
@@ -106,11 +105,10 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 -DXML_GE=0                           // Disable XML general entities (security)
 ```
 
-**SINGLE_BUFFER_MODE implications**:
-- Only ONE framebuffer exists (not double-buffered)
-- Grayscale rendering requires temporary buffer allocation (`renderer.storeBwBuffer()`)
-- Must call `renderer.restoreBwBuffer()` to free temporary buffers
-- See [lib/GfxRenderer/GfxRenderer.cpp:439-440](../lib/GfxRenderer/GfxRenderer.cpp) for malloc usage
+**Framebuffers**: `EINK_DISPLAY_SINGLE_BUFFER_MODE` is NOT defined by any environment here (only `freeink-sdk/platformio.sample.ini` sets it), so this build has a write framebuffer AND a secondary previous-frame buffer (~48 KB each). Consequences:
+- `displayBuffer()` ends with a buffer swap, so afterwards the write framebuffer holds the frame from TWO refreshes ago. Any partial repaint that patches regions and re-displays MUST call `renderer.syncWriteBufferFromDisplayed()` first, or it ships a stale frame to the panel. See `BookInfoActivity.cpp` for a correct example.
+- The secondary buffer is a lendable resource: `releaseSecondaryBuffer()` / `borrowSecondaryBuffer()` hand it to Background-B's section builds and the next-page pre-render.
+- Grayscale rendering still needs a temporary buffer (`renderer.storeBwBuffer()` / `restoreBwBuffer()`).
 
 ### Directory Structure
 * lib/: Internal libraries (Epub engine, GfxRenderer, UITheme, I18n)
@@ -412,17 +410,9 @@ void onExit()   { /* free: vTaskDelete, free buffer, close files */ Activity::on
 
 **Total**: ~80+ global `EpdFont` and `EpdFontFamily` objects
 
-**Compilation Flag**:
-```cpp
-#ifndef OMIT_FONTS
-  // Most fonts loaded here
-#endif
-```
-
 **Implications**:
 - Fonts stored in **Flash** (marked as `static const` in `lib/EpdFont/builtinFonts/`)
 - Font rendering data cached in **DRAM** when first used
-- `OMIT_FONTS` can reduce binary size for minimal builds
 - Font IDs defined in [src/fontIds.h](../src/fontIds.h)
 
 **Usage**:

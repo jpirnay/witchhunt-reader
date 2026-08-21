@@ -43,6 +43,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DictionaryWordSelectActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
@@ -62,6 +63,7 @@
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
 #include "activities/home/BookInfoActivity.h"
+#include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -1036,6 +1038,48 @@ void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& acti
   Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
 }
 
+void EpubReaderActivity::suspendBackgroundWork() {
+  if (backgroundWorkSuspended_) return;
+  backgroundWorkSuspended_ = true;
+  {
+    // Under the render lock, like every other borrow teardown: the render task
+    // calls endBackgroundBorrow() from the top of every render(), and two
+    // unlocked teardowns double-free the same Section.
+    RenderLock lock(*this);
+    // endBackgroundBorrow(), NOT resetBackgroundBuild(). This releases what is
+    // actually large — the lent 48 KB region and the build arena inside it —
+    // and aborts only a build that is still live, which is resumable by design:
+    // abortSectionBuild() keeps a completed extraction, so the retry skips the
+    // inflate. A build that already FINISHED is left alone. Its Section is a
+    // few hundred bytes of page-offset LUT, and the work itself is not in RAM
+    // at all: the cache file on the card is the durable artifact, which is why
+    // the look-ahead's own Probe state discards the Section object the moment
+    // loadSectionFile() finds the file. Dropping it here would free nothing
+    // worth having and cost the next visit a needless re-open.
+    const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+    endBackgroundBorrow();
+    // Same reasoning as startActivityForResult's: an overlay opening says
+    // nothing about whether the parse fits between two page turns, so it must
+    // not burn the budget that makes B abandon a spine.
+    backgroundPreemptCount_ = preemptionsBeforeOverlay;
+  }
+  // Discard the pre-rendered next page: it lives in the secondary framebuffer,
+  // which the overlay is about to draw over. render()'s prologue also clears
+  // this on any pass that is not PreRender/BufferDisplay, so the flag would not
+  // survive the reader's next render either -- but doing it here means the
+  // discard does not depend on which pass that render turns out to be.
+  preRenderedPage = {};
+  LOG_INF("ERS", "Background work suspended for a dictionary interaction");
+}
+
+void EpubReaderActivity::resumeBackgroundWork() {
+  if (!backgroundWorkSuspended_) return;
+  backgroundWorkSuspended_ = false;
+  // Nothing to restart explicitly: the look-ahead re-probes from Probe on the
+  // next loop() and the pre-render re-arms on the next render().
+  LOG_INF("ERS", "Background work resumed");
+}
+
 void EpubReaderActivity::resetBackgroundBuild() {
   endBackgroundBorrow();       // returns the lent buffer (and aborts the build) if B held it
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
@@ -1123,7 +1167,7 @@ void EpubReaderActivity::endBackgroundBorrow() {
 }
 
 void EpubReaderActivity::stepBackgroundSectionBuild() {
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_) {
     return;
   }
   // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
@@ -1700,6 +1744,44 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   }
 }
 
+void EpubReaderActivity::openDictionary() {
+  if (!section) return;
+
+  if (SETTINGS.dictionaryName[0] == '\0') {
+    // Send the user somewhere they can act rather than showing a popup that
+    // only tells them what is missing.
+    suspendBackgroundWork();
+    startActivityForResult(std::make_unique<DictionarySelectionActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) {
+                             resumeBackgroundWork();
+                             requestUpdate();
+                           });
+    return;
+  }
+
+  // During an active build the on-disk LUT is not written yet, so the page has
+  // to come from the in-memory one -- the same choice the pre-render pass makes.
+  auto page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(section->currentPage))
+                                        : section->loadPageFromSectionFile();
+  if (!page) {
+    LOG_ERR("ERS", "Dictionary: could not load the current page");
+    return;
+  }
+
+  const RenderLayout layout = computeRenderLayout();
+  const int effectiveFontId = getEffectiveReaderFontId();
+  // Before startActivityForResult, which only hands back the borrowed buffer:
+  // the overlay wants the heap a completed look-ahead section is sitting on.
+  suspendBackgroundWork();
+  startActivityForResult(
+      std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page), effectiveFontId,
+                                                     layout.marginLeft, layout.marginTop),
+      [this](const ActivityResult&) {
+        resumeBackgroundWork();
+        requestUpdate();
+      });
+}
+
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
@@ -1735,6 +1817,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::DICTIONARY:
+      openDictionary();
+      break;
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
       // Show each entry's note text when the book-level cache can supply it — see
       // footnotePreviewsForCurrentPage() for when opening the list may gather it.
@@ -2945,7 +3030,7 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
 
 void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   // Pre-render pass: render next page content into the frame buffer (no status bar, no flush).
-  if (!section || preRenderedPage.ready) {
+  if (!section || preRenderedPage.ready || backgroundWorkSuspended_) {
     return;
   }
   const int nextPage = section->currentPage + 1;
@@ -5013,6 +5098,9 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
         requestUpdate();
       }
+      break;
+    case BA::BTN_DICTIONARY:
+      openDictionary();
       break;
     case BA::BTN_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {

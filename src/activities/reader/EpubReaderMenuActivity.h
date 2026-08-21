@@ -15,6 +15,7 @@ class EpubReaderMenuActivity final : public MenuListActivity {
     NONE,
     SELECT_CHAPTER,
     FOOTNOTES,
+    DICTIONARY,
     EMBEDDED_STYLE,
     IMAGE_RENDERING,
     TEXT_DARKNESS,

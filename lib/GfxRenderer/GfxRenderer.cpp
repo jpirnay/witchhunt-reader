@@ -1231,6 +1231,51 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
   }
 }
 
+bool GfxRenderer::getPixel(const int x, const int y) const {
+  int phyX = 0;
+  int phyY = 0;
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  rotateCoordinates(getOrientation(), x, y, &phyX, &phyY, displayWidth, displayHeight);
+  if (phyX < 0 || phyX >= displayWidth || phyY < 0 || phyY >= displayHeight) return false;
+
+  const uint32_t byteIndex = static_cast<uint32_t>(phyY) * getDisplayWidthBytes() + (phyX / 8);
+  const uint8_t bitPosition = 7 - (phyX % 8);
+  // A CLEARED bit is dark: drawPixel(state=true) clears it.
+  return (frameBuffer[byteIndex] & (1 << bitPosition)) == 0;
+}
+
+size_t GfxRenderer::readFramebufferRegion(const int x, const int y, const int width, const int height,
+                                          uint8_t* const buffer, const size_t bufferSize) const {
+  if (!buffer || width <= 0 || height <= 0) return 0;
+  const size_t needed = (static_cast<size_t>(width) * static_cast<size_t>(height) + 7) / 8;
+  if (needed > bufferSize) return 0;
+  if (x < 0 || y < 0 || x + width > getScreenWidth() || y + height > getScreenHeight()) return 0;
+
+  memset(buffer, 0, needed);
+  size_t bit = 0;
+  for (int row = 0; row < height; row++) {
+    for (int col = 0; col < width; col++, bit++) {
+      if (getPixel(x + col, y + row)) buffer[bit / 8] |= static_cast<uint8_t>(1u << (7 - (bit % 8)));
+    }
+  }
+  return needed;
+}
+
+void GfxRenderer::writeFramebufferRegion(const int x, const int y, const int width, const int height,
+                                         const uint8_t* const buffer) const {
+  if (!buffer || width <= 0 || height <= 0) return;
+  if (x < 0 || y < 0 || x + width > getScreenWidth() || y + height > getScreenHeight()) return;
+
+  size_t bit = 0;
+  for (int row = 0; row < height; row++) {
+    for (int col = 0; col < width; col++, bit++) {
+      const bool dark = (buffer[bit / 8] & (1u << (7 - (bit % 8)))) != 0;
+      drawPixel(x + col, y + row, dark);
+    }
+  }
+}
+
 void GfxRenderer::writePhysicalPortraitPackedRow(const int physicalY, const uint8_t* packedRow, const int pixelWidth,
                                                  const bool invertBits) const {
   if (!frameBuffer || !packedRow || pixelWidth <= 0 || physicalY < 0 || physicalY >= static_cast<int>(panelWidth)) {

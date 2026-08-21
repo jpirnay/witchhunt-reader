@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "GlyphFallback.h"
 #include "SmallCaps.h"
 
 // Scale a 12.4 fixed-point advance by the small-caps factor, rounding to nearest.
@@ -211,7 +212,10 @@ uint32_t EpdFont::applyLigatures(uint32_t cp, const char*& text) const {
   return cp;
 }
 
-const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
+// The real lookup: interval table, then the on-demand loader an SD font
+// installs. No fallbacks -- getGlyph() layers those on top, so a fallback can
+// never recurse back into another fallback.
+const EpdGlyph* EpdFont::findGlyph(const uint32_t cp) const {
   const int count = data->intervalCount;
   if (count == 0 && !data->glyphMissHandler) return nullptr;
 
@@ -238,9 +242,22 @@ const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
     const EpdGlyph* loaded = data->glyphMissHandler(data->glyphMissCtx, cp);
     if (loaded) return loaded;
   }
+  return nullptr;
+}
 
-  if (cp != REPLACEMENT_GLYPH) {
-    return getGlyph(REPLACEMENT_GLYPH);
+const EpdGlyph* EpdFont::getGlyph(const uint32_t cp) const {
+  if (const EpdGlyph* glyph = findGlyph(cp)) return glyph;
+
+  // The font does not have it. Before giving up and drawing a box, try a close
+  // relative that most fonts do carry — a dictionary's phonetic transcription is
+  // otherwise a row of identical rectangles. See GlyphFallback.h; this only
+  // runs once the real glyph has been ruled out, so a font that has the
+  // character is never second-guessed.
+  const uint32_t substitute = fallbackGlyphCodepoint(cp);
+  if (substitute != cp) {
+    if (const EpdGlyph* glyph = findGlyph(substitute)) return glyph;
   }
+
+  if (cp != REPLACEMENT_GLYPH) return findGlyph(REPLACEMENT_GLYPH);
   return nullptr;
 }
