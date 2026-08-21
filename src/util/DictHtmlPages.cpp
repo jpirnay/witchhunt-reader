@@ -28,8 +28,9 @@ bool heapAllowsStyledLayout() {
 
 }  // namespace
 
-bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definition, const uint16_t viewportWidth,
-                              const uint16_t viewportHeight, std::vector<std::unique_ptr<Page>>& pagesOut) {
+bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definition, const int fontId,
+                              const uint16_t viewportWidth, const uint16_t viewportHeight,
+                              std::vector<std::unique_ptr<Page>>& pagesOut) {
   pagesOut.clear();
   if (definition.empty()) return false;
   if (!heapAllowsStyledLayout()) {
@@ -51,9 +52,9 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
     // <img> entirely, and every path that dereferences epub sits behind either
     // that check or a non-empty image src that only that path can set.
     auto parser = makeUniqueNoThrow<ChapterHtmlSlimParser>(
-        nullptr, renderer, SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-        SETTINGS.extraParagraphSpacing != 0, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-        SETTINGS.hyphenationEnabled != 0, SETTINGS.fontSizeNormalization != 0, SETTINGS.bionicReading != 0,
+        nullptr, renderer, fontId, SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing != 0,
+        SETTINGS.paragraphAlignment, viewportWidth, viewportHeight, SETTINGS.hyphenationEnabled != 0,
+        SETTINGS.fontSizeNormalization != 0, SETTINGS.bionicReading != 0,
         [&pagesOut, &resourceLimitHit, &retainedElements](std::unique_ptr<Page> page) {
           if (resourceLimitHit) return;
           const size_t pageElements = page->elements.size();

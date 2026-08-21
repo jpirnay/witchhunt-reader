@@ -8,7 +8,26 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "fontIds.h"
 #include "util/ButtonNavigator.h"
+
+// The font dictionary definitions are rendered in -- fixed, and deliberately
+// NOT the reader's font.
+//
+// A definition is the only text in the firmware that needs the phonetic
+// alphabet, and the phonetic alphabet is not free: shipping it in all twenty
+// Noto Sans faces cost 124 KB of flash. Pinning the viewer to one face means
+// only that face has to carry it. Noto Sans also reads well for reference text
+// and looks distinct from the book, which is the right signal for an overlay.
+//
+// The cost is that a reader using Extra Large text still gets a 14pt
+// definition. Under OMIT_FONTS only Bookerly 14 is registered, so fall back to
+// it -- that build has no IPA glyphs at all and relies on GlyphFallback.
+#ifdef OMIT_FONTS
+#define DICTIONARY_FONT_ID BOOKERLY_14_FONT_ID
+#else
+#define DICTIONARY_FONT_ID NOTOSANS_14_FONT_ID
+#endif
 
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain text,

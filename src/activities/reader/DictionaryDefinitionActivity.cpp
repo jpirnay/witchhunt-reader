@@ -59,7 +59,7 @@ DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() 
 bool DictionaryDefinitionActivity::layoutHtmlPages() {
   const BodyArea body = bodyArea();
   if (body.width <= 0 || body.height <= 0) return false;
-  if (!buildDictionaryHtmlPages(renderer, definition, static_cast<uint16_t>(body.width),
+  if (!buildDictionaryHtmlPages(renderer, definition, DICTIONARY_FONT_ID, static_cast<uint16_t>(body.width),
                                 static_cast<uint16_t>(body.height), pages)) {
     return false;
   }
@@ -86,7 +86,7 @@ void DictionaryDefinitionActivity::wrapText() {
   lines.clear();
   lines.reserve(definition.size() / 32 + 8);
 
-  const int fontId = SETTINGS.getReaderFontId();
+  const int fontId = DICTIONARY_FONT_ID;
   const BodyArea body = bodyArea();
   const int maxWidth = body.width;
   const int spaceWidth = renderer.getSpaceWidth(fontId);
@@ -244,7 +244,7 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   // Body: two-pass draw inside a prewarm scope (the same pattern the reader's
   // page render uses) so SD-card font glyphs load from the card in one batch
   // instead of one on-demand read per character on every page turn.
-  const int fontId = SETTINGS.getReaderFontId();
+  const int fontId = DICTIONARY_FONT_ID;
   const int bodyStartY = headerY + metrics.headerHeight + metrics.verticalSpacing;
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
