@@ -320,6 +320,14 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   // Restore the pixels under the old highlight, draw the new one, and push --
   // skipping the two-pass page render entirely.
   if (popup == Popup::None && snapshotIdx >= 0 && !words.empty() && selected != snapshotIdx) {
+    // displayBuffer() ends with a buffer swap, so the write framebuffer holds
+    // the frame from TWO refreshes ago -- the reader menu the overlay was
+    // opened from, or an older cursor position. Patching two word boxes into
+    // that and re-displaying it ships the stale frame back to the panel, which
+    // is why the menu reappeared and old highlights piled up. Resync to what is
+    // actually on screen first; the saved pixels below were read from that same
+    // frame, so the restore only lines up after this.
+    renderer.syncWriteBufferFromDisplayed();
     renderer.writeFramebufferRegion(snapshotX, snapshotY, snapshotW, snapshotH, snapshot.get());
     // The full path's PrewarmScope cleared the glyph cache on exit; batch-load
     // just the highlighted word's glyphs before drawing them white-on-black.
