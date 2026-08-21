@@ -426,6 +426,9 @@ class EpubReaderActivity final : public Activity {
   //              next section in the lookahead window (or idles if the window is exhausted)
   enum class BackgroundBuildState : uint8_t { Probe, WaitHeap, Building, Settled };
   BackgroundBuildState backgroundBuildState_ = BackgroundBuildState::Probe;
+  // Set between suspendBackgroundWork() and resumeBackgroundWork(): no look-ahead
+  // build is probed, armed or stepped, and no page is pre-rendered.
+  bool backgroundWorkSuspended_ = false;
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
   // When the spine the user just entered has no cache, buildSection() starts an in-place
   // incremental build owned by `section` and hands the slicing to stepCurrentSectionBuild()
@@ -733,6 +736,27 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+
+  // Open word selection over the current page, or the dictionary picker when no
+  // dictionary is configured. Both suspend background work for their duration.
+  void openDictionary();
+
+  // Quiesce background work and hold it quiesced until resumeBackgroundWork().
+  //
+  // Stacking an activity already stops the reader's loop() and hands back
+  // Background-B's borrowed framebuffer, but it deliberately KEEPS a completed
+  // look-ahead section so the next page turn can adopt it. A dictionary lookup
+  // is the one overlay where that is the wrong trade: it needs a 32 KB
+  // contiguous inflate window, the definition text, and possibly a laid-out
+  // page set, all at once, on the heap a reading session has already
+  // fragmented. A finished section held "just in case" is exactly the resident
+  // block that turns those allocations into a LowMemory popup.
+  //
+  // So this drops the completed section too, and latches a flag so nothing
+  // re-arms in the gap between the child finishing and the reader's next
+  // render. The cost is that the next boundary cross rebuilds that section.
+  void suspendBackgroundWork();
+  void resumeBackgroundWork();
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
                           const SyncPositionOverride* positionOverride = nullptr,
                           const SyncPostAction& postAction = {});
