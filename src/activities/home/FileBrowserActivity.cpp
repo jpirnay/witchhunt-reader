@@ -368,10 +368,18 @@ void FileBrowserActivity::loop() {
 
   // Up/Down side buttons step through the list; Left/Right page (handled above).
   const int listSize = static_cast<int>(entryCount());
+  const int indexBeforeNav = selectorIndex;
   buttonNavigator.onNextList(
       {MappedInputManager::Button::Down}, selectorIndex, listSize, [this] { requestUpdate(); }, listView.visibleRows);
   buttonNavigator.onPreviousList(
       {MappedInputManager::Button::Up}, selectorIndex, listSize, [this] { requestUpdate(); }, listView.visibleRows);
+  // The navigator's own jumps — double-tap for a page, hold for the far end — move the selection
+  // without touching the window, and the layout cannot tell a jump from a step (see
+  // pageSelection). Anchoring on anything bigger than a single step gives those jumps a screen of
+  // new names too, instead of scrolling by one row.
+  if (std::abs(selectorIndex - indexBeforeNav) > 1) {
+    listView.firstVisible = selectorIndex;
+  }
 }
 
 // Rows one Left/Right press moves. drawList reports what the last render fit — which for wrapped

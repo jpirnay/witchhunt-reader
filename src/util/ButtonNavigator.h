@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include "ButtonEventManager.h"
 #include "MappedInputManager.h"
 
 class ButtonNavigator final {
@@ -16,20 +17,27 @@ class ButtonNavigator final {
   std::function<bool(int)> selectablePredicate;
   int selectableTotalItems = 0;
 
+  // Timestamp of the press this navigator last acted on, and the sampler press count it had seen
+  // by then — both per direction. The count is what makes a tap impossible to miss: it rises even
+  // when two presses land inside one loop tick, where a polled edge flag reports only one.
   uint32_t lastNextPressMs = 0;
   uint32_t lastPreviousPressMs = 0;
+  uint16_t lastNextPressCount = 0;
+  uint16_t lastPreviousPressCount = 0;
   bool longPressNextFired = false;
   bool longPressPreviousFired = false;
-  bool pendingDoubleNext = false;
-  bool pendingDoublePrevious = false;
   int indexBeforePress = 0;
 
-  static constexpr uint16_t listDoubleClickMs = 200;
+  // Matches ButtonEventManager::DOUBLE_WINDOW_MS: one physical gesture, one definition of how long
+  // a double-tap may take. It was 200 ms, which is short for a deliberate double-tap even before
+  // anything measured it wrong.
+  static constexpr uint16_t listDoubleClickMs = ButtonEventManager::DOUBLE_WINDOW_MS;
   static constexpr uint32_t listLongPressMs = 1500;
 
   [[nodiscard]] bool shouldNavigateContinuously() const;
   void onListNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
-                 uint32_t& lastPressMs, bool& longPressFired, bool& pendingDouble, const Callback& onChange);
+                 uint32_t& lastPressMs, uint16_t& lastSeenPressCount, bool& longPressFired, const Callback& onChange);
+  [[nodiscard]] static ButtonEventManager::PressLog latestPressLog(const Buttons& buttons);
   void onListPageNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
                      const Callback& onChange);
   [[nodiscard]] static int effectivePageSize(int pageSize) { return pageSize > 0 ? pageSize : defaultListPageSize; }

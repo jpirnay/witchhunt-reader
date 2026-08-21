@@ -62,6 +62,13 @@ bool ButtonEventManager::hasDoubleAction(const Button button) const {
   return false;
 }
 
+ButtonEventManager::PressLog ButtonEventManager::pressLog(const Button button) const {
+  const int idx = buttonToIndex(button);
+  if (idx < 0) return {};
+  const PerButton& s = buttons[idx];
+  return {s.pressCount, s.loggedPressMs, s.priorLoggedPressMs};
+}
+
 void ButtonEventManager::pushEvent(const Button button, const PressType type) {
   const int next = (eventTail + 1) % EVENT_BUF;
   if (next == eventHead) return;  // buffer full, drop oldest not possible — just drop newest
@@ -94,6 +101,9 @@ void ButtonEventManager::drain() {
     b.state = State::Idle;
     b.pressDownTime = 0;
     b.releaseTime = 0;
+    b.loggedPressMs = 0;
+    b.priorLoggedPressMs = 0;
+    b.pressCount = 0;
   }
   eventHead = eventTail = 0;
   // Drop edges the sampler queued for the outgoing activity so they don't bleed in.
@@ -102,6 +112,14 @@ void ButtonEventManager::drain() {
 
 void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool pressed, const unsigned long t) {
   PerButton& s = buttons[idx];
+  // Count and time every press-down edge before the state machine has its say: pressLog() has to
+  // answer for taps the FSM folds away (a second press inside the double window) or classifies
+  // without recording (an immediate Short).
+  if (pressed) {
+    s.priorLoggedPressMs = s.loggedPressMs;
+    s.loggedPressMs = t;
+    s.pressCount++;
+  }
   switch (s.state) {
     case State::Idle:
       if (pressed) {

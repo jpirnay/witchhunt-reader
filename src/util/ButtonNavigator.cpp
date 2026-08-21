@@ -227,28 +227,28 @@ int ButtonNavigator::previousPageIndex(const int currentIndex, const int totalIt
 
 void ButtonNavigator::onNextList(int& selectedIndex, const int totalItems, const Callback& onChange,
                                  const int pageSize) {
-  onListNav(getStepNextButtons(), true, selectedIndex, totalItems, pageSize, lastNextPressMs, longPressNextFired,
-            pendingDoubleNext, onChange);
+  onListNav(getStepNextButtons(), true, selectedIndex, totalItems, pageSize, lastNextPressMs, lastNextPressCount,
+            longPressNextFired, onChange);
   onListPageNav(getPageNextButtons(), true, selectedIndex, totalItems, pageSize, onChange);
 }
 
 void ButtonNavigator::onNextList(const Buttons& buttons, int& selectedIndex, const int totalItems,
                                  const Callback& onChange, const int pageSize) {
-  onListNav(buttons, true, selectedIndex, totalItems, pageSize, lastNextPressMs, longPressNextFired, pendingDoubleNext,
+  onListNav(buttons, true, selectedIndex, totalItems, pageSize, lastNextPressMs, lastNextPressCount, longPressNextFired,
             onChange);
 }
 
 void ButtonNavigator::onPreviousList(int& selectedIndex, const int totalItems, const Callback& onChange,
                                      const int pageSize) {
   onListNav(getStepPreviousButtons(), false, selectedIndex, totalItems, pageSize, lastPreviousPressMs,
-            longPressPreviousFired, pendingDoublePrevious, onChange);
+            lastPreviousPressCount, longPressPreviousFired, onChange);
   onListPageNav(getPagePreviousButtons(), false, selectedIndex, totalItems, pageSize, onChange);
 }
 
 void ButtonNavigator::onPreviousList(const Buttons& buttons, int& selectedIndex, const int totalItems,
                                      const Callback& onChange, const int pageSize) {
-  onListNav(buttons, false, selectedIndex, totalItems, pageSize, lastPreviousPressMs, longPressPreviousFired,
-            pendingDoublePrevious, onChange);
+  onListNav(buttons, false, selectedIndex, totalItems, pageSize, lastPreviousPressMs, lastPreviousPressCount,
+            longPressPreviousFired, onChange);
 }
 
 // Left/Right: one screenful per press, held down for continuous paging. Deliberately none of the
@@ -276,9 +276,29 @@ void ButtonNavigator::onListPageNav(const Buttons& buttons, const bool forward, 
   onPressAndContinuous(buttons, jump);
 }
 
+// Merges the press logs of a button set: counts add up, timestamps come from whichever button was
+// pressed last. Sets are normally one button (Up, or Down), and where they are not, the pair is
+// two names for one physical button (Up/PageBack) or two buttons that mean the same thing to the
+// list — either way a press on any of them is a press for this navigator. A pair of taps split
+// across two DIFFERENT buttons of the set is not read as a double-tap, which is the intended
+// reading: those are two separate gestures.
+ButtonEventManager::PressLog ButtonNavigator::latestPressLog(const Buttons& buttons) {
+  ButtonEventManager::PressLog merged;
+  uint16_t total = 0;
+  for (const MappedInputManager::Button b : buttons) {
+    const auto log = globalButtonEvents().pressLog(b);
+    total = static_cast<uint16_t>(total + log.count);
+    if (log.count > 0 && (merged.count == 0 || log.lastPressMs >= merged.lastPressMs)) {
+      merged = log;
+    }
+  }
+  merged.count = total;
+  return merged;
+}
+
 void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int& selectedIndex, const int totalItems,
-                                const int pageSize, uint32_t& lastPressMs, bool& longPressFired, bool& pendingDouble,
-                                const Callback& onChange) {
+                                const int pageSize, uint32_t& lastPressMs, uint16_t& lastSeenPressCount,
+                                bool& longPressFired, const Callback& onChange) {
   if (!mappedInput || totalItems <= 0) return;
 
   const bool anyHeld = std::any_of(buttons.begin(), buttons.end(),
@@ -310,23 +330,39 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
     longPressFired = false;
   }
 
-  const bool wasPressed = std::any_of(buttons.begin(), buttons.end(),
-                                      [](const MappedInputManager::Button b) { return mappedInput->wasPressed(b); });
-  if (!wasPressed) return;
+  // Presses come from the sampler's log, not from polling wasPressed(): it counts every debounced
+  // press-down edge and stamps it with the time the sampler saw it. Polling loses both halves of a
+  // double-tap — two taps inside one loop tick collapse into a single flag, and the gap ends up
+  // measured between the moments the loop NOTICED each press, which includes whatever redraw
+  // happened in between. On e-ink that redraw alone outlasts the window, which is why a
+  // double-tap used to register as two single steps almost every time.
+  const ButtonEventManager::PressLog press = latestPressLog(buttons);
+  if (press.count == lastSeenPressCount) return;
+  const bool resumed = press.count < lastSeenPressCount;  // drain() zeroed the log under us
+  const uint16_t newPresses = resumed ? press.count : static_cast<uint16_t>(press.count - lastSeenPressCount);
+  lastSeenPressCount = press.count;
 
   // Long press already fired: skip the press navigation — the jump-to-end already happened.
   if (longPressFired) return;
 
-  const uint32_t now = millis();
-  // Detect double-click: measure gap since previous press.
-  const bool isDouble = lastPressMs > 0 && (now - lastPressMs) < listDoubleClickMs;
-  lastPressMs = now;
-  pendingDouble = false;
+  // Two taps close together are a page jump, whether they arrived in one tick (the pair is in the
+  // log) or across two (the second is close to the one we acted on last time).
+  const bool doubleInOneTick =
+      newPresses >= 2 && press.priorPressMs > 0 && press.lastPressMs - press.priorPressMs < listDoubleClickMs;
+  const bool doubleAcrossTicks =
+      newPresses == 1 && lastPressMs > 0 && press.lastPressMs - lastPressMs < listDoubleClickMs;
+  const bool isDouble = !resumed && (doubleInOneTick || doubleAcrossTicks);
+  // Zeroed after a jump so a third tap starts a fresh pair instead of chaining page after page.
+  lastPressMs = isDouble ? 0 : press.lastPressMs;
 
   if (isDouble) {
-    // Restore to position before the first press so the total movement is exactly one page.
-    // Guard against a stale indexBeforePress if totalItems shrank since the single press stored it.
-    selectedIndex = (indexBeforePress >= 0 && indexBeforePress < totalItems) ? indexBeforePress : selectedIndex;
+    // A pair split across two ticks already moved one step for its first tap: undo that, so the
+    // total movement is exactly one page. A pair that arrived inside a single tick has not moved
+    // anything yet, and its indexBeforePress belongs to some older press — leave the selection be.
+    // (The bounds test also guards a stale index if the list shrank since it was stored.)
+    if (doubleAcrossTicks && indexBeforePress >= 0 && indexBeforePress < totalItems) {
+      selectedIndex = indexBeforePress;
+    }
     // A page, not a fixed ten: this is the only jump available on the lists whose Left/Right are
     // taken by their own actions (the file browser), so it should match what a screenful is there.
     const int jumpCount = effectivePageSize(pageSize);
