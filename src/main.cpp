@@ -1420,6 +1420,7 @@ void loop() {
         case BA::BTN_CYCLE_FONT_SIZE:
         case BA::BTN_CYCLE_ORIENTATION:
         case BA::BTN_QUICK_OVERRIDES:
+        case BA::BTN_DICTIONARY:
           return true;
         default:  // BTN_GO_HOME / BTN_SLEEP / BTN_FORCE_*_REFRESH / BTN_OPEN_BOOKMARKS / BTN_IGNORE are global
           return false;
@@ -1515,6 +1516,9 @@ void loop() {
           break;
         case BA::BTN_QUICK_OVERRIDES:
           activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
+          break;
+        case BA::BTN_DICTIONARY:
+          activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
           break;
         case BA::BTN_IGNORE:
           // Explicit "do nothing": swallow the event so neither a global action nor the
