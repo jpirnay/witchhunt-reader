@@ -823,9 +823,12 @@ void WifiSelectionActivity::loop() {
     }
 
     // Handle navigation
-    buttonNavigator.onNextList(selectedNetworkIndex, static_cast<int>(networks.size()), [this] { requestUpdate(); });
-    buttonNavigator.onPreviousList(selectedNetworkIndex, static_cast<int>(networks.size()),
-                                   [this] { requestUpdate(); });
+    // Step on Up/Down only: Left starts a saved-password connect and Right rescans (handled above),
+    // so they must not also move the selection. The page jump is the double-click on Up/Down.
+    buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectedNetworkIndex,
+                               static_cast<int>(networks.size()), [this] { requestUpdate(); });
+    buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectedNetworkIndex,
+                                   static_cast<int>(networks.size()), [this] { requestUpdate(); });
   }
 }
 
