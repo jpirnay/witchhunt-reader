@@ -262,6 +262,11 @@ class CrossPointSettings {
   uint8_t fontFamily = BOOKERLY;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
+  // Folder name under /dictionaries (or /.dictionaries) of the StarDict
+  // dictionary used for word lookup; empty means no dictionary is selected.
+  // A folder NAME, not a path: DictionaryRegistry::resolveBasePath rejects
+  // separators and dot prefixes so a hand-edited value cannot escape the roots.
+  char dictionaryName[32] = "";
   uint8_t fontSize = MEDIUM;
   // Reader font settings (TXT / MD) — defaults to EPUB settings when not explicitly set
   uint8_t txtFontFamily = NOTOSANS;
@@ -403,6 +408,7 @@ class CrossPointSettings {
     BTN_CYCLE_ORIENTATION,
     BTN_QUICK_OVERRIDES,
     BTN_IGNORE,
+    BTN_DICTIONARY,
     BUTTON_ACTION_COUNT
   };
 

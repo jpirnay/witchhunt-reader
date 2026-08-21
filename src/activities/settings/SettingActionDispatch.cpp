@@ -5,6 +5,7 @@
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "DetectTimezoneActivity.h"
+#include "DictionarySelectionActivity.h"
 #include "EnumSelectionActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
@@ -61,6 +62,8 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<DetectTimezoneActivity>(renderer, mappedInput);
     case SettingAction::ReadingStats:
       return std::make_unique<ReadingStatsActivity>(renderer, mappedInput);
+    case SettingAction::DictionarySelect:
+      return std::make_unique<DictionarySelectionActivity>(renderer, mappedInput);
     case SettingAction::Submenu:
     case SettingAction::None:
       return nullptr;
