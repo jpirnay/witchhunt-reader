@@ -36,3 +36,24 @@ target_link_libraries(DictionaryTest PRIVATE
 # entry. A resource lock serialises them so no run pulls the directory out from
 # under another; the whole suite takes a few milliseconds, so nothing is lost.
 gtest_discover_tests(DictionaryTest PROPERTIES RESOURCE_LOCK dictionary_sd_root)
+
+# The HTML normalizer needs nothing but a Print sink, so it is covered on its
+# own -- and against the real SaxParser, which is the only way to prove the
+# repairs it deliberately leaves to the parser are actually made there.
+add_executable(DictHtmlNormalizeTest
+  DictHtmlNormalizeTest.cpp
+  ${REPO_ROOT}/src/util/DictHtmlNormalize.cpp
+)
+
+target_include_directories(DictHtmlNormalizeTest PRIVATE
+  ${REPO_ROOT}/test/shims
+  ${REPO_ROOT}/src/util
+)
+
+target_link_libraries(DictHtmlNormalizeTest PRIVATE
+  crosspoint_test_common
+  GTest::gtest_main
+  SaxParser
+)
+
+gtest_discover_tests(DictHtmlNormalizeTest)
