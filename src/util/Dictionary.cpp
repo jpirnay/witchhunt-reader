@@ -756,12 +756,13 @@ void Dictionary::stemVariants(const std::string& word, std::vector<std::string>&
   }
 }
 
-bool Dictionary::lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
-                        LookupResult* outResult) {
+bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::string& matchedHeadwordOut,
+                         LookupResult* outResult) {
   const auto setResult = [outResult](LookupResult r) {
     if (outResult) *outResult = r;
   };
   setResult(LookupResult::NotFound);
+  locationOut = {};
   const std::string cleaned = cleanWord(word);
   if (cleaned.empty() || !isOpen()) return false;
 
@@ -806,12 +807,24 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
     if (searchFailed) setResult(LookupResult::ReadError);
     return false;
   }
+  locationOut = location;
+  setResult(LookupResult::Found);  // found in the INDEX; reading it may still fail
+  return true;
+}
 
-  // Found in the index — propagate the precise failure reason from readDefinition
-  // (decompression / low memory / read error) so the caller can name it.
+bool Dictionary::readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult) {
+  // Propagates the precise failure reason from readDefinition (decompression /
+  // low memory / read error) so the caller can name it.
   if (readDefinition(location, definitionOut, outResult)) {
-    setResult(LookupResult::Found);
+    if (outResult) *outResult = LookupResult::Found;
     return true;
   }
   return false;
+}
+
+bool Dictionary::lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
+                        LookupResult* outResult) {
+  DictLocation location;
+  if (!resolve(word, location, matchedHeadwordOut, outResult)) return false;
+  return readResolved(location, definitionOut, outResult);
 }

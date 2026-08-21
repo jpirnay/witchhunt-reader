@@ -96,6 +96,21 @@ class Dictionary {
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
               LookupResult* outResult = nullptr);
 
+  // The index half of lookup(): find WHERE the definition is, without reading
+  // it. Same cleaning, synonym and stemming behaviour, but it stops at the
+  // location -- no inflate, no 32 KB window, no definition buffer, nothing
+  // larger than the session scan buffers.
+  //
+  // Cheap enough to run speculatively while the user is still choosing a word,
+  // which pre-pays the search for the lookup that follows and lets the UI say
+  // in advance that a word has no entry. Feed the result to readResolved().
+  bool resolve(const char* word, DictLocation& locationOut, std::string& matchedHeadwordOut,
+               LookupResult* outResult = nullptr);
+
+  // Read the definition for a location resolve() returned. Separated so a
+  // caller that already resolved does not search the index twice.
+  bool readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult = nullptr);
+
   static std::string cleanWord(const char* word);
 
   static constexpr uint32_t MAX_DEFINITION_BYTES = 64 * 1024;

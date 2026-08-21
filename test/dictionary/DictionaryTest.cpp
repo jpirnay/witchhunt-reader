@@ -358,6 +358,46 @@ TEST_F(DictionaryTest, SynonymsResolveThroughTheOrdinalIndex) {
   EXPECT_EQ(definition, expectedDefinition("quixotic"));
 }
 
+TEST_F(DictionaryTest, ResolveFindsTheLocationWithoutReadingIt) {
+  const std::string folder = provision("plain", "Resolving");
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+
+  // resolve() must agree with the index on both the location and the headword,
+  // for exact hits, stemmed hits and synonyms alike -- it is the same search.
+  for (size_t i = 0; i < plainEntries.size(); i += 211) {
+    const IndexEntry& entry = plainEntries[i];
+    DictLocation location;
+    std::string headword;
+    Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+    ASSERT_TRUE(dict.resolve(entry.word.c_str(), location, headword, &result)) << entry.word;
+    EXPECT_EQ(result, Dictionary::LookupResult::Found);
+    EXPECT_TRUE(location.found);
+    EXPECT_EQ(location.offset, entry.offset);
+    EXPECT_EQ(location.size, entry.size);
+    EXPECT_EQ(headword, entry.word);
+
+    // And reading that location gives exactly what lookup() would have.
+    std::string definition;
+    ASSERT_TRUE(dict.readResolved(location, definition, &result));
+    EXPECT_EQ(result, Dictionary::LookupResult::Found);
+    EXPECT_EQ(definition, plainDictBlob.substr(entry.offset, entry.size));
+  }
+
+  DictLocation synonymLocation;
+  std::string synonymHeadword;
+  ASSERT_TRUE(dict.resolve("quixotical", synonymLocation, synonymHeadword));
+  EXPECT_EQ(synonymHeadword, "quixotic");
+
+  // A miss resolves to nothing and reports a miss, not a failure.
+  DictLocation missLocation;
+  std::string missHeadword;
+  Dictionary::LookupResult missResult = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.resolve("zzzzzzzznotaword", missLocation, missHeadword, &missResult));
+  EXPECT_EQ(missResult, Dictionary::LookupResult::NotFound);
+  EXPECT_FALSE(missLocation.found);
+}
+
 TEST_F(DictionaryTest, LookupsSucceedWithoutTheSidecar) {
   // No .qidx: locate() must fall back to scanning the index from byte 0 rather
   // than fail, because a dictionary can be used before the indexing pass runs.
