@@ -341,6 +341,49 @@ TEST_F(DictionaryTest, StemVariantsResolveToTheirHeadword) {
   EXPECT_GT(checked, 20);
 }
 
+TEST_F(DictionaryTest, HyphenatedCompoundsFallBackToTheirLongestPart) {
+  const std::string folder = provision("plain", "Hyphenated");
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+
+  std::string definition;
+  std::string headword;
+
+  // A compound that IS a headword must win outright -- it must not be split and
+  // resolved to "being", which would return the wrong entry for a word the
+  // dictionary actually has.
+  ASSERT_TRUE(dict.lookup("well-being", definition, headword));
+  EXPECT_EQ(headword, "well-being");
+  EXPECT_EQ(definition, expectedDefinition("well-being"));
+
+  // A compound that is not a headword falls back to its longest part, which is
+  // the one carrying the meaning.
+  ASSERT_TRUE(dict.lookup("multi-billionaire", definition, headword));
+  EXPECT_EQ(headword, "billionaire");
+  EXPECT_EQ(definition, expectedDefinition("billionaire"));
+
+  // Longest-first, not head-final: "law" would be the head here and is not in
+  // the dictionary, while "mother" is what the reader wants.
+  ASSERT_TRUE(dict.lookup("mother-in-law", definition, headword));
+  EXPECT_EQ(headword, "mother");
+
+  // The real hyphens EPUB text uses, not just ASCII.
+  ASSERT_TRUE(
+      dict.lookup("multi\xE2\x80\x91"
+                  "billionaire",
+                  definition, headword));
+  EXPECT_EQ(headword, "billionaire");
+
+  // Surrounding punctuation and case still get cleaned off first.
+  ASSERT_TRUE(dict.lookup("(Multi-Billionaire)", definition, headword));
+  EXPECT_EQ(headword, "billionaire");
+
+  // A compound whose parts are all absent is still a genuine miss.
+  Dictionary::LookupResult result = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.lookup("zzzznope-yyyynope", definition, headword, &result));
+  EXPECT_EQ(result, Dictionary::LookupResult::NotFound);
+}
+
 TEST_F(DictionaryTest, SynonymsResolveThroughTheOrdinalIndex) {
   const std::string folder = provision("plain", "Synonyms");
   Dictionary dict;

@@ -725,6 +725,54 @@ std::string Dictionary::cleanWord(const char* word) {
   return result;
 }
 
+// Components of a hyphenated compound, longest first, or empty when the word is
+// not hyphenated.
+//
+// Longest-first rather than left-to-right or right-to-left because the longest
+// part is nearly always the one carrying the meaning: "multi-billionaire" ->
+// billionaire, "self-esteem" -> esteem, "e-mail" -> mail. It also handles the
+// case a head-final rule gets wrong -- "mother-in-law" resolves to "mother"
+// rather than "law".
+//
+// Splits on ASCII hyphen-minus and on U+2010/U+2011, the real hyphens EPUB text
+// uses; NOT on en or em dashes, which join clauses rather than build words, and
+// which cleanWord has already stripped from the edges.
+void Dictionary::hyphenParts(const std::string& word, std::vector<std::string>& out) {
+  out.clear();
+  const auto* bytes = reinterpret_cast<const unsigned char*>(word.data());
+  const size_t n = word.size();
+
+  size_t start = 0;
+  for (size_t i = 0; i <= n;) {
+    size_t sepLen = 0;
+    if (i == n) {
+      sepLen = 0;
+    } else if (bytes[i] == '-') {
+      sepLen = 1;
+    } else if (i + 2 < n && bytes[i] == 0xE2 && bytes[i + 1] == 0x80 &&
+               (bytes[i + 2] == 0x90 || bytes[i + 2] == 0x91)) {
+      sepLen = 3;
+    }
+    if (sepLen == 0 && i < n) {
+      i++;
+      continue;
+    }
+    if (i > start) out.emplace_back(word, start, i - start);
+    if (i == n) break;
+    i += sepLen;
+    start = i;
+  }
+
+  // One component means there was no hyphen (or only leading/trailing ones), so
+  // there is nothing here the caller has not already tried.
+  if (out.size() < 2) {
+    out.clear();
+    return;
+  }
+  std::stable_sort(out.begin(), out.end(),
+                   [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
+}
+
 void Dictionary::stemVariants(const std::string& word, std::vector<std::string>& out) {
   out.clear();
   out.reserve(6);
@@ -779,22 +827,39 @@ bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::strin
       return false;
     }
 
-    location = locate(session, cleaned.c_str(), &matchedHeadwordOut);
-    searchFailed = location.readError;
+    // The whole probe for one target: exact, then dictionary-authored synonyms
+    // (alternate spellings and irregular forms, which take precedence over the
+    // English-only stemmer and are language-agnostic), then stem variants.
+    const auto probe = [&](const std::string& target) {
+      DictLocation found = locate(session, target.c_str(), &matchedHeadwordOut);
+      searchFailed = searchFailed || found.readError;
+      if (!found.found && hasSyn) {
+        found = locateSynonym(session, target.c_str(), &matchedHeadwordOut);
+        searchFailed = searchFailed || found.readError;
+      }
+      if (!found.found) {
+        std::vector<std::string> variants;
+        stemVariants(target, variants);
+        for (const auto& variant : variants) {
+          found = locate(session, variant.c_str(), &matchedHeadwordOut);
+          searchFailed = searchFailed || found.readError;
+          if (found.found) break;
+        }
+      }
+      return found;
+    };
 
-    // Dictionary-authored synonyms (alternate spellings, irregular forms) take
-    // precedence over the English-only stemmer, and are language-agnostic.
-    if (!location.found && hasSyn) {
-      location = locateSynonym(session, cleaned.c_str(), &matchedHeadwordOut);
-      searchFailed = searchFailed || location.readError;
-    }
+    location = probe(cleaned);
 
+    // Still nothing, and the word is a hyphenated compound: look up its parts.
+    // The compound itself is tried first and often wins -- "mother-in-law" and
+    // "well-being" are headwords -- but "multi-billionaire" usually is not, and
+    // returning the definition of "billionaire" beats returning nothing.
     if (!location.found) {
-      std::vector<std::string> variants;
-      stemVariants(cleaned, variants);
-      for (const auto& variant : variants) {
-        location = locate(session, variant.c_str(), &matchedHeadwordOut);
-        searchFailed = searchFailed || location.readError;
+      std::vector<std::string> parts;
+      hyphenParts(cleaned, parts);
+      for (const auto& part : parts) {
+        location = probe(part);
         if (location.found) break;
       }
     }

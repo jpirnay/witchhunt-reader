@@ -60,6 +60,12 @@ def make_entries():
     entries["quixotic"] = "exceedingly idealistic; unrealistic and impractical"
     # Case pair that only sorts correctly under case-insensitive comparison.
     entries["Quorum"] = "the minimum number of members required to be present"
+    # Hyphenated-compound fallback. "well-being" is a headword in its own right,
+    # so the compound must win outright; "billionaire" and "mother" exist only as
+    # parts, so a compound built from them has to fall back to the longest part.
+    entries["well-being"] = "the state of being comfortable, healthy, or happy"
+    entries["billionaire"] = "a person with assets worth a billion or more"
+    entries["mother"] = "a woman in relation to her child or children"
     return entries
 
 
