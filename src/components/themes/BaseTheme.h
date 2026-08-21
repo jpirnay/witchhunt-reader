@@ -27,6 +27,27 @@ struct TabInfo {
   bool selected;
 };
 
+// A list's live view state, owned by the activity and handed to drawList on every render. Two
+// things need somewhere to live between frames and neither belongs to a stateless theme:
+//
+//   * maxTitleLines > 1 wraps a title too long for one line over up to that many lines, growing
+//     its row to match, so items sharing a long prefix ("Author - Series 01 - ...") stay
+//     distinguishable instead of all truncating to the same visible text. Rows of different
+//     heights cannot page by index, so such a list scrolls, and firstVisible is where it is
+//     scrolled to — drawList keeps it in step with the selection.
+//   * visibleRows reports how many rows the last render actually fit on screen. That is the page
+//     size for Left/Right paging (ButtonNavigator::onNextList), and only the renderer knows it.
+//
+// Default-constructed and never passed, a list behaves exactly as it always did: fixed-height
+// rows, whole-page flips, titles truncated with an ellipsis.
+struct ListViewState {
+  int maxTitleLines = 1;  // in: 1 = classic single-line rows
+  int firstVisible = 0;   // in/out: index of the top row (wrapped lists only)
+  int visibleRows = 0;    // out: rows on screen after the last render
+
+  [[nodiscard]] bool wraps() const { return maxTitleLines > 1; }
+};
+
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -140,8 +161,8 @@ class BaseTheme {
                         const std::function<std::string(int index)>& rowTitle,
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
-                        const std::function<std::string(int index)>& rowValue = nullptr,
-                        bool highlightValue = false) const;
+                        const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
+                        ListViewState* view = nullptr) const;
   virtual void drawListSeparator(const GfxRenderer& renderer, Rect rowRect, int textX, int textWidth,
                                  const std::string& title) const;
   virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
@@ -214,4 +235,38 @@ class BaseTheme {
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY);
+
+  // Hard ceiling on wrapped title lines. Past three the row stops reading as one entry in a list
+  // and starts reading as a paragraph, and a single item can fill the screen.
+  static constexpr int maxWrappedTitleLines = 3;
+
+ protected:
+  // Per-theme look of a wrapped (variable-height) row. drawWrappedList() owns the layout; these
+  // are the few things the themes actually disagree about.
+  struct WrappedListStyle {
+    int hPadding = 0;          // horizontal padding inside the selection shape
+    int iconSize = 0;          // 0 = this theme draws no row icons
+    int titleTextOffsetY = 0;  // first text line's offset from the row top
+    int cornerRadius = 0;      // 0 = square selection shape
+    int scrollBarWidth = 0;    // 0 = this theme marks overflow with arrows instead of a bar
+    int scrollBarRightOffset = 0;
+    bool selectionIsBlack = true;  // black fill + inverted text, vs a light-gray fill
+    // Classic draws the selection edge to edge; the Lyra themes inset it into a rounded pill.
+    bool fullWidthSelection = true;
+  };
+  virtual WrappedListStyle wrappedListStyle() const { return {}; }
+  // Bitmap for a row icon, or nullptr when the theme draws none. Mirrors what each theme's own
+  // drawList does with rowIcon.
+  virtual const uint8_t* rowIconBitmap(UIIcon icon, int size) const { return nullptr; }
+
+  // The variable-height list, shared by every theme: layout and text wrapping live here, and the
+  // per-theme look comes from wrappedListStyle() / rowIconBitmap(). Each drawList() delegates
+  // here when the caller opted in, so there is one scrolling implementation, not one per theme.
+  void drawWrappedList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                       const std::function<std::string(int index)>& rowTitle,
+                       const std::function<UIIcon(int index)>& rowIcon, ListViewState& view) const;
+
+  // Up/down triangles marking that the list continues past the visible rows. Used by themes
+  // without a scroll bar.
+  static void drawListOverflowArrows(const GfxRenderer& renderer, Rect rect);
 };

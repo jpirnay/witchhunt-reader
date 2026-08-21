@@ -13,6 +13,7 @@
 
 #include "I18n.h"
 #include "RecentBooksStore.h"
+#include "components/ListLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -251,39 +252,159 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
   }
 }
 
+void BaseTheme::drawListOverflowArrows(const GfxRenderer& renderer, const Rect rect) {
+  constexpr int indicatorWidth = 20;
+  constexpr int arrowSize = 6;
+  constexpr int margin = 15;  // Offset from right edge
+
+  const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+  const int indicatorTop = rect.y;  // Offset to avoid overlapping side button hints
+  const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+  // Draw up arrow at top (^) - narrow point at top, wide base at bottom
+  for (int i = 0; i < arrowSize; ++i) {
+    const int lineWidth = 1 + i * 2;
+    const int startX = centerX - i;
+    renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+  }
+
+  // Draw down arrow at bottom (v) - wide base at top, narrow point at bottom
+  for (int i = 0; i < arrowSize; ++i) {
+    const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+    const int startX = centerX - (arrowSize - 1 - i);
+    renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                      indicatorBottom - arrowSize + 1 + i);
+  }
+}
+
+// Variable-height rows: a title too long for one line is wrapped over up to
+// view.maxTitleLines lines and its row grows by one line height per extra line. Shared by every
+// theme — see BaseTheme::wrappedListStyle() for the per-theme look.
+void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, const int itemCount,
+                                const int selectedIndex, const std::function<std::string(int index)>& rowTitle,
+                                const std::function<UIIcon(int index)>& rowIcon, ListViewState& view) const {
+  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const WrappedListStyle style = wrappedListStyle();
+  const int baseRowHeight = metrics.listRowHeight;
+  if (itemCount <= 0 || rect.height < baseRowHeight || rowTitle == nullptr) {
+    view.visibleRows = 0;
+    return;
+  }
+
+  const int maxLines = std::min(view.maxTitleLines, maxWrappedTitleLines);
+  const int lineStep = renderer.getLineHeight(UI_10_FONT_ID);
+
+  // Reserve the scroll bar strip unconditionally. Whether the list scrolls depends on the wrapped
+  // row heights, which depend on the text width, which would depend on the bar — reserving first
+  // breaks that circle, and the bar is still only DRAWN when the rows really do not all fit.
+  const int contentWidth = rect.width - (style.scrollBarWidth + style.scrollBarRightOffset);
+  const int iconGap = (rowIcon != nullptr && style.iconSize > 0) ? style.iconSize + style.hPadding : 0;
+  const int textX = rect.x + metrics.contentSidePadding + style.hPadding + iconGap;
+  const int textWidth = contentWidth - metrics.contentSidePadding * 2 - style.hPadding * 2 - iconGap;
+  if (textWidth <= 0) {
+    view.visibleRows = 0;
+    return;
+  }
+
+  // Separators keep the plain row height; only real titles can grow.
+  const auto rowHeightFor = [&](const int index) {
+    const std::string title = rowTitle(index);
+    if (UITheme::isSeparatorTitle(title)) return baseRowHeight;
+    const int lines = static_cast<int>(renderer.wrappedText(UI_10_FONT_ID, title.c_str(), textWidth, maxLines).size());
+    return baseRowHeight + (lines > 1 ? (lines - 1) * lineStep : 0);
+  };
+
+  const ListLayout::Window window =
+      ListLayout::computeWindow(itemCount, selectedIndex, rect.height, view.firstVisible, rowHeightFor);
+  view.visibleRows = window.count;
+  if (window.count <= 0) return;
+
+  // Scroll position: how far the window's top row is through the rows that can be a top row.
+  if (window.count < itemCount) {
+    if (style.scrollBarWidth > 0) {
+      const int barHeight = std::max(8, rect.height * window.count / itemCount);
+      const int barY = rect.y + ((rect.height - barHeight) * window.first) / (itemCount - window.count);
+      const int barX = rect.x + rect.width - style.scrollBarRightOffset;
+      renderer.drawLine(barX, rect.y, barX, rect.y + rect.height, true);
+      renderer.fillRect(barX - style.scrollBarWidth, barY, style.scrollBarWidth, barHeight, true);
+    } else {
+      drawListOverflowArrows(renderer, rect);
+    }
+  }
+
+  for (int row = 0; row < window.count; row++) {
+    const int index = window.first + row;
+    const int rowY = rect.y + window.top[row];
+    const int rowHeight = window.height[row];
+
+    std::string title = rowTitle(index);
+    if (UITheme::isSeparatorTitle(title)) {
+      title = UITheme::stripSeparatorTitle(title);
+      drawListSeparator(
+          renderer,
+          Rect{rect.x + metrics.contentSidePadding, rowY, contentWidth - metrics.contentSidePadding * 2, rowHeight},
+          textX, textWidth, title);
+      continue;
+    }
+
+    const bool selected = (index == selectedIndex);
+    if (selected) {
+      const int selX = style.fullWidthSelection ? rect.x : rect.x + metrics.contentSidePadding;
+      const int selWidth = style.fullWidthSelection ? rect.width : contentWidth - metrics.contentSidePadding * 2;
+      if (style.cornerRadius > 0) {
+        renderer.fillRoundedRect(selX, rowY, selWidth, rowHeight, style.cornerRadius,
+                                 style.selectionIsBlack ? Color::Black : Color::LightGray);
+      } else {
+        renderer.fillRect(selX, rowY, selWidth, rowHeight);
+      }
+    }
+    // Only a black fill needs the text knocked out of it; a light-gray one keeps black text.
+    const bool textBlack = !(selected && style.selectionIsBlack);
+
+    int lineY = rowY + style.titleTextOffsetY;
+    for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, title.c_str(), textWidth, maxLines)) {
+      renderer.drawText(UI_10_FONT_ID, textX, lineY, line.c_str(), textBlack);
+      lineY += lineStep;
+    }
+
+    if (iconGap > 0) {
+      // Aligned with the first line, not the middle of a grown row, so icons stay on one baseline.
+      const uint8_t* iconBitmap = rowIconBitmap(rowIcon(index), style.iconSize);
+      if (iconBitmap != nullptr) {
+        const int iconX = rect.x + metrics.contentSidePadding + style.hPadding;
+        const int iconY = rowY + (baseRowHeight - style.iconSize) / 2;
+        if (textBlack) {
+          renderer.drawIcon(iconBitmap, iconX, iconY, style.iconSize, style.iconSize);
+        } else {
+          renderer.drawIconInverted(iconBitmap, iconX, iconY, style.iconSize, style.iconSize);
+        }
+      }
+    }
+  }
+}
+
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
-                         const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
+                         const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                         ListViewState* view) const {
+  // Wrapping only covers title (+ icon) rows: a subtitle or a value column has its own fixed
+  // geometry inside the row, so those lists stay on the classic fixed-height path.
+  if (view != nullptr && view->wraps() && rowSubtitle == nullptr && rowValue == nullptr) {
+    drawWrappedList(renderer, rect, itemCount, selectedIndex, rowTitle, rowIcon, *view);
+    return;
+  }
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
+  // A fixed-height list still reports its page size, so Left/Right page by what is really on
+  // screen rather than by a guess.
+  if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
-    constexpr int indicatorWidth = 20;
-    constexpr int arrowSize = 6;
-    constexpr int margin = 15;  // Offset from right edge
-
-    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
-    const int indicatorTop = rect.y;  // Offset to avoid overlapping side button hints
-    const int indicatorBottom = rect.y + rect.height - arrowSize;
-
-    // Draw up arrow at top (^) - narrow point at top, wide base at bottom
-    for (int i = 0; i < arrowSize; ++i) {
-      const int lineWidth = 1 + i * 2;
-      const int startX = centerX - i;
-      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
-    }
-
-    // Draw down arrow at bottom (v) - wide base at top, narrow point at bottom
-    for (int i = 0; i < arrowSize; ++i) {
-      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
-      const int startX = centerX - (arrowSize - 1 - i);
-      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
-                        indicatorBottom - arrowSize + 1 + i);
-    }
+    drawListOverflowArrows(renderer, rect);
   }
 
   bool selectedIsSeparator = false;

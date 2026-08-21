@@ -58,7 +58,7 @@ class LyraTheme : public BaseTheme {
                 const std::function<std::string(int index)>& rowTitle,
                 const std::function<std::string(int index)>& rowSubtitle,
                 const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
-                bool highlightValue) const override;
+                bool highlightValue, ListViewState* view) const override;
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
   void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;
@@ -79,6 +79,9 @@ class LyraTheme : public BaseTheme {
   bool showsFileIcons() const override { return true; }
 
  protected:
+  WrappedListStyle wrappedListStyle() const override;
+  const uint8_t* rowIconBitmap(UIIcon icon, int size) const override { return iconForName(icon, size); }
+
   static int getRecentBookProgressPercent(const RecentBook& book);
   static const uint8_t* iconForName(UIIcon icon, int size);
 };

@@ -406,10 +406,14 @@ void FileBrowserActivity::render(RenderLock&&) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else {
+    // Wrap long names over up to three lines. A folder of one series is otherwise a column of
+    // identical-looking rows: "Lynn Messina - Beatrice Hyde-Clare Mysteries 0x - ..." truncates to
+    // the same visible text for every book in it, and the part that tells them apart is the part
+    // that gets cut. Rows only grow when a name needs it, so short names cost nothing.
     GUI.drawList(
         renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(entryCount()),
         selectorIndex, [this](int index) { return getFileName(entryName(index)); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(entryName(index)); });
+        [this](int index) { return UITheme::getFileIcon(entryName(index)); }, nullptr, false, &listView);
   }
 
   // Side buttons (Up/Down) navigate; show their hints on the side
