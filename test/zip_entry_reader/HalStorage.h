@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -24,17 +25,35 @@ class HalFile : public Print {
   HalFile() = default;
   ~HalFile() { closeQuiet(); }
 
-  HalFile(HalFile&& o) noexcept : fp_(o.fp_), hasImpl_(o.hasImpl_) {
+  HalFile(HalFile&& o) noexcept
+      : fp_(o.fp_),
+        hasImpl_(o.hasImpl_),
+        isDir_(o.isDir_),
+        hasName_(o.hasName_),
+        name_(std::move(o.name_)),
+        entries_(std::move(o.entries_)),
+        next_(o.next_) {
     o.fp_ = nullptr;
     o.hasImpl_ = false;
+    o.isDir_ = false;
+    o.hasName_ = false;
+    o.next_ = 0;
   }
   HalFile& operator=(HalFile&& o) noexcept {
     if (this != &o) {
       closeQuiet();
       fp_ = o.fp_;
       hasImpl_ = o.hasImpl_;
+      isDir_ = o.isDir_;
+      hasName_ = o.hasName_;
+      name_ = std::move(o.name_);
+      entries_ = std::move(o.entries_);
+      next_ = o.next_;
       o.fp_ = nullptr;
       o.hasImpl_ = false;
+      o.isDir_ = false;
+      o.hasName_ = false;
+      o.next_ = 0;
     }
     return *this;
   }
@@ -82,8 +101,26 @@ class HalFile : public Print {
     return closeQuiet();
   }
 
+  // Directory handle, so tests can exercise code that walks the SD card
+  // (DictionaryRegistry scans /dictionaries/*/ for index stems). Entries are
+  // snapshotted and sorted at open time: std::filesystem iteration order is
+  // unspecified, and device SdFat order is not reproducible either, so a test
+  // that depends on it would be flaky rather than wrong.
+  bool openDir(const std::string& path) {
+    closeQuiet();
+    hasImpl_ = true;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(path, ec) || ec) return false;
+    isDir_ = true;
+    for (const auto& e : std::filesystem::directory_iterator(path, ec)) {
+      entries_.push_back({e.path().filename().string(), e.is_directory()});
+    }
+    std::sort(entries_.begin(), entries_.end(), [](const DirEntry& a, const DirEntry& b) { return a.name < b.name; });
+    return true;
+  }
+
   bool isOpen() const { return fp_ != nullptr; }
-  explicit operator bool() const { return fp_ != nullptr; }
+  explicit operator bool() const { return fp_ != nullptr || isDir_ || hasName_; }
 
   int read(void* buf, size_t n) {
     if (!fp_) return -1;
@@ -133,12 +170,29 @@ class HalFile : public Print {
   void flush() {
     if (fp_) fflush(fp_);
   }
-  size_t getName(char*, size_t) { return 0; }
+  size_t getName(char* out, size_t len) {
+    if (!out || len == 0) return 0;
+    const size_t n = std::min(name_.size(), len - 1);
+    std::memcpy(out, name_.data(), n);
+    out[n] = '\0';
+    return n;
+  }
   bool rename(const char*) { return false; }
   bool getModifyDateTime(uint16_t*, uint16_t*) { return false; }
-  bool isDirectory() const { return false; }
-  void rewindDirectory() {}
-  HalFile openNextFile() { return HalFile{}; }
+  bool isDirectory() const { return isDir_; }
+  void rewindDirectory() { next_ = 0; }
+  // One entry per call, exhausted-directory returns a falsy handle. Only the
+  // name and the directory flag are populated — that is all a scan reads.
+  HalFile openNextFile() {
+    HalFile f;
+    if (next_ >= entries_.size()) return f;
+    const DirEntry& e = entries_[next_++];
+    f.hasImpl_ = true;
+    f.hasName_ = true;
+    f.name_ = e.name;
+    f.isDir_ = e.isDir;
+    return f;
+  }
 
  private:
   // close() without the device-parity check: for the destructor and the open helpers, which must
@@ -148,11 +202,24 @@ class HalFile : public Print {
       fclose(fp_);
       fp_ = nullptr;
     }
+    isDir_ = false;
+    entries_.clear();
+    next_ = 0;
     return true;
   }
 
+  struct DirEntry {
+    std::string name;
+    bool isDir = false;
+  };
+
   FILE* fp_ = nullptr;
   bool hasImpl_ = false;
+  bool isDir_ = false;
+  bool hasName_ = false;
+  std::string name_;
+  std::vector<DirEntry> entries_;
+  size_t next_ = 0;
 };
 
 using FsFile = HalFile;
@@ -162,6 +229,7 @@ class HalStorage {
   bool openFileForRead(const char*, const std::string& path, HalFile& f) { return f.openForRead(path); }
   bool openFileForRead(const char*, const char* path, HalFile& f) { return f.openForRead(path); }
   bool openFileForWrite(const char*, const std::string& path, HalFile& f) { return f.openForWrite(path); }
+  bool openFileForWrite(const char*, const char* path, HalFile& f) { return f.openForWrite(path); }
   bool openFileForUpdate(const char*, const std::string& path, HalFile& f) { return f.openForUpdate(path); }
   bool openFileForUpdate(const char*, const char* path, HalFile& f) { return f.openForUpdate(path); }
   bool exists(const char* path) { return std::filesystem::exists(path); }
@@ -193,7 +261,12 @@ class HalStorage {
   using oflag_t = int;
   HalFile open(const char* path, oflag_t = O_RDONLY) {
     HalFile f;
-    f.openForRead(path);
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec) && !ec) {
+      f.openDir(path);
+    } else {
+      f.openForRead(path);
+    }
     return f;
   }
   // Sorted for determinism: std::filesystem iteration order is unspecified and
