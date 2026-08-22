@@ -148,7 +148,10 @@ class TextBlock final : public Block {
   // copies. Soft hyphens are stripped during the arena copy (they must not reach the glyph
   // stream, and the measured widths already exclude them), which is what the vector path used
   // a mutable copy of each word for.
-  TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle);
+  // xpos by const reference, not by value: it is only read (copied into the arena below), and
+  // by-value forced the caller to hand over a vector it had just built, which meant one heap
+  // allocation per rendered LINE for pure scratch. See ParsedText::extractLine.
+  TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle);
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
