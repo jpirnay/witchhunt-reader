@@ -261,12 +261,15 @@ class ChapterHtmlSlimParser final : public Print {
     // Attributed resident bytes held by pendingRow's cells (see MAX_TABLE_ROW_BUFFER_BYTES).
     size_t pendingRowBytes = 0;
     // The table's leading header row, re-emitted at the top of every continuation fragment so a
-    // table that spans a page break keeps its column labels. This is the one thing the streaming
-    // model holds for longer than a row, and it is bounded: one row, captured only if it opens
-    // the table and only while it is short enough to be worth the space it costs each page. Its
-    // cells share the original row's TextBlocks (shared_ptr, and TextBlock::render is const), so
-    // the copy is a handful of pointers rather than the text.
-    std::unique_ptr<LayoutRow> repeatHeader;
+    // table that spans a page break keeps its column labels. Held in its BUFFERED form and laid
+    // out again per fragment, NOT as a laid-out LayoutRow whose TextBlocks are shared between
+    // fragments. Sharing them was cheaper but it couples the header's lifetime to every page the
+    // table touches, which rules out ever scoping line storage to a page (see the table scratch
+    // arena). Re-layout costs one row of work per page break and keeps each fragment's lines
+    // owned solely by that fragment. Bounded: one row, captured only if it opens the table, and
+    // only while it is short enough to be worth the space it costs each page.
+    std::unique_ptr<BufferedTableRow> repeatHeader;
+    uint16_t repeatHeaderHeight = 0;    // laid-out height, measured once at capture
     bool repeatHeaderResolved = false;  // set after the table's first row; only that row qualifies
   };
   std::unique_ptr<BufferedTable> currentTable;

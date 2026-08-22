@@ -607,7 +607,14 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
 bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
-  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT && maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT;
+  // The contiguous bar carries a slack term because largest-free-block readings land a few bytes
+  // UNDER the round number -- the allocator's own bookkeeping. Device trace, this chapter: two
+  // rows were refused at contig 12276 against a bar of 12288, twelve bytes short, with the memory
+  // plainly there. A soft gate can live with that (ensureHeapForTextLayout only warns); a gate
+  // that drops content cannot, so the bar is lowered off the power-of-two boundary.
+  static constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
+                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT - LARGEST_FREE_BLOCK_SLACK;
   if (!ok) {
     LOG_DBG("EHP", "Table row layout skipped (%u free, %u max alloc); row falls back to paragraphs", freeHeap,
             maxAllocHeap);
@@ -3245,7 +3252,19 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   if (!t.repeatHeaderResolved) {
     t.repeatHeaderResolved = true;
     if (lr.isHeaderRow && lr.height <= viewportHeight / 3) {
-      t.repeatHeader.reset(new (std::nothrow) LayoutRow(lr));
+      // The BUFFERED row is kept, not the laid-out one: layoutTableRow preserves its source
+      // (preserveSource=true), so the cells can be laid out again for each continuation fragment
+      // and every fragment ends up owning its own lines. Height is recorded here so the packing
+      // arithmetic below does not have to lay the header out just to measure it.
+      //
+      // MOVED, not copied -- BufferedTableCell owns a unique_ptr<ParsedText> and is not copyable,
+      // and this row's cells are discarded at the end of this function regardless, so taking them
+      // costs nothing. The clear() at the bottom then runs on an already-emptied vector.
+      auto header = std::unique_ptr<BufferedTableRow>(new (std::nothrow) BufferedTableRow(std::move(t.pendingRow)));
+      if (header) {
+        t.repeatHeader = std::move(header);
+        t.repeatHeaderHeight = lr.height;
+      }
     }
   }
 
@@ -3264,11 +3283,10 @@ void ChapterHtmlSlimParser::commitPendingRow() {
 
   // Height the repeated header adds when this row is the one that opens a continuation fragment.
   // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
-  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeader->renderCols == lr.renderCols;
+  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
   const uint16_t headerContrib =
-      repeatHeaderHere
-          ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeader->height + 1) : t.repeatHeader->height)
-          : 0;
+      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
+                       : 0;
 
   // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
   // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
@@ -3293,12 +3311,17 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // Reopen a continuation fragment with the table's header row, so the reader still has column
   // labels on every page the table covers rather than only the first.
   if (repeatHeaderHere && t.packer.rows.empty()) {
-    TableRow hdr;
-    hdr.isHeaderRow = t.repeatHeader->isHeaderRow;
-    hdr.height = t.repeatHeader->height;
-    hdr.cells = t.repeatHeader->cells;
-    t.packer.rows.push_back(std::move(hdr));
-    t.packer.height += headerContrib;
+    // Laid out afresh for this fragment. A failure here is not fatal -- the continuation simply
+    // opens without a header, which is what every table did before this existed.
+    LayoutRow hdrLayout;
+    if (layoutTableRow(*t.repeatHeader, columnCount, hdrLayout) && hdrLayout.renderCols == lr.renderCols) {
+      TableRow hdr;
+      hdr.isHeaderRow = hdrLayout.isHeaderRow;
+      hdr.height = hdrLayout.height;
+      hdr.cells = std::move(hdrLayout.cells);
+      t.packer.rows.push_back(std::move(hdr));
+      t.packer.height += headerContrib;
+    }
   }
 
   TableRow tr;
