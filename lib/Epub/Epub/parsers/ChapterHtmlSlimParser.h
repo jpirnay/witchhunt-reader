@@ -273,23 +273,6 @@ class ChapterHtmlSlimParser final : public Print {
     bool repeatHeaderResolved = false;  // set after the table's first row; only that row qualifies
   };
   std::unique_ptr<BufferedTable> currentTable;
-  // Word storage for table cell lines, kept out of the general heap. A table page churns three to
-  // five times as many variable-sized allocations as a prose page (same text, cut into cells), and
-  // a device trace showed that permanently costing ~6 KB of largest-free-block per chapter even
-  // though every byte came back. Created on the first row that reaches grid layout, so books
-  // without tables never pay for it, and destroyed once the last pooled line is gone.
-  std::unique_ptr<TextBlockLinePool> tableLinePool_;
-  // Measured, not estimated. A first cut used 12 KB, reasoning from the 7-9.4 KB of line storage
-  // that table pages ran above the prose baseline; the device then reported the pool's own peak as
-  // 5071 bytes across a full appendix-b build, with zero fallbacks. The difference matters because
-  // an oversized pool is not free: the same build showed contig at 11252 while laying out prose,
-  // and a 12 KB request there would swallow the largest free block whole -- the pool causing
-  // exactly the harm it exists to prevent. Overflow is cheap by comparison (allocArena falls back
-  // to the heap), so the size is set near the observed peak rather than above the worst case.
-  static constexpr size_t TABLE_LINE_POOL_BYTES = 6 * 1024;
-  // ...and even at 6 KB it is only worth taking when the heap can spare a block that size without
-  // giving up its largest. Below this, tables allocate from the heap as they always did.
-  static constexpr size_t TABLE_LINE_POOL_MIN_CONTIG = TABLE_LINE_POOL_BYTES * 3;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
   struct ListEntry {
@@ -414,10 +397,6 @@ class ChapterHtmlSlimParser final : public Print {
   void startNewTextBlock(const BlockStyle& blockStyle);
   void clearSpentBlockHeadingStyle();
   bool heapAllowsTableRowLayout() const;
-  // Hands the pool's 12 KB back once nothing points into it. Called where lines can have died:
-  // at </table> and after each page is emitted. A non-zero live count simply defers to the next
-  // call, so this can never free storage a fragment is still holding.
-  void releaseTableLinePoolIfIdle();
   bool flushPartWordBuffer();
   void makePages();
   // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.

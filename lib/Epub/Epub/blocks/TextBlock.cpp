@@ -10,19 +10,6 @@
 #include <cstring>
 
 bool TextBlock::guideDotsEnabled = false;
-TextBlockLinePool* TextBlock::linePool = nullptr;
-
-std::unique_ptr<uint8_t[], TextBlockArenaDeleter> TextBlock::allocArena(const size_t bytes) {
-  if (linePool != nullptr) {
-    if (uint8_t* pooled = linePool->allocate(bytes)) {
-      return {pooled, TextBlockArenaDeleter{linePool}};
-    }
-    // Pool exhausted: fall through to the heap. The line is NOT counted, so the pool's rewind
-    // stays correct, and the caller sees ordinary storage.
-  }
-  auto heap = makeUniqueNoThrow<uint8_t[]>(bytes);
-  return {heap.release(), TextBlockArenaDeleter{nullptr}};
-}
 
 TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const bool hasSizes) {
   // Layout documented in TextBlock.h: 16-bit arrays first (textOff, xpos), then
@@ -92,7 +79,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   textBytes = static_cast<uint16_t>(totalText);
 
   const size_t size = arenaSize(numWords, sizesPresent, textBytes);
-  arena = allocArena(size);
+  arena = makeUniqueNoThrow<uint8_t[]>(size);
   if (!arena) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
@@ -186,7 +173,7 @@ TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, con
   textBytes = static_cast<uint16_t>(totalText);
 
   const size_t size = arenaSize(numWords, sizesPresent, textBytes);
-  arena = allocArena(size);
+  arena = makeUniqueNoThrow<uint8_t[]>(size);
   if (!arena) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
@@ -451,7 +438,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
 
   if (wc > 0) {
     const size_t size = arenaSize(wc, block->sizesPresent, textBytes);
-    block->arena = allocArena(size);
+    block->arena = makeUniqueNoThrow<uint8_t[]>(size);
     if (!block->arena) {
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
