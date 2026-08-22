@@ -11,6 +11,7 @@
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "HeapTrack.h"
 
 namespace pipeline_harness {
 namespace {
@@ -143,15 +144,21 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     out << "SPINE " << i << " href=" << epub->getSpineItem(i).href << " pages=" << section.pageCount
         << " truncated=" << (section.isTruncatedCache() ? 1 : 0)
         << " cssFallback=" << (section.isEmbeddedStyleFallback() ? 1 : 0) << "\n";
+    // The read-back below is harness scaffolding: it deserializes every page purely to print it,
+    // which the firmware never does. Left in the profile it dominates the allocation census (and
+    // did, on the first run of this instrumentation), so the build is what gets counted.
+    heapTrackPause();
     for (uint16_t p = 0; p < section.pageCount; ++p) {
       section.currentPage = p;
       const auto page = section.loadPageFromSectionFile();
       if (!page) {
+        heapTrackResume();
         out << " PAGE " << p << " ERROR load failed\n";
         return false;
       }
       dumpPage(out, *page, p, cacheDir);
     }
+    heapTrackResume();
     if (spineStat) {
       const auto us =
           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - spineStart);

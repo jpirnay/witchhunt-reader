@@ -193,6 +193,9 @@ void heapTrackSizeHistogram(size_t* out, const int count) {
   for (int i = 0; i < count && i < kSizeBucketCount; i++) out[i] = g_sizeBuckets[i].load();
 }
 
+void heapTrackPause() { g_tracking.store(false); }
+void heapTrackResume() { g_tracking.store(true); }
+
 int heapTrackTopSites(HeapTrackSite* out, const int count) {
   if (out == nullptr || count <= 0) return 0;
   int n = 0;
