@@ -77,6 +77,12 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_MAX_ALLOC;
 
+// Largest-free-block readings land a few bytes UNDER the round number -- the allocator's own
+// bookkeeping, documented at ensureHeapForTextLayout below. Any contiguous threshold that DROPS
+// CONTENT when it is missed subtracts this, so a block genuinely of the required size is never
+// read as short. Thresholds that only warn do not need it.
+constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
+
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_ALLOC;
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
@@ -557,7 +563,20 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
 
   // Soft low-memory zone: keep parsing in degraded mode and only hard-abort when
   // both free and contiguous heap fall to critical levels.
-  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD && maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) {
+  //
+  // The contiguous floor carries the same slack the comment below describes, because on THIS
+  // branch being a few bytes short does not merely warn -- it falls through to streamFailed and
+  // saxParser_.stop(), and the half-built section is written to cache. Device log, appendix-b:
+  //
+  //   Table row layout skipped (16864 free, 6132 max alloc); row falls back to paragraphs
+  //   [ERR] Low heap (16596 free, 6132 max alloc), aborting parse before table cell paragraph
+  //   [ERR] Parse incomplete; keeping partial section cache with 30 pages
+  //
+  // 6132 against a 6144 floor. Free heap was 16596, nearly double its own floor of 9216; nothing
+  // was actually exhausted. Losing half a chapter to twelve bytes of allocator bookkeeping is the
+  // one outcome this gate exists to prevent.
+  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD &&
+      maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK) {
     // Deliberately does NOT latch image handling off any more. This gate trips on a transient dip
     // — and trips often, because the soft floor (12 * 1024) is a value the allocator can never
     // report: every largest-free-block it returns is 512k - 12, so the neighbours are 12276 and
@@ -623,7 +642,6 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   // slack term is the allocator's own bookkeeping: largest-free-block readings land a few bytes
   // under the round number (a row was once refused at 12276 against a 12288 bar, twelve short,
   // with the memory plainly there), so neither bar sits on a power of two.
-  static constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
   const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
                   maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK;
   if (!ok) {
