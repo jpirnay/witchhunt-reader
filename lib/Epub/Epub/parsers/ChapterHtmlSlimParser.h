@@ -279,10 +279,17 @@ class ChapterHtmlSlimParser final : public Print {
   // though every byte came back. Created on the first row that reaches grid layout, so books
   // without tables never pay for it, and destroyed once the last pooled line is gone.
   std::unique_ptr<TextBlockLinePool> tableLinePool_;
-  // Sized from the same trace: table pages ran 7-9.4 KB of line storage above the prose baseline,
-  // and the live set spans up to about one and a half pages (flushTableFragment emits a page while
-  // the packer still holds rows). Overflow is not a failure -- allocArena falls back to the heap.
-  static constexpr size_t TABLE_LINE_POOL_BYTES = 12 * 1024;
+  // Measured, not estimated. A first cut used 12 KB, reasoning from the 7-9.4 KB of line storage
+  // that table pages ran above the prose baseline; the device then reported the pool's own peak as
+  // 5071 bytes across a full appendix-b build, with zero fallbacks. The difference matters because
+  // an oversized pool is not free: the same build showed contig at 11252 while laying out prose,
+  // and a 12 KB request there would swallow the largest free block whole -- the pool causing
+  // exactly the harm it exists to prevent. Overflow is cheap by comparison (allocArena falls back
+  // to the heap), so the size is set near the observed peak rather than above the worst case.
+  static constexpr size_t TABLE_LINE_POOL_BYTES = 6 * 1024;
+  // ...and even at 6 KB it is only worth taking when the heap can spare a block that size without
+  // giving up its largest. Below this, tables allocate from the heap as they always did.
+  static constexpr size_t TABLE_LINE_POOL_MIN_CONTIG = TABLE_LINE_POOL_BYTES * 3;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
   struct ListEntry {

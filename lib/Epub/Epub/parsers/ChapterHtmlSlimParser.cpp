@@ -3546,7 +3546,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   // Cell lines come from the table pool rather than the general heap for the duration of this
   // row. The pool rewinds only when its last line dies, so a row still held by the packer across
   // an emitPage() cannot have its storage reclaimed underneath it.
-  if (!tableLinePool_) {
+  if (!tableLinePool_ && ESP.getMaxAllocHeap() >= TABLE_LINE_POOL_MIN_CONTIG) {
     tableLinePool_ = std::unique_ptr<TextBlockLinePool>(new (std::nothrow) TextBlockLinePool(TABLE_LINE_POOL_BYTES));
     if (tableLinePool_ && !tableLinePool_->valid()) tableLinePool_.reset();
   }
