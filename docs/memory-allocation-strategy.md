@@ -433,6 +433,45 @@ Also observed on the same run: two of seven refusals failed the contiguous check
 bytes** (`12276` against a `12288` bar). Largest-free-block readings land 12 under the round
 number, so a hard gate on a power-of-two contig threshold is close to unreachable.
 
+### 8.4b Tried and reverted: pooling table line storage (2026-08-22)
+
+The obvious response to 8.4a is to take those allocations off the general heap. It was built
+(`TextBlockLinePool`, a bump pool for `TextBlock` word storage during table row layout, rewinding
+only when its live-line count reaches zero) and measured with a controlled A/B:
+`-DSCT_HEAP_TRACE=1 -DEHP_FORCE_BLOCKING_BUILD -DEHP_TABLE_LINE_POOL=0|1`, cache cleared between,
+both arms BLOCKING at free 95428 / 94740, both 68 pages, both zero degraded rows.
+
+Compare excess over each arm's OWN prose baseline — arm B's baseline sits 30 blocks above arm A's,
+so raw figures mislead:
+
+| page | excess blk (off) | excess blk (on) | delta | excess bytes (off) | excess bytes (on) |
+|------|-----------------:|----------------:|------:|-------------------:|------------------:|
+| 31   | +364 | +285 | -22% | +14593 | +20129 |
+| 33   | +401 | +315 | -21% | +16453 | +21693 |
+
+It removed about a fifth of the block churn. It was reverted anyway, because of the column on the
+right: the pool's own 6 KB is resident for as long as a table is being laid out, and it cost ~4 KB
+of contiguous space. The secondary framebuffer is 52272 bytes. Arm A's contig sat at 53236, just
+above; arm B's at 49140, just below:
+
+    arm A: reallocSecondary failures = 0,  successes = 3
+    arm B: reallocSecondary failures = 51, successes = 2
+
+The reader could not restore its secondary buffer, dropped to single-buffer mode, and every page
+turn in the book became a HALF refresh. **Never take a large contiguous block during a section
+build**; the framebuffer realloc threshold is a cliff, and this is the second time this codebase
+has walked off it (the word-width cache was the first).
+
+Two further readings worth keeping. The 21% fell well short of the ~50% predicted from "one of two
+blocks per line", and the pool's own peak was only ~5063 bytes — so most of a table page's excess
+is NOT line word storage but the per-cell `std::vector` allocations (`TableCell::lines`,
+`TableRow::cells`) plus the `make_shared` control blocks. A future attempt should aim there, and
+must do it by REMOVING allocations rather than relocating them into a reservation.
+
+And contig recovers after the tables at ~95 KB free (53236 -> 38900 -> 53236). The permanent
+26612 -> 20468 collapse in 8.4a happened at ~30 KB free, so the durable damage is a function of
+how tight the heap already is, not an unconditional property of table layout.
+
 ### 8.5 Landed from this round
 
 - **TARGET 2** — `image_scratch` pass arena; PNG ring + scanline buffers and the JPEG work pool
