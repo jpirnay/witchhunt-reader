@@ -3416,9 +3416,17 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     // wastes). A lookup failure leaves 0 = unknown -> static floors only, the old behaviour.
     size_t inflatedSize = 0;
     epub->getSpineItemInflatedSize(currentSpineIndex, &inflatedSize);
-    const SectionBuildMode mode = (resumeBackgroundBuild || !cacheHit) && !cssFallbackRebuild
-                                      ? chooseSectionBuildMode(embeddedStyle, inflatedSize)
-                                      : SectionBuildMode::Blocking;
+    SectionBuildMode mode = (resumeBackgroundBuild || !cacheHit) && !cssFallbackRebuild
+                                ? chooseSectionBuildMode(embeddedStyle, inflatedSize)
+                                : SectionBuildMode::Blocking;
+#ifdef EHP_FORCE_BLOCKING_BUILD
+    // Experiment harness only (see docs/memory-allocation-strategy.md 8.4a). Pins every section to
+    // the blocking path so two instrumented runs are comparable: the Background-C decision depends
+    // on live heap, which is the very thing under measurement, and a run that takes a different
+    // path -- or aborts before reaching the construct being measured -- produces numbers that
+    // cannot be read against the other arm. Never defined in a shipped build.
+    mode = SectionBuildMode::Blocking;
+#endif
     const bool incremental = mode != SectionBuildMode::Blocking;
     bool runBlocking = !incremental;
 

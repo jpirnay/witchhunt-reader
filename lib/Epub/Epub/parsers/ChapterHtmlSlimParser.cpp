@@ -74,6 +74,13 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 #ifndef EHP_IMAGE_HEADER_MIN_MAX_ALLOC
 #define EHP_IMAGE_HEADER_MIN_MAX_ALLOC (34 * 1024)
 #endif
+// Pool table cell line storage off the general heap (see TextBlockLinePool.h). Compile-time
+// switchable so the two arms of an A/B can be built from the same tree; 0 restores the plain
+// per-line heap allocation this replaced.
+#ifndef EHP_TABLE_LINE_POOL
+#define EHP_TABLE_LINE_POOL 1
+#endif
+
 constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_MAX_ALLOC;
 
@@ -3546,7 +3553,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   // Cell lines come from the table pool rather than the general heap for the duration of this
   // row. The pool rewinds only when its last line dies, so a row still held by the packer across
   // an emitPage() cannot have its storage reclaimed underneath it.
-  if (!tableLinePool_ && ESP.getMaxAllocHeap() >= TABLE_LINE_POOL_MIN_CONTIG) {
+  if (EHP_TABLE_LINE_POOL && !tableLinePool_ && ESP.getMaxAllocHeap() >= TABLE_LINE_POOL_MIN_CONTIG) {
     tableLinePool_ = std::unique_ptr<TextBlockLinePool>(new (std::nothrow) TextBlockLinePool(TABLE_LINE_POOL_BYTES));
     if (tableLinePool_ && !tableLinePool_->valid()) tableLinePool_.reset();
   }
