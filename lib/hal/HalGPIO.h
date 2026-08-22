@@ -65,18 +65,21 @@ class HalGPIO {
   // X4 detection is a single digitalRead and stays per-loop.
   static constexpr unsigned long USB_POLL_X3_MS = 1000;
 
-  // USB-Serial-JTAG SOF activity, sampled by update(): the host sends a SOF
-  // frame every 1 ms while the bus is enumerated, so a frame index that moved
-  // between two samples means a live host link. Catches what the charge-based
-  // X3 check misses: a data-only cable, and any cable once the battery is full
-  // (charge current ~0). Both matter for HalPowerManager::lightSleep(), which
-  // must not halt the chip out from under an enumerated CDC link. Samples must
-  // be >SOF_SAMPLE_MS apart — update() can be called back-to-back (inner input
-  // loops), and adjacent reads would compare equal and flicker the verdict.
-  uint16_t lastSofFrameIndex = 0;
-  unsigned long sofLastSampleMs = 0;
-  bool usbSofActive = false;
-  static constexpr unsigned long SOF_SAMPLE_MS = 10;
+  // Live USB host link, straight from the IDF's SOF monitor
+  // (usb_serial_jtag_is_connected(), maintained by a FreeRTOS tick hook that
+  // watches the SOF interrupt bit with a 3 ms no-SOF tolerance). Catches what
+  // the charge-based X3 check misses: a data-only cable, and any cable once the
+  // battery is full (charge current ~0). Both matter for
+  // HalPowerManager::lightSleep(), which must not halt the chip out from under
+  // an enumerated CDC link — and for main.cpp, which only opens the serial log
+  // when a host is present.
+  //
+  // This used to be sampled here by diffing USB_SERIAL_JTAG.fram_num: that index
+  // is 11 bits and wraps every 2.048 s, so any sampling cadence landing on a
+  // multiple of that read two equal values and reported "no host" while a
+  // monitor was attached. The IDF hook has no such blind spot and costs nothing
+  // to read.
+  bool usbHostLinkActive = false;
 
   // Per-device electrical/charge-inference USB check (fresh read; X3 = BQ27220
   // charge current over I2C, X4 = VBUS-driven level on GPIO20).
@@ -256,6 +259,12 @@ class HalGPIO {
 
   // Check if USB is connected
   bool isUsbConnected() const;
+
+  // Enumerated USB host link only (SOF activity), with no charge-state
+  // inference mixed in. Separated out so a caller that needs to know *why* the
+  // verdict came out the way it did — the serial-log gate's diagnostic — can
+  // report the two terms apart.
+  bool isUsbHostLinkActive() const;
 
   // USB state as sampled by the last update() call. Prefer this in per-loop
   // polling: isUsbConnected() performs a fresh I2C read on X3.
