@@ -221,7 +221,7 @@ class ChapterHtmlSlimParser final : public Print {
     std::vector<TableCell> cells;
     uint16_t height = 0;  // content height + 2 x TABLE_CELL_PADDING
     bool isHeaderRow = false;
-    uint8_t renderCols = 0;  // 1 for a full-width single-cell row, else the table's column count
+    uint8_t renderCols = 0;  // grid columns this row was laid out on (the table's column count)
   };
   // Rows accumulated for the PageTableFragment currently being packed. A fragment carries a single
   // column count and must fit the viewport, so a change in either forces a flush.
@@ -230,6 +230,7 @@ class ChapterHtmlSlimParser final : public Print {
     uint16_t height = 0;
     uint8_t cols = 0;
     uint16_t totalWidth = 0;
+    int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
     bool hasBorder = true;
   };
   struct BufferedTable {
@@ -241,6 +242,10 @@ class ChapterHtmlSlimParser final : public Print {
     // packer.cols, which is per-fragment and resets on every flush: without this a ragged row
     // landing just after a page break would narrow the table's second half.
     uint8_t columnCount = 0;
+    // The table's own box, from the <table> element's resolved CSS margins and padding. Columns
+    // divide contentWidth rather than the full viewport, so an indented table stays indented
+    // instead of being stretched edge to edge.
+    uint16_t contentWidth = 0;
     int depth = 0;          // nesting depth; > 1 means we're inside a nested table
     bool hasBorder = true;  // false when border="0" on the <table> element
     // This table can never be a grid (nested table, rowspan, low heap): every cell from here on
@@ -255,6 +260,14 @@ class ChapterHtmlSlimParser final : public Print {
     bool rowOverflowed = false;
     // Attributed resident bytes held by pendingRow's cells (see MAX_TABLE_ROW_BUFFER_BYTES).
     size_t pendingRowBytes = 0;
+    // The table's leading header row, re-emitted at the top of every continuation fragment so a
+    // table that spans a page break keeps its column labels. This is the one thing the streaming
+    // model holds for longer than a row, and it is bounded: one row, captured only if it opens
+    // the table and only while it is short enough to be worth the space it costs each page. Its
+    // cells share the original row's TextBlocks (shared_ptr, and TextBlock::render is const), so
+    // the copy is a handful of pointers rather than the text.
+    std::unique_ptr<LayoutRow> repeatHeader;
+    bool repeatHeaderResolved = false;  // set after the table's first row; only that row qualifies
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -379,6 +392,8 @@ class ChapterHtmlSlimParser final : public Print {
   // disable images for the rest of the chapter (that result gets baked into the section cache).
   bool heapAllowsImageHeaderRead() const;
   void startNewTextBlock(const BlockStyle& blockStyle);
+  void clearSpentBlockHeadingStyle();
+  bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   void makePages();
   // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.

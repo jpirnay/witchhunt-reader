@@ -49,14 +49,15 @@ void dumpTextLine(std::ostream& out, const PageLine& line) {
 // rows, cells and lines so cell content is covered by the same golden and word-stream checks as
 // body text.
 void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const std::string& cacheDir) {
-  out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " h=" << tbl.getTotalHeight()
+  out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " w=" << tbl.getTotalWidth() << " h=" << tbl.getTotalHeight()
       << " cols=" << static_cast<int>(tbl.getColumnCount()) << " border=" << (tbl.getHasBorder() ? 1 : 0)
       << " rows=" << tbl.getRows().size() << "\n";
   for (const auto& row : tbl.getRows()) {
     out << "   ROW h=" << row.height << " hdr=" << (row.isHeaderRow ? 1 : 0) << " cells=" << row.cells.size() << "\n";
     for (size_t c = 0; c < row.cells.size(); ++c) {
       const auto& cell = row.cells[c];
-      out << "    CELL " << c << " hdr=" << (cell.isHeader ? 1 : 0) << " lines=" << cell.lines.size() << "\n";
+      out << "    CELL " << c << " hdr=" << (cell.isHeader ? 1 : 0) << " span=" << static_cast<int>(cell.colSpan)
+          << " lines=" << cell.lines.size() << "\n";
       for (const auto& line : cell.lines) {
         out << "     LN words=" << line->wordCount() << "\n";
         dumpWords(out, *line, "      ");

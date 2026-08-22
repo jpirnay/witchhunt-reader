@@ -32,6 +32,27 @@ Cases covered:
      bounds. 40 words => 40 lines (<= 64) => 960px, over the 760px viewport.
      Distinct from case 3: the line check passes and the height check fires.
 
+  7. ch7 — a partial colspan: a cell that spans some but not all columns.
+     Issue #186: every such row used to fall back to paragraphs, so a table
+     whose first column was a <th colspan="2"> row header rendered as a wall
+     of loose text. The spanning cell must sit in the grid, one row deep and
+     two columns wide, with the plain rows aligned around it.
+
+  8. ch8 — a table with its own horizontal margins.
+     The grid divides the table's content width, not the viewport, and the
+     fragment is placed at the table's left inset, so an indented table stays
+     indented instead of being stretched edge to edge.
+
+  9. ch9 — <caption> ordering and style.
+     A caption must render ABOVE its table (the fragment is only emitted at
+     </table>, so a caption left pending came out below it), and neither the
+     caption nor the paragraph after the table may inherit the heading's font
+     size multiplier from the block the table drained.
+
+ 10. ch10 — a <thead> row on a table that spans several pages.
+     Every continuation fragment must reopen with the header row, so the
+     column labels are on each page rather than only the first.
+
   5. ch5 — a table with more than MAX_TABLE_ROWS (48) rows.
      Today this never actually reaches the row limit: the 12KB buffer budget
      trips first, around row 35, and flattens the table to paragraphs either
@@ -52,6 +73,7 @@ body  { margin: 0; padding: 0; }
 p     { margin-top: 1pt; margin-bottom: 0; text-align: justify; }
 h1    { text-align: center; margin-top: 0.5em; margin-bottom: 0.5em; }
 table { border-collapse: collapse; }
+table.inset { margin-left: 2em; margin-right: 1em; }
 """
 
 
@@ -200,6 +222,87 @@ row -- a row that blows the budget costs that row, not the table.</p>
 <p>Closing text.</p>
 """)
 
+# ---------------------------------------------------------------------------
+# Chapter 7 — partial colspan (issue #186)
+# ---------------------------------------------------------------------------
+# A four-column table whose row headers span the first two columns. Distinct
+# from ch2: the span covers only part of the row, which the grid rejected
+# outright until colspan became a per-cell width rather than a full-row flag.
+ch7 = xhtml("Ch7: Partial colspan", """
+<h1>Ch 7: Partial Colspan</h1>
+<p>PASS: every row stays in the grid. The spanning header cells cover the first
+two of four columns; the value cells line up in columns three and four.</p>
+<table>
+<thead>
+<tr><th colspan="2">In 1,000 Parts of</th><th>Green</th><th>Black</th></tr>
+</thead>
+<tbody>
+<tr><th colspan="2">Natural oil</th><td>7.90</td><td>0.06</td></tr>
+<tr><th colspan="2">Clorophyl</th><td>22.20</td><td>18.14</td></tr>
+<tr><th>Alkaloids:</th><th>Mateina</th><td>4.50</td><td>4.30</td></tr>
+</tbody>
+</table>
+<p>Closing text.</p>
+""")
+
+# ---------------------------------------------------------------------------
+# Chapter 8 — table with its own horizontal margins
+# ---------------------------------------------------------------------------
+ch8 = xhtml("Ch8: Inset table", """
+<h1>Ch 8: Inset Table</h1>
+<p>PASS: the table box starts at the left margin the CSS asks for and ends
+before the right one; the plain table below it still spans the full width.</p>
+<table class="inset">
+<tbody>
+<tr><td>Alpha</td><td>Beta</td><td>Gamma</td></tr>
+<tr><td>Delta</td><td>Epsilon</td><td>Zeta</td></tr>
+</tbody>
+</table>
+<table>
+<tbody>
+<tr><td>Alpha</td><td>Beta</td><td>Gamma</td></tr>
+</tbody>
+</table>
+<p>Closing text.</p>
+""")
+
+# ---------------------------------------------------------------------------
+# Chapter 9 — caption ordering and style
+# ---------------------------------------------------------------------------
+ch9 = xhtml("Ch9: Table caption", """
+<h1>Ch 9: Table Caption</h1>
+<table>
+<caption>CAPTIONMARKER belongs above the table it describes.</caption>
+<tbody>
+<tr><td>Alpha</td><td>Beta</td></tr>
+<tr><td>Gamma</td><td>Delta</td></tr>
+</tbody>
+</table>
+<p>PASS: the caption line sits above the grid, and both it and this closing
+paragraph render at body size -- not at the heading size of the h1 above.</p>
+""")
+
+# ---------------------------------------------------------------------------
+# Chapter 10 — header row repeated across page breaks
+# ---------------------------------------------------------------------------
+_thead_rows = "\n".join(
+    f'<tr><td>Left{i:02d}</td><td>Mid{i:02d}</td><td>Right{i:02d}</td></tr>' for i in range(60))
+
+ch10 = xhtml("Ch10: Repeated header row", """
+<h1>Ch 10: Repeated Header Row</h1>
+<p>PASS: every page this table covers opens with the Left/Mid/Right header
+row, not just the first.</p>
+<table>
+<thead>
+<tr><th>Left</th><th>Mid</th><th>Right</th></tr>
+</thead>
+<tbody>
+""" + _thead_rows + """
+</tbody>
+</table>
+<p>Closing text.</p>
+""")
+
 CHAPTERS = [
     ("ch1", "chapter1.xhtml", "Chapter 1: Mid-table column change", ch1),
     ("ch2", "chapter2.xhtml", "Chapter 2: Full-width span row",     ch2),
@@ -207,6 +310,10 @@ CHAPTERS = [
     ("ch4", "chapter4.xhtml", "Chapter 4: Row over the viewport",   ch4),
     ("ch5", "chapter5.xhtml", "Chapter 5: Sixty-row table",         ch5),
     ("ch6", "chapter6.xhtml", "Chapter 6: Row over the budget",     ch6),
+    ("ch7", "chapter7.xhtml", "Chapter 7: Partial colspan",          ch7),
+    ("ch8", "chapter8.xhtml", "Chapter 8: Inset table",              ch8),
+    ("ch9", "chapter9.xhtml", "Chapter 9: Table caption",            ch9),
+    ("ch10", "chapter10.xhtml", "Chapter 10: Repeated header row",   ch10),
 ]
 
 

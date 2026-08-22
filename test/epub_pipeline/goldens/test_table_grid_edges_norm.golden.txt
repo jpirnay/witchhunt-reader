@@ -1,4 +1,4 @@
-BOOK title=Test: Table Grid Edges lang=en spine=6 toc=6 reliableToc=1
+BOOK title=Test: Table Grid Edges lang=en spine=10 toc=10 reliableToc=1
 SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=11 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
@@ -49,40 +49,40 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=409 s=0 z=100 t=third
   LINE y=190 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=cell.
-  TABLE y=214 x=0 h=36 cols=2 border=1 rows=1
+  TABLE y=214 x=0 w=460 h=36 cols=2 border=1 rows=1
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Header
       W x=78 s=0 z=100 t=left
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Header
       W x=78 s=0 z=100 t=right
-  TABLE y=250 x=0 h=71 cols=3 border=1 rows=2
+  TABLE y=250 x=0 w=460 h=71 cols=3 border=1 rows=2
    ROW h=34 hdr=0 cells=3
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=one
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=two
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=three
    ROW h=34 hdr=0 cells=3
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=four
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=five
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=six
@@ -99,7 +99,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=block
    W x=48 s=0 z=100 t=layout.
 SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=8 footnotes=0
+ PAGE 0 elements=6 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
    W x=37 s=1 z=100 t=Ch
    W x=85 s=1 z=100 t=2:
@@ -128,20 +128,19 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=57 s=0 z=100 t=and
    W x=94 s=0 z=100 t=below
    W x=142 s=0 z=100 t=it.
-  TABLE y=128 x=0 h=36 cols=3 border=1 rows=1
+  TABLE y=128 x=0 w=460 h=130 cols=3 border=1 rows=3
    ROW h=34 hdr=0 cells=3
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Alpha
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Beta
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Gamma
-  TABLE y=164 x=0 h=60 cols=1 border=1 rows=1
    ROW h=58 hdr=0 cells=1
-    CELL 0 hdr=0 lines=2
+    CELL 0 hdr=0 span=3 lines=2
      LN words=9
       W x=18 s=0 z=100 t=A
       W x=32 s=0 z=100 t=single
@@ -154,18 +153,17 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
       W x=409 s=0 z=100 t=this
      LN words=1
       W x=0 s=0 z=100 t=table.
-  TABLE y=224 x=0 h=36 cols=3 border=1 rows=1
    ROW h=34 hdr=0 cells=3
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Delta
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Epsilon
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Zeta
-  LINE y=261 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=259 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
 SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
@@ -319,30 +317,30 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=c6
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c7
-  TABLE y=48 x=0 h=36 cols=8 border=1 rows=1
+  TABLE y=48 x=0 w=460 h=36 cols=8 border=1 rows=1
    ROW h=34 hdr=0 cells=8
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d0
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d1
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d2
-    CELL 3 hdr=0 lines=1
+    CELL 3 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d3
-    CELL 4 hdr=0 lines=1
+    CELL 4 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d4
-    CELL 5 hdr=0 lines=1
+    CELL 5 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d5
-    CELL 6 hdr=0 lines=1
+    CELL 6 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d6
-    CELL 7 hdr=0 lines=1
+    CELL 7 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=d7
   LINE y=85 x=0 align=0 mult=1.000 hfid=0 words=2
@@ -462,30 +460,30 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=c6
   LINE y=550 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=c7
-  TABLE y=574 x=0 h=36 cols=8 border=1 rows=1
+  TABLE y=574 x=0 w=460 h=36 cols=8 border=1 rows=1
    ROW h=34 hdr=0 cells=8
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e0
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e1
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e2
-    CELL 3 hdr=0 lines=1
+    CELL 3 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e3
-    CELL 4 hdr=0 lines=1
+    CELL 4 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e4
-    CELL 5 hdr=0 lines=1
+    CELL 5 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e5
-    CELL 6 hdr=0 lines=1
+    CELL 6 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e6
-    CELL 7 hdr=0 lines=1
+    CELL 7 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=e7
   LINE y=611 x=0 align=0 mult=1.000 hfid=0 words=2
@@ -522,429 +520,429 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=4 truncated=0 cssFallback=0
   LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=table
    W x=52 s=0 z=100 t=spans.
-  TABLE y=128 x=0 h=631 cols=2 border=1 rows=18
+  TABLE y=128 x=0 w=460 h=631 cols=2 border=1 rows=18
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left00
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right00
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left01
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right01
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left02
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right02
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left03
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right03
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left04
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right04
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left05
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right05
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left06
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right06
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left07
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right07
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left08
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right08
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left09
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right09
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left10
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right10
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left11
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right11
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left12
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right12
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left13
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right13
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left14
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right14
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left15
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right15
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left16
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right16
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left17
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right17
  PAGE 1 elements=1 footnotes=0
-  TABLE y=0 x=0 h=736 cols=2 border=1 rows=21
+  TABLE y=0 x=0 w=460 h=736 cols=2 border=1 rows=21
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left18
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right18
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left19
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right19
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left20
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right20
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left21
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right21
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left22
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right22
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left23
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right23
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left24
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right24
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left25
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right25
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left26
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right26
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left27
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right27
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left28
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right28
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left29
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right29
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left30
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right30
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left31
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right31
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left32
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right32
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left33
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right33
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left34
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right34
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left35
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right35
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left36
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right36
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left37
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right37
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left38
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right38
  PAGE 2 elements=1 footnotes=0
-  TABLE y=0 x=0 h=736 cols=2 border=1 rows=21
+  TABLE y=0 x=0 w=460 h=736 cols=2 border=1 rows=21
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left39
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right39
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left40
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right40
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left41
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right41
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left42
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right42
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left43
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right43
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left44
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right44
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left45
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right45
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left46
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right46
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left47
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right47
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left48
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right48
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left49
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right49
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left50
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right50
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left51
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right51
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left52
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right52
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left53
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right53
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left54
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right54
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left55
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right55
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left56
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right56
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left57
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right57
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left58
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right58
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Left59
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Right59
  PAGE 3 elements=1 footnotes=0
@@ -1396,32 +1394,937 @@ SPINE 5 href=OEBPS/chapter6.xhtml pages=3 truncated=0 cssFallback=0
    W x=98 s=0 z=100 t=Bulk70037
    W x=197 s=0 z=100 t=Bulk70038
    W x=290 s=0 z=100 t=Bulk70039
-  TABLE y=576 x=0 h=36 cols=8 border=1 rows=1
+  TABLE y=576 x=0 w=460 h=36 cols=8 border=1 rows=1
    ROW h=34 hdr=0 cells=8
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f0
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f1
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f2
-    CELL 3 hdr=0 lines=1
+    CELL 3 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f3
-    CELL 4 hdr=0 lines=1
+    CELL 4 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f4
-    CELL 5 hdr=0 lines=1
+    CELL 5 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f5
-    CELL 6 hdr=0 lines=1
+    CELL 6 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f6
-    CELL 7 hdr=0 lines=1
+    CELL 7 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=f7
   LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Closing
+   W x=92 s=0 z=100 t=text.
+SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=59 s=1 z=100 t=Ch
+   W x=107 s=1 z=100 t=7:
+   W x=152 s=1 z=100 t=Partial
+   W x=279 s=1 z=100 t=Colspan
+  LINE y=56 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=76 s=0 z=100 t=every
+   W x=131 s=0 z=100 t=row
+   W x=166 s=0 z=100 t=stays
+   W x=223 s=0 z=100 t=in
+   W x=249 s=0 z=100 t=the
+   W x=289 s=0 z=100 t=grid.
+   W x=341 s=0 z=100 t=The
+   W x=377 s=0 z=100 t=spanning
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=header
+   W x=66 s=0 z=100 t=cells
+   W x=117 s=0 z=100 t=cover
+   W x=173 s=0 z=100 t=the
+   W x=212 s=0 z=100 t=first
+   W x=263 s=0 z=100 t=two
+   W x=299 s=0 z=100 t=of
+   W x=329 s=0 z=100 t=four
+   W x=378 s=0 z=100 t=columns;
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=45 s=0 z=100 t=value
+   W x=112 s=0 z=100 t=cells
+   W x=169 s=0 z=100 t=line
+   W x=218 s=0 z=100 t=up
+   W x=249 s=0 z=100 t=in
+   W x=280 s=0 z=100 t=columns
+   W x=363 s=0 z=100 t=three
+   W x=425 s=0 z=100 t=and
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=four.
+  TABLE y=152 x=0 w=460 h=165 cols=4 border=1 rows=4
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 span=2 lines=1
+     LN words=4
+      W x=18 s=0 z=100 t=In
+      W x=44 s=0 z=100 t=1,000
+      W x=100 s=0 z=100 t=Parts
+      W x=154 s=0 z=100 t=of
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Green
+    CELL 2 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Black
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=1 span=2 lines=1
+     LN words=2
+      W x=18 s=0 z=100 t=Natural
+      W x=93 s=0 z=100 t=oil
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=7.90
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=0.06
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=1 span=2 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Clorophyl
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=22.20
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=18.14
+   ROW h=58 hdr=0 cells=4
+    CELL 0 hdr=1 span=1 lines=2
+     LN words=1
+      W x=18 s=0 z=100 t=Alka-
+     LN words=1
+      W x=0 s=0 z=100 t=loids:
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mateina
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=4.50
+    CELL 3 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=4.30
+  LINE y=318 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Closing
+   W x=92 s=0 z=100 t=text.
+SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=8 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=103 s=1 z=100 t=Ch
+   W x=151 s=1 z=100 t=8:
+   W x=187 s=1 z=100 t=Inset
+   W x=282 s=1 z=100 t=Table
+  LINE y=56 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=77 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=table
+   W x=174 s=0 z=100 t=box
+   W x=209 s=0 z=100 t=starts
+   W x=277 s=0 z=100 t=at
+   W x=309 s=0 z=100 t=the
+   W x=350 s=0 z=100 t=left
+   W x=398 s=0 z=100 t=margin
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=CSS
+   W x=83 s=0 z=100 t=asks
+   W x=130 s=0 z=100 t=for
+   W x=169 s=0 z=100 t=and
+   W x=209 s=0 z=100 t=ends
+   W x=255 s=0 z=100 t=before
+   W x=318 s=0 z=100 t=the
+   W x=358 s=0 z=100 t=right
+   W x=414 s=0 z=100 t=one;
+  LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=46 s=0 z=100 t=plain
+   W x=105 s=0 z=100 t=table
+   W x=166 s=0 z=100 t=below
+   W x=223 s=0 z=100 t=it
+   W x=254 s=0 z=100 t=still
+   W x=312 s=0 z=100 t=spans
+   W x=374 s=0 z=100 t=the
+   W x=420 s=0 z=100 t=full
+  LINE y=128 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=width.
+  TABLE y=152 x=36 w=406 h=71 cols=3 border=1 rows=2
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Alpha
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Beta
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Gamma
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Delta
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Epsilon
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Zeta
+  TABLE y=223 x=0 w=460 h=36 cols=3 border=1 rows=1
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Alpha
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Beta
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Gamma
+  LINE y=260 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Closing
+   W x=92 s=0 z=100 t=text.
+SPINE 8 href=OEBPS/chapter9.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=6 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=86 s=1 z=100 t=Ch
+   W x=134 s=1 z=100 t=9:
+   W x=171 s=1 z=100 t=Table
+   W x=256 s=1 z=100 t=Caption
+  LINE y=56 x=0 align=2 mult=1.000 hfid=0 words=7
+   W x=8 s=0 z=100 t=CAPTIONMARKER
+   W x=130 s=0 z=100 t=belongs
+   W x=203 s=0 z=100 t=above
+   W x=260 s=0 z=100 t=the
+   W x=297 s=0 z=100 t=table
+   W x=349 s=0 z=100 t=it
+   W x=371 s=0 z=100 t=describes.
+  TABLE y=89 x=0 w=460 h=71 cols=2 border=1 rows=2
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Alpha
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Beta
+   ROW h=34 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Gamma
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Delta
+  LINE y=160 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=76 s=0 z=100 t=the
+   W x=116 s=0 z=100 t=caption
+   W x=189 s=0 z=100 t=line
+   W x=233 s=0 z=100 t=sits
+   W x=276 s=0 z=100 t=above
+   W x=336 s=0 z=100 t=the
+   W x=376 s=0 z=100 t=grid,
+   W x=426 s=0 z=100 t=and
+  LINE y=184 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=both
+   W x=49 s=0 z=100 t=it
+   W x=74 s=0 z=100 t=and
+   W x=114 s=0 z=100 t=this
+   W x=160 s=0 z=100 t=closing
+   W x=234 s=0 z=100 t=paragraph
+   W x=330 s=0 z=100 t=render
+   W x=392 s=0 z=100 t=at
+   W x=423 s=0 z=100 t=body
+  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=size
+   W x=39 s=0 z=100 t=--
+   W x=63 s=0 z=100 t=not
+   W x=102 s=0 z=100 t=at
+   W x=130 s=0 z=100 t=the
+   W x=167 s=0 z=100 t=heading
+   W x=242 s=0 z=100 t=size
+   W x=281 s=0 z=100 t=of
+   W x=309 s=0 z=100 t=the
+   W x=346 s=0 z=100 t=h1
+   W x=370 s=0 z=100 t=above.
+SPINE 9 href=OEBPS/chapter10.xhtml pages=4 truncated=0 cssFallback=0
+ PAGE 0 elements=4 footnotes=0
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
+   W x=29 s=1 z=100 t=Ch
+   W x=77 s=1 z=100 t=10:
+   W x=133 s=1 z=100 t=Repeated
+   W x=274 s=1 z=100 t=Header
+   W x=380 s=1 z=100 t=Row
+  LINE y=56 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=PASS:
+   W x=74 s=0 z=100 t=every
+   W x=127 s=0 z=100 t=page
+   W x=172 s=0 z=100 t=this
+   W x=216 s=0 z=100 t=table
+   W x=269 s=0 z=100 t=covers
+   W x=333 s=0 z=100 t=opens
+   W x=387 s=0 z=100 t=with
+   W x=428 s=0 z=100 t=the
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=Left/Mid/Right
+   W x=139 s=0 z=100 t=header
+   W x=203 s=0 z=100 t=row,
+   W x=243 s=0 z=100 t=not
+   W x=282 s=0 z=100 t=just
+   W x=325 s=0 z=100 t=the
+   W x=362 s=0 z=100 t=first.
+  TABLE y=104 x=0 w=460 h=631 cols=3 border=1 rows=18
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid
+    CELL 2 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left00
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid00
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right00
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left01
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid01
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right01
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left02
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid02
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right02
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left03
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid03
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right03
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left04
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid04
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right04
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left05
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid05
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right05
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left06
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid06
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right06
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left07
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid07
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right07
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left08
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid08
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right08
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left09
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid09
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right09
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left10
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid10
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right10
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left11
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid11
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right11
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left12
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid12
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right12
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left13
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid13
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right13
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left14
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid14
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right14
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left15
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid15
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right15
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left16
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid16
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right16
+ PAGE 1 elements=1 footnotes=0
+  TABLE y=0 x=0 w=460 h=736 cols=3 border=1 rows=21
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid
+    CELL 2 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left17
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid17
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right17
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left18
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid18
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right18
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left19
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid19
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right19
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left20
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid20
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right20
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left21
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid21
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right21
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left22
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid22
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right22
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left23
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid23
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right23
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left24
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid24
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right24
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left25
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid25
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right25
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left26
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid26
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right26
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left27
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid27
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right27
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left28
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid28
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right28
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left29
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid29
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right29
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left30
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid30
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right30
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left31
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid31
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right31
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left32
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid32
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right32
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left33
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid33
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right33
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left34
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid34
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right34
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left35
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid35
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right35
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left36
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid36
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right36
+ PAGE 2 elements=1 footnotes=0
+  TABLE y=0 x=0 w=460 h=736 cols=3 border=1 rows=21
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid
+    CELL 2 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left37
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid37
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right37
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left38
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid38
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right38
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left39
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid39
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right39
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left40
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid40
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right40
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left41
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid41
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right41
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left42
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid42
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right42
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left43
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid43
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right43
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left44
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid44
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right44
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left45
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid45
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right45
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left46
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid46
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right46
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left47
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid47
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right47
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left48
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid48
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right48
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left49
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid49
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right49
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left50
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid50
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right50
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left51
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid51
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right51
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left52
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid52
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right52
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left53
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid53
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right53
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left54
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid54
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right54
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left55
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid55
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right55
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left56
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid56
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right56
+ PAGE 3 elements=2 footnotes=0
+  TABLE y=0 x=0 w=460 h=141 cols=3 border=1 rows=4
+   ROW h=34 hdr=1 cells=3
+    CELL 0 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left
+    CELL 1 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid
+    CELL 2 hdr=1 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left57
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid57
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right57
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left58
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid58
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right58
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Left59
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Mid59
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=18 s=0 z=100 t=Right59
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Closing
    W x=92 s=0 z=100 t=text.
