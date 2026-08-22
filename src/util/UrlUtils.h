@@ -9,6 +9,16 @@ namespace UrlUtils {
 std::string ensureProtocol(const std::string& url);
 
 /**
+ * Repair a mistyped http/https scheme, e.g. "https:/example.com" or
+ * "https:example.com" -> "https://example.com", and drop a doubled scheme
+ * ("http://https://example.com" -> "https://example.com"). A well-formed URL,
+ * or one with any other scheme, is returned unchanged. Hand-typed server URLs
+ * lose a slash easily, and the result then looks scheme-less to every "://"
+ * check, which prepends a second scheme on top.
+ */
+std::string repairSchemeSeparator(const std::string& url);
+
+/**
  * Extract host with protocol from URL (e.g., "http://example.com" from "http://example.com/path")
  */
 std::string extractHost(const std::string& url);

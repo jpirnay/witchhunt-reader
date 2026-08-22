@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
+#include "util/UrlUtils.h"
 
 namespace {
 // Upper bound on any stored credential we will decode from JSON. A WPA passphrase
@@ -454,7 +455,9 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
       *needsResave = true;
     }
   }
-  store.serverUrl = doc["serverUrl"] | std::string("");
+  // Repair a scheme typo saved by an older build, so the settings screen shows the
+  // same URL getBaseUrl() will connect to.
+  store.serverUrl = UrlUtils::repairSchemeSeparator(doc["serverUrl"] | std::string(""));
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
