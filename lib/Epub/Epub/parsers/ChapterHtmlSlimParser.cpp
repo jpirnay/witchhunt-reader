@@ -607,14 +607,25 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
 bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
-  // The contiguous bar carries a slack term because largest-free-block readings land a few bytes
-  // UNDER the round number -- the allocator's own bookkeeping. Device trace, this chapter: two
-  // rows were refused at contig 12276 against a bar of 12288, twelve bytes short, with the memory
-  // plainly there. A soft gate can live with that (ensureHeapForTextLayout only warns); a gate
-  // that drops content cannot, so the bar is lowered off the power-of-two boundary.
+  // Free heap uses the SOFT text-layout floor (see the note by MAX_TABLE_ROW_BUFFER_BYTES for why
+  // not the hard one). The contiguous bar is deliberately NOT the matching soft value.
+  //
+  // It was, briefly, and it made tables disappear completely. MIN_MAX_ALLOC_FOR_TEXT_LAYOUT
+  // (12 KB) guards laying out a whole PARAGRAPH; a table cell line allocates one TextBlock word
+  // arena, tens to a few hundred bytes. Requiring 12 KB contiguous to place a 200-byte line is
+  // disproportionate, and it is fatal on the Background-C path, where the secondary buffer is lent
+  // to the build arena and contig sits structurally at 8-12 KB: every row of every table was
+  // refused while free heap sat at a comfortable 22-33 KB. Every measurement that missed this ran
+  // blocking with the framebuffer released, where contig is 30-57 KB.
+  //
+  // So the contiguous bar is the HARD floor -- the order of magnitude a row actually allocates --
+  // while the free-heap bar stays soft and keeps the margin the paragraph fallback needs. The
+  // slack term is the allocator's own bookkeeping: largest-free-block readings land a few bytes
+  // under the round number (a row was once refused at 12276 against a 12288 bar, twelve short,
+  // with the memory plainly there), so neither bar sits on a power of two.
   static constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
   const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
-                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT - LARGEST_FREE_BLOCK_SLACK;
+                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK;
   if (!ok) {
     LOG_DBG("EHP", "Table row layout skipped (%u free, %u max alloc); row falls back to paragraphs", freeHeap,
             maxAllocHeap);
