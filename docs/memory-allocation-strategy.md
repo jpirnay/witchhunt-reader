@@ -394,6 +394,45 @@ demonstrated. Before committing to either change above, log `contig` at several 
 `createSectionFile` on device and find where the block actually collapses. That is a few log
 lines and it decides whether the target is the small objects or something else entirely.
 
+### 8.4a Partially answered: table layout is a named contributor (2026-08-22)
+
+`SCT_HEAP_TRACE=1` on X3 2.24-dev, appendix-b of "Through the Brazilian Wilderness". Tables
+sit on pages ~30-39 of that section; everything else is prose, so the section is its own
+control:
+
+| page        | free   | contig      | allocBlk | freeBlk | allocBytes |
+|-------------|--------|-------------|----------|---------|------------|
+| 0-25 prose  | ~30000 | 23540-26612 | 440-445  | 8-11    | ~226000    |
+| 30 table    | 20604  | 9204        | 575      | 17      | 233312     |
+| 35 table    | 16980  | 13300       | 658      | 28      | 235608     |
+| 40-65 prose | ~29000 | **20468**   | 448-455  | 11-15   | ~227000    |
+
+This is the measurement 8.4 asks for, and it answers the question for one construct:
+
+1. Table pages allocate **130-215 extra blocks** (+7-9.4 KB). The cost is block COUNT, not
+   bytes — one `TextBlock` per cell line, each with its own vectors, all live simultaneously
+   because `layoutTableRow` holds every cell before the packer takes the row.
+2. Nothing is retained. `allocBlk` and `allocBytes` return to baseline immediately after the
+   tables, so the fragment packer drains correctly. A residency explanation was tested and
+   disproven.
+3. `contig` is **permanently** damaged: 26612 before the tables, 20468 for all 30 pages after.
+   Six KB of largest-free-block lost by a build that gave every byte back. `freeBlk` spiking
+   to 17 and 28 against a baseline of 8-11, on exactly those pages, is the churn doing it.
+
+So for tables the answer to 8.4 is: allocation **count** is what collapses the contiguous
+block, and the mechanism is churn rather than retention. That does not yet generalise to the
+whole parse — prose pages hold `allocBlk` flat while `contig` still drifts, so something else
+contributes too and remains unnamed.
+
+A consequence worth recording separately: the low-heap gate on table row layout is tripped by
+the table's own footprint. The readings it refuses rows at (page 30 `free=20604 contig=9204`,
+page 35 `free=16980`) are the table pages' own dip, not pressure from elsewhere. Moving that
+threshold only relocates the problem; reducing the churn is the fix.
+
+Also observed on the same run: two of seven refusals failed the contiguous check by **12
+bytes** (`12276` against a `12288` bar). Largest-free-block readings land 12 under the round
+number, so a hard gate on a power-of-two contig threshold is close to unreachable.
+
 ### 8.5 Landed from this round
 
 - **TARGET 2** — `image_scratch` pass arena; PNG ring + scanline buffers and the JPEG work pool
