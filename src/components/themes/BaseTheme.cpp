@@ -986,11 +986,19 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Battery
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
+  int batterySize = 0;
   if (SETTINGS.statusBarBattery) {
     GUI.drawBatteryLeft(renderer,
                         Rect{metrics.statusBarHorizontalMargin + orientedMarginLeft + 1, textY, metrics.batteryWidth,
                              metrics.batteryHeight},
                         showBatteryPercentage);
+    // Measure the drawn footprint instead of estimating it: a three digit percentage ("100%")
+    // is wider than a fixed guess, and the clock/title placed to the right would overlap it.
+    batterySize = 1 + metrics.batteryWidth;
+    if (showBatteryPercentage) {
+      const auto percentageText = std::to_string(powerManager.getBatteryPercentage()) + "%";
+      batterySize += BaseTheme::batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
+    }
   }
 
   // Draw Clock
@@ -999,7 +1007,6 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     char clockStr[16];
     HalClock::formatTime(clockStr, sizeof(clockStr), !SETTINGS.clockFormat12h);
     clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, clockStr);
-    const int batterySize = SETTINGS.statusBarBattery ? (showBatteryPercentage ? 50 : 20) : 0;
     renderer.drawText(SMALL_FONT_ID, metrics.statusBarHorizontalMargin + orientedMarginLeft + batterySize + 8, textY,
                       clockStr);
   }
@@ -1009,7 +1016,6 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int rendererableScreenWidth =
         screenWidth - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
 
-    const int batterySize = SETTINGS.statusBarBattery ? (showBatteryPercentage ? 50 : 20) : 0;
     const int starReserve = isStarred ? (renderer.getTextWidth(SMALL_FONT_ID, "*") + 6) : 0;
     const int clockSize = clockTextWidth > 0 ? clockTextWidth + 8 : 0;
     const int titleMarginLeft = batterySize + clockSize + 30;
