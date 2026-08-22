@@ -91,8 +91,9 @@ class ButtonNavigator final {
   // Up/Down step; Left/Right jump a page. They used to be interchangeable — both pairs stepped one
   // item — which left no way to cross a few hundred chapters or files without holding a button.
   // `pageSize` is how many rows the list currently shows (ListViewState::visibleRows); it falls
-  // back to defaultListPageSize, and a list shorter than a page pages by a single item, so short
-  // menus behave exactly as they always did.
+  // back to defaultListPageSize, and a list shorter than a page pages by a single item — that
+  // holds for the double-tap jump too, so on a one-screen list every tap is a step and taps that
+  // land inside the double-click window cannot throw the selection to the far end.
   void onNextList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
   void onPreviousList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
 

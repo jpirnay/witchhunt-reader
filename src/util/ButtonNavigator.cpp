@@ -351,9 +351,24 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
       newPresses >= 2 && press.priorPressMs > 0 && press.lastPressMs - press.priorPressMs < listDoubleClickMs;
   const bool doubleAcrossTicks =
       newPresses == 1 && lastPressMs > 0 && press.lastPressMs - lastPressMs < listDoubleClickMs;
-  const bool isDouble = !resumed && (doubleInOneTick || doubleAcrossTicks);
+  // ...but only where there is a page to jump to. Nothing tells a deliberate double-tap apart from
+  // two single taps closer together than the double-click window, so on a list that fits on one
+  // screen — where a page jump has nothing to move to — the pair must read as two steps. Paging
+  // anyway meant an impatient reader on item 5 lost the step they had just taken (the first tap is
+  // undone below) and was thrown to the far end of the list instead of to item 6, and a third tap
+  // then wrapped the selection round to item 1. Left/Right paging has always degraded to a step on
+  // a short list (see nextPageIndex/previousPageIndex); the double-tap jump had not.
+  const int page = effectivePageSize(pageSize);
+  const bool canPage = totalItems > page;
+  const bool isDouble = !resumed && canPage && (doubleInOneTick || doubleAcrossTicks);
   // Zeroed after a jump so a third tap starts a fresh pair instead of chaining page after page.
   lastPressMs = isDouble ? 0 : press.lastPressMs;
+
+  const auto stepFrom = [&](const int from) {
+    return forward ? (selectablePredicate ? nextIndex(from) : nextIndex(from, totalItems))
+                   : (selectablePredicate ? previousIndex(from) : previousIndex(from, totalItems));
+  };
+  const auto step = [&] { selectedIndex = stepFrom(selectedIndex); };
 
   if (isDouble) {
     // A pair split across two ticks already moved one step for its first tap: undo that, so the
@@ -365,11 +380,8 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
     }
     // A page, not a fixed ten: this is the only jump available on the lists whose Left/Right are
     // taken by their own actions (the file browser), so it should match what a screenful is there.
-    const int jumpCount = effectivePageSize(pageSize);
-    for (int i = 0; i < jumpCount; ++i) {
-      const int next =
-          forward ? (selectablePredicate ? nextIndex(selectedIndex) : nextIndex(selectedIndex, totalItems))
-                  : (selectablePredicate ? previousIndex(selectedIndex) : previousIndex(selectedIndex, totalItems));
+    for (int i = 0; i < page; ++i) {
+      const int next = stepFrom(selectedIndex);
       // Stop before wrapping: forward movement decreases index only on wrap; backward vice versa.
       if (forward && next <= selectedIndex) break;
       if (!forward && next >= selectedIndex) break;
@@ -377,9 +389,13 @@ void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int&
     }
   } else {
     indexBeforePress = selectedIndex;
-    selectedIndex =
-        forward ? (selectablePredicate ? nextIndex(selectedIndex) : nextIndex(selectedIndex, totalItems))
-                : (selectablePredicate ? previousIndex(selectedIndex) : previousIndex(selectedIndex, totalItems));
+    step();
+    // Both halves of a same-tick pair are new presses that no page jump is going to spend, so the
+    // second one steps too instead of being swallowed. (An e-ink redraw easily outlasts a tap, so
+    // two taps landing in one tick is ordinary, not a rarity.)
+    if (doubleInOneTick && !resumed) {
+      step();
+    }
   }
   onChange();
 }

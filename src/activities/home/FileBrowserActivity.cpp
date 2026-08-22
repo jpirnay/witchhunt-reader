@@ -375,9 +375,10 @@ void FileBrowserActivity::loop() {
       {MappedInputManager::Button::Up}, selectorIndex, listSize, [this] { requestUpdate(); }, listView.visibleRows);
   // The navigator's own jumps — double-tap for a page, hold for the far end — move the selection
   // without touching the window, and the layout cannot tell a jump from a step (see
-  // pageSelection). Anchoring on anything bigger than a single step gives those jumps a screen of
-  // new names too, instead of scrolling by one row.
-  if (std::abs(selectorIndex - indexBeforeNav) > 1) {
+  // pageSelection). Anchoring on anything bigger than a pair of steps gives those jumps a screen
+  // of new names too, instead of scrolling by one row. A pair, not a single step: two taps that
+  // land in one loop tick are two steps, and stepping should still scroll row by row.
+  if (std::abs(selectorIndex - indexBeforeNav) > 2) {
     listView.firstVisible = selectorIndex;
   }
 }
