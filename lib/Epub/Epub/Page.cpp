@@ -99,30 +99,33 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
     colX[c + 1] = drawX + static_cast<int>((static_cast<uint32_t>(totalWidth) * (c + 1)) / columnCount);
   }
 
-  if (hasBorder) {
-    for (uint8_t c = 1; c < columnCount; c++) {
-      renderer.drawLine(colX[c], drawY, colX[c], drawY + totalHeight - 1, true);
-    }
-  }
-
-  // Rows: text content + horizontal separators
+  // Rows: text content + separators. Column separators are drawn per row rather than as full-height
+  // lines, because a colspan cell has no internal boundaries to draw.
   const int lineHeight = renderer.getLineHeight(fontId);  // constant for this render; hoist out of the cell loops
   int rowY = drawY;
   for (size_t r = 0; r < rows.size(); r++) {
     const TableRow& row = rows[r];
-    for (uint8_t c = 0; c < columnCount && c < static_cast<uint8_t>(row.cells.size()); c++) {
-      const TableCell& cell = row.cells[c];
+    // The last row's separators run to the bottom border, matching the outer rect.
+    const int sepBottom = (r + 1 < rows.size()) ? rowY + row.height - 1 : drawY + totalHeight - 1;
+    uint8_t col = 0;
+    for (const TableCell& cell : row.cells) {
+      if (col >= columnCount) break;
+      const uint8_t span = std::min<uint8_t>(cell.colSpan ? cell.colSpan : 1, columnCount - col);
       int lineY = rowY + TABLE_CELL_PADDING;
       for (const auto& line : cell.lines) {
-        line->render(renderer, fontId, colX[c] + TABLE_CELL_PADDING, lineY);
+        line->render(renderer, fontId, colX[col] + TABLE_CELL_PADDING, lineY);
         lineY += lineHeight;
       }
       // In-cell graphic, drawn below the cell text. Always 1-bit (BW) thumbnails:
       // the decode/cache machinery lives in ImageBlock; the BW cache is built during
       // the warm pass and simply blitted here (and again in grayscale strip passes).
       if (cell.image) {
-        cell.image->render(renderer, colX[c] + TABLE_CELL_PADDING, lineY, /*forceLoad=*/true,
+        cell.image->render(renderer, colX[col] + TABLE_CELL_PADDING, lineY, /*forceLoad=*/true,
                            /*monochromeOutput=*/true);
+      }
+      col = static_cast<uint8_t>(col + span);
+      if (hasBorder && col < columnCount) {
+        renderer.drawLine(colX[col], rowY, colX[col], sepBottom, true);
       }
     }
     rowY += row.height;
@@ -193,6 +196,7 @@ bool PageTableFragment::serialize(FsFile& file) {
     serialization::writePod(file, cellCount);
     for (const auto& cell : row.cells) {
       serialization::writePod(file, cell.isHeader);
+      serialization::writePod(file, cell.colSpan);
       const uint8_t lineCount = static_cast<uint8_t>(cell.lines.size());
       serialization::writePod(file, lineCount);
       for (const auto& line : cell.lines) {
@@ -248,6 +252,11 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
     for (uint8_t c = 0; c < cellCount; c++) {
       TableCell cell;
       serialization::readPod(file, cell.isHeader);
+      serialization::readPod(file, cell.colSpan);
+      if (cell.colSpan == 0 || cell.colSpan > columnCount) {
+        LOG_ERR("PGE", "TableFragment: invalid colSpan %u at row %u cell %u", cell.colSpan, r, c);
+        return nullptr;
+      }
       uint8_t lineCount;
       serialization::readPod(file, lineCount);
       if (lineCount > MAX_CELL_LINES) {

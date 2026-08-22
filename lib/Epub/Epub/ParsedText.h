@@ -29,6 +29,13 @@ class ParsedText {
 
  private:
   std::vector<std::string> words;
+  // Per-line x positions, reused across every line this block produces. Deliberately a member and
+  // not a local: as a local it was a fresh heap allocation for EVERY rendered line, whose whole
+  // life was reserve/fill/hand-over/free -- the line's words were already flattened into
+  // TextBlock's single arena, and this handed the x positions over separately. Host profile of
+  // one book: 16258 allocations at extractLine against 14459 rendered lines, essentially one
+  // each, in the 16-32 byte classes that dominate the allocation count.
+  std::vector<int16_t> lineXPosScratch_;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
   // Per-word font size, percent of the block font size (100 = block size). Kept in

@@ -113,7 +113,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   bindArenaPointers();
 }
 
-TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle)
+TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle)
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
   if (range.words == nullptr || range.styles == nullptr) {
     LOG_ERR("TXB", "Construction failed: null word range");

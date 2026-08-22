@@ -6,6 +6,8 @@
 // A missing cacheDir uses a fresh temp dir (cold build). Passing the same
 // cacheDir twice exercises the warm path. --bench adds per-spine timing,
 // whole-run peak heap, and the on-disk cache footprint to stderr.
+#include <dlfcn.h>
+
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -72,6 +74,24 @@ int main(const int argc, char** argv) {
                               "<=1K", "<=2K", "<=4K", "<=8K",  "<=16K", ">16K"};
     for (int i = 0; i < 12; i++) {
       if (buckets[i]) std::fprintf(stderr, " %s=%zu", labels[i], buckets[i]);
+    }
+    // Where the allocations come from, not just how big they are. Raw addresses; pipe through
+    // addr2line against this binary to get file:line.
+    HeapTrackSite sites[40];
+    const int siteCount = heapTrackTopSites(sites, 40);
+    for (int i = 0; i < siteCount; i++) {
+      // Resolve in-process: the binary is position-independent, so a raw runtime address means
+      // nothing to addr2line without the load base. dladdr gives both the symbol and the base,
+      // and the base-relative offset is what addr2line can turn into file:line.
+      Dl_info info{};
+      const char* sym = "?";
+      unsigned long long rel = sites[i].pc;
+      if (dladdr(reinterpret_cast<void*>(static_cast<uintptr_t>(sites[i].pc)), &info) != 0) {
+        if (info.dli_sname != nullptr) sym = info.dli_sname;
+        if (info.dli_fbase != nullptr) rel = sites[i].pc - reinterpret_cast<uintptr_t>(info.dli_fbase);
+      }
+      std::fprintf(stderr, "\nBENCHMARK alloc_site count=%zu bytes=%zu off=0x%llx sym=%s", sites[i].count,
+                   sites[i].bytes, rel, sym);
     }
   }
   std::fprintf(stderr, "\n");

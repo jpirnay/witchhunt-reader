@@ -11,6 +11,7 @@
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "HeapTrack.h"
 
 namespace pipeline_harness {
 namespace {
@@ -49,14 +50,15 @@ void dumpTextLine(std::ostream& out, const PageLine& line) {
 // rows, cells and lines so cell content is covered by the same golden and word-stream checks as
 // body text.
 void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const std::string& cacheDir) {
-  out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " h=" << tbl.getTotalHeight()
+  out << "  TABLE y=" << tbl.yPos << " x=" << tbl.xPos << " w=" << tbl.getTotalWidth() << " h=" << tbl.getTotalHeight()
       << " cols=" << static_cast<int>(tbl.getColumnCount()) << " border=" << (tbl.getHasBorder() ? 1 : 0)
       << " rows=" << tbl.getRows().size() << "\n";
   for (const auto& row : tbl.getRows()) {
     out << "   ROW h=" << row.height << " hdr=" << (row.isHeaderRow ? 1 : 0) << " cells=" << row.cells.size() << "\n";
     for (size_t c = 0; c < row.cells.size(); ++c) {
       const auto& cell = row.cells[c];
-      out << "    CELL " << c << " hdr=" << (cell.isHeader ? 1 : 0) << " lines=" << cell.lines.size() << "\n";
+      out << "    CELL " << c << " hdr=" << (cell.isHeader ? 1 : 0) << " span=" << static_cast<int>(cell.colSpan)
+          << " lines=" << cell.lines.size() << "\n";
       for (const auto& line : cell.lines) {
         out << "     LN words=" << line->wordCount() << "\n";
         dumpWords(out, *line, "      ");
@@ -142,15 +144,21 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     out << "SPINE " << i << " href=" << epub->getSpineItem(i).href << " pages=" << section.pageCount
         << " truncated=" << (section.isTruncatedCache() ? 1 : 0)
         << " cssFallback=" << (section.isEmbeddedStyleFallback() ? 1 : 0) << "\n";
+    // The read-back below is harness scaffolding: it deserializes every page purely to print it,
+    // which the firmware never does. Left in the profile it dominates the allocation census (and
+    // did, on the first run of this instrumentation), so the build is what gets counted.
+    heapTrackPause();
     for (uint16_t p = 0; p < section.pageCount; ++p) {
       section.currentPage = p;
       const auto page = section.loadPageFromSectionFile();
       if (!page) {
+        heapTrackResume();
         out << " PAGE " << p << " ERROR load failed\n";
         return false;
       }
       dumpPage(out, *page, p, cacheDir);
     }
+    heapTrackResume();
     if (spineStat) {
       const auto us =
           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - spineStart);

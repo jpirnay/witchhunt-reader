@@ -1168,7 +1168,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   // Pre-calculate X positions for words
   // Continuation words attach to the previous word with no space before them
-  std::vector<int16_t> lineXPos;
+  std::vector<int16_t>& lineXPos = lineXPosScratch_;
+  lineXPos.clear();  // keeps the capacity: the point is to stop reallocating per line
   lineXPos.reserve(lineWordCount);
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
@@ -1220,7 +1221,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = std::make_shared<TextBlock>(range, std::move(lineXPos), blockStyle);
+  auto block = std::make_shared<TextBlock>(range, lineXPos, blockStyle);
   if (!block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return LineProcessResult::Accepted;

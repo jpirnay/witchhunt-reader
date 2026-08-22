@@ -84,6 +84,9 @@ struct TableCell {
   std::vector<std::shared_ptr<TextBlock>> lines;
   std::shared_ptr<ImageBlock> image;  // optional in-cell graphic, drawn below any cell text
   bool isHeader = false;
+  // Number of grid columns this cell occupies. A row's spans always sum to the fragment's
+  // columnCount (layout pads short rows), so the renderer can walk cells and accumulate.
+  uint8_t colSpan = 1;
 };
 
 struct TableRow {
@@ -114,6 +117,7 @@ class PageTableFragment final : public PageElement {
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
+  uint16_t getTotalWidth() const { return totalWidth; }
   uint8_t getColumnCount() const { return columnCount; }
   bool getHasBorder() const { return hasBorder; }
   // Read-only view of the laid-out cells. Exists for the pipeline dump: without it no golden can
