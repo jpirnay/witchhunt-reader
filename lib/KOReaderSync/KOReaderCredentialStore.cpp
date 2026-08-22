@@ -6,6 +6,7 @@
 #include <ObfuscationUtils.h>
 
 #include "../../src/JsonSettingsIO.h"
+#include "../../src/util/UrlUtils.h"
 
 // Initialize the static instance
 KOReaderCredentialStore KOReaderCredentialStore::instance;
@@ -70,19 +71,28 @@ void KOReaderCredentialStore::clearCredentials() {
 }
 
 void KOReaderCredentialStore::setServerUrl(const std::string& url) {
-  serverUrl = url;
-  LOG_DBG("KRS", "Set server URL: %s", url.empty() ? "(default)" : url.c_str());
+  // Repair a typo'd scheme here as well as in getBaseUrl(), so the settings
+  // screen shows -- and the file keeps -- the URL that will actually be used.
+  serverUrl = UrlUtils::repairSchemeSeparator(url);
+  LOG_DBG("KRS", "Set server URL: %s", serverUrl.empty() ? "(default)" : serverUrl.c_str());
 }
 
 std::string KOReaderCredentialStore::getBaseUrl() const {
   std::string url;
   if (serverUrl.empty()) {
     url = DEFAULT_SERVER_URL;
-  } else if (serverUrl.find("://") == std::string::npos) {
-    // Normalize URL: add http:// if no protocol specified (local servers typically don't have SSL)
-    url = "http://" + serverUrl;
   } else {
-    url = serverUrl;
+    // A URL entered as "https:/host" (one slash) carries a scheme no "://" test can
+    // see; without the repair it becomes "http://https:/host", which resolves to the
+    // host "https:" and fails every connect.
+    const std::string repaired = UrlUtils::repairSchemeSeparator(serverUrl);
+    if (repaired != serverUrl) {
+      // Quoted so a missing slash is unmistakable in a log; on screen "https:/host"
+      // and "https://host" look almost identical.
+      LOG_INF("KRS", "Repaired malformed sync URL: '%s' -> '%s'", serverUrl.c_str(), repaired.c_str());
+    }
+    // Falls back to http:// when no protocol was given (local servers typically don't have SSL).
+    url = UrlUtils::ensureProtocol(repaired);
   }
 
   // Strip trailing slashes to avoid double-slash in API paths
