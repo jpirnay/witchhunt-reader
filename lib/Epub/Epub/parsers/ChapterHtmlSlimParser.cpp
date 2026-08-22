@@ -604,6 +604,16 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
 //
 // See the note by MAX_TABLE_ROW_BUFFER_BYTES for why the heap is sampled here, immediately before
 // the allocations, rather than as cells accumulate.
+void ChapterHtmlSlimParser::releaseTableLinePoolIfIdle() {
+  // Only between tables. The pool already rewinds by itself whenever its last line dies, so it is
+  // reused for free while a table is being built; destroying it per page emit would trade the
+  // small-allocation churn this exists to remove for a 12 KB malloc/free on every page.
+  if (currentTable || !tableLinePool_ || tableLinePool_->liveLines() != 0) return;
+  LOG_DBG("EHP", "Table line pool released: highWater=%u fallbacks=%u",
+          static_cast<unsigned>(tableLinePool_->highWater()), static_cast<unsigned>(tableLinePool_->fallbacks()));
+  tableLinePool_.reset();
+}
+
 bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
@@ -765,8 +775,11 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.
 void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   paragraphLutPerPage.push_back({xhtmlByteOffset, xpathParagraphIndex, xpathListItemIndex});
-  completePageFn(std::move(currentPage));
+  completePageFn(std::move(currentPage));  // serializes AND destroys the page, so its lines die here
   completedPageCount++;
+  // Picks up the case where </table> could not release because a fragment was still on the page
+  // that has just now been emitted.
+  releaseTableLinePoolIfIdle();
   currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
@@ -2714,6 +2727,7 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     self->commitPendingRow();
     self->flushTableFragment(self->currentTable->packer);
     self->currentTable.reset();
+    self->releaseTableLinePoolIfIdle();
     self->nextWordContinues = false;
   }
 
@@ -3528,6 +3542,15 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
   const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
       std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
   const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+
+  // Cell lines come from the table pool rather than the general heap for the duration of this
+  // row. The pool rewinds only when its last line dies, so a row still held by the packer across
+  // an emitPage() cannot have its storage reclaimed underneath it.
+  if (!tableLinePool_) {
+    tableLinePool_ = std::unique_ptr<TextBlockLinePool>(new (std::nothrow) TextBlockLinePool(TABLE_LINE_POOL_BYTES));
+    if (tableLinePool_ && !tableLinePool_->valid()) tableLinePool_.reset();
+  }
+  const TextBlock::LinePoolScope linePoolScope(tableLinePool_.get());
 
   out.cells.clear();
   out.isHeaderRow = bufRow.isHeaderRow;

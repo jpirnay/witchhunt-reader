@@ -9,6 +9,7 @@
 
 #include "Block.h"
 #include "BlockStyle.h"
+#include "TextBlockLinePool.h"
 
 // Represents a line of text on a page.
 //
@@ -87,9 +88,14 @@ class TextBlock final : public Block {
   uint16_t textBytes = 0;  // total size of the text region, including one NUL per word
   bool sizesPresent = false;
   bool isValid = true;
-  // The ONLY allocation: makeUniqueNoThrow, so OOM yields an invalid block
-  // instead of abort() (bare new is not nothrow with -fno-exceptions).
-  std::unique_ptr<uint8_t[]> arena;
+  // Allocates word storage from the active line pool when there is one and the request fits,
+  // else from the heap. Never throws; a null result is an OOM the caller must handle.
+  static std::unique_ptr<uint8_t[], TextBlockArenaDeleter> allocArena(size_t bytes);
+
+  // The ONLY allocation: allocArena, so OOM yields an invalid block instead of abort()
+  // (bare new is not nothrow with -fno-exceptions). May be heap storage or a view into a
+  // TextBlockLinePool; the deleter carries which, so the two cannot be confused at destruction.
+  std::unique_ptr<uint8_t[], TextBlockArenaDeleter> arena;
   // Typed views into the arena, bound once after the arena is filled. All
   // 16-bit bases sit at even offsets, so direct dereference is alignment-safe.
   const uint16_t* textOffArr = nullptr;
@@ -110,6 +116,10 @@ class TextBlock final : public Block {
   // from settings before pages render. Not per-block state -- blocks are cached
   // and shared across renders, and the aid applies uniformly to every line.
   static bool guideDotsEnabled;
+
+  // Active pool for word storage, or nullptr for plain heap allocation. Process-wide like
+  // guideDotsEnabled, and set only through LinePoolScope so it cannot be left dangling.
+  static TextBlockLinePool* linePool;
 
   TextBlock() = default;  // deserialize() fills the fields directly
   static size_t arenaSize(uint16_t wordCount, bool hasSizes, uint16_t textBytes);
@@ -203,6 +213,22 @@ class TextBlock final : public Block {
   // word layout is untouched, so the flag is NOT part of the section cache key
   // and toggling it never triggers a section rebuild.
   static void setGuideDots(const bool enabled) { guideDotsEnabled = enabled; }
+
+  // Routes word storage for every TextBlock built inside the scope through `pool`. Restores the
+  // previous pool on exit (so scopes nest harmlessly) and is the only way to set it -- the pool
+  // must not outlive the lines it backs, and an unbalanced raw assignment would allow that.
+  class LinePoolScope {
+   public:
+    explicit LinePoolScope(TextBlockLinePool* pool) : previous_(linePool) {
+      linePool = (pool != nullptr && pool->valid()) ? pool : nullptr;
+    }
+    ~LinePoolScope() { linePool = previous_; }
+    LinePoolScope(const LinePoolScope&) = delete;
+    LinePoolScope& operator=(const LinePoolScope&) = delete;
+
+   private:
+    TextBlockLinePool* previous_;
+  };
 
   // given a renderer works out where to break the words into lines
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;

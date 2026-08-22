@@ -273,6 +273,16 @@ class ChapterHtmlSlimParser final : public Print {
     bool repeatHeaderResolved = false;  // set after the table's first row; only that row qualifies
   };
   std::unique_ptr<BufferedTable> currentTable;
+  // Word storage for table cell lines, kept out of the general heap. A table page churns three to
+  // five times as many variable-sized allocations as a prose page (same text, cut into cells), and
+  // a device trace showed that permanently costing ~6 KB of largest-free-block per chapter even
+  // though every byte came back. Created on the first row that reaches grid layout, so books
+  // without tables never pay for it, and destroyed once the last pooled line is gone.
+  std::unique_ptr<TextBlockLinePool> tableLinePool_;
+  // Sized from the same trace: table pages ran 7-9.4 KB of line storage above the prose baseline,
+  // and the live set spans up to about one and a half pages (flushTableFragment emits a page while
+  // the packer still holds rows). Overflow is not a failure -- allocArena falls back to the heap.
+  static constexpr size_t TABLE_LINE_POOL_BYTES = 12 * 1024;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
   struct ListEntry {
@@ -397,6 +407,10 @@ class ChapterHtmlSlimParser final : public Print {
   void startNewTextBlock(const BlockStyle& blockStyle);
   void clearSpentBlockHeadingStyle();
   bool heapAllowsTableRowLayout() const;
+  // Hands the pool's 12 KB back once nothing points into it. Called where lines can have died:
+  // at </table> and after each page is emitted. A non-zero live count simply defers to the next
+  // call, so this can never free storage a fragment is still holding.
+  void releaseTableLinePoolIfIdle();
   bool flushPartWordBuffer();
   void makePages();
   // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.
