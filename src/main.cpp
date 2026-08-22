@@ -706,6 +706,66 @@ static HalGPIO::WakeGestures wakeGestureFromSettings() {
   return gestures;
 }
 
+#ifdef ENABLE_SERIAL_LOG
+// Open the USB-CDC log wire when a host is actually on the other end.
+//
+// This is the ONLY HWCDC::begin() in the firmware. -DARDUINO_USB_MODE=1 compiles
+// out the core's CDC-on-boot begin() (cores/esp32/main.cpp guards it with
+// !ARDUINO_USB_MODE; HWCDC.cpp only instantiates the object), so skipping this
+// call leaves HWCDC with no TX ring buffer and no ISR — nothing can ever set its
+// "connected" flag, `if (logSerial)` in logPrintf() stays false, and every LOG_*
+// line is dropped for the rest of the session while still filling the RTC ring.
+//
+// Gated rather than unconditional because begin() allocates the 4 KB RX + 8 KB TX
+// buffers below, which are pure waste on a device running from battery.
+//
+// The gate has to be the enumerated host link, not the charge state. X3 has no
+// pin-level USB detect (GPIO20 is I2C SDA there), so its electrical check infers
+// a cable from BQ27220 charge current — which reads false on a full battery or a
+// data-only cable. That is how an X3 with a serial monitor attached could stay
+// mute for a whole session while X4, which reads VBUS off a pin, never did.
+// isUsbConnected() now leads with the IDF's SOF-based host-link flag, and the
+// call is retried on USB state changes so a cable plugged after boot still gets
+// a log.
+static bool serialLogOpen = false;
+
+static bool openSerialLogIfHostPresent() {
+  if (serialLogOpen) return false;
+
+  // The host link is the signal that matters; the charge inference behind
+  // isUsbConnected() is only consulted when there is none, since on X3 it costs
+  // an I2C read and can only add a (harmless) false positive here.
+  const bool hostLink = gpio.isUsbHostLinkActive();
+  if (!hostLink && !gpio.isUsbConnected()) {
+    // Ring-buffer only — the wire is closed by definition. Surfaces in the crash
+    // report's "Last logs", so a session that produced no serial output at all
+    // can still be explained after the fact.
+    LOG_INF("MAIN", "Serial log not opened: no USB host link, no charge-inferred cable");
+    return false;
+  }
+
+  // Enlarge the USB-CDC RX buffer from the 256-byte default before begin().
+  // The serial file-transfer protocol receives 2048-byte chunks in bursts; a
+  // 256-byte ring drops bytes whenever the byte-by-byte drain stalls briefly,
+  // which surfaces as "Timeout waiting for ACK" / failed uploads. 4096 matches
+  // MicroReader's usb_serial_jtag rx_buffer_size.
+  logSerial.setRxBufferSize(4096);
+  // Enlarge the TX buffer too (default 256) so file downloads stream out in
+  // larger bursts without the device having to block mid-chunk on a full ring
+  // (a full ring that doesn't drain within HWCDC's tx timeout flips the link
+  // to "disconnected" and silently drops TX).
+  logSerial.setTxBufferSize(8192);
+  Serial.begin(115200);
+  const unsigned long start = millis();
+  while (!Serial && (millis() - start) < 500) {
+    delay(10);
+  }
+  serialLogOpen = true;
+  LOG_INF("MAIN", "Serial log opened (%s)", hostLink ? "enumerated host link" : "charge-inferred cable");
+  return true;
+}
+#endif
+
 void setup() {
   markBootPhase(BootPhase::SetupEntry);
   // Load just the settings we need before any other init, so the wake gesture mirrors
@@ -799,24 +859,7 @@ void setup() {
   }
 
 #ifdef ENABLE_SERIAL_LOG
-  if (gpio.isUsbConnected()) {
-    // Enlarge the USB-CDC RX buffer from the 256-byte default before begin().
-    // The serial file-transfer protocol receives 2048-byte chunks in bursts; a
-    // 256-byte ring drops bytes whenever the byte-by-byte drain stalls briefly,
-    // which surfaces as "Timeout waiting for ACK" / failed uploads. 4096 matches
-    // MicroReader's usb_serial_jtag rx_buffer_size. setRxBufferSize() recreates
-    // the queue, so it takes effect even though CDC_ON_BOOT already ran begin().
-    logSerial.setRxBufferSize(4096);
-    // Enlarge the TX buffer too (default 256) so file downloads stream out in
-    // larger bursts without the device having to block mid-chunk on a full ring
-    // (a full ring that doesn't drain within HWCDC's tx timeout flips the link
-    // to "disconnected" and silently drops TX).
-    logSerial.setTxBufferSize(8192);
-    Serial.begin(115200);
-    const unsigned long start = millis();
-    while (!Serial && (millis() - start) < 500) {
-      delay(10);
-    }
+  if (openSerialLogIfHostPresent()) {
     markBootPhase(BootPhase::SerialUp);
   }
 #endif
@@ -1296,6 +1339,11 @@ void loop() {
   // Refresh the battery icon when USB is plugged or unplugged.
   // Placed after sleep guards so we never queue a render that won't be processed.
   if (gpio.wasUsbStateChanged()) {
+#ifdef ENABLE_SERIAL_LOG
+    // A cable (or a host) that arrived after boot: open the log wire now rather
+    // than staying mute until the next reboot. No-op once it is open.
+    openSerialLogIfHostPresent();
+#endif
     activityManager.requestUpdate();
   }
 
