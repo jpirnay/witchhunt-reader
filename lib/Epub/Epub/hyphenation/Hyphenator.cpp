@@ -20,6 +20,9 @@ const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
 
 namespace {
 
+constexpr size_t kFallbackMinPrefix = 2;
+constexpr size_t kFallbackMinSuffix = 2;
+
 const LanguageHyphenator* hyphenatorForLanguage(const std::string& langTag) {
   if (langTag.empty()) return nullptr;
 
@@ -233,10 +236,12 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
     indexes = hyphenator->breakIndexes(cps);
   }
 
-  // Only add fallback breaks if needed
+  // Only add fallback breaks if needed.
   if (includeFallback && indexes.empty()) {
-    const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : LiangWordConfig::kDefaultMinPrefix;
-    const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : LiangWordConfig::kDefaultMinSuffix;
+    const size_t minPrefix = hyphenator ? hyphenator->minPrefix() : kFallbackMinPrefix;
+
+    const size_t minSuffix = hyphenator ? hyphenator->minSuffix() : kFallbackMinSuffix;
+
     for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
       indexes.push_back(idx);
     }
