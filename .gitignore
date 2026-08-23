@@ -40,8 +40,15 @@ lib/EpdFont/scripts/downloaded_fonts/
 lib/EpdFont/scripts/instanced_fonts/
 lib/EpdFont/scripts/output/
 .editorconfig
-# Claude Code: share project skills with the team, keep local agent state
-# (worktrees, scheduled-task locks, settings.local, scout CLEANUP.md) out.
+node_modules/
+# Claude Code: keep local agent state out (worktrees, scheduled-task
+# locks, settings.local, scout CLEANUP.md).
 .claude/*
 !.claude/skills/
-node_modules/
+/managed_components
+/.dummy
+/CMakeLists.txt
+/dependencies.lock
+/sdkconfig.*
+sdkconfig.sticky
+flake.*
