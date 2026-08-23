@@ -1,6 +1,5 @@
 #include "GermanHybridRules.h"
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +9,7 @@
 namespace {
 
 constexpr uint8_t kSymbolOther = 30;
+constexpr uint8_t kSymbolPad = 31;
 
 uint8_t germanSymbol(uint32_t cp) {
   cp = toLowerLatin(cp);
@@ -84,10 +84,9 @@ bool pairKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint1
   return true;
 }
 
-bool contextKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
-  // minPrefix/minSuffix are both 2, so every legal runtime boundary has two
-  // codepoints available on each side. Still guard here to keep the helper
-  // safe if the caller changes those limits later.
+bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
+  // minPrefix/minSuffix are both 2, so every runtime boundary considered by
+  // applyGermanHybridOverrides() has two codepoints available on each side.
   if (boundary < 2 || boundary + 1 >= cps.size()) {
     return false;
   }
@@ -104,6 +103,32 @@ bool contextKey(const std::vector<CodepointInfo>& cps, const size_t boundary, ui
     if (symbol == kSymbolOther) {
       return false;
     }
+    key = (key << 5) | symbol;
+  }
+
+  outKey = key;
+  return true;
+}
+
+bool contextKey3(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
+  // Six 5-bit symbols -> 30-bit key. Boundaries are allowed two characters
+  // from a word edge, so use symbol 31 as a pad for the missing third context
+  // character.  Symbol 30 remains reserved for unsupported/other characters.
+  uint32_t key = 0;
+  const std::ptrdiff_t base = static_cast<std::ptrdiff_t>(boundary);
+  const std::ptrdiff_t size = static_cast<std::ptrdiff_t>(cps.size());
+
+  for (std::ptrdiff_t relative = -3; relative <= 2; ++relative) {
+    const std::ptrdiff_t index = base + relative;
+    uint8_t symbol = kSymbolPad;
+
+    if (index >= 0 && index < size) {
+      symbol = germanSymbol(cps[static_cast<size_t>(index)].value);
+      if (symbol == kSymbolOther) {
+        return false;
+      }
+    }
+
     key = (key << 5) | symbol;
   }
 
@@ -140,6 +165,30 @@ bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, co
   return first < count && packed20At(data.data(), first) == key;
 }
 
+uint32_t packed30At(const uint8_t* data, const size_t index) {
+  const uint8_t* p = data + index * 4;
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+         (static_cast<uint32_t>(p[3] & 0x3F) << 24);
+}
+
+template <size_t N>
+bool containsPacked30(const std::array<uint8_t, N>& data, const size_t count, const uint32_t key) {
+  size_t first = 0;
+  size_t last = count;
+
+  while (first < last) {
+    const size_t middle = first + (last - first) / 2;
+    const uint32_t value = packed30At(data.data(), middle);
+    if (value < key) {
+      first = middle + 1;
+    } else {
+      last = middle;
+    }
+  }
+
+  return first < count && packed30At(data.data(), first) == key;
+}
+
 }  // namespace
 
 void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* breaks) {
@@ -147,29 +196,41 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
     return;
   }
 
-  // The base engine is deliberately permissive: it implements the cheap
-  // Sprechsilben rules and proposes candidate boundaries. The generated
-  // tables turn that into a conservative e-reader policy:
-  //   1. keep candidates from globally safe immediate boundary classes;
-  //   2. otherwise keep only candidates with a safe 2+2 context;
-  //   3. add a high-confidence 2+2 residual break when the base engine missed it.
+  // Stage 1 is intentionally identical to the original hybrid policy:
+  //   - keep base candidates accepted by a globally safe immediate pair;
+  //   - otherwise require a safe 2+2 context;
+  //   - add high-confidence 2+2 residual breaks.
+  //
+  // Stage 2 only corrects what that policy still gets wrong:
+  //   - a 3+3 BLOCK removes a known-dangerous accepted break;
+  //   - otherwise a 3+3 ADD may recover a high-confidence missed break.
+  //
+  // BLOCK always wins. For an e-reader, omitting an optional legal break is
+  // preferable to displaying an illegal visible hyphen.
   for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
-    uint32_t context = 0;
-    const bool hasContext = contextKey(cps, boundary, context);
+    uint32_t context2 = 0;
+    const bool hasContext2 = contextKey2(cps, boundary, context2);
 
+    bool accepted = false;
     if (breaks[boundary] != 0) {
       uint16_t pair = 0;
       const bool safeByPair = pairKey(cps, boundary, pair) && isSafePair(pair);
-      const bool safeByContext = hasContext && containsPacked20(kGermanSafeContexts, kGermanSafeContextCount, context);
-
-      if (!safeByPair && !safeByContext) {
-        breaks[boundary] = 0;
-      }
-      continue;
+      const bool safeByContext =
+          hasContext2 && containsPacked20(kGermanSafeContexts, kGermanSafeContextCount, context2);
+      accepted = safeByPair || safeByContext;
+    } else if (hasContext2 && containsPacked20(kGermanAddContexts, kGermanAddContextCount, context2)) {
+      accepted = true;
     }
 
-    if (hasContext && containsPacked20(kGermanAddContexts, kGermanAddContextCount, context)) {
-      breaks[boundary] = 1;
+    uint32_t context3 = 0;
+    const bool hasContext3 = contextKey3(cps, boundary, context3);
+
+    if (hasContext3 && containsPacked30(kGermanBlockContexts3, kGermanBlockContext3Count, context3)) {
+      accepted = false;
+    } else if (!accepted && hasContext3 && containsPacked30(kGermanAddContexts3, kGermanAddContext3Count, context3)) {
+      accepted = true;
     }
+
+    breaks[boundary] = accepted ? 1 : 0;
   }
 }
