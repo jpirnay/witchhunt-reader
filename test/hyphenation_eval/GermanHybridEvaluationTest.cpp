@@ -61,10 +61,21 @@ std::vector<DanteCase> loadDanteCases() {
     std::string preferred;
     std::string undesirable;
 
-    if (!std::getline(stream, word, '|') || !std::getline(stream, legal, '|') ||
-        !std::getline(stream, preferred, '|') || !std::getline(stream, undesirable)) {
+    // Four fields are required:
+    //
+    //   word|legal|preferred|undesirable
+    //
+    // The last field is commonly empty ("word|2,5|2|"), which is valid.
+    if (std::count(line.begin(), line.end(), '|') != 3) {
       continue;
     }
+
+    if (!std::getline(stream, word, '|') || !std::getline(stream, legal, '|') ||
+        !std::getline(stream, preferred, '|')) {
+      continue;
+    }
+
+    std::getline(stream, undesirable);
 
     result.push_back({word, parsePositions(legal), parsePositions(preferred), parsePositions(undesirable)});
   }
@@ -90,6 +101,7 @@ TEST(GermanHybridEval, HeldOutDantePrecisionAndRecall) {
 
   const auto cases = loadDanteCases();
   ASSERT_FALSE(cases.empty()) << "german_dante_eval.txt missing; run scripts/update_hyphenation.sh first";
+  ASSERT_GE(cases.size(), 1000u) << "Too few DANTE evaluation cases loaded; fixture parsing is probably broken";
 
   size_t truePositives = 0;
   size_t falsePositives = 0;
@@ -152,9 +164,15 @@ TEST(GermanHybridEval, HeldOutDantePrecisionAndRecall) {
   ::testing::Test::RecordProperty("undesirable_used", std::to_string(undesirableUsed));
   ::testing::Test::RecordProperty("test_cases", std::to_string(cases.size()));
 
-  std::cout << "German hybrid DANTE: precision=" << precision * 100.0 << "% recall=" << recall * 100.0
-            << "% preferred-recall=" << preferredRecall * 100.0 << "% exact=" << exactRate * 100.0
-            << "% false-positive-breaks=" << falsePositives << " undesirable-used=" << undesirableUsed << '\n';
+  const size_t legalTotal = truePositives + falseNegatives;
+
+  std::cout << "German hybrid DANTE:"
+            << " cases=" << cases.size() << " legal-breaks=" << legalTotal
+            << " actual-breaks=" << (truePositives + falsePositives) << " precision=" << precision * 100.0 << "%"
+            << " recall=" << recall * 100.0 << "%"
+            << " preferred-recall=" << preferredRecall * 100.0 << "%"
+            << " exact=" << exactRate * 100.0 << "%"
+            << " false-positive-breaks=" << falsePositives << " undesirable-used=" << undesirableUsed << '\n';
 
   // Bootstrap gates. The conservative hybrid is intentionally optimized for
   // precision, not for reproducing every optional DANTE/Pyphen break.
