@@ -45,3 +45,10 @@ lib/EpdFont/scripts/output/
 .claude/*
 !.claude/skills/
 node_modules/
+/managed_components
+/.dummy
+/CMakeLists.txt
+/dependencies.lock
+/sdkconfig.*
+sdkconfig.sticky
+flake.*
