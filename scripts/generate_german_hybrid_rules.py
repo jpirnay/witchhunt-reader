@@ -56,6 +56,11 @@ class WordEntry:
     legal: frozenset[int]
     preferred: frozenset[int]
     undesirable: frozenset[int]
+    ordinary: frozenset[int]       # -
+    compound: frozenset[int]       # =
+    prefix: frozenset[int]         # <
+    suffix: frozenset[int]         # >
+    uncategorized: frozenset[int]  # ·
     bucket: int
 
 
@@ -276,6 +281,12 @@ def parse_word_line(line: str) -> WordEntry | None:
     legal: set[int] = set()
     preferred: set[int] = set()
     undesirable: set[int] = set()
+    ordinary: set[int] = set()
+    compound: set[int] = set()
+    prefix: set[int] = set()
+    suffix: set[int] = set()
+    uncategorized: set[int] = set()
+
     for boundary, marker in markers.items():
         if boundary < MIN_PREFIX or len(cps) - boundary < MIN_SUFFIX:
             continue
@@ -284,7 +295,23 @@ def parse_word_line(line: str) -> WordEntry | None:
         if "." in marker:
             undesirable.add(boundary)
             continue
+
         legal.add(boundary)
+
+        # Keep the original DANTE marker categories for diagnostics. Mixed
+        # markers deliberately put the same boundary into more than one
+        # category; these recalls are diagnostics, not a partition of legal.
+        if "-" in marker:
+            ordinary.add(boundary)
+        if "=" in marker:
+            compound.add(boundary)
+        if "<" in marker:
+            prefix.add(boundary)
+        if ">" in marker:
+            suffix.add(boundary)
+        if "·" in marker:
+            uncategorized.add(boundary)
+
         if any(ch in MORPHEME_MARKER_CHARS for ch in marker):
             preferred.add(boundary)
 
@@ -294,6 +321,11 @@ def parse_word_line(line: str) -> WordEntry | None:
         legal=frozenset(legal),
         preferred=frozenset(preferred),
         undesirable=frozenset(undesirable),
+        ordinary=frozenset(ordinary),
+        compound=frozenset(compound),
+        prefix=frozenset(prefix),
+        suffix=frozenset(suffix),
+        uncategorized=frozenset(uncategorized),
         bucket=split_bucket(plain),
     )
 
@@ -527,11 +559,20 @@ def write_eval_fixture(output: Path, candidates: list[tuple[bytes, WordEntry]]) 
     with output.open("w", encoding="utf-8") as out:
         out.write("# Held-out DANTE evaluation for GermanHybridHyphenator\n")
         out.write("# Bucket 9 is never used to generate firmware tables.\n")
-        out.write("# Format: word|legal|preferred|undesirable\n")
+        out.write(
+            "# Format: "
+            "word|legal|preferred|undesirable|"
+            "ordinary|compound|prefix|suffix|uncategorized\n"
+        )
         for _, entry in candidates:
             out.write(
                 f"{entry.word}|{positions(entry.legal)}|{positions(entry.preferred)}|"
-                f"{positions(entry.undesirable)}\n"
+                f"{positions(entry.undesirable)}|"
+                f"{positions(entry.ordinary)}|"
+                f"{positions(entry.compound)}|"
+                f"{positions(entry.prefix)}|"
+                f"{positions(entry.suffix)}|"
+                f"{positions(entry.uncategorized)}\n"
             )
 
 
