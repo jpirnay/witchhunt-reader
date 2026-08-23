@@ -6,10 +6,24 @@
 
 #include "generated/de_hybrid_rules.h"
 
+// Older / baseline generated headers do not contain any 3+3 tables.
+// A generator that emits 3+3 data must also emit:
+//
+//   #define GERMAN_HYBRID_HAS_3X3 1
+//
+// before the table declarations.
+//
+// This keeps the runtime source compatible with both generated formats.
+#ifndef GERMAN_HYBRID_HAS_3X3
+#define GERMAN_HYBRID_HAS_3X3 0
+#endif
+
 namespace {
 
 constexpr uint8_t kSymbolOther = 30;
+#if GERMAN_HYBRID_HAS_3X3
 constexpr uint8_t kSymbolPad = 31;
+#endif
 
 uint8_t germanSymbol(uint32_t cp) {
   cp = toLowerLatin(cp);
@@ -19,49 +33,47 @@ uint8_t germanSymbol(uint32_t cp) {
   }
 
   switch (cp) {
-    case 0x00E4:  // ä
-      return 26;
-    case 0x00F6:  // ö
-      return 27;
-    case 0x00FC:  // ü
-      return 28;
-    case 0x00DF:  // ß
-      return 29;
+    case 0x00E4:
+      return 26;  // ä
+    case 0x00F6:
+      return 27;  // ö
+    case 0x00FC:
+      return 28;  // ü
+    case 0x00DF:
+      return 29;  // ß
 
-    // Fold common accented vowels used in German foreign words to their
-    // ASCII base letter. Keep this mapping identical to the generator.
-    case 0x00E0:  // à
-    case 0x00E1:  // á
-    case 0x00E2:  // â
-    case 0x00E3:  // ã
-    case 0x00E5:  // å
+    case 0x00E0:
+    case 0x00E1:
+    case 0x00E2:
+    case 0x00E3:
+    case 0x00E5:
       return static_cast<uint8_t>('a' - 'a');
 
-    case 0x00E8:  // è
-    case 0x00E9:  // é
-    case 0x00EA:  // ê
-    case 0x00EB:  // ë
+    case 0x00E8:
+    case 0x00E9:
+    case 0x00EA:
+    case 0x00EB:
       return static_cast<uint8_t>('e' - 'a');
 
-    case 0x00EC:  // ì
-    case 0x00ED:  // í
-    case 0x00EE:  // î
-    case 0x00EF:  // ï
+    case 0x00EC:
+    case 0x00ED:
+    case 0x00EE:
+    case 0x00EF:
       return static_cast<uint8_t>('i' - 'a');
 
-    case 0x00F2:  // ò
-    case 0x00F3:  // ó
-    case 0x00F4:  // ô
-    case 0x00F5:  // õ
+    case 0x00F2:
+    case 0x00F3:
+    case 0x00F4:
+    case 0x00F5:
       return static_cast<uint8_t>('o' - 'a');
 
-    case 0x00F9:  // ù
-    case 0x00FA:  // ú
-    case 0x00FB:  // û
+    case 0x00F9:
+    case 0x00FA:
+    case 0x00FB:
       return static_cast<uint8_t>('u' - 'a');
 
-    case 0x00FD:  // ý
-    case 0x00FF:  // ÿ
+    case 0x00FD:
+    case 0x00FF:
       return static_cast<uint8_t>('y' - 'a');
 
     default:
@@ -76,6 +88,7 @@ bool pairKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint1
 
   const uint8_t left = germanSymbol(cps[boundary - 1].value);
   const uint8_t right = germanSymbol(cps[boundary].value);
+
   if (left == kSymbolOther || right == kSymbolOther) {
     return false;
   }
@@ -84,9 +97,7 @@ bool pairKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint1
   return true;
 }
 
-bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
-  // minPrefix/minSuffix are both 2, so every runtime boundary considered by
-  // applyGermanHybridOverrides() has two codepoints available on each side.
+bool contextKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
   if (boundary < 2 || boundary + 1 >= cps.size()) {
     return false;
   }
@@ -110,35 +121,10 @@ bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, u
   return true;
 }
 
-bool contextKey3(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
-  // Six 5-bit symbols -> 30-bit key. Boundaries are allowed two characters
-  // from a word edge, so use symbol 31 as a pad for the missing third context
-  // character.  Symbol 30 remains reserved for unsupported/other characters.
-  uint32_t key = 0;
-  const std::ptrdiff_t base = static_cast<std::ptrdiff_t>(boundary);
-  const std::ptrdiff_t size = static_cast<std::ptrdiff_t>(cps.size());
-
-  for (std::ptrdiff_t relative = -3; relative <= 2; ++relative) {
-    const std::ptrdiff_t index = base + relative;
-    uint8_t symbol = kSymbolPad;
-
-    if (index >= 0 && index < size) {
-      symbol = germanSymbol(cps[static_cast<size_t>(index)].value);
-      if (symbol == kSymbolOther) {
-        return false;
-      }
-    }
-
-    key = (key << 5) | symbol;
-  }
-
-  outKey = key;
-  return true;
-}
-
 bool isSafePair(const uint16_t key) {
   const size_t byteIndex = key >> 3;
   const uint8_t mask = static_cast<uint8_t>(1u << (key & 7u));
+
   return byteIndex < kGermanSafePairBits.size() && (kGermanSafePairBits[byteIndex] & mask) != 0;
 }
 
@@ -155,6 +141,7 @@ bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, co
   while (first < last) {
     const size_t middle = first + (last - first) / 2;
     const uint32_t value = packed20At(data.data(), middle);
+
     if (value < key) {
       first = middle + 1;
     } else {
@@ -163,6 +150,38 @@ bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, co
   }
 
   return first < count && packed20At(data.data(), first) == key;
+}
+
+#if GERMAN_HYBRID_HAS_3X3
+
+uint8_t contextSymbol3(const std::vector<CodepointInfo>& cps, const int index) {
+  if (index < 0 || index >= static_cast<int>(cps.size())) {
+    return kSymbolPad;
+  }
+  return germanSymbol(cps[static_cast<size_t>(index)].value);
+}
+
+bool contextKey3(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
+  if (boundary == 0 || boundary >= cps.size()) {
+    return false;
+  }
+
+  const int b = static_cast<int>(boundary);
+  const uint8_t symbols[6] = {
+      contextSymbol3(cps, b - 3), contextSymbol3(cps, b - 2), contextSymbol3(cps, b - 1),
+      contextSymbol3(cps, b),     contextSymbol3(cps, b + 1), contextSymbol3(cps, b + 2),
+  };
+
+  uint32_t key = 0;
+  for (const uint8_t symbol : symbols) {
+    if (symbol == kSymbolOther) {
+      return false;
+    }
+    key = (key << 5) | symbol;
+  }
+
+  outKey = key;
+  return true;
 }
 
 uint32_t packed30At(const uint8_t* data, const size_t index) {
@@ -179,6 +198,7 @@ bool containsPacked30(const std::array<uint8_t, N>& data, const size_t count, co
   while (first < last) {
     const size_t middle = first + (last - first) / 2;
     const uint32_t value = packed30At(data.data(), middle);
+
     if (value < key) {
       first = middle + 1;
     } else {
@@ -189,6 +209,8 @@ bool containsPacked30(const std::array<uint8_t, N>& data, const size_t count, co
   return first < count && packed30At(data.data(), first) == key;
 }
 
+#endif
+
 }  // namespace
 
 void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* breaks) {
@@ -196,41 +218,37 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
     return;
   }
 
-  // Stage 1 is intentionally identical to the original hybrid policy:
-  //   - keep base candidates accepted by a globally safe immediate pair;
-  //   - otherwise require a safe 2+2 context;
-  //   - add high-confidence 2+2 residual breaks.
-  //
-  // Stage 2 only corrects what that policy still gets wrong:
-  //   - a 3+3 BLOCK removes a known-dangerous accepted break;
-  //   - otherwise a 3+3 ADD may recover a high-confidence missed break.
-  //
-  // BLOCK always wins. For an e-reader, omitting an optional legal break is
-  // preferable to displaying an illegal visible hyphen.
   for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
-    uint32_t context2 = 0;
-    const bool hasContext2 = contextKey2(cps, boundary, context2);
+    uint32_t context = 0;
+    const bool hasContext = contextKey(cps, boundary, context);
 
-    bool accepted = false;
     if (breaks[boundary] != 0) {
       uint16_t pair = 0;
       const bool safeByPair = pairKey(cps, boundary, pair) && isSafePair(pair);
-      const bool safeByContext =
-          hasContext2 && containsPacked20(kGermanSafeContexts, kGermanSafeContextCount, context2);
-      accepted = safeByPair || safeByContext;
-    } else if (hasContext2 && containsPacked20(kGermanAddContexts, kGermanAddContextCount, context2)) {
-      accepted = true;
+      const bool safeByContext = hasContext && containsPacked20(kGermanSafeContexts, kGermanSafeContextCount, context);
+
+      if (!safeByPair && !safeByContext) {
+        breaks[boundary] = 0;
+      }
+    } else if (hasContext && containsPacked20(kGermanAddContexts, kGermanAddContextCount, context)) {
+      breaks[boundary] = 1;
     }
 
+#if GERMAN_HYBRID_HAS_3X3
     uint32_t context3 = 0;
-    const bool hasContext3 = contextKey3(cps, boundary, context3);
-
-    if (hasContext3 && containsPacked30(kGermanBlockContexts3, kGermanBlockContext3Count, context3)) {
-      accepted = false;
-    } else if (!accepted && hasContext3 && containsPacked30(kGermanAddContexts3, kGermanAddContext3Count, context3)) {
-      accepted = true;
+    if (!contextKey3(cps, boundary, context3)) {
+      continue;
     }
 
-    breaks[boundary] = accepted ? 1 : 0;
+    // BLOCK always wins.
+    if (containsPacked30(kGermanBlockContexts3, kGermanBlockContext3Count, context3)) {
+      breaks[boundary] = 0;
+      continue;
+    }
+
+    if (breaks[boundary] == 0 && containsPacked30(kGermanAddContexts3, kGermanAddContext3Count, context3)) {
+      breaks[boundary] = 1;
+    }
+#endif
   }
 }
