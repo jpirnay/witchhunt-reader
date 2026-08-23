@@ -31,6 +31,8 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/Hyphenator.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LanguageRegistry.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LiangHyphenation.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridHyphenator.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridRules.cpp
   ${REPO_ROOT}/lib/Epub/Epub/converters/GifToFramebufferConverter.cpp
   ${REPO_ROOT}/lib/Epub/Epub/converters/ImageDecoderFactory.cpp
   ${REPO_ROOT}/lib/Epub/Epub/converters/ImageToFramebufferDecoder.cpp
