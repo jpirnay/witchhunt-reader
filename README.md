@@ -171,6 +171,8 @@ These are bundled directly in the repository. Each retains its upstream copyrigh
 - **yxml** by Yoran Heling — the XML/HTML SAX parser backend (`SaxParser`), used by the EPUB and OPDS parsers. https://dev.yorhel.nl/yxml — Copyright (c) 2013-2014 Yoran Heling, MIT. Vendored under [`lib/SaxParser`](lib/SaxParser).
 - **uzlib** by Joergen Ibsen and Paul Sokolovsky — tiny DEFLATE/inflate, used for ZIP/EPUB extraction and PNG inflate. https://github.com/pfalcon/uzlib — Copyright (c) 2003 Joergen Ibsen, (c) 2014-2018 Paul Sokolovsky, zlib license. Vendored under [`lib/uzlib`](lib/uzlib).
 - **QR-Code-generator (qrcodegen)** by Project Nayuki — QR code generation. https://github.com/nayuki/QR-Code-generator — Copyright (c) Project Nayuki, MIT. Vendored under [`lib/QRCode`](lib/QRCode).
+- **DANTE German word list** (`hyphenation/languages-german`) — annotated German hyphenation/morpheme data used at build/update time to generate the compact German hybrid-hyphenation validator and its held-out test corpus. MIT licensed; upstream copyright and license are retained in `lib/Epub/Epub/hyphenation/generated/DANTE-LICENSE.txt`.
+
 
 ## External libraries (PlatformIO `lib_deps`)
 Pulled from the PlatformIO registry at build time.

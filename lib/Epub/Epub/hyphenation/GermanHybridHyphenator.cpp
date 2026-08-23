@@ -57,11 +57,6 @@ bool isGermanVowel(const uint32_t cpIn) {
   }
 }
 
-bool isPair(const std::vector<CodepointInfo>& cps, const size_t pos, const char first, const char second) {
-  return pos + 1 < cps.size() && lower(cps[pos].value) == static_cast<uint32_t>(first) &&
-         lower(cps[pos + 1].value) == static_cast<uint32_t>(second);
-}
-
 bool isProtectedDiphthong(const std::vector<CodepointInfo>& cps, const size_t pos) {
   if (pos + 1 >= cps.size()) {
     return false;
@@ -195,7 +190,7 @@ std::vector<size_t> GermanHybridHyphenator::breakIndexes(const std::vector<Codep
   // Generated high-confidence corrections:
   //   + add missed morphology/foreign-word breaks
   //   - suppress unsafe base-rule breaks
-  applyGermanHybridOverrides(cps, breaks.data(), cps.size());
+  applyGermanHybridOverrides(cps, breaks.data());
 
   std::vector<size_t> result;
 

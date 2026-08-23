@@ -1,9 +1,12 @@
 add_executable(HyphenationEvaluationTest
   HyphenationEvaluationTest.cpp
+  GermanHybridEvaluationTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/Hyphenator.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LanguageRegistry.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LiangHyphenation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationCommon.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridHyphenator.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridRules.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
 
