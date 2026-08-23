@@ -1,6 +1,7 @@
+#include "GermanHybridHyphenator.h"
+
 #include <array>
 
-#include "GermanHybridHyphenator.h"
 #include "GermanHybridRules.h"
 #include "HyphenationCommon.h"
 
