@@ -5,9 +5,8 @@
 
 #include "HyphenationCommon.h"
 
-// Takes the candidate break mask produced by GermanHybridHyphenator's small
-// rule engine, removes candidates that are not known-safe, and adds a small
-// number of high-confidence residual breaks learned from DANTE.
+// Validates candidate German syllable breaks and adds high-confidence
+// residual breaks learned from the DANTE German word list.
 //
-// breaks[i] corresponds to a break before cps[i].
+// breaks[i] means that a break may occur before cps[i].
 void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* breaks);
