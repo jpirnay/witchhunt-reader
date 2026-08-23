@@ -1,23 +1,31 @@
 #pragma once
 
-#include "LiangHyphenation.h"
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
-// Generic Liang-backed hyphenator that stores pattern metadata plus language-specific helpers.
+#include "HyphenationCommon.h"
+
+// What should visually happen when the line is broken at a language-generated
+// break opportunity?
+//
+// Western hyphenation normally inserts a visible hyphen.
+// East-Asian line breaking normally does not.
+enum class BreakDecoration : uint8_t {
+  InsertHyphen,
+  None,
+};
+
 class LanguageHyphenator {
  public:
-  LanguageHyphenator(const SerializedHyphenationPatterns& patterns, bool (*isLetterFn)(uint32_t),
-                     uint32_t (*toLowerFn)(uint32_t), size_t minPrefix = LiangWordConfig::kDefaultMinPrefix,
-                     size_t minSuffix = LiangWordConfig::kDefaultMinSuffix)
-      : patterns_(patterns), config_(isLetterFn, toLowerFn, minPrefix, minSuffix) {}
+  virtual ~LanguageHyphenator() = default;
 
-  std::vector<size_t> breakIndexes(const std::vector<CodepointInfo>& cps) const {
-    return liangBreakIndexes(cps, patterns_, config_);
-  }
+  // Returns codepoint indexes at which a line may be broken.
+  // Index N means: break before cps[N].
+  virtual std::vector<size_t> breakIndexes(const std::vector<CodepointInfo>& cps) const = 0;
 
-  size_t minPrefix() const { return config_.minPrefix; }
-  size_t minSuffix() const { return config_.minSuffix; }
+  virtual size_t minPrefix() const = 0;
+  virtual size_t minSuffix() const = 0;
 
- protected:
-  const SerializedHyphenationPatterns& patterns_;
-  LiangWordConfig config_;
+  virtual BreakDecoration breakDecoration() const = 0;
 };

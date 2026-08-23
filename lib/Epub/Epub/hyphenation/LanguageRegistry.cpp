@@ -3,8 +3,9 @@
 #include <algorithm>
 #include <array>
 
+#include "GermanHybridHyphenator.h"
 #include "HyphenationCommon.h"
-#include "generated/hyph-de.trie.h"
+#include "LiangLanguageHyphenator.h"
 #include "generated/hyph-en.trie.h"
 #include "generated/hyph-es.trie.h"
 #include "generated/hyph-fr.trie.h"
@@ -16,16 +17,23 @@
 
 namespace {
 
-// English hyphenation patterns (3/3 minimum prefix/suffix length)
-LanguageHyphenator englishHyphenator(en_patterns, isLatinLetter, toLowerLatin, 3, 3);
-LanguageHyphenator frenchHyphenator(fr_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator germanHyphenator(de_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator russianHyphenator(ru_patterns, isCyrillicLetter, toLowerCyrillic);
-LanguageHyphenator spanishHyphenator(es_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator italianHyphenator(it_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator swedishHyphenator(sv_patterns, isLatinLetter, toLowerLatin);
-LanguageHyphenator ukrainianHyphenator(uk_patterns, isCyrillicLetter, toLowerCyrillic);
-LanguageHyphenator polishHyphenator(pl_patterns, isLatinLetter, toLowerLatin);
+LiangLanguageHyphenator englishHyphenator(en_patterns, isLatinLetter, toLowerLatin, 3, 3);
+
+LiangLanguageHyphenator frenchHyphenator(fr_patterns, isLatinLetter, toLowerLatin);
+
+GermanHybridHyphenator germanHyphenator;
+
+LiangLanguageHyphenator russianHyphenator(ru_patterns, isCyrillicLetter, toLowerCyrillic);
+
+LiangLanguageHyphenator spanishHyphenator(es_patterns, isLatinLetter, toLowerLatin);
+
+LiangLanguageHyphenator italianHyphenator(it_patterns, isLatinLetter, toLowerLatin);
+
+LiangLanguageHyphenator swedishHyphenator(sv_patterns, isLatinLetter, toLowerLatin);
+
+LiangLanguageHyphenator ukrainianHyphenator(uk_patterns, isCyrillicLetter, toLowerCyrillic);
+
+LiangLanguageHyphenator polishHyphenator(pl_patterns, isLatinLetter, toLowerLatin);
 
 using EntryArray = std::array<LanguageEntry, 9>;
 

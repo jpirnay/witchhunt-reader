@@ -102,7 +102,9 @@ void appendSegmentPatternBreaks(const std::vector<CodepointInfo>& cps, const Lan
         if (idx == 0 || idx >= segment.size()) continue;
         const size_t cpIdx = segStart + idx;
         if (cpIdx < cps.size()) {
-          outBreaks.push_back({cps[cpIdx].byteOffset, true});
+          const bool insertHyphen = hyphenator.breakDecoration() == BreakDecoration::InsertHyphen;
+
+          outBreaks.push_back({cps[cpIdx].byteOffset, insertHyphen});
         }
       }
     }
@@ -246,10 +248,11 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
 
   std::vector<Hyphenator::BreakInfo> breaks;
   breaks.reserve(indexes.size());
-  for (const size_t idx : indexes) {
-    breaks.push_back({byteOffsetForIndex(cps, idx), true});
-  }
+  const bool insertHyphen = !hyphenator || hyphenator->breakDecoration() == BreakDecoration::InsertHyphen;
 
+  for (const size_t idx : indexes) {
+    breaks.push_back({byteOffsetForIndex(cps, idx), insertHyphen});
+  }
   return breaks;
 }
 
