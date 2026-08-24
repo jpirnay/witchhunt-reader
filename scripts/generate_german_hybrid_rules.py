@@ -92,6 +92,15 @@ ADD3_CONFIDENCE_DEFAULT = 0.90
 MAX_3X3_PAYLOAD_DEFAULT = 20_000
 THREE_X_THREE_KEY_BYTES = 4
 
+# German morphology component list. These are learned from DANTE compound (=)
+# boundaries, not hard-coded word exceptions. Runtime uses them only to prefer
+# an already accepted compound boundary when a candidate is one or two
+# characters away from that boundary.
+MAX_MORPH_COMPONENTS_DEFAULT = 128
+MIN_MORPH_COMPONENT_SUPPORT_DEFAULT = 15
+MIN_MORPH_COMPONENT_LENGTH = 4
+MAX_MORPH_COMPONENT_LENGTH = 18
+
 
 @dataclass(frozen=True)
 class WordEntry:
@@ -1150,6 +1159,77 @@ def exact_metrics(
     )
 
 
+def build_morphology_components(
+    entries: list[WordEntry],
+    min_support: int,
+    max_components: int,
+) -> list[bytes]:
+    """
+    Learn frequent German compound components from DANTE's '=' markers.
+
+    We deliberately do not learn individual false-positive words. A component
+    is useful only when DANTE repeatedly marks it as a compound constituent.
+    This keeps the runtime rule lexical/morphological while remaining small.
+    """
+    counts: dict[str, int] = defaultdict(int)
+
+    for entry in entries:
+        if entry.bucket > 6 or not entry.compound:
+            continue
+
+        boundaries = sorted(entry.compound)
+        points = [0, *boundaries, len(entry.cps)]
+
+        for left, right in zip(points, points[1:]):
+            length = right - left
+            if not (
+                MIN_MORPH_COMPONENT_LENGTH
+                <= length
+                <= MAX_MORPH_COMPONENT_LENGTH
+            ):
+                continue
+
+            component = ''.join(chr(cp) for cp in entry.cps[left:right]).casefold()
+            if not all(german_symbol(ord(ch)) != SYMBOL_OTHER for ch in component):
+                continue
+            counts[component] += 1
+
+    selected = [
+        (component, count)
+        for component, count in counts.items()
+        if count >= min_support
+    ]
+
+    selected.sort(
+        key=lambda item: (item[1], len(item[0]), item[0]),
+        reverse=True,
+    )
+
+    return [
+        component.encode('utf-8')
+        for component, _count in selected[:max_components]
+    ]
+
+
+def pack_morphology_components(
+    components: list[bytes],
+) -> tuple[bytes, list[int], list[int]]:
+    """Store each component as one-byte German 5-bit symbols."""
+    blob = bytearray()
+    offsets: list[int] = []
+    lengths: list[int] = []
+
+    for component in components:
+        text = component.decode('utf-8')
+        symbols = [german_symbol(ord(ch)) for ch in text]
+        if any(symbol == SYMBOL_OTHER for symbol in symbols):
+            continue
+        offsets.append(len(blob))
+        lengths.append(len(symbols))
+        blob.extend(symbols)
+
+    return bytes(blob), offsets, lengths
+
 def write_header(
     output: Path,
     source: Path,
@@ -1158,6 +1238,7 @@ def write_header(
     add_contexts: set[int],
     block: set[int],
     add: set[int],
+    morphology_components: list[bytes],
 ) -> None:
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
 
@@ -1198,6 +1279,10 @@ def write_header(
             (key >> 16) & 0xFF,
             (key >> 24) & 0x3F,
         ))
+
+    morph_blob, morph_offsets, morph_lengths = pack_morphology_components(
+        morphology_components
+    )
 
     def fmt(blob: bytes) -> str:
         if not blob:
@@ -1259,6 +1344,25 @@ kGermanAddContexts3 = {{
 }};
 
 inline constexpr size_t kGermanAddContext3Count = {len(add)};
+"""
+
+    text += f"""
+inline constexpr std::array<uint8_t, {len(morph_blob)}>
+kGermanMorphologyComponentBlob = {{
+{fmt(morph_blob)}
+}};
+
+inline constexpr std::array<uint16_t, {len(morph_offsets)}>
+kGermanMorphologyComponentOffsets = {{
+{', '.join(str(x) for x in morph_offsets)}
+}};
+
+inline constexpr std::array<uint8_t, {len(morph_lengths)}>
+kGermanMorphologyComponentLengths = {{
+{', '.join(str(x) for x in morph_lengths)}
+}};
+
+inline constexpr size_t kGermanMorphologyComponentCount = {len(morph_offsets)};
 """
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1360,6 +1464,16 @@ def main() -> None:
         default=0,
         help="Maximum undesirable-break increase over each validation baseline.",
     )
+    parser.add_argument(
+        "--max-morph-components",
+        type=int,
+        default=MAX_MORPH_COMPONENTS_DEFAULT,
+    )
+    parser.add_argument(
+        "--min-morph-component-support",
+        type=int,
+        default=MIN_MORPH_COMPONENT_SUPPORT_DEFAULT,
+    )
 
     args = parser.parse_args()
 
@@ -1388,6 +1502,16 @@ def main() -> None:
         f"devA={len(dev_a)} "
         f"devB={len(dev_b)} "
         f"test={len(test)}"
+    )
+
+    morphology_components = build_morphology_components(
+        all_entries,
+        args.min_morph_component_support,
+        args.max_morph_components,
+    )
+    print(
+        f"German morphology components: {len(morphology_components)} "
+        f"(min-support={args.min_morph_component_support})"
     )
 
     # ------------------------------------------------------------------
@@ -1880,6 +2004,7 @@ def main() -> None:
         add_contexts,
         selected_block,
         selected_add,
+        morphology_components,
     )
 
     write_fixture(
