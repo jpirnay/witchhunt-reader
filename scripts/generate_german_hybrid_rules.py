@@ -372,7 +372,7 @@ def apply_3x3(entry: WordEntry, baseline: set[int], block: set[int], add: set[in
 
 
 def metrics(cases, safe_pairs, safe_contexts, add_contexts, block, add):
-    m = {"words":0,"tp":0,"fp":0,"fn":0,"exact":0,"preferred_found":0,"preferred_total":0,"undesirable_used":0}
+    m = {"words":0,"tp":0,"fp":0,"fn":0,"exact":0,"preferred_found":0,"preferred_total":0,"undesirable_used":0, "false_positives":0}
     for e in cases:
         actual = apply_3x3(e, apply_base(e, safe_pairs, safe_contexts, add_contexts), block, add)
         m["words"] += 1
@@ -380,6 +380,7 @@ def metrics(cases, safe_pairs, safe_contexts, add_contexts, block, add):
         m["exact"] += int(actual == e.legal)
         m["preferred_found"] += len(actual & e.preferred); m["preferred_total"] += len(e.preferred)
         m["undesirable_used"] += len(actual & e.undesirable)
+        m["false_positives"] += len(actual & e.false_positives) if hasattr(e, "false_positives") else 0
     p = m["tp"] / (m["tp"] + m["fp"]) if m["tp"] + m["fp"] else 1.0
     r = m["tp"] / (m["tp"] + m["fn"]) if m["tp"] + m["fn"] else 1.0
     f = 2*p*r/(p+r) if p+r else 0.0
@@ -486,9 +487,27 @@ def main():
     print(f"selected 3+3: block={len(block)} add={len(add)}")
     print(f"3+3 payload: {4*(len(block)+len(add))} bytes / {args.max_3x3_payload} max")
     print(f"generated payload: {payload} bytes (2+2={128+3*(len(safe_contexts)+len(add_contexts))}, 3+3={4*(len(block)+len(add))})")
-    print(f"validation-selected: words={vm['words']} precision={vm['precision']*100:.3f}% recall={vm['recall']*100:.3f}% F1={vm['f1']*100:.3f}% exact={vm['exact']*100:.3f}% preferred-recall={vm['preferred_recall']*100:.3f}% undesirable-used={vm['undesirable_used']} false-positives={vm['false_positives']}")
+    print(
+        f"validation-selected: "
+        f"words={vm['words']} "
+        f"precision={vm['precision']*100:.3f}% "
+        f"recall={vm['recall']*100:.3f}% "
+        f"F1={vm['f1']*100:.3f}% "
+        f"exact={vm['exact']*100:.3f}% "
+        f"preferred-recall={vm['preferred_recall']*100:.3f}% "
+        f"undesirable-used={vm['undesirable_used']} "
+        f"false-positives={vm.get('false_positives', 0)}"
+    )
     tm=metrics(test,safe_pairs,safe_contexts,add_contexts,block,add)
-    print(f"test: words={tm['words']} precision={tm['precision']*100:.3f}% recall={tm['recall']*100:.3f}% F1={tm['f1']*100:.3f}% exact={tm['exact']*100:.3f}% preferred-recall={tm['preferred_recall']*100:.3f}% undesirable-used={tm['undesirable_used']} false-positives={tm['false_positives']}")
+    print(
+        f"test: words={tm['words']} "
+        f"precision={tm['precision']*100:.3f}% "
+        f"recall={tm['recall']*100:.3f}% "
+        f"F1={tm['f1']*100:.3f}% "
+        f"exact={tm['exact']*100:.3f}% "
+        f"preferred-recall={tm['preferred_recall']*100:.3f}% "
+        f"undesirable-used={tm['undesirable_used']} "
+        f"false-positives={tm.get('false_positives', 0)}")
 
     write_header(args.output_header,args.input,safe_pairs,safe_contexts,add_contexts,block,add)
     write_fixture(args.output_eval,test)
