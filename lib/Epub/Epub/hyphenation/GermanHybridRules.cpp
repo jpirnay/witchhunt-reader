@@ -197,22 +197,15 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
     return;
   }
 
-  // Stage 1 is intentionally identical to the original hybrid policy:
-  //   - keep base candidates accepted by a globally safe immediate pair;
-  //   - otherwise require a safe 2+2 context;
-  //   - add high-confidence 2+2 residual breaks.
-  //
-  // Stage 2 only corrects what that policy still gets wrong:
-  //   - a 3+3 BLOCK removes a known-dangerous accepted break;
-  //   - otherwise a 3+3 ADD may recover a high-confidence missed break.
-  //
-  // BLOCK always wins. For an e-reader, omitting an optional legal break is
-  // preferable to displaying an illegal visible hyphen.
+  // Stage 1: establish the complete 2+2 baseline for every boundary first.
+  // This is important because the morphology layer needs to see the same
+  // accepted alternatives that it sees in the Python generator.
   for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
     uint32_t context2 = 0;
     const bool hasContext2 = contextKey2(cps, boundary, context2);
 
     bool accepted = false;
+
     if (breaks[boundary] != 0) {
       uint16_t pair = 0;
       const bool safeByPair = pairKey(cps, boundary, pair) && isSafePair(pair);
@@ -223,11 +216,16 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
       accepted = true;
     }
 
-    // German morphology layer: only override an already accepted break when
-    // a learned compound component has an accepted boundary within +/-2.
-    // This is deliberately before the 3+3 residual layer.
-    if (breaks[boundary] != 0 && germanMorphologyShouldBlock(cps, breaks, boundary)) {
-      breaks[boundary] = 0;
+    breaks[boundary] = accepted ? 1 : 0;
+  }
+
+  // Stage 2: apply morphology, then the residual 3+3 layer.
+  // BLOCK always wins over ADD.
+  for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
+    bool accepted = breaks[boundary] != 0;
+
+    if (accepted && germanMorphologyShouldBlock(cps, breaks, boundary)) {
+      accepted = false;
     }
 
     uint32_t context3 = 0;

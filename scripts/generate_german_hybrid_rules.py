@@ -644,15 +644,59 @@ def apply_2x2(
     return frozenset(result)
 
 
+def morphology_should_block(
+    cps: tuple[int, ...],
+    breaks: frozenset[int],
+    boundary: int,
+    morphology_components: list[tuple[int, ...]],
+) -> bool:
+    """Mirror germanMorphologyShouldBlock() for generator-side evaluation.
+
+    A currently accepted break is suppressed only when an already accepted
+    alternative break exists 1..2 characters away at the start of a learned
+    compound component. This keeps the Python optimizer identical to the
+    firmware runtime.
+    """
+    max_distance = 2
+    for distance in range(1, max_distance + 1):
+        right = boundary + distance
+        if right < len(cps) and right in breaks:
+            for component in morphology_components:
+                if right + len(component) <= len(cps):
+                    if tuple(german_symbol(cp) for cp in cps[right:right + len(component)]) == component:
+                        return True
+
+        if boundary >= distance:
+            left = boundary - distance
+            if left in breaks:
+                for component in morphology_components:
+                    if left + len(component) <= len(cps):
+                        if tuple(german_symbol(cp) for cp in cps[left:left + len(component)]) == component:
+                            return True
+    return False
+
+
+def compile_morphology_components(
+    components: list[bytes],
+) -> list[tuple[int, ...]]:
+    """Decode generated UTF-8 components into the firmware symbol alphabet."""
+    result: list[tuple[int, ...]] = []
+    for component in components:
+        text = component.decode("utf-8")
+        symbols = tuple(german_symbol(ord(ch)) for ch in text)
+        if symbols and all(symbol != SYMBOL_OTHER for symbol in symbols):
+            result.append(symbols)
+    return result
+
+
 def analyze_entries(
     entries: list[WordEntry],
     safe_pairs: set[int],
     safe_contexts: set[int],
     add_contexts: set[int],
+    morphology_components: list[tuple[int, ...]],
 ) -> list[AnalyzedEntry]:
-    """
-    Cache both the base rule result and the 2+2 result exactly once.
-    """
+    """Cache base + 2+2 + morphology exactly once per word."""
     result: list[AnalyzedEntry] = []
 
     for entry in entries:
@@ -660,11 +704,25 @@ def analyze_entries(
         baseline = apply_2x2(
             entry, base, safe_pairs, safe_contexts, add_contexts
         )
+        protected: set[int] = set(baseline)
+        # Match the firmware's sequential morphology pass: earlier boundaries
+        # may already have been suppressed when a later boundary is examined.
+        for boundary in range(2, len(entry.cps) - 2):
+            if boundary not in protected:
+                continue
+            if morphology_should_block(
+                entry.cps,
+                frozenset(protected),
+                boundary,
+                morphology_components,
+            ):
+                protected.discard(boundary)
+
         result.append(
             AnalyzedEntry(
                 entry=entry,
                 base=base,
-                baseline=baseline,
+                baseline=frozenset(protected),
             )
         )
 
@@ -1509,8 +1567,11 @@ def main() -> None:
         args.min_morph_component_support,
         args.max_morph_components,
     )
+    morphology_symbols = compile_morphology_components(
+        morphology_components
+    )
     print(
-        f"German morphology components: {len(morphology_components)} "
+        f"German morphology components: {len(morphology_symbols)} "
         f"(min-support={args.min_morph_component_support})"
     )
 
@@ -1536,24 +1597,28 @@ def main() -> None:
         safe_pairs,
         safe_contexts,
         add_contexts,
+        morphology_symbols,
     )
     analyzed_a = analyze_entries(
         dev_a,
         safe_pairs,
         safe_contexts,
         add_contexts,
+        morphology_symbols,
     )
     analyzed_b = analyze_entries(
         dev_b,
         safe_pairs,
         safe_contexts,
         add_contexts,
+        morphology_symbols,
     )
     analyzed_test = analyze_entries(
         test,
         safe_pairs,
         safe_contexts,
         add_contexts,
+        morphology_symbols,
     )
 
     baseline_a = metrics_for_baseline(analyzed_a)
