@@ -1341,10 +1341,3 @@ kGermanAddContexts3 = {
 };
 
 inline constexpr size_t kGermanAddContext3Count = 250;
-
-inline constexpr std::array<uint8_t, 0>
-kGermanMorphologyAddContexts2 = {
-
-};
-
-inline constexpr size_t kGermanMorphologyAddContext2Count = 0;

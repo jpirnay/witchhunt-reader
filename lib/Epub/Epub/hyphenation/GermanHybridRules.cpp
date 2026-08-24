@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "GermanMorphologyRules.h"
 #include "generated/de_hybrid_rules.h"
 
 namespace {
@@ -20,42 +19,51 @@ uint8_t germanSymbol(uint32_t cp) {
   }
 
   switch (cp) {
-    case 0x00E4:
-      return 26;  // ä
-    case 0x00F6:
-      return 27;  // ö
-    case 0x00FC:
-      return 28;  // ü
-    case 0x00DF:
-      return 29;  // ß
-    case 0x00E0:
-    case 0x00E1:
-    case 0x00E2:
-    case 0x00E3:
-    case 0x00E5:
+    case 0x00E4:  // ä
+      return 26;
+    case 0x00F6:  // ö
+      return 27;
+    case 0x00FC:  // ü
+      return 28;
+    case 0x00DF:  // ß
+      return 29;
+
+    // Fold common accented vowels used in German foreign words to their
+    // ASCII base letter. Keep this mapping identical to the generator.
+    case 0x00E0:  // à
+    case 0x00E1:  // á
+    case 0x00E2:  // â
+    case 0x00E3:  // ã
+    case 0x00E5:  // å
       return static_cast<uint8_t>('a' - 'a');
-    case 0x00E8:
-    case 0x00E9:
-    case 0x00EA:
-    case 0x00EB:
+
+    case 0x00E8:  // è
+    case 0x00E9:  // é
+    case 0x00EA:  // ê
+    case 0x00EB:  // ë
       return static_cast<uint8_t>('e' - 'a');
-    case 0x00EC:
-    case 0x00ED:
-    case 0x00EE:
-    case 0x00EF:
+
+    case 0x00EC:  // ì
+    case 0x00ED:  // í
+    case 0x00EE:  // î
+    case 0x00EF:  // ï
       return static_cast<uint8_t>('i' - 'a');
-    case 0x00F2:
-    case 0x00F3:
-    case 0x00F4:
-    case 0x00F5:
+
+    case 0x00F2:  // ò
+    case 0x00F3:  // ó
+    case 0x00F4:  // ô
+    case 0x00F5:  // õ
       return static_cast<uint8_t>('o' - 'a');
-    case 0x00F9:
-    case 0x00FA:
-    case 0x00FB:
+
+    case 0x00F9:  // ù
+    case 0x00FA:  // ú
+    case 0x00FB:  // û
       return static_cast<uint8_t>('u' - 'a');
-    case 0x00FD:
-    case 0x00FF:
+
+    case 0x00FD:  // ý
+    case 0x00FF:  // ÿ
       return static_cast<uint8_t>('y' - 'a');
+
     default:
       return kSymbolOther;
   }
@@ -77,13 +85,21 @@ bool pairKey(const std::vector<CodepointInfo>& cps, const size_t boundary, uint1
 }
 
 bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
+  // minPrefix/minSuffix are both 2, so every runtime boundary considered by
+  // applyGermanHybridOverrides() has two codepoints available on each side.
   if (boundary < 2 || boundary + 1 >= cps.size()) {
     return false;
   }
 
+  const uint8_t symbols[4] = {
+      germanSymbol(cps[boundary - 2].value),
+      germanSymbol(cps[boundary - 1].value),
+      germanSymbol(cps[boundary].value),
+      germanSymbol(cps[boundary + 1].value),
+  };
+
   uint32_t key = 0;
-  for (size_t i = boundary - 2; i <= boundary + 1; ++i) {
-    const uint8_t symbol = germanSymbol(cps[i].value);
+  for (const uint8_t symbol : symbols) {
     if (symbol == kSymbolOther) {
       return false;
     }
@@ -95,10 +111,9 @@ bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, u
 }
 
 bool contextKey3(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
-  if (boundary == 0 || boundary >= cps.size()) {
-    return false;
-  }
-
+  // Six 5-bit symbols -> 30-bit key. Boundaries are allowed two characters
+  // from a word edge, so use symbol 31 as a pad for the missing third context
+  // character.  Symbol 30 remains reserved for unsupported/other characters.
   uint32_t key = 0;
   const std::ptrdiff_t base = static_cast<std::ptrdiff_t>(boundary);
   const std::ptrdiff_t size = static_cast<std::ptrdiff_t>(cps.size());
@@ -106,12 +121,14 @@ bool contextKey3(const std::vector<CodepointInfo>& cps, const size_t boundary, u
   for (std::ptrdiff_t relative = -3; relative <= 2; ++relative) {
     const std::ptrdiff_t index = base + relative;
     uint8_t symbol = kSymbolPad;
+
     if (index >= 0 && index < size) {
       symbol = germanSymbol(cps[static_cast<size_t>(index)].value);
       if (symbol == kSymbolOther) {
         return false;
       }
     }
+
     key = (key << 5) | symbol;
   }
 
@@ -134,6 +151,7 @@ template <size_t N>
 bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, const uint32_t key) {
   size_t first = 0;
   size_t last = count;
+
   while (first < last) {
     const size_t middle = first + (last - first) / 2;
     const uint32_t value = packed20At(data.data(), middle);
@@ -143,6 +161,7 @@ bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, co
       last = middle;
     }
   }
+
   return first < count && packed20At(data.data(), first) == key;
 }
 
@@ -156,6 +175,7 @@ template <size_t N>
 bool containsPacked30(const std::array<uint8_t, N>& data, const size_t count, const uint32_t key) {
   size_t first = 0;
   size_t last = count;
+
   while (first < last) {
     const size_t middle = first + (last - first) / 2;
     const uint32_t value = packed30At(data.data(), middle);
@@ -165,6 +185,7 @@ bool containsPacked30(const std::array<uint8_t, N>& data, const size_t count, co
       last = middle;
     }
   }
+
   return first < count && packed30At(data.data(), first) == key;
 }
 
@@ -175,7 +196,17 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
     return;
   }
 
-  // Stage 1: the proven 2+2 baseline.
+  // Stage 1 is intentionally identical to the original hybrid policy:
+  //   - keep base candidates accepted by a globally safe immediate pair;
+  //   - otherwise require a safe 2+2 context;
+  //   - add high-confidence 2+2 residual breaks.
+  //
+  // Stage 2 only corrects what that policy still gets wrong:
+  //   - a 3+3 BLOCK removes a known-dangerous accepted break;
+  //   - otherwise a 3+3 ADD may recover a high-confidence missed break.
+  //
+  // BLOCK always wins. For an e-reader, omitting an optional legal break is
+  // preferable to displaying an illegal visible hyphen.
   for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
     uint32_t context2 = 0;
     const bool hasContext2 = contextKey2(cps, boundary, context2);
@@ -191,30 +222,15 @@ void applyGermanHybridOverrides(const std::vector<CodepointInfo>& cps, uint8_t* 
       accepted = true;
     }
 
-    // Do not feed the unfiltered base candidate stream onward: the result of
-    // this stage is the exact established 2+2 baseline.
-    breaks[boundary] = accepted ? 1 : 0;
-  }
-
-  // Stage 2: German morphology as a POSITIVE-ONLY compound-boundary ADD.
-  // It never removes a break and therefore cannot create the catastrophic
-  // recall collapse seen with the previous negative morphology experiment.
-  for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
-    if (breaks[boundary] == 0 && germanMorphologyShouldAdd(cps, boundary)) {
-      breaks[boundary] = 1;
-    }
-  }
-
-  // Stage 3: proven residual 3+3 corrections.
-  for (size_t boundary = 2; boundary + 2 <= cps.size(); ++boundary) {
     uint32_t context3 = 0;
     const bool hasContext3 = contextKey3(cps, boundary, context3);
 
     if (hasContext3 && containsPacked30(kGermanBlockContexts3, kGermanBlockContext3Count, context3)) {
-      breaks[boundary] = 0;
-    } else if (breaks[boundary] == 0 && hasContext3 &&
-               containsPacked30(kGermanAddContexts3, kGermanAddContext3Count, context3)) {
-      breaks[boundary] = 1;
+      accepted = false;
+    } else if (!accepted && hasContext3 && containsPacked30(kGermanAddContexts3, kGermanAddContext3Count, context3)) {
+      accepted = true;
     }
+
+    breaks[boundary] = accepted ? 1 : 0;
   }
 }
