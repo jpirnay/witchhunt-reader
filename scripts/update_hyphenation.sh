@@ -43,6 +43,8 @@ process_liang it
 process_liang uk
 process_liang sv
 process_liang pl
+process_liang pt
+process_liang nl
 
 # German deliberately no longer uses the large Hypher trie.
 if [[ "${GENERATE_LEGACY_GERMAN_TRIE:-0}" == "1" ]]; then

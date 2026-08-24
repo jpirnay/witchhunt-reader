@@ -10,7 +10,9 @@
 #include "generated/hyph-es.trie.h"
 #include "generated/hyph-fr.trie.h"
 #include "generated/hyph-it.trie.h"
+#include "generated/hyph-nl.trie.h"
 #include "generated/hyph-pl.trie.h"
+#include "generated/hyph-pt.trie.h"
 #include "generated/hyph-ru.trie.h"
 #include "generated/hyph-sv.trie.h"
 #include "generated/hyph-uk.trie.h"
@@ -35,7 +37,11 @@ LiangLanguageHyphenator ukrainianHyphenator(uk_patterns, isCyrillicLetter, toLow
 
 LiangLanguageHyphenator polishHyphenator(pl_patterns, isLatinLetter, toLowerLatin);
 
-using EntryArray = std::array<LanguageEntry, 9>;
+LiangLanguageHyphenator portugueseHyphenator(pt_patterns, isLatinLetter, toLowerLatin);
+
+LiangLanguageHyphenator dutchHyphenator(nl_patterns, isLatinLetter, toLowerLatin);
+
+using EntryArray = std::array<LanguageEntry, 11>;
 
 const EntryArray& entries() {
   static const EntryArray kEntries = {{{"english", "en", &englishHyphenator},
@@ -46,7 +52,9 @@ const EntryArray& entries() {
                                        {"italian", "it", &italianHyphenator},
                                        {"swedish", "sv", &swedishHyphenator},
                                        {"polish", "pl", &polishHyphenator},
-                                       {"ukrainian", "uk", &ukrainianHyphenator}}};
+                                       {"ukrainian", "uk", &ukrainianHyphenator},
+                                       {"dutch", "nl", &dutchHyphenator},
+                                       {"portuguese", "pt", &portugueseHyphenator}}};
   return kEntries;
 }
 
