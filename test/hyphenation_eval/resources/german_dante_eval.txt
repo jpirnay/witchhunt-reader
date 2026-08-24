@@ -1,3 +1,4 @@
+# Held-out DANTE evaluation for GermanHybridHyphenator
 # Format: word|legal|preferred|undesirable|ordinary|compound|prefix|suffix|uncategorized
 bestelltet|2,7|2||7||2||
 Fälligkeitsdatum|3,6,11,13|6,11||3,13|11||6|

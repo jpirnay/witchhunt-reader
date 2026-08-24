@@ -6,14 +6,31 @@ cd "$ROOT_DIR"
 
 mkdir -p build
 
+# Set FORCE_HYPHENATION_DOWNLOAD=1 when you explicitly want to refresh the
+# downloaded source files. Normal runs reuse files already present in build/.
+FORCE_DOWNLOAD="${FORCE_HYPHENATION_DOWNLOAD:-0}"
+
+fetch_if_missing() {
+  local url="$1"
+  local output="$2"
+
+  if [[ "$FORCE_DOWNLOAD" == "1" || ! -s "$output" ]]; then
+    echo "Downloading $(basename "$output")"
+    wget -O "$output" "$url"
+  else
+    echo "Using cached $(basename "$output")"
+  fi
+}
+
 process_liang() {
   local lang="$1"
+  local output="build/$lang.bin"
+  local url="https://github.com/typst/hypher/raw/refs/heads/main/tries/$lang.bin"
 
-  wget -O "build/$lang.bin" \
-    "https://github.com/typst/hypher/raw/refs/heads/main/tries/$lang.bin"
+  fetch_if_missing "$url" "$output"
 
   python3 scripts/generate_hyphenation_trie.py \
-    --input "build/$lang.bin" \
+    --input "$output" \
     --output "lib/Epub/Epub/hyphenation/generated/hyph-${lang}.trie.h"
 }
 
@@ -27,20 +44,16 @@ process_liang uk
 process_liang sv
 process_liang pl
 
-# German deliberately no longer uses the ~201 KiB Hypher trie.  Keep the old
-# generated header in the repository while the new implementation is being
-# evaluated, but do not refresh/reference it in normal builds.
+# German deliberately no longer uses the large Hypher trie.
 if [[ "${GENERATE_LEGACY_GERMAN_TRIE:-0}" == "1" ]]; then
   process_liang de
 fi
 
-# DANTE's annotated word list is the source for the compact German validator.
-# The generator embeds the source SHA-256 in the generated header so a build can
-# always be traced to the exact downloaded word list even though master evolves.
-wget -O build/dante-german-wortliste \
-  "https://github.com/hyphenation/languages-german/raw/refs/heads/master/wortliste"
+DANTE_FILE="build/dante-german-wortliste"
+DANTE_URL="https://github.com/hyphenation/languages-german/raw/refs/heads/master/wortliste"
+fetch_if_missing "$DANTE_URL" "$DANTE_FILE"
 
 python3 scripts/generate_german_hybrid_rules.py \
-  --input build/dante-german-wortliste \
+  --input "$DANTE_FILE" \
   --output-header lib/Epub/Epub/hyphenation/generated/de_hybrid_rules.h \
   --output-eval test/hyphenation_eval/resources/german_dante_eval.txt
