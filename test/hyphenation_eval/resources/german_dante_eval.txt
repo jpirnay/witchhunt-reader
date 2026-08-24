@@ -1,5 +1,3 @@
-# Held-out DANTE evaluation for GermanHybridHyphenator
-# Bucket 9 is never used to generate firmware tables.
 # Format: word|legal|preferred|undesirable|ordinary|compound|prefix|suffix|uncategorized
 bestelltet|2,7|2||7||2||
 Fälligkeitsdatum|3,6,11,13|6,11||3,13|11||6|
