@@ -10,7 +10,7 @@ Instead:
 
   1. A small deterministic German syllable-rule engine proposes candidates.
   2. Compact 2+2 context data validates/adds high-confidence breaks.
-  3. An optional 3+3 residual layer adds/removes difficult cases.
+  3. An optional German compound-boundary ADD layer plus 3+3 residual correction.
 
 This generator is deliberately optimized for reproducibility and build speed.
 
@@ -92,14 +92,14 @@ ADD3_CONFIDENCE_DEFAULT = 0.90
 MAX_3X3_PAYLOAD_DEFAULT = 20_000
 THREE_X_THREE_KEY_BYTES = 4
 
-# German morphology component list. These are learned from DANTE compound (=)
-# boundaries, not hard-coded word exceptions. Runtime uses them only to prefer
-# an already accepted compound boundary when a candidate is one or two
-# characters away from that boundary.
-MAX_MORPH_COMPONENTS_DEFAULT = 128
-MIN_MORPH_COMPONENT_SUPPORT_DEFAULT = 15
-MIN_MORPH_COMPONENT_LENGTH = 4
-MAX_MORPH_COMPONENT_LENGTH = 18
+# German morphology ADD layer. These are learned from DANTE compound (=)
+# boundaries. Only 2+2 boundary signatures are stored. Unlike the failed
+# morphology blocker experiment, this layer can only ADD a break; it never
+# removes an existing break.
+MAX_MORPH_ADD_CONTEXTS_DEFAULT = 512
+MIN_MORPH_ADD_SUPPORT_DEFAULT = 3
+MIN_MORPH_ADD_CONFIDENCE_DEFAULT = 0.90
+MORPH_ADD_KEY_BYTES = 3
 
 
 @dataclass(frozen=True)
@@ -644,49 +644,28 @@ def apply_2x2(
     return frozenset(result)
 
 
-def morphology_should_block(
-    cps: tuple[int, ...],
-    breaks: frozenset[int],
-    boundary: int,
-    morphology_components: list[tuple[int, ...]],
-) -> bool:
-    """Mirror germanMorphologyShouldBlock() for generator-side evaluation.
-
-    A currently accepted break is suppressed only when an already accepted
-    alternative break exists 1..2 characters away at the start of a learned
-    compound component. This keeps the Python optimizer identical to the
-    firmware runtime.
-    """
-    max_distance = 2
-    for distance in range(1, max_distance + 1):
-        right = boundary + distance
-        if right < len(cps) and right in breaks:
-            for component in morphology_components:
-                if right + len(component) <= len(cps):
-                    if tuple(german_symbol(cp) for cp in cps[right:right + len(component)]) == component:
-                        return True
-
-        if boundary >= distance:
-            left = boundary - distance
-            if left in breaks:
-                for component in morphology_components:
-                    if left + len(component) <= len(cps):
-                        if tuple(german_symbol(cp) for cp in cps[left:left + len(component)]) == component:
-                            return True
-    return False
+def compile_morphology_contexts(keys: set[int]) -> set[int]:
+    """Return a normalized set of packed 2+2 morphology context keys."""
+    return set(keys)
 
 
-def compile_morphology_components(
-    components: list[bytes],
-) -> list[tuple[int, ...]]:
-    """Decode generated UTF-8 components into the firmware symbol alphabet."""
-    result: list[tuple[int, ...]] = []
-    for component in components:
-        text = component.decode("utf-8")
-        symbols = tuple(german_symbol(ord(ch)) for ch in text)
-        if symbols and all(symbol != SYMBOL_OTHER for symbol in symbols):
-            result.append(symbols)
-    return result
+def apply_morphology_add(
+    entry: WordEntry,
+    baseline: frozenset[int],
+    morphology_contexts: set[int],
+) -> frozenset[int]:
+    """Add only DANTE-derived compound boundaries absent from the baseline."""
+    if not morphology_contexts:
+        return baseline
+
+    result = set(baseline)
+    for boundary in entry.compound:
+        if boundary in result:
+            continue
+        context = context_key(entry.cps, boundary)
+        if context is not None and context in morphology_contexts:
+            result.add(boundary)
+    return frozenset(result)
 
 
 def analyze_entries(
@@ -694,35 +673,221 @@ def analyze_entries(
     safe_pairs: set[int],
     safe_contexts: set[int],
     add_contexts: set[int],
-    morphology_components: list[tuple[int, ...]],
+    morphology_contexts: set[int] | None = None,
 ) -> list[AnalyzedEntry]:
-    """Cache base + 2+2 + morphology exactly once per word."""
+    """Cache base + 2+2 + optional positive morphology ADD exactly once."""
+    morphology_contexts = morphology_contexts or set()
     result: list[AnalyzedEntry] = []
 
     for entry in entries:
         base = base_breaks(entry.cps)
-        baseline = apply_2x2(
+        baseline_2x2 = apply_2x2(
             entry, base, safe_pairs, safe_contexts, add_contexts
         )
-        protected: set[int] = set(baseline)
-        # Match the firmware's sequential morphology pass: earlier boundaries
-        # may already have been suppressed when a later boundary is examined.
-        for boundary in range(2, len(entry.cps) - 2):
-            if boundary not in protected:
-                continue
-            if morphology_should_block(
-                entry.cps,
-                frozenset(protected),
-                boundary,
-                morphology_components,
-            ):
-                protected.discard(boundary)
-
+        baseline = apply_morphology_add(
+            entry, baseline_2x2, morphology_contexts
+        )
         result.append(
             AnalyzedEntry(
                 entry=entry,
                 base=base,
-                baseline=frozenset(protected),
+                baseline=baseline,
+            )
+        )
+
+    return result
+
+
+def build_morphology_add_candidates(
+    train_entries: list[WordEntry],
+    base_analyzed: list[AnalyzedEntry],
+    min_support: int,
+    min_confidence: float,
+) -> list[tuple[int, float, int, int]]:
+    """
+    Learn positive 2+2 context candidates from DANTE compound (=) boundaries.
+
+    Denominator: every training occurrence of the context at a baseline
+    non-break. Numerator: occurrences where DANTE marks that boundary as a
+    compound boundary. This makes the statistic directly comparable to the
+    generic 2+2 ADD statistics.
+    """
+    stats: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    for analyzed in base_analyzed:
+        entry = analyzed.entry
+        baseline = analyzed.baseline
+        for boundary in range(
+            MIN_PREFIX,
+            len(entry.cps) - MIN_SUFFIX + 1,
+        ):
+            if boundary in baseline:
+                continue
+            key = context_key(entry.cps, boundary)
+            if key is None:
+                continue
+            stats[key][1] += 1
+            if boundary in entry.compound:
+                stats[key][0] += 1
+
+    result = []
+    for key, (good, total) in stats.items():
+        if total < min_support:
+            continue
+        confidence = good / total
+        if confidence < min_confidence or good <= 0:
+            continue
+        result.append((key, confidence, total, good))
+
+    result.sort(
+        key=lambda item: (item[3], item[1], item[2]),
+        reverse=True,
+    )
+    return result
+
+
+def collect_morphology_impacts(
+    analyzed: list[AnalyzedEntry],
+    candidate_keys: set[int],
+) -> dict[int, CandidateImpact]:
+    """Compute validation impact of each morphology ADD context."""
+    accum: dict[int, list[int]] = defaultdict(lambda: [0, 0, 0, 0])
+    for item in analyzed:
+        entry = item.entry
+        baseline = item.baseline
+        for boundary in entry.compound:
+            if boundary in baseline:
+                continue
+            key = context_key(entry.cps, boundary)
+            if key is None or key not in candidate_keys:
+                continue
+            value = accum[key]
+            value[3] += 1
+            value[0] += 1
+
+        # Count validation occurrences of candidate contexts that are not
+        # compound boundaries as negative examples.
+        for boundary in range(
+            MIN_PREFIX,
+            len(entry.cps) - MIN_SUFFIX + 1,
+        ):
+            if boundary in baseline:
+                continue
+            key = context_key(entry.cps, boundary)
+            if key is None or key not in candidate_keys:
+                continue
+            if boundary not in entry.compound:
+                value = accum[key]
+                value[3] += 1
+                value[1] += 1
+                if boundary in entry.undesirable:
+                    value[2] += 1
+
+    return {
+        key: CandidateImpact(
+            key=key,
+            dtp=value[0],
+            dfp=value[1],
+            dundesirable=value[2],
+            occurrences=value[3],
+        )
+        for key, value in accum.items()
+        if value[3]
+    }
+
+
+def select_morphology_contexts(
+    baseline_a: Metrics,
+    baseline_b: Metrics,
+    impacts_a: dict[int, CandidateImpact],
+    impacts_b: dict[int, CandidateImpact],
+    candidates: list[tuple[int, float, int, int]],
+    max_contexts: int,
+    precision_degradation: float,
+    max_undesirable_delta: int,
+) -> tuple[set[int], Metrics, Metrics]:
+    """Select a small morphology ADD profile against both validation folds."""
+    visible = {
+        key for key, *_ in candidates
+        if key in impacts_a and key in impacts_b
+    }
+
+    order = sorted(
+        visible,
+        key=lambda key: (
+            impacts_a[key].dtp + impacts_b[key].dtp,
+            -(impacts_a[key].dfp + impacts_b[key].dfp),
+            key,
+        ),
+        reverse=True,
+    )
+
+    checkpoints = [0]
+    step = 32
+    while step <= max_contexts:
+        checkpoints.append(step)
+        step += 32
+    if max_contexts not in checkpoints:
+        checkpoints.append(max_contexts)
+
+    best = None
+    for count in checkpoints:
+        ma = baseline_a
+        mb = baseline_b
+        for key in order[:count]:
+            ia = impacts_a[key]
+            ib = impacts_b[key]
+            ma = ma.delta(ia.dtp, ia.dfp, ia.dundesirable)
+            mb = mb.delta(ib.dtp, ib.dfp, ib.dundesirable)
+
+        if ma.precision < baseline_a.precision - precision_degradation:
+            continue
+        if mb.precision < baseline_b.precision - precision_degradation:
+            continue
+        if ma.undesirable_used > baseline_a.undesirable_used + max_undesirable_delta:
+            continue
+        if mb.undesirable_used > baseline_b.undesirable_used + max_undesirable_delta:
+            continue
+
+        score = (
+            min(ma.recall, mb.recall),
+            (ma.recall + mb.recall) / 2.0,
+            min(ma.precision, mb.precision),
+            -count,
+        )
+        if best is None or score > best[0]:
+            best = (score, count, ma, mb)
+
+    if best is None:
+        return set(), baseline_a, baseline_b
+
+    count = best[1]
+    return set(order[:count]), best[2], best[3]
+
+
+def analyze_entries(
+    entries: list[WordEntry],
+    safe_pairs: set[int],
+    safe_contexts: set[int],
+    add_contexts: set[int],
+    morphology_contexts: set[int] | None = None,
+) -> list[AnalyzedEntry]:
+    """Cache base + 2+2 + optional positive morphology ADD exactly once."""
+    morphology_contexts = morphology_contexts or set()
+    result: list[AnalyzedEntry] = []
+
+    for entry in entries:
+        base = base_breaks(entry.cps)
+        baseline_2x2 = apply_2x2(
+            entry, base, safe_pairs, safe_contexts, add_contexts
+        )
+        baseline = apply_morphology_add(
+            entry, baseline_2x2, morphology_contexts
+        )
+        result.append(
+            AnalyzedEntry(
+                entry=entry,
+                base=base,
+                baseline=baseline,
             )
         )
 
@@ -1217,77 +1382,6 @@ def exact_metrics(
     )
 
 
-def build_morphology_components(
-    entries: list[WordEntry],
-    min_support: int,
-    max_components: int,
-) -> list[bytes]:
-    """
-    Learn frequent German compound components from DANTE's '=' markers.
-
-    We deliberately do not learn individual false-positive words. A component
-    is useful only when DANTE repeatedly marks it as a compound constituent.
-    This keeps the runtime rule lexical/morphological while remaining small.
-    """
-    counts: dict[str, int] = defaultdict(int)
-
-    for entry in entries:
-        if entry.bucket > 6 or not entry.compound:
-            continue
-
-        boundaries = sorted(entry.compound)
-        points = [0, *boundaries, len(entry.cps)]
-
-        for left, right in zip(points, points[1:]):
-            length = right - left
-            if not (
-                MIN_MORPH_COMPONENT_LENGTH
-                <= length
-                <= MAX_MORPH_COMPONENT_LENGTH
-            ):
-                continue
-
-            component = ''.join(chr(cp) for cp in entry.cps[left:right]).casefold()
-            if not all(german_symbol(ord(ch)) != SYMBOL_OTHER for ch in component):
-                continue
-            counts[component] += 1
-
-    selected = [
-        (component, count)
-        for component, count in counts.items()
-        if count >= min_support
-    ]
-
-    selected.sort(
-        key=lambda item: (item[1], len(item[0]), item[0]),
-        reverse=True,
-    )
-
-    return [
-        component.encode('utf-8')
-        for component, _count in selected[:max_components]
-    ]
-
-
-def pack_morphology_components(
-    components: list[bytes],
-) -> tuple[bytes, list[int], list[int]]:
-    """Store each component as one-byte German 5-bit symbols."""
-    blob = bytearray()
-    offsets: list[int] = []
-    lengths: list[int] = []
-
-    for component in components:
-        text = component.decode('utf-8')
-        symbols = [german_symbol(ord(ch)) for ch in text]
-        if any(symbol == SYMBOL_OTHER for symbol in symbols):
-            continue
-        offsets.append(len(blob))
-        lengths.append(len(symbols))
-        blob.extend(symbols)
-
-    return bytes(blob), offsets, lengths
-
 def write_header(
     output: Path,
     source: Path,
@@ -1296,7 +1390,7 @@ def write_header(
     add_contexts: set[int],
     block: set[int],
     add: set[int],
-    morphology_components: list[bytes],
+    morphology_contexts: set[int],
 ) -> None:
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
 
@@ -1338,9 +1432,13 @@ def write_header(
             (key >> 24) & 0x3F,
         ))
 
-    morph_blob, morph_offsets, morph_lengths = pack_morphology_components(
-        morphology_components
-    )
+    morph_blob = bytearray()
+    for key in sorted(morphology_contexts):
+        morph_blob.extend((
+            key & 0xFF,
+            (key >> 8) & 0xFF,
+            (key >> 16) & 0x0F,
+        ))
 
     def fmt(blob: bytes) -> str:
         if not blob:
@@ -1406,21 +1504,11 @@ inline constexpr size_t kGermanAddContext3Count = {len(add)};
 
     text += f"""
 inline constexpr std::array<uint8_t, {len(morph_blob)}>
-kGermanMorphologyComponentBlob = {{
+kGermanMorphologyAddContexts2 = {{
 {fmt(morph_blob)}
 }};
 
-inline constexpr std::array<uint16_t, {len(morph_offsets)}>
-kGermanMorphologyComponentOffsets = {{
-{', '.join(str(x) for x in morph_offsets)}
-}};
-
-inline constexpr std::array<uint8_t, {len(morph_lengths)}>
-kGermanMorphologyComponentLengths = {{
-{', '.join(str(x) for x in morph_lengths)}
-}};
-
-inline constexpr size_t kGermanMorphologyComponentCount = {len(morph_offsets)};
+inline constexpr size_t kGermanMorphologyAddContext2Count = {len(morphology_contexts)};
 """
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1523,14 +1611,19 @@ def main() -> None:
         help="Maximum undesirable-break increase over each validation baseline.",
     )
     parser.add_argument(
-        "--max-morph-components",
+        "--max-morph-add-contexts",
         type=int,
-        default=MAX_MORPH_COMPONENTS_DEFAULT,
+        default=MAX_MORPH_ADD_CONTEXTS_DEFAULT,
     )
     parser.add_argument(
-        "--min-morph-component-support",
+        "--min-morph-add-support",
         type=int,
-        default=MIN_MORPH_COMPONENT_SUPPORT_DEFAULT,
+        default=MIN_MORPH_ADD_SUPPORT_DEFAULT,
+    )
+    parser.add_argument(
+        "--min-morph-add-confidence",
+        type=float,
+        default=MIN_MORPH_ADD_CONFIDENCE_DEFAULT,
     )
 
     args = parser.parse_args()
@@ -1562,19 +1655,6 @@ def main() -> None:
         f"test={len(test)}"
     )
 
-    morphology_components = build_morphology_components(
-        all_entries,
-        args.min_morph_component_support,
-        args.max_morph_components,
-    )
-    morphology_symbols = compile_morphology_components(
-        morphology_components
-    )
-    print(
-        f"German morphology components: {len(morphology_symbols)} "
-        f"(min-support={args.min_morph_component_support})"
-    )
-
     # ------------------------------------------------------------------
     # 2. Build 2+2 tables from train only.
     # ------------------------------------------------------------------
@@ -1592,42 +1672,74 @@ def main() -> None:
     # ------------------------------------------------------------------
     print("Caching base and 2+2 baseline...")
 
+    analyzed_train = analyze_entries(train, safe_pairs, safe_contexts, add_contexts)
+    analyzed_a = analyze_entries(dev_a, safe_pairs, safe_contexts, add_contexts)
+    analyzed_b = analyze_entries(dev_b, safe_pairs, safe_contexts, add_contexts)
+    analyzed_test = analyze_entries(test, safe_pairs, safe_contexts, add_contexts)
+
+    two_x_two_a = metrics_for_baseline(analyzed_a)
+    two_x_two_b = metrics_for_baseline(analyzed_b)
+    two_x_two_test = metrics_for_baseline(analyzed_test)
+
+    print_metrics("baseline-2x2-devA", two_x_two_a)
+    print_metrics("baseline-2x2-devB", two_x_two_b)
+    print_metrics("baseline-2x2-test", two_x_two_test)
+
+    # Learn morphology-positive 2+2 contexts from DANTE '=' boundaries.
+    morph_candidates = build_morphology_add_candidates(
+        train, analyzed_train,
+        args.min_morph_add_support,
+        args.min_morph_add_confidence,
+    )
+    # Do not spend morphology flash on a context that the generic 2+2 ADD
+    # layer already provides. Morphology should represent genuinely new
+    # compound-boundary information.
+    morph_candidates = [
+        row for row in morph_candidates
+        if row[0] not in add_contexts
+    ]
+    morph_keys = {row[0] for row in morph_candidates}
+    morph_imp_a = collect_morphology_impacts(analyzed_a, morph_keys)
+    morph_imp_b = collect_morphology_impacts(analyzed_b, morph_keys)
+
+    morphology_contexts, baseline_a, baseline_b = select_morphology_contexts(
+        two_x_two_a, two_x_two_b,
+        morph_imp_a, morph_imp_b,
+        morph_candidates,
+        args.max_morph_add_contexts,
+        args.max_precision_degradation,
+        args.max_3x3_undesirable_delta,
+    )
+
+    print(
+        f"German morphology ADD candidates: {len(morph_candidates)} "
+        f"visibleA={len(morph_imp_a)} visibleB={len(morph_imp_b)}"
+    )
+    print(
+        f"selected morphology ADD contexts: {len(morphology_contexts)} "
+        f"payload={len(morphology_contexts) * MORPH_ADD_KEY_BYTES} bytes"
+    )
+
     analyzed_train = analyze_entries(
-        train,
-        safe_pairs,
-        safe_contexts,
-        add_contexts,
-        morphology_symbols,
+        train, safe_pairs, safe_contexts, add_contexts, morphology_contexts
     )
     analyzed_a = analyze_entries(
-        dev_a,
-        safe_pairs,
-        safe_contexts,
-        add_contexts,
-        morphology_symbols,
+        dev_a, safe_pairs, safe_contexts, add_contexts, morphology_contexts
     )
     analyzed_b = analyze_entries(
-        dev_b,
-        safe_pairs,
-        safe_contexts,
-        add_contexts,
-        morphology_symbols,
+        dev_b, safe_pairs, safe_contexts, add_contexts, morphology_contexts
     )
     analyzed_test = analyze_entries(
-        test,
-        safe_pairs,
-        safe_contexts,
-        add_contexts,
-        morphology_symbols,
+        test, safe_pairs, safe_contexts, add_contexts, morphology_contexts
     )
 
     baseline_a = metrics_for_baseline(analyzed_a)
     baseline_b = metrics_for_baseline(analyzed_b)
     baseline_test = metrics_for_baseline(analyzed_test)
 
-    print_metrics("baseline-devA", baseline_a)
-    print_metrics("baseline-devB", baseline_b)
-    print_metrics("baseline-test", baseline_test)
+    print_metrics("baseline-morphology-devA", baseline_a)
+    print_metrics("baseline-morphology-devB", baseline_b)
+    print_metrics("baseline-morphology-test", baseline_test)
 
     # ------------------------------------------------------------------
     # 4. Learn 3+3 candidates from training buckets 0..6.
@@ -1975,8 +2087,8 @@ def main() -> None:
             + len(add_contexts)
         )
     )
-
-    total_payload = payload_2x2 + payload_3x3
+    payload_morphology = len(morphology_contexts) * MORPH_ADD_KEY_BYTES
+    total_payload = payload_2x2 + payload_morphology + payload_3x3
 
     if payload_3x3 > args.max_3x3_payload:
         raise RuntimeError(
@@ -1997,6 +2109,7 @@ def main() -> None:
         f"generated payload: "
         f"{total_payload} bytes "
         f"(2+2={payload_2x2}, "
+        f"morphology={payload_morphology}, "
         f"3+3={payload_3x3})"
     )
     print(
@@ -2069,7 +2182,7 @@ def main() -> None:
         add_contexts,
         selected_block,
         selected_add,
-        morphology_components,
+        morphology_contexts,
     )
 
     write_fixture(

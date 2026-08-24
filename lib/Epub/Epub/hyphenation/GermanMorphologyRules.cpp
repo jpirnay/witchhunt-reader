@@ -1,6 +1,6 @@
 #include "GermanMorphologyRules.h"
 
-#include <cstddef>
+#include <array>
 #include <cstdint>
 
 #include "generated/de_hybrid_rules.h"
@@ -25,76 +25,88 @@ uint8_t germanSymbol(uint32_t cp) {
       return 28;  // ü
     case 0x00DF:
       return 29;  // ß
+
+    case 0x00E0:
+    case 0x00E1:
+    case 0x00E2:
+    case 0x00E3:
+    case 0x00E5:
+      return static_cast<uint8_t>('a' - 'a');
+    case 0x00E8:
+    case 0x00E9:
+    case 0x00EA:
+    case 0x00EB:
+      return static_cast<uint8_t>('e' - 'a');
+    case 0x00EC:
+    case 0x00ED:
+    case 0x00EE:
+    case 0x00EF:
+      return static_cast<uint8_t>('i' - 'a');
+    case 0x00F2:
+    case 0x00F3:
+    case 0x00F4:
+    case 0x00F5:
+      return static_cast<uint8_t>('o' - 'a');
+    case 0x00F9:
+    case 0x00FA:
+    case 0x00FB:
+      return static_cast<uint8_t>('u' - 'a');
+    case 0x00FD:
+    case 0x00FF:
+      return static_cast<uint8_t>('y' - 'a');
     default:
       return kSymbolOther;
   }
 }
 
-bool matchesComponent(const std::vector<CodepointInfo>& cps, const size_t start, const size_t length,
-                      const size_t componentIndex) {
-  if (start + length > cps.size()) {
+bool contextKey2(const std::vector<CodepointInfo>& cps, const size_t boundary, uint32_t& outKey) {
+  if (boundary < 2 || boundary + 1 >= cps.size()) {
     return false;
   }
 
-  const size_t offset = kGermanMorphologyComponentOffsets[componentIndex];
-
-  for (size_t i = 0; i < length; ++i) {
-    const uint8_t symbol = germanSymbol(cps[start + i].value);
-
-    if (symbol == kSymbolOther || symbol != kGermanMorphologyComponentBlob[offset + i]) {
+  uint32_t key = 0;
+  for (size_t i = boundary - 2; i <= boundary + 1; ++i) {
+    const uint8_t symbol = germanSymbol(cps[i].value);
+    if (symbol == kSymbolOther) {
       return false;
     }
+    key = (key << 5) | symbol;
   }
 
+  outKey = key;
   return true;
 }
 
-bool hasComponentStartingAt(const std::vector<CodepointInfo>& cps, const size_t start) {
-  if (start >= cps.size()) {
-    return false;
-  }
+uint32_t packed20At(const uint8_t* data, const size_t index) {
+  const uint8_t* p = data + index * 3;
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2] & 0x0F) << 16);
+}
 
-  for (size_t i = 0; i < kGermanMorphologyComponentCount; ++i) {
-    const size_t length = kGermanMorphologyComponentLengths[i];
+template <size_t N>
+bool containsPacked20(const std::array<uint8_t, N>& data, const size_t count, const uint32_t key) {
+  size_t first = 0;
+  size_t last = count;
 
-    if (matchesComponent(cps, start, length, i)) {
-      return true;
+  while (first < last) {
+    const size_t middle = first + (last - first) / 2;
+    const uint32_t value = packed20At(data.data(), middle);
+    if (value < key) {
+      first = middle + 1;
+    } else {
+      last = middle;
     }
   }
 
-  return false;
+  return first < count && packed20At(data.data(), first) == key;
 }
 
 }  // namespace
 
-bool germanMorphologyShouldBlock(const std::vector<CodepointInfo>& cps, const uint8_t* breaks, const size_t boundary) {
-  if (breaks == nullptr || boundary >= cps.size()) {
+bool germanMorphologyShouldAdd(const std::vector<CodepointInfo>& cps, const size_t boundary) {
+  uint32_t key = 0;
+  if (!contextKey2(cps, boundary, key)) {
     return false;
   }
 
-  // We only intervene when there is already another accepted break at a
-  // nearby learned compound-component boundary. Thus the morphology layer
-  // chooses between two existing layout alternatives instead of inventing a
-  // new hard linguistic prohibition.
-  constexpr int kMaxDistance = 2;
-
-  for (int distance = 1; distance <= kMaxDistance; ++distance) {
-    if (boundary + static_cast<size_t>(distance) < cps.size()) {
-      const size_t candidateComponentStart = boundary + static_cast<size_t>(distance);
-
-      if (breaks[candidateComponentStart] != 0 && hasComponentStartingAt(cps, candidateComponentStart)) {
-        return true;
-      }
-    }
-
-    if (boundary >= static_cast<size_t>(distance)) {
-      const size_t candidateComponentStart = boundary - static_cast<size_t>(distance);
-
-      if (breaks[candidateComponentStart] != 0 && hasComponentStartingAt(cps, candidateComponentStart)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return containsPacked20(kGermanMorphologyAddContexts2, kGermanMorphologyAddContext2Count, key);
 }

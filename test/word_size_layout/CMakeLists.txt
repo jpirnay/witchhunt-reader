@@ -8,9 +8,9 @@ add_executable(WordSizeLayoutTest
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationCommon.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridHyphenator.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanHybridRules.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/hyphenation/GermanMorphologyRules.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
-
 # Include order matters: this directory's GfxRenderer.h shim must win over the
 # real lib/GfxRenderer (which drags in HalDisplay); lib/GfxRenderer is therefore
 # deliberately absent from the include path.
@@ -24,7 +24,6 @@ target_include_directories(WordSizeLayoutTest PRIVATE
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
 )
-
 target_link_libraries(WordSizeLayoutTest PRIVATE
   crosspoint_test_common
   GTest::gtest_main

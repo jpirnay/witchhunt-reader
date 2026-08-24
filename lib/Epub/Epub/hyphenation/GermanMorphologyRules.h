@@ -6,11 +6,7 @@
 
 #include "HyphenationCommon.h"
 
-// Returns true when a currently accepted break is suspicious because it sits
-// immediately next to a frequently observed German compound component.
-//
-// The rule is deliberately conservative: it only blocks a candidate when an
-// already accepted alternative break exists exactly at the learned component
-// boundary one or two characters away. This avoids globally blacklisting
-// common character sequences.
-bool germanMorphologyShouldBlock(const std::vector<CodepointInfo>& cps, const uint8_t* breaks, size_t boundary);
+// Returns true when the current boundary matches a DANTE-learned German
+// compound boundary signature. This layer is positive-only: it may ADD a
+// break, but it never removes an existing break.
+bool germanMorphologyShouldAdd(const std::vector<CodepointInfo>& cps, size_t boundary);
