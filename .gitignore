@@ -45,6 +45,7 @@ node_modules/
 # locks, settings.local, scout CLEANUP.md).
 .claude/*
 !.claude/skills/
+node_modules/
 /managed_components
 /.dummy
 /CMakeLists.txt
