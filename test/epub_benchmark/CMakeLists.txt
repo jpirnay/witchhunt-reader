@@ -14,6 +14,7 @@ target_include_directories(EpubParserBenchmark PRIVATE
   ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/lib/Utf8
 )
 
 target_link_libraries(EpubParserBenchmark PRIVATE
