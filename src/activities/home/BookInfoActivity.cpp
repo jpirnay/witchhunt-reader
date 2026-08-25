@@ -175,15 +175,18 @@ void BookInfoActivity::onEnter() {
   requestUpdate(true);
 }
 
+// Prev/Next are labelled on the front strip and this screen draws no side hints, so they stay there
+// whichever way the device is held — only which of the two comes first on screen moves, and
+// frontStripPrevious/Next answer that exactly the way mapLabels() does.
 void BookInfoActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+  } else if (mappedInput.wasReleased(MappedInputManager::frontStripPrevious())) {
     if (descPage > 0) {
       descPage--;
       requestUpdate(true);
     }
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  } else if (mappedInput.wasReleased(MappedInputManager::frontStripNext())) {
     if (descPage + 1 < descTotalPages) {
       descPage++;
       requestUpdate(true);

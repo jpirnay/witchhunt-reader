@@ -9,6 +9,7 @@
 class ButtonNavigator final {
   using Callback = std::function<void()>;
   using Buttons = std::vector<MappedInputManager::Button>;
+  using Direction = MappedInputManager::Direction;
 
   const uint16_t continuousStartMs;
   const uint16_t continuousIntervalMs;
@@ -105,15 +106,20 @@ class ButtonNavigator final {
   void onPreviousList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange,
                       int pageSize = 0);
 
+  // Resolved through MappedInputManager::buttonFor on every call, so a list navigates by what the
+  // reader sees rather than by which edge of the panel a button happens to sit on: in landscape
+  // the front strip stands vertically and steps, while the side buttons lie across the bottom (or
+  // top) and page. Cheap enough to re-resolve per tick — a switch on the current orientation.
   [[nodiscard]] static Buttons getNextButtons() {
-    return {MappedInputManager::Button::Down, MappedInputManager::Button::Right};
+    return {MappedInputManager::buttonFor(Direction::Down), MappedInputManager::buttonFor(Direction::Right)};
   }
   [[nodiscard]] static Buttons getPreviousButtons() {
-    return {MappedInputManager::Button::Up, MappedInputManager::Button::Left};
+    return {MappedInputManager::buttonFor(Direction::Up), MappedInputManager::buttonFor(Direction::Left)};
   }
-  // The halves of the pairs above: stepping is on the side buttons, paging on the front ones.
-  [[nodiscard]] static Buttons getStepNextButtons() { return {MappedInputManager::Button::Down}; }
-  [[nodiscard]] static Buttons getStepPreviousButtons() { return {MappedInputManager::Button::Up}; }
-  [[nodiscard]] static Buttons getPageNextButtons() { return {MappedInputManager::Button::Right}; }
-  [[nodiscard]] static Buttons getPagePreviousButtons() { return {MappedInputManager::Button::Left}; }
+  // The halves of the pairs above: stepping is on the buttons that run up/down the screen, paging
+  // on the ones that run across it.
+  [[nodiscard]] static Buttons getStepNextButtons() { return {MappedInputManager::buttonFor(Direction::Down)}; }
+  [[nodiscard]] static Buttons getStepPreviousButtons() { return {MappedInputManager::buttonFor(Direction::Up)}; }
+  [[nodiscard]] static Buttons getPageNextButtons() { return {MappedInputManager::buttonFor(Direction::Right)}; }
+  [[nodiscard]] static Buttons getPagePreviousButtons() { return {MappedInputManager::buttonFor(Direction::Left)}; }
 };

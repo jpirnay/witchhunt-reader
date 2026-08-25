@@ -973,11 +973,23 @@ void setup() {
   WEATHER_SETTINGS.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
-  // In LandscapeCounterClockwise the front-button strip runs bottom-to-top on screen, so the
-  // logical Left/Right roles (and their hints) swap to keep "previous/Up" above "next/Down".
-  // See MappedInputManager::setStripReversedPredicate and issue #87.
-  MappedInputManager::setStripReversedPredicate(
-      [] { return renderer.getOrientation() == GfxRenderer::Orientation::LandscapeCounterClockwise; });
+  // Navigation follows the screen, not the panel: rotating the device rotates which physical
+  // button means "up". The input layer sits below the renderer and so cannot ask it directly —
+  // this bridges the two, and is queried live so it can never go stale.
+  // See MappedInputManager::buttonFor and issue #87.
+  MappedInputManager::setOrientationProvider([] {
+    switch (renderer.getOrientation()) {
+      case GfxRenderer::Orientation::LandscapeClockwise:
+        return MappedInputManager::ScreenOrientation::LandscapeClockwise;
+      case GfxRenderer::Orientation::PortraitInverted:
+        return MappedInputManager::ScreenOrientation::PortraitInverted;
+      case GfxRenderer::Orientation::LandscapeCounterClockwise:
+        return MappedInputManager::ScreenOrientation::LandscapeCounterClockwise;
+      case GfxRenderer::Orientation::Portrait:
+        break;
+    }
+    return MappedInputManager::ScreenOrientation::Portrait;
+  });
 
   markBootPhase(BootPhase::ConfigLoad);
   // First serial output only here to avoid timing inconsistencies for power button press duration verification

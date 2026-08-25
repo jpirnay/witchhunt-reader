@@ -1029,12 +1029,12 @@ void KOReaderSyncActivity::loop() {
   if (state == SHOWING_RESULT) {
     // Navigate options. Up and Down previously both advanced, which was invisible with two rows
     // and wrong as soon as a third existed.
-    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
-        mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
       selectedOption = (selectedOption + OPTION_COUNT - 1) % OPTION_COUNT;
       requestUpdate();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) ||
-               mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
       selectedOption = (selectedOption + 1) % OPTION_COUNT;
       requestUpdate();
     }

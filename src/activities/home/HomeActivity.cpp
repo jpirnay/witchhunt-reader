@@ -805,16 +805,16 @@ void HomeActivity::loop() {
     // lastCarouselBookIndex (= bookCount, an invalid carousel index), permanently
     // stranding the selector in the menu row — Left/Right still move the icon highlight
     // but Up/Down can never return to the carousel. One-direction-per-tick prevents it.
-    const bool rowToggle = mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-                           mappedInput.wasPressed(MappedInputManager::Button::Down);
+    const bool rowToggle = mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+                           mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down);
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + 1) % bookCount;
       else if (!inCarouselRow)
         selectorIndex = bookCount + (menuIdx + 1) % menuItemCount;
       requestUpdate();
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + bookCount - 1) % bookCount;
       else if (!inCarouselRow)
@@ -880,7 +880,12 @@ void HomeActivity::render(RenderLock&&) {
 
   // Fast path: theme owns its own pre-rendered frame cache
   if (isCarousel) {
-    const auto carouselLabels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    // The carousel scrolls along logical Left/Right and the row toggle sits on logical Up/Down, so
+    // in landscape the front strip carries the toggle instead — mapHints puts the matching arrows
+    // there. (Only the front strip is drawn; the side buttons are unlabelled on the home screen.)
+    const auto carouselLabels =
+        mappedInput.mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+            .front;
     const bool handled = GUI.tryFastHomeRender(
         renderer, recentBooks, selectorIndex, menuCount,
         [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
@@ -929,7 +934,10 @@ void HomeActivity::render(RenderLock&&) {
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
-  const auto labels = isCarousel ? mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
+  const auto labels = isCarousel ? mappedInput
+                                       .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
+                                                 tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                                       .front
                                  : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 

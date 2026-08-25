@@ -187,12 +187,12 @@ void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
 void KeyboardEntryActivity::loop() {
   const int totalRows = getTotalRowCount();
 
-  if (!cursorMode && mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+  if (!cursorMode && mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
     upHeld = true;
     upLongHandled = false;
   }
 
-  if (upHeld && !upLongHandled && mappedInput.isPressed(MappedInputManager::Button::Up) &&
+  if (upHeld && !upLongHandled && mappedInput.isLogicalPressed(MappedInputManager::Direction::Up) &&
       mappedInput.getHeldTime() > LONG_PRESS_MS) {
     cursorMode = true;
     upLongHandled = true;
@@ -201,7 +201,7 @@ void KeyboardEntryActivity::loop() {
     requestUpdate();
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Up)) {
     if (upHeld && !upLongHandled && !cursorMode) {
       bool wasBottom = isBottomRow(selectedRow);
       const int contentCols = getContentColCount();
@@ -219,7 +219,7 @@ void KeyboardEntryActivity::loop() {
     upLongHandled = false;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down)) {
     downHeld = true;
     if (cursorMode) {
       togglePos = false;
@@ -233,7 +233,7 @@ void KeyboardEntryActivity::loop() {
     }
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Down)) {
     if (downHeld && !downLongHandled && !cursorMode) {
       bool wasBottom = isBottomRow(selectedRow);
       const int contentCols = getContentColCount();
@@ -251,14 +251,14 @@ void KeyboardEntryActivity::loop() {
     downLongHandled = false;
   }
 
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] {
+  buttonNavigator.onPressAndContinuous({MappedInputManager::buttonFor(MappedInputManager::Direction::Left)}, [this] {
     if (cursorMode) return;
     int maxCol = isBottomRow(selectedRow) ? BOTTOM_KEY_COUNT - 1 : getContentColCount() - 1;
     selectedCol = ButtonNavigator::previousIndex(selectedCol, maxCol + 1);
     requestUpdate();
   });
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
     if (cursorMode) {
       if (togglePos) {
         cursorPos = savedCursorPos;
@@ -271,7 +271,7 @@ void KeyboardEntryActivity::loop() {
     }
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
     if (cursorMode && inputType == InputType::Password && !togglePos) {
       rightHeld = true;
       rightLongHandled = false;
@@ -279,14 +279,14 @@ void KeyboardEntryActivity::loop() {
     }
   }
 
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] {
+  buttonNavigator.onPressAndContinuous({MappedInputManager::buttonFor(MappedInputManager::Direction::Right)}, [this] {
     if (cursorMode) return;
     int maxCol = isBottomRow(selectedRow) ? BOTTOM_KEY_COUNT - 1 : getContentColCount() - 1;
     selectedCol = ButtonNavigator::nextIndex(selectedCol, maxCol + 1);
     requestUpdate();
   });
 
-  if (rightHeld && !rightLongHandled && mappedInput.isPressed(MappedInputManager::Button::Right) &&
+  if (rightHeld && !rightLongHandled && mappedInput.isLogicalPressed(MappedInputManager::Direction::Right) &&
       mappedInput.getHeldTime() > LONG_PRESS_MS) {
     if (cursorMode && inputType == InputType::Password && !togglePos) {
       savedCursorPos = rightStartCursorPos;
@@ -296,7 +296,7 @@ void KeyboardEntryActivity::loop() {
     }
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
     if (cursorMode && inputType == InputType::Password) {
       rightHeld = false;
       rightLongHandled = false;
@@ -731,10 +731,10 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), ">", "<");
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
 
-  GUI.drawSideButtonHints(renderer, ">", "<");
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

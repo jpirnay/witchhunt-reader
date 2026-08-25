@@ -187,7 +187,14 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   renderer.setOrientation(orig_orientation);
 }
 
-void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
+void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
+  // Like drawButtonHints: draw in panel coordinates, so each box stays beside the button it names
+  // whichever way the device is held. The side buttons sit on the panel's right edge (BTN_UP
+  // nearest the top) — which is the edge getContentRect() reserves in every orientation, while the
+  // logical right edge is a different one in three of the four.
+  const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
   const int screenWidth = renderer.getScreenWidth();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
@@ -197,42 +204,42 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     // X3 layout: Up on left side, Down on right side, positioned higher
     constexpr int x3ButtonY = 155;
 
-    if (topBtn != nullptr && topBtn[0] != '\0') {
+    if (upBtn != nullptr && upBtn[0] != '\0') {
       const int leftX = buttonMargin;
       renderer.drawRect(leftX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, upBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
       const int textX = leftX + (buttonWidth - textHeight) / 2;
       const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, topBtn);
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, upBtn);
     }
 
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
+    if (downBtn != nullptr && downBtn[0] != '\0') {
       const int rightX = screenWidth - buttonMargin - buttonWidth;
       renderer.drawRect(rightX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, downBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
       const int textX = rightX + (buttonWidth - textHeight) / 2;
       const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, bottomBtn);
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, downBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
     constexpr int topButtonY = 345;
-    const char* labels[] = {topBtn, bottomBtn};
+    const char* labels[] = {upBtn, downBtn};
     const int x = screenWidth - buttonMargin - buttonWidth;
 
-    if (topBtn != nullptr && topBtn[0] != '\0') {
+    if (upBtn != nullptr && upBtn[0] != '\0') {
       renderer.drawLine(x, topButtonY, x + buttonWidth - 1, topButtonY);
       renderer.drawLine(x, topButtonY, x, topButtonY + buttonHeight - 1);
       renderer.drawLine(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
     }
 
-    if ((topBtn != nullptr && topBtn[0] != '\0') || (bottomBtn != nullptr && bottomBtn[0] != '\0')) {
+    if ((upBtn != nullptr && upBtn[0] != '\0') || (downBtn != nullptr && downBtn[0] != '\0')) {
       renderer.drawLine(x, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + buttonHeight);
     }
 
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
+    if (downBtn != nullptr && downBtn[0] != '\0') {
       renderer.drawLine(x, topButtonY + buttonHeight, x, topButtonY + 2 * buttonHeight - 1);
       renderer.drawLine(x + buttonWidth - 1, topButtonY + buttonHeight, x + buttonWidth - 1,
                         topButtonY + 2 * buttonHeight - 1);
@@ -250,6 +257,8 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
       }
     }
   }
+
+  renderer.setOrientation(orig_orientation);
 }
 
 void BaseTheme::drawListOverflowArrows(const GfxRenderer& renderer, const Rect rect) {

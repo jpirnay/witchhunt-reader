@@ -71,7 +71,11 @@ void ConfirmationActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  // Cancel and Confirm are not travel across a screen, so they do not follow the logical
+  // directions onto the side buttons: they stay on the front strip, which is the only strip this
+  // prompt draws hints on. What does follow the orientation is which of the two is drawn first —
+  // and these are the very buttons mapLabels() puts those two labels on.
+  if (mappedInput.wasReleased(MappedInputManager::frontStripNext())) {
     ActivityResult res;
     res.isCancelled = false;
     setResult(std::move(res));
@@ -79,7 +83,7 @@ void ConfirmationActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+  if (mappedInput.wasReleased(MappedInputManager::frontStripPrevious())) {
     ActivityResult res;
     res.isCancelled = true;
     setResult(std::move(res));

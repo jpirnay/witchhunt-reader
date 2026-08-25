@@ -44,21 +44,23 @@ void SliderPickerActivity::loop() {
       return;
     }
 
-    if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
+    if ((ev.button == MappedInputManager::Button::PageBack ||
+         MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left)) &&
         ev.type == ButtonEventManager::PressType::Short) {
       adjustValue(-kSmallStep);
       return;
     }
 
-    if ((ev.button == MappedInputManager::Button::PageForward || ev.button == MappedInputManager::Button::Right) &&
+    if ((ev.button == MappedInputManager::Button::PageForward ||
+         MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right)) &&
         ev.type == ButtonEventManager::PressType::Short) {
       adjustValue(kSmallStep);
       return;
     }
   }
 
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] { adjustValue(kLargeStep); });
-  buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] { adjustValue(-kLargeStep); });
+  buttonNavigator.onPressAndContinuous(ButtonNavigator::getStepPreviousButtons(), [this] { adjustValue(kLargeStep); });
+  buttonNavigator.onPressAndContinuous(ButtonNavigator::getStepNextButtons(), [this] { adjustValue(-kLargeStep); });
 }
 
 void SliderPickerActivity::render(RenderLock&&) {
@@ -93,8 +95,11 @@ void SliderPickerActivity::render(RenderLock&&) {
 
   renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, I18N.get(cfg.hintId), true);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // The slider runs across the screen, so - / + ride logical Left/Right and move to whichever
+  // button pair lies on that axis; the coarse step rides logical Up/Down and is unlabelled.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), "-", "+", "", "");
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }
