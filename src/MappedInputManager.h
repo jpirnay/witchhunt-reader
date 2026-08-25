@@ -44,9 +44,12 @@ class MappedInputManager {
   // follow the strip order — logical buttons survive orientation, raw indices do not.
   //
   // The provider is installed once at startup (main.cpp) and queried live, so the orientation
-  // can never go stale against a renderer whose orientation changed. It must answer for
-  // the orientation the *user* is holding, which is why the themes' transient flip to
-  // Portrait while drawing the hint strip is not allowed to feed it.
+  // can never go stale against a renderer whose orientation changed. It must answer for the
+  // orientation the *user* is holding, which is why it reads GfxRenderer::getHeldOrientation():
+  // rendering runs on its own task, and the themes flip the renderer to Portrait mid-pass to put
+  // the hint strips on the panel edge. Sampling plain getOrientation() from loop() therefore
+  // catches Portrait now and then and resolves a direction to the wrong physical button — which
+  // showed up as a landscape page jump occasionally followed by a stray single step.
   static void setOrientationProvider(ScreenOrientation (*provider)());
   static ScreenOrientation screenOrientation();
   static bool isVerticalStripReversed();

@@ -159,8 +159,16 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  // The strip is laid out in panel coordinates so each box lands beside the button it names. In
+  // PortraitInverted the panel is simply turned 180°, so drawing it inverted instead of upright
+  // keeps the boxes on the same panel edge AND lets the reader read the labels — drawing them
+  // upright there put every word upside down. (The landscape modes are a different problem: their
+  // strip is a vertical column, which needs rotated text rather than a rotated page.)
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
 
+  const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = 106;
   constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
@@ -171,34 +179,60 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int x3ButtonPositions[] = {38, 154, 268, 384};
   const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
   const char* labels[] = {btn1, btn2, btn3, btn4};
+  // Inverted flips both axes, so the strip's panel-bottom band becomes the top one and each slot
+  // mirrors across the width. Labels keep their hardware index — the mirroring is what carries
+  // each box back to its own button.
+  const int stripY = inverted ? 0 : pageHeight - buttonY;
 
   for (int i = 0; i < 4; i++) {
     // Only draw if the label is non-empty
     if (labels[i] != nullptr && labels[i][0] != '\0') {
-      const int x = buttonPositions[i];
-      renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
-      renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
+      const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
+      renderer.fillRect(x, stripY, buttonWidth, buttonHeight, false);
+      renderer.drawRect(x, stripY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(UI_10_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      renderer.drawText(UI_10_FONT_ID, textX, stripY + textYOffset, labels[i]);
     }
   }
 
-  renderer.setOrientation(orig_orientation);
+  renderer.setDrawOrientation(orig_orientation);
 }
 
 void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
-  // Like drawButtonHints: draw in panel coordinates, so each box stays beside the button it names
-  // whichever way the device is held. The side buttons sit on the panel's right edge (BTN_UP
-  // nearest the top) — which is the edge getContentRect() reserves in every orientation, while the
-  // logical right edge is a different one in three of the four.
+  // Like drawButtonHints: the geometry below is written in PANEL coordinates, so each box stays
+  // beside the button it names whichever way the device is held. The side buttons sit on the
+  // panel's right edge (BTN_UP nearest the top) — which is the edge getContentRect() reserves in
+  // every orientation, while the logical right edge is a different one in three of the four.
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
 
   const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 4;
+
+  // Panel -> drawing space. Upright, that is the identity; inverted, both axes mirror, and these
+  // three wrappers are the only place that has to know. Text is anchored at the left edge of its
+  // rotated column and at the END of the run (it extends upwards), so its anchor mirrors to the
+  // opposite corner of the box it occupies rather than point-for-point.
+  const auto mx = [&](const int x) { return inverted ? screenWidth - 1 - x : x; };
+  const auto my = [&](const int y) { return inverted ? screenHeight - 1 - y : y; };
+  const auto line = [&](const int x1, const int y1, const int x2, const int y2) {
+    renderer.drawLine(mx(x1), my(y1), mx(x2), my(y2));
+  };
+  const auto rect = [&](const int x, const int y, const int w, const int h) {
+    renderer.drawRect(inverted ? screenWidth - x - w : x, inverted ? screenHeight - y - h : y, w, h);
+  };
+  const auto textCW = [&](const int x, const int y, const char* text) {
+    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, text);
+    const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+    renderer.drawTextRotated90CW(SMALL_FONT_ID, inverted ? screenWidth - x - textHeight : x,
+                                 inverted ? screenHeight - 1 - y + textWidth : y, text);
+  };
 
   if (gpio.deviceIsX3()) {
     // X3 layout: Up on left side, Down on right side, positioned higher
@@ -206,22 +240,18 @@ void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
 
     if (upBtn != nullptr && upBtn[0] != '\0') {
       const int leftX = buttonMargin;
-      renderer.drawRect(leftX, x3ButtonY, buttonWidth, buttonHeight);
+      rect(leftX, x3ButtonY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, upBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-      const int textX = leftX + (buttonWidth - textHeight) / 2;
-      const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, upBtn);
+      textCW(leftX + (buttonWidth - textHeight) / 2, x3ButtonY + (buttonHeight + textWidth) / 2, upBtn);
     }
 
     if (downBtn != nullptr && downBtn[0] != '\0') {
       const int rightX = screenWidth - buttonMargin - buttonWidth;
-      renderer.drawRect(rightX, x3ButtonY, buttonWidth, buttonHeight);
+      rect(rightX, x3ButtonY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, downBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-      const int textX = rightX + (buttonWidth - textHeight) / 2;
-      const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, downBtn);
+      textCW(rightX + (buttonWidth - textHeight) / 2, x3ButtonY + (buttonHeight + textWidth) / 2, downBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
@@ -230,20 +260,19 @@ void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
     const int x = screenWidth - buttonMargin - buttonWidth;
 
     if (upBtn != nullptr && upBtn[0] != '\0') {
-      renderer.drawLine(x, topButtonY, x + buttonWidth - 1, topButtonY);
-      renderer.drawLine(x, topButtonY, x, topButtonY + buttonHeight - 1);
-      renderer.drawLine(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
+      line(x, topButtonY, x + buttonWidth - 1, topButtonY);
+      line(x, topButtonY, x, topButtonY + buttonHeight - 1);
+      line(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
     }
 
     if ((upBtn != nullptr && upBtn[0] != '\0') || (downBtn != nullptr && downBtn[0] != '\0')) {
-      renderer.drawLine(x, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + buttonHeight);
+      line(x, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + buttonHeight);
     }
 
     if (downBtn != nullptr && downBtn[0] != '\0') {
-      renderer.drawLine(x, topButtonY + buttonHeight, x, topButtonY + 2 * buttonHeight - 1);
-      renderer.drawLine(x + buttonWidth - 1, topButtonY + buttonHeight, x + buttonWidth - 1,
-                        topButtonY + 2 * buttonHeight - 1);
-      renderer.drawLine(x, topButtonY + 2 * buttonHeight - 1, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
+      line(x, topButtonY + buttonHeight, x, topButtonY + 2 * buttonHeight - 1);
+      line(x + buttonWidth - 1, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
+      line(x, topButtonY + 2 * buttonHeight - 1, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
     }
 
     for (int i = 0; i < 2; i++) {
@@ -251,14 +280,12 @@ void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
         const int y = topButtonY + i * buttonHeight;
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
         const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-        const int textX = x + (buttonWidth - textHeight) / 2;
-        const int textY = y + (buttonHeight + textWidth) / 2;
-        renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, labels[i]);
+        textCW(x + (buttonWidth - textHeight) / 2, y + (buttonHeight + textWidth) / 2, labels[i]);
       }
     }
   }
 
-  renderer.setOrientation(orig_orientation);
+  renderer.setDrawOrientation(orig_orientation);
 }
 
 void BaseTheme::drawListOverflowArrows(const GfxRenderer& renderer, const Rect rect) {

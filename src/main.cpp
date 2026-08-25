@@ -978,7 +978,7 @@ void setup() {
   // this bridges the two, and is queried live so it can never go stale.
   // See MappedInputManager::buttonFor and issue #87.
   MappedInputManager::setOrientationProvider([] {
-    switch (renderer.getOrientation()) {
+    switch (renderer.getHeldOrientation()) {
       case GfxRenderer::Orientation::LandscapeClockwise:
         return MappedInputManager::ScreenOrientation::LandscapeClockwise;
       case GfxRenderer::Orientation::PortraitInverted:

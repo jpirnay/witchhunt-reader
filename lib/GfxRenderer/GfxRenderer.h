@@ -38,6 +38,8 @@ class GfxRenderer {
   HalDisplay& display;
   std::atomic<int> renderMode;
   std::atomic<int> orientation;
+  // Mirrors `orientation` except across the themes' transient hint-strip flips. See setOrientation.
+  std::atomic<int> heldOrientation;
   std::atomic<bool> fadingFix;
   // Text darkness for 2-bit grayscale glyph rendering.
   std::atomic<uint8_t> textDarkness;
@@ -163,6 +165,7 @@ class GfxRenderer {
       : display(halDisplay),
         renderMode(static_cast<int>(BW)),
         orientation(static_cast<int>(Portrait)),
+        heldOrientation(static_cast<int>(Portrait)),
         fadingFix(false),
         textDarkness(1) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
@@ -218,8 +221,23 @@ class GfxRenderer {
   bool restoreFontMetadata() const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
-  void setOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  void setOrientation(const Orientation o) {
+    orientation.store(static_cast<int>(o), std::memory_order_relaxed);
+    heldOrientation.store(static_cast<int>(o), std::memory_order_relaxed);
+  }
   Orientation getOrientation() const { return static_cast<Orientation>(orientation.load(std::memory_order_relaxed)); }
+
+  // Draw in `o` WITHOUT changing what getHeldOrientation() reports. For furniture that has to sit
+  // on a fixed panel edge whichever way the device is held — the button-hint strips flip to
+  // Portrait so their boxes land beside the physical buttons, then flip back.
+  void setDrawOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  // The orientation the reader is actually holding the device in, unaffected by the transient
+  // flips above. Render runs on its own task, so anything sampling orientation from OUTSIDE a
+  // render pass — the input layer's logical directions above all — must read this instead of
+  // getOrientation(), or it will now and then catch a hint strip mid-draw and answer Portrait.
+  Orientation getHeldOrientation() const {
+    return static_cast<Orientation>(heldOrientation.load(std::memory_order_relaxed));
+  }
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix.store(enabled, std::memory_order_relaxed); }

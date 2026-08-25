@@ -44,15 +44,17 @@ void SliderPickerActivity::loop() {
       return;
     }
 
-    if ((ev.button == MappedInputManager::Button::PageBack ||
-         MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left)) &&
+    // Fine step on logical Left/Right, coarse on logical Up/Down (below) — four directions, four
+    // buttons, one meaning each. The PageBack/PageForward names that used to be matched here as
+    // well are the SIDE buttons under a second name, i.e. the coarse pair: a single press of the
+    // side back button ran both arms and moved the value by +10 then -1.
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
         ev.type == ButtonEventManager::PressType::Short) {
       adjustValue(-kSmallStep);
       return;
     }
 
-    if ((ev.button == MappedInputManager::Button::PageForward ||
-         MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right)) &&
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
         ev.type == ButtonEventManager::PressType::Short) {
       adjustValue(kSmallStep);
       return;

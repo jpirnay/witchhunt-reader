@@ -406,8 +406,13 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  // Inverted draws the strip inverted too, so the labels are the right way up for the reader —
+  // see BaseTheme::drawButtonHints for why that works and why landscape is a separate problem.
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
 
+  const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = 80;
   constexpr int smallButtonHeight = 15;
@@ -420,55 +425,74 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
   const char* labels[] = {btn1, btn2, btn3, btn4};
 
+  // Inverted flips both axes: the strip's panel-bottom band becomes the top one and each slot
+  // mirrors across the width, which is what carries every box back to its own button.
+  const int fullY = inverted ? 0 : pageHeight - buttonY;
+  const int smallY = inverted ? 0 : pageHeight - smallButtonHeight;
+
   for (int i = 0; i < 4; i++) {
-    const int x = buttonPositions[i];
+    const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
     if (labels[i] != nullptr && labels[i][0] != '\0') {
       // Draw the filled background and border for a FULL-sized button
-      renderer.fillRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
-      renderer.drawRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false,
-                               false, true);
+      renderer.fillRoundedRect(x, fullY, buttonWidth, buttonHeight, cornerRadius, Color::White);
+      renderer.drawRoundedRect(x, fullY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false, false, true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(SMALL_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      renderer.drawText(SMALL_FONT_ID, textX, fullY + textYOffset, labels[i]);
     } else {
       // Draw the filled background and border for a SMALL-sized button
-      renderer.fillRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, cornerRadius,
-                               Color::White);
-      renderer.drawRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, 1, cornerRadius, true,
-                               true, false, false, true);
+      renderer.fillRoundedRect(x, smallY, buttonWidth, smallButtonHeight, cornerRadius, Color::White);
+      renderer.drawRoundedRect(x, smallY, buttonWidth, smallButtonHeight, 1, cornerRadius, true, true, false, false,
+                               true);
     }
   }
 
-  renderer.setOrientation(orig_orientation);
+  renderer.setDrawOrientation(orig_orientation);
 }
 
 void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
-  // Panel coordinates, for the reason spelled out in BaseTheme::drawSideButtonHints.
+  // Panel coordinates and the inverted mirroring, for the reasons spelled out in
+  // BaseTheme::drawSideButtonHints.
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
 
   const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = LyraMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 78;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 0;
+
+  const auto roundedRect = [&](const int x, const int y, const int w, const int h, const bool topLeft,
+                               const bool topRight, const bool bottomLeft, const bool bottomRight) {
+    // Mirroring the box mirrors which of its corners are the rounded ones too.
+    renderer.drawRoundedRect(inverted ? screenWidth - x - w : x, inverted ? screenHeight - y - h : y, w, h, 1,
+                             cornerRadius, inverted ? bottomRight : topLeft, inverted ? bottomLeft : topRight,
+                             inverted ? topRight : bottomLeft, inverted ? topLeft : bottomRight, true);
+  };
+  const auto textCW = [&](const int x, const int y, const char* text) {
+    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, text);
+    const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+    renderer.drawTextRotated90CW(SMALL_FONT_ID, inverted ? screenWidth - x - textHeight : x,
+                                 inverted ? screenHeight - 1 - y + textWidth : y, text);
+  };
 
   if (gpio.deviceIsX3()) {
     // X3 layout: Up on left side, Down on right side, positioned higher
     constexpr int x3ButtonY = 155;
 
     if (upBtn != nullptr && upBtn[0] != '\0') {
-      renderer.drawRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, false, true, false,
-                               true, true);
+      roundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, false, true, false, true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, upBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, upBtn);
+      textCW(buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, upBtn);
     }
 
     if (downBtn != nullptr && downBtn[0] != '\0') {
       const int rightX = screenWidth - buttonWidth;
-      renderer.drawRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
-                               true);
+      roundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, true, false, true, false);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, downBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, rightX, x3ButtonY + (buttonHeight + textWidth) / 2, downBtn);
+      textCW(rightX, x3ButtonY + (buttonHeight + textWidth) / 2, downBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
@@ -476,25 +500,23 @@ void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
     const int x = screenWidth - buttonWidth;
 
     if (upBtn != nullptr && upBtn[0] != '\0') {
-      renderer.drawRoundedRect(x, topHintButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
-                               true);
+      roundedRect(x, topHintButtonY, buttonWidth, buttonHeight, true, false, true, false);
     }
 
     if (downBtn != nullptr && downBtn[0] != '\0') {
-      renderer.drawRoundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, 1, cornerRadius, true,
-                               false, true, false, true);
+      roundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, true, false, true, false);
     }
 
     for (int i = 0; i < 2; i++) {
       if (labels[i] != nullptr && labels[i][0] != '\0') {
         const int y = topHintButtonY + (i * buttonHeight) + 5;
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
-        renderer.drawTextRotated90CW(SMALL_FONT_ID, x, y + (buttonHeight + textWidth) / 2, labels[i]);
+        textCW(x, y + (buttonHeight + textWidth) / 2, labels[i]);
       }
     }
   }
 
-  renderer.setOrientation(orig_orientation);
+  renderer.setDrawOrientation(orig_orientation);
 }
 
 void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
