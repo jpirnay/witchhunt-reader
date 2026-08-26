@@ -324,10 +324,15 @@ void ParsedText::layoutAndExtractLines(
   // Compute firstLineIndent once here so all layout helpers use the same value.
   // On a continuation flush the remaining words are mid-paragraph, so no indent.
   // firstLineExtraIndent adds extra indent on the first line (on top of CSS text-indent).
+  // A negative text-indent is the hanging-indent pattern (margin-left:3em; text-indent:-1em),
+  // where the inset is what the first line hangs out of. It may pull left by at most that inset:
+  // the block's own left edge is where the CSS containing block starts, and anything past it
+  // renders off the panel and silently loses its first glyphs (issue #198).
   const int cssTextIndent =
       !isContinuation_ && blockStyle.textIndentDefined &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? std::min(std::max<int>(static_cast<int>(blockStyle.textIndent), -(pageWidth - 1)), pageWidth - 1)
+          ? std::min(std::max<int>(static_cast<int>(blockStyle.textIndent), -static_cast<int>(blockStyle.leftInset())),
+                     pageWidth - 1)
           : 0;
   const int firstLineIndent = cssTextIndent + (isContinuation_ ? 0 : static_cast<int>(blockStyle.firstLineExtraIndent));
 
