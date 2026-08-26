@@ -329,15 +329,15 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=132 s=0 z=100 t=the
    W x=169 s=0 z=100 t=paragraph.
   LINE y=191 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=0 z=100 t=Second
-   W x=85 s=0 z=100 t=line
-   W x=128 s=0 z=100 t=of
-   W x=158 s=0 z=100 t=the
-   W x=197 s=0 z=100 t=paragraph
-   W x=290 s=0 z=100 t=—
-   W x=305 s=0 z=100 t=directly
-   W x=378 s=0 z=100 t=below,
-   W x=436 s=0 z=100 t=no
+   W x=0 s=0 z=100 t=Second
+   W x=69 s=0 z=100 t=line
+   W x=114 s=0 z=100 t=of
+   W x=146 s=0 z=100 t=the
+   W x=187 s=0 z=100 t=paragraph
+   W x=280 s=0 z=100 t=—
+   W x=297 s=0 z=100 t=directly
+   W x=372 s=0 z=100 t=below,
+   W x=432 s=0 z=100 t=no
   LINE y=215 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=gap.
   LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7

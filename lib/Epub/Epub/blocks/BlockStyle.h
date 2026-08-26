@@ -91,16 +91,23 @@ struct BlockStyle {
     // Vertical margins between a parent and its child collapse (CSS collapsing margins):
     // the combined margin is the larger of the two, not their sum. Without this, a
     // margined block wrapping a margined child (e.g. <div> around an <h1>) double-counts
-    // the gap and over-spaces. Horizontal margins and padding stay additive.
+    // the gap and over-spaces. Vertical padding stays additive; for the horizontal sides
+    // see below.
     combinedBlockStyle.marginTop = std::max(child.marginTop, marginTop);
     combinedBlockStyle.marginBottom = std::max(child.marginBottom, marginBottom);
-    combinedBlockStyle.marginLeft = static_cast<int16_t>(child.marginLeft + marginLeft);
-    combinedBlockStyle.marginRight = static_cast<int16_t>(child.marginRight + marginRight);
 
     combinedBlockStyle.paddingTop = static_cast<int16_t>(child.paddingTop + paddingTop);
     combinedBlockStyle.paddingBottom = static_cast<int16_t>(child.paddingBottom + paddingBottom);
-    combinedBlockStyle.paddingLeft = static_cast<int16_t>(child.paddingLeft + paddingLeft);
-    combinedBlockStyle.paddingRight = static_cast<int16_t>(child.paddingRight + paddingRight);
+
+    // Horizontal insets are the child's alone. They used to accumulate here, which was this
+    // merge's only way of getting a wrapper's margin into the block that finally holds the
+    // text -- but it reaches the wrapper's FIRST child only, and it also lets a spent sibling
+    // block donate its margin. Enclosing insets now arrive on every child through the parser's
+    // blockInsetStack_, so summing them here as well would double them.
+    combinedBlockStyle.marginLeft = child.marginLeft;
+    combinedBlockStyle.marginRight = child.marginRight;
+    combinedBlockStyle.paddingLeft = child.paddingLeft;
+    combinedBlockStyle.paddingRight = child.paddingRight;
     // Text indent: use child's if defined
     if (child.textIndentDefined) {
       combinedBlockStyle.textIndent = child.textIndent;

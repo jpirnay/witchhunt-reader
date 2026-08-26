@@ -707,6 +707,10 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
+  } else if (blockStyle.fromBrElement) {
+    // A block created by an inline <br> is the next line of the SAME paragraph, so it gets no
+    // first-line indent. (A <br> standing between two paragraphs leaves its block empty; that
+    // block is merged into the following one, which brings its own indent.)
   } else if (!extraParagraphSpacing && blockStyle.floatZoneCount == 0 &&
              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
     // No CSS text-indent defined — apply a font-size-relative pixel indent so paragraph

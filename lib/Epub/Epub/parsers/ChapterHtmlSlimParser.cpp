@@ -153,6 +153,14 @@ constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre", "caption"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
+// Elements whose own horizontal inset also applies to the blocks nested inside them
+// (blockInsetStack_). Everything that can hold another block belongs here, plus <p>/<li>/<pre>,
+// whose <br>-separated lines each become a block of their own and must keep the inset of the
+// paragraph they belong to. <ul>/<ol> deliberately stay out: list indentation is synthesised
+// per <li> from the list depth, so counting the list's own margin as well would double it.
+const char* INSET_CONTAINER_TAGS[] = {"div", "blockquote", "section", "article", "aside", "main", "p", "li", "pre"};
+constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(INSET_CONTAINER_TAGS[0]);
+
 const char* BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
 
@@ -1041,6 +1049,22 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
           capWidth + kDropCapGapPx, zoneHeight);
 }
 
+void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emSize) const {
+  if (blockInsetStack_.empty()) return;
+  int left = style.leftInset();
+  int right = style.rightInset();
+  for (const auto& entry : blockInsetStack_) {
+    left += entry.left;
+    right += entry.right;
+  }
+  const int cap = static_cast<int>(emSize * BlockStyle::MAX_HORIZONTAL_INSET_EM);
+  // Only the sum is ever laid out (leftInset()/rightInset()), so the capped total goes on the
+  // margin and the padding keeps its own value. Both stay >= 0: fromCssStyle clamps each
+  // element's contribution to [0, cap], so the capped total can never fall below the padding.
+  style.marginLeft = static_cast<int16_t>(std::min(left, cap) - style.paddingLeft);
+  style.marginRight = static_cast<int16_t>(std::min(right, cap) - style.paddingRight);
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
@@ -1324,9 +1348,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // ("feat: improve table rendering (#89)", Julia <julia@uxj.io>), which sizes the grid from
     // the table's block inset; we reuse BlockStyle::fromCssStyle so the 4em inset cap and the
     // em/percentage resolution stay shared with every other block.
-    const BlockStyle tableBlockStyle =
-        BlockStyle::fromCssStyle(cssStyle, static_cast<float>(self->renderer.getFontAscenderSize(self->fontId)),
-                                 static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+    const float tableEmSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+    BlockStyle tableBlockStyle = BlockStyle::fromCssStyle(
+        cssStyle, tableEmSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+    self->addAncestorInsets(tableBlockStyle, tableEmSize);
     const int16_t horizontalInset = tableBlockStyle.totalHorizontalInset();
     self->currentTable->contentWidth = (horizontalInset > 0 && horizontalInset < self->viewportWidth)
                                            ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
@@ -1932,8 +1957,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   }
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
-  const auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
+  auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+
+  // This element's own inset is what its children inherit; capture it before the ancestors are
+  // folded in, or each level would count itself once per descendant.
+  const int16_t ownInsetLeft = userAlignmentBlockStyle.leftInset();
+  const int16_t ownInsetRight = userAlignmentBlockStyle.rightInset();
+  self->addAncestorInsets(userAlignmentBlockStyle, emSize);
+  if ((ownInsetLeft > 0 || ownInsetRight > 0) &&
+      self->blockInsetStack_.size() < ChapterHtmlSlimParser::kMaxBlockInsetDepth &&
+      matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS)) {
+    self->blockInsetStack_.push_back({self->depth, ownInsetLeft, ownInsetRight});
+  }
 
   // Block/header boundaries must flush any buffered trailing word first.
   // Otherwise tags like ..."item?"<p ...> can carry the final word into the next paragraph.
@@ -1952,6 +1988,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth);
+    self->addAncestorInsets(headerBlockStyle, emSize);
     headerBlockStyle.textAlignDefined = true;
     if (self->embeddedStyle && cssStyle.hasTextAlign() &&
         self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
@@ -2004,6 +2041,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
+      // The horizontal inset is the enclosing block's, not the <br>'s: a <br> splits one
+      // paragraph into several blocks, and all of them sit inside the same containing block.
+      // (Vertical margins are deliberately not carried — they would repeat per line.)
+      self->addAncestorInsets(brStyle, emSize);
       // text-indent is not inherited across <br>: it applies to the first line of a block only.
       // Span-based indents (poem stanza pattern) are applied directly to each block at span-open time.
       brStyle.fromBrElement = true;
@@ -2020,7 +2061,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // distinguishable. listStack.size() == 1 for top-level, 2 for first nested, etc.
       if (strcmp(name, "li") == 0 && !cssStyle.hasMarginLeft() && !self->listStack.empty()) {
         const int depth = static_cast<int>(std::min(self->listStack.size(), size_t(3)));
-        blockStyle.marginLeft = static_cast<int16_t>(emSize * 1.5f * depth);
+        blockStyle.marginLeft = static_cast<int16_t>(blockStyle.marginLeft + emSize * 1.5f * depth);
       }
       self->startNewTextBlock(blockStyle);
       self->updateEffectiveInlineStyle();
@@ -2651,6 +2692,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   // Pop explicit-width container entries whose block is now out of scope
   while (!self->containerWidthStack_.empty() && self->containerWidthStack_.back().depth >= self->depth) {
     self->containerWidthStack_.pop_back();
+  }
+
+  // Pop horizontal insets whose block-level element is now out of scope
+  while (!self->blockInsetStack_.empty() && self->blockInsetStack_.back().depth >= self->depth) {
+    self->blockInsetStack_.pop_back();
   }
 
   // Closing a footnote link — create entry from collected text and href
