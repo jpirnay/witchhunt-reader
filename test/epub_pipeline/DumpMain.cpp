@@ -6,7 +6,9 @@
 // A missing cacheDir uses a fresh temp dir (cold build). Passing the same
 // cacheDir twice exercises the warm path. --bench adds per-spine timing,
 // whole-run peak heap, and the on-disk cache footprint to stderr.
-#include <dlfcn.h>
+#if !defined(_WIN32)
+#include <dlfcn.h>  // dladdr, for symbolising alloc sites; MinGW has no dlfcn
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -83,13 +85,15 @@ int main(const int argc, char** argv) {
       // Resolve in-process: the binary is position-independent, so a raw runtime address means
       // nothing to addr2line without the load base. dladdr gives both the symbol and the base,
       // and the base-relative offset is what addr2line can turn into file:line.
-      Dl_info info{};
       const char* sym = "?";
       unsigned long long rel = sites[i].pc;
+#if !defined(_WIN32)
+      Dl_info info{};
       if (dladdr(reinterpret_cast<void*>(static_cast<uintptr_t>(sites[i].pc)), &info) != 0) {
         if (info.dli_sname != nullptr) sym = info.dli_sname;
         if (info.dli_fbase != nullptr) rel = sites[i].pc - reinterpret_cast<uintptr_t>(info.dli_fbase);
       }
+#endif
       std::fprintf(stderr, "\nBENCHMARK alloc_site count=%zu bytes=%zu off=0x%llx sym=%s", sites[i].count,
                    sites[i].bytes, rel, sym);
     }
