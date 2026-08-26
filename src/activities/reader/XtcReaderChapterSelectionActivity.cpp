@@ -82,7 +82,7 @@ void XtcReaderChapterSelectionActivity::loop() {
 void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
   const int pageItems = getPageItems();
 
   const int titleX =
@@ -112,10 +112,13 @@ void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
   // Left/Right page when there is more than one page to cross, and fall back to stepping (which is
   // what ButtonNavigator::nextPageIndex does on a short list) when there is not.
   const bool pages = static_cast<int>(chapters.size()) > pageItems;
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), pages ? tr(STR_LIST_PAGE_PREV) : tr(STR_DIR_UP),
-                            pages ? tr(STR_LIST_PAGE_NEXT) : tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Paging rides logical Left/Right and stepping logical Up/Down, so which pair sits on the front
+  // strip and which on the side buttons is the orientation's business — mapHints routes both sets
+  // of labels to whichever buttons are doing the job.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), pages ? tr(STR_LIST_PAGE_PREV) : "",
+                                          pages ? tr(STR_LIST_PAGE_NEXT) : "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

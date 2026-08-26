@@ -240,20 +240,21 @@ void GlobalBookmarksActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
     renameSelected();
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
     deleteSelected();
     return;
   }
 
-  // Navigator is restricted to Up/Down so the Left (rename) and Right (delete)
+  // Navigator is restricted to logical Up/Down so the logical Left (rename) and Right (delete)
   // handlers above cannot race default cursor movement on the same press tick.
-  buttonNavigator.onNextList({MappedInputManager::Button::Down}, selectorIndex, total, [this] { requestUpdate(); });
-  buttonNavigator.onPreviousList({MappedInputManager::Button::Up}, selectorIndex, total, [this] { requestUpdate(); });
+  buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectorIndex, total, [this] { requestUpdate(); });
+  buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectorIndex, total,
+                                 [this] { requestUpdate(); });
 }
 
 void GlobalBookmarksActivity::render(RenderLock&&) {
@@ -277,10 +278,11 @@ void GlobalBookmarksActivity::render(RenderLock&&) {
   }
 
   const bool hasBookmarks = !rows.empty() && !isSeparatorRow(selectorIndex);
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), hasBookmarks ? tr(STR_OPEN) : "",
-                                            hasBookmarks ? tr(STR_RENAME) : "", hasBookmarks ? tr(STR_DELETE) : "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto hints =
+      mappedInput.mapHints(tr(STR_HOME), hasBookmarks ? tr(STR_OPEN) : "", hasBookmarks ? tr(STR_RENAME) : "",
+                           hasBookmarks ? tr(STR_DELETE) : "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

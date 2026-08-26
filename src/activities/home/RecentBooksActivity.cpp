@@ -324,7 +324,8 @@ void RecentBooksActivity::loop() {
     }
 
     // Up short: navigate (row up in grid, previous in list)
-    if (ev.button == MappedInputManager::Button::Up && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Up) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         if (gridView) {
           selectorIndex = std::max(0, selectorIndex - gridColumns());
@@ -337,7 +338,8 @@ void RecentBooksActivity::loop() {
     }
 
     // Down short: navigate (row down in grid, next in list)
-    if (ev.button == MappedInputManager::Button::Down && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Down) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         if (gridView) {
           selectorIndex = std::min(listSize - 1, selectorIndex + gridColumns());
@@ -350,13 +352,15 @@ void RecentBooksActivity::loop() {
     }
 
     // Up long: toggle between list and grid view
-    if (ev.button == MappedInputManager::Button::Up && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Up) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       switchViewMode(!gridView);
       return;
     }
 
     // Left short: column left in grid, previous in list
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         selectorIndex = ButtonNavigator::previousIndex(selectorIndex, listSize);
         requestUpdate();
@@ -365,7 +369,8 @@ void RecentBooksActivity::loop() {
     }
 
     // Right short: column right in grid, next in list
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         selectorIndex = ButtonNavigator::nextIndex(selectorIndex, listSize);
         requestUpdate();
@@ -374,13 +379,15 @@ void RecentBooksActivity::loop() {
     }
 
     // Left long: remove selected book (both views)
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       removeSelectedBook();
       return;
     }
 
     // Right long: show book info (both views)
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       showSelectedBookInfo();
       return;
     }
@@ -485,9 +492,10 @@ void RecentBooksActivity::renderListView(RenderLock&&) {
   }
 
   const bool hasBooks = !recentBooks.empty();
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), hasBooks ? tr(STR_OPEN) : "", "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto hints =
+      mappedInput.mapHints(tr(STR_HOME), hasBooks ? tr(STR_OPEN) : "", "", "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }
@@ -671,9 +679,9 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     renderer.drawText(SMALL_FONT_ID, contentRect.x + metrics.contentSidePadding, hintY, hint.c_str());
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto hints = mappedInput.mapHints(tr(STR_HOME), tr(STR_OPEN), "", "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

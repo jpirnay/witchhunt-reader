@@ -352,15 +352,18 @@ void DictionaryWordSelectActivity::loop() {
 
   const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
   const int before = selected;
-  if (mappedInput.wasPressed(MappedInputManager::Button::Left) && selected > 0) {
+  // The cursor travels over the page as the reader sees it, so it follows the logical directions:
+  // whichever button pair lies across the screen picks the neighbouring word, and whichever runs
+  // up and down it changes line.
+  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left) && selected > 0) {
     selected--;
     requestUpdate();
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Right) && hasNextWord) {
+  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right) && hasNextWord) {
     selected++;
     requestUpdate();
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
+  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
     moveVertical(-1);
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
+  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down)) {
     moveVertical(1);
   }
   // Restart the debounce on every move, so holding a direction down resolves
@@ -437,7 +440,12 @@ void DictionaryWordSelectActivity::drawHints() const {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  // The cursor moves in all four directions; the front strip carries two of them and the side
+  // buttons the other two, so the arrows have to be routed rather than fixed.
+  const auto labels =
+      mappedInput
+          .mapHints(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+          .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

@@ -673,14 +673,14 @@ void WifiSelectionActivity::loop() {
 
   // Handle save prompt state
   if (state == WifiSelectionState::SAVE_PROMPT) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (savePromptSelection > 0) {
         savePromptSelection--;
         requestUpdate();
       }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-               mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (savePromptSelection < 1) {
         savePromptSelection++;
         requestUpdate();
@@ -702,14 +702,14 @@ void WifiSelectionActivity::loop() {
 
   // Handle forget prompt state (connection failed with saved credentials)
   if (state == WifiSelectionState::FORGET_PROMPT) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (forgetPromptSelection > 0) {
         forgetPromptSelection--;
         requestUpdate();
       }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-               mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (forgetPromptSelection < 2) {
         forgetPromptSelection++;
         requestUpdate();
@@ -805,12 +805,12 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       startWifiScan();
       return;
     }
 
-    const bool leftPressed = mappedInput.wasPressed(MappedInputManager::Button::Left);
+    const bool leftPressed = mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left);
     if (leftPressed) {
       const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
       if (hasSavedPassword) {
@@ -823,8 +823,9 @@ void WifiSelectionActivity::loop() {
     }
 
     // Handle navigation
-    // Step on Up/Down only: Left starts a saved-password connect and Right rescans (handled above),
-    // so they must not also move the selection. The page jump is the double-click on Up/Down.
+    // Step on logical Up/Down only: logical Left opens the saved-network options and logical Right
+    // rescans (handled above), so they must not also move the selection. The page jump is the
+    // double-click on Up/Down.
     buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectedNetworkIndex,
                                static_cast<int>(networks.size()), [this] { requestUpdate(); });
     buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectedNetworkIndex,
@@ -904,7 +905,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
 
 void WifiSelectionActivity::renderNetworkList() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
 
   if (networks.empty()) {
     // No networks found or scan failed
@@ -933,8 +934,13 @@ void WifiSelectionActivity::renderNetworkList() const {
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* optionsLabel = hasSavedPassword ? tr(STR_OPTIONS_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), optionsLabel, tr(STR_RETRY));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Options/Retry ride logical Left/Right and the step rides logical Up/Down, so in landscape the
+  // two pairs change places along with the labels — hence both hint strips, and the side gutter
+  // reserved above.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_CONNECT), optionsLabel, tr(STR_RETRY), tr(STR_DIR_UP),
+                                          tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 }
 
 void WifiSelectionActivity::renderConnecting() const {
@@ -1016,7 +1022,11 @@ void WifiSelectionActivity::renderSavePrompt() const {
   }
 
   // Use centralized button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  // Either axis moves the selection here, so label the front strip with whichever pair it carries.
+  const auto labels = mappedInput
+                          .mapHints(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP),
+                                    tr(STR_DIR_DOWN))
+                          .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -1078,7 +1088,10 @@ void WifiSelectionActivity::renderForgetPrompt() const {
   }
 
   // Use centralized button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  const auto labels =
+      mappedInput
+          .mapHints(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+          .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
