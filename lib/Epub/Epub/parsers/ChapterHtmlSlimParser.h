@@ -294,6 +294,27 @@ class ChapterHtmlSlimParser final : public Print {
   };
   std::vector<ContainerWidthEntry> containerWidthStack_;
 
+  // Horizontal insets (margin + padding, per side) of the block-level elements currently open.
+  // Every block nested inside them starts at their sum: layout has no box model, so without
+  // this a wrapper's inset would reach only its FIRST child -- the empty-block merge in
+  // startNewTextBlock() -- and every later sibling would jump back to the viewport edge. With a
+  // hanging indent on the children (verse: div{margin-left:2em} > p{text-indent:-1em}) those
+  // siblings then start left of the panel and lose their first glyph (issue #198).
+  // depth = parser depth at push (pre-increment); popped in endElement when that scope closes.
+  struct BlockInsetEntry {
+    int depth;
+    int16_t left;
+    int16_t right;
+  };
+  // Insets nested deeper than this are dropped rather than tracked: the total is capped at 4em
+  // either way, and a book that nests inset wrappers this deep is pathological, not typographic.
+  static constexpr size_t kMaxBlockInsetDepth = 8;
+  std::vector<BlockInsetEntry> blockInsetStack_;
+
+  // Fold the insets of every enclosing block-level element into `style`, capping each side at
+  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away.
+  void addAncestorInsets(BlockStyle& style, float emSize) const;
+
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
   int completedPageCount = 0;
   std::vector<std::pair<std::string, uint16_t>> anchorData;

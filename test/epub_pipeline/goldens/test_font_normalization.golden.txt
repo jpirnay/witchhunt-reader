@@ -292,15 +292,15 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=18 s=0 z=100 t=ninety-eight
   LINE y=144 x=0 align=0 mult=0.950 hfid=0 words=1
-   W x=17 s=0 z=100 t=ninety-five
+   W x=0 s=0 z=100 t=ninety-five
   LINE y=167 x=0 align=0 mult=0.920 hfid=0 words=1
-   W x=17 s=0 z=100 t=ninety-two
+   W x=0 s=0 z=100 t=ninety-two
   LINE y=189 x=0 align=0 mult=0.890 hfid=0 words=1
-   W x=16 s=0 z=100 t=eighty-nine
+   W x=0 s=0 z=100 t=eighty-nine
   LINE y=210 x=0 align=0 mult=0.800 hfid=0 words=1
-   W x=14 s=0 z=100 t=eighty
+   W x=0 s=0 z=100 t=eighty
   LINE y=229 x=0 align=0 mult=0.700 hfid=0 words=1
-   W x=13 s=0 z=100 t=seventy
+   W x=0 s=0 z=100 t=seventy
   LINE y=246 x=0 align=0 mult=0.920 hfid=0 words=9
    W x=17 s=0 z=100 t=8.
    W x=38 s=0 z=100 t=BLOCK

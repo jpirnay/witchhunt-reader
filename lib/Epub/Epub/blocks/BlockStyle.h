@@ -72,6 +72,12 @@ struct BlockStyle {
   FloatZone floatZones[kMaxFloatZones] = {};
   int8_t floatZoneCount = 0;
 
+  // Clamp one horizontal margin/padding value into [0, maxPx]. The upper bound is
+  // MAX_HORIZONTAL_INSET_EM (see above); the lower bound exists because a block is laid out
+  // against the viewport, not against a parent box -- a negative inset has nothing to pull
+  // back into, so it only pushes the first glyphs off the left edge of the panel.
+  static int16_t clampInset(const int16_t px, const int16_t maxPx) { return px < 0 ? 0 : std::min(px, maxPx); }
+
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
   [[nodiscard]] int16_t rightInset() const { return marginRight + paddingRight; }
@@ -85,16 +91,23 @@ struct BlockStyle {
     // Vertical margins between a parent and its child collapse (CSS collapsing margins):
     // the combined margin is the larger of the two, not their sum. Without this, a
     // margined block wrapping a margined child (e.g. <div> around an <h1>) double-counts
-    // the gap and over-spaces. Horizontal margins and padding stay additive.
+    // the gap and over-spaces. Vertical padding stays additive; for the horizontal sides
+    // see below.
     combinedBlockStyle.marginTop = std::max(child.marginTop, marginTop);
     combinedBlockStyle.marginBottom = std::max(child.marginBottom, marginBottom);
-    combinedBlockStyle.marginLeft = static_cast<int16_t>(child.marginLeft + marginLeft);
-    combinedBlockStyle.marginRight = static_cast<int16_t>(child.marginRight + marginRight);
 
     combinedBlockStyle.paddingTop = static_cast<int16_t>(child.paddingTop + paddingTop);
     combinedBlockStyle.paddingBottom = static_cast<int16_t>(child.paddingBottom + paddingBottom);
-    combinedBlockStyle.paddingLeft = static_cast<int16_t>(child.paddingLeft + paddingLeft);
-    combinedBlockStyle.paddingRight = static_cast<int16_t>(child.paddingRight + paddingRight);
+
+    // Horizontal insets are the child's alone. They used to accumulate here, which was this
+    // merge's only way of getting a wrapper's margin into the block that finally holds the
+    // text -- but it reaches the wrapper's FIRST child only, and it also lets a spent sibling
+    // block donate its margin. Enclosing insets now arrive on every child through the parser's
+    // blockInsetStack_, so summing them here as well would double them.
+    combinedBlockStyle.marginLeft = child.marginLeft;
+    combinedBlockStyle.marginRight = child.marginRight;
+    combinedBlockStyle.paddingLeft = child.paddingLeft;
+    combinedBlockStyle.paddingRight = child.paddingRight;
     // Text indent: use child's if defined
     if (child.textIndentDefined) {
       combinedBlockStyle.textIndent = child.textIndent;
@@ -134,13 +147,13 @@ struct BlockStyle {
     // Resolve all CssLength values to pixels using the current font's em size and viewport width
     blockStyle.marginTop = cssStyle.marginTop.toPixelsInt16(emSize, vw);
     blockStyle.marginBottom = cssStyle.marginBottom.toPixelsInt16(emSize, vw);
-    blockStyle.marginLeft = std::min(cssStyle.marginLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
-    blockStyle.marginRight = std::min(cssStyle.marginRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
+    blockStyle.marginLeft = clampInset(cssStyle.marginLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
+    blockStyle.marginRight = clampInset(cssStyle.marginRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
 
     blockStyle.paddingTop = cssStyle.paddingTop.toPixelsInt16(emSize, vw);
     blockStyle.paddingBottom = cssStyle.paddingBottom.toPixelsInt16(emSize, vw);
-    blockStyle.paddingLeft = std::min(cssStyle.paddingLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
-    blockStyle.paddingRight = std::min(cssStyle.paddingRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
+    blockStyle.paddingLeft = clampInset(cssStyle.paddingLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
+    blockStyle.paddingRight = clampInset(cssStyle.paddingRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
 
     // For textIndent: if it's a percentage we can't resolve (no viewport width),
     // leave textIndentDefined=false so applyParagraphIndent() applies a pixel fallback
