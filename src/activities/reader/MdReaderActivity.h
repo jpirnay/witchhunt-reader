@@ -60,8 +60,11 @@ class MdReaderActivity final : public LineReaderActivity {
 
  protected:
   void onReaderExit() override;
+  // The heading list stands in for a chapter list in the shared reader menu.
+  void fillMenuOptions(SimpleReaderMenuActivity::Options& options) const override;
+  bool onReaderMenuAction(SimpleReaderMenuActivity::MenuAction action) override;
   // Opens the ToC overlay when the document has headings.
-  bool onConfirmShortPress() override;
+  void openTocSelection();
   // Keeps currentHeadingIndex in sync with the page shown.
   void onPageChanged() override;
 

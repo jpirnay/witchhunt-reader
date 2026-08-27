@@ -102,9 +102,30 @@ void TxtReaderActivity::onReaderExit() {
   currentPageLines.clear();
 }
 
-bool TxtReaderActivity::onConfirmShortPress() {
+void TxtReaderActivity::fillMenuOptions(SimpleReaderMenuActivity::Options& options) const {
+  options.canStarPages = true;
+  options.hasStarredPages = !bookmarkStore.isEmpty();
+  options.currentPageStarred = bookmarkStore.has(0, static_cast<uint16_t>(currentPage));
+}
+
+bool TxtReaderActivity::onReaderMenuAction(const SimpleReaderMenuActivity::MenuAction action) {
+  using MenuAction = SimpleReaderMenuActivity::MenuAction;
+  if (action == MenuAction::STAR_PAGE) {
+    // Flat book: TXT has no spine, so every bookmark sits in section 0.
+    bookmarkStore.toggle(0, static_cast<uint16_t>(currentPage));
+    requestUpdate();
+    return true;
+  }
+  if (action == MenuAction::STARRED_PAGES) {
+    openStarredPages();
+    return true;
+  }
+  return false;
+}
+
+void TxtReaderActivity::openStarredPages() {
   if (bookmarkStore.isEmpty()) {
-    return false;
+    return;
   }
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
@@ -117,7 +138,6 @@ bool TxtReaderActivity::onConfirmShortPress() {
                            }
                            requestUpdate();
                          });
-  return true;
 }
 
 void TxtReaderActivity::initializeReader() {
@@ -684,17 +704,11 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
       requestUpdate();
       break;
     case BA::BTN_OPEN_BOOKMARKS:
-      if (!bookmarkStore.isEmpty()) {
-        ReaderUtils::enforceExitFullRefresh(renderer);
-        startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
-                               [this](const ActivityResult& result) {
-                                 if (!result.isCancelled) {
-                                   const auto& starred = std::get<StarredPageResult>(result.data);
-                                   currentPage = starred.pageNumber;
-                                   requestUpdate();
-                                 }
-                               });
-      }
+      openStarredPages();
+      break;
+    case BA::BTN_READER_MENU:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      openReaderMenu();
       break;
     case BA::BTN_NEXT_SECTION:
     case BA::BTN_PREV_SECTION:

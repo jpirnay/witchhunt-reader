@@ -197,22 +197,29 @@ void XtcReaderActivity::openReaderMenu() {
   if (!xtc) {
     return;
   }
-  startActivityForResult(
-      std::make_unique<XtcReaderMenuActivity>(renderer, mappedInput, xtc->getTitle(), static_cast<int>(currentPage) + 1,
-                                              static_cast<int>(xtc->getPageCount()),
-                                              xtc->hasChapters() && !xtc->getChapters().empty()),
-      [this](const ActivityResult& result) {
-        // Back leaves the result variant empty. std::get on the wrong alternative throws, and the
-        // device is built -fno-exceptions, so that would be an abort() rather than a no-op.
-        if (result.isCancelled || !std::holds_alternative<MenuResult>(result.data)) {
-          return;
-        }
-        onReaderMenuConfirm(static_cast<XtcReaderMenuActivity::MenuAction>(std::get<MenuResult>(result.data).action));
-      });
+  SimpleReaderMenuActivity::Options options;
+  options.title = xtc->getTitle();
+  options.currentPage = static_cast<int>(currentPage) + 1;
+  options.totalPages = static_cast<int>(xtc->getPageCount());
+  options.hasChapters = xtc->hasChapters() && !xtc->getChapters().empty();
+  // An XTH book leaves up to four transposed page planes of ~96 KB each behind, so clearing the
+  // cache recovers real space here in a way it does not for the line-oriented readers.
+  options.canDeleteCache = true;
+
+  startActivityForResult(std::make_unique<SimpleReaderMenuActivity>(renderer, mappedInput, std::move(options)),
+                         [this](const ActivityResult& result) {
+                           // Back leaves the result variant empty. std::get on the wrong alternative throws, and the
+                           // device is built -fno-exceptions, so that would be an abort() rather than a no-op.
+                           if (result.isCancelled || !std::holds_alternative<MenuResult>(result.data)) {
+                             return;
+                           }
+                           onReaderMenuConfirm(static_cast<SimpleReaderMenuActivity::MenuAction>(
+                               std::get<MenuResult>(result.data).action));
+                         });
 }
 
-void XtcReaderActivity::onReaderMenuConfirm(const XtcReaderMenuActivity::MenuAction action) {
-  using MenuAction = XtcReaderMenuActivity::MenuAction;
+void XtcReaderActivity::onReaderMenuConfirm(const SimpleReaderMenuActivity::MenuAction action) {
+  using MenuAction = SimpleReaderMenuActivity::MenuAction;
   const int pageCount = static_cast<int>(xtc->getPageCount());
 
   switch (action) {
@@ -312,6 +319,10 @@ void XtcReaderActivity::onReaderMenuConfirm(const XtcReaderMenuActivity::MenuAct
       onGoHome();
       return;
 
+    // XTC has no bookmark store yet, so these are never offered (Options::canStarPages stays
+    // false) — listed to keep the switch exhaustive.
+    case MenuAction::STAR_PAGE:
+    case MenuAction::STARRED_PAGES:
     case MenuAction::NONE:
       break;
   }
@@ -690,6 +701,10 @@ void XtcReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
           requestUpdate();
         }
       }
+      break;
+    case BA::BTN_READER_MENU:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      openReaderMenu();
       break;
     case BA::BTN_EXIT_READER:
       ReaderUtils::enforceExitFullRefresh(renderer);

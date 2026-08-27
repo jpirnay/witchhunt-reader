@@ -191,9 +191,21 @@ void MdReaderActivity::onReaderExit() {
   currentPageLines.clear();
 }
 
-bool MdReaderActivity::onConfirmShortPress() {
-  if (headings.empty()) {
+void MdReaderActivity::fillMenuOptions(SimpleReaderMenuActivity::Options& options) const {
+  options.hasChapters = !headings.empty();
+}
+
+bool MdReaderActivity::onReaderMenuAction(const SimpleReaderMenuActivity::MenuAction action) {
+  if (action != SimpleReaderMenuActivity::MenuAction::SELECT_CHAPTER || headings.empty()) {
     return false;
+  }
+  openTocSelection();
+  return true;
+}
+
+void MdReaderActivity::openTocSelection() {
+  if (headings.empty()) {
+    return;
   }
   onPageChanged();
   ReaderUtils::enforceExitFullRefresh(renderer);
@@ -206,7 +218,6 @@ bool MdReaderActivity::onConfirmShortPress() {
           requestUpdate();
         }
       });
-  return true;
 }
 
 void MdReaderActivity::onPageChanged() {
@@ -924,18 +935,11 @@ void MdReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION ac
       jumpToHeading(false);
       break;
     case BA::BTN_OPEN_TOC:
-      if (!headings.empty()) {
-        onPageChanged();
-        startActivityForResult(
-            std::make_unique<MdReaderTocSelectionActivity>(renderer, mappedInput, headings, currentHeadingIndex),
-            [this](const ActivityResult& result) {
-              if (!result.isCancelled) {
-                currentPage = std::get<PageResult>(result.data).page;
-                onPageChanged();
-                requestUpdate();
-              }
-            });
-      }
+      openTocSelection();
+      break;
+    case BA::BTN_READER_MENU:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      openReaderMenu();
       break;
     case BA::BTN_EXIT_READER:
       ReaderUtils::enforceExitFullRefresh(renderer);

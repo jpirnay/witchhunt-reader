@@ -10,7 +10,7 @@
 #include <Xtc.h>
 
 #include "ReaderUtils.h"
-#include "XtcReaderMenuActivity.h"
+#include "SimpleReaderMenuActivity.h"
 #include "activities/Activity.h"
 
 class XtcReaderActivity final : public Activity {
@@ -22,7 +22,7 @@ class XtcReaderActivity final : public Activity {
 
   void renderPage();
   void openReaderMenu();
-  void onReaderMenuConfirm(XtcReaderMenuActivity::MenuAction action);
+  void onReaderMenuConfirm(SimpleReaderMenuActivity::MenuAction action);
   // Draws the shared reader status bar over the pre-rendered page. Unlike the reflowed
   // readers, XTC cannot reserve margin space for it, so the band is cleared to white first
   // and the bar is an opaque overlay. Honours the global status-bar settings throughout,

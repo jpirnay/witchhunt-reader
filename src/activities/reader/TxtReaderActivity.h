@@ -29,8 +29,13 @@ class TxtReaderActivity final : public LineReaderActivity {
  protected:
   void onReaderEnter() override;
   void onReaderExit() override;
-  // Opens the starred-pages overlay when bookmarks exist.
-  bool onConfirmShortPress() override;
+  // TXT is the only line-oriented format with a bookmark store, so it is the only one that
+  // offers the Star Page / Starred Pages entries.
+  void fillMenuOptions(SimpleReaderMenuActivity::Options& options) const override;
+  bool onReaderMenuAction(SimpleReaderMenuActivity::MenuAction action) override;
+  // Opens the starred-pages overlay when bookmarks exist. Shared by the menu entry and the
+  // BTN_OPEN_BOOKMARKS button action.
+  void openStarredPages();
 
  public:
   explicit TxtReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Txt> txt)

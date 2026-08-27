@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <variant>
 
 #include "CrossPointState.h"
 #include "FinishedBookActivity.h"
@@ -12,6 +13,10 @@
 #include "ReaderActivity.h"
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
+#include "activities/ActivityResult.h"
+#include "activities/SliderPickerActivity.h"
+#include "activities/home/BookInfoActivity.h"
+#include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "components/UITheme.h"
 
 void LineReaderActivity::onEnter() {
@@ -94,11 +99,13 @@ void LineReaderActivity::loop() {
       }
     }
 
+    // Confirm opens the reader menu, as it does in the EPUB and XTC readers. The overlays that
+    // used to sit on this button (TXT starred pages, MD table of contents) are its first entries,
+    // and both remain one press away on a remapped button (BTN_OPEN_BOOKMARKS / BTN_OPEN_TOC).
     if (ev.button == MappedInputManager::Button::Confirm && ev.type == ButtonEventManager::PressType::Short) {
-      if (onConfirmShortPress()) {
-        return;
-      }
-      continue;
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      openReaderMenu();
+      return;
     }
 
     if ((ev.button == MappedInputManager::Button::PageBack || ev.button == MappedInputManager::Button::Left) &&
@@ -119,6 +126,122 @@ void LineReaderActivity::loop() {
     goToPreviousPage();
   } else if (nextTriggered) {
     goToNextPage();
+  }
+}
+
+void LineReaderActivity::openReaderMenu() {
+  if (!txt) {
+    return;
+  }
+  SimpleReaderMenuActivity::Options options;
+  options.title = txt->getTitle();
+  options.currentPage = currentPage + 1;
+  options.totalPages = totalPages;
+  fillMenuOptions(options);
+
+  startActivityForResult(std::make_unique<SimpleReaderMenuActivity>(renderer, mappedInput, std::move(options)),
+                         [this](const ActivityResult& result) {
+                           // Back leaves the result variant empty. std::get on the wrong
+                           // alternative throws, and the device is built -fno-exceptions, so that
+                           // would be an abort() rather than a no-op.
+                           if (result.isCancelled || !std::holds_alternative<MenuResult>(result.data)) {
+                             return;
+                           }
+                           onReaderMenuConfirm(static_cast<SimpleReaderMenuActivity::MenuAction>(
+                               std::get<MenuResult>(result.data).action));
+                         });
+}
+
+void LineReaderActivity::onReaderMenuConfirm(const SimpleReaderMenuActivity::MenuAction action) {
+  using MenuAction = SimpleReaderMenuActivity::MenuAction;
+
+  // The format-specific entries first: the subclass owns the chapter list and the bookmark store.
+  if (onReaderMenuAction(action)) {
+    return;
+  }
+
+  switch (action) {
+    case MenuAction::GO_TO_PERCENT: {
+      // Both jumps land exactly. These formats paginate the whole document up front, so unlike the
+      // EPUB reader there is no per-chapter estimate to go through.
+      const int initialPercent = static_cast<int>(ReaderUtils::pageProgressPercentByte(currentPage, totalPages));
+      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput,
+                                                                    SliderPickerActivity::Config{
+                                                                        .titleId = StrId::STR_GO_TO_PERCENT,
+                                                                        .hintId = StrId::STR_PERCENT_STEP_HINT,
+                                                                        .minValue = 0,
+                                                                        .maxValue = 100,
+                                                                        .initialValue = initialPercent,
+                                                                        .suffix = "%",
+                                                                    }),
+                             [this](const ActivityResult& result) {
+                               if (result.isCancelled) {
+                                 return;
+                               }
+                               const int percent = std::get<PercentResult>(result.data).percent;
+                               const int page = totalPages > 0 ? percent * totalPages / 100 : 0;
+                               currentPage = std::min(std::max(page, 0), std::max(totalPages - 1, 0));
+                               onPageChanged();
+                             });
+      break;
+    }
+
+    case MenuAction::GO_TO_PAGE: {
+      if (totalPages <= 0) {
+        break;
+      }
+      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput,
+                                                                    SliderPickerActivity::Config{
+                                                                        .titleId = StrId::STR_GO_TO_PAGE,
+                                                                        .hintId = StrId::STR_SLIDER_STEP_HINT,
+                                                                        .minValue = 1,
+                                                                        .maxValue = totalPages,
+                                                                        .initialValue = currentPage + 1,
+                                                                    }),
+                             [this](const ActivityResult& result) {
+                               if (result.isCancelled) {
+                                 return;
+                               }
+                               currentPage = std::get<PercentResult>(result.data).percent - 1;
+                               onPageChanged();
+                             });
+      break;
+    }
+
+    case MenuAction::BOOK_INFO:
+      startActivityForResult(std::make_unique<BookInfoActivity>(renderer, mappedInput, txt->getPath()),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
+
+    case MenuAction::READING_STATS_FOR_BOOK:
+      // Same filename-hash docId the session was opened with. Time from the session still running
+      // lands in the store only on reader exit, so a first-ever session shows "no data" — accurate.
+      startActivityForResult(std::make_unique<ReadingStatsBookDetailActivity>(
+                                 renderer, mappedInput, KOReaderDocumentId::calculateFromFilename(txt->getPath())),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
+
+    case MenuAction::MARK_AS_READ:
+      if (totalPages > 0) {
+        currentPage = totalPages - 1;
+        onPageChanged();
+      }
+      launchFinishedBookFlow();  // saves progress before handing over
+      break;
+
+    case MenuAction::GO_HOME:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      onGoHome();
+      break;
+
+    // Handled by the subclass above, or never offered to these formats
+    // (DELETE_CACHE: a page index is a few KB, there is nothing worth recovering).
+    case MenuAction::SELECT_CHAPTER:
+    case MenuAction::STAR_PAGE:
+    case MenuAction::STARRED_PAGES:
+    case MenuAction::DELETE_CACHE:
+    case MenuAction::NONE:
+      break;
   }
 }
 

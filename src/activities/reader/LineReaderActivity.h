@@ -7,6 +7,7 @@
 
 #include "CrossPointSettings.h"
 #include "ReaderUtils.h"
+#include "SimpleReaderMenuActivity.h"
 #include "activities/Activity.h"
 
 // Shared scaffolding for the line-oriented file readers (TXT, Markdown).
@@ -16,8 +17,9 @@
 // loop() input handling (back/page buttons, tilt page turns, finished-book
 // flow). Subclasses provide the format-specific parsing and page rendering,
 // and hook in via onReaderEnter()/onReaderExit() for extras such as bookmarks
-// or headings, onConfirmShortPress() for their navigation overlay, and
-// onPageChanged() for per-page bookkeeping.
+// or headings, fillMenuOptions()/onReaderMenuAction() for the entries of the
+// shared reader menu they can back, and onPageChanged() for per-page
+// bookkeeping.
 class LineReaderActivity : public Activity {
  protected:
   std::unique_ptr<Txt> txt;
@@ -61,13 +63,20 @@ class LineReaderActivity : public Activity {
   // Called from onExit() after the stats session is flushed, before the
   // document is torn down (TXT syncs bookmarks, subclasses clear their lines).
   virtual void onReaderExit() {}
-  // Called from loop() on a Confirm short press. Return true when handled
-  // (TXT opens starred pages, MD opens the ToC); false lets the press fall
-  // through unhandled.
-  virtual bool onConfirmShortPress() { return false; }
+  // Lets a subclass declare which of the shared reader-menu entries it can back. The base fills
+  // in title/page/total; TXT adds the bookmark flags, MD the heading list.
+  virtual void fillMenuOptions(SimpleReaderMenuActivity::Options& options) const {}
+  // Called for menu actions the base does not own (chapter list, bookmarks). Return true when
+  // handled; the base treats anything else as a no-op.
+  virtual bool onReaderMenuAction(SimpleReaderMenuActivity::MenuAction action) { return false; }
   // Called after currentPage changed through the shared page-turn handling
   // (MD recomputes the current heading here).
   virtual void onPageChanged() {}
+
+  // Opens the shared reader menu (Confirm short press, or the BTN_READER_MENU action) and applies
+  // the chosen entry. The subclass only sees what fillMenuOptions()/onReaderMenuAction() cover.
+  void openReaderMenu();
+  void onReaderMenuConfirm(SimpleReaderMenuActivity::MenuAction action);
 
   // Page-turn helpers used by loop(); going forward past the last page
   // launches the finished-book flow.

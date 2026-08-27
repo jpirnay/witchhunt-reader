@@ -1,4 +1,4 @@
-#include "XtcReaderMenuActivity.h"
+#include "SimpleReaderMenuActivity.h"
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -10,38 +10,44 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-XtcReaderMenuActivity::XtcReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string title,
-                                             const int currentPage, const int totalPages, const bool hasChapters)
-    : MenuListActivity("XtcReaderMenu", renderer, mappedInput),
-      title(std::move(title)),
-      currentPage(currentPage),
-      totalPages(totalPages) {
-  buildMenuItems(hasChapters);
+SimpleReaderMenuActivity::SimpleReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                                   Options options)
+    : MenuListActivity("SimpleReaderMenu", renderer, mappedInput), options(std::move(options)) {
+  buildMenuItems();
 }
 
-void XtcReaderMenuActivity::buildMenuItems(const bool hasChapters) {
-  menuItems.reserve(10);
+void SimpleReaderMenuActivity::buildMenuItems() {
+  menuItems.reserve(11);
 
   // --- Navigation ---
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_NAVIGATION));
-  // Chapters are optional in the container and plenty of converted files carry none; the entry is
-  // omitted rather than shown leading to an empty list.
-  if (hasChapters) {
+  if (options.hasChapters) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_SELECT_CHAPTER, SettingAction::None));
   }
   menuItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PERCENT, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PAGE, SettingAction::None));
+
+  // --- Bookmarks ---
+  if (options.canStarPages) {
+    menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_BOOKMARKS));
+    menuItems.push_back(SettingInfo::Action(StrId::STR_STAR_PAGE, SettingAction::None));
+    if (options.hasStarredPages) {
+      menuItems.push_back(SettingInfo::Action(StrId::STR_STARRED_PAGES, SettingAction::None));
+    }
+  }
 
   // --- Tools ---
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_TOOLS));
   menuItems.push_back(SettingInfo::Action(StrId::STR_BOOK_INFO, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_READING_STATS_FOR_THIS_BOOK, SettingAction::None));
   menuItems.push_back(SettingInfo::Action(StrId::STR_MARK_AS_READ, SettingAction::None));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_DELETE_CACHE, SettingAction::None));
+  if (options.canDeleteCache) {
+    menuItems.push_back(SettingInfo::Action(StrId::STR_DELETE_CACHE, SettingAction::None));
+  }
   menuItems.push_back(SettingInfo::Action(StrId::STR_GO_HOME_BUTTON, SettingAction::None));
 }
 
-XtcReaderMenuActivity::MenuAction XtcReaderMenuActivity::actionForNameId(const StrId nameId) {
+SimpleReaderMenuActivity::MenuAction SimpleReaderMenuActivity::actionForNameId(const StrId nameId) {
   switch (nameId) {
     case StrId::STR_SELECT_CHAPTER:
       return MenuAction::SELECT_CHAPTER;
@@ -49,6 +55,10 @@ XtcReaderMenuActivity::MenuAction XtcReaderMenuActivity::actionForNameId(const S
       return MenuAction::GO_TO_PERCENT;
     case StrId::STR_GO_TO_PAGE:
       return MenuAction::GO_TO_PAGE;
+    case StrId::STR_STAR_PAGE:
+      return MenuAction::STAR_PAGE;
+    case StrId::STR_STARRED_PAGES:
+      return MenuAction::STARRED_PAGES;
     case StrId::STR_BOOK_INFO:
       return MenuAction::BOOK_INFO;
     case StrId::STR_READING_STATS_FOR_THIS_BOOK:
@@ -64,41 +74,48 @@ XtcReaderMenuActivity::MenuAction XtcReaderMenuActivity::actionForNameId(const S
   }
 }
 
-void XtcReaderMenuActivity::finishWithAction(const MenuAction action) {
+std::string SimpleReaderMenuActivity::getItemValueString(const int index) const {
+  if (menuItems[index].nameId == StrId::STR_STAR_PAGE) {
+    return options.currentPageStarred ? std::string(tr(STR_STATE_ON)) : std::string(tr(STR_STATE_OFF));
+  }
+  return MenuListActivity::getItemValueString(index);
+}
+
+void SimpleReaderMenuActivity::finishWithAction(const MenuAction action) {
   MenuResult payload;
   payload.action = static_cast<int>(action);
   setResult(std::move(payload));
   finish();
 }
 
-void XtcReaderMenuActivity::onActionSelected(const int index) {
+void SimpleReaderMenuActivity::onActionSelected(const int index) {
   finishWithAction(actionForNameId(menuItems[index].nameId));
 }
 
-void XtcReaderMenuActivity::onBackPressed() {
+void SimpleReaderMenuActivity::onBackPressed() {
   ActivityResult result;
   result.isCancelled = true;
   setResult(std::move(result));
   finish();
 }
 
-void XtcReaderMenuActivity::render(RenderLock&&) {
+void SimpleReaderMenuActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
   // Title
   const std::string truncTitle =
-      renderer.truncatedText(UI_12_FONT_ID, title.c_str(), contentRect.width - 40, EpdFontFamily::BOLD);
+      renderer.truncatedText(UI_12_FONT_ID, options.title.c_str(), contentRect.width - 40, EpdFontFamily::BOLD);
   const int titleX =
       contentRect.x +
       (contentRect.width - renderer.getTextWidth(UI_12_FONT_ID, truncTitle.c_str(), EpdFontFamily::BOLD)) / 2;
   renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentRect.y, truncTitle.c_str(), true, EpdFontFamily::BOLD);
 
-  // Progress summary. Unlike EPUB there is no chapter/book split to report: the page count is
-  // baked into the container, so one exact "page x/y — z%" line says everything.
-  if (totalPages > 0) {
-    const std::string progressLine = std::to_string(currentPage) + "/" + std::to_string(totalPages) + "  " +
-                                     std::to_string(currentPage * 100 / totalPages) + "%";
+  // Progress summary. Unlike EPUB there is no chapter/book split to report — these formats paginate
+  // the whole document at once — so one exact "page x/y  z%" line says everything.
+  if (options.totalPages > 0) {
+    const std::string progressLine = std::to_string(options.currentPage) + "/" + std::to_string(options.totalPages) +
+                                     "  " + std::to_string(options.currentPage * 100 / options.totalPages) + "%";
     renderer.drawCenteredText(UI_10_FONT_ID, 45, progressLine.c_str());
   }
 
