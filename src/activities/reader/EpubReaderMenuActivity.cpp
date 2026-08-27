@@ -100,6 +100,8 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasPrintedPages) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PRINTED_PAGE, SettingAction::None));
   }
+  // Auto page turn: ACTION type with custom cycling in onActionSelected
+  menuItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
 
   // Bookmarks, footnotes
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_BOOKMARKS));
@@ -345,11 +347,6 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                                 threeStateOverrideFromSlot(v);
                           })
                           .withSubmenu(StrId::STR_READER_OVERRIDES));
-
-  // Helper functions, reading ruler, auto page turn, orientation
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_UTILS));
-  // Auto page turn: ACTION type with custom cycling in onActionSelected
-  menuItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
 
   // --- Synchronisation (only if credentials are set) ---
   if (KOREADER_STORE.hasCredentials()) {
