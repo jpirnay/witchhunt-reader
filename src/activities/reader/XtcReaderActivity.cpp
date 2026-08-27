@@ -9,6 +9,8 @@
 
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 
@@ -25,6 +27,9 @@
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
+#include "activities/SliderPickerActivity.h"
+#include "activities/home/BookInfoActivity.h"
+#include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -37,6 +42,15 @@ void XtcReaderActivity::onEnter() {
 
   if (!xtc) {
     return;
+  }
+
+  // XTC pages are pre-rendered for the panel and are written straight to it by
+  // writePhysicalPortraitPackedRow(), which bypasses the reader orientation. Pin the renderer to
+  // portrait so the status-bar overlay — drawn in logical coordinates — lands on the same axes as
+  // the page instead of across it when the global orientation is landscape.
+  {
+    RenderLock lock(*this);
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   }
 
   xtc->setupCacheDir();
@@ -84,18 +98,12 @@ void XtcReaderActivity::loop() {
 
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
+    // Confirm opens the reader menu, as it does in the EPUB reader. Chapter selection lives
+    // inside it rather than on this button, so the gesture means the same thing in every reader.
     if (ev.button == MappedInputManager::Button::Confirm && ev.type == ButtonEventManager::PressType::Short) {
-      if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
-        ReaderUtils::enforceExitFullRefresh(renderer);
-        startActivityForResult(
-            std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
-            [this](const ActivityResult& result) {
-              if (!result.isCancelled) {
-                currentPage = std::get<PageResult>(result.data).page;
-              }
-            });
-        return;
-      }
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      openReaderMenu();
+      return;
     }
 
     if (ev.button == MappedInputManager::Button::Back) {
@@ -185,6 +193,130 @@ void XtcReaderActivity::loop() {
   }
 }
 
+void XtcReaderActivity::openReaderMenu() {
+  if (!xtc) {
+    return;
+  }
+  startActivityForResult(
+      std::make_unique<XtcReaderMenuActivity>(renderer, mappedInput, xtc->getTitle(), static_cast<int>(currentPage) + 1,
+                                              static_cast<int>(xtc->getPageCount()),
+                                              xtc->hasChapters() && !xtc->getChapters().empty()),
+      [this](const ActivityResult& result) {
+        // Back leaves the result variant empty. std::get on the wrong alternative throws, and the
+        // device is built -fno-exceptions, so that would be an abort() rather than a no-op.
+        if (result.isCancelled || !std::holds_alternative<MenuResult>(result.data)) {
+          return;
+        }
+        onReaderMenuConfirm(static_cast<XtcReaderMenuActivity::MenuAction>(std::get<MenuResult>(result.data).action));
+      });
+}
+
+void XtcReaderActivity::onReaderMenuConfirm(const XtcReaderMenuActivity::MenuAction action) {
+  using MenuAction = XtcReaderMenuActivity::MenuAction;
+  const int pageCount = static_cast<int>(xtc->getPageCount());
+
+  switch (action) {
+    case MenuAction::SELECT_CHAPTER:
+      startActivityForResult(
+          std::make_unique<XtcReaderChapterSelectionActivity>(renderer, mappedInput, xtc, currentPage),
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              currentPage = std::get<PageResult>(result.data).page;
+            }
+          });
+      break;
+
+    case MenuAction::GO_TO_PERCENT: {
+      // Both jumps land exactly: an XTC page count is baked into the container and never
+      // repaginates, so there is no estimate here of the kind the EPUB reader has to make.
+      const int initialPercent =
+          pageCount > 0
+              ? static_cast<int>(ReaderUtils::pageProgressPercentByte(static_cast<int>(currentPage), pageCount))
+              : 0;
+      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput,
+                                                                    SliderPickerActivity::Config{
+                                                                        .titleId = StrId::STR_GO_TO_PERCENT,
+                                                                        .hintId = StrId::STR_PERCENT_STEP_HINT,
+                                                                        .minValue = 0,
+                                                                        .maxValue = 100,
+                                                                        .initialValue = initialPercent,
+                                                                        .suffix = "%",
+                                                                    }),
+                             [this, pageCount](const ActivityResult& result) {
+                               if (result.isCancelled) {
+                                 return;
+                               }
+                               const int percent = std::get<PercentResult>(result.data).percent;
+                               const int page = pageCount > 0 ? percent * pageCount / 100 : 0;
+                               currentPage =
+                                   static_cast<uint32_t>(std::min(std::max(page, 0), std::max(pageCount - 1, 0)));
+                             });
+      break;
+    }
+
+    case MenuAction::GO_TO_PAGE: {
+      if (pageCount <= 0) {
+        break;
+      }
+      startActivityForResult(
+          std::make_unique<SliderPickerActivity>(renderer, mappedInput,
+                                                 SliderPickerActivity::Config{
+                                                     .titleId = StrId::STR_GO_TO_PAGE,
+                                                     .hintId = StrId::STR_SLIDER_STEP_HINT,
+                                                     .minValue = 1,
+                                                     .maxValue = pageCount,
+                                                     .initialValue = static_cast<int>(currentPage) + 1,
+                                                 }),
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              currentPage = static_cast<uint32_t>(std::get<PercentResult>(result.data).percent - 1);
+            }
+          });
+      break;
+    }
+
+    case MenuAction::BOOK_INFO:
+      startActivityForResult(std::make_unique<BookInfoActivity>(renderer, mappedInput, xtc->getPath()),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
+
+    case MenuAction::READING_STATS_FOR_BOOK:
+      // Same filename-hash docId the session was opened with. Time from the session still running
+      // lands in the store only on reader exit, so a first-ever session shows "no data" — accurate.
+      startActivityForResult(std::make_unique<ReadingStatsBookDetailActivity>(
+                                 renderer, mappedInput, KOReaderDocumentId::calculateFromFilename(xtc->getPath())),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
+
+    case MenuAction::MARK_AS_READ:
+      if (pageCount > 0) {
+        currentPage = static_cast<uint32_t>(pageCount - 1);
+        saveProgress();
+      }
+      BookFinished::launchFinishedBookFlow(*this, renderer, mappedInput, xtc->getPath(), std::string(), std::string(),
+                                           xtc->getAuthor());
+      return;
+
+    case MenuAction::DELETE_CACHE:
+      // Drops the transposed page planes as well as the metadata, which for an XTH book is the
+      // bulk of the cache. Progress is written back straight away so the position survives.
+      xtc->clearCache();
+      xtc->setupCacheDir();
+      saveProgress();
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      onGoHome();
+      return;
+
+    case MenuAction::GO_HOME:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      onGoHome();
+      return;
+
+    case MenuAction::NONE:
+      break;
+  }
+}
+
 void XtcReaderActivity::render(RenderLock&&) {
   if (!xtc) {
     return;
@@ -255,14 +387,18 @@ void XtcReaderActivity::renderPage() {
       }
       renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
     }
+    renderStatusBar();
 
     // Display BW with conditional refresh based on pagesUntilFullRefresh
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
     // Pass 2: LSB buffer - mark DARK gray only (XTH value 1)
     // In LUT: 0 bit = apply gray effect, 1 bit = untouched
+    // Status-bar rows are left at the cleared 0x00 the pass starts from, which is what a purely
+    // black-and-white region produces anyway — the overlay is BW text and must not pick up gray.
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
+      if (isStatusBarRow(y)) continue;
       if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::DarkOnly, row, rowBytes, maxSrcX)) {
         free(row);
         return;
@@ -275,6 +411,7 @@ void XtcReaderActivity::renderPage() {
     // In LUT: 0 bit = apply gray effect, 1 bit = untouched
     renderer.clearScreen(0x00);
     for (uint16_t y = 0; y < maxSrcY; y++) {
+      if (isStatusBarRow(y)) continue;
       if (!pageStream.readGrayMaskRow(y, xtc::XtcPageRowStream::GrayMask::LightOrDark, row, rowBytes, maxSrcX)) {
         free(row);
         return;
@@ -296,6 +433,7 @@ void XtcReaderActivity::renderPage() {
       }
       renderer.writePhysicalPortraitPackedRow(y, row, maxSrcX, invertBits);
     }
+    renderStatusBar();
 
     // Cleanup grayscale buffers with current frame buffer
     renderer.cleanupGrayscaleWithFrameBuffer();
@@ -316,13 +454,88 @@ void XtcReaderActivity::renderPage() {
   }
   // White pixels are already cleared by clearScreen()
 
-  // XTC pages already have status bar pre-rendered, no need to add our own
+  renderStatusBar();
 
   // Display with appropriate refresh
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   free(row);
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+}
+
+bool XtcReaderActivity::isStatusBarRow(const int y) const {
+  const int topHeight = UITheme::getStatusBarTopHeight();
+  if (topHeight > 0 && y < topHeight) {
+    return true;
+  }
+  const int bottomHeight = UITheme::getStatusBarBottomHeight();
+  return bottomHeight > 0 && y >= renderer.getScreenHeight() - bottomHeight;
+}
+
+void XtcReaderActivity::renderStatusBar() const {
+  const int topHeight = UITheme::getStatusBarTopHeight();
+  const int bottomHeight = UITheme::getStatusBarBottomHeight();
+  if (topHeight <= 0 && bottomHeight <= 0) {
+    return;  // every status item is switched off — leave the page exactly as the file rendered it
+  }
+
+  // The reflowed readers keep the bar clear of the text by shrinking the viewport. A pre-rendered
+  // page has no viewport to shrink and its ink runs to the panel edge, so the band is punched out
+  // to white first and the bar drawn on top of the page.
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+  if (topHeight > 0) {
+    renderer.fillRect(0, 0, screenWidth, topHeight, false);
+  }
+  if (bottomHeight > 0) {
+    renderer.fillRect(0, screenHeight - bottomHeight, screenWidth, bottomHeight, false);
+  }
+
+  const int pageCount = static_cast<int>(xtc->getPageCount());
+  const int page = static_cast<int>(currentPage) + 1;
+  const float progress = pageCount > 0 ? page * 100.0f / static_cast<float>(pageCount) : 0.0f;
+
+  std::string title;
+  if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
+    for (const auto& chapter : xtc->getChapters()) {
+      if (currentPage >= chapter.startPage && currentPage <= chapter.endPage) {
+        title = chapter.name;
+        break;
+      }
+    }
+    // Chapters are optional in the container (and absent from plenty of real files). Falling back
+    // to the book title beats showing "Unnamed" on every page of a book that simply has no ToC.
+    if (title.empty()) {
+      title = xtc->getTitle();
+    }
+  } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
+    title = xtc->getTitle();
+  }
+
+  GUI.drawStatusBar(renderer, progress, page, pageCount, title);
+
+  lastStatusBarPage = page;
+  lastStatusBarBattery = SETTINGS.statusBarBattery ? static_cast<int>(powerManager.getBatteryPercentage()) : -1;
+  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
+    const time_t now = HalClock::now();
+    lastStatusBarClockMinute = now > 0 ? static_cast<int>(now / 60) : -1;
+  } else {
+    lastStatusBarClockMinute = -1;
+  }
+}
+
+bool XtcReaderActivity::shouldSkipPeriodicUpdate() const {
+  if (lastStatusBarPage < 0) return false;  // no baseline yet — let the first render happen
+  if (static_cast<int>(currentPage) + 1 != lastStatusBarPage) return false;
+  if (SETTINGS.statusBarBattery) {
+    if (static_cast<int>(powerManager.getBatteryPercentage()) != lastStatusBarBattery) return false;
+  }
+  if (SETTINGS.useClock && SETTINGS.statusBarClock && HalClock::isSynced()) {
+    const time_t now = HalClock::now();
+    const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
+    if (minute != lastStatusBarClockMinute) return false;
+  }
+  return true;
 }
 
 void XtcReaderActivity::saveProgress() const {
