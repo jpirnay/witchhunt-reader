@@ -41,6 +41,13 @@ class XtcReaderActivity final : public Activity {
   mutable int lastStatusBarBattery = -1;
   mutable int lastStatusBarClockMinute = -1;
 
+  // What the status bar last showed. A minute tick re-renders the whole page here — for XTH that
+  // is four passes over an SD-streamed page — so it is only worth doing when the bar would
+  // actually change. Same guard as LineReaderActivity, where the re-render is far cheaper.
+  mutable int lastStatusBarPage = -1;
+  mutable int lastStatusBarBattery = -1;
+  mutable int lastStatusBarClockMinute = -1;
+
  public:
   explicit XtcReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Xtc> xtc)
       : Activity("XtcReader", renderer, mappedInput), xtc(std::move(xtc)) {}
@@ -49,6 +56,7 @@ class XtcReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  bool shouldSkipPeriodicUpdate() const override;
   bool shouldSkipPeriodicUpdate() const override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 
