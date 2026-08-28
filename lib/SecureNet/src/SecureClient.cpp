@@ -1,5 +1,6 @@
 #include "SecureClient.h"
 
+#include <Arduino.h>  // micros(), getCpuFrequencyMhz() for the handshake cost split
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
@@ -36,11 +37,35 @@ SecureClient::~SecureClient() { stop(); }
 #if defined(FREEINK_NET_WOLFSSL)
 
 namespace {
+// Handshake I/O accounting. wcRecv/wcSend are the ONLY path between wolfSSL and the socket, so
+// timing them splits a handshake into "in the transport" and "computing" -- and those have
+// completely different fixes. A single elapsed figure cannot tell them apart, and the poll count
+// alone is misleading: Arduino's NetworkClient::write() drives select() with a
+// WIFI_CLIENT_SELECT_TIMEOUT_US budget per retry, so a stalled send blocks INSIDE one
+// wolfSSL_connect() call and looks exactly like slow crypto from the outside.
+// The connect path is single-threaded, so plain statics are enough; connectWithMethod() resets
+// them per attempt.
+struct HandshakeIoStats {
+  uint32_t ioUs;
+  uint32_t recvCalls;
+  uint32_t sendCalls;
+  uint32_t recvBytes;
+  uint32_t sendBytes;
+  uint32_t slowestIoUs;
+};
+HandshakeIoStats g_handshakeIo = {};
+
 // Bridge wolfSSL's I/O to the underlying WiFiClient transport. Non-blocking:
 // return WANT_READ/WANT_WRITE when the socket has nothing yet so wolfSSL retries.
 int wcSend(WOLFSSL* /*ssl*/, char* buf, int sz, void* ctx) {
   auto* t = static_cast<WiFiClient*>(ctx);
+  const uint32_t ioStartUs = micros();
   const int n = t->write(reinterpret_cast<const uint8_t*>(buf), sz);
+  const uint32_t elapsedUs = micros() - ioStartUs;
+  g_handshakeIo.ioUs += elapsedUs;
+  g_handshakeIo.sendCalls++;
+  if (n > 0) g_handshakeIo.sendBytes += static_cast<uint32_t>(n);
+  if (elapsedUs > g_handshakeIo.slowestIoUs) g_handshakeIo.slowestIoUs = elapsedUs;
   if (n <= 0) {
     // A dead transport must surface as CONN_CLOSE: mapping it to WANT_WRITE
     // makes the handshake spin until the deadline instead of failing fast.
@@ -52,11 +77,22 @@ int wcSend(WOLFSSL* /*ssl*/, char* buf, int sz, void* ctx) {
 }
 int wcRecv(WOLFSSL* /*ssl*/, char* buf, int sz, void* ctx) {
   auto* t = static_cast<WiFiClient*>(ctx);
-  if (!t->connected() && t->available() == 0) return WOLFSSL_CBIO_ERR_CONN_CLOSE;
-  if (t->available() == 0) return WOLFSSL_CBIO_ERR_WANT_READ;
-  const int n = t->read(reinterpret_cast<uint8_t*>(buf), sz);
-  if (n <= 0) return WOLFSSL_CBIO_ERR_WANT_READ;
-  return n;
+  const uint32_t ioStartUs = micros();
+  int result;
+  if (!t->connected() && t->available() == 0) {
+    result = WOLFSSL_CBIO_ERR_CONN_CLOSE;
+  } else if (t->available() == 0) {
+    result = WOLFSSL_CBIO_ERR_WANT_READ;
+  } else {
+    const int n = t->read(reinterpret_cast<uint8_t*>(buf), sz);
+    result = (n <= 0) ? WOLFSSL_CBIO_ERR_WANT_READ : n;
+  }
+  const uint32_t elapsedUs = micros() - ioStartUs;
+  g_handshakeIo.ioUs += elapsedUs;
+  g_handshakeIo.recvCalls++;
+  if (result > 0) g_handshakeIo.recvBytes += static_cast<uint32_t>(result);
+  if (elapsedUs > g_handshakeIo.slowestIoUs) g_handshakeIo.slowestIoUs = elapsedUs;
+  return result;
 }
 
 // True if the wolfSSL error code is a peer-certificate-verification failure
@@ -79,12 +115,48 @@ bool isVerificationError(int err) {
   }
 }
 
-// Installed as wolfSSL's verify callback only when the caller could not obtain a trustworthy
-// clock. wolfSSL calls it for every verification failure; accept precisely the two
+// Per-certificate verification timing. wolfSSL issues the verify callback once per chain
+// certificate -- intermediates first, leaf last -- so the gap between consecutive invocations is
+// that certificate's verification cost. This is what turns a single "the server flight took
+// 3061 ms" into a per-hop number, which is what decides whether shortening the chain is worth a
+// trust-store change. Only populated when CROSSPOINT_TLS_VERIFY_TIMING is built in; without it
+// wolfSSL calls the callback on errors only and this stays empty, which is harmless.
+struct ChainVerifyStats {
+  uint32_t callStartMs;  // start of the wolfSSL_connect() call the chain is being processed in
+  uint32_t lastCbMs;
+  uint32_t count;
+  uint32_t gapMs[8];
+  int depth[8];
+};
+ChainVerifyStats g_chainVerify = {};
+
+// Mirrors SecureClient::_allowCertificateDateErrors for the callback, which wolfSSL gives no
+// user-data pointer. The connect path is single-threaded (same reasoning as g_handshakeIo), and
+// connectWithMethod() sets this immediately before installing the callback.
+bool g_allowCertificateDateErrors = false;
+
+// wolfSSL's verify callback. Two jobs, and the timing one must never change the verdict.
+//
+// Verdict: when the caller could not obtain a trustworthy clock, accept precisely the two
 // validity-window errors and pass everything else (chain, signature, trust anchor, hostname)
-// straight through as the failure it is.
-int allowCertificateDateErrors(int preverify, WOLFSSL_X509_STORE_CTX* store) {
-  if (preverify == 0 && store != nullptr && (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E)) {
+// straight through as the failure it is. Otherwise return `preverify` untouched, which is
+// exactly what wolfSSL does when no callback is installed -- so installing this unconditionally
+// (which the timing needs) leaves behaviour identical.
+int verifyCallback(int preverify, WOLFSSL_X509_STORE_CTX* store) {
+  const uint32_t nowMs = millis();
+  if (g_chainVerify.count < sizeof(g_chainVerify.gapMs) / sizeof(g_chainVerify.gapMs[0])) {
+    // The first gap is measured from the start of the enclosing wolfSSL_connect() call, so it
+    // carries the ServerHello work (key exchange, transcript) ahead of the first certificate;
+    // every later gap is one certificate's verification on its own.
+    const uint32_t since = (g_chainVerify.count == 0) ? g_chainVerify.callStartMs : g_chainVerify.lastCbMs;
+    g_chainVerify.gapMs[g_chainVerify.count] = nowMs - since;
+    g_chainVerify.depth[g_chainVerify.count] = store != nullptr ? store->error_depth : -1;
+  }
+  g_chainVerify.count++;
+  g_chainVerify.lastCbMs = nowMs;
+
+  if (g_allowCertificateDateErrors && preverify == 0 && store != nullptr &&
+      (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E)) {
     LOG_INF("TLS", "Ignoring certificate date error %d (no trusted clock); chain and hostname still verified",
             store->error);
     return 1;
@@ -96,7 +168,33 @@ int allowCertificateDateErrors(int preverify, WOLFSSL_X509_STORE_CTX* store) {
 // One handshake attempt at a fixed verification level and TLS method.
 int SecureClient::connectWithMethod(const char* host, uint16_t port, void* method, const char* label, bool verifyPeer) {
   stop();
+#ifdef CROSSPOINT_TLS_VERIFY_TIMING
+  // Proves the instrumentation define actually reached the wolfSSL headers. It travels via
+  // build_flags -> user_settings.h, and PlatformIO's build cache can hand back a library object
+  // compiled without it, in which case the verify callback silently never fires and the chain
+  // timing comes back empty with nothing to say why.
+#if defined(WOLFSSL_ALWAYS_VERIFY_CB) && defined(WOLFSSL_VERIFY_CB_ALL_CERTS)
+  static bool loggedVerifyCbBuild = false;
+  if (!loggedVerifyCbBuild) {
+    loggedVerifyCbBuild = true;
+    LOG_INF("TLS", "per-cert verify timing built in (ALWAYS_VERIFY_CB + VERIFY_CB_ALL_CERTS)");
+  }
+#else
+#warning "CROSSPOINT_TLS_VERIFY_TIMING set but wolfSSL verify-callback defines did not reach the headers"
+  static bool loggedVerifyCbMissing = false;
+  if (!loggedVerifyCbMissing) {
+    loggedVerifyCbMissing = true;
+    LOG_ERR("TLS", "per-cert verify timing requested but wolfSSL was built without the callback defines");
+  }
+#endif
+#endif
+  // Split the connect into its three costs -- name resolution + TCP, then the handshake, and how
+  // many non-blocking poll iterations the handshake took. A single "connect took N ms" cannot
+  // tell a slow resolver from a slow server from our own 5 ms poll granularity, and on this
+  // device the handshake is now the largest item in a sync.
+  const uint32_t transportStartMs = millis();
   if (!_transport.connect(host, port)) return 0;
+  const uint32_t transportMs = millis() - transportStartMs;
 
   auto* ctx = wolfSSL_CTX_new(static_cast<WOLFSSL_METHOD*>(method));
   if (!ctx) {
@@ -129,8 +227,8 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
       stop();
       return 0;
     }
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER,
-                           _allowCertificateDateErrors ? allowCertificateDateErrors : nullptr);
+    g_allowCertificateDateErrors = _allowCertificateDateErrors;
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, verifyCallback);
   } else {
     wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, nullptr);
   }
@@ -162,10 +260,31 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     if (largestNow < _handshakeMinLargest) _handshakeMinLargest = largestNow;
   };
   sampleHeapTrough();
+  g_handshakeIo = {};
+  g_chainVerify = {};
+  const uint32_t handshakeStartMs = millis();
+  uint32_t pollCount = 0;
+  // Per-call durations. A wolfSSL_connect() call returns as soon as it needs more data, so each
+  // entry is one uninterrupted stretch of work: the first covers building the ClientHello (the
+  // ECDHE key generation), and whichever one consumes the server's flight covers the shared
+  // secret plus the certificate chain verification. With compute dominating the handshake, the
+  // shape of this list says which of those to attack -- a single fat entry at the end is chain
+  // work, a fat first entry is key generation, and evenly spread is the math backend itself.
+  constexpr size_t MAX_TIMED_CALLS = 12;
+  uint32_t callMs[MAX_TIMED_CALLS] = {};
+  size_t callCount = 0;
+  auto timedConnect = [&]() {
+    const uint32_t callStartMs = millis();
+    g_chainVerify.callStartMs = callStartMs;
+    const int rc = wolfSSL_connect(ssl);
+    if (callCount < MAX_TIMED_CALLS) callMs[callCount++] = millis() - callStartMs;
+    return rc;
+  };
   const uint32_t deadline = millis() + 15000;
   int ret;
-  while ((ret = wolfSSL_connect(ssl)) != WOLFSSL_SUCCESS) {
+  while ((ret = timedConnect()) != WOLFSSL_SUCCESS) {
     sampleHeapTrough();
+    pollCount++;
     const int err = wolfSSL_get_error(ssl, ret);
     if (err != WOLFSSL_ERROR_WANT_READ && err != WOLFSSL_ERROR_WANT_WRITE) {
       // Record whether this was a cert-verify failure so the caller can decide
@@ -184,6 +303,50 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     delay(5);
   }
   sampleHeapTrough();
+  // What was actually negotiated. With most of the handshake measured as pure compute, the group
+  // is the question that decides the fix: the SP fast path (sp_c32.c) covers P-256/P-384 only, so
+  // an X25519 key share runs on the portable fe_operations.c code instead and none of the SP
+  // tuning applies to it. Its own line -- the logger truncates at 256 chars including the prefix,
+  // and appending this to the cost line below cut the group name off exactly when it mattered.
+  const char* negotiatedCurve = wolfSSL_get_curve_name(ssl);
+  const char* negotiatedCipher = wolfSSL_get_cipher_name(ssl);
+  const char* negotiatedVersion = wolfSSL_get_version(ssl);
+  LOG_INF("TLS", "negotiated %s: %s / %s / group=%s", host, negotiatedVersion ? negotiatedVersion : "?",
+          negotiatedCipher ? negotiatedCipher : "?", negotiatedCurve ? negotiatedCurve : "?");
+
+  // Read this as three buckets that must add up: transport I/O, our own poll sleeps
+  // (pollCount x 5 ms), and whatever is left, which is wolfSSL computing. Each has its own fix.
+  const uint32_t handshakeMs = millis() - handshakeStartMs;
+  const uint32_t ioMs = g_handshakeIo.ioUs / 1000;
+  const uint32_t sleepMs = pollCount * 5;
+  const long computeMs = static_cast<long>(handshakeMs) - static_cast<long>(ioMs) - static_cast<long>(sleepMs);
+  LOG_INF("TLS", "connect %s: tcp+dns=%lu hs=%lu = io %lu + sleep %lu + compute %ld | rx %lu/%luB tx %lu/%luB cpu=%lu",
+          host, static_cast<unsigned long>(transportMs), static_cast<unsigned long>(handshakeMs),
+          static_cast<unsigned long>(ioMs), static_cast<unsigned long>(sleepMs), computeMs,
+          static_cast<unsigned long>(g_handshakeIo.recvCalls), static_cast<unsigned long>(g_handshakeIo.recvBytes),
+          static_cast<unsigned long>(g_handshakeIo.sendCalls), static_cast<unsigned long>(g_handshakeIo.sendBytes),
+          static_cast<unsigned long>(getCpuFrequencyMhz()));
+
+  char callList[128];
+  size_t callListLen = 0;
+  for (size_t i = 0; i < callCount && callListLen < sizeof(callList) - 8; ++i) {
+    callListLen += snprintf(callList + callListLen, sizeof(callList) - callListLen, i == 0 ? "%lu" : ",%lu",
+                            static_cast<unsigned long>(callMs[i]));
+  }
+  LOG_INF("TLS", "handshake call ms: [%s]%s", callList, callCount >= MAX_TIMED_CALLS ? " (truncated)" : "");
+
+  if (g_chainVerify.count > 0) {
+    char chainList[128];
+    size_t chainLen = 0;
+    const size_t shown = g_chainVerify.count < 8 ? g_chainVerify.count : 8;
+    for (size_t i = 0; i < shown && chainLen < sizeof(chainList) - 16; ++i) {
+      chainLen += snprintf(chainList + chainLen, sizeof(chainList) - chainLen, i == 0 ? "d%d:%lu" : " d%d:%lu",
+                           g_chainVerify.depth[i], static_cast<unsigned long>(g_chainVerify.gapMs[i]));
+    }
+    // First entry includes the pre-certificate ServerHello work; the rest are per-certificate.
+    LOG_INF("TLS", "chain verify: %lu certs [%s] (first entry includes key exchange)",
+            static_cast<unsigned long>(g_chainVerify.count), chainList);
+  }
   _connected = true;
   return 1;
 }
