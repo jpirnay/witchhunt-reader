@@ -81,6 +81,26 @@ void rememberResponsePreview(const char* body) {
   g_lastResponsePreview[sizeof(g_lastResponsePreview) - 1] = '\0';
 }
 
+// Log exactly what the server answered with. KOSync-compatible servers disagree about how
+// they say "nothing stored" — bodiless, "{}", "[]", "null", a lone newline, a BOM — and the
+// printable preview cannot tell those apart, so short bodies are dumped as hex as well.
+// INFO level: one line per request, and it is the first thing a sync bug report needs.
+void logResponseBody(const char* method, const std::string& url, int status, const std::string& body) {
+  std::string hex;
+  const size_t hexLen = std::min<size_t>(body.size(), 24);
+  hex.reserve(hexLen * 3);
+  for (size_t i = 0; i < hexLen; ++i) {
+    char byteText[4];
+    snprintf(byteText, sizeof(byteText), "%02X ", static_cast<unsigned char>(body[i]));
+    hex += byteText;
+  }
+  if (body.size() > hexLen) hex += "...";
+  if (hex.empty()) hex = "-";
+
+  LOG_INF("KOSync", "Response %s %s -> HTTP %d | len=%u | body=%s | hex=%s", method, url.c_str(), status,
+          static_cast<unsigned>(body.size()), previewBody(body.c_str()).c_str(), hex.c_str());
+}
+
 // Reset the static diagnostic state at the start of each request and capture pre-flight
 // heap so failure reporting always reflects what was available when the request started.
 void beginRequest(const char* operation) {
@@ -95,7 +115,7 @@ void beginRequest(const char* operation) {
 
 // Skip a leading UTF-8 BOM (EF BB BF) and ASCII whitespace, returning a pointer
 // to the first content character.  Used by response-body checks that verify the
-// payload starts with '{' (JSON) rather than '<' (HTML captive-portal page).
+// payload opens a JSON document rather than '<' (HTML captive-portal page).
 const char* skipBomAndWhitespace(const char* p) {
   // UTF-8 BOM
   if (static_cast<unsigned char>(p[0]) == 0xEF && static_cast<unsigned char>(p[1]) == 0xBB &&
@@ -108,17 +128,30 @@ const char* skipBomAndWhitespace(const char* p) {
   return p;
 }
 
-// True when a body is present but is not a JSON object. That did not come from the KOSync
-// API — it is the signature of a captive portal or reverse proxy answering with its own
-// HTML — so the accompanying status code cannot be trusted to mean what it says.
+// A body carrying no content: absent, or nothing but a BOM and whitespace. Servers that
+// answer "nothing stored" with a bare 200 sometimes still emit a newline, which must read
+// the same as a truly empty body rather than as a JSON parse error.
+bool bodyIsEffectivelyEmpty(const std::string& body) {
+  return body.empty() || *skipBomAndWhitespace(body.c_str()) == '\0';
+}
+
+// True when a body is present but cannot be the JSON the KOSync API speaks. That did not come
+// from the API — it is the signature of a captive portal or reverse proxy answering with its
+// own HTML — so the accompanying status code cannot be trusted to mean what it says.
+//
+// Demanding a JSON *object* here was too strict: KOSync-compatible servers signal "nothing
+// stored for this document" with whatever their framework serializes an absent record as —
+// an empty array, or the bare literal null — and those were reported to the user as a captive
+// portal. Accept every JSON document shape and let the endpoint decide what it means; only a
+// body that cannot be JSON at all ('<' for HTML, prose from a proxy) is rejected here.
 //
 // An empty body is deliberately NOT a portal signature: several endpoints legitimately
 // answer bodiless (204/205), and portals always serve a page. Callers that additionally
 // require a body decide that for themselves.
 bool bodyIsNotJson(const std::string& body) {
-  if (body.empty()) return false;
-  const char c = *skipBomAndWhitespace(body.c_str());
-  return c != '\0' && c != '{';
+  if (bodyIsEffectivelyEmpty(body)) return false;
+  const char* p = skipBomAndWhitespace(body.c_str());
+  return *p != '{' && *p != '[' && strncmp(p, "null", 4) != 0;
 }
 
 // Screen a response body before its status code is interpreted. Returns true when the caller
@@ -308,6 +341,7 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   if (rc >= 100) {  // got an HTTP status line
     KOReaderSyncClient::lastHttpCode = rc;
     outBody = http->getBody();
+    logResponseBody(method, url, rc, outBody);
     return ESP_OK;
   }
   // Map SecureHttpClient transport errors to the esp_err_t codes the callers
@@ -431,15 +465,11 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   // portal's 401 + HTML surface as AUTH_FAILED, sending the user off to reset credentials
   // that were fine.
   if (shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
-  if (httpCode >= 200 && httpCode < 300) {
-    // 204/205 are legitimately bodiless; every other 2xx must carry the JSON object the
-    // reference server sends on 200.
-    if (httpCode != 204 && httpCode != 205 && responseBody.empty()) {
-      g_lastInvalidBody = true;
-      return INVALID_RESPONSE;
-    }
-    return OK;
-  }
+  // A 2xx that survived the body screen is a successful authentication, bodiless or not.
+  // Requiring a body on anything but 204/205 locked out servers that acknowledge auth with a
+  // bare 200 — and reported them as a captive portal, sending users to reset working
+  // credentials. A portal cannot reach here: it serves a page, which the screen above rejects.
+  if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
   return SERVER_ERROR;
 }
@@ -512,7 +542,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     // Spring-based KOSync implementations answer 204 where the reference server
     // answers 200 with an empty object. Both belong on the same graceful
     // no-remote-progress path as 404, not in SERVER_ERROR.
-    if (responseBody.empty()) {
+    if (bodyIsEffectivelyEmpty(responseBody)) {
       LOG_INF("KOSync", "HTTP %d with no body — treating as not found", httpCode);
       return NOT_FOUND;
     }
@@ -525,9 +555,11 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
       return JSON_ERROR;
     }
 
-    // kosync convention: no stored progress for the document is signalled by
-    // HTTP 200 with an empty body ("{}"), not by 404. Detect that here so the
-    // caller doesn't apply a zeroed-out position as if it were real progress.
+    // kosync convention: no stored progress for the document is signalled by a 2xx
+    // carrying an empty payload, not by 404. What "empty" serializes to varies by
+    // implementation — "{}", "[]", or a bare "null" — and all three land here with no
+    // "progress" key. Detect that so the caller doesn't apply a zeroed-out position as
+    // if it were real progress.
     if (doc["progress"].isNull()) {
       std::string jsonDump;
       serializeJson(doc, jsonDump);
