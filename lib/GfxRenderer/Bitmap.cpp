@@ -188,14 +188,20 @@ BmpReaderError Bitmap::parseHeaders() {
 
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
-    // Adaptive output is already level-corrected, so it wants the evenly-spaced
-    // quantizer; the display-tuned thresholds would compensate a second time.
-    const Gray4QuantizationMode quantizationMode =
-        adaptiveTonePoints.active ? Gray4QuantizationMode::Native : Gray4QuantizationMode::DisplayTuned;
+    // Always DisplayTuned, tone mapping or not. The tone curve corrects the IMAGE's
+    // range; the DisplayTuned values correct for the PANEL's transfer function, and
+    // level-correcting an image does not change how dark the panel renders level 1.
+    // Feeding the ditherer the evenly-spaced values instead tells it that level 1
+    // shows as 85 when it actually shows as 30, and error diffusion turns that
+    // 55-level lie into a systematic darkening (measured: covers lost 20-40 points
+    // of mean brightness and, on low-gain images, contrast as well). The reader's
+    // in-book image path has always used DisplayTuned with tone mapping active --
+    // see the AtkinsonDitherer built in JpegToFramebufferConverter -- and this is
+    // what brings the sleep screen back in line with it.
     if (USE_ATKINSON) {
-      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width, quantizationMode);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
     } else {
-      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width, quantizationMode);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
     }
   }
 
@@ -301,11 +307,10 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
       if (nativePalette) {
         // Palette matches native gray levels: direct mapping (still apply brightness/contrast/gamma)
         color = static_cast<uint8_t>(adjusted >> 6);
-      } else if (adaptiveTonePoints.active) {
-        // Already level-corrected: quantize evenly rather than re-compensating.
-        color = quantizeGray4(adjusted, Gray4QuantizationMode::Native).index;
       } else {
-        // Non-native palette with dithering disabled: simple quantization
+        // Non-native palette with dithering disabled: simple quantization. Tone-mapped
+        // input takes this path too -- the curve has already corrected the image, and
+        // these thresholds still have to account for the panel (see parseHeaders).
         color = quantize(adjusted, currentX, prevRowY);
       }
     }

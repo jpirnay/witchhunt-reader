@@ -28,8 +28,12 @@ namespace adaptive_tone {
 // robust against a handful of stray extreme pixels in a way min/max is not.
 inline constexpr uint32_t LOW_PERCENTILE_PERMILLE = 10;
 inline constexpr uint32_t HIGH_PERCENTILE_PERMILLE = 990;
-// Below this spread the image already uses most of the range, so a stretch would
-// amplify noise for no visible gain -- fall back to the untouched renderer.
+// Below this spread the percentiles sit so close together that stretching them apart
+// would need a gain of 2.7x or more, which amplifies sensor noise and JPEG blocking
+// far more than it reveals detail -- fall back to the untouched renderer.
+// Note this is a floor, not a ceiling: it does NOT catch the opposite case, an image
+// whose p1..p99 already span most of the range (gain ~1.0) so that the stretch is
+// nearly a no-op. Those are left alone by arithmetic rather than by a gate.
 inline constexpr int MIN_RANGE = 96;
 // Correction strength, applied as a blend between the original and fully-stretched
 // luminance. 3/4 is upstream's X3-tuned value, confirmed on both X3 and X4.

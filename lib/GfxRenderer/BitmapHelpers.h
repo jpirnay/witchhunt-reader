@@ -26,8 +26,15 @@ struct QuantizedGray4 {
 //   they encode how dark each level actually renders, so error diffusion stays
 //   honest about what the panel produced.
 // Native: evenly-spaced levels (0/85/170/255), i.e. the mathematically correct
-//   quantizer. Only appropriate when the input has already been level-corrected;
-//   applying DisplayTuned on top of such input double-compensates.
+//   quantizer for a display whose levels ARE evenly spaced. This panel's are not,
+//   so Native is not the right choice here for any input.
+//   In particular it is NOT the counterpart to adaptive tone mapping: a tone curve
+//   corrects the image's range, DisplayTuned corrects the panel's transfer function,
+//   and the two are orthogonal. Level-correcting an image does not make the panel's
+//   level 1 any lighter, so swapping to Native on tone-mapped input just tells error
+//   diffusion that level 1 shows as 85 when it really shows as 30 -- which reads as a
+//   badly darkened image, not as avoided double-compensation. (That swap was the bug
+//   behind the near-black adaptive sleep covers; see Bitmap::parseHeaders.)
 // Note: `Native` matches quantizeGray4Level() in Epub/converters/DitherUtils.h,
 // which serves the reader's image path. Kept separate because that one returns
 // only an index and has no DisplayTuned counterpart.
