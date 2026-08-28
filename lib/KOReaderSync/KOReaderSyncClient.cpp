@@ -84,8 +84,12 @@ void rememberResponsePreview(const char* body) {
 // Log exactly what the server answered with. KOSync-compatible servers disagree about how
 // they say "nothing stored" — bodiless, "{}", "[]", "null", a lone newline, a BOM — and the
 // printable preview cannot tell those apart, so short bodies are dumped as hex as well.
-// INFO level: one line per request, and it is the first thing a sync bug report needs.
-void logResponseBody(const char* method, const std::string& url, int status, const std::string& body) {
+// The elapsed time covers connect + handshake + request + body read, and is paired with
+// whether a handshake actually ran, because that is what separates "the server is slow" from
+// "we paid for a new TLS session". INFO level: one line per request, and it is the first
+// thing a sync bug report needs.
+void logResponseBody(const char* method, const std::string& url, int status, const std::string& body,
+                     uint32_t elapsedMs, bool didHandshake) {
   std::string hex;
   const size_t hexLen = std::min<size_t>(body.size(), 24);
   hex.reserve(hexLen * 3);
@@ -97,7 +101,8 @@ void logResponseBody(const char* method, const std::string& url, int status, con
   if (body.size() > hexLen) hex += "...";
   if (hex.empty()) hex = "-";
 
-  LOG_INF("KOSync", "Response %s %s -> HTTP %d | len=%u | body=%s | hex=%s", method, url.c_str(), status,
+  LOG_INF("KOSync", "Response %s %s -> HTTP %d in %lu ms (%s) | len=%u | body=%s | hex=%s", method, url.c_str(), status,
+          static_cast<unsigned long>(elapsedMs), didHandshake ? "fresh handshake" : "session reused",
           static_cast<unsigned>(body.size()), previewBody(body.c_str()).c_str(), hex.c_str());
 }
 
@@ -141,9 +146,12 @@ bool bodyIsEffectivelyEmpty(const std::string& body) {
 //
 // Demanding a JSON *object* here was too strict: KOSync-compatible servers signal "nothing
 // stored for this document" with whatever their framework serializes an absent record as —
-// an empty array, or the bare literal null — and those were reported to the user as a captive
-// portal. Accept every JSON document shape and let the endpoint decide what it means; only a
-// body that cannot be JSON at all ('<' for HTML, prose from a proxy) is rejected here.
+// kosync.rustysoft.de answers HTTP 200 with the empty string "" (hex 22 22), others use "[]"
+// or a bare null — and every one of those was reported to the user as a captive portal.
+// Accept any JSON root an "empty record" can serialize to and let the endpoint decide what it
+// means; only a body that cannot be JSON at all ('<' for HTML, prose from a proxy) is rejected
+// here. Numbers and true/false stay rejected: no server encodes an absent record as either,
+// and letting them through would blunt the portal/proxy heuristic this check exists for.
 //
 // An empty body is deliberately NOT a portal signature: several endpoints legitimately
 // answer bodiless (204/205), and portals always serve a page. Callers that additionally
@@ -151,7 +159,7 @@ bool bodyIsEffectivelyEmpty(const std::string& body) {
 bool bodyIsNotJson(const std::string& body) {
   if (bodyIsEffectivelyEmpty(body)) return false;
   const char* p = skipBomAndWhitespace(body.c_str());
-  return *p != '{' && *p != '[' && strncmp(p, "null", 4) != 0;
+  return *p != '{' && *p != '[' && *p != '"' && strncmp(p, "null", 4) != 0;
 }
 
 // Screen a response body before its status code is interpreted. Returns true when the caller
@@ -325,7 +333,9 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   const size_t troughBefore = http->lastHandshakeMinLargest();
   const size_t preflightLargest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
 
+  const uint32_t requestStartMs = millis();
   const int rc = http->request(method, url, body);
+  const uint32_t elapsedMs = millis() - requestStartMs;
 
   const size_t troughLargest = http->lastHandshakeMinLargest();
   const bool didHandshake = (troughLargest != troughBefore) && (troughLargest != SIZE_MAX);
@@ -341,9 +351,13 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   if (rc >= 100) {  // got an HTTP status line
     KOReaderSyncClient::lastHttpCode = rc;
     outBody = http->getBody();
-    logResponseBody(method, url, rc, outBody);
+    logResponseBody(method, url, rc, outBody, elapsedMs, didHandshake);
     return ESP_OK;
   }
+  // Time a failed request too: a 5000 ms elapsed against the 5000 ms timeout says the peer
+  // went quiet, where a sub-second failure is a refused connect or a TLS rejection.
+  LOG_ERR("KOSync", "Request %s %s failed after %lu ms (rc=%d, %s)", method, url.c_str(),
+          static_cast<unsigned long>(elapsedMs), rc, didHandshake ? "fresh handshake" : "no handshake");
   // Map SecureHttpClient transport errors to the esp_err_t codes the callers
   // already branch on for retry decisions.
   switch (rc) {
@@ -557,10 +571,10 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
     // kosync convention: no stored progress for the document is signalled by a 2xx
     // carrying an empty payload, not by 404. What "empty" serializes to varies by
-    // implementation — "{}", "[]", or a bare "null" — and all three land here with no
-    // "progress" key. Detect that so the caller doesn't apply a zeroed-out position as
-    // if it were real progress.
-    if (doc["progress"].isNull()) {
+    // implementation — "{}", "[]", "\"\"", or a bare null — so anything that is not an
+    // object carrying a "progress" key means no record. Detect that so the caller doesn't
+    // apply a zeroed-out position as if it were real progress.
+    if (!doc.is<JsonObject>() || doc["progress"].isNull()) {
       std::string jsonDump;
       serializeJson(doc, jsonDump);
       LOG_INF("KOSync", "Empty progress payload — treating as not found | payload=%s", jsonDump.c_str());
