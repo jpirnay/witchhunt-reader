@@ -124,7 +124,8 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
   if (body && bodyLen) {
     if (_client->write(body, bodyLen) != bodyLen) return false;
   }
-  _trace.sendMs = millis() - sendStartMs;
+  _trace.sendDoneMs = millis();
+  _trace.sendMs = _trace.sendDoneMs - sendStartMs;
   _trace.sendBytes = req.size() + bodyLen;
   return true;
 }
@@ -133,12 +134,12 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
 // out (sendBytes), did anything come back at all (ttfb, 0 = never), how long did we sit waiting
 // (polls x 2 ms), and what did the link look like while we waited.
 void SecureHttpClient::logRequestTrace(const char* method, const Url& u, int rc) const {
-  LOG_DBG("HTTP", "%s %s: conn=%s send %lums/%uB ttfb=%lums polls=%lu hdr=%uB attempts=%u rssi=%d ps=%d -> rc=%d",
+  LOG_DBG("HTTP", "%s %s: conn=%s/%lums send %lums/%uB ttfb=%lums polls=%lu hdr=%uB attempts=%u rssi=%d ps=%d -> rc=%d",
           method, u.host.c_str(), _trace.reusedConnection ? "reused" : "fresh",
-          static_cast<unsigned long>(_trace.sendMs), static_cast<unsigned>(_trace.sendBytes),
-          static_cast<unsigned long>(_trace.firstByteMs), static_cast<unsigned long>(_trace.readPolls),
-          static_cast<unsigned>(_trace.headerBytes), _trace.attempts, static_cast<int>(WiFi.RSSI()),
-          static_cast<int>(WiFi.getSleep()), rc);
+          static_cast<unsigned long>(_trace.connectMs), static_cast<unsigned long>(_trace.sendMs),
+          static_cast<unsigned>(_trace.sendBytes), static_cast<unsigned long>(_trace.firstByteMs),
+          static_cast<unsigned long>(_trace.readPolls), static_cast<unsigned>(_trace.headerBytes), _trace.attempts,
+          static_cast<int>(WiFi.RSSI()), static_cast<int>(WiFi.getSleep()), rc);
 }
 
 // Connect (or reuse), send, and read headers — with one transparent retry: a
@@ -155,10 +156,12 @@ int SecureHttpClient::transact(const char* method, const Url& u, const uint8_t* 
     const bool reusing = connectionMatches(u);
     _trace.reusedConnection = reusing;
     _trace.attempts = static_cast<uint8_t>(attempt + 1);
+    const uint32_t connectStartMs = millis();
     if (!ensureConnected(u)) {
       logRequestTrace(method, u, ERR_CONNECT);
       return ERR_CONNECT;
     }
+    _trace.connectMs = millis() - connectStartMs;
     if (!sendRequest(method, u, body, bodyLen)) {
       close();
       if (reusing && attempt == 0) continue;
@@ -186,7 +189,9 @@ bool SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
       if (ch < 0) break;
       // First decrypted byte of the response: the difference between "the peer never answered"
       // and "the answer arrived and something after this went wrong".
-      if (_trace.firstByteMs == 0) _trace.firstByteMs = millis() - _trace.startMs;
+      if (_trace.firstByteMs == 0 && _trace.sendDoneMs != 0) {
+        _trace.firstByteMs = millis() - _trace.sendDoneMs;
+      }
       ++_trace.headerBytes;
       if (ch == '\n') {
         if (!line.empty() && line.back() == '\r') line.pop_back();

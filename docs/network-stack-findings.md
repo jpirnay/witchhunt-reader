@@ -53,10 +53,20 @@ logged the *successful* case, which is how we found out it could not measure any
 
 ### WiFi
 
-- **`scan_time.active.min` is the dwell, not `max`.** A station leaves a channel after `min` ms and
-  only stays as long as `max` once it has already heard an AP. Measured directly: a scan requesting
-  `min=100 / max=300` returned in **101 ms**. Arduino's `WiFiScanClass` default for `min` is 100 ms
-  and it passes that unless told otherwise (`setScanActiveMinTime`).
+- **`min` is the dwell when nothing answers; `max` only applies once an AP has been heard** — and
+  the two values come from *different* APIs. Three measurements pin it down:
+
+  | default params (`esp_wifi_set_scan_parameters`) | per-scan config (`esp_wifi_scan_start`) | AP heard? | measured |
+  |---|---|---|---|
+  | `min=0 / max=120` | `min=100 / max=300` | no | **101 ms** |
+  | `min=120 / max=120` | `min=300 / max=300` | no | **121 ms** |
+  | `min=120 / max=120` | `min=300 / max=300` | yes | **302 ms** |
+
+  The effective `min` tracks the *default params* every time, and the effective `max` tracks the
+  *per-scan config*. So `WiFi.setScanActiveMinTime()` — which sets the per-scan `min` — is
+  silently overridden whenever `esp_wifi_set_scan_parameters()` has been called, which
+  `applyScanBudget()` does on every connect. To lengthen a probe's floor you must raise the
+  *default* `min` and put it back afterwards.
 - **The driver keeps no scan records from an internal connect scan.**
   `esp_wifi_scan_get_ap_num()` returned 0 immediately after a *successful* association — so a 0
   after a failure carries no information.
@@ -94,16 +104,40 @@ Each of these was believed, acted on, and disproven. Do not re-propose without n
 | The idle governor downclocks the CPU mid-sync and breaks WiFi | `HalPowerManager::setPowerSaving()` already refuses to downclock while `WiFi.getMode() != WIFI_MODE_NULL` |
 | `WiFi.setSleep(WIFI_PS_NONE)` races the core's `STA_START` handler | It does not: `setSleep` stores `_sleepEnabled` even before the STA starts, and the `STA_START` handler applies `WiFi.getSleep()` — our value either way |
 | Pinning a freshly-measured BSSID is safe because the risk was staleness | The pin failed on a BSSID seen 1 ms earlier. The channel is the part that pays; the address is not |
+| Narrowing the connect to the probed *channel* (no BSSID) avoids that | It does not. The channel-restricted `begin()` also returned `NO_AP_FOUND` while the probe line directly above it reported the AP at -72 dBm. **Anything we narrow gets rejected**; only the driver's own unhinted sweep associates |
+| A real `active.min` on the sweep will reduce the `NO_AP_FOUND` rate | The opposite was observed. With `min=0` a connect took ~3.5 s with at most one miss; with `min=max=120` two consecutive runs took 7.5 s with two and three misses. Equal `min`/`max` also removes the driver's room to extend a dwell when it *does* hear something. Reverted |
 | Verify-then-fall-back-insecure provides partial security | It provides none against an on-path attacker — the bad certificate is accepted on the retry — while paying for the chain walk twice |
 
 ## Open
 
 | Question | What would settle it |
 |---|---|
-| What stalls the *first* request on a fresh connection (5 s with no status line, then a lost SYN)? | The new `[HTTP] ... ttfb=.. polls=..` trace. `ttfb=0` with high polls = nothing ever came back; a non-zero `ttfb` with short `hdr` = it answered and we lost the rest |
-| Does the channel-only fast connect work on this mesh? | One flash. Look for `WiFi.begin -> SSID (ch=N only, fast scan)` followed by a prompt associate |
-| Does a real `active.min` on the sweep reduce the `NO_AP_FOUND` rate? | Several connects. The failures were never frequent, so this needs a run of them |
-| Is the intermittent failure ours or the path's? | One run pointed at a different kosync server (`sync.koreader.rocks`, already in the curated roots). If it follows the device, it is ours |
+| What stalls the *first* request on a fresh connection (5 s with no status line, then a lost SYN)? | Not reproduced since. Two clean runs showed `ttfb=710/762 ms` on a fresh connection and `25/62 ms` reused, with no failures — but the first trace measured `ttfb` from the top of `transact()`, folding the ~595 ms handshake in, so the real figure is ~115 ms. Corrected; the next occurrence will read straight |
+| Why does the association itself take 6 s and 2-3 `NO_AP_FOUND` sweeps now, where it took 3.5 s and at most one? | RSSI moved from -63..-69 dBm to -72..-73 dBm across the same sessions, at the same desk, while our scan-budget change was also in. Both variables moved at once. The revert isolates the second; if 7.5 s connects persist, it is the link |
+| Is the intermittent request failure ours or the path's? | One run pointed at a different kosync server (`sync.koreader.rocks`, already in the curated roots). If it follows the device, it is ours |
+
+## The home-channel probe: tried, measured, reverted
+
+The idea was sound on paper: a full sweep gives the AP one ~120 ms window out of ~1560 ms, so scan
+its channel alone for longer and hand the driver a candidate. It was built, measured over four
+device runs, and removed.
+
+What the runs showed, in order:
+
+1. The probe listened for 101 ms, not the 300 requested — the parameter model above was wrong.
+2. With the dwell corrected it **did** find the AP (`1 AP(s) on channel, 1 for 'PYSY' at -69 dBm`),
+   and the BSSID-pinned `begin()` that followed returned `NO_AP_FOUND` after 1939 ms, while the
+   unhinted `begin()` after it associated with that same BSSID 58 ms later.
+3. Dropping the BSSID and restricting only the channel changed nothing: `NO_AP_FOUND` again, with
+   the probe reporting the AP at -72 dBm one line above.
+
+Three narrowing strategies, three rejections, against a driver-run sweep that succeeds. Whatever
+this mesh answers, it answers a broadcast sweep and not a targeted attempt — so the probe was
+reverted along with the scan-budget change, leaving the sweep exactly as it was.
+
+The stop rule was set before the last flash and honoured: *if a channel-restricted attempt reports
+no AP while the probe above it saw one, stop narrowing.* Writing that down in advance is what kept
+this from becoming a fourth variation.
 
 ## Process traps hit during this work
 
