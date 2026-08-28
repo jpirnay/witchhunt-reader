@@ -26,31 +26,6 @@ namespace {
 
 void readDeviceBaseMac(uint8_t mac[6]) { esp_efuse_mac_get_default(mac); }
 
-// How many APs the driver's connect-time scan actually recorded.
-//
-// The discriminator for a NO_AP_FOUND miss on a mesh SSID. A full sweep spends ~120 ms of its
-// ~1560 ms on the one channel our AP lives on, so a single delayed beacon or lost probe response
-// there fails the whole sweep -- but that is one of two stories, and they need opposite fixes:
-//
-//   count == 0  the sweep heard nothing anywhere. A timing/radio problem; a longer dwell on the
-//               home channel is the answer.
-//   count  > 0  it heard other networks but had no candidate for OUR SSID. That is the
-//               steering signature -- mesh firmware answering probe requests selectively -- and
-//               the answer is passive listening, since beacons cannot be suppressed.
-//
-// Logged on the associated path too, deliberately: if a SUCCESSFUL connect also reports 0, the
-// driver simply does not retain records from an internal connect scan and a zero on the failure
-// path means nothing. That calibration is why both call sites exist.
-void logConnectScanRecords(const char* outcome) {
-  uint16_t apCount = 0;
-  const esp_err_t err = esp_wifi_scan_get_ap_num(&apCount);
-  if (err != ESP_OK) {
-    LOG_DBG("WIFI", "Scan records at %s: unavailable (%s)", outcome, esp_err_to_name(err));
-    return;
-  }
-  LOG_DBG("WIFI", "Scan records at %s: %u AP(s) in the driver's last scan", outcome, apCount);
-}
-
 std::string formatMacLabel(const uint8_t mac[6]) {
   char macStr[64];
   snprintf(macStr, sizeof(macStr), "%s %02x-%02x-%02x-%02x-%02x-%02x", tr(STR_MAC_ADDRESS), mac[0], mac[1], mac[2],
@@ -87,7 +62,6 @@ void WifiSelectionActivity::onEnter() {
         // failed attempt cost us a bad node, or whether the same node needed two tries.
         LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u", millis() - connectionStartTime,
                 formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
-        logConnectScanRecords("associate");
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
@@ -120,8 +94,11 @@ void WifiSelectionActivity::onEnter() {
                 WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
                 formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
                 static_cast<int>(info.wifi_sta_disconnected.rssi));
-        if (reason == WIFI_REASON_NO_AP_FOUND) {
-          logConnectScanRecords("no-ap-found");
+        // A pinned attempt that never saw its AP is ours to correct, and quickly: the driver
+        // would otherwise keep retrying the same pin. Flag it; checkConnectionStatus() re-issues
+        // the full sweep (calling into the driver from its own event task is not safe).
+        if (currentAttemptPinned && !currentAttemptAssociated && reason == WIFI_REASON_NO_AP_FOUND) {
+          pinnedAttemptMissed = true;
         }
       },
       ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
@@ -421,6 +398,8 @@ void WifiSelectionActivity::attemptConnection() {
   requestUpdate();
 
   prepareForConnect();
+  // Cheap and self-diagnosing; falls through to the full sweep whenever it cannot help.
+  if (startHomeChannelProbe()) return;
   issueWifiBegin();
 }
 
@@ -518,8 +497,126 @@ void WifiSelectionActivity::applyScanBudget() {
           SCAN_PASSIVE_DWELL_MS, SCAN_HOME_CHAN_DWELL_MS);
 }
 
+// Scans ONE channel -- the last one we associated on -- before handing the connect to the driver.
+//
+// A full sweep is ~13 channels x 120 ms, of which the AP we want gets a single 120 ms window:
+// about one beacon interval. One delayed beacon or one lost probe response inside that window and
+// the whole sweep returns NO_AP_FOUND (all-zero BSSID), costing ~1.5 s plus the driver's own retry
+// ~2 s later. That is the intermittent miss seen on this mesh at -67 dBm -- not a range problem
+// but an airtime lottery, which is why standing in the same place does not change the odds.
+//
+// Spending the budget on the only channel that can succeed inverts them: 300 ms is three beacon
+// intervals deep instead of barely one, and still five times cheaper than the sweep. The result
+// doubles as the diagnostic the driver could not give us -- its internal connect scan retains no
+// records, so esp_wifi_scan_get_ap_num() reported 0 even on a SUCCESSFUL connect. Here,
+// "N AP(s) on channel, 0 for 'X'" is probe-response suppression (mesh steering), and
+// "0 AP(s) on channel" is the timing story.
+//
+// This is NOT the cached hint that was removed. That one pinned a REMEMBERED BSSID and skipped
+// scanning, so it both missed (a coin flip) and locked onto whatever it last saw -- a -86 dBm node
+// on a mesh. This pins a BSSID observed milliseconds ago and still takes the strongest of whatever
+// answered. Pin what you measured, not what you remember.
+bool WifiSelectionActivity::startHomeChannelProbe() {
+  const auto* cred = WIFI_STORE.findCredential(selectedSSID);
+  if (cred == nullptr || cred->channel == 0 || cred->channel > MAX_2G4_CHANNEL) {
+    return false;  // No usable hint (first connect, or a cleared cache): take the full sweep.
+  }
+
+  if (WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false, HOME_PROBE_PASSIVE, HOME_PROBE_DWELL_MS,
+                        cred->channel) == WIFI_SCAN_FAILED) {
+    LOG_DBG("WIFI", "Home-channel probe could not start on ch=%u; full sweep", cred->channel);
+    return false;
+  }
+
+  homeProbeChannel = cred->channel;
+  homeProbeStartMs = millis();
+  state = WifiSelectionState::HOME_CHANNEL_PROBE;
+  return true;
+}
+
+void WifiSelectionActivity::processHomeChannelProbe() {
+  const int16_t scanResult = WiFi.scanComplete();
+
+  if (scanResult == WIFI_SCAN_RUNNING) {
+    if (millis() - homeProbeStartMs < HOME_PROBE_TIMEOUT_MS) return;
+    // Generous against a 300 ms dwell, so reaching here means stuck rather than slow.
+    LOG_DBG("WIFI", "Home-channel probe stuck after %lu ms; full sweep", millis() - homeProbeStartMs);
+    WiFi.scanDelete();
+    state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
+    issueWifiBegin();
+    return;
+  }
+
+  // Strongest AP for our SSID on this channel. The count of everything else on it is what
+  // separates "heard nothing at all" from "heard the neighbours but not us".
+  int bestIndex = -1;
+  int32_t bestRssi = 0;
+  size_t matches = 0;
+  for (int16_t i = 0; i < scanResult; ++i) {
+    if (WiFi.SSID(i) != selectedSSID.c_str()) continue;
+    ++matches;
+    const int32_t rssi = WiFi.RSSI(i);
+    if (bestIndex < 0 || rssi > bestRssi) {
+      bestIndex = i;
+      bestRssi = rssi;
+    }
+  }
+
+  uint8_t bestBssid[6] = {};
+  if (bestIndex >= 0) {
+    const uint8_t* raw = WiFi.BSSID(static_cast<uint8_t>(bestIndex));
+    if (raw != nullptr) {
+      memcpy(bestBssid, raw, sizeof(bestBssid));
+    } else {
+      bestIndex = -1;  // Nothing to pin to.
+    }
+  }
+
+  if (bestIndex >= 0) {
+    LOG_DBG("WIFI", "Home-channel probe: ch=%u %s %lu ms -> %d AP(s) on channel, %zu for '%s' (best %s at %d dBm)",
+            homeProbeChannel, HOME_PROBE_PASSIVE ? "passive" : "active", millis() - homeProbeStartMs,
+            static_cast<int>(scanResult), matches, selectedSSID.c_str(), formatMacDashed(bestBssid).c_str(),
+            static_cast<int>(bestRssi));
+  } else {
+    LOG_DBG("WIFI", "Home-channel probe: ch=%u %s %lu ms -> %d AP(s) on channel, none for '%s'", homeProbeChannel,
+            HOME_PROBE_PASSIVE ? "passive" : "active", millis() - homeProbeStartMs,
+            static_cast<int>(scanResult < 0 ? 0 : scanResult), selectedSSID.c_str());
+  }
+
+  WiFi.scanDelete();
+  state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
+
+  if (bestIndex >= 0) {
+    issueWifiBeginPinned(bestBssid, homeProbeChannel);
+    return;
+  }
+  // The probe is an optimisation, never a gate: whatever it fails to see still gets the full
+  // signal-sorted sweep, which is also what finds an AP that has moved channel.
+  issueWifiBegin();
+}
+
+// Pinned begin(), for a BSSID the probe saw milliseconds ago.
+//
+// WIFI_FAST_SCAN is what makes this cheap, and it is safe here for exactly the reason it was
+// unsafe before: its "take the first match" rule has one candidate when the BSSID is pinned.
+// Unpinned, that same rule is what attached the device to a -86 dBm node over the -63 dBm one.
+void WifiSelectionActivity::issueWifiBeginPinned(const uint8_t bssid[6], uint8_t channel) {
+  currentAttemptAssociated = false;
+  currentAttemptPinned = true;
+  pinnedAttemptMissed = false;
+
+  WiFi.setScanMethod(WIFI_FAST_SCAN);
+  WiFi.config(IPAddress(), IPAddress(), IPAddress(), IPAddress());
+
+  const char* pwd = (selectedRequiresPassword && !enteredPassword.empty()) ? enteredPassword.c_str() : nullptr;
+  LOG_DBG("WIFI", "WiFi.begin -> %s (pinned %s ch=%u, pre-begin %lu ms)", selectedSSID.c_str(),
+          formatMacDashed(bssid).c_str(), channel, millis() - connectionStartTime);
+  WiFi.begin(selectedSSID.c_str(), pwd, static_cast<int32_t>(channel), bssid);
+}
+
 void WifiSelectionActivity::issueWifiBegin() {
   currentAttemptAssociated = false;
+  currentAttemptPinned = false;
 
   // Always a full, signal-sorted scan. The cached channel/BSSID hint that used to shortcut this
   // is gone, and the device data is unambiguous about why:
@@ -593,6 +690,17 @@ bool WifiSelectionActivity::checkCaptivePortal() {
 void WifiSelectionActivity::checkConnectionStatus() {
   if (state != WifiSelectionState::CONNECTING && state != WifiSelectionState::AUTO_CONNECTING &&
       state != WifiSelectionState::AUTO_CYCLING) {
+    return;
+  }
+
+  // A pinned attempt that never found its AP: correct it ourselves rather than let the driver
+  // keep retrying the same pin until the 15 s timeout. The full sweep also re-finds an AP that
+  // moved channel, so this is the recovery for a stale hint as much as for a missed probe.
+  if (pinnedAttemptMissed) {
+    pinnedAttemptMissed = false;
+    LOG_DBG("WIFI", "Pinned attempt found no AP at %lu ms; falling back to the full sweep",
+            millis() - connectionStartTime);
+    issueWifiBegin();
     return;
   }
 
@@ -710,6 +818,11 @@ void WifiSelectionActivity::loop() {
   // Check scan progress
   if (state == WifiSelectionState::SCANNING) {
     processWifiScanResults();
+    return;
+  }
+
+  if (state == WifiSelectionState::HOME_CHANNEL_PROBE) {
+    processHomeChannelProbe();
     return;
   }
 
@@ -936,6 +1049,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       renderNetworkList();
       break;
     case WifiSelectionState::CONNECTING:
+    case WifiSelectionState::HOME_CHANNEL_PROBE:
       renderConnecting();
       break;
     case WifiSelectionState::CONNECTED:
