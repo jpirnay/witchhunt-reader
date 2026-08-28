@@ -284,6 +284,35 @@ void WifiSelectionActivity::processWifiScanResults() {
     return;
   }
 
+  // Full survey of what THIS radio saw, before the SSID dedup below throws most of it away.
+  //
+  // An off-device scan cannot answer questions about the device's link: it is a different
+  // antenna, in a different place, with different sensitivity. Every per-BSSID conclusion has to
+  // come from here. One line per record plus a 2.4 GHz channel histogram, which is what says
+  // whether the band is crowded, whether our AP has neighbours on its channel, and whether the
+  // SSID really has more than one radio within reach.
+  if (scanResult > 0) {
+    LOG_DBG("WIFI", "Scan survey: %d record(s)", static_cast<int>(scanResult));
+    uint8_t perChannel[15] = {};
+    for (int i = 0; i < scanResult; ++i) {
+      const int channel = static_cast<int>(WiFi.channel(i));
+      if (channel >= 1 && channel <= 14) ++perChannel[channel];
+      const uint8_t* bssid = WiFi.BSSID(static_cast<uint8_t>(i));
+      const std::string ssid = WiFi.SSID(i).c_str();
+      LOG_DBG("WIFI", "  ch%-2d %4d dBm %s enc=%d %s", channel, static_cast<int>(WiFi.RSSI(i)),
+              bssid != nullptr ? formatMacDashed(bssid).c_str() : "??-??-??-??-??-??",
+              static_cast<int>(WiFi.encryptionType(i)), ssid.empty() ? "<hidden>" : ssid.c_str());
+    }
+    char histogram[96];
+    size_t used = 0;
+    for (int channel = 1; channel <= 14 && used < sizeof(histogram) - 12; ++channel) {
+      if (perChannel[channel] == 0) continue;
+      used += snprintf(histogram + used, sizeof(histogram) - used, "%sch%d:%u", used ? " " : "", channel,
+                       perChannel[channel]);
+    }
+    LOG_DBG("WIFI", "Scan survey by 2.4 GHz channel: %s", used ? histogram : "(nothing)");
+  }
+
   // Scan complete, process results
   // Use a map to deduplicate networks by SSID, keeping the strongest signal
   std::map<std::string, WifiNetworkInfo> uniqueNetworks;
