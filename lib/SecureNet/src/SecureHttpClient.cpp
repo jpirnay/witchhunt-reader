@@ -71,6 +71,11 @@ bool SecureHttpClient::ensureConnected(const Url& u) {
 
   if (u.https()) {
     _secure.setCACert(_rootCA);
+    // No trust store means the caller asked for an unverified connection. Say so
+    // explicitly rather than letting connect() take the verified path and quietly
+    // find nothing to verify against: this is what makes lastConnectWasInsecure()
+    // — and every log line derived from it — tell the truth.
+    _secure.setInsecure(_rootCA == nullptr);
     _secure.setAllowInsecureFallback(_allowInsecureFallback);
     _secure.setAllowCertificateDateErrors(_allowCertificateDateErrors);
     _secure.setTimeout(_timeoutMs / 1000);

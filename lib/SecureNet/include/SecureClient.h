@@ -40,8 +40,10 @@ class SecureClient : public Client {
   // Certificate / verification configuration (applied before connect()).
   // rootCA is a (concatenated) PEM string; not copied — must outlive the client.
   void setCACert(const char* rootCA) { _rootCA = rootCA; }
-  // Skip peer verification entirely (debug only; not used in shipping paths).
-  void setInsecure() { _insecure = true; }
+  // Skip peer verification entirely: no trust store, no hostname check, and
+  // lastConnectWasInsecure() reports it. Takes a bool because the client is reused
+  // across requests, so the caller must be able to turn it back off.
+  void setInsecure(bool insecure = true) { _insecure = insecure; }
   // When true (default) and a CA is set, a verification-class handshake failure
   // is retried once with verification disabled (logged). OTA sets this false.
   void setAllowInsecureFallback(bool allow) { _allowInsecureFallback = allow; }

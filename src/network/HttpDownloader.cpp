@@ -70,20 +70,39 @@ bool logPreCallContext(const std::string& url) {
   return true;
 }
 
+// Does this transfer verify the peer? Resolves the caller's policy against the
+// user's "skip HTTPS validation" setting — the escape hatch for self-hosted
+// servers with a private CA or a self-signed certificate, which the device
+// otherwise cannot reach at all. Strict ignores it by design.
+bool verificationRequested(HttpDownloader::TlsPolicy tls) {
+  switch (tls) {
+    case HttpDownloader::TlsPolicy::Strict:
+      return true;
+    case HttpDownloader::TlsPolicy::Verified:
+      return !SETTINGS.skipHttpsValidation;
+    case HttpDownloader::TlsPolicy::Unverified:
+      return false;
+  }
+  return true;
+}
+
 // One-shot streaming GET over SecureNet (wolfSSL). Fills the Sink and emits
-// "Phase start"/"Phase open_ok"/"Phase done" heap telemetry. TLS verification
-// uses the curated CrossPoint roots; verified-first with insecure fallback
-// (except where the caller disables it, e.g. OTA).
+// "Phase start"/"Phase open_ok"/"Phase done" heap telemetry. The TlsPolicy
+// decides whether the curated roots are loaded at all and what happens when the
+// peer fails to verify.
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
-                                           const std::string& password, Sink& sink, bool allowInsecureFallback) {
+                                           const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls) {
   const bool clockReady = logPreCallContext(url);
   const unsigned long startMs = millis();
   LOG_DBG("HTTP", "Phase start @%lums heap=%u largest=%u", millis() - startMs, esp_get_free_heap_size(),
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 
   crosspoint::SecureHttpClient http;
-  http.setCACert(CROSSPOINT_ROOTS_PEM);
-  http.setAllowInsecureFallback(allowInsecureFallback);
+  // No roots => SecureClient sets WOLFSSL_VERIFY_NONE and skips the hostname
+  // check: one handshake, no chain work.
+  http.setCACert(verificationRequested(tls) ? CROSSPOINT_ROOTS_PEM : nullptr);
+  // Never retry unverified behind the caller's back; see TlsPolicy.
+  http.setAllowInsecureFallback(false);
   http.setAllowCertificateDateErrors(!clockReady);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
@@ -131,12 +150,12 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   return HttpDownloader::OK;
 }
 
-// Single funnel for every fetchUrl/downloadToFile overload. allowInsecureFallback
-// defaults true (browsing paths); OTA passes false to fail closed.
+// Single funnel for every fetchUrl/downloadToFile overload. The policy defaults
+// to the historic browsing posture; callers that carry credentials, install
+// files, or fetch public data pass their own.
 HttpDownloader::DownloadError runGetDispatch(const std::string& url, const std::string& username,
-                                             const std::string& password, Sink& sink,
-                                             bool allowInsecureFallback = true) {
-  return runGetSecure(url, username, password, sink, allowInsecureFallback);
+                                             const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls) {
+  return runGetSecure(url, username, password, sink, tls);
 }
 }  // namespace
 
@@ -161,18 +180,20 @@ namespace {
 // heap win). Cross-host requests transparently reopen inside SecureHttpClient.
 HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& session, const std::string& url,
                                                     const std::string& username, const std::string& password,
-                                                    Sink& sink, bool allowInsecureFallback) {
+                                                    Sink& sink, HttpDownloader::TlsPolicy tls) {
   auto* impl = session.impl();
   // Evaluated on every call, not just when the session is created: a session opened before the
   // clock was set must not keep that verdict for the rest of its life (nor the reverse).
   const bool clockReady = logPreCallContext(url);
   if (!impl->http) {
     impl->http = std::make_unique<crosspoint::SecureHttpClient>();
-    impl->http->setCACert(CROSSPOINT_ROOTS_PEM);
     impl->http->setTimeout(HTTP_TIMEOUT_MS);
     impl->http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   }
-  impl->http->setAllowInsecureFallback(allowInsecureFallback);
+  // Re-applied per call, like the clock verdict below: a session outlives a
+  // single request and must not carry a previous caller's policy.
+  impl->http->setCACert(verificationRequested(tls) ? CROSSPOINT_ROOTS_PEM : nullptr);
+  impl->http->setAllowInsecureFallback(false);
   impl->http->setAllowCertificateDateErrors(!clockReady);
   impl->http->clearHeaders();
   if (!username.empty() && !password.empty()) {
@@ -202,17 +223,18 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
 }
 
 HttpDownloader::DownloadError runGetOnSession(HttpDownloader::Session& session, const std::string& url,
-                                              const std::string& username, const std::string& password, Sink& sink) {
-  return runGetSecureOnSession(session, url, username, password, sink, /*allowInsecureFallback=*/true);
+                                              const std::string& username, const std::string& password, Sink& sink,
+                                              HttpDownloader::TlsPolicy tls) {
+  return runGetSecureOnSession(session, url, username, password, sink, tls);
 }
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
-                              const std::string& password) {
+                              const std::string& password, TlsPolicy tls) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; };
-  return runGetDispatch(url, username, password, sink) == OK;
+  return runGetDispatch(url, username, password, sink, tls) == OK;
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
@@ -229,7 +251,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   }
   Sink sink;
   sink.write = [&onData](const uint8_t* data, size_t len) { return onData(data, len); };
-  const DownloadError result = runGetDispatch(url, username, password, sink);
+  const DownloadError result = runGetDispatch(url, username, password, sink, TlsPolicy::Verified);
   if (result == OK) {
     return true;
   }
@@ -246,8 +268,8 @@ bool HttpDownloader::fetchUrlVerified(const std::string& url, const DataCallback
   }
   Sink sink;
   sink.write = [&onData](const uint8_t* data, size_t len) { return onData(data, len); };
-  // allowInsecureFallback=false: fail closed on cert-verify failure (OTA).
-  const DownloadError result = runGetDispatch(url, username, password, sink, /*allowInsecureFallback=*/false);
+  // Strict: OTA never honours the skip-validation setting.
+  const DownloadError result = runGetDispatch(url, username, password, sink, TlsPolicy::Strict);
   if (result == OK) {
     return true;
   }
@@ -255,7 +277,7 @@ bool HttpDownloader::fetchUrlVerified(const std::string& url, const DataCallback
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, const std::string& username,
-                              const std::string& password) {
+                              const std::string& password, TlsPolicy tls) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   outContent.clear();  // start clean; the sink appends, so don't carry prior content
   Sink sink;
@@ -263,7 +285,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent, c
     outContent.append(reinterpret_cast<const char*>(data), len);
     return true;
   };
-  return runGetDispatch(url, username, password, sink) == OK;
+  return runGetDispatch(url, username, password, sink, tls) == OK;
 }
 
 namespace {
@@ -290,7 +312,7 @@ HttpDownloader::DownloadError finishFileDownload(HttpDownloader::DownloadError r
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, const std::string& username,
-                                                             const std::string& password) {
+                                                             const std::string& password, TlsPolicy tls) {
   LOG_DBG("HTTP", "Downloading: %s", url.c_str());
   LOG_DBG("HTTP", "Destination: %s", destPath.c_str());
 
@@ -307,13 +329,14 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.progress = std::move(progress);
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGetDispatch(url, username, password, sink);
+  const DownloadError result = runGetDispatch(url, username, password, sink, tls);
   return finishFileDownload(result, destPath, file, sink.downloaded);
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(Session& session, const std::string& url,
                                                              const std::string& destPath, ProgressCallback progress,
-                                                             const std::string& username, const std::string& password) {
+                                                             const std::string& username, const std::string& password,
+                                                             TlsPolicy tls) {
   LOG_DBG("HTTP", "Downloading (session): %s", url.c_str());
   LOG_DBG("HTTP", "Destination: %s", destPath.c_str());
 
@@ -330,6 +353,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(Session& session, c
   sink.progress = std::move(progress);
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
-  const DownloadError result = runGetOnSession(session, url, username, password, sink);
+  const DownloadError result = runGetOnSession(session, url, username, password, sink, tls);
   return finishFileDownload(result, destPath, file, sink.downloaded);
 }

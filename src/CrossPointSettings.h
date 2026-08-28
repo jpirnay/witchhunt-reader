@@ -373,6 +373,15 @@ class CrossPointSettings {
   uint8_t useWeather = 1;
   // Include release candidate builds when checking for OTA updates.
   uint8_t includeBetaUpdates = 0;
+  // Accept any TLS certificate on https requests (1 = skip validation).
+  //
+  // For self-hosted servers with a private CA or a self-signed certificate —
+  // an OPDS catalog or a local KOReader sync server — where the alternative is
+  // that the device simply cannot reach them. It disables authentication of the
+  // peer for every https call the firmware makes, so credentials sent to such a
+  // server are only as safe as the network path. OTA is deliberately exempt:
+  // firmware is executed, so it stays verified whatever this is set to.
+  uint8_t skipHttpsValidation = 0;
 
   // Configurable actions for short / double / long press on each logical button.
   //

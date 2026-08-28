@@ -33,6 +33,9 @@ namespace {
 constexpr esp_err_t KO_ERR_CONNECT = static_cast<esp_err_t>(0x7001);  // connect/transport failure (retryable)
 constexpr esp_err_t KO_ERR_EAGAIN = static_cast<esp_err_t>(0x7002);   // timeout/truncated (retryable)
 
+// Mirrors the app's "skip HTTPS validation" setting; see setSkipTlsValidation().
+bool g_skipTlsValidation = false;
+
 bool g_keepSessionOpen = false;
 // Persistent wolfSSL HTTP client for a KOSync session. Its internal keep-alive
 // reuses the TLS connection across GET-progress -> PUT-update on the same host,
@@ -301,10 +304,17 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   }
 
   // KOSync default host is https (TLS 1.3); custom local servers may be http.
-  // SecureHttpClient verifies https against the curated roots (verified-first with
-  // insecure fallback) and passes http through a plain WiFiClient. Tiny JSON
-  // payloads, so the small-buffer intent of the old 1 KB config is naturally met.
-  http->setCACert(CROSSPOINT_ROOTS_PEM);
+  // SecureHttpClient verifies https against the curated roots and passes http
+  // through a plain WiFiClient. Tiny JSON payloads, so the small-buffer intent
+  // of the old 1 KB config is naturally met.
+  //
+  // Fail closed unless the user has explicitly disabled validation: applyAuthHeaders()
+  // puts the sync account's password on the wire (Basic auth, plus the md5 in
+  // x-auth-key), so accepting an unverifiable peer would hand those credentials to
+  // whoever answered. No roots => SecureClient skips verification entirely, which is
+  // what a self-hosted server with a private CA needs.
+  http->setCACert(g_skipTlsValidation ? nullptr : CROSSPOINT_ROOTS_PEM);
+  http->setAllowInsecureFallback(false);
   // Last-resort clock guard. The activities are expected to have run
   // HalClock::ensureUsableForTls() once WiFi came up (they have SETTINGS and therefore the
   // configured NTP server; this library does not). Asking here as well means a caller that
@@ -380,6 +390,8 @@ static inline bool hasCredentials() {
   LOG_INF("KOSync", "No credentials configured");
   return false;
 }
+
+void KOReaderSyncClient::setSkipTlsValidation(bool skip) { g_skipTlsValidation = skip; }
 
 void KOReaderSyncClient::beginPersistentSession() {
   if (g_keepSessionOpen) {

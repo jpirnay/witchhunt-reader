@@ -69,6 +69,9 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   }
 
   LOG_DBG("KOSync", "WiFi connected, starting sync");
+  // Push the current setting before any request: the library cannot read SETTINGS,
+  // and the value may have changed since boot.
+  KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
 
   {
     RenderLock lock(*this);
