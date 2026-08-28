@@ -35,7 +35,7 @@ std::string gridThumbPath(const std::string& coverBmpPath, int tw, int th) {
 // Where the grid lives on screen: the content rect and first-row offset from the active theme,
 // plus the cell geometry CoverGridLayout derives from that space.
 struct GridLayout {
-  Rect content;       // rect the whole screen body lives in
+  Rect content{};     // rect the whole screen body lives in
   int contentTop;     // y of the first row (below the header)
   int contentHeight;  // usable height from contentTop down
   CoverGridLayout::Layout cells;
