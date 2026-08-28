@@ -36,7 +36,9 @@ class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
   // heap, read error), which makes the tone curve an identity — never a hard failure.
   // Call once and reuse across render passes; the result must be shared so every pass
   // quantizes against the same black/white points.
-  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath);
+  // `mode` selects the endpoint stretch or the CDF equalization; see AdaptiveTone.h.
+  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath,
+                                                   adaptive_tone::Mode mode = adaptive_tone::Mode::Stretch);
 
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 

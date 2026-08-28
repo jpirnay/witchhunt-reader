@@ -17,7 +17,9 @@ class PngToFramebufferConverter final : public ImageToFramebufferDecoder {
   // Costs a FULL EXTRA DECODE: unlike a BMP, a PNG cannot be rewound, so there is no
   // cheap pre-pass -- inflate must run over every row. Call this once and reuse the
   // result across render passes; do not call it per pass.
-  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath);
+  // `mode` selects the endpoint stretch or the CDF equalization; see AdaptiveTone.h.
+  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath,
+                                                   adaptive_tone::Mode mode = adaptive_tone::Mode::Stretch);
 
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {
     return getDimensionsStatic(imagePath, dims);

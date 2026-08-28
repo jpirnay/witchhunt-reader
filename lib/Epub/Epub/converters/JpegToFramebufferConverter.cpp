@@ -943,7 +943,8 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
   return true;
 }
 
-adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath) {
+adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath,
+                                                                      const adaptive_tone::Mode toneMode) {
   adaptive_tone::Points points;  // inactive by default — identity tone curve
 
   // Only baseline JPEGs go through TJpgDec. The progressive path reconstructs a DC-only
@@ -992,10 +993,10 @@ adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std:
   }
 
   if (histCtx.histogramSamples == 0) return points;
-  points = adaptive_tone::derivePoints(histogram.get(), histCtx.histogramSamples);
-  LOG_TRC("JPG", "Adaptive tone: active=%d black=%u white=%u (%llu samples): %s", points.active ? 1 : 0,
-          points.blackPoint, points.whitePoint, static_cast<unsigned long long>(histCtx.histogramSamples),
-          imagePath.c_str());
+  points = adaptive_tone::derivePoints(histogram.get(), histCtx.histogramSamples, toneMode);
+  LOG_TRC("JPG", "Adaptive tone (%s): active=%d black=%u white=%u (%llu samples): %s",
+          toneMode == adaptive_tone::Mode::Equalize ? "equalize" : "stretch", points.active ? 1 : 0, points.blackPoint,
+          points.whitePoint, static_cast<unsigned long long>(histCtx.histogramSamples), imagePath.c_str());
   return points;
 }
 

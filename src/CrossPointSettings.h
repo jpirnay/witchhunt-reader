@@ -36,6 +36,10 @@ class CrossPointSettings {
     INVERTED_BLACK_AND_WHITE = 2,
     // Greyscale like NO_FILTER, but stretches the image's own tonal range first.
     ADAPTIVE_TONE = 3,
+    // Greyscale too, but levels via the histogram's own CDF rather than its endpoints.
+    // Reaches bimodal images that ADAPTIVE_TONE leaves flat, at the cost of more dither
+    // texture in smooth gradients -- see AdaptiveTone.h.
+    EQUALIZE_TONE = 4,
     SLEEP_SCREEN_COVER_FILTER_COUNT
   };
   enum QUICK_RESUME_SLEEP_SCREEN {
