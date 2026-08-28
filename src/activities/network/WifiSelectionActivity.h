@@ -91,6 +91,11 @@ class WifiSelectionActivity final : public Activity {
   // Scan duration is CHANNELS x DWELL and independent of SSID density; 80 ms puts a 13-channel
   // sweep at ~1040 ms against ~1560 ms at the IDF default of 120 ms, while keeping margin for an
   // AP that is slow to answer a probe. Too short lands back in NO_AP_FOUND plus a driver retry.
+  // min is the REAL listening floor: the station leaves a channel after min ms unless it has
+  // already heard an AP, in which case it may stay until max. A min of 0 therefore does not mean
+  // "use max", it means "do not wait" -- measured directly: a probe with min=100/max=300 came
+  // back in 101 ms. Keep them equal so a sweep is deterministic (13 x 120 ms ~ 1560 ms).
+  static constexpr uint32_t SCAN_ACTIVE_DWELL_MIN_MS = 120;
   static constexpr uint32_t SCAN_ACTIVE_DWELL_MAX_MS = 120;
   static constexpr uint32_t SCAN_PASSIVE_DWELL_MS = 200;
   // Documented minimum; only relevant while already associated, which this path is not.
@@ -101,6 +106,9 @@ class WifiSelectionActivity final : public Activity {
   // whole attempt. 300 ms on one channel is both cheaper than the sweep and three beacon
   // intervals deep instead of barely one.
   static constexpr uint32_t HOME_PROBE_DWELL_MS = 300;
+  // Arduino's WiFiScanClass default for active.min, restored after the probe overrides it so the
+  // network-list sweep is not silently lengthened to 13 x 300 ms.
+  static constexpr uint32_t ARDUINO_SCAN_ACTIVE_MIN_DEFAULT_MS = 100;
   // Ceiling on the async scan before we give up on it and take the full sweep. Generous against
   // the dwell so only a genuinely stuck scan trips it.
   static constexpr unsigned long HOME_PROBE_TIMEOUT_MS = 1500;

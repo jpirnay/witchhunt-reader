@@ -477,11 +477,19 @@ void WifiSelectionActivity::prepareForConnect() {
 // probe response is one frame that can be lost. Do not go below 100 again without a mechanism
 // that does not need to hear a beacon.
 //
+// The dwell that matters is active.MIN, not max, and this used to pass min=0. A station leaves a
+// channel after min ms and only stays as long as max once it has already heard an AP, so max is
+// an allowance for a channel that is answering, not a listening budget for one that is silent.
+// Measured directly on device: a scan requesting min=100/max=300 returned in 101 ms. With min=0
+// the sweep was therefore not waiting the 120 ms this comment assumed on any quiet channel --
+// which is a far better explanation for an intermittent NO_AP_FOUND at -67 dBm than bad luck
+// with a single beacon. min and max are now equal so a sweep is deterministic.
+//
 // home_chan_dwell_time is set to its documented 30 ms minimum: it only matters while already
 // associated (returning to the home channel between scanned ones), which is not this path.
 void WifiSelectionActivity::applyScanBudget() {
   wifi_scan_default_params_t params = {};
-  params.scan_time.active.min = 0;
+  params.scan_time.active.min = SCAN_ACTIVE_DWELL_MIN_MS;
   params.scan_time.active.max = SCAN_ACTIVE_DWELL_MAX_MS;
   params.scan_time.passive = SCAN_PASSIVE_DWELL_MS;
   params.home_chan_dwell_time = SCAN_HOME_CHAN_DWELL_MS;
@@ -522,8 +530,17 @@ bool WifiSelectionActivity::startHomeChannelProbe() {
     return false;  // No usable hint (first connect, or a cleared cache): take the full sweep.
   }
 
-  if (WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false, HOME_PROBE_PASSIVE, HOME_PROBE_DWELL_MS,
-                        cred->channel) == WIFI_SCAN_FAILED) {
+  // max alone does not buy a dwell: Arduino passes its own active.min (100 ms by default) and the
+  // station leaves after min unless an AP has already answered. The first device run proved it --
+  // "ch=11 active 101 ms -> 0 AP(s)" against a requested 300 ms, i.e. the probe listened for LESS
+  // than a sweep channel does. Raise min for this scan and put it back afterwards, because it is a
+  // static shared with the network-list scan, which must not become 13 x 300 ms.
+  // (A passive probe would not need this: passive dwell is a single value.)
+  WiFi.setScanActiveMinTime(HOME_PROBE_DWELL_MS);
+  const int16_t scanStart =
+      WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false, HOME_PROBE_PASSIVE, HOME_PROBE_DWELL_MS, cred->channel);
+  WiFi.setScanActiveMinTime(ARDUINO_SCAN_ACTIVE_MIN_DEFAULT_MS);
+  if (scanStart == WIFI_SCAN_FAILED) {
     LOG_DBG("WIFI", "Home-channel probe could not start on ch=%u; full sweep", cred->channel);
     return false;
   }
@@ -578,9 +595,16 @@ void WifiSelectionActivity::processHomeChannelProbe() {
             static_cast<int>(scanResult), matches, selectedSSID.c_str(), formatMacDashed(bestBssid).c_str(),
             static_cast<int>(bestRssi));
   } else {
-    LOG_DBG("WIFI", "Home-channel probe: ch=%u %s %lu ms -> %d AP(s) on channel, none for '%s'", homeProbeChannel,
-            HOME_PROBE_PASSIVE ? "passive" : "active", millis() - homeProbeStartMs,
-            static_cast<int>(scanResult < 0 ? 0 : scanResult), selectedSSID.c_str());
+    // Report the raw result: a negative code is a FAILED scan, which says nothing about the air,
+    // and clamping it to "0 AP(s)" would read as "the channel was empty".
+    if (scanResult < 0) {
+      LOG_DBG("WIFI", "Home-channel probe: ch=%u %s %lu ms -> scan failed (%d); full sweep", homeProbeChannel,
+              HOME_PROBE_PASSIVE ? "passive" : "active", millis() - homeProbeStartMs, static_cast<int>(scanResult));
+    } else {
+      LOG_DBG("WIFI", "Home-channel probe: ch=%u %s %lu ms -> %d AP(s) on channel, none for '%s'", homeProbeChannel,
+              HOME_PROBE_PASSIVE ? "passive" : "active", millis() - homeProbeStartMs, static_cast<int>(scanResult),
+              selectedSSID.c_str());
+    }
   }
 
   WiFi.scanDelete();
