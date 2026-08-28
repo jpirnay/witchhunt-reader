@@ -126,7 +126,7 @@ class WifiSelectionActivity final : public Activity {
   // apart from a drop after association.
   volatile bool currentAttemptAssociated = false;
 
-  // True while the outstanding begin() is pinned to a BSSID the home-channel probe just saw.
+  // True while the outstanding begin() is restricted to the channel the probe just heard.
   bool currentAttemptPinned = false;
   // Raised by the disconnect handler when a pinned attempt came back NO_AP_FOUND, and consumed
   // in checkConnectionStatus(). The handler runs in the WiFi event task, so it only sets a flag:
@@ -161,9 +161,9 @@ class WifiSelectionActivity final : public Activity {
   // Issues WiFi.begin() with a full, signal-sorted scan. See the definition for why the cached
   // channel/BSSID hint that used to shortcut this was removed.
   void issueWifiBegin();
-  // Pinned variant: WIFI_FAST_SCAN against one BSSID on one channel, for a candidate the
-  // home-channel probe saw milliseconds ago.
-  void issueWifiBeginPinned(const uint8_t bssid[6], uint8_t channel);
+  // Channel-restricted variant: WIFI_FAST_SCAN on the one channel the home-channel probe just
+  // heard the AP on. Deliberately does NOT pin the BSSID; see the definition.
+  void issueWifiBeginOnChannel(uint8_t channel);
   // Short single-channel scan of the last-known-good channel. Returns false when there is no
   // usable hint or the scan could not start, in which case the caller takes the full sweep.
   bool startHomeChannelProbe();

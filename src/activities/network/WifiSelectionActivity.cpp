@@ -94,9 +94,9 @@ void WifiSelectionActivity::onEnter() {
                 WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
                 formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
                 static_cast<int>(info.wifi_sta_disconnected.rssi));
-        // A pinned attempt that never saw its AP is ours to correct, and quickly: the driver
-        // would otherwise keep retrying the same pin. Flag it; checkConnectionStatus() re-issues
-        // the full sweep (calling into the driver from its own event task is not safe).
+        // A channel-restricted attempt that never saw its AP is ours to correct, and quickly: the
+        // driver would otherwise keep retrying the same restriction. Flag it; checkConnectionStatus()
+        // re-issues the full sweep (calling into the driver from its own event task is not safe).
         if (currentAttemptPinned && !currentAttemptAssociated && reason == WIFI_REASON_NO_AP_FOUND) {
           pinnedAttemptMissed = true;
         }
@@ -610,21 +610,37 @@ void WifiSelectionActivity::processHomeChannelProbe() {
   WiFi.scanDelete();
   state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
 
-  if (bestIndex >= 0) {
-    issueWifiBeginPinned(bestBssid, homeProbeChannel);
+  // Exactly one candidate on the channel is what makes WIFI_FAST_SCAN's first-match rule safe.
+  // Two nodes of the same mesh on one channel and it could take the weaker, which is the
+  // regression that retired the old hint -- so hand those to the sorted full sweep.
+  if (bestIndex >= 0 && matches == 1) {
+    issueWifiBeginOnChannel(homeProbeChannel);
     return;
+  }
+  if (matches > 1) {
+    LOG_DBG("WIFI", "%zu APs for '%s' on ch=%u; full sweep picks by signal", matches, selectedSSID.c_str(),
+            homeProbeChannel);
   }
   // The probe is an optimisation, never a gate: whatever it fails to see still gets the full
   // signal-sorted sweep, which is also what finds an AP that has moved channel.
   issueWifiBegin();
 }
 
-// Pinned begin(), for a BSSID the probe saw milliseconds ago.
+// begin() restricted to the channel the probe just heard the AP on -- channel only, no BSSID.
 //
-// WIFI_FAST_SCAN is what makes this cheap, and it is safe here for exactly the reason it was
-// unsafe before: its "take the first match" rule has one candidate when the BSSID is pinned.
-// Unpinned, that same rule is what attached the device to a -86 dBm node over the -63 dBm one.
-void WifiSelectionActivity::issueWifiBeginPinned(const uint8_t bssid[6], uint8_t channel) {
+// Pinning the BSSID as well was tried and failed on device: the probe saw the AP
+// ("1 AP(s) on channel, 1 for 'PYSY' ... at -69 dBm"), the pinned begin() then spent 1939 ms and
+// returned NO_AP_FOUND, and the unpinned begin() that followed associated with that same BSSID on
+// that same channel 58 ms later -- too fast to have scanned, so the driver still had the record
+// the pinned attempt had just rejected. A BSSID-pinned connect probes that address directly, and
+// something in this mesh does not answer a directed probe the way it answers a broadcast one.
+// The channel is the part that pays anyway; the address was never the point.
+//
+// WIFI_FAST_SCAN's "take the first match" is what attached the device to a -86 dBm node when it
+// was applied across all channels. Confined to one channel it is only unsafe if that channel
+// carries more than one AP for the SSID, and processHomeChannelProbe() has just counted them: it
+// takes this path only when there is exactly one.
+void WifiSelectionActivity::issueWifiBeginOnChannel(uint8_t channel) {
   currentAttemptAssociated = false;
   currentAttemptPinned = true;
   pinnedAttemptMissed = false;
@@ -633,9 +649,9 @@ void WifiSelectionActivity::issueWifiBeginPinned(const uint8_t bssid[6], uint8_t
   WiFi.config(IPAddress(), IPAddress(), IPAddress(), IPAddress());
 
   const char* pwd = (selectedRequiresPassword && !enteredPassword.empty()) ? enteredPassword.c_str() : nullptr;
-  LOG_DBG("WIFI", "WiFi.begin -> %s (pinned %s ch=%u, pre-begin %lu ms)", selectedSSID.c_str(),
-          formatMacDashed(bssid).c_str(), channel, millis() - connectionStartTime);
-  WiFi.begin(selectedSSID.c_str(), pwd, static_cast<int32_t>(channel), bssid);
+  LOG_DBG("WIFI", "WiFi.begin -> %s (ch=%u only, fast scan, pre-begin %lu ms)", selectedSSID.c_str(), channel,
+          millis() - connectionStartTime);
+  WiFi.begin(selectedSSID.c_str(), pwd, static_cast<int32_t>(channel), nullptr);
 }
 
 void WifiSelectionActivity::issueWifiBegin() {
@@ -722,7 +738,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
   // moved channel, so this is the recovery for a stale hint as much as for a missed probe.
   if (pinnedAttemptMissed) {
     pinnedAttemptMissed = false;
-    LOG_DBG("WIFI", "Pinned attempt found no AP at %lu ms; falling back to the full sweep",
+    LOG_DBG("WIFI", "Channel-restricted attempt found no AP at %lu ms; falling back to the full sweep",
             millis() - connectionStartTime);
     issueWifiBegin();
     return;
