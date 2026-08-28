@@ -18,8 +18,7 @@ logged the *successful* case, which is how we found out it could not measure any
 | `[TLS] connect host: tcp+dns=.. hs=.. = io .. + sleep .. + compute ..` | `SecureClient::connectWithMethod` | Is the handshake network-bound or CPU-bound? |
 | `[TLS] handshake call ms: [..]` | same | Which `wolfSSL_connect()` call carries the cost — first entry is ClientHello/keygen, the fat one is the server flight |
 | `[TLS] chain verify: N certs [d3:.. d2:.. ..]` | `verifyCallback` | Per-certificate verification cost, root-most first. Needs `-DCROSSPOINT_TLS_VERIFY_TIMING` |
-| `[HTTP] GET host: conn=.. send ..ms/..B ttfb=..ms polls=.. hdr=..B attempts=.. rssi=.. ps=.. -> rc=..` | `SecureHttpClient::logRequestTrace` | Everything *after* the handshake. `ttfb=0` means nothing ever arrived |
-| `[WIFI] Home-channel probe: ch=.. active ..ms -> N AP(s) on channel, M for 'SSID'` | `processHomeChannelProbe` | Did we hear the AP, and did anyone else answer on that channel |
+| `[HTTP] GET host: conn=fresh/..ms send ..ms/..B ttfb=..ms polls=.. hdr=..B rssi=.. ps=.. -> rc=..` | `SecureHttpClient::logRequestTrace` | Everything after the handshake. `conn` is connect+handshake; `ttfb` starts at the end of the send, so `ttfb=0` means nothing ever arrived |
 | `[WIFI] EVT disconnected .. reason=201 (NO_AP_FOUND) .. bssid=00-00-.. rssi=-128` | event handler | An all-zero BSSID means the scan produced no candidate at all |
 
 `ps=` is `WiFi.getSleep()`: 0 = `WIFI_PS_NONE`, 1 = `WIFI_PS_MIN_MODEM`.
