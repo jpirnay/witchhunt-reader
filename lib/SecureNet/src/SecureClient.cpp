@@ -177,7 +177,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
   static bool loggedVerifyCbBuild = false;
   if (!loggedVerifyCbBuild) {
     loggedVerifyCbBuild = true;
-    LOG_INF("TLS", "per-cert verify timing built in (ALWAYS_VERIFY_CB + VERIFY_CB_ALL_CERTS)");
+    LOG_DBG("TLS", "per-cert verify timing built in (ALWAYS_VERIFY_CB + VERIFY_CB_ALL_CERTS)");
   }
 #else
 #warning "CROSSPOINT_TLS_VERIFY_TIMING set but wolfSSL verify-callback defines did not reach the headers"
@@ -311,7 +311,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
   const char* negotiatedCurve = wolfSSL_get_curve_name(ssl);
   const char* negotiatedCipher = wolfSSL_get_cipher_name(ssl);
   const char* negotiatedVersion = wolfSSL_get_version(ssl);
-  LOG_INF("TLS", "negotiated %s: %s / %s / group=%s", host, negotiatedVersion ? negotiatedVersion : "?",
+  LOG_DBG("TLS", "negotiated %s: %s / %s / group=%s", host, negotiatedVersion ? negotiatedVersion : "?",
           negotiatedCipher ? negotiatedCipher : "?", negotiatedCurve ? negotiatedCurve : "?");
 
   // Read this as three buckets that must add up: transport I/O, our own poll sleeps
@@ -320,7 +320,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
   const uint32_t ioMs = g_handshakeIo.ioUs / 1000;
   const uint32_t sleepMs = pollCount * 5;
   const long computeMs = static_cast<long>(handshakeMs) - static_cast<long>(ioMs) - static_cast<long>(sleepMs);
-  LOG_INF("TLS", "connect %s: tcp+dns=%lu hs=%lu = io %lu + sleep %lu + compute %ld | rx %lu/%luB tx %lu/%luB cpu=%lu",
+  LOG_DBG("TLS", "connect %s: tcp+dns=%lu hs=%lu = io %lu + sleep %lu + compute %ld | rx %lu/%luB tx %lu/%luB cpu=%lu",
           host, static_cast<unsigned long>(transportMs), static_cast<unsigned long>(handshakeMs),
           static_cast<unsigned long>(ioMs), static_cast<unsigned long>(sleepMs), computeMs,
           static_cast<unsigned long>(g_handshakeIo.recvCalls), static_cast<unsigned long>(g_handshakeIo.recvBytes),
@@ -333,7 +333,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
     callListLen += snprintf(callList + callListLen, sizeof(callList) - callListLen, i == 0 ? "%lu" : ",%lu",
                             static_cast<unsigned long>(callMs[i]));
   }
-  LOG_INF("TLS", "handshake call ms: [%s]%s", callList, callCount >= MAX_TIMED_CALLS ? " (truncated)" : "");
+  LOG_DBG("TLS", "handshake call ms: [%s]%s", callList, callCount >= MAX_TIMED_CALLS ? " (truncated)" : "");
 
   if (g_chainVerify.count > 0) {
     char chainList[128];
@@ -344,7 +344,7 @@ int SecureClient::connectWithMethod(const char* host, uint16_t port, void* metho
                            g_chainVerify.depth[i], static_cast<unsigned long>(g_chainVerify.gapMs[i]));
     }
     // First entry includes the pre-certificate ServerHello work; the rest are per-certificate.
-    LOG_INF("TLS", "chain verify: %lu certs [%s] (first entry includes key exchange)",
+    LOG_DBG("TLS", "chain verify: %lu certs [%s] (first entry includes key exchange)",
             static_cast<unsigned long>(g_chainVerify.count), chainList);
   }
   _connected = true;

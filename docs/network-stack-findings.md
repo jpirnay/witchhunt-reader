@@ -23,6 +23,15 @@ logged the *successful* case, which is how we found out it could not measure any
 
 `ps=` is `WiFi.getSleep()`: 0 = `WIFI_PS_NONE`, 1 = `WIFI_PS_MIN_MODEM`.
 
+All of these are `LOG_DBG`, so they exist only in development builds — release builds set
+`LOG_LEVEL=1` and the macro compiles to nothing. What still reaches a release log from the TLS
+layer is failures alone: a certificate-date waiver, a trust-store that would not load, a handshake
+timeout, a verification failure. Note that `CROSSPOINT_TLS_VERIFY_TIMING` is not in
+`platformio.ini`, yet it is defined in the binaries built here (the string is in `firmware.bin`),
+so it is coming from a cached PlatformIO build environment — worth clearing if you want the
+per-certificate callback out of a build entirely, since that define also changes wolfSSL's
+callback behaviour, not just the logging.
+
 ## Confirmed
 
 ### TLS
