@@ -69,7 +69,28 @@ logged the *successful* case, which is how we found out it could not measure any
 - **The driver keeps no scan records from an internal connect scan.**
   `esp_wifi_scan_get_ap_num()` returned 0 immediately after a *successful* association — so a 0
   after a failure carries no information.
-- **A BSSID-pinned connect fails on this mesh where an unpinned one succeeds.** The probe saw the
+- **There is no mesh.** An off-device scan of the SSID found one physical AP with two radios and
+  five BSSIDs, all sharing the base `9f:c2:3x:b8:0c` (`:31:` = 2.4 GHz, `:32:` = 5 GHz, extra
+  hidden SSIDs per radio). On 2.4 GHz there is exactly **one** BSSID — `f0:9f:c2:31:b8:0c`,
+  channel 11, 20 MHz, the one the device always associates with. The "-86 dBm node on channel 1"
+  that justified removing the old connection hint is not in the air at all, so sort-by-signal has
+  been choosing between one candidate this whole time.
+
+  | BSSID | radio | ch | signal (desktop) |
+  |---|---|---|---|
+  | `f0:9f:c2:32:b8:0c` | 5 GHz | 48 | -73 dBm |
+  | `f6:9f:c2:32:b8:0c` | 5 GHz | 48 | -74 dBm |
+  | `fa:9f:c2:32:b8:0c` | 5 GHz | 48 | -74 dBm |
+  | **`f0:9f:c2:31:b8:0c`** | **2.4 GHz** | **11** | **-82 dBm** |
+  | `f6:9f:c2:31:b8:0c` | 2.4 GHz | 11 | -83 dBm |
+
+  Two things fall out. **The 2.4 GHz radio reads 9 dB weaker than the 5 GHz radio on the same
+  chassis from the same spot** — backwards, since 2.4 GHz penetrates better, and worth checking the
+  AP's 2.4 GHz transmit power (band-steering setups often reduce it). And the AP advertises
+  **802.11v BSS Transition**, i.e. client steering is enabled. Measured from a desktop, not the
+  reader, so the absolute numbers do not transfer; the topology and the inter-band gap do.
+  Beacon interval is 100 TU, which confirms the beacon-window arithmetic used above.
+- **A BSSID-pinned connect fails where an unpinned one succeeds.** The probe saw the
   AP (`1 AP(s) on channel, 1 for 'PYSY' ... at -69 dBm`), the pinned `begin()` spent 1939 ms and
   returned `NO_AP_FOUND`, and the unpinned `begin()` that followed associated **with that same
   BSSID on that same channel 58 ms later** — far too fast to have scanned, so the driver still held
@@ -102,6 +123,7 @@ Each of these was believed, acted on, and disproven. Do not re-propose without n
 | The 80 ms dwell caused the `NO_AP_FOUND` misses | The dwell number was never in effect either way, which is also why 80 vs 120 made so little difference when tested |
 | The idle governor downclocks the CPU mid-sync and breaks WiFi | `HalPowerManager::setPowerSaving()` already refuses to downclock while `WiFi.getMode() != WIFI_MODE_NULL` |
 | `WiFi.setSleep(WIFI_PS_NONE)` races the core's `STA_START` handler | It does not: `setSleep` stores `_sleepEnabled` even before the STA starts, and the `STA_START` handler applies `WiFi.getSleep()` — our value either way |
+| The SSID is a multi-node mesh, so AP selection matters | It is one AP with two radios. On 2.4 GHz there is a single BSSID. Every "which node do we pick" argument in this investigation was about a choice that does not exist |
 | Pinning a freshly-measured BSSID is safe because the risk was staleness | The pin failed on a BSSID seen 1 ms earlier. The channel is the part that pays; the address is not |
 | Narrowing the connect to the probed *channel* (no BSSID) avoids that | It does not. The channel-restricted `begin()` also returned `NO_AP_FOUND` while the probe line directly above it reported the AP at -72 dBm. **Anything we narrow gets rejected**; only the driver's own unhinted sweep associates |
 | A real `active.min` on the sweep will reduce the `NO_AP_FOUND` rate | The opposite was observed. With `min=0` a connect took ~3.5 s with at most one miss; with `min=max=120` two consecutive runs took 7.5 s with two and three misses. Equal `min`/`max` also removes the driver's room to extend a dwell when it *does* hear something. Reverted |
