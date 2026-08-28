@@ -155,6 +155,21 @@ OVERRIDES = """
 #define SMALL_SESSION_CACHE
 #endif
 
+/* Instrumentation only, off unless -DCROSSPOINT_TLS_VERIFY_TIMING is in build_flags.
+ * wolfSSL issues the verify callback ONLY on a verification error by default, so a
+ * successful handshake reports nothing and per-certificate cost cannot be measured. These two
+ * make it fire for every certificate in the chain (intermediates first, leaf last), which is
+ * what SecureClient's callback times. Semantics are unchanged for us: the callback returns
+ * `preverify` untouched on success, which is exactly what wolfSSL does with no callback. */
+#ifdef CROSSPOINT_TLS_VERIFY_TIMING
+#ifndef WOLFSSL_ALWAYS_VERIFY_CB
+#define WOLFSSL_ALWAYS_VERIFY_CB
+#endif
+#ifndef WOLFSSL_VERIFY_CB_ALL_CERTS
+#define WOLFSSL_VERIFY_CB_ALL_CERTS
+#endif
+#endif
+
 /* Some cross-signed chains (GTS R4 via GlobalSign, USERTrust) verify more
  * reliably when alternate chain building is allowed. */
 #ifndef WOLFSSL_ALT_CERT_CHAINS

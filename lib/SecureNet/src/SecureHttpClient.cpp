@@ -1,6 +1,7 @@
 #include "SecureHttpClient.h"
 
 #include <Logging.h>
+#include <WiFi.h>
 #include <base64.h>
 
 #include <cstdlib>
@@ -71,6 +72,11 @@ bool SecureHttpClient::ensureConnected(const Url& u) {
 
   if (u.https()) {
     _secure.setCACert(_rootCA);
+    // No trust store means the caller asked for an unverified connection. Say so
+    // explicitly rather than letting connect() take the verified path and quietly
+    // find nothing to verify against: this is what makes lastConnectWasInsecure()
+    // — and every log line derived from it — tell the truth.
+    _secure.setInsecure(_rootCA == nullptr);
     _secure.setAllowInsecureFallback(_allowInsecureFallback);
     _secure.setAllowCertificateDateErrors(_allowCertificateDateErrors);
     _secure.setTimeout(_timeoutMs / 1000);
@@ -113,11 +119,27 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
   if (body && bodyLen) req += "Content-Length: " + std::to_string(bodyLen) + "\r\n";
   req += "\r\n";
 
+  const uint32_t sendStartMs = millis();
   if (_client->write(reinterpret_cast<const uint8_t*>(req.data()), req.size()) != req.size()) return false;
   if (body && bodyLen) {
     if (_client->write(body, bodyLen) != bodyLen) return false;
   }
+  _trace.sendDoneMs = millis();
+  _trace.sendMs = _trace.sendDoneMs - sendStartMs;
+  _trace.sendBytes = req.size() + bodyLen;
   return true;
+}
+
+// One line per request covering everything after the handshake. Read it as: did the request go
+// out (sendBytes), did anything come back at all (ttfb, 0 = never), how long did we sit waiting
+// (polls x 2 ms), and what did the link look like while we waited.
+void SecureHttpClient::logRequestTrace(const char* method, const Url& u, int rc) const {
+  LOG_DBG("HTTP", "%s %s: conn=%s/%lums send %lums/%uB ttfb=%lums polls=%lu hdr=%uB attempts=%u rssi=%d ps=%d -> rc=%d",
+          method, u.host.c_str(), _trace.reusedConnection ? "reused" : "fresh",
+          static_cast<unsigned long>(_trace.connectMs), static_cast<unsigned long>(_trace.sendMs),
+          static_cast<unsigned>(_trace.sendBytes), static_cast<unsigned long>(_trace.firstByteMs),
+          static_cast<unsigned long>(_trace.readPolls), static_cast<unsigned>(_trace.headerBytes), _trace.attempts,
+          static_cast<int>(WiFi.RSSI()), static_cast<int>(WiFi.getSleep()), rc);
 }
 
 // Connect (or reuse), send, and read headers — with one transparent retry: a
@@ -128,21 +150,34 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
 // that failed on a fresh connection is a real error and is not retried.
 int SecureHttpClient::transact(const char* method, const Url& u, const uint8_t* body, size_t bodyLen,
                                ResponseMeta& meta) {
+  _trace = RequestTrace{};
+  _trace.startMs = millis();
   for (int attempt = 0; attempt < 2; ++attempt) {
     const bool reusing = connectionMatches(u);
-    if (!ensureConnected(u)) return ERR_CONNECT;
+    _trace.reusedConnection = reusing;
+    _trace.attempts = static_cast<uint8_t>(attempt + 1);
+    const uint32_t connectStartMs = millis();
+    if (!ensureConnected(u)) {
+      logRequestTrace(method, u, ERR_CONNECT);
+      return ERR_CONNECT;
+    }
+    _trace.connectMs = millis() - connectStartMs;
     if (!sendRequest(method, u, body, bodyLen)) {
       close();
       if (reusing && attempt == 0) continue;
+      logRequestTrace(method, u, ERR_SEND);
       return ERR_SEND;
     }
     if (!readHeaders(meta.status, meta.contentLength, meta.chunked, meta.keepAlive, meta.location)) {
       close();
       if (reusing && attempt == 0) continue;
+      logRequestTrace(method, u, ERR_TIMEOUT);
       return ERR_TIMEOUT;
     }
+    logRequestTrace(method, u, meta.status);
     return 0;
   }
+  logRequestTrace(method, u, ERR_SEND);
   return ERR_SEND;  // unreachable: the second attempt always returns above
 }
 
@@ -152,6 +187,12 @@ bool SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
     while (_client->available() > 0) {
       const int ch = _client->read();
       if (ch < 0) break;
+      // First decrypted byte of the response: the difference between "the peer never answered"
+      // and "the answer arrived and something after this went wrong".
+      if (_trace.firstByteMs == 0 && _trace.sendDoneMs != 0) {
+        _trace.firstByteMs = millis() - _trace.sendDoneMs;
+      }
+      ++_trace.headerBytes;
       if (ch == '\n') {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         return true;
@@ -160,6 +201,7 @@ bool SecureHttpClient::readLine(std::string& line, uint32_t deadline) {
       line += static_cast<char>(ch);
     }
     if (!_client->connected() && _client->available() == 0) return false;
+    ++_trace.readPolls;
     delay(2);
   }
   return false;

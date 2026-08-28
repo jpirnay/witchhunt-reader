@@ -46,6 +46,8 @@ void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
   // fail to LOAD, long before any certificate is seen. Not fatal if it fails: SecureClient then
   // waives certificate dates only, keeping chain/signature/hostname checks intact.
   HalClock::ensureUsableForTls(SETTINGS.ntpServer);
+  // Same escape hatch as the sync path: a self-hosted server with a private CA.
+  KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
 
   if (mode == Mode::REGISTER) {
     performRegistration();

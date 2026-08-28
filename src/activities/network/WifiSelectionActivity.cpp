@@ -55,9 +55,13 @@ void WifiSelectionActivity::onEnter() {
   // STA_CONNECTED = association (auth + 4-way handshake done).
   // STA_GOT_IP    = DHCP done.
   evtIdConnected = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
         currentAttemptAssociated = true;
-        LOG_DBG("WIFI", "EVT associated at %lu ms", millis() - connectionStartTime);
+        // Which AP we landed on, not just when. On a mesh SSID the sorted candidate list is the
+        // whole story: pairing this BSSID with the one in the disconnect below says whether a
+        // failed attempt cost us a bad node, or whether the same node needed two tries.
+        LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u", millis() - connectionStartTime,
+                formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
@@ -82,8 +86,14 @@ void WifiSelectionActivity::onEnter() {
   evtIdDisconnected = WiFi.onEvent(
       [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
         const uint8_t reason = info.wifi_sta_disconnected.reason;
-        LOG_DBG("WIFI", "EVT disconnected at %lu ms: reason=%u (%s) assoc=%d", millis() - connectionStartTime, reason,
-                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0);
+        // bssid/rssi name the AP that failed and how loud it was at the moment it gave up, which
+        // is what separates "the driver picked a node it cannot actually hold" from "the whole
+        // SSID is too weak here".
+        LOG_DBG("WIFI", "EVT disconnected at %lu ms: reason=%u (%s) assoc=%d bssid=%s rssi=%d",
+                millis() - connectionStartTime, reason,
+                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
+                formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
+                static_cast<int>(info.wifi_sta_disconnected.rssi));
       },
       ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
@@ -412,6 +422,16 @@ void WifiSelectionActivity::prepareForConnect() {
     WiFi.disconnect(true, true);
   }
 
+  // Modem sleep OFF for the whole network session. The Arduino core arms WIFI_PS_MIN_MODEM at
+  // STA_START, so it is active across the scan/auth/assoc we are about to pay for: the radio
+  // dozes between DTIM beacons, and a missed beacon on a weak link is reported as
+  // reason=200 (BEACON_TIMEOUT) with assoc=0 -- a ~10 s dead attempt before the driver retries.
+  // OtaUpdater already does this for its transfer (WifiPowerSaveGuard); the connect itself is
+  // just as beacon-sensitive. Set before begin() so the STA_START handler picks up this value
+  // rather than the default. Left off for the session: every network activity here stops the
+  // radio outright when it is done, so there is no idle-with-WiFi-up state to save power in.
+  WiFi.setSleep(WIFI_PS_NONE);
+
   // Ranks what the full scan collected, so the strongest AP for the SSID wins. This is what makes
   // dropping the channel/BSSID hint correct on a mesh -- see issueWifiBegin().
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
@@ -437,11 +457,17 @@ void WifiSelectionActivity::prepareForConnect() {
 // record list, not time. At the IDF default of 120 ms a 13-channel sweep is ~1560 ms, which is
 // most of the ~2.57 s that unhinted associations used to take (the rest being auth/assoc).
 //
-// 80 ms puts the sweep at ~1040 ms while leaving real margin for an AP that is slow to answer a
-// probe. Going lower is where it gets risky: too short a dwell misses the AP on its channel and
-// lands back in NO_AP_FOUND plus the driver's retry, which is exactly the 2.4 s failure the
-// pinned-BSSID hint used to produce. The disconnect-reason logging in onEnter() is what would
-// show that happening, so this is tunable with evidence rather than by guesswork.
+// 80 ms was tried here and is back out: it produced exactly the miss this comment used to warn
+// about -- "EVT disconnected at 1546 ms: reason=201 (NO_AP_FOUND) assoc=0
+// bssid=00-00-00-00-00-00 rssi=-128", an all-zero BSSID meaning the sweep never saw the AP at
+// all, followed by the driver's own full re-sweep. A miss costs a whole second sweep (~1.5 s),
+// three times what the shorter dwell saves, so the trade only paid when it happened to work.
+//
+// 120 ms is the IDF default and there is a reason it sits above 100: the standard beacon
+// interval IS 100 ms, so a dwell shorter than that is not guaranteed to overlap a single beacon
+// on the channel -- it leaves the scan depending on catching the probe response alone, and a
+// probe response is one frame that can be lost. Do not go below 100 again without a mechanism
+// that does not need to hear a beacon.
 //
 // home_chan_dwell_time is set to its documented 30 ms minimum: it only matters while already
 // associated (returning to the home channel between scanned ones), which is not this path.
