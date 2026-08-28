@@ -90,7 +90,7 @@ class WifiSelectionActivity final : public Activity {
   // Scan duration is CHANNELS x DWELL and independent of SSID density; 80 ms puts a 13-channel
   // sweep at ~1040 ms against ~1560 ms at the IDF default of 120 ms, while keeping margin for an
   // AP that is slow to answer a probe. Too short lands back in NO_AP_FOUND plus a driver retry.
-  static constexpr uint32_t SCAN_ACTIVE_DWELL_MAX_MS = 80;
+  static constexpr uint32_t SCAN_ACTIVE_DWELL_MAX_MS = 120;
   static constexpr uint32_t SCAN_PASSIVE_DWELL_MS = 200;
   // Documented minimum; only relevant while already associated, which this path is not.
   static constexpr uint8_t SCAN_HOME_CHAN_DWELL_MS = 30;
