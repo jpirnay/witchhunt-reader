@@ -26,6 +26,31 @@ namespace {
 
 void readDeviceBaseMac(uint8_t mac[6]) { esp_efuse_mac_get_default(mac); }
 
+// How many APs the driver's connect-time scan actually recorded.
+//
+// The discriminator for a NO_AP_FOUND miss on a mesh SSID. A full sweep spends ~120 ms of its
+// ~1560 ms on the one channel our AP lives on, so a single delayed beacon or lost probe response
+// there fails the whole sweep -- but that is one of two stories, and they need opposite fixes:
+//
+//   count == 0  the sweep heard nothing anywhere. A timing/radio problem; a longer dwell on the
+//               home channel is the answer.
+//   count  > 0  it heard other networks but had no candidate for OUR SSID. That is the
+//               steering signature -- mesh firmware answering probe requests selectively -- and
+//               the answer is passive listening, since beacons cannot be suppressed.
+//
+// Logged on the associated path too, deliberately: if a SUCCESSFUL connect also reports 0, the
+// driver simply does not retain records from an internal connect scan and a zero on the failure
+// path means nothing. That calibration is why both call sites exist.
+void logConnectScanRecords(const char* outcome) {
+  uint16_t apCount = 0;
+  const esp_err_t err = esp_wifi_scan_get_ap_num(&apCount);
+  if (err != ESP_OK) {
+    LOG_DBG("WIFI", "Scan records at %s: unavailable (%s)", outcome, esp_err_to_name(err));
+    return;
+  }
+  LOG_DBG("WIFI", "Scan records at %s: %u AP(s) in the driver's last scan", outcome, apCount);
+}
+
 std::string formatMacLabel(const uint8_t mac[6]) {
   char macStr[64];
   snprintf(macStr, sizeof(macStr), "%s %02x-%02x-%02x-%02x-%02x-%02x", tr(STR_MAC_ADDRESS), mac[0], mac[1], mac[2],
@@ -62,6 +87,7 @@ void WifiSelectionActivity::onEnter() {
         // failed attempt cost us a bad node, or whether the same node needed two tries.
         LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u", millis() - connectionStartTime,
                 formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
+        logConnectScanRecords("associate");
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
@@ -94,6 +120,9 @@ void WifiSelectionActivity::onEnter() {
                 WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
                 formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
                 static_cast<int>(info.wifi_sta_disconnected.rssi));
+        if (reason == WIFI_REASON_NO_AP_FOUND) {
+          logConnectScanRecords("no-ap-found");
+        }
       },
       ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
