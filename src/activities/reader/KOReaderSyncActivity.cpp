@@ -34,10 +34,18 @@ void logSyncMemSnapshot(const char* stage) {
 }
 
 // Freshness policy, on top of HalClock::ensureUsableForTls()'s correctness floor. The floor
-// guarantees only "inside the certs' validity window", which is all TLS needs; this additionally
-// keeps the timestamp we upload to the sync server from drifting. Note the two answer different
-// questions — an unset clock reads as `now <= 0` here, but it is ensureUsableForTls() that makes
-// the handshake possible at all, so this must never be the only guard before a TLS call.
+// guarantees "inside the certs' validity window", which is genuinely all the SYNC needs: the
+// upload carries no timestamp (updateProgress() sends document/progress/percentage/device/
+// device_id and the server stamps the record), and the timestamp the server returns is parsed
+// into KOReaderProgress::timestamp and never read. An earlier version of this comment claimed
+// the freshness policy kept an uploaded timestamp from drifting; there is no such timestamp.
+//
+// What it is actually for is the device clock everything ELSE reads -- the status bar, reading
+// stats, cache ages -- for which a network session is simply the only chance to correct it. That
+// is worth keeping while HalClock::syncNtp()'s fast path costs ~20 ms; it would not be worth a
+// multi-second stall. Note the two guards answer different questions: an unset clock reads as
+// `now <= 0` here, but it is ensureUsableForTls() that makes the handshake possible at all, so
+// this must never be the only guard before a TLS call.
 bool shouldSyncNtpNow() {
   const time_t lastSync = HalClock::lastSyncTime();
   const time_t now = HalClock::now();
