@@ -31,7 +31,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 69;  // bumped: table cells carry a colSpan
+constexpr uint8_t SECTION_FILE_VERSION = 70;  // bumped: a wrapper's horizontal inset reaches every
+                                              // child block, and insets/hanging indents are clamped to
+                                              // the panel. Layout bakes insets into word xpos (see v61),
+                                              // so a v69 cache keeps the off-panel lines this fixes
+                                              // v69: table cells carry a colSpan
                                               // v68: near-body font-size snapping now also covers block-level
                                               // CSS (p.body { font-size: 1.1em }), not just inline wrappers
                                               // v67: img boxes honour `auto` and keep the source aspect ratio
