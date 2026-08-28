@@ -61,10 +61,18 @@ enum class BmpReaderError : uint8_t {
   ShortReadRow,
 };
 
-// Adaptive: derive black/white points from the image's own luminance histogram
-// and stretch toward them before dithering, for images whose useful tonal range
-// sits in a narrow band. Implies the Native quantizer -- see analyzeAdaptiveTone().
-enum class BitmapToneMapping : uint8_t { None, Adaptive };
+// Adaptive: derive black/white points from the image's own luminance histogram and
+// stretch toward them before dithering, for images whose useful tonal range sits in a
+// narrow band.
+// Equalize: map through the histogram's own CDF instead, which also reaches images
+// whose percentiles already span the range but whose mass does not (see AdaptiveTone.h).
+// Both feed the DisplayTuned quantizer, like every other path -- see analyzeAdaptiveTone().
+enum class BitmapToneMapping : uint8_t { None, Adaptive, Equalize };
+
+// The analysis mode a tone-mapping selection implies. None never reaches derivePoints().
+inline adaptive_tone::Mode toneAnalysisMode(const BitmapToneMapping toneMapping) {
+  return toneMapping == BitmapToneMapping::Equalize ? adaptive_tone::Mode::Equalize : adaptive_tone::Mode::Stretch;
+}
 
 class Bitmap {
  public:

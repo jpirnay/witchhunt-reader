@@ -138,6 +138,20 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
   return true;
 }
 
+// Adaptive tone mapping applies to user-supplied sleep images only. The overlay
+// compositing path deliberately does not use it: it draws onto an already-rendered
+// screen, where a per-image level stretch would fight the image underneath.
+BitmapToneMapping sleepImageToneMapping() {
+  switch (SETTINGS.sleepScreenCoverFilter) {
+    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE:
+      return BitmapToneMapping::Adaptive;
+    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE:
+      return BitmapToneMapping::Equalize;
+    default:
+      return BitmapToneMapping::None;
+  }
+}
+
 bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, const BookOverlayInfo& overlayInfo) {
   constexpr size_t MIN_FREE_HEAP = 60 * 1024;  // PNG decoder ~42 KB + overhead
   if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
@@ -193,8 +207,9 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // this costs an extra decode, and re-deriving it per pass would triple that. All
   // passes must use the same points anyway, or the BW carrier would disagree with
   // the grey planes layered on top. Skipped entirely on a cache hit.
-  if (!useCache && SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE) {
-    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename);
+  const BitmapToneMapping pngToneMapping = sleepImageToneMapping();
+  if (!useCache && pngToneMapping != BitmapToneMapping::None) {
+    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename, toneAnalysisMode(pngToneMapping));
   }
   // Write the cache on the decoding pass only; the filter is already part of the
   // cache filename, so no separate invalidation is needed.
@@ -425,17 +440,6 @@ void SleepActivity::onEnter() {
       return renderDefaultSleepScreen();
   }
 }
-
-namespace {
-// Adaptive tone mapping applies to user-supplied sleep images only. The overlay
-// compositing path deliberately does not use it: it draws onto an already-rendered
-// screen, where a per-image level stretch would fight the image underneath.
-BitmapToneMapping sleepImageToneMapping() {
-  return SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE
-             ? BitmapToneMapping::Adaptive
-             : BitmapToneMapping::None;
-}
-}  // namespace
 
 void SleepActivity::renderCustomSleepScreen() const {
   const BookOverlayInfo overlayInfo{};
@@ -683,13 +687,14 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   LOG_DBG("SLP", "drawing to %d x %d", x, y);
   renderer.clearScreen();
 
-  // ADAPTIVE_TONE is a greyscale mode too: it changes how levels are derived, not
-  // whether they exist. Omitting it here would silently drop those images to the
+  // The tone filters are greyscale modes too: they change how levels are derived, not
+  // whether they exist. Omitting them here would silently drop those images to the
   // 1-bit half-refresh path.
   const bool hasGreyscale =
       bitmap.hasGreyscale() &&
       (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER ||
-       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE);
+       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE ||
+       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE);
 
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 

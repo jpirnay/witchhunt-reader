@@ -159,7 +159,8 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
   return true;
 }
 
-adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath) {
+adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath,
+                                                                     const adaptive_tone::Mode mode) {
   adaptive_tone::Points points;
 
   const size_t freeHeap = ESP.getFreeHeap();
@@ -211,12 +212,14 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
   file.close();
   if (!ok || sampled == 0) return points;
 
-  points = adaptive_tone::derivePoints(histogram.get(), sampled);
+  points = adaptive_tone::derivePoints(histogram.get(), sampled, mode);
   if (points.active) {
-    LOG_TRC("PNG", "Adaptive tone enabled: black=%u white=%u", (unsigned)points.blackPoint,
+    LOG_TRC("PNG", "Adaptive tone (%s) enabled: black=%u white=%u",
+            mode == adaptive_tone::Mode::Equalize ? "equalize" : "stretch", (unsigned)points.blackPoint,
             (unsigned)points.whitePoint);
   } else {
-    LOG_TRC("PNG", "Adaptive tone skipped: range too narrow");
+    LOG_TRC("PNG", "Adaptive tone (%s) declined: line art or range too narrow",
+            mode == adaptive_tone::Mode::Equalize ? "equalize" : "stretch");
   }
   return points;
 }

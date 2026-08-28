@@ -62,9 +62,14 @@ bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str());
 namespace image_tone {
 namespace {
 uint8_t g_filterId = 0;
+adaptive_tone::Mode g_mode = adaptive_tone::Mode::Stretch;
+}  // namespace
+void setFilter(const uint8_t filterId, const adaptive_tone::Mode mode) {
+  g_filterId = filterId;
+  g_mode = mode;
 }
-void setFilterId(const uint8_t filterId) { g_filterId = filterId; }
 uint8_t getFilterId() { return g_filterId; }
+adaptive_tone::Mode getMode() { return g_mode; }
 }  // namespace image_tone
 
 namespace image_scratch {
@@ -123,10 +128,10 @@ adaptive_tone::Points analyzeImageTone(const std::string& imagePath) {
     for (auto& c : ext) c = tolower(c);
   }
   if (JpegToFramebufferConverter::supportsFormat(ext)) {
-    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath);
+    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
   }
   if (PngToFramebufferConverter::supportsFormat(ext)) {
-    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath);
+    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
   }
   return {};
 }

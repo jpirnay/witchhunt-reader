@@ -177,7 +177,7 @@ BmpReaderError Bitmap::parseHeaders() {
   // that gives 256 distinct luminances, enough for percentiles to mean something.
   // Below that (<=4 bpp, so <=16 levels, and only 4 at 2 bpp) they do not, and such
   // images take the nativePalette path anyway.
-  if (toneMapping == BitmapToneMapping::Adaptive && bpp >= 8) {
+  if (toneMapping != BitmapToneMapping::None && bpp >= 8) {
     analyzeAdaptiveTone();
     const BmpReaderError rewindResult = rewindToData();
     if (rewindResult != BmpReaderError::Ok) {
@@ -212,10 +212,10 @@ uint8_t Bitmap::applyAdaptiveTone(const uint8_t luminance) const {
   return adaptive_tone::apply(adaptiveTonePoints, luminance);
 }
 
-// Builds a 256-bin luminance histogram over a row-subsampled pass and derives the
-// black/white points from its tail percentiles. Leaves the points inactive (i.e.
-// the renderer unchanged) on any allocation failure, short read, or too-narrow
-// range, so a failed analysis degrades to current behaviour rather than to a
+// Builds a 256-bin luminance histogram over a row-subsampled pass and derives the tone
+// curve from it, in whichever mode the caller selected. Leaves the points inactive (i.e.
+// the renderer unchanged) on any allocation failure, short read, or a histogram the
+// analysis declines, so a failed analysis degrades to current behaviour rather than to a
 // broken image. Only called for bpp >= 8.
 bool Bitmap::analyzeAdaptiveTone() {
   adaptiveTonePoints = {};
@@ -271,14 +271,16 @@ bool Bitmap::analyzeAdaptiveTone() {
 
   if (sampled == 0) return false;
 
-  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled);
+  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping));
   if (!adaptiveTonePoints.active) {
-    LOG_DBG("BMP", "Adaptive tone skipped: range too narrow");
+    LOG_DBG("BMP", "Adaptive tone (%s) declined: line art or range too narrow",
+            toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch");
     return false;
   }
 
-  LOG_DBG("BMP", "Adaptive tone enabled: black=%u white=%u", static_cast<unsigned>(adaptiveTonePoints.blackPoint),
-          static_cast<unsigned>(adaptiveTonePoints.whitePoint));
+  LOG_DBG("BMP", "Adaptive tone (%s) enabled: black=%u white=%u",
+          toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch",
+          static_cast<unsigned>(adaptiveTonePoints.blackPoint), static_cast<unsigned>(adaptiveTonePoints.whitePoint));
   return true;
 }
 
