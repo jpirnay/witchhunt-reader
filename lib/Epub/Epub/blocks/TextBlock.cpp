@@ -48,7 +48,7 @@ void TextBlock::bindArenaPointers() {
 
 TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle,
-                     std::vector<uint8_t> word_sizes, std::vector<bool> word_continues)
+                     std::vector<uint8_t> word_sizes, const std::vector<bool>& word_continues)
     // Narrow the parser's full BlockStyle to the render-only slice: the spacing
     // fields have already been consumed into word_xpos / the line's y by layout.
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {

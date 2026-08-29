@@ -678,6 +678,8 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
     // differential path for the whole word rather than restoring half of it.
     size_t written = 0;
     if (saved) {
+      // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+      // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
       written = renderer.readFramebufferRegion(hx, hy, hw, hh, snapshot.get() + used, SNAPSHOT_CAPACITY - used);
       saved = written > 0;
     }
@@ -753,6 +755,8 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     renderer.syncWriteBufferFromDisplayed();
     for (uint8_t run = 0; run < snapshotRunCount; run++) {
       const SnapshotRun& saved = snapshotRuns[run];
+      // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+      // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
       renderer.writeFramebufferRegion(saved.x, saved.y, saved.width, saved.height, snapshot.get() + saved.offset);
     }
     // Batch-load just the highlighted word's glyphs before drawing them

@@ -130,7 +130,7 @@ class TextBlock final : public Block {
   // check and drop the line instead of using it.
   explicit TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle = BlockStyle(),
-                     std::vector<uint8_t> word_sizes = {}, std::vector<bool> word_continues = {});
+                     std::vector<uint8_t> word_sizes = {}, const std::vector<bool>& word_continues = {});
 
   // Slice of a laid-out block, addressed directly in the caller's storage.
   // Layout produces lines as [first, first + count) windows over the block's word arrays;
