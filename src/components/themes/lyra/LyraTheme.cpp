@@ -429,21 +429,28 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   // mirrors across the width, which is what carries every box back to its own button.
   const int fullY = inverted ? 0 : pageHeight - buttonY;
   const int smallY = inverted ? 0 : pageHeight - smallButtonHeight;
+  // Only three sides are stroked: the edge that sits on the panel border is left open. Mirroring
+  // the box mirrors which edge that is, so the corner flags (which also gate the straight edges)
+  // have to flip too — otherwise inverted strokes the screen edge and leaves the content-facing
+  // side of the box unpainted.
+  const bool roundTop = !inverted;
+  const bool roundBottom = inverted;
 
   for (int i = 0; i < 4; i++) {
     const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
     if (labels[i] != nullptr && labels[i][0] != '\0') {
       // Draw the filled background and border for a FULL-sized button
       renderer.fillRoundedRect(x, fullY, buttonWidth, buttonHeight, cornerRadius, Color::White);
-      renderer.drawRoundedRect(x, fullY, buttonWidth, buttonHeight, 1, cornerRadius, true, true, false, false, true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
       renderer.drawText(SMALL_FONT_ID, textX, fullY + textYOffset, labels[i]);
+      renderer.drawRoundedRect(x, fullY, buttonWidth, buttonHeight, 1, cornerRadius, roundTop, roundTop, roundBottom,
+                               roundBottom, true);
     } else {
       // Draw the filled background and border for a SMALL-sized button
       renderer.fillRoundedRect(x, smallY, buttonWidth, smallButtonHeight, cornerRadius, Color::White);
-      renderer.drawRoundedRect(x, smallY, buttonWidth, smallButtonHeight, 1, cornerRadius, true, true, false, false,
-                               true);
+      renderer.drawRoundedRect(x, smallY, buttonWidth, smallButtonHeight, 1, cornerRadius, roundTop, roundTop,
+                               roundBottom, roundBottom, true);
     }
   }
 
@@ -474,7 +481,7 @@ void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
   const auto textCW = [&](const int x, const int y, const char* text) {
     const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, text);
     const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-    renderer.drawTextRotated90CW(SMALL_FONT_ID, inverted ? screenWidth - x - textHeight : x,
+    renderer.drawTextRotated90CW(SMALL_FONT_ID, inverted ? screenWidth - x - textHeight - 5 : x,
                                  inverted ? screenHeight - 1 - y + textWidth : y, text);
   };
 

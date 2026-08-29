@@ -189,10 +189,10 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
     if (labels[i] != nullptr && labels[i][0] != '\0') {
       const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
       renderer.fillRect(x, stripY, buttonWidth, buttonHeight, false);
-      renderer.drawRect(x, stripY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
       renderer.drawText(UI_10_FONT_ID, textX, stripY + textYOffset, labels[i]);
+      renderer.drawRect(x, stripY, buttonWidth, buttonHeight);
     }
   }
 
