@@ -244,6 +244,35 @@ TEST(AdaptiveToneEqualize, LeavesAnAlreadyUniformHistogramAlone) {
   }
 }
 
+TEST(AdaptiveToneEqualize, DoesNotLiftAShadowSpikeIntoTheMidtones) {
+  // The dark-cover case: 40% of the pixels in a narrow near-black band, the rest spread
+  // thinly above it. Unclipped, the CDF hands that band most of the output range and the
+  // black background comes back as mid-grey -- the washed-out covers this clip fixes.
+  Histogram h{};
+  for (int i = 12; i <= 30; i++) h[static_cast<size_t>(i)] = 4000;  // ~40% of the image
+  for (int i = 31; i <= 255; i++) h[static_cast<size_t>(i)] = 500;
+
+  const Points points = derive(h, Mode::Equalize);
+  ASSERT_TRUE(points.active);
+  EXPECT_LT(adaptive_tone::apply(points, 20), 48) << "the near-black band must stay dark";
+  EXPECT_LT(adaptive_tone::apply(points, 64), 96) << "shadows must not be pushed to midtones";
+}
+
+TEST(AdaptiveToneEqualize, FallsBackTowardsTheIdentityOnASingleDominantTone) {
+  // The clip's graceful-degradation property: the more one tone dominates, the less range
+  // the curve can hand it, so an image with nothing else to equalize is left nearly alone
+  // rather than being blown apart.
+  Histogram h{};
+  for (int i = 0; i < 256; i++) h[static_cast<size_t>(i)] = 10;
+  h[70] = 400000;
+
+  const Points points = derive(h, Mode::Equalize);
+  ASSERT_TRUE(points.active);
+  for (int i = 0; i < 256; i++) {
+    EXPECT_NEAR(adaptive_tone::apply(points, static_cast<uint8_t>(i)), i, 8) << "lum=" << i;
+  }
+}
+
 TEST(AdaptiveToneEqualize, ReachesFullWhiteAtTheTop) {
   // The CDF is evaluated at the top of each bin, so the brightest occupied level maps to
   // 255 before blending. Sampling the CDF below the bin instead is the classic off-by-one

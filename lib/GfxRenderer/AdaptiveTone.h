@@ -87,11 +87,30 @@ inline constexpr uint32_t MIN_MIDTONE_PERMILLE = 60;
 // rather than a replacement.
 enum class Mode : uint8_t { Stretch, Equalize };
 
+// --- Why the CDF is clipped ------------------------------------------------------
+// Proportional-to-mass is the whole point of equalization and also its failure mode: it
+// is proportional with no upper bound, so a single dominant tone claims output range in
+// proportion to how dominant it is. Book covers are the worst case for that -- a dark
+// night scene puts 40% of its pixels in a narrow near-black band, the CDF hands that band
+// most of the range, and the black background comes back as mid-grey. Measured on the
+// sample covers, unclipped equalization lifted luminance 32 to 82 and 64 to 129 on one
+// and 64 to 91, 96 to 151 on another: shadows gone, the image washed out. That is the
+// textbook global-histogram-equalization result, not a bug in the CDF.
+//
+// The textbook answer is the contrast limit from CLAHE: cap what any one bin may
+// contribute before integrating, and hand the clipped-off excess back to every bin
+// evenly. A spike can then buy at most EQ_CLIP_MULTIPLE times the flat share of the
+// output range, and the more an image is dominated by one tone the closer its curve
+// falls back to the identity -- which is the right way for this to fail. It stays two
+// passes over 256 bins with no extra buffer.
+inline constexpr uint64_t EQ_CLIP_MULTIPLE = 2;
+
 // Equalization strength, as a blend against the original luminance. Deliberately gentler
-// than Stretch's 3/4: a full CDF map is a much stronger transform, and at 3/4 the smooth
-// background gradients on photographic covers break into visible dither banding.
+// than Stretch's 3/4: a full CDF map is a much stronger transform, and above 1/4 the
+// smooth background gradients on photographic covers break into visible dither banding
+// and dark covers still read as lifted even with the clip above holding the curve back.
 inline constexpr int EQ_BLEND_NUM = 1;
-inline constexpr int EQ_BLEND_DEN = 2;
+inline constexpr int EQ_BLEND_DEN = 4;
 
 // --- Where the curve lives -------------------------------------------------------
 // Both modes bake into a 256-entry lookup table rather than being recomputed per pixel:
@@ -201,11 +220,29 @@ inline Points derivePoints(const uint32_t* histogram, uint64_t sampleCount, Mode
   // of everything below it -- the usual off-by-one that leaves equalized images dark.
   // No MIN_RANGE gate: a narrow band is precisely what equalization is for, and the
   // line-art rejection above has already turned away the images that must not be touched.
+  //
+  // Bin counts are clipped to EQ_CLIP_MULTIPLE of the flat share and the excess shared
+  // out evenly before integrating, so no single dominant tone can claim the range -- see
+  // the note on EQ_CLIP_MULTIPLE for what that failure looks like on a dark cover.
+  const uint64_t clipLimit = (sampleCount * EQ_CLIP_MULTIPLE) / 256u;
+  uint64_t excess = 0;
+  for (int i = 0; i < 256; i++) {
+    if (histogram[i] > clipLimit) excess += histogram[i] - clipLimit;
+  }
+  const uint64_t shared = excess / 256u;
+  uint64_t clippedTotal = 0;
+  for (int i = 0; i < 256; i++) {
+    clippedTotal += (histogram[i] < clipLimit ? histogram[i] : clipLimit) + shared;
+  }
+  // Only reachable on a degenerate histogram (fewer samples than bins); leave the caller
+  // untoned rather than divide by it.
+  if (clippedTotal == 0) return points;
+
   points.generation = ++detail::g_generation;
   uint64_t running = 0;
   for (int i = 0; i < 256; i++) {
-    running += histogram[i];
-    const int equalized = static_cast<int>((running * 255u) / sampleCount);
+    running += (histogram[i] < clipLimit ? histogram[i] : clipLimit) + shared;
+    const int equalized = static_cast<int>((running * 255u) / clippedTotal);
     int adjusted = (i * (EQ_BLEND_DEN - EQ_BLEND_NUM) + equalized * EQ_BLEND_NUM) / EQ_BLEND_DEN;
     if (i > HIGHLIGHT_FLOOR && adjusted < i) adjusted = i;
     if (adjusted < 0) adjusted = 0;
