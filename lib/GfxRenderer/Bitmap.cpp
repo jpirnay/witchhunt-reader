@@ -188,16 +188,13 @@ BmpReaderError Bitmap::parseHeaders() {
 
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
-    // Always DisplayTuned, tone mapping or not. The tone curve corrects the IMAGE's
-    // range; the DisplayTuned values correct for the PANEL's transfer function, and
-    // level-correcting an image does not change how dark the panel renders level 1.
-    // Feeding the ditherer the evenly-spaced values instead tells it that level 1
-    // shows as 85 when it actually shows as 30, and error diffusion turns that
-    // 55-level lie into a systematic darkening (measured: covers lost 20-40 points
-    // of mean brightness and, on low-gain images, contrast as well). The reader's
-    // in-book image path has always used DisplayTuned with tone mapping active --
-    // see the AtkinsonDitherer built in JpegToFramebufferConverter -- and this is
-    // what brings the sleep screen back in line with it.
+    // Always DisplayTuned, tone mapping or not: the tone curve corrects the IMAGE's
+    // range and the quantizer's thresholds correct for the PANEL, so the two are
+    // orthogonal and there is nothing for a mode swap to avoid. The earlier swap to
+    // Native on tone-mapped input was a real bug (near-black sleep covers), but so was
+    // the thing it was compensating for -- DisplayTuned used to feed error diffusion a
+    // bunched 15/30/80/210 level spacing, which is what actually washed the midtones
+    // out. Both live under Gray4QuantizationMode now; see the note there.
     if (USE_ATKINSON) {
       atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
     } else {
