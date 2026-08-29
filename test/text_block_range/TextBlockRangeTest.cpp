@@ -198,4 +198,75 @@ TEST(TextBlockRange, NullSizesMeansUniform) {
   EXPECT_EQ(block.wordSizePct(1), 100);
 }
 
+// The continuation flag rides in the spare high bit of the packed style byte. It is what tells
+// the dictionary overlay that "rea" and "ding" are one word rather than two, so it has to
+// survive the range copy without leaking into the style the renderer reads back.
+TEST(TextBlockContinues, RangeCtorCarriesTheFlagWithoutDisturbingStyles) {
+  const std::vector<std::string> words = {"noun", "rea", "ding", "?", "next"};
+  const std::vector<EpdFontFamily::Style> styles = {EpdFontFamily::REGULAR, EpdFontFamily::BOLD, EpdFontFamily::REGULAR,
+                                                    EpdFontFamily::REGULAR, EpdFontFamily::ITALIC};
+  const std::vector<uint8_t> sizes(words.size(), 100);
+  const std::vector<bool> continues = {false, false, true, true, false};
+  TextBlock::WordRange range = makeRange(words, styles, sizes, 0, words.size());
+  range.continues = &continues;
+
+  TextBlock block(range, {0, 40, 70, 110, 130}, BlockStyle());
+  ASSERT_TRUE(block.valid());
+  for (uint16_t i = 0; i < words.size(); i++) {
+    EXPECT_EQ(block.wordContinues(i), continues[i]) << "word " << i;
+    EXPECT_EQ(block.wordStyle(i), styles[i]) << "word " << i;
+  }
+}
+
+// A style that uses the top of the 7-bit range must not be mistaken for a continuation, and a
+// continuation must not smuggle a bit into the style.
+TEST(TextBlockContinues, HighStyleBitsSurviveAlongsideTheFlag) {
+  const std::vector<std::string> words = {"small", "caps"};
+  const auto smallCapsBold = static_cast<EpdFontFamily::Style>(EpdFontFamily::SMALL_CAPS | EpdFontFamily::BOLD |
+                                                               EpdFontFamily::SUP | EpdFontFamily::UNDERLINE);
+  const std::vector<EpdFontFamily::Style> styles = {smallCapsBold, smallCapsBold};
+  const std::vector<uint8_t> sizes(words.size(), 100);
+  const std::vector<bool> continues = {false, true};
+  TextBlock::WordRange range = makeRange(words, styles, sizes, 0, words.size());
+  range.continues = &continues;
+
+  TextBlock block(range, {0, 50}, BlockStyle());
+  ASSERT_TRUE(block.valid());
+  EXPECT_EQ(block.wordStyle(0), smallCapsBold);
+  EXPECT_EQ(block.wordStyle(1), smallCapsBold);
+  EXPECT_FALSE(block.wordContinues(0));
+  EXPECT_TRUE(block.wordContinues(1));
+}
+
+// The flags are indexed like the source words, not from 0 -- an interior line must report the
+// flags of the words it actually holds.
+TEST(TextBlockContinues, FlagsFollowTheRangeWindow) {
+  const Fixture f = uniformFixture();
+  const std::vector<bool> continues = {false, false, true, true, false};
+  TextBlock::WordRange range = makeRange(f.words, f.styles, f.sizes, 2, 2);
+  range.continues = &continues;
+
+  TextBlock block(range, {0, 40}, BlockStyle());
+  ASSERT_TRUE(block.valid());
+  EXPECT_TRUE(block.wordContinues(0));  // source word 2
+  EXPECT_TRUE(block.wordContinues(1));  // source word 3
+}
+
+// A caller that does not track continuation (and a cache written before the bit existed) must
+// read as "every word is space-separated".
+TEST(TextBlockContinues, AbsentFlagsMeanNoContinuation) {
+  const Fixture f = uniformFixture();
+  TextBlock block(makeRange(f.words, f.styles, f.sizes, 0, 3), {0, 40, 90}, BlockStyle());
+  ASSERT_TRUE(block.valid());
+  for (uint16_t i = 0; i < 3; i++) EXPECT_FALSE(block.wordContinues(i));
+
+  // A short vector is ignored rather than read out of bounds.
+  const std::vector<bool> tooShort = {true};
+  TextBlock::WordRange range = makeRange(f.words, f.styles, f.sizes, 0, 3);
+  range.continues = &tooShort;
+  TextBlock guarded(range, {0, 40, 90}, BlockStyle());
+  ASSERT_TRUE(guarded.valid());
+  for (uint16_t i = 0; i < 3; i++) EXPECT_FALSE(guarded.wordContinues(i));
+}
+
 }  // namespace

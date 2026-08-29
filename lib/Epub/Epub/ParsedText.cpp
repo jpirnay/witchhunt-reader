@@ -1225,6 +1225,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.words = &words;
   range.styles = &wordStyles;
   range.sizes = &wordSizes;
+  // Carried into the block so a reader-side consumer can tell one logical word from the
+  // fragments layout split it into (bionic-reading halves, attached punctuation). Nothing on
+  // the render path reads it; the xpos above already encodes the spacing.
+  range.continues = &continuesVec;
   range.first = lastBreakAt;
   range.count = lineWordCount;
 
