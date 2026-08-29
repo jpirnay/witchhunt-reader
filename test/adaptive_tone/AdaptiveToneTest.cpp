@@ -11,6 +11,7 @@
 #include <numeric>
 
 #include "AdaptiveTone.h"
+#include "BitmapHelpers.h"
 
 namespace {
 
@@ -281,6 +282,62 @@ TEST(AdaptiveToneEqualize, ReachesFullWhiteAtTheTop) {
   const Points points = derive(h, Mode::Equalize);
   ASSERT_TRUE(points.active);
   EXPECT_EQ(adaptive_tone::apply(points, 255), 255);
+}
+
+// --- Gray4QuantizationMode --------------------------------------------------
+//
+// The two modes are a threshold tuning, not two different claims about the level
+// spacing. Feeding error diffusion a bunched spacing (the old 15/30/80/210) collapsed
+// midtone images onto two levels 130 apart and washed the covers out; these pin the
+// separation of concerns so it cannot be reintroduced by "tuning the quantizer".
+
+TEST(Gray4Quantization, BothModesFeedBackTheSameLevelSpacing) {
+  // Whatever the thresholds, `value` is the error-diffusion feedback term and must
+  // describe how far apart the levels are -- identically in both modes.
+  for (int index = 0; index < 4; index++) {
+    const int expected = index * 85;
+    for (int gray = 0; gray <= 255; gray++) {
+      const QuantizedGray4 tuned = quantizeGray4(gray, Gray4QuantizationMode::DisplayTuned);
+      const QuantizedGray4 native = quantizeGray4(gray, Gray4QuantizationMode::Native);
+      if (tuned.index == index) EXPECT_EQ(tuned.value, expected) << "tuned gray=" << gray;
+      if (native.index == index) EXPECT_EQ(native.value, expected) << "native gray=" << gray;
+    }
+  }
+}
+
+TEST(Gray4Quantization, FeedbackValuesAreEvenlySpaced) {
+  // The gap between adjacent levels is what a midtone pixel has to be dithered across.
+  // An uneven set strands whole bands of the image between two far-apart levels.
+  for (const auto mode : {Gray4QuantizationMode::DisplayTuned, Gray4QuantizationMode::Native}) {
+    int value[4] = {-1, -1, -1, -1};
+    for (int gray = 0; gray <= 255; gray++) {
+      const QuantizedGray4 q = quantizeGray4(gray, mode);
+      value[q.index] = q.value;
+    }
+    ASSERT_EQ(value[0], 0);
+    ASSERT_EQ(value[3], 255);
+    for (int i = 1; i < 4; i++) EXPECT_EQ(value[i] - value[i - 1], 85) << "level " << i;
+  }
+}
+
+TEST(Gray4Quantization, DisplayTunedKeepsItsBrighteningThresholds) {
+  // The X4 compensation lives here and only here: the tuned mode promotes a pixel to a
+  // higher level than the untuned midpoints would. Losing this is the near-black failure.
+  EXPECT_EQ(quantizeGray4(100, Gray4QuantizationMode::DisplayTuned).index, 2);
+  EXPECT_EQ(quantizeGray4(100, Gray4QuantizationMode::Native).index, 1);
+  for (int gray = 0; gray <= 255; gray++) {
+    EXPECT_GE(quantizeGray4(gray, Gray4QuantizationMode::DisplayTuned).index,
+              quantizeGray4(gray, Gray4QuantizationMode::Native).index)
+        << "gray=" << gray;
+  }
+}
+
+TEST(Gray4Quantization, IsMonotonicInBothModes) {
+  for (const auto mode : {Gray4QuantizationMode::DisplayTuned, Gray4QuantizationMode::Native}) {
+    for (int gray = 1; gray <= 255; gray++) {
+      EXPECT_GE(quantizeGray4(gray, mode).index, quantizeGray4(gray - 1, mode).index) << "gray=" << gray;
+    }
+  }
 }
 
 }  // namespace
