@@ -35,26 +35,88 @@ class DictionaryWordSelectActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  // Screen box of one selectable word. `text` points into the owned Page's
-  // TextBlock arena (NUL-terminated), valid for this activity's lifetime.
-  struct WordBox {
+  // The font a piece was drawn with, and what follows from it. A page has one or two of these
+  // -- body text, plus a heading or an inline size change -- so they are deduplicated into a
+  // side table and a fragment stores a one-byte index instead of the fields themselves.
+  struct DrawStyle {
+    float scale;
+    // Full width, NOT narrowed: font ids are 32-bit hashes (see fontIds.h, e.g. 1883578066), so
+    // a 16-bit field truncates every one of them to a font that does not exist -- which draws
+    // the highlight box and none of the glyphs inside it.
+    int fontId;
+    int16_t height;
+  };
+
+  // Screen box of one PIECE of a selectable word. Layout hands the page words already
+  // fragmented: bionic reading splits "reading" into a bold "read" and a plain "ing",
+  // hyphenation splits it across two lines as "read-" and "ing", and attached punctuation
+  // arrives as its own token. `text` points into the owned Page's TextBlock arena, valid for
+  // this activity's lifetime.
+  //
+  // Kept to 16 bytes on purpose. A bionic page carries ~500 of these and the array has to be ONE
+  // contiguous block that stays alive until the definition has been read -- and the definition's
+  // own heap guard is a largest-contiguous-block test (Dictionary.cpp), so every byte here comes
+  // straight off the budget a lookup has to work with.
+  struct Fragment {
+    const char* text;
     int16_t x;
     int16_t y;
     int16_t width;
-    int16_t height;
-    uint16_t row;
-    const char* text;
-    // How the page drew this word, so the highlight can redraw it in white and
-    // land on the same glyphs -- a heading uses its own font, and a word may be
-    // bold, italic or scaled by the publisher's font sizes.
-    int fontId;
+    // Bytes of `text` this piece covers. Usually the whole arena token, but a token holding an
+    // em dash between two words ("swiftness-a") is cut at the dash, and those pieces are not
+    // NUL-terminated where they end -- read them through fragmentText().
+    uint16_t length;
+    uint8_t drawStyle;  // index into drawStyles
+    // Bold, italic, sub/superscript: this one really is per piece -- bionic reading alternates
+    // bold and regular within a single word.
     EpdFontFamily::Style style;
-    float scale;
   };
+  static_assert(sizeof(Fragment) <= 16, "Fragment is on the reader's contiguous-heap budget");
+
+  // One word as the reader sees it: a run of consecutive fragments. Selection, highlighting
+  // and lookup all work on these, so a bionic-split or hyphenated word behaves like any other.
+  struct Word {
+    uint16_t firstFragment;
+    uint8_t fragmentCount;
+    // Fragment offset (from firstFragment) of the piece that ends on the hyphen layout added
+    // when it broke this word across two lines, or NO_HYPHEN. Both the offset and the row span
+    // are derived from it: fragments up to and including it sit on `row`, the rest on the row
+    // below.
+    uint8_t hyphenFragment;
+    uint16_t row;
+    // Horizontal extent on `row` -- the part of the word the cursor navigates by. A
+    // hyphen-joined word's tail on the next row is highlighted but does not steer navigation.
+    int16_t x;
+    int16_t width;
+  };
+  static constexpr uint8_t NO_HYPHEN = 0xFF;
+  // Longest word handed to the dictionary, joined across fragments. Headwords far shorter
+  // than this; the buffer is a stack local, so it stays well inside the task stack budget.
+  static constexpr size_t WORD_TEXT_CAPACITY = 128;
 
   enum class Popup : uint8_t { None, Busy, NotFound, Error };
 
   void extractWords();
+  // Exact-ish capacity for the two arrays, counted before anything is allocated. Growing them
+  // mid-scan would hold the old and the new block at once, which is what actually destroys the
+  // contiguous run a definition needs. Returns tokens; sets `wordEstimate` to the group count.
+  size_t countPageTokens(size_t& wordEstimate) const;
+  uint8_t internDrawStyle(const TextBlock::WordBox& geometry);
+  // Fuse each line-final word ending in a hyphen with the first word of the line below.
+  // Layout does not record that it hyphenated (the flag never reaches the page cache), so the
+  // shape of the break is the evidence: a word that ends the line on '-' with a word starting
+  // the next line is the split of one word in every book that is not deliberately odd.
+  void joinHyphenatedWords();
+  // Concatenate word `index`'s fragments into `buf` (NUL-terminated), returning the length.
+  // dropJoinHyphen leaves out the hyphen layout inserted at a line break, which is what the
+  // dictionary should see first; a compound that legitimately breaks at its own hyphen is
+  // retried with it.
+  size_t buildWordText(int index, char* buf, size_t capacity, bool dropJoinHyphen) const;
+  // NUL-terminated view of one fragment: the arena pointer itself when the piece ends on the
+  // token's own NUL, otherwise a copy in `buf`.
+  static const char* fragmentText(const Fragment& fragment, char* buf, size_t capacity);
+  const DrawStyle& drawStyleOf(const Fragment& fragment) const { return drawStyles[fragment.drawStyle]; }
+  bool isHyphenJoined(const int index) const { return words[index].hyphenFragment != NO_HYPHEN; }
   // Open the dictionary on first use. Idempotent; false when there is none
   // configured or it will not open.
   bool ensureDictionaryOpen();
@@ -80,7 +142,9 @@ class DictionaryWordSelectActivity final : public Activity {
   const int marginLeft;
   const int marginTop;
 
-  std::vector<WordBox> words;
+  std::vector<DrawStyle> drawStyles;
+  std::vector<Fragment> fragments;
+  std::vector<Word> words;
   // Word boxes are measured once the font cache has been prewarmed for this
   // page, which only happens inside render(); onEnter() has no framebuffer to
   // scan against. Until then there is nothing to highlight.
@@ -132,11 +196,22 @@ class DictionaryWordSelectActivity final : public Activity {
   // every SD-font glyph on the page). snapshotIdx is the word whose under-pixels
   // are saved; -1 means the framebuffer no longer holds a clean page (popup
   // drawn, sub-activity shown) and the next render must be a full one.
+  //
+  // A word covers one rectangle per row it occupies -- two for a hyphen-joined word, whose
+  // halves sit at the end of one line and the start of the next. Saving their bounding box
+  // instead would mean saving both whole lines and everything between them, so the runs are
+  // packed back to back into the one buffer.
+  struct SnapshotRun {
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+    uint16_t offset;  // byte offset of this run's pixels within `snapshot`
+  };
   static constexpr size_t SNAPSHOT_CAPACITY = 2048;  // packed 1bpp: 16384 pixels
+  static constexpr uint8_t MAX_SNAPSHOT_RUNS = 2;
   std::unique_ptr<uint8_t[]> snapshot;
-  int16_t snapshotX = 0;
-  int16_t snapshotY = 0;
-  int16_t snapshotW = 0;
-  int16_t snapshotH = 0;
+  SnapshotRun snapshotRuns[MAX_SNAPSHOT_RUNS] = {};
+  uint8_t snapshotRunCount = 0;
   int snapshotIdx = -1;
 };

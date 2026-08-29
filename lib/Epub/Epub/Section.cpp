@@ -31,7 +31,13 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 70;  // bumped: a wrapper's horizontal inset reaches every
+constexpr uint8_t SECTION_FILE_VERSION = 71;  // bumped: the packed word style byte now carries a
+                                              // per-word "continues the previous word" bit, so the
+                                              // dictionary overlay can select a bionic-split or
+                                              // hyphenated word as one word. A v70 cache reads the
+                                              // bit as clear everywhere, i.e. keeps the old split
+                                              // selection, so it has to be rebuilt
+                                              // v70: a wrapper's horizontal inset reaches every
                                               // child block, and insets/hanging indents are clamped to
                                               // the panel. Layout bakes insets into word xpos (see v61),
                                               // so a v69 cache keeps the off-panel lines this fixes

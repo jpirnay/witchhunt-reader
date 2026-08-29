@@ -28,7 +28,7 @@
 // unaligned multi-byte access):
 //   uint16_t textOff[wordCount]   byte offset of word i's text within text[]
 //   int16_t  xpos[wordCount]
-//   uint8_t  styles[wordCount]
+//   uint8_t  styles[wordCount]    low 7 bits EpdFontFamily::Style, bit 7 = continues
 //   uint8_t  sizes[wordCount]     present only when sizesPresent
 //   char     text[textBytes]      all words back to back, each NUL-terminated
 //
@@ -121,13 +121,16 @@ class TextBlock final : public Block {
   }
 
  public:
+  // Spare high bit of the packed style byte: EpdFontFamily::Style only uses bits 0-6.
+  static constexpr uint8_t WORD_CONTINUES_BIT = 0x80;
+
   // Flatten-on-construct: copies the layout-time vectors into the arena; the
   // vectors die with the caller. An all-100% sizes vector is normalized to "no
   // sizes". On arena OOM the block is empty and valid() is false -- callers must
   // check and drop the line instead of using it.
   explicit TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle = BlockStyle(),
-                     std::vector<uint8_t> word_sizes = {});
+                     std::vector<uint8_t> word_sizes = {}, const std::vector<bool>& word_continues = {});
 
   // Slice of a laid-out block, addressed directly in the caller's storage.
   // Layout produces lines as [first, first + count) windows over the block's word arrays;
@@ -140,6 +143,9 @@ class TextBlock final : public Block {
     const std::vector<std::string>* words = nullptr;
     const std::vector<EpdFontFamily::Style>* styles = nullptr;
     const std::vector<uint8_t>* sizes = nullptr;  // may be null/empty => uniform 100%
+    // Layout's per-word "attaches to the previous word with no space" flags, indexed like
+    // `words`. May be null, meaning every word is space-separated.
+    const std::vector<bool>* continues = nullptr;
     size_t first = 0;
     size_t count = 0;
   };
@@ -167,7 +173,15 @@ class TextBlock final : public Block {
     return end - textOffArr[i] - 1;  // exclude the NUL
   }
   int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
-  EpdFontFamily::Style wordStyle(const uint16_t i) const { return static_cast<EpdFontFamily::Style>(stylesArr[i]); }
+  EpdFontFamily::Style wordStyle(const uint16_t i) const {
+    return static_cast<EpdFontFamily::Style>(stylesArr[i] & ~WORD_CONTINUES_BIT);
+  }
+  // True when word i is glued to word i-1 with no space between them: the two halves of a
+  // bionic-reading word, an attached punctuation token, a styled run that changes mid-word.
+  // Word 0 carries the flag layout gave the line's first token, so it is only meaningful for
+  // i > 0. Rides in the spare high bit of the style byte, so it costs no RAM and no cache
+  // bytes; a cache written before the bit existed simply reports false everywhere.
+  bool wordContinues(const uint16_t i) const { return (stylesArr[i] & WORD_CONTINUES_BIT) != 0; }
   bool hasWordSizes() const { return sizesPresent; }
   uint8_t wordSizePct(const uint16_t i) const { return sizesPresent ? sizesArr[i] : 100; }
   // Diagnostic/test helper: materializes the per-word size vector (empty when uniform).

@@ -7,6 +7,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <algorithm>
 #include <cctype>
 #include <climits>
 #include <cstdlib>
@@ -24,18 +25,62 @@ constexpr unsigned long POPUP_DURATION_MS = 1500;
 // A token is selectable when it has an ASCII alphanumeric or a non-ASCII
 // codepoint outside U+2000-U+206F (dashes, bullets and other General
 // Punctuation that appear as standalone tokens are not words).
-bool isSelectableToken(const char* text) {
-  for (const auto* p = reinterpret_cast<const uint8_t*>(text); *p != 0; p++) {
-    if (*p < 0x80) {
-      if (std::isalnum(*p)) return true;
-    } else if (*p == 0xE2 && (p[1] == 0x80 || p[1] == 0x81)) {
-      if (p[2] == 0) break;  // truncated sequence: skipping would step past the NUL
-      p += 2;                // skip the 3-byte General Punctuation codepoint
+bool isSelectableToken(const char* text, const size_t length) {
+  const auto* p = reinterpret_cast<const uint8_t*>(text);
+  for (size_t i = 0; i < length; i++) {
+    if (p[i] < 0x80) {
+      if (std::isalnum(p[i])) return true;
+    } else if (p[i] == 0xE2 && i + 2 < length && (p[i + 1] == 0x80 || p[i + 1] == 0x81)) {
+      i += 2;  // skip the 3-byte General Punctuation codepoint
     } else {
       return true;
     }
   }
   return false;
+}
+
+// Word bytes for the purpose of finding a dash that joins two words.
+bool isWordByte(const uint8_t c) { return c >= 0x80 || std::isalnum(c) != 0; }
+
+// Byte offset just past the next em or en dash (U+2014 / U+2013) that has a word on both sides,
+// scanning from `from`; 0 when there is none.
+//
+// A dash written without spaces fuses two words into one layout token -- "swiftness-a",
+// "truth-that" -- and the reader looking one of them up means one of them. This is the cut. The
+// dash stays with the LEFT piece so the pieces tile the token exactly (no gap to position) and
+// the dictionary's own edge-stripping takes it off the lookup.
+// A token with no word content of its own that carries an em or en dash separates the words on
+// either side of it exactly as a space does. Bionic reading produces these: it tokenizes
+// "swiftness-a" into a word span, the dash, and another word span, so the dash arrives as its
+// own token rather than inside one.
+bool isDashSeparatorToken(const char* text, const size_t length) {
+  if (isSelectableToken(text, length)) return false;
+  const auto* b = reinterpret_cast<const uint8_t*>(text);
+  for (size_t i = 0; i + 2 < length; i++) {
+    if (b[i] == 0xE2 && b[i + 1] == 0x80 && (b[i + 2] == 0x93 || b[i + 2] == 0x94)) return true;
+  }
+  return false;
+}
+
+size_t nextDashSplit(const char* text, const size_t length, const size_t from) {
+  const auto* b = reinterpret_cast<const uint8_t*>(text);
+  for (size_t i = from; i + 3 < length; i++) {
+    if (b[i] != 0xE2 || b[i + 1] != 0x80) continue;
+    if (b[i + 2] != 0x93 && b[i + 2] != 0x94) continue;  // en dash, em dash
+    if (i == 0 || !isWordByte(b[i - 1]) || !isWordByte(b[i + 3])) continue;
+    return i + 3;
+  }
+  return 0;
+}
+
+// A word broken across two lines ends on an ASCII hyphen -- either the one layout inserted at
+// the break, or the compound's own. A token that is nothing but a dash is not a broken word.
+bool endsOnHyphen(const char* text, const size_t length) { return length >= 2 && text[length - 1] == '-'; }
+
+// The other half of a broken word starts on a word character, never on punctuation.
+bool startsOnWordByte(const char* text) {
+  const auto first = static_cast<uint8_t>(text[0]);
+  return first >= 0x80 || std::isalnum(first) != 0;
 }
 
 // Fed to the watchdog while the index pass streams a multi-megabyte .idx.
@@ -55,9 +100,52 @@ void DictionaryWordSelectActivity::onEnter() {
 // after the font cache has been prewarmed for this page: the boxes come from
 // TextBlock::wordBox, which measures the text, and measuring an SD-card font
 // before the prewarm loads every glyph from the card one overflow slot at a time.
+// Index of `geometry`'s (font, scale, line height) in the side table, adding it if new. The
+// table has one or two entries on a normal page, so the linear scan never runs long; the 255th
+// distinct style reuses the last slot rather than overflowing the one-byte index.
+uint8_t DictionaryWordSelectActivity::internDrawStyle(const TextBlock::WordBox& geometry) {
+  for (size_t i = 0; i < drawStyles.size(); i++) {
+    if (drawStyles[i].fontId == geometry.fontId && drawStyles[i].scale == geometry.scale &&
+        drawStyles[i].height == geometry.height) {
+      return static_cast<uint8_t>(i);
+    }
+  }
+  if (drawStyles.size() >= UINT8_MAX) return static_cast<uint8_t>(drawStyles.size() - 1);
+  drawStyles.push_back({geometry.scale, geometry.fontId, geometry.height});
+  return static_cast<uint8_t>(drawStyles.size() - 1);
+}
+
+size_t DictionaryWordSelectActivity::countPageTokens(size_t& wordEstimate) const {
+  size_t tokens = 0;
+  wordEstimate = 0;
+  for (const auto& element : page->elements) {
+    if (element->getTag() != TAG_PageLine) continue;
+    const auto& block = static_cast<const PageLine*>(element.get())->getBlock();
+    if (!block || !block->valid()) continue;
+    const uint16_t count = block->wordCount();
+    tokens += count;
+    // One group per token that does not continue the one before it. Reading the continuation
+    // bits costs a byte each -- no text scan, no measurement.
+    for (uint16_t i = 0; i < count; i++) {
+      if (i == 0 || !block->wordContinues(i)) wordEstimate++;
+    }
+  }
+  return tokens;
+}
+
 void DictionaryWordSelectActivity::extractWords() {
+  // Reserve once, up front, from a real count. A dense page runs to ~280 tokens and bionic
+  // reading roughly doubles that, so a fixed guess is either far too small -- and then the
+  // vector doubles repeatedly, each growth holding the old block alongside the new -- or far too
+  // large. Cutting a token at an em dash adds a piece here and there, hence the small slack.
+  size_t wordEstimate = 0;
+  const size_t tokenCount = countPageTokens(wordEstimate);
+  drawStyles.clear();
+  drawStyles.reserve(4);
+  fragments.clear();
+  fragments.reserve(tokenCount + tokenCount / 16 + 4);
   words.clear();
-  words.reserve(128);
+  words.reserve(wordEstimate + wordEstimate / 16 + 4);
   rowCount = 0;
 
   for (const auto& element : page->elements) {
@@ -67,29 +155,122 @@ void DictionaryWordSelectActivity::extractWords() {
     if (!block || !block->valid()) continue;
 
     bool rowHasWords = false;
-    for (uint16_t i = 0; i < block->wordCount(); i++) {
-      const char* text = block->wordText(i);
-      if (!isSelectableToken(text)) continue;
+    bool openGroup = false;           // words.back() is a group still being extended
+    bool openSelectable = false;      // ...and it holds at least one selectable token
+    bool previousEmitted = false;     // the previous block word produced a fragment
+    uint16_t fragmentSourceWord = 0;  // block word the piece being added came from
 
+    // A group with nothing selectable in it -- a lone dash, a run of quotes -- is dropped.
+    // Both it and its fragments are the tail of their vectors, so this is a pop, not a gap.
+    auto closeGroup = [&] {
+      if (!openGroup) return;
+      if (openSelectable) {
+        rowHasWords = true;
+      } else {
+        fragments.resize(words.back().firstFragment);
+        words.pop_back();
+      }
+      openGroup = false;
+      openSelectable = false;
+    };
+
+    // Adds one piece of a token. `mayGlue` is false for every piece after a dash cut: a dash
+    // between two words is a word boundary even though layout kept the pair in one token.
+    auto addFragment = [&](const char* text, const size_t length, const int x, const int width,
+                           const TextBlock::WordBox& geometry, const bool mayGlue) {
+      const bool glued = mayGlue && openGroup && previousEmitted && fragmentSourceWord > 0 &&
+                         block->wordContinues(fragmentSourceWord) && words.back().fragmentCount < UINT8_MAX;
+      if (!glued) closeGroup();
+
+      Fragment fragment;
+      fragment.x = static_cast<int16_t>(x);
+      fragment.y = geometry.y;
+      fragment.width = static_cast<int16_t>(width);
+      fragment.text = text;
+      fragment.length = static_cast<uint16_t>(length);
+      fragment.style = geometry.style;
+      fragment.drawStyle = internDrawStyle(geometry);
+      fragments.push_back(fragment);
+      previousEmitted = true;
+
+      if (glued) {
+        Word& word = words.back();
+        word.fragmentCount++;
+        word.width = static_cast<int16_t>(fragment.x + fragment.width - word.x);
+      } else {
+        Word word;
+        word.firstFragment = static_cast<uint16_t>(fragments.size() - 1);
+        word.fragmentCount = 1;
+        word.hyphenFragment = NO_HYPHEN;
+        word.row = rowCount;
+        word.x = fragment.x;
+        word.width = fragment.width;
+        words.push_back(word);
+        openGroup = true;
+      }
+      // Punctuation glued to a word rides along -- the dictionary strips a word's edges
+      // anyway -- but it never makes a group selectable on its own.
+      openSelectable = openSelectable || isSelectableToken(text, length);
+    };
+
+    for (uint16_t i = 0; i < block->wordCount(); i++) {
+      fragmentSourceWord = i;
+      const char* text = block->wordText(i);
+      const size_t textLength = block->wordTextLen(i);
       const TextBlock::WordBox geometry =
           block->wordBox(renderer, i, fontId, line->xPos + marginLeft, line->yPos + marginTop);
-      if (geometry.width <= 0 || geometry.height <= 0) continue;
+      // A token with no ink of its own -- the visible space that holds a no-break group
+      // together -- is not part of any word, and it separates the words on either side of it.
+      if (geometry.width <= 0 || geometry.height <= 0) {
+        previousEmitted = false;
+        continue;
+      }
+      // A bare dash between two words is a boundary, not a piece of either of them.
+      if (isDashSeparatorToken(text, textLength)) {
+        previousEmitted = false;
+        continue;
+      }
 
-      WordBox box;
-      box.x = geometry.x;
-      box.y = geometry.y;
-      box.width = geometry.width;
-      box.height = geometry.height;
-      box.row = rowCount;
-      box.text = text;
-      box.fontId = geometry.fontId;
-      box.style = geometry.style;
-      box.scale = geometry.scale;
-      words.push_back(box);
-      rowHasWords = true;
+      // The common case: one whole token, measured once by wordBox and used in place.
+      // Cutting needs a NUL-terminated copy to measure, so a token too long for the scratch
+      // buffer is left whole -- those are never the dash-joined pairs this is for.
+      if (textLength >= WORD_TEXT_CAPACITY || nextDashSplit(text, textLength, 0) == 0) {
+        addFragment(text, textLength, geometry.x, geometry.width, geometry, /*mayGlue=*/true);
+        continue;
+      }
+
+      size_t partStart = 0;
+      int partX = geometry.x;
+      bool firstPart = true;
+      while (partStart < textLength) {
+        size_t partEnd = nextDashSplit(text, textLength, partStart);
+        if (partEnd == 0) partEnd = textLength;
+        const size_t partLength = partEnd - partStart;
+
+        char part[WORD_TEXT_CAPACITY];
+        memcpy(part, text + partStart, partLength);
+        part[partLength] = '\0';
+        const int partWidth = (geometry.scale == 1.0f)
+                                  ? renderer.getTextWidth(geometry.fontId, part, geometry.style)
+                                  : renderer.getTextWidthScaled(geometry.fontId, part, geometry.style, geometry.scale);
+        if (partWidth > 0) {
+          addFragment(text + partStart, partLength, partX, partWidth, geometry, firstPart);
+          firstPart = false;
+        }
+
+        if (partEnd < textLength) {
+          // Advance, not ink width: the next piece starts where this one's pen ends.
+          const int advance = renderer.getTextAdvanceX(geometry.fontId, part, geometry.style);
+          partX += (geometry.scale == 1.0f) ? advance : static_cast<int>(advance * geometry.scale + 0.5f);
+        }
+        partStart = partEnd;
+      }
     }
+    closeGroup();
     if (rowHasWords) rowCount++;
   }
+
+  joinHyphenatedWords();
 
   wordsExtracted = true;
   // Start on the middle row's word nearest mid-screen instead of top-left: any
@@ -98,6 +279,52 @@ void DictionaryWordSelectActivity::extractWords() {
     const int initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
     if (initial >= 0) selected = initial;
   }
+}
+
+void DictionaryWordSelectActivity::joinHyphenatedWords() {
+  for (size_t i = 0; i + 1 < words.size(); i++) {
+    Word& prefix = words[i];
+    const Word& suffix = words[i + 1];
+    // Words are in reading order, so a suffix one row down is by construction the last word of
+    // its line meeting the first word of the next.
+    if (suffix.row != prefix.row + 1) continue;
+    // The fragments have to be adjacent for the joined word to stay one contiguous run.
+    if (suffix.firstFragment != prefix.firstFragment + prefix.fragmentCount) continue;
+    if (prefix.fragmentCount + suffix.fragmentCount > UINT8_MAX) continue;
+    const Fragment& tail = fragments[suffix.firstFragment - 1];
+    if (!endsOnHyphen(tail.text, tail.length)) continue;
+    if (!startsOnWordByte(fragments[suffix.firstFragment].text)) continue;
+
+    prefix.hyphenFragment = static_cast<uint8_t>(prefix.fragmentCount - 1);
+    prefix.fragmentCount = static_cast<uint8_t>(prefix.fragmentCount + suffix.fragmentCount);
+    words.erase(words.begin() + static_cast<long>(i) + 1);
+  }
+}
+
+const char* DictionaryWordSelectActivity::fragmentText(const Fragment& fragment, char* buf, const size_t capacity) {
+  if (fragment.text[fragment.length] == '\0') return fragment.text;  // whole token: no copy needed
+  const size_t take = std::min(static_cast<size_t>(fragment.length), capacity - 1);
+  memcpy(buf, fragment.text, take);
+  buf[take] = '\0';
+  return buf;
+}
+
+size_t DictionaryWordSelectActivity::buildWordText(const int index, char* buf, const size_t capacity,
+                                                   const bool dropJoinHyphen) const {
+  if (capacity == 0) return 0;
+  const Word& word = words[index];
+  size_t length = 0;
+  for (uint8_t f = 0; f < word.fragmentCount && length + 1 < capacity; f++) {
+    const Fragment& piece = fragments[word.firstFragment + f];
+    const char* source = piece.text;
+    size_t take = piece.length;
+    if (dropJoinHyphen && f == word.hyphenFragment && take > 0 && source[take - 1] == '-') take--;
+    take = std::min(take, capacity - 1 - length);
+    memcpy(buf + length, source, take);
+    length += take;
+  }
+  buf[length] = '\0';
+  return length;
 }
 
 // Index of the word in `row` whose horizontal center is closest to centerX;
@@ -117,14 +344,19 @@ int DictionaryWordSelectActivity::closestInRow(const uint16_t row, const int cen
 }
 
 void DictionaryWordSelectActivity::moveVertical(const int direction) {
-  const WordBox& current = words[selected];
-  const int targetRow = static_cast<int>(current.row) + direction;
-  if (targetRow < 0 || targetRow >= static_cast<int>(rowCount)) return;
-
-  const int best = closestInRow(static_cast<uint16_t>(targetRow), current.x + current.width / 2);
-  if (best >= 0 && best != selected) {
-    selected = best;
-    requestUpdate();
+  const Word& current = words[selected];
+  const int centerX = current.x + current.width / 2;
+  // Rows can be empty: joining a hyphenated word pulls the only word off the row that carried
+  // its tail. Keep going rather than letting one such row wall the cursor in.
+  for (int row = static_cast<int>(current.row) + direction; row >= 0 && row < static_cast<int>(rowCount);
+       row += direction) {
+    const int best = closestInRow(static_cast<uint16_t>(row), centerX);
+    if (best < 0) continue;
+    if (best != selected) {
+      selected = best;
+      requestUpdate();
+    }
+    return;
   }
 }
 
@@ -154,8 +386,16 @@ void DictionaryWordSelectActivity::speculateForSelection() {
     return;
   }
 
+  char text[WORD_TEXT_CAPACITY];
+  buildWordText(selected, text, sizeof(text), true);
   Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-  const bool found = dict.resolve(words[selected].text, speculationLocation, speculationHeadword, &result);
+  bool found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+  // A word broken at a hyphen it already had ("US-Satellitensystems") is a real headword WITH
+  // the hyphen, so the joined form gets a second chance before the word is called absent.
+  if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
+    buildWordText(selected, text, sizeof(text), false);
+    found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+  }
   speculationIdx = selected;
   if (found) {
     speculation = Speculation::Found;
@@ -248,8 +488,14 @@ void DictionaryWordSelectActivity::performLookup() {
     } else {
       result = Dictionary::LookupResult::NotFound;
     }
-  } else {
-    found = ok && dict.lookup(words[selected].text, definition, headword, &result);
+  } else if (ok) {
+    char text[WORD_TEXT_CAPACITY];
+    buildWordText(selected, text, sizeof(text), true);
+    found = dict.lookup(text, definition, headword, &result);
+    if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
+      buildWordText(selected, text, sizeof(text), false);
+      found = dict.lookup(text, definition, headword, &result);
+    }
   }
 
   if (found) {
@@ -378,52 +624,92 @@ void DictionaryWordSelectActivity::loop() {
 // buffer / oversize box) -- the highlight is drawn regardless, but the next
 // cursor move must do a full repaint.
 bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
-  const WordBox& word = words[selected];
-  // The box is the word's exact advance box, grown by 2px so the highlight has
-  // a little air around the glyphs. Clamped to the panel so save, draw and
-  // restore all use the same rectangle.
-  int hx = word.x - 2;
-  int hy = word.y - 2;
-  int hw = word.width + 4;
-  int hh = word.height + 4;
-  if (hx < 0) {
-    hw += hx;
-    hx = 0;
-  }
-  if (hy < 0) {
-    hh += hy;
-    hy = 0;
-  }
-  if (hx + hw > renderer.getScreenWidth()) hw = renderer.getScreenWidth() - hx;
-  if (hy + hh > renderer.getScreenHeight()) hh = renderer.getScreenHeight() - hy;
+  const Word& word = words[selected];
+  // Fragments up to and including the hyphenated one sit on the word's own row, the rest on
+  // the row below; each run gets its own box, so nothing between the two lines is disturbed.
+  const uint8_t runBounds[MAX_SNAPSHOT_RUNS + 1] = {
+      0, word.hyphenFragment == NO_HYPHEN ? word.fragmentCount : static_cast<uint8_t>(word.hyphenFragment + 1),
+      word.fragmentCount};
 
-  bool saved = false;
-  if (snapshot && hw > 0 && hh > 0) {
-    saved = renderer.readFramebufferRegion(hx, hy, hw, hh, snapshot.get(), SNAPSHOT_CAPACITY) > 0;
+  // A word the speculative resolve has already proved absent gets an outline instead of the
+  // inverse fill: the cursor is still obviously here, but the reader can see there is nothing
+  // to look up without pressing Confirm and waiting for a "Not found" popup. Anything not yet
+  // resolved keeps the plain highlight -- absence is only ever claimed on a verdict.
+  const bool knownMissing = speculationIdx == selected && speculation == Speculation::Missing;
+
+  snapshotRunCount = 0;
+  size_t used = 0;
+  bool saved = snapshot != nullptr;
+  for (uint8_t run = 0; run < MAX_SNAPSHOT_RUNS; run++) {
+    if (runBounds[run] >= runBounds[run + 1]) continue;
+    const Fragment& firstPiece = fragments[word.firstFragment + runBounds[run]];
+    int left = firstPiece.x;
+    int top = firstPiece.y;
+    int right = firstPiece.x + firstPiece.width;
+    int bottom = firstPiece.y + drawStyleOf(firstPiece).height;
+    for (uint8_t f = runBounds[run] + 1; f < runBounds[run + 1]; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      left = std::min(left, static_cast<int>(piece.x));
+      top = std::min(top, static_cast<int>(piece.y));
+      right = std::max(right, piece.x + piece.width);
+      bottom = std::max(bottom, piece.y + drawStyleOf(piece).height);
+    }
+
+    // The box is the run's exact advance box, grown by 2px so the highlight has
+    // a little air around the glyphs. Clamped to the panel so save, draw and
+    // restore all use the same rectangle.
+    int hx = left - 2;
+    int hy = top - 2;
+    int hw = right - left + 4;
+    int hh = bottom - top + 4;
+    if (hx < 0) {
+      hw += hx;
+      hx = 0;
+    }
+    if (hy < 0) {
+      hh += hy;
+      hy = 0;
+    }
+    if (hx + hw > renderer.getScreenWidth()) hw = renderer.getScreenWidth() - hx;
+    if (hy + hh > renderer.getScreenHeight()) hh = renderer.getScreenHeight() - hy;
+    if (hw <= 0 || hh <= 0) continue;
+
+    // Runs share the one buffer back to back; a run that no longer fits gives up the
+    // differential path for the whole word rather than restoring half of it.
+    size_t written = 0;
+    if (saved) {
+      // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+      // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
+      written = renderer.readFramebufferRegion(hx, hy, hw, hh, snapshot.get() + used, SNAPSHOT_CAPACITY - used);
+      saved = written > 0;
+    }
+    if (saved) {
+      snapshotRuns[snapshotRunCount] = {static_cast<int16_t>(hx), static_cast<int16_t>(hy), static_cast<int16_t>(hw),
+                                        static_cast<int16_t>(hh), static_cast<uint16_t>(used)};
+      snapshotRunCount++;
+      used += written;
+    }
+
+    if (knownMissing) {
+      renderer.drawRect(hx, hy, hw, hh, true);
+    } else {
+      renderer.fillRect(hx, hy, hw, hh, true);
+    }
+    for (uint8_t f = runBounds[run]; f < runBounds[run + 1]; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      const DrawStyle& drawStyle = drawStyleOf(piece);
+      char scratch[WORD_TEXT_CAPACITY];
+      const char* text = fragmentText(piece, scratch, sizeof(scratch));
+      if (drawStyle.scale == 1.0f) {
+        renderer.drawText(drawStyle.fontId, piece.x, piece.y, text, knownMissing, piece.style);
+      } else {
+        renderer.drawTextScaled(drawStyle.fontId, piece.x, piece.y, text, knownMissing, piece.style, drawStyle.scale);
+      }
+    }
   }
-  snapshotX = static_cast<int16_t>(hx);
-  snapshotY = static_cast<int16_t>(hy);
-  snapshotW = static_cast<int16_t>(hw);
-  snapshotH = static_cast<int16_t>(hh);
+
+  if (!saved) snapshotRunCount = 0;
   snapshotIdx = saved ? selected : -1;
-
-  // A word the speculative resolve has already proved absent gets an outline
-  // instead of the inverse fill: the cursor is still obviously here, but the
-  // reader can see there is nothing to look up without pressing Confirm and
-  // waiting for a "Not found" popup. Anything not yet resolved keeps the plain
-  // highlight -- absence is only ever claimed on a verdict.
-  const bool known_missing = speculationIdx == selected && speculation == Speculation::Missing;
-  if (known_missing) {
-    renderer.drawRect(hx, hy, hw, hh, true);
-  } else {
-    renderer.fillRect(hx, hy, hw, hh, true);
-  }
-  const bool inkBlack = known_missing;
-  if (word.scale == 1.0f) {
-    renderer.drawText(word.fontId, word.x, word.y, word.text, inkBlack, word.style);
-  } else {
-    renderer.drawTextScaled(word.fontId, word.x, word.y, word.text, inkBlack, word.style, word.scale);
-  }
   return saved;
 }
 
@@ -467,7 +753,12 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     // actually on screen first; the saved pixels below were read from that same
     // frame, so the restore only lines up after this.
     renderer.syncWriteBufferFromDisplayed();
-    renderer.writeFramebufferRegion(snapshotX, snapshotY, snapshotW, snapshotH, snapshot.get());
+    for (uint8_t run = 0; run < snapshotRunCount; run++) {
+      const SnapshotRun& saved = snapshotRuns[run];
+      // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+      // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
+      renderer.writeFramebufferRegion(saved.x, saved.y, saved.width, saved.height, snapshot.get() + saved.offset);
+    }
     // Batch-load just the highlighted word's glyphs before drawing them
     // white-on-black. clearCache() FIRST: prewarmCache() appends into the page
     // slots and deliberately never clears them -- that clear normally happens
@@ -480,8 +771,13 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     // re-render the page, only the two word boxes and the hints.
     auto* fcm = renderer.getFontCacheManager();
     fcm->clearCache();
-    fcm->prewarmCache(words[selected].fontId, words[selected].text,
-                      static_cast<uint8_t>(1u << (static_cast<uint8_t>(words[selected].style) & 0x03)));
+    const Word& word = words[selected];
+    for (uint8_t f = 0; f < word.fragmentCount; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      char scratch[WORD_TEXT_CAPACITY];
+      fcm->prewarmCache(drawStyleOf(piece).fontId, fragmentText(piece, scratch, sizeof(scratch)),
+                        static_cast<uint8_t>(1u << (static_cast<uint8_t>(piece.style) & 0x03)));
+    }
     speculationRepaintPending = false;
     if (drawHighlightWithSnapshot()) {
       drawHints();
