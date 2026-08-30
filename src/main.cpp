@@ -496,6 +496,21 @@ static void serviceBootPowerRelease() {
   }
 }
 
+// Whether GPIO13 (the X4 battery latch) stays HIGH through deep sleep, keeping the MCU
+// powered at ~3-4 mA so the LP timer keeps running and RTC memory survives.
+//
+// Every path that sleeps must agree on this. It used to be computed only inside
+// enterDeepSleep(), so the two early-boot "go straight back to sleep" paths took
+// startDeepSleep()'s keepClockAlive=false default instead: one short tap on a sleeping
+// device (or any spurious wake) was enough to have the wake gate reject the press and put
+// the device back down with the battery latch CUT, converting "asleep, wakes on a tap"
+// into "powered off, needs a hold long enough to carry the whole boot" — and losing the
+// clock with it, because those paths also never called HalClock::saveBeforeSleep().
+//
+// X3 is excluded: its DS3231 keeps time independently, so it never needs the LP timer
+// held alive, and GPIO13 there is the SD rail enable rather than a battery latch.
+static bool keepClockAliveForSleep() { return SETTINGS.useClock && !gpio.deviceIsX3(); }
+
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
 void enterDeepSleep(bool fromTimeout = false) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
@@ -516,7 +531,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // On X3 the DS3231 keeps time independently, so there's no need to keep the MCU
   // powered during deep sleep for LP timer preservation.
-  const bool keepLpAlive = SETTINGS.useClock && !gpio.deviceIsX3();
+  const bool keepLpAlive = keepClockAliveForSleep();
   HalClock::saveBeforeSleep(keepLpAlive);
   // If sleeping from a running reader the book loaded successfully, so the boot-loop
   // guard count is no longer needed. Reset it now because onExit() is never called
@@ -877,7 +892,12 @@ void setup() {
     // If USB power caused a cold boot, go back to sleep immediately without initializing subsystems
     LOG_DBG("MAIN", "Wakeup reason: After USB Power => Deep sleep");
     halTiltSensor.deepSleep();
-    powerManager.startDeepSleep(gpio);
+    // Same policy the device slept under, not startDeepSleep()'s default — see
+    // keepClockAliveForSleep(). saveBeforeSleep() no-ops when the clock was never
+    // restored (it returns early on !isSynced()), which is the case this early in boot.
+    const bool keepLpAlive = keepClockAliveForSleep();
+    HalClock::saveBeforeSleep(keepLpAlive);
+    powerManager.startDeepSleep(gpio, keepLpAlive);
     return;
   }
 
@@ -938,7 +958,14 @@ void setup() {
     LOG_INF("BOOT", "Wake gate rejected the press (%s), returning to deep sleep",
             HalGPIO::wakeVerdictName(bootWakeCheck.verdict));
     halTiltSensor.deepSleep();
-    powerManager.startDeepSleep(gpio);
+    // Go back down under the SAME policy the device slept under. Rejecting a press is a
+    // "nothing happened" answer, so it must not change the power state: with the default
+    // keepClockAlive=false this branch cut the X4 battery latch, so a single too-short tap
+    // silently downgraded a sleeping device to a powered-off one (see
+    // keepClockAliveForSleep()).
+    const bool keepLpAlive = keepClockAliveForSleep();
+    HalClock::saveBeforeSleep(keepLpAlive);
+    powerManager.startDeepSleep(gpio, keepLpAlive);
     return;
   }
 
