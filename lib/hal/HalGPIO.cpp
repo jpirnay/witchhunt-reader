@@ -338,7 +338,7 @@ bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
 unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
 
-void HalGPIO::waitForStablePowerRelease() {
+unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS
   // consecutive milliseconds.  The InputManager debounce (5 ms) is too short for
   // mechanical switch bounce which can last 10-50 ms, so we bypass it entirely here.
@@ -352,9 +352,28 @@ void HalGPIO::waitForStablePowerRelease() {
     } else {
       stableStart = 0;
     }
+    // Bounded, and deliberately so. This used to be `while (true)` with no way out, run
+    // at the point of no return on the sleep path: the input sampler is already stopped,
+    // the panel is already in deep sleep holding the sleep screen, and the loop task is
+    // not subscribed to the task WDT (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is unset
+    // and nothing calls esp_task_wdt_add on it), so nothing was going to rescue it. A pin
+    // that reads LOW indefinitely — a sticky or dirty switch, a finger that never comes
+    // off — therefore froze the device with the sleep screen displayed and every button
+    // dead, recoverable only by a reset (issue #155).
+    //
+    // Sleeping with the button still down is the lesser evil: the worst case is one
+    // immediate re-wake (the deep-sleep GPIO trigger is level-LOW), which the boot-side
+    // wake gate then classifies like any other press. A permanent freeze has no recovery
+    // at all. The caller is told how long we waited so the breadcrumb can record it.
+    if (millis() - waitStart >= timeoutMs) {
+      LOG_ERR("GPIO", "Power button still held after %lums — sleeping anyway (raw pin LOW)", timeoutMs);
+      return millis() - waitStart;
+    }
     delay(10);
   }
-  LOG_DBG("GPIO", "Power button stable-released after %lu ms", millis() - waitStart);
+  const unsigned long waited = millis() - waitStart;
+  LOG_DBG("GPIO", "Power button stable-released after %lu ms", waited);
+  return waited;
 }
 
 bool HalGPIO::isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples) {
