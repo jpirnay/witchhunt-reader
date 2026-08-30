@@ -1,0 +1,267 @@
+#include "BootDiagnosticsActivity.h"
+
+#include <CrossPointSettings.h>
+#include <GfxRenderer.h>
+#include <HalPowerManager.h>
+#include <I18n.h>
+#include <esp_sleep.h>
+#include <esp_system.h>
+
+#include <cstdio>
+
+#include "MappedInputManager.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+namespace {
+
+// Short technical tokens, deliberately untranslated: their whole purpose is to be
+// photographed into a bug report and compared against another reporter's, so a German
+// device and an English one must produce the same word.
+const char* resetReasonName(uint8_t reason) {
+  switch (static_cast<esp_reset_reason_t>(reason)) {
+    case ESP_RST_UNKNOWN:
+      return "unknown";
+    case ESP_RST_POWERON:
+      return "power-on";
+    case ESP_RST_EXT:
+      return "ext-reset";
+    case ESP_RST_SW:
+      return "sw-restart";
+    case ESP_RST_PANIC:
+      return "panic";
+    case ESP_RST_INT_WDT:
+      return "int-wdt";
+    case ESP_RST_TASK_WDT:
+      return "task-wdt";
+    case ESP_RST_WDT:
+      return "other-wdt";
+    case ESP_RST_DEEPSLEEP:
+      return "deep-sleep";
+    case ESP_RST_BROWNOUT:
+      return "brownout";
+    case ESP_RST_SDIO:
+      return "sdio";
+    default:
+      return "other";
+  }
+}
+
+const char* wakeCauseName(uint8_t cause) {
+  switch (static_cast<esp_sleep_wakeup_cause_t>(cause)) {
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+      return "none";
+    case ESP_SLEEP_WAKEUP_TIMER:
+      return "timer";
+    case ESP_SLEEP_WAKEUP_GPIO:
+      return "gpio";
+    case ESP_SLEEP_WAKEUP_UART:
+      return "uart";
+    case ESP_SLEEP_WAKEUP_ULP:
+      return "ulp";
+    default:
+      return "other";
+  }
+}
+
+// A sleep that got as far as arming the wake source is a completed sleep: the very next
+// statement is esp_deep_sleep_start(). Anything short of that means the device was still
+// running when it stopped being useful — which is the distinction the whole page exists
+// to make.
+bool sleepReachedDeepSleep(uint8_t stage) { return stage >= static_cast<uint8_t>(BootDiag::SleepStage::WakeArmed); }
+
+}  // namespace
+
+void BootDiagnosticsActivity::onEnter() {
+  Activity::onEnter();
+  loaded_ = false;
+  requestUpdate();
+}
+
+void BootDiagnosticsActivity::loop() {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+      mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    finish();
+    return;
+  }
+  // Read the ring on the first loop pass rather than in onEnter(), so the header paints
+  // immediately and the SD read (which shares the display's SPI bus) does not sit in
+  // front of the first frame.
+  if (!loaded_) {
+    recordCount_ = BootDiag::loadRecords(records_, BootDiag::kCapacity);
+    loaded_ = true;
+    requestUpdate();
+  }
+}
+
+void BootDiagnosticsActivity::render(RenderLock&&) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect contentRect = UITheme::getContentRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false);
+
+  renderer.clearScreen();
+  GUI.drawHeader(renderer,
+                 Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
+                 tr(STR_BOOT_DIAGNOSTICS), CROSSPOINT_VERSION);
+
+  const int fontId = UI_10_FONT_ID;
+  const int leftX = contentRect.x + metrics.verticalSpacing * 3;
+  // Labels are translated and so vary in length; give the value column a fixed start far
+  // enough right that the longest German label still clears it.
+  const int valueX = contentRect.x + contentRect.width * 42 / 100;
+  const int valueW = contentRect.x + contentRect.width - valueX - metrics.verticalSpacing * 3;
+  const int lineH = renderer.getLineHeight(fontId);
+  const int rowStep = lineH + 2;
+  const int subHeaderHeight = lineH + 6;
+  const int hintsTop = contentRect.y + contentRect.height - metrics.buttonHintsHeight;
+  int y = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+
+  auto room = [&](int rows) { return y + rows * rowStep <= hintsTop; };
+
+  auto drawSection = [&](const char* title) {
+    GUI.drawSubHeader(renderer, Rect{contentRect.x, y, contentRect.width, subHeaderHeight}, title);
+    y += subHeaderHeight + 2;
+  };
+  const int labelW = valueX - leftX - 4;
+  auto drawRow = [&](const char* label, const char* value) {
+    // Both halves are clipped: labels are translated (German runs noticeably longer than
+    // English) and values are free-form technical strings, so either can overrun.
+    renderer.drawText(fontId, leftX, y, renderer.truncatedText(fontId, label, labelW, EpdFontFamily::BOLD).c_str(),
+                      true, EpdFontFamily::BOLD);
+    renderer.drawText(fontId, valueX, y, renderer.truncatedText(fontId, value, valueW).c_str());
+    y += rowStep;
+  };
+  // A row whose value spans the full width — used for the phase trace and the history
+  // lines, which are long, monospaced-ish token runs with no useful label/value split.
+  const int wideW = contentRect.x + contentRect.width - leftX - metrics.verticalSpacing * 3;
+  auto drawWide = [&](const char* text) {
+    renderer.drawText(fontId, leftX, y, renderer.truncatedText(fontId, text, wideW).c_str());
+    y += rowStep;
+  };
+
+  char buf[96];
+
+  // ---- This boot -----------------------------------------------------------------
+  drawSection(tr(STR_DIAG_THIS_BOOT));
+  drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
+  drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
+
+  const auto& check = BootDiag::wakeCheck();
+  snprintf(buf, sizeof(buf), "%s (held %u ms, needs %u ms)", HalGPIO::wakeVerdictName(check.verdict), check.heldMs,
+           CrossPointSettings::getPowerWakeHoldDuration());
+  drawRow(tr(STR_DIAG_WAKE_GATE), buf);
+
+  snprintf(buf, sizeof(buf), "%u ms", BootDiag::phaseMs(BootDiag::BootPhase::FirstPaint));
+  drawRow(tr(STR_DIAG_FIRST_PAINT), buf);
+
+  // Per-phase deltas, wrapped across as many full-width rows as they need. Deltas rather
+  // than absolutes: the cost of a phase is the actionable figure, and absolutes are just
+  // their running sum. Unreached phases are skipped, so a short trace is itself a signal
+  // about which path the boot took.
+  renderer.drawText(fontId, leftX, y,
+                    renderer.truncatedText(fontId, tr(STR_DIAG_BOOT_PHASES), labelW, EpdFontFamily::BOLD).c_str(), true,
+                    EpdFontFamily::BOLD);
+  y += rowStep;
+  {
+    size_t used = 0;
+    uint16_t previous = 0;
+    buf[0] = '\0';
+    for (uint8_t i = 0; i < static_cast<uint8_t>(BootDiag::BootPhase::Count) && room(1); i++) {
+      const auto phase = static_cast<BootDiag::BootPhase>(i);
+      if (!BootDiag::phaseReached(phase)) continue;
+      char token[24];
+      const int len = snprintf(token, sizeof(token), "%s+%u", BootDiag::phaseName(phase),
+                               static_cast<unsigned>(BootDiag::phaseMs(phase) - previous));
+      previous = BootDiag::phaseMs(phase);
+      if (len < 0) continue;
+      // Wrap on measured width, not on a token count: the labels differ in length, the
+      // stamps grow from one digit to five as the boot proceeds, and the page renders in
+      // both orientations — any fixed count either clips in portrait or wastes half the
+      // line in landscape. Buffer overrun is impossible by the same test: the append only
+      // happens when the result still fits, and a single token is 23 chars at most.
+      if (used > 0) {
+        char candidate[sizeof(buf)];
+        snprintf(candidate, sizeof(candidate), "%s %s", buf, token);
+        if (renderer.getTextWidth(fontId, candidate) > wideW || used + 1 + static_cast<size_t>(len) >= sizeof(buf)) {
+          drawWide(buf);
+          used = 0;
+          buf[0] = '\0';
+        }
+      }
+      used += static_cast<size_t>(snprintf(buf + used, sizeof(buf) - used, "%s%s", used ? " " : "", token));
+    }
+    if (used > 0 && room(1)) drawWide(buf);
+  }
+
+  // Idle duty cycle. The closest proxy for average current without a meter, and readable
+  // only here: the CDC guard turns light sleep off for as long as a serial monitor is
+  // attached, so a serial log of this would only ever print zeroes.
+  {
+    const auto& stats = powerManager.lightSleepStats();
+    const uint32_t totalMs = stats.sleptMs + stats.awakeMs;
+    const unsigned pct = totalMs > 0 ? static_cast<unsigned>((stats.sleptMs * 100ULL) / totalMs) : 0;
+    snprintf(buf, sizeof(buf), "%us slept (%u%%), %u tries, %u gpio wakes", stats.sleptMs / 1000, pct, stats.attempts,
+             stats.wakeGpio);
+    if (room(1)) drawRow(tr(STR_LIGHT_SLEEP), buf);
+  }
+
+  // ---- Last sleep ----------------------------------------------------------------
+  // Sourced from the newest sleep record rather than from live state: the interesting
+  // case is a sleep that ended in a way this boot could not observe.
+  const BootDiag::Record* lastSleep = nullptr;
+  for (uint8_t i = 0; i < recordCount_; i++) {
+    if (records_[i].kind == BootDiag::KindSleep) {
+      lastSleep = &records_[i];
+      break;
+    }
+  }
+
+  if (room(7)) {
+    drawSection(tr(STR_DIAG_LAST_SLEEP));
+    if (lastSleep == nullptr) {
+      drawRow(tr(STR_DIAG_STOPPED_AT), tr(STR_DIAG_NO_RECORDS));
+    } else {
+      const bool complete = sleepReachedDeepSleep(lastSleep->code);
+      drawRow(tr(STR_DIAG_STOPPED_AT), BootDiag::stageName(static_cast<BootDiag::SleepStage>(lastSleep->code)));
+      // The verdict gets a full-width row of its own rather than sharing the value
+      // column: it is the one line a reporter is being asked to read, and the value
+      // column is too narrow to hold it next to the stage name without clipping.
+      drawWide(complete ? tr(STR_DIAG_SLEEP_OK) : tr(STR_DIAG_SLEEP_STUCK));
+      drawRow(tr(STR_DIAG_TRIGGER), BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)));
+      drawRow(tr(STR_DIAG_BATTERY_LATCH),
+              (lastSleep->flags & BootDiag::kFlagKeepClock) ? tr(STR_DIAG_LATCH_KEPT) : tr(STR_DIAG_LATCH_CUT));
+      snprintf(buf, sizeof(buf), "%u ms%s", lastSleep->msA,
+               (lastSleep->flags & BootDiag::kFlagReleaseTimeout) ? " (TIMED OUT)" : "");
+      drawRow(tr(STR_DIAG_RELEASE_WAIT), buf);
+    }
+  }
+
+  // ---- History -------------------------------------------------------------------
+  // Alternating sleep/boot lines are what make a report self-explanatory: a
+  // "await-release" sleep followed by an "ext-reset" boot is a hang, while a "wake-armed"
+  // sleep followed by a "power-on" boot is a healthy cycle.
+  if (room(3)) {
+    drawSection(tr(STR_DIAG_HISTORY));
+    if (recordCount_ == 0) {
+      drawWide(tr(STR_DIAG_NO_RECORDS));
+    }
+    for (uint8_t i = 0; i < recordCount_ && room(1); i++) {
+      const BootDiag::Record& r = records_[i];
+      if (r.kind == BootDiag::KindSleep) {
+        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s%s", static_cast<unsigned long>(r.seq),
+                 BootDiag::stageName(static_cast<BootDiag::SleepStage>(r.code)),
+                 BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
+                 (r.flags & BootDiag::kFlagKeepClock) ? "latch-kept" : "latch-cut",
+                 (r.flags & BootDiag::kFlagReleaseTimeout) ? " rel-timeout" : "");
+      } else {
+        snprintf(buf, sizeof(buf), "%lu boot  %s/%s %s %ums sd@%ums", static_cast<unsigned long>(r.seq),
+                 resetReasonName(r.reason), wakeCauseName(r.flags),
+                 HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)), r.msB, r.msC);
+      }
+      drawWide(buf);
+    }
+  }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer();
+}

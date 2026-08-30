@@ -28,6 +28,7 @@ enum class SettingAction {
   SdFirmwareUpdate,
   Language,
   SystemInfo,
+  BootDiagnostics,
   DetectTimezone,
   SyncTime,
   Weather,

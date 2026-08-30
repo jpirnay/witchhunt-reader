@@ -181,6 +181,11 @@ void SettingsActivity::onEnter() {
   addToMoved(systemSettings, lastSystemSub,
              std::move(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStats)
                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  // Next to System Information, which is where anyone chasing a "the power button did
+  // nothing" report already looks.
+  addToMoved(systemSettings, lastSystemSub,
+             std::move(SettingInfo::Action(StrId::STR_BOOT_DIAGNOSTICS, SettingAction::BootDiagnostics)
+                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
   SettingInfo::prepareSubmenus(displaySettings, submenuData);
   SettingInfo::prepareSubmenus(readerSettings, submenuData);
