@@ -451,8 +451,11 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
   }
 }
 
-// Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
-void enterDeepSleep(bool fromTimeout = false) {
+// Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on
+// Timeout"). `trigger` is diagnostics only — it does not change behaviour, it just records
+// which gesture asked for the sleep, which is the first thing a "it did not wake up" report
+// needs pinned down.
+void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = BootDiag::SleepTrigger::PowerHold) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
           gpio.isPressed(HalGPIO::BTN_POWER), digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
   // The web server activity releases BOTH framebuffers for WiFi heap
@@ -463,8 +466,8 @@ void enterDeepSleep(bool fromTimeout = false) {
     silentRestartToSleep(fromTimeout);
     return;  // not reached — silentRestartToSleep() restarts the chip
   }
-  BootDiag::beginSleep(fromTimeout ? BootDiag::SleepTrigger::Timeout : BootDiag::SleepTrigger::PowerHold,
-                       keepClockAliveForSleep(), activityManager.isReaderActivity());
+  BootDiag::beginSleep(fromTimeout ? BootDiag::SleepTrigger::Timeout : trigger, keepClockAliveForSleep(),
+                       activityManager.isReaderActivity());
   // Stop the background sampler before tearing down the display/power rails so no
   // ADC read races with that teardown. From here sleep prep reads the power pin
   // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
@@ -1522,7 +1525,7 @@ void loop() {
           activityManager.goHome();
           break;
         case BA::BTN_SLEEP:
-          enterDeepSleep();
+          enterDeepSleep(/*fromTimeout=*/false, BootDiag::SleepTrigger::ButtonAction);
           return;  // enterDeepSleep() never returns, but return here to stop processing
         case BA::BTN_FORCE_REFRESH: {
           // In the reader, route through the activity so it re-displays the CURRENT page in
