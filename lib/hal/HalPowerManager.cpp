@@ -223,6 +223,11 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // output mode. Non-Xteink boards are left alone — GPIO13 is an ordinary signal
   // there (SPI MOSI on the LilyGo T5S3, display CS on the X4 Pro).
   if (gpio.isXteinkDevice()) {
+    // gpio_hold_dis() first: a hold left over from an earlier slice (or from a previous
+    // sleep cycle) makes gpio_set_level() a silent no-op, so without this the pin would
+    // keep whatever level it was latched at — the exact failure mode documented at
+    // startDeepSleep()'s own gpio_hold_dis below. Re-holding immediately after is free.
+    gpio_hold_dis(GPIO_BATTERY_LATCH);
     gpio_set_level(GPIO_BATTERY_LATCH, 1);
     gpio_set_direction(GPIO_BATTERY_LATCH, GPIO_MODE_OUTPUT);
     gpio_hold_en(GPIO_BATTERY_LATCH);
@@ -329,6 +334,18 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     gpio_deep_sleep_hold_en();
     gpio_hold_en(GPIO_SPIWP);
   } else {
+    // Same release, for the boards that reach GPIO13 through the SDK's rail teardown
+    // instead of the latch branch above. It matters on X3: lightSleep() re-holds GPIO13
+    // HIGH on every idle slice for ALL Xteink C3 boards (isXteinkDevice()), but only the
+    // X4 branch above released it — so powerDownRailsForSleep() could not drive the X3's
+    // SD rail enable LOW and the card stayed powered through deep sleep, draining the
+    // battery. Guarded to Xteink C3 for the same reason the branch above is: elsewhere
+    // GPIO13 is an ordinary bus signal (SPI MOSI on the T5S3, display CS on the X4 Pro)
+    // that nothing has held and that we must not touch.
+    if (gpio.isXteinkDevice()) {
+      gpio_hold_dis(GPIO_NUM_13);
+    }
+    gpio_deep_sleep_hold_dis();
     freeink::PowerManager::powerDownRailsForSleep();
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
