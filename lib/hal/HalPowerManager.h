@@ -60,8 +60,25 @@ class HalPowerManager {
     uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
   };
 
+  // The last steps of startDeepSleep(), reported to an optional observer. That
+  // function does not return, so the only way anything downstream can learn how far it
+  // got is to be told on the way past.
+  enum class SleepStep : uint8_t {
+    RailsConfigured,  // GPIO13 / rail teardown done, wake pin pulled up
+    AwaitingRelease,  // about to block on the power-button release
+    ReleaseDone,      // release seen, or the wait gave up (see `timedOut`)
+    WakeArmed,        // wake source armed; esp_deep_sleep_start() is the next statement
+  };
+  // Plain function pointer, not std::function: the latter costs ~2-4 KB of binary per
+  // signature and heap-allocates its closure, and this is called on the sleep path where
+  // the heap may already be why we are sleeping. Owned by the app layer so the HAL takes
+  // no dependency on the diagnostics module.
+  using SleepStepHook = void (*)(SleepStep step, unsigned long waitedMs, bool timedOut);
+  void setSleepStepHook(SleepStepHook hook) { sleepStepHook_ = hook; }
+
  private:
   LightSleepStats lightSleepStats_;
+  SleepStepHook sleepStepHook_ = nullptr;
   unsigned long lastSliceEndMs_ = 0;
 
  public:
