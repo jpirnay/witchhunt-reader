@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
@@ -767,6 +768,28 @@ static bool openSerialLogIfHostPresent() {
 #endif
 
 void setup() {
+  // FIRST statement, ahead of the NVS read and the wake gate: on the X4 the battery
+  // MOSFET is gated by GPIO13 (BoardProfile power.latch0), and BoardConfig documents a
+  // hardware revision in the field that does NOT self-latch — those units stay powered
+  // only while the power button physically bridges the rail. holdPowerRails() drives the
+  // latch and is the SDK's documented "call it first thing in setup()" contract
+  // (BoardConfig.h: selectDevice() re-asserts it once the real board is known, on the
+  // premise that the consumer already called it once).
+  //
+  // Until this landed, the latch was first asserted inside gpio.begin() — after the NVS
+  // read, after the wake gate's up-to-300 ms hold window, after three full
+  // heap_caps_check_integrity_all() walks and the OTA state read. A non-self-latching
+  // unit therefore had to be held for the whole of that (plus the ~200-300 ms bootloader
+  // that millis() does not count) or the rail dropped mid-boot and nothing happened at
+  // all: the panel still showed the sleep screen, so it read as "stuck asleep, the power
+  // button does nothing" (issue #155). Asserting it here is a no-op on self-latching
+  // units and costs one GPIO write.
+  //
+  // Safe before device detection: the dual C3 binary boots with the X4 profile, whose
+  // latch0 is GPIO13; the X3 profiles leave latch0 unassigned and carry GPIO13 as their
+  // SD rail enable, which wants HIGH at boot anyway. selectDevice() in gpio.begin()
+  // re-runs holdPowerRails() with the resolved profile.
+  BoardConfig::holdPowerRails();
   markBootPhase(BootPhase::SetupEntry);
   // Load just the settings we need before any other init, so the wake gesture mirrors
   // whichever press type(s) the user configured to put the device to sleep.
