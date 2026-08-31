@@ -1,11 +1,13 @@
 #pragma once
 
 #include <BoardConfig.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "CrossPointSettings.h"
@@ -77,6 +79,10 @@ inline std::string getKoSyncMinPagesDisplay(void*) {
   return std::to_string(v) + tr(STR_PAGES_SUFFIX);
 }
 
+inline std::string getFrontlightBrightnessDisplay(void*) { return std::to_string(SETTINGS.frontlightBrightness) + "%"; }
+
+inline std::string getFrontlightWarmthDisplay(void*) { return std::to_string(SETTINGS.frontlightWarmth) + "%"; }
+
 inline std::vector<SettingInfo> buildSettingsList() {
   // Shared button action options used by all button enum entries.
   const std::vector<StrId> btnActionOptions = {StrId::STR_BTN_ACT_PAGE_FORWARD,
@@ -103,12 +109,22 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                                StrId::STR_BTN_ACT_IGNORE,
                                                StrId::STR_DICTIONARY};
 
+  // The frontlight actions sit at the END of BUTTON_ACTION, so dropping them on
+  // a board with no light leaves every other option's numeric value untouched —
+  // a settings file written on a lit board still reads correctly here.
+  const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
+                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER};
+
   // Prepend the per-button default action to the shared options list.
+  const bool hasLight = Frontlight.present();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
-    result.reserve(1 + btnActionOptions.size());
+    result.reserve(1 + btnActionOptions.size() + (hasLight ? lightActionOptions.size() : 0));
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
+    if (hasLight) {
+      result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
+    }
     return result;
   };
 
@@ -160,6 +176,38 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubcategory(StrId::STR_MENU_DISP_REFRESH));
   settings.push_back(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                                          StrId::STR_CAT_DISPLAY));
+
+  // --- Reading light (boards with a PWM frontlight/backlight) ---
+  // Grouped in a submenu so the Display tab stays one screen on boards that
+  // have one, and disappears entirely on boards that do not.
+  settings.push_back(SettingInfo::DynamicToggle(
+                         StrId::STR_READING_LIGHT, [](const void*) -> uint8_t { return Frontlight.isOn() ? 1 : 0; },
+                         [](void*, const uint8_t v) {
+                           // The hardware, not SETTINGS, is the authority for
+                           // "is the light on" (a wake with Restore off leaves
+                           // them legitimately apart), so read it back rather
+                           // than mirroring the requested value.
+                           Frontlight.setOn(v != 0);
+                           SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
+                         },
+                         "frontlightOn", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .withSubcategory(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
+  settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_BRIGHTNESS, SettingAction::FrontlightBrightnessPicker)
+                         .withDisplayGetter(getFrontlightBrightnessDisplay)
+                         .withCategory(StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
+  settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_WARMTH, SettingAction::FrontlightWarmthPicker)
+                         .withDisplayGetter(getFrontlightWarmthDisplay)
+                         .withCategory(StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::WarmLight));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_RESTORE_LIGHT_ON_WAKE, &CrossPointSettings::frontlightRestoreOnWake,
+                                         "frontlightRestoreOnWake", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
   settings.push_back(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                                        {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                                         StrId::STR_THEME_LYRA_CAROUSEL},
@@ -559,6 +607,13 @@ inline std::vector<SettingInfo> getSettingsList() {
         // SSD1677 develops grayscale from a factory waveform, so there is no
         // LUT to swap and the fast/OEM trade-off does not exist there.
         return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+      case SettingRequires::ReadingLight:
+        // Asked of the HAL rather than the board profile: the EEGO A4's I2C
+        // light is only present after begin() gets an ACK, so the profile alone
+        // would over-report.
+        return Frontlight.present();
+      case SettingRequires::WarmLight:
+        return Frontlight.present() && Frontlight.hasColorTemperature();
     }
     return true;
   };

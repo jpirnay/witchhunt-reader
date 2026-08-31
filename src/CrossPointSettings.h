@@ -324,6 +324,18 @@ class CrossPointSettings {
   uint8_t uiTheme = LYRA;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
+  // --- Frontlight / backlight (boards with FrontlightConfig; T5S3, X4 Pro) ---
+  // Brightness is a 0-100 percentage the SDK maps through a perceptual gamma
+  // curve. The floor the UI offers is HalFrontlight::MIN_BRIGHTNESS, not 0:
+  // "off" is frontlightOn, not a zero level.
+  uint8_t frontlightBrightness = 60;
+  // Warm/cool mix, 0 = fully cool .. 100 = fully warm. Only meaningful on a
+  // two-channel board (X4 Pro); inert on the T5S3's single backlight channel.
+  uint8_t frontlightWarmth = 50;
+  uint8_t frontlightOn = 0;
+  // Whether waking restores the light. Off by default so a device that wakes in
+  // a dark bag does not light up; brightness/warmth are always restored.
+  uint8_t frontlightRestoreOnWake = 1;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
@@ -440,6 +452,12 @@ class CrossPointSettings {
     BTN_QUICK_OVERRIDES,
     BTN_IGNORE,
     BTN_DICTIONARY,
+    // Frontlight/backlight control. Global (not reader-scoped): the light is
+    // just as wanted on the home screen or in a list. Inert on boards without
+    // one — HalFrontlight is a no-op there — and SettingsList hides them.
+    BTN_LIGHT_TOGGLE,
+    BTN_LIGHT_BRIGHTER,
+    BTN_LIGHT_DIMMER,
     BUTTON_ACTION_COUNT
   };
 

@@ -9,6 +9,7 @@
 #include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalI2cBus.h>
 #include <HalPowerManager.h>
@@ -1076,6 +1077,14 @@ void setup() {
   WEATHER_SETTINGS.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+
+  // Brightness and warmth are always restored. A normal wake starts with the
+  // light off unless Restore Light on Wake is enabled; silent maintenance
+  // reboots preserve the live state so a heap-recovery restart mid-chapter does
+  // not go dark under the reader's hands. Inert on boards without a light.
+  // Ported from upstream/develop (crosspoint-reader#2983).
+  const bool restoreLightOn = SETTINGS.frontlightOn != 0 && (SETTINGS.frontlightRestoreOnWake != 0 || isSilentReboot);
+  Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.
@@ -1474,6 +1483,10 @@ void loop() {
   {
     using BA = CrossPointSettings::BUTTON_ACTION;
     using B = MappedInputManager::Button;
+    // One press = one visible step. Ten percent covers the whole range in ten
+    // presses, which is about as many as anyone will make in a row; the
+    // brightness slider is there for setting an exact level.
+    constexpr int LIGHT_STEP_PERCENT = 10;
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
       switch (ev.button) {
         case B::Back:
@@ -1685,6 +1698,30 @@ void loop() {
         case BA::BTN_DICTIONARY:
           activityManager.dispatchButtonAction(BA::BTN_DICTIONARY);
           break;
+        // Frontlight control is global — handled here rather than through
+        // dispatchButtonAction() because it is not the activity's business, and
+        // it is as useful on the home screen as it is mid-page. The level is
+        // persisted so it survives the next boot; the panel is not redrawn,
+        // because nothing on it changed.
+        case BA::BTN_LIGHT_TOGGLE:
+          Frontlight.setOn(!Frontlight.isOn());
+          SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
+          SETTINGS.saveToFile();
+          break;
+        case BA::BTN_LIGHT_BRIGHTER:
+        case BA::BTN_LIGHT_DIMMER: {
+          const int delta =
+              (static_cast<BA>(action) == BA::BTN_LIGHT_BRIGHTER) ? LIGHT_STEP_PERCENT : -LIGHT_STEP_PERCENT;
+          SETTINGS.frontlightBrightness = Frontlight.setBrightnessDelta(delta);
+          // A step on a dark panel is meant as "light, this bright", not as a
+          // silent no-op the user cannot see.
+          if (!Frontlight.isOn()) {
+            Frontlight.setOn(true);
+            SETTINGS.frontlightOn = 1;
+          }
+          SETTINGS.saveToFile();
+          break;
+        }
         case BA::BTN_IGNORE:
           // Explicit "do nothing": swallow the event so neither a global action nor the
           // activity's built-in behaviour fires. A press that produced a Long emits no

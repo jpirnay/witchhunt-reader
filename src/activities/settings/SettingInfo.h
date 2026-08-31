@@ -36,6 +36,15 @@ enum class SettingRequires : uint8_t {
   // B0 allows keying on the display controller — with a comment saying why,
   // which is this one.
   SelectableGrayscaleLut,
+  // A PWM frontlight/backlight the firmware can drive (BoardConfig frontlight
+  // config, or the PM1 PWM path). Answered through HalFrontlight so a board
+  // whose light is probed at runtime reports honestly. Named ReadingLight, not
+  // Frontlight: HalFrontlight.h defines `Frontlight` as a singleton macro, and
+  // a macro does not respect the enum's scope.
+  ReadingLight,
+  // A second (warm) light channel, so colour temperature is a real control.
+  // Sub-capability of Frontlight — the T5S3's single backlight channel has none.
+  WarmLight,
 };
 
 enum class SettingAction {
@@ -62,6 +71,8 @@ enum class SettingAction {
   SleepTimeoutPicker,
   RefreshFrequencyPicker,
   KOSyncMinPagesPicker,
+  FrontlightBrightnessPicker,
+  FrontlightWarmthPicker,
   SwitchToUsbDrive,
   Submenu,
 };
@@ -204,6 +215,22 @@ struct SettingInfo {
     s.type = SettingType::STRING;
     s.stringOffset = (size_t)ptr - (size_t)&SETTINGS;
     s.stringMaxLen = maxLen;
+    s.key = key;
+    s.category = category;
+    return s;
+  }
+
+  // Stateless variant of Toggle — for a flag whose authority is not a
+  // CrossPointSettings field alone. The frontlight's on/off is one: the setter
+  // must reach the hardware as well as the setting, or the light would only
+  // follow the switch after a reboot.
+  static SettingInfo DynamicToggle(StrId nameId, ValueGetterFn getter, ValueSetterFn setter, const char* key = nullptr,
+                                   StrId category = StrId::STR_NONE_OPT) {
+    SettingInfo s;
+    s.nameId = nameId;
+    s.type = SettingType::TOGGLE;
+    s.valueGetter = getter;
+    s.valueSetter = setter;
     s.key = key;
     s.category = category;
     return s;
