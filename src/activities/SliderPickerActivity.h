@@ -41,4 +41,10 @@ class SliderPickerActivity : public Activity {
   ButtonNavigator buttonNavigator;
 
   void adjustValue(int delta);
+  // Move straight to `newValue` (a tap or drag names a value outright rather than a step).
+  // Repaints only when the value actually changed — see handleSliderTouch().
+  void setValue(int newValue);
+
+  // Tap or drag on the bar. Returns true when the touch was consumed. Inert on non-touch boards.
+  bool handleSliderTouch();
 };
