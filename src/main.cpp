@@ -859,8 +859,10 @@ void setup() {
     // keepClockAliveForSleep(). saveBeforeSleep() no-ops when the clock was never
     // restored (it returns early on !isSynced()), which is the case this early in boot.
     const bool keepLpAlive = keepClockAliveForSleep();
-    // Breadcrumb only: this runs before Storage.begin(), so there is no card to write to.
-    // BootDiag::persistBoot() on the NEXT boot notices the unpersisted crumb and files it.
+    // This boot is being abandoned before Storage.begin(), so it writes no boot record,
+    // and on an X4 sleeping with the latch cut the breadcrumb dies with the rail. Count it
+    // in NVS instead — otherwise a run of these is invisible and the device just looks dead.
+    BootDiag::noteAbortedBoot(BootDiag::SleepTrigger::UsbPowerBoot, BootDiag::wakeCheck().verdict);
     BootDiag::beginSleep(BootDiag::SleepTrigger::UsbPowerBoot, keepLpAlive, /*fromReader=*/false);
     HalClock::saveBeforeSleep(keepLpAlive);
     powerManager.startDeepSleep(gpio, keepLpAlive);
@@ -930,9 +932,11 @@ void setup() {
     // silently downgraded a sleeping device to a powered-off one (see
     // keepClockAliveForSleep()).
     const bool keepLpAlive = keepClockAliveForSleep();
-    // Breadcrumb only — same reason as the USB path above: no SD card yet. This one is
-    // worth having: a rejected wake leaves no other trace, and a device that keeps waking
-    // and refusing shows up here as a run of gate-rejected sleeps.
+    // Same as the USB path above, and this is the one that matters: a device waking,
+    // refusing the press and sleeping again — several times a minute, leaving the panel
+    // untouched — is indistinguishable from a dead one unless the aborts are counted
+    // somewhere that survives the rail.
+    BootDiag::noteAbortedBoot(BootDiag::SleepTrigger::WakeGateRejected, BootDiag::wakeCheck().verdict);
     BootDiag::beginSleep(BootDiag::SleepTrigger::WakeGateRejected, keepLpAlive, /*fromReader=*/false);
     HalClock::saveBeforeSleep(keepLpAlive);
     powerManager.startDeepSleep(gpio, keepLpAlive);

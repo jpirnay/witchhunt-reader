@@ -212,6 +212,23 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
   drawRow(tr(STR_DIAG_PREV_SESSION),
           BootDiag::previousSessionEndedWithoutSleep() ? tr(STR_DIAG_PREV_NO_SLEEP) : tr(STR_DIAG_PREV_SLEPT));
+  // Headline row rather than history-only: a device that wakes, refuses the press and
+  // sleeps again leaves the panel untouched, so this counter is the only thing separating
+  // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
+  {
+    uint16_t aborted = 0;
+    for (uint8_t i = 0; i < recordCount_; i++) {
+      if (records_[i].kind == BootDiag::KindBoot) break;  // only the run since this boot
+      if (records_[i].kind == BootDiag::KindAborted) aborted = records_[i].msA;
+    }
+    if (aborted == 0) {
+      drawRow(tr(STR_DIAG_ABORTED_BOOTS), tr(STR_DIAG_ABORTED_NONE));
+    } else {
+      snprintf(buf, sizeof(buf), "%u%s — %s", aborted, aborted >= BootDiag::kAbortCountCap ? "+" : "",
+               tr(STR_DIAG_ABORTED_FMT));
+      drawRow(tr(STR_DIAG_ABORTED_BOOTS), buf);
+    }
+  }
   drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
 
   const auto& check = BootDiag::wakeCheck();

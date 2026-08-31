@@ -4,6 +4,7 @@
 #include <CrossPointSettings.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Preferences.h>
 #include <esp_attr.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -65,6 +66,46 @@ void crumbStore(uint8_t stage, uint8_t trigger, uint8_t flags, bool pending) {
   s_crumbSleep = static_cast<uint32_t>(stage) | (static_cast<uint32_t>(trigger) << 8) |
                  (static_cast<uint32_t>(flags) << 16) | (static_cast<uint32_t>(pending ? 1u : 0u) << kPendingShift);
   s_crumbMagic = kCrumbMagic;
+}
+
+// ---------------------------------------------------------------------------
+// Aborted-boot counter (NVS)
+// ---------------------------------------------------------------------------
+//
+// Its own namespace rather than a few more keys in "Crosspoint": this is diagnostics, it
+// is written from a path that runs before the settings layer is fully up, and a corrupt or
+// cleared entry here must never be able to disturb a real setting.
+constexpr char kAbortNamespace[] = "wbdiag";
+constexpr char kAbortCountKey[] = "abrtN";
+constexpr char kAbortReasonKey[] = "abrtR";
+constexpr char kAbortVerdictKey[] = "abrtV";
+
+struct AbortTally {
+  uint16_t count = 0;
+  uint8_t trigger = 0;
+  uint8_t verdict = 0;
+};
+
+AbortTally readAbortTally() {
+  AbortTally tally;
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/true)) {
+    return tally;  // namespace has never been written — no aborts to report
+  }
+  tally.count = nvs.getUShort(kAbortCountKey, 0);
+  tally.trigger = nvs.getUChar(kAbortReasonKey, 0);
+  tally.verdict = nvs.getUChar(kAbortVerdictKey, 0);
+  nvs.end();
+  return tally;
+}
+
+void clearAbortTally() {
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
+    return;
+  }
+  nvs.clear();
+  nvs.end();
 }
 
 // ---------------------------------------------------------------------------
@@ -451,6 +492,22 @@ void persistSleep() {
   }
 }
 
+void noteAbortedBoot(SleepTrigger trigger, HalGPIO::WakeVerdict verdict) {
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
+    return;
+  }
+  const uint16_t count = nvs.getUShort(kAbortCountKey, 0);
+  if (count < kAbortCountCap) {
+    nvs.putUShort(kAbortCountKey, static_cast<uint16_t>(count + 1));
+    nvs.putUChar(kAbortReasonKey, static_cast<uint8_t>(trigger));
+    nvs.putUChar(kAbortVerdictKey, static_cast<uint8_t>(verdict));
+  }
+  nvs.end();
+  LOG_INF("BOOT", "Aborted boot #%u (%s, gate %s) — going straight back to sleep", count + 1, triggerName(trigger),
+          HalGPIO::wakeVerdictName(verdict));
+}
+
 void persistReleaseTimeout(bool storageLive) {
   if (!storageLive) {
     return;  // this board's teardown path has already cut the SD rail
@@ -483,6 +540,7 @@ void persistBoot() {
 
   const esp_reset_reason_t resetReason = esp_reset_reason();
   const esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
+  const AbortTally abortTally = readAbortTally();
 
   updateRing([&] {
     if (hadCrumb && pending) {
@@ -503,6 +561,19 @@ void persistBoot() {
       finalizeNewestSleep(hadCrumb, finalStage, crumbFlagBits, waitMs, resetReason);
     }
 
+    // Aborted boots since the last completed one, as a single summary line placed before
+    // this boot's record so the history reads chronologically. Nothing else could have
+    // recorded them: those boots return before Storage.begin() and lose the breadcrumb
+    // with the rail.
+    if (abortTally.count > 0) {
+      Record aborted{};
+      aborted.kind = KindAborted;
+      aborted.code = abortTally.verdict;
+      aborted.reason = abortTally.trigger;
+      aborted.msA = abortTally.count;
+      imageAppend(aborted);
+    }
+
     Record boot{};
     boot.kind = KindBoot;
     boot.code = static_cast<uint8_t>(s_wakeCheck.verdict);
@@ -513,6 +584,13 @@ void persistBoot() {
     boot.msC = phaseMs(BootPhase::SdMount);
     imageAppend(boot);
   });
+
+  if (abortTally.count > 0) {
+    // Drained into the ring above, so the next completed boot starts a fresh run. Only
+    // written when there was something to clear, which keeps the healthy path free of NVS
+    // writes entirely.
+    clearAbortTally();
+  }
 
   // Consumed either way: a crumb that could not be written is still spent, and leaving it
   // set would attribute this boot's sleep state to the next boot as well.

@@ -153,7 +153,15 @@ struct Record {
 };
 static_assert(sizeof(Record) == 16, "Record is written to SD verbatim; keep it 16 bytes");
 
-enum Kind : uint8_t { KindSleep = 0, KindBoot = 1 };
+enum Kind : uint8_t {
+  KindSleep = 0,
+  KindBoot = 1,
+  // A run of boots that woke, refused to come up, and went straight back to sleep. One
+  // record summarises the whole run rather than one per abort: they are counted in NVS as
+  // they happen (nothing else survives — see noteAbortedBoot) and drained into the ring by
+  // the next boot that actually completes.
+  KindAborted = 2,
+};
 
 /// Record::flags bits, sleep records only.
 enum SleepFlags : uint8_t {
@@ -204,6 +212,23 @@ inline constexpr uint8_t kCapacity = 16;
 /// breadcrumb (when it survived), appends this boot's record, and clears the
 /// breadcrumb.  Cheap: one 272-byte read and one 272-byte write.
 void persistBoot();
+
+/// Record that this boot decided not to come up: the wake gate refused the press, or USB
+/// power caused a cold boot.  Both paths return from setup() before Storage.begin(), so
+/// they write no boot record, and on an X4 sleeping with the latch cut the RTC breadcrumb
+/// does not survive the rail going away either.  Without this an abort loop is completely
+/// invisible — the device reads as dead while it is in fact waking and refusing several
+/// times a minute, which is one of the shapes issue #155 could take.
+///
+/// Counted in NVS because that is the only store alive at this point in setup() that also
+/// survives the rail: the card is not mounted yet and RTC memory is about to be lost.  The
+/// count saturates at kAbortCountCap so a runaway loop cannot write without bound, and the
+/// healthy path costs one read and no writes.
+void noteAbortedBoot(SleepTrigger trigger, HalGPIO::WakeVerdict verdict);
+
+/// Ceiling on the NVS abort counter.  Past this the run is self-evidently a loop and the
+/// exact number stops being interesting, so writing stops.
+inline constexpr uint16_t kAbortCountCap = 250;
 
 /// Call on the sleep path once everything that can fail has succeeded and only the
 /// release wait and the wake arming remain.  Appends the sleep record so it survives a
