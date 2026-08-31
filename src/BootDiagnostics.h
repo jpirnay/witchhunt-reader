@@ -4,6 +4,8 @@
 
 #include <cstdint>
 
+#include "BootDiagRing.h"
+
 /// Boot and sleep forensics.
 ///
 /// Two things this firmware could not previously answer from the device itself:
@@ -87,38 +89,6 @@ void logSummary();
 // Sleep breadcrumb
 // ---------------------------------------------------------------------------
 
-/// How far the last deep-sleep attempt got.  Advanced through RTC_NOINIT as the sleep
-/// path proceeds, so the two indistinguishable failures — "never actually slept" and
-/// "slept but did not wake" — separate cleanly on the next boot.
-///
-/// Ordered: a larger value means strictly more progress, so the page can render the
-/// stage as a position along the sequence.
-enum class SleepStage : uint8_t {
-  None = 0,         // no sleep attempted since this power cycle began
-  Requested,        // enterDeepSleep() entered and committed
-  StatePersisted,   // app state + clock written
-  ScreenPainted,    // sleep screen handed to the panel
-  PanelAsleep,      // display.deepSleep() returned
-  RailsConfigured,  // GPIO13 / rail teardown done, wake pin pulled up
-  AwaitingRelease,  // blocking on the power-button release — where a stuck pin hangs
-  ReleaseTimedOut,  // the release wait gave up and slept anyway
-  WakeArmed,        // wake source armed; esp_deep_sleep_start() is the next statement
-  Count,
-};
-
-/// Why the firmware decided to sleep.  Distinguishes a deliberate gesture from the two
-/// early-boot paths that sleep before any UI exists, which is worth knowing: those are
-/// invisible to the user and used to change the device's power state behind their back.
-enum class SleepTrigger : uint8_t {
-  Unknown = 0,
-  PowerHold,         // power button held past the sleep threshold
-  Timeout,           // inactivity auto-sleep
-  ButtonAction,      // a button mapped to the Sleep action
-  WakeGateRejected,  // woke, gate refused the press, going straight back down
-  UsbPowerBoot,      // USB power caused a cold boot; nothing else was initialised
-  Count,
-};
-
 const char* stageName(SleepStage stage);
 const char* triggerName(SleepTrigger trigger);
 
@@ -138,76 +108,6 @@ void noteReleaseWait(unsigned long waitedMs, bool timedOut);
 // Persisted history
 // ---------------------------------------------------------------------------
 
-/// One line of the sleep/wake history.  16 bytes, POD, and read back with memcpy
-/// rather than a pointer cast — the C3 faults on unaligned multi-byte loads.
-struct Record {
-  uint32_t seq;    // monotonic across boots and power cycles; establishes ordering
-  uint8_t kind;    // Kind
-  uint8_t code;    // Sleep: SleepStage reached | Boot: HalGPIO::WakeVerdict
-  uint8_t reason;  // Sleep: SleepTrigger       | Boot: esp_reset_reason()
-  uint8_t flags;   // Sleep: kFlag*             | Boot: esp_sleep_get_wakeup_cause()
-  uint16_t msA;    // Sleep: release-wait ms    | Boot: wake gate decidedAtMs
-  uint16_t msB;    // Sleep: uptime seconds     | Boot: wake gate heldMs
-  uint16_t msC;    // Sleep: unused             | Boot: millis() at SD mount
-  uint16_t pad;    // keeps the struct 16 bytes and 4-byte aligned
-};
-static_assert(sizeof(Record) == 16, "Record is written to SD verbatim; keep it 16 bytes");
-
-enum Kind : uint8_t {
-  KindSleep = 0,
-  KindBoot = 1,
-  // A run of boots that woke, refused to come up, and went straight back to sleep. One
-  // record summarises the whole run rather than one per abort: they are counted in NVS as
-  // they happen (nothing else survives — see noteAbortedBoot) and drained into the ring by
-  // the next boot that actually completes.
-  KindAborted = 2,
-};
-
-/// Record::flags bits, sleep records only.
-enum SleepFlags : uint8_t {
-  kFlagKeepClock = 1 << 0,       // battery latch stays HIGH, MCU powered through sleep
-  kFlagFromReader = 1 << 1,      // slept with a book open (wake repaints nothing until the page lands)
-  kFlagReleaseTimeout = 1 << 2,  // the power-button release wait gave up
-  kFlagStageFromRtc = 1 << 3,    // final stage was amended from the RTC breadcrumb on the next boot
-  // Set by persistSleep(), cleared by the next persistBoot(). While set, `code` is only
-  // the stage reached when the record was written — the last steps had not run yet — so
-  // it must not be read as a verdict. A record still carrying this flag was written by a
-  // boot that never came back, which is itself worth seeing.
-  kFlagInProgress = 1 << 4,
-  // Final stage was deduced from this boot's reset reason because the breadcrumb did not
-  // survive. Not a measurement: see resetImpliesMcuHadStopped().
-  kFlagStageInferred = 1 << 5,
-};
-
-/// How a sleep record's `code` should be read once finalised.
-///
-/// Deliberately does NOT lean on esp_reset_reason() to separate a clean power-down from a
-/// reset-button rescue: on the ESP32-C3 it cannot. Its get_reset_reason() has no
-/// ESP_RST_EXT case at all — RESET_REASON_CHIP_POWER_ON covers both a real power-on and a
-/// CHIP_PU (EN pin) reset, and both surface as ESP_RST_POWERON. So the two boots are
-/// indistinguishable at that level by hardware, and anything claiming otherwise would be
-/// guessing. What separates them instead is evidence written while the device was still
-/// running: kFlagReleaseTimeout (persisted the moment the release wait gives up) and the
-/// shape of the history, where an unclean end leaves a boot record with no sleep before it.
-enum class SleepOutcome : uint8_t {
-  ReachedDeepSleep,   // measured: the breadcrumb survived and showed the wake source armed
-  ReleaseTimedOut,    // measured: the release wait gave up, so the device was still running
-  PoweredOffAsAsked,  // the rail was cut, which is what this sleep's policy asked for
-  PoweredOffUnasked,  // the rail was cut although the policy said the MCU should stay up
-  DidNotSleep,        // the recorded stage itself shows it never got there
-  Unfinished,         // still flagged in-progress — the finalising boot never happened
-};
-SleepOutcome outcomeOf(const Record& record);
-
-/// True when this boot's record is not preceded by a sleep — the previous session ended
-/// without reaching the sleep path at all (a reset while awake, a crash, a rail cut). This
-/// is the discriminator that survives a rail cut, since the reset reason cannot provide it.
-bool previousSessionEndedWithoutSleep();
-
-/// How many events the ring keeps.  16 covers eight full sleep/wake cycles, which is
-/// more than any reporter has been asked to reproduce, at 272 bytes on the card.
-inline constexpr uint8_t kCapacity = 16;
-
 /// Call once after Storage.begin().  Amends the previous sleep record from the RTC
 /// breadcrumb (when it survived), appends this boot's record, and clears the
 /// breadcrumb.  Cheap: one 272-byte read and one 272-byte write.
@@ -226,9 +126,39 @@ void persistBoot();
 /// healthy path costs one read and no writes.
 void noteAbortedBoot(SleepTrigger trigger, HalGPIO::WakeVerdict verdict);
 
-/// Ceiling on the NVS abort counter.  Past this the run is self-evidently a loop and the
+/// Ceiling on each NVS abort bucket.  Past this the run is self-evidently a loop and the
 /// exact number stops being interesting, so writing stops.
 inline constexpr uint16_t kAbortCountCap = 250;
+
+/// Aborts are bucketed by reason, not just totalled: "it refused 7 times" and "it refused 4
+/// times because the press was already over and 3 because it was released early" are
+/// different faults, and only the second tells you which way to look.
+///
+/// Bucket 0 is the USB-power cold boot, whose wake verdict carries no information (the gate
+/// runs before the branch is chosen and always reports whatever the pin happened to be
+/// doing).  Buckets 1..N are wake-gate rejections keyed by the verdict that caused them, so
+/// released-early and never-pressed stay separate.
+inline constexpr uint8_t kWakeVerdictCount = 6;  // HalGPIO::WakeVerdict, NotPressed..NoSecondPress
+inline constexpr uint8_t kAbortBucketUsbPower = 0;
+inline constexpr uint8_t kAbortBucketCount = 1 + kWakeVerdictCount;
+
+/// Bucket index for a (trigger, verdict) pair.
+inline uint8_t abortBucketOf(SleepTrigger trigger, HalGPIO::WakeVerdict verdict) {
+  if (trigger != SleepTrigger::WakeGateRejected) {
+    return kAbortBucketUsbPower;
+  }
+  const uint8_t v = static_cast<uint8_t>(verdict);
+  return v < kWakeVerdictCount ? static_cast<uint8_t>(1 + v) : kAbortBucketUsbPower;
+}
+
+/// Inverse of abortBucketOf(), for rendering a drained record.
+inline SleepTrigger abortBucketTrigger(uint8_t bucket) {
+  return bucket == kAbortBucketUsbPower ? SleepTrigger::UsbPowerBoot : SleepTrigger::WakeGateRejected;
+}
+inline HalGPIO::WakeVerdict abortBucketVerdict(uint8_t bucket) {
+  return bucket == kAbortBucketUsbPower ? HalGPIO::WakeVerdict::NotPressed
+                                        : static_cast<HalGPIO::WakeVerdict>(bucket - 1);
+}
 
 /// Call on the sleep path once everything that can fail has succeeded and only the
 /// release wait and the wake arming remain.  Appends the sleep record so it survives a
@@ -248,5 +178,11 @@ void persistReleaseTimeout(bool storageLive);
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.
 uint8_t loadRecords(Record* out, uint8_t maxRecords);
+
+/// True when this boot's record is not preceded by a sleep — the previous session ended
+/// without reaching the sleep path at all (a reset while awake, a crash, a rail cut).  On
+/// the C3 this is the only way to see that, since the reset reason cannot separate a reset
+/// press from a power-on.
+bool previousSessionEndedWithoutSleep();
 
 }  // namespace BootDiag

@@ -216,29 +216,28 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // sleeps again leaves the panel untouched, so this counter is the only thing separating
   // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
   {
-    // records_ is newest-first, and persistBoot() appends the abort summary BEFORE this
-    // boot's own record — so slot 0 is always our own KindBoot entry and has to be stepped
-    // over. Stop at the next KindBoot, which is the previous completed boot: anything at or
-    // beyond it belongs to an earlier run and is history, not this one's diagnosis.
-    uint16_t aborted = 0;
-    bool steppedOverOwnBoot = false;
-    for (uint8_t i = 0; i < recordCount_; i++) {
-      if (records_[i].kind == BootDiag::KindBoot) {
-        if (steppedOverOwnBoot) break;
-        steppedOverOwnBoot = true;
-        continue;
-      }
-      if (records_[i].kind == BootDiag::KindAborted) {
-        aborted = records_[i].msA;
-        break;
-      }
-    }
+    const uint16_t aborted = BootDiag::abortsInCurrentRun(records_, recordCount_);
     if (aborted == 0) {
       drawRow(tr(STR_DIAG_ABORTED_BOOTS), tr(STR_DIAG_ABORTED_NONE));
     } else {
-      snprintf(buf, sizeof(buf), "%u%s — %s", aborted, aborted >= BootDiag::kAbortCountCap ? "+" : "",
-               tr(STR_DIAG_ABORTED_FMT));
+      snprintf(buf, sizeof(buf), "%u — %s", aborted, tr(STR_DIAG_ABORTED_FMT));
       drawRow(tr(STR_DIAG_ABORTED_BOOTS), buf);
+      // Every reason on its own continuation row. The total alone says "it is looping"; the
+      // breakdown says which way to look — a run of released-early is a user pressing too
+      // briefly, a run of not-pressed is the device waking with nothing on the button at
+      // all, and usb-boot is the cable rather than the button.
+      uint8_t first = 0;
+      uint8_t last = 0;
+      if (BootDiag::currentRunRange(records_, recordCount_, first, last)) {
+        for (uint8_t i = first; i < last && room(1); i++) {
+          const BootDiag::Record& r = records_[i];
+          if (r.kind != BootDiag::KindAborted) continue;
+          snprintf(buf, sizeof(buf), "   %u%s  %s / gate %s", r.msA, r.msA >= BootDiag::kAbortCountCap ? "+" : "",
+                   BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
+                   HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)));
+          drawWide(buf);
+        }
+      }
     }
   }
   drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));

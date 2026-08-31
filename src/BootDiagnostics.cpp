@@ -76,14 +76,20 @@ void crumbStore(uint8_t stage, uint8_t trigger, uint8_t flags, bool pending) {
 // is written from a path that runs before the settings layer is fully up, and a corrupt or
 // cleared entry here must never be able to disturb a real setting.
 constexpr char kAbortNamespace[] = "wbdiag";
-constexpr char kAbortCountKey[] = "abrtN";
-constexpr char kAbortReasonKey[] = "abrtR";
-constexpr char kAbortVerdictKey[] = "abrtV";
+// One blob rather than a key per bucket: a single read-modify-write per abort, and the
+// layout can grow a bucket without stranding orphaned keys in the namespace.
+constexpr char kAbortBucketsKey[] = "abrtB";
 
 struct AbortTally {
-  uint16_t count = 0;
-  uint8_t trigger = 0;
-  uint8_t verdict = 0;
+  uint16_t buckets[kAbortBucketCount] = {};
+
+  uint32_t total() const {
+    uint32_t sum = 0;
+    for (uint16_t count : buckets) {
+      sum += count;
+    }
+    return sum;
+  }
 };
 
 AbortTally readAbortTally() {
@@ -92,9 +98,9 @@ AbortTally readAbortTally() {
   if (!nvs.begin(kAbortNamespace, /*readOnly=*/true)) {
     return tally;  // namespace has never been written — no aborts to report
   }
-  tally.count = nvs.getUShort(kAbortCountKey, 0);
-  tally.trigger = nvs.getUChar(kAbortReasonKey, 0);
-  tally.verdict = nvs.getUChar(kAbortVerdictKey, 0);
+  // Short read (an older layout, or a truncated entry) leaves the rest zeroed, which reads
+  // as "no aborts in those buckets" — the safe direction.
+  nvs.getBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
   nvs.end();
   return tally;
 }
@@ -113,35 +119,22 @@ void clearAbortTally() {
 // ---------------------------------------------------------------------------
 
 constexpr char kRingPath[] = "/.crosspoint/bootdiag.bin";
-constexpr uint32_t kRingMagic = 0x57424431;  // 'WBD1'
-// Bumped to 2: version-1 sleep records were written at the PanelAsleep stage and only
-// ever finalised when the RTC breadcrumb survived, which on an X4 with the default
-// useClock=0 it never does (the sleep cuts the battery latch). Every such record reads as
-// "never reached deep sleep" and there is no way to tell a real one from the artefact, so
-// they are discarded rather than shown.
-constexpr uint16_t kRingVersion = 2;
 
-// Whole-file read/modify/write. At 272 bytes that is one SD block either way, so a
-// partial in-place update would buy nothing and would need seek bookkeeping the ring
-// wrap makes fiddly.
-struct RingHeader {
-  uint32_t magic;
-  uint16_t version;
-  uint16_t count;     // valid records, <= kCapacity
-  uint16_t head;      // index of the OLDEST record
-  uint16_t reserved;  // keeps nextSeq 4-byte aligned in the file image
-  uint32_t nextSeq;
-};
-static_assert(sizeof(RingHeader) == 16, "RingHeader is written to SD verbatim");
+// One 272-byte scratch image, reused by both writers. Static rather than stack: the sleep
+// path runs on the loop task after the render task has been left holding its own buffers,
+// and this codebase is sensitive to stack-into-heap spills (see the btnsample stack note in
+// HalGPIO). Static rather than heap: it must work when the heap is too fragmented to serve
+// anything, which is one of the states worth recording.
+uint8_t s_image[kImageBytes];
 
-constexpr size_t kFileBytes = sizeof(RingHeader) + sizeof(Record) * kCapacity;
-
-// One 272-byte scratch image, reused by both writers. Static rather than stack: the
-// sleep path runs on the loop task after the render task has been left holding its own
-// buffers, and this codebase is sensitive to stack-into-heap spills (see the btnsample
-// stack note in HalGPIO). Static rather than heap: it must work when the heap is too
-// fragmented to serve anything, which is one of the states worth recording.
-uint8_t s_image[kFileBytes];
+// Thin bindings of the shared ring helpers to that one buffer. The layout and the ordering
+// rules live in BootDiagRing.h so they can be exercised on the host; only the file I/O and
+// the choice of buffer belong here.
+RingHeader imageHeader() { return ringHeaderOf(s_image); }
+void imageSetHeader(const RingHeader& header) { ringSetHeader(s_image, header); }
+void imageGetRecord(uint8_t slot, Record& out) { ringGet(s_image, slot, out); }
+void imageSetRecord(uint8_t slot, const Record& in) { ringSet(s_image, slot, in); }
+void imageAppend(Record& record) { ringAppend(s_image, record); }
 
 bool readImage() {
   memset(s_image, 0, sizeof(s_image));
@@ -154,59 +147,7 @@ bool readImage() {
   if (read != static_cast<int>(sizeof(s_image))) {
     return false;
   }
-  RingHeader header{};
-  memcpy(&header, s_image, sizeof(header));
-  if (header.magic != kRingMagic || header.version != kRingVersion || header.count > kCapacity ||
-      header.head >= kCapacity) {
-    return false;
-  }
-  return true;
-}
-
-void resetImage() {
-  memset(s_image, 0, sizeof(s_image));
-  const RingHeader header{kRingMagic, kRingVersion, 0, 0, 0, 1};
-  memcpy(s_image, &header, sizeof(header));
-}
-
-RingHeader imageHeader() {
-  RingHeader header{};
-  memcpy(&header, s_image, sizeof(header));
-  return header;
-}
-
-void imageSetHeader(const RingHeader& header) { memcpy(s_image, &header, sizeof(header)); }
-
-void imageGetRecord(uint8_t slot, Record& out) {
-  memcpy(&out, s_image + sizeof(RingHeader) + static_cast<size_t>(slot) * sizeof(Record), sizeof(Record));
-}
-
-void imageSetRecord(uint8_t slot, const Record& in) {
-  memcpy(s_image + sizeof(RingHeader) + static_cast<size_t>(slot) * sizeof(Record), &in, sizeof(Record));
-}
-
-/// Slot holding the newest record, or kCapacity when the ring is empty.
-uint8_t newestSlot(const RingHeader& header) {
-  if (header.count == 0) {
-    return kCapacity;
-  }
-  return static_cast<uint8_t>((header.head + header.count - 1) % kCapacity);
-}
-
-void imageAppend(Record& record) {
-  RingHeader header = imageHeader();
-  record.seq = header.nextSeq++;
-  uint8_t slot;
-  if (header.count < kCapacity) {
-    slot = static_cast<uint8_t>((header.head + header.count) % kCapacity);
-    header.count++;
-  } else {
-    // Full: overwrite the oldest and walk the head forward.
-    slot = header.head;
-    header.head = static_cast<uint16_t>((header.head + 1) % kCapacity);
-  }
-  imageSetRecord(slot, record);
-  imageSetHeader(header);
+  return ringValid(s_image);
 }
 
 bool writeImage() {
@@ -229,7 +170,7 @@ bool updateRing(Fn mutate) {
     return false;
   }
   if (!readImage()) {
-    resetImage();
+    ringInit(s_image);
   }
   mutate();
   return writeImage();
@@ -268,8 +209,8 @@ bool resetImpliesRailWasCut(esp_reset_reason_t reason) {
 /// knowable at all.
 void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFlagBits, uint32_t waitMs,
                          esp_reset_reason_t resetReason) {
-  const RingHeader header = imageHeader();
-  const uint8_t slot = newestSlot(header);
+  const RingHeader header = ringHeaderOf(s_image);
+  const uint8_t slot = ringNewestSlot(header);
   if (slot >= kCapacity) {
     return;
   }
@@ -301,28 +242,6 @@ void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFl
 }
 
 }  // namespace
-
-SleepOutcome outcomeOf(const Record& record) {
-  if (record.kind != KindSleep) {
-    return SleepOutcome::DidNotSleep;
-  }
-  if ((record.flags & kFlagInProgress) != 0) {
-    return SleepOutcome::Unfinished;
-  }
-  // Measured, and the only failure verdict that survives a rail cut: the release wait gave
-  // up, so the device was still executing long after it should have been asleep.
-  if ((record.flags & kFlagReleaseTimeout) != 0) {
-    return SleepOutcome::ReleaseTimedOut;
-  }
-  if ((record.flags & kFlagStageInferred) != 0) {
-    // The breadcrumb did not survive, so all that is known is that the rail went away.
-    // Whether that is the right answer depends on what this sleep asked for: a latch-cut
-    // sleep powering the board off is the intended end, a latch-kept one is not.
-    return (record.flags & kFlagKeepClock) != 0 ? SleepOutcome::PoweredOffUnasked : SleepOutcome::PoweredOffAsAsked;
-  }
-  return record.code >= static_cast<uint8_t>(SleepStage::WakeArmed) ? SleepOutcome::ReachedDeepSleep
-                                                                    : SleepOutcome::DidNotSleep;
-}
 
 bool previousSessionEndedWithoutSleep() {
   // Newest first: [0] is this boot's own record, [1] is whatever preceded it. Two boots
@@ -493,19 +412,21 @@ void persistSleep() {
 }
 
 void noteAbortedBoot(SleepTrigger trigger, HalGPIO::WakeVerdict verdict) {
+  const uint8_t bucket = abortBucketOf(trigger, verdict);
   Preferences nvs;
   if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
+    LOG_ERR("BOOT", "Aborted boot could not be counted: NVS namespace unavailable");
     return;
   }
-  const uint16_t count = nvs.getUShort(kAbortCountKey, 0);
-  if (count < kAbortCountCap) {
-    nvs.putUShort(kAbortCountKey, static_cast<uint16_t>(count + 1));
-    nvs.putUChar(kAbortReasonKey, static_cast<uint8_t>(trigger));
-    nvs.putUChar(kAbortVerdictKey, static_cast<uint8_t>(verdict));
+  AbortTally tally;
+  nvs.getBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
+  if (tally.buckets[bucket] < kAbortCountCap) {
+    tally.buckets[bucket]++;
+    nvs.putBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
   }
   nvs.end();
-  LOG_INF("BOOT", "Aborted boot #%u (%s, gate %s) — going straight back to sleep", count + 1, triggerName(trigger),
-          HalGPIO::wakeVerdictName(verdict));
+  LOG_INF("BOOT", "Aborted boot: %s / gate %s (x%u in this run) — going straight back to sleep", triggerName(trigger),
+          HalGPIO::wakeVerdictName(verdict), tally.buckets[bucket]);
 }
 
 void persistReleaseTimeout(bool storageLive) {
@@ -513,8 +434,8 @@ void persistReleaseTimeout(bool storageLive) {
     return;  // this board's teardown path has already cut the SD rail
   }
   updateRing([] {
-    const RingHeader header = imageHeader();
-    const uint8_t slot = newestSlot(header);
+    const RingHeader header = ringHeaderOf(s_image);
+    const uint8_t slot = ringNewestSlot(header);
     if (slot >= kCapacity) {
       return;
     }
@@ -561,16 +482,23 @@ void persistBoot() {
       finalizeNewestSleep(hadCrumb, finalStage, crumbFlagBits, waitMs, resetReason);
     }
 
-    // Aborted boots since the last completed one, as a single summary line placed before
-    // this boot's record so the history reads chronologically. Nothing else could have
-    // recorded them: those boots return before Storage.begin() and lose the breadcrumb
-    // with the rail.
-    if (abortTally.count > 0) {
+    // Aborted boots since the last completed one, placed before this boot's record so the
+    // history reads chronologically. Nothing else could have recorded them: those boots
+    // return before Storage.begin() and lose the breadcrumb with the rail.
+    //
+    // One record per non-zero bucket, not one per run: a device refusing four times because
+    // the press was already over and three times because it was released early is a
+    // different fault from one that only ever did the first, and a single total hides that.
+    // At most kAbortBucketCount records, and in practice one or two.
+    for (uint8_t bucket = 0; bucket < kAbortBucketCount; bucket++) {
+      if (abortTally.buckets[bucket] == 0) {
+        continue;
+      }
       Record aborted{};
       aborted.kind = KindAborted;
-      aborted.code = abortTally.verdict;
-      aborted.reason = abortTally.trigger;
-      aborted.msA = abortTally.count;
+      aborted.code = static_cast<uint8_t>(abortBucketVerdict(bucket));
+      aborted.reason = static_cast<uint8_t>(abortBucketTrigger(bucket));
+      aborted.msA = abortTally.buckets[bucket];
       imageAppend(aborted);
     }
 
@@ -585,7 +513,7 @@ void persistBoot() {
     imageAppend(boot);
   });
 
-  if (abortTally.count > 0 && ringWritten) {
+  if (abortTally.total() > 0 && ringWritten) {
     // Cleared only once the ring actually took the summary — a failed card write would
     // otherwise discard the count and the aborts would vanish entirely. Guarded on
     // count > 0 as well, so the healthy path stays free of NVS writes.
@@ -603,14 +531,7 @@ uint8_t loadRecords(Record* out, uint8_t maxRecords) {
   if (out == nullptr || maxRecords == 0 || !Storage.ready() || !readImage()) {
     return 0;
   }
-  const RingHeader header = imageHeader();
-  const uint8_t wanted = header.count < maxRecords ? static_cast<uint8_t>(header.count) : maxRecords;
-  for (uint8_t i = 0; i < wanted; i++) {
-    // Newest first: walk back from the last written slot.
-    const uint8_t slot = static_cast<uint8_t>((header.head + header.count - 1 - i + kCapacity) % kCapacity);
-    imageGetRecord(slot, out[i]);
-  }
-  return wanted;
+  return ringLoadNewestFirst(s_image, out, maxRecords);
 }
 
 }  // namespace BootDiag
