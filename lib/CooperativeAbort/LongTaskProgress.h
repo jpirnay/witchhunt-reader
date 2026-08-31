@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 // Progress reporting for long-running work in the lib layer.
 //
 // Sibling to CooperativeAbort, and the same dependency direction: the app installs a
@@ -31,6 +33,33 @@ using Handler = void (*)(const char* stage);
 void setHandler(Handler handler);
 
 // Report entry into a named stage. Cheap: one null check when nothing is installed.
+// May paint, so it belongs only at points the caller knows own the framebuffer.
 void step(const char* stage);
+
+// --- Liveness ------------------------------------------------------------------------
+// Separate from step() because the two cannot share a call site. The decoders and the page
+// renderer already yield frequently — per MCU block in tjpgBmpOutput, per element in
+// Page::render — but those points CANNOT paint: they are mid-write into the framebuffer,
+// and drawPopup() resyncs the write buffer from the displayed frame, which would erase the
+// half-decoded image and leave the decoder filling a buffer holding the previous screen.
+// Aborting the work to paint instead is worse: on any decode longer than the paint
+// interval it would restart from scratch every time and never finish.
+//
+// So the yield points feed this instead. It records only — never paints — which is enough
+// to separate the two failures that look identical from outside: work that is slow but
+// still ticking, and work that has genuinely stopped. That distinction is exactly what a
+// "the device looks dead" report could not previously supply.
+
+// Note that long-running work is still making progress. Records a timestamp; no handler is
+// invoked and nothing is drawn. Called from CooperativeAbort::shouldAbortLongTask(), so
+// every existing and future yield point is covered without touching any of them.
+void noteAlive();
+
+// Milliseconds since the last noteAlive(), or 0 if none has ever been recorded.
+uint32_t msSinceAlive();
+
+// The stage name most recently passed to step(), or nullptr. Points at the caller's string
+// literal — the call sites all pass literals, so it outlives the call.
+const char* currentStage();
 
 }  // namespace LongTaskProgress

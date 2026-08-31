@@ -16,6 +16,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <LongTaskProgress.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
@@ -484,6 +485,9 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
 //
 // 1 KB stack: the deepest path is persistResumeStall() -> one 272-byte SD write.
 static constexpr uint32_t RESUME_STALL_REPORT_MS = 20000;
+// How recent a yield-point tick has to be to count as "still working". Generous: the
+// coarsest yield boundary is one page element, which can legitimately take a second or two.
+static constexpr uint32_t STALL_TICK_WINDOW_MS = 3000;
 static constexpr uint32_t RESUME_STALL_POLL_MS = 1000;
 
 static void resumeStallReporterTask(void*) {
@@ -502,8 +506,17 @@ static void resumeStallReporterTask(void*) {
     reported = true;  // once per open: the point is a marker, not a running commentary
     const WakeTrace::Phase phase = WakeTrace::furthestReached();
     const unsigned long waited = WakeTrace::msSinceOpen();
-    LOG_ERR("MAIN", "Resume still has no page after %lums, stalled in phase %s", waited, WakeTrace::phaseName(phase));
-    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000));
+    // Slow or wedged? The decoders and the page renderer poll CooperativeAbort at per-block
+    // and per-element boundaries, and every one of those polls records liveness. Recent ticks
+    // mean the work is grinding forward; none at all means it is stuck inside a single
+    // uninterruptible step. Those two look identical on a dead-looking screen and want
+    // completely different fixes.
+    const bool ticking = LongTaskProgress::msSinceAlive() < STALL_TICK_WINDOW_MS;
+    LOG_ERR("MAIN", "Resume still has no page after %lums, in phase %s (%s, last tick %lums ago, stage %s)", waited,
+            WakeTrace::phaseName(phase), ticking ? "still ticking" : "NO TICKS",
+            static_cast<unsigned long>(LongTaskProgress::msSinceAlive()),
+            LongTaskProgress::currentStage() ? LongTaskProgress::currentStage() : "?");
+    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000), ticking);
   }
 }
 

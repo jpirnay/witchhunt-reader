@@ -194,7 +194,7 @@ AbortCounts abortCounts();
 /// A marker, not a trigger: nothing acts on it.  Written once per open so the history shows
 /// that a resume ran long and where, without an automatic restart destroying the evidence or
 /// giving the reporter a second unexplained reboot to account for.
-void persistResumeStall(uint8_t wakePhase, uint16_t seconds);
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking);
 
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.
