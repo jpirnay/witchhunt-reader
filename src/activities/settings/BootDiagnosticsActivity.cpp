@@ -1,15 +1,19 @@
 #include "BootDiagnosticsActivity.h"
 
+#include <BoardConfig.h>
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <I18n.h>
+#include <XteinkDetect.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 
 #include <cstdio>
 
 #include "MappedInputManager.h"
+#include "SystemStatus.h"  // displayControllerName()
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -174,6 +178,31 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   };
 
   char buf[96];
+
+  // ---- Hardware variant ----------------------------------------------------------
+  // First, because it is the identity line of any bug report. The X3 and X4 each ship in
+  // more than one silicon variant (per-batch panel swaps UC8253 -> UC8279d and
+  // SSD1677 -> UC8179), and two reports of "the same" fault are only comparable once it is
+  // known whether they came from the same variant. All of this is already resolved at boot
+  // by a live bus probe — it just had nowhere to be read.
+  drawSection(tr(STR_SEC_HARDWARE));
+  drawRow(tr(STR_DIAG_BOARD_PROFILE), BoardConfig::ACTIVE.name);
+  {
+    const auto& probe = freeink::getXteinkDisplayProbeDiag();
+    snprintf(buf, sizeof(buf), "%s%s", displayControllerName(BoardConfig::ACTIVE.displayController),
+             probe.promoted ? " (promoted by probe)" : "");
+    drawRow(tr(STR_DISPLAY_CONTROLLER), buf);
+    // The raw fingerprint, not just the name it resolved to: two units can report the same
+    // controller and still differ here, and an unrun or inconclusive probe is itself a
+    // finding. Bytes are what a cross-reference between two reporters actually compares.
+    if (probe.valid) {
+      snprintf(buf, sizeof(buf), "ver %02X %02X %02X %02X %02X flg %02X v%u%s", probe.ver[0], probe.ver[1],
+               probe.ver[2], probe.ver[3], probe.ver[4], probe.flg, probe.verdict, probe.mtpValid ? " mtp" : "");
+    } else {
+      snprintf(buf, sizeof(buf), "%s", tr(STR_DIAG_UNKNOWN));
+    }
+    drawRow(tr(STR_DIAG_PANEL_PROBE), buf);
+  }
 
   // ---- This boot -----------------------------------------------------------------
   drawSection(tr(STR_DIAG_THIS_BOOT));

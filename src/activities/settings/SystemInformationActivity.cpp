@@ -152,6 +152,9 @@ void SystemInformationActivity::render(RenderLock&&) {
   drawRow(tr(STR_DEVICE), std::string(status.deviceType) + " (" + std::to_string(status.displayWidth) + " x " +
                               std::to_string(status.displayHeight) + " px)");
   drawRow(tr(STR_DISPLAY_CONTROLLER), status.displayController);
+  // The profile, not just "X3"/"X4": the per-batch panel variants select different
+  // sibling profiles, and that distinction is what makes two field reports comparable.
+  drawRow(tr(STR_DIAG_BOARD_PROFILE), status.boardProfile);
 
   drawSection(tr(STR_SEC_CHIP));
   drawRow(tr(STR_CHIP), status.chipVersion);

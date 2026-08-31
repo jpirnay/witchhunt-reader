@@ -49,8 +49,13 @@ inline const char* displayControllerName(BoardConfig::DisplayController controll
 // System Information activity so both surfaces show consistent data.
 struct SystemStatus {
   const char* version;
-  const char* displaySdk;         // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
-  const char* deviceType;         // "X3" or "X4"
+  const char* displaySdk;  // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
+  const char* deviceType;  // "X3" or "X4"
+  // Exact BoardProfile selected at boot, e.g. "xteink_x4" / "xteink_x3" /
+  // "xteink_x3_uc8279". deviceType alone is not enough to identify a unit: each model
+  // ships in more than one silicon variant (per-batch panel swaps), and two bug reports
+  // are only comparable once it is known whether they came from the same one.
+  const char* boardProfile;
   const char* displayController;  // panel controller silicon resolved at boot, e.g. "UC8253"
   uint16_t displayWidth;          // Native panel width in pixels (long edge)
   uint16_t displayHeight;         // Native panel height in pixels (short edge)
@@ -101,6 +106,7 @@ struct SystemStatus {
       s.displayWidth = 800;
       s.displayHeight = 480;
     }
+    s.boardProfile = BoardConfig::ACTIVE.name;
     s.displayController = displayControllerName(BoardConfig::ACTIVE.displayController);
     s.chipVersion = ESP.getChipModel();
     s.chipVersion += " rev ";
