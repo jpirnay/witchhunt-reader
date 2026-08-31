@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -27,6 +29,22 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
   const int tileY = rect.y;
   const int coverHeight = std::max(120, rect.height - coverHeightOffset);
   const bool hasContinueReading = !recentBooks.empty();
+
+  // The three tiles published for touch. Recorded ahead of the draw loop, which is skipped on a
+  // cached repaint (coverRendered) while the geometry above is recomputed every call. Values are
+  // book indices, matching how HomeActivity numbers the covers in its selector.
+  {
+    TapTargets::Recorder::Builder coverTargets;
+    const int tileCount = hasContinueReading ? std::min(static_cast<int>(recentBooks.size()),
+                                                        Lyra3CoversMetrics::values.homeRecentBooksCount)
+                                             : 0;
+    for (int i = 0; i < tileCount; i++) {
+      const int tileX = Lyra3CoversMetrics::values.contentSidePadding + tileWidth * i;
+      coverTargets.add(tileX + hPaddingInSelection, tileY + hPaddingInSelection, tileWidth - 2 * hPaddingInSelection,
+                       coverHeight, i);
+    }
+    TapTargets::homeCovers().record(coverTargets);
+  }
 
   // Draw book card regardless, fill with message based on `hasContinueReading`
   // Draw cover image as background if available (inside the box)

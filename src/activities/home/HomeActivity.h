@@ -89,6 +89,9 @@ class HomeActivity final : public Activity {
   int focusSelectorIndex = -1;
 
   void onSelectBook(const std::string& path);
+  // Tap on a cover or a menu entry: opens it. Returns true when the touch was consumed.
+  // Inert on non-touch boards. Reads the targets the active theme published.
+  bool handleHomeTouch();
   void dispatchMenuAction(MenuAction action);
 
   void rebuildMenuEntries();

@@ -32,6 +32,7 @@
 #include "components/icons/wifi.h"
 #include "components/themes/ButtonHintLayout.h"
 #include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -575,6 +576,16 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     coverWidth = static_cast<int>(coverHeight * 0.6f);
   }
 
+  // Tile published for touch, ahead of the draw so a cached repaint (coverRendered) records it
+  // too — see BaseTheme::drawRecentBookCover. One cover, so value 0.
+  {
+    TapTargets::Recorder::Builder coverTargets;
+    if (hasContinueReading) {
+      coverTargets.add(rect.x + LyraMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight, 0);
+    }
+    TapTargets::homeCovers().record(coverTargets);
+  }
+
   // Draw book card regardless, fill with message based on `hasContinueReading`
   // Draw cover image as background if available (inside the box)
   // Only load from SD on first render, then use stored buffer
@@ -729,10 +740,14 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
   }
 
+  // Rows published for touch — see BaseTheme::drawButtonMenu. Values are MENU-LOCAL indices.
+  TapTargets::Recorder::Builder menuTargets;
+
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
     Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding, rect.y + i * (rowHeight + rowSpacing),
                          tileWidth, rowHeight};
+    menuTargets.add(tileRect.x, tileRect.y, tileRect.width, tileRect.height, i);
 
     const bool selected = selectedIndex == i;
 
@@ -763,6 +778,8 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
     renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
   }
+
+  TapTargets::homeMenu().record(menuTargets);
 }
 
 Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame) const {

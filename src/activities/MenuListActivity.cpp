@@ -87,13 +87,21 @@ void MenuListActivity::loop() {
   handleNavigation();
 }
 
-// Touch equivalent of "move the selection, then confirm", against the rows drawMenuList()
-// actually painted. One place, so all eight subclasses gain it without being touched.
+// Activate the row under the finger, against the rows drawMenuList() actually painted. One
+// place, so all eight subclasses gain it without being touched.
 //
-// Two-step on purpose, matching the buttons rather than firing on first contact: resting a
-// finger on a row moves the highlight (Down), lifting it activates (Tap). On e-paper a
-// mis-activation costs a screen the reader then has to navigate back out of, so the cheap
-// half happens under the finger and the expensive half only on release.
+// Tap only, and NOT the two-step "Down moves the highlight, Tap activates" that the buttons
+// imply. Down fires once a contact has been held TOUCH_DOWN_SELECT_DELAY_MS (90 ms), which an
+// ordinary finger tap comfortably exceeds -- so acting on it would move the selection, repaint,
+// and then activate and repaint again: two full e-paper refreshes, roughly a second, for one
+// tap. The first of those is meant to be feedback, but at that latency it lands after the
+// finger has already gone, so it is pure cost.
+//
+// Down is still claimed (returns true) rather than ignored, so no other consumer treats the
+// same contact as its own. The real answer to tap feedback is a cheap localised invert --
+// upstream's setFlash/clearTapFlash -- which this fork does not have yet; it is P2 in
+// docs/touch-input-migration-2026-08-14.md. Until it exists, one refresh per tap is the right
+// trade.
 //
 // Separator rows never appear here -- the band records them as non-selectable, the same
 // exclusion initMenuList()'s predicate makes for button navigation -- so a tap on a section
@@ -102,20 +110,14 @@ bool MenuListActivity::handleListTouch() {
   int index = -1;
   switch (mappedInput.listTouch(index)) {
     case MappedInputManager::RowTouch::Down:
+      return true;  // claimed, deliberately without a repaint -- see above
+    case MappedInputManager::RowTouch::Tap:
       // Range-check even though the band was recorded from this same list: the record happens
       // on the render task and menuItems can be rebuilt between that render and this tap.
       if (index < 0 || index >= static_cast<int>(menuItems.size())) return true;
-      if (index != selectedIndex) {
-        selectedIndex = index;
-        requestUpdate();
-      }
-      return true;
-    case MappedInputManager::RowTouch::Tap:
-      if (index < 0 || index >= static_cast<int>(menuItems.size())) return true;
       selectedIndex = index;
-      // Repaint even when the item did not move the selection: toggleCurrentItem() requests one
-      // for a value change, but an ACTION item that opens nothing leaves the highlight where a
-      // preceding Down put it, and the row under the finger must end up looking selected.
+      // Repaint even when toggleCurrentItem() does not: an ACTION item that opens nothing still
+      // has to leave the highlight on the row the finger landed on.
       requestUpdate();
       toggleCurrentItem();
       return true;

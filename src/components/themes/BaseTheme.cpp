@@ -17,6 +17,7 @@
 #include "components/UITheme.h"
 #include "components/themes/ButtonHintLayout.h"
 #include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -701,6 +702,16 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const int bookY = rect.y;
   const int bookHeight = baseHeight;
 
+  // Publish the tile for touch. Recorded here rather than inside the draw below, because that
+  // half is skipped on a cached repaint (coverRendered) while the geometry above is recomputed
+  // every call -- so this is the one point that is true on both paths. Value 0: this theme shows
+  // only the most recent book, and HomeActivity's selector numbers the covers from 0.
+  {
+    TapTargets::Recorder::Builder coverTargets;
+    if (hasContinueReading) coverTargets.add(bookX, bookY, bookWidth, bookHeight, 0);
+    TapTargets::homeCovers().record(coverTargets);
+  }
+
   // Bookmark dimensions (used in multiple places)
   const int bookmarkWidth = bookWidth / 8;
   const int bookmarkHeight = bookHeight / 5;
@@ -917,8 +928,15 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
   }
 
+  // Publish the rows for touch from the same geometry the draw uses. Values are MENU-LOCAL
+  // indices; HomeActivity adds the cover offset, since a theme drawing the menu has no idea how
+  // many covers sit above it.
+  TapTargets::Recorder::Builder menuTargets;
+
   for (int i = 0; i < buttonCount; ++i) {
     const int tileY = rect.y + static_cast<int>(i) * (rowHeight + rowSpacing);
+    menuTargets.add(rect.x + BaseMetrics::values.contentSidePadding, tileY,
+                    rect.width - BaseMetrics::values.contentSidePadding * 2, rowHeight, i);
 
     const bool selected = selectedIndex == i;
 
@@ -939,6 +957,8 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
   }
+
+  TapTargets::homeMenu().record(menuTargets);
 }
 
 Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame) const {

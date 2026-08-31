@@ -338,8 +338,9 @@ void RecentBooksActivity::openSelectedBook(const bool longPress) {
   activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
 }
 
-// A tap on a cover (grid) or a row (list). Two-step like every other list in the firmware:
-// resting a finger moves the selection, lifting it opens the book.
+// A tap on a cover (grid) or a row (list): it opens the book. Tap only, not the two-step
+// "hold to move the selection, lift to open" -- see MenuListActivity::handleListTouch() for why
+// that costs two full e-paper refreshes per tap and buys feedback that arrives too late.
 //
 // The two views resolve the hit differently, and neither re-derives geometry. The list view
 // draws through GUI.drawList, so its rows are already published in ListTouchBand and
@@ -379,15 +380,9 @@ bool RecentBooksActivity::handleBookTouch() {
   }
 
   if (touch == MappedInputManager::RowTouch::None) return false;
+  // Down is claimed but not acted on, so the same contact cannot also be read by anything else.
+  if (touch == MappedInputManager::RowTouch::Down) return true;
   if (index < 0 || index >= static_cast<int>(recentBooks.size())) return true;
-
-  if (touch == MappedInputManager::RowTouch::Down) {
-    if (index != selectorIndex) {
-      selectorIndex = index;
-      requestUpdate();
-    }
-    return true;
-  }
 
   selectorIndex = index;
   openSelectedBook(/*longPress=*/false);
