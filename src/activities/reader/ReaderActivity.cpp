@@ -7,6 +7,7 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <LongTaskProgress.h>
 #include <PngToBmpConverter.h>
 #include <SidecarFiles.h>
 #include <ZipFile.h>
@@ -602,6 +603,80 @@ std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std
   return beginPngThumbSessionImpl(bookPath, height * 6 / 10, height, name, filesOut);
 }
 
+namespace {
+
+// Progress handler for Epub::load(), installed only for the duration of that call.
+//
+// load() can spend seconds on a cache-miss CSS rebuild and painted nothing while it did.
+// On a wake resume there is no splash behind it either, so the panel keeps showing the
+// sleep screen and the device reads as dead — the failure behind issue #155.
+//
+// Safe to paint from here: load() is called from ReaderActivity::onEnter(), which runs on
+// the loop task, and the RenderLock below is the same one the first-open popup a few lines
+// down already takes. The handler is scoped to the call (see the RAII installer) so it can
+// never fire from a task that does not own the framebuffer.
+uint32_t g_openStartMs = 0;
+uint32_t g_openLastPaintMs = 0;
+// The renderer belongs to the activity, and the handler is a plain function pointer with no
+// context argument (see LongTaskProgress.h on why it is not a std::function). The scope
+// guard below owns the lifetime of this pointer: it is set on entry and cleared on exit
+// together with the handler, so it can never be stale when the handler runs.
+GfxRenderer* g_openRenderer = nullptr;
+
+void onOpenProgress(const char* stage) {
+  // Thresholds rather than a cadence: each paint is an e-ink refresh, and a warm open
+  // finishes well inside the first one, so a healthy book costs nothing.
+  constexpr uint32_t FIRST_HINT_MS = 2000;
+  constexpr uint32_t REPAINT_INTERVAL_MS = 5000;
+
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - g_openStartMs;
+  if (elapsed < FIRST_HINT_MS) {
+    return;
+  }
+  if (g_openLastPaintMs != 0 && now - g_openLastPaintMs < REPAINT_INTERVAL_MS) {
+    return;
+  }
+  g_openLastPaintMs = now;
+
+  // The stage token is the area of work, deliberately untranslated so it reads the same in
+  // a bug report from any locale — the same rule the Boot Diagnostics values follow.
+  if (g_openRenderer == nullptr) {
+    return;
+  }
+  char message[64];
+  snprintf(message, sizeof(message), "%s %s %us", tr(STR_INDEXING), stage, static_cast<unsigned>(elapsed / 1000));
+  RenderLock lock;
+  GUI.drawPopup(*g_openRenderer, message);
+}
+
+// Installs the handler for a scope and guarantees it is cleared — an installed handler
+// paints, so it must not outlive the one call site that can safely do so.
+struct ScopedOpenProgress {
+  // `enabled` is false on the first-open path: it already draws its own popup, and it may
+  // have released the secondary framebuffer for indexing headroom — drawPopup() needs that
+  // buffer, so painting there would be the crash compileSectionCache warns about. The warm
+  // open is the one with no feedback at all, and the one where the cache-miss CSS rebuild
+  // sits, so that is where this is armed.
+  ScopedOpenProgress(GfxRenderer& renderer, const bool enabled) {
+    if (!enabled) {
+      return;
+    }
+    g_openStartMs = millis();
+    g_openLastPaintMs = 0;
+    g_openRenderer = &renderer;
+    LongTaskProgress::setHandler(&onOpenProgress);
+  }
+  ~ScopedOpenProgress() {
+    LongTaskProgress::setHandler(nullptr);
+    g_openRenderer = nullptr;
+  }
+  ScopedOpenProgress(const ScopedOpenProgress&) = delete;
+  ScopedOpenProgress& operator=(const ScopedOpenProgress&) = delete;
+};
+
+}  // namespace
+
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
@@ -804,6 +879,9 @@ void ReaderActivity::onEnter() {
                 static_cast<unsigned long>(esp_get_free_heap_size()));
       }
     }
+    // Armed only for the warm open — see ScopedOpenProgress. Covers Epub::load()'s
+    // milestones, the slowest of which (a cache-miss CSS rebuild) previously painted nothing.
+    ScopedOpenProgress openProgress(renderer, !firstOpenIndexing);
     auto epub = loadEpub(initialBookPath);
     if (releasedForIndexing) {
       RenderLock lock;
