@@ -12,6 +12,12 @@ class ButtonRemapActivity final : public Activity {
 
   void onEnter() override;
   void onExit() override;
+  // Deliberately does NOT implement selectListRow(): this screen is a wizard that assigns
+  // each role from the physical button the reader presses, so its list is a progress
+  // display, not a chooser. Accepting a tap would move currentStep AND have
+  // ActivityManager synthesize a Confirm press -- which is exactly the input this screen
+  // exists to capture, so a tap would record itself as the user's chosen button.
+
   void loop() override;
   void render(RenderLock&&) override;
 

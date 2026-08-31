@@ -975,7 +975,8 @@ void HomeActivity::render(RenderLock&&) {
 // three covers, a carousel, and a menu that is a vertical row list in two themes and a
 // horizontal icon strip in the carousel).
 //
-// Tap only, not the two-step hold-then-lift: see MenuListActivity::handleListTouch() for why a
+// Tap only, not the two-step hold-then-lift: see MenuListActivity::selectListRow() and
+// ActivityManager::dispatchListTap() for why a
 // Down repaint costs a second full e-paper refresh and delivers its feedback too late to help.
 bool HomeActivity::handleHomeTouch() {
   if (!mappedInput.hasTouch()) return false;

@@ -16,6 +16,8 @@
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/themes/ButtonHintStrip.h"
+#include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "home/FileBrowserActivity.h"
 #include "home/GlobalBookmarksActivity.h"
 #include "home/HomeActivity.h"
@@ -127,6 +129,17 @@ void ActivityManager::renderTaskLoop() {
       // window where render() drops the mutex (renderContents' pre-waveform unlock), which is
       // exactly the window a plain RenderLock cannot see — see RenderLock(ExclusiveActivityAccess).
       renderPassActive.store(true, std::memory_order_release);
+      // Every touch recorder starts each pass empty, so what they hold afterwards is exactly
+      // what THIS frame painted. Clearing on activity transitions alone is not enough: a screen
+      // can stop drawing its list without changing activity (WifiSelection swaps the network
+      // list for a "no networks" message; FontDownload for a progress screen), and the band
+      // recorded before that would keep answering taps against rows nothing paints any more.
+      // Cleared here rather than in each conditional screen because "the recorders describe the
+      // last frame" is a property of the render pass, not something 26 screens should each
+      // remember.
+      ListTouchBand::invalidate();
+      TapTargets::homeCovers().invalidate();
+      TapTargets::homeMenu().invalidate();
       currentActivity->render(std::move(lock));
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
@@ -203,6 +216,7 @@ void ActivityManager::loop() {
   if (!drainInput && currentActivity) {
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     currentActivity->loop();
+    dispatchListTap();
     dispatchHintStripTap();
   }
 
@@ -556,6 +570,35 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
   if (currentActivity && currentActivity->isReaderActivity()) {
     currentActivity->onButtonAction(action);
   }
+}
+
+void ActivityManager::dispatchListTap() {
+  if (!mappedInput.hasTouch()) return;
+
+  // Nothing painted a list on this screen, so there is nothing here a tap could mean. Checked
+  // before touching the tap queue: the tap belongs to whoever else wants it.
+  if (!ListTouchBand::hasBand()) return;
+
+  // Like the hint strip, this runs AFTER currentActivity->loop(), which makes it a strict
+  // fallback: a screen that handles its own taps (Home's covers and menu, RecentBooks' cover
+  // grid) has already consumed the tap and this finds nothing.
+  int index = -1;
+  if (mappedInput.listTouch(index) != MappedInputManager::RowTouch::Tap) return;
+
+  // The screen decides whether that row is selectable right now, and moves its own selection.
+  // Declining leaves the tap consumed but inert, which is correct: the finger landed on a row
+  // this screen painted, so nothing else should get to interpret it.
+  if (currentActivity == nullptr || !currentActivity->selectListRow(index)) return;
+
+  // Then let the screen's OWN Confirm handler do the rest. Synthesizing the press rather than
+  // calling an "activate" hook is deliberate: every one of these screens already has a Confirm
+  // path, often several branches deep (a category row that cycles, an entry that opens, a value
+  // that toggles), and a tap must run that exact code rather than a parallel copy of it. Raw
+  // rather than logical so the user's button remapping still applies, exactly as the hint strip
+  // does it. Both the wasPressed() bitmask consumers and ButtonEventManager's press-type FSM see
+  // an ordinary Short press, one tick from now.
+  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Confirm));
+  LOG_DBG("TCH", "List tap -> row %d, Confirm synthesized", index);
 }
 
 void ActivityManager::dispatchHintStripTap() {

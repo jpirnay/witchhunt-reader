@@ -100,3 +100,9 @@ void NetworkModeSelectionActivity::onCancel() {
   setResult(std::move(result));
   finish();
 }
+
+bool NetworkModeSelectionActivity::selectListRow(const int index) {
+  if (index < 0 || index >= static_cast<int>(MENU_ITEM_COUNT)) return false;
+  selectedIndex = index;
+  return true;
+}

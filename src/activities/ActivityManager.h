@@ -198,6 +198,7 @@ class ActivityManager {
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see
   // the definition for why that ordering matters.
+  void dispatchListTap();
   void dispatchHintStripTap();
 
   // If immediate is true, the update will be triggered immediately.

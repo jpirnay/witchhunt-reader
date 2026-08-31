@@ -84,3 +84,9 @@ void DictionarySelectionActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+bool DictionarySelectionActivity::selectListRow(const int index) {
+  if (index < 0 || index >= static_cast<int>(optionCount())) return false;
+  selectedIndex = index;
+  return true;
+}

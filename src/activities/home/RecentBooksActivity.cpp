@@ -339,7 +339,7 @@ void RecentBooksActivity::openSelectedBook(const bool longPress) {
 }
 
 // A tap on a cover (grid) or a row (list): it opens the book. Tap only, not the two-step
-// "hold to move the selection, lift to open" -- see MenuListActivity::handleListTouch() for why
+// "hold to move the selection, lift to open" -- see ActivityManager::dispatchListTap() for why
 // that costs two full e-paper refreshes per tap and buys feedback that arrives too late.
 //
 // The two views resolve the hit differently, and neither re-derives geometry. The list view

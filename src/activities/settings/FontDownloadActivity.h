@@ -19,6 +19,8 @@ class FontDownloadActivity : public Activity {
 
   void onEnter() override;
   void onExit() override;
+  // Tap on a row -> move the selection there; ActivityManager synthesizes Confirm.
+  bool selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return state_ == LOADING_MANIFEST || state_ == DOWNLOADING; }

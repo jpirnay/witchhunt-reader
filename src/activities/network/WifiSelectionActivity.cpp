@@ -1179,3 +1179,9 @@ void WifiSelectionActivity::onComplete(const bool connected) {
   setResult(std::move(result));
   finish();
 }
+
+bool WifiSelectionActivity::selectListRow(const int index) {
+  if (index < 0 || index >= static_cast<int>(networks.size())) return false;
+  selectedNetworkIndex = index;
+  return true;
+}

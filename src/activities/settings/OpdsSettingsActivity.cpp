@@ -235,3 +235,9 @@ void OpdsSettingsActivity::render(RenderLock&&) {
     renderer.displayBuffer();
   }
 }
+
+bool OpdsSettingsActivity::selectListRow(const int index) {
+  if (index < 0 || index >= getMenuItemCount()) return false;
+  selectedIndex = index;
+  return true;
+}

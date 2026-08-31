@@ -23,6 +23,8 @@ class DictionarySelectionActivity final : public Activity {
       : Activity("DictionarySelect", renderer, mappedInput) {}
 
   void onEnter() override;
+  // Tap on a list row -> move the selection there; ActivityManager then synthesizes Confirm.
+  bool selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 

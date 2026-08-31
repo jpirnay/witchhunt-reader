@@ -298,3 +298,9 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+bool StatusBarSettingsActivity::selectListRow(const int index) {
+  if (index < 0 || index >= static_cast<int>(visibleItemCount())) return false;
+  selectedIndex = static_cast<uint8_t>(index);
+  return true;
+}

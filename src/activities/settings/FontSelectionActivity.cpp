@@ -67,3 +67,9 @@ void FontSelectionActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+bool FontSelectionActivity::selectListRow(const int index) {
+  if (index < 0 || index >= fontCount) return false;
+  selectedIndex = index;
+  return true;
+}

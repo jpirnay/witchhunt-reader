@@ -60,6 +60,8 @@ class FinishedBookActivity : public Activity {
                        bool koReaderSyncAvailable = false);
 
   void onEnter() override;
+  // Tap on an action row -> move the selection there; ActivityManager synthesizes Confirm.
+  bool selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 

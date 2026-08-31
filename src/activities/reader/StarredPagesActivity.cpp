@@ -156,3 +156,9 @@ void StarredPagesActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+bool StarredPagesActivity::selectListRow(const int index) {
+  if (index < 0 || index >= static_cast<int>(bookmarkStore.getAll().size())) return false;
+  selectorIndex = index;
+  return true;
+}

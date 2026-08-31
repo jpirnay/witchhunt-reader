@@ -77,3 +77,9 @@ void LanguageSelectActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+bool LanguageSelectActivity::selectListRow(const int index) {
+  if (index < 0 || index >= totalItems) return false;
+  selectedIndex = index;
+  return true;
+}

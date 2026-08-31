@@ -396,3 +396,13 @@ void SettingsActivity::render(RenderLock&&) {
   needsHalfRefresh = false;
   renderer.displayBuffer(halfRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
 }
+
+bool SettingsActivity::selectListRow(const int index) {
+  // The list drawn by render() starts at selectedSettingIndex 1: index 0 is the category tab
+  // row, which the list does not paint (render() passes `selectedSettingIndex - 1`). So band
+  // row i is setting i, reached by setting selectedSettingIndex to i + 1 -- and a tap can never
+  // land on the tab row, which is correct, since the tab bar is a separate target.
+  if (index < 0 || index >= settingsCount) return false;
+  selectedSettingIndex = index + 1;
+  return true;
+}
