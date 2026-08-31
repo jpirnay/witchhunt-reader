@@ -25,6 +25,8 @@ class MdReaderTocSelectionActivity final : public Activity {
 
   void onEnter() override;
   void onExit() override;
+  // Tap on a heading row -> move the selection there; ActivityManager synthesizes Confirm.
+  bool selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 };

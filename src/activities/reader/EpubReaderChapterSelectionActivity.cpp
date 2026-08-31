@@ -3,8 +3,11 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 int EpubReaderChapterSelectionActivity::getTotalItems() const { return epub->getTocItemsCount(); }
@@ -90,6 +93,11 @@ void EpubReaderChapterSelectionActivity::render(RenderLock&&) {
   renderer.fillRect(contentRect.x, 60 + contentRect.y + (selectorIndex % pageItems) * 30 - 2, contentRect.width - 1,
                     30);
 
+  // Publish the rows for touch, from the same numbers the fill and the text use. The band top
+  // is the selection fill's y (-2), not the text baseline: the fill is what reads as the row.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, 60 + contentRect.y - 2, 30, pageStartIndex,
+                                   std::min(pageItems, totalItems - pageStartIndex));
+
   for (int i = 0; i < pageItems; i++) {
     int itemIndex = pageStartIndex + i;
     if (itemIndex >= totalItems) break;
@@ -118,4 +126,10 @@ void EpubReaderChapterSelectionActivity::render(RenderLock&&) {
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
+}
+
+bool EpubReaderChapterSelectionActivity::selectListRow(const int index) {
+  if (index < 0 || index >= getTotalItems()) return false;
+  selectorIndex = index;
+  return true;
 }

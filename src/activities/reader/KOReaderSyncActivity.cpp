@@ -20,6 +20,7 @@
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 namespace {
@@ -821,6 +822,12 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     const int optionY = 350;
     const int optionHeight = 30;
 
+    // The three options published for touch. Only this state draws them -- every other state of
+    // this screen is a progress or result message with nothing to choose -- and the recorders are
+    // cleared at the top of each render pass, so a tap can never reach them from those.
+    ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, optionY - 2, optionHeight,
+                                     /*firstIndex=*/0, OPTION_COUNT);
+
     // Apply option
     if (selectedOption == 0) {
       renderer.fillRect(contentRect.x, optionY - 2, contentRect.width - 1, optionHeight);
@@ -1108,4 +1115,13 @@ void KOReaderSyncActivity::loop() {
     }
     return;
   }
+}
+
+bool KOReaderSyncActivity::selectListRow(const int index) {
+  // Guarded on the state that actually draws the options: `state` is read on the loop task and
+  // could have moved on since the render that recorded the band.
+  if (state != SHOWING_RESULT) return false;
+  if (index < 0 || index >= OPTION_COUNT) return false;
+  selectedOption = index;
+  return true;
 }

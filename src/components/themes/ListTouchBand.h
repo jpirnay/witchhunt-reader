@@ -152,4 +152,23 @@ struct Builder {
   void commit() const { record(band); }
 };
 
+// The common case, in one call: a page of uniform-height rows, all selectable, item index
+// `firstIndex` at the top.
+//
+// Exists because six screens draw their own lists instead of going through GUI.drawList --
+// the three chapter/TOC selectors, the footnote picker, the OPDS browser and the KOReader
+// sync prompt -- and they all have exactly this shape. Recording it by hand six times is six
+// chances to get the -2 selection offset or the page-start index wrong.
+//
+// `top` is the y of the FIRST row's tappable band, which is the same y the selection fill
+// uses, not the text baseline: those hand-rolled lists tend to fill at `rowY - 2` and draw
+// text at `rowY`, and the fill is what the reader sees as the row.
+inline void recordUniformRows(const int x, const int width, const int top, const int rowHeight, const int firstIndex,
+                              const int rowCount) {
+  Builder b;
+  b.begin(x, width, firstIndex);
+  for (int r = 0; r < rowCount; ++r) b.addRow(top + r * rowHeight, rowHeight, /*selectable=*/true);
+  b.commit();
+}
+
 }  // namespace ListTouchBand

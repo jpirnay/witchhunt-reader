@@ -25,6 +25,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/OpdsFilename.h"
@@ -476,6 +477,12 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     const int listTop = midY + 20;
     const int itemsPerPage = formatItemsPerPage(contentRect);
     const int pageStartIndex = formatSelectorIndex / itemsPerPage * itemsPerPage;
+    // Format rows published for touch. This screen has TWO lists in two different states, and
+    // only one is on screen at a time; the recorders are cleared at the top of each render pass,
+    // so whichever state painted last is the only one a tap can reach.
+    ListTouchBand::recordUniformRows(
+        contentRect.x, contentRect.width - 1, listTop - 2, FORMAT_ITEM_HEIGHT, pageStartIndex,
+        std::min(itemsPerPage, static_cast<int>(entry.acquisitionLinks.size()) - pageStartIndex));
     renderer.fillRect(contentRect.x, listTop + (formatSelectorIndex - pageStartIndex) * FORMAT_ITEM_HEIGHT - 2,
                       contentRect.width - 1, FORMAT_ITEM_HEIGHT);
     for (int i = pageStartIndex;
@@ -584,6 +591,11 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   }
 
   const auto pageStartIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS;
+  // Entry rows published for touch. The y here is a bare 60, NOT contentRect.y + 60 as the
+  // chapter selectors use — matched to the fill below rather than "corrected", because the fill
+  // is where the row visibly is.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, 60 - 2, 30, pageStartIndex,
+                                   std::min<int>(PAGE_ITEMS, static_cast<int>(entryOffsets.size()) - pageStartIndex));
   renderer.fillRect(contentRect.x, 60 + (selectorIndex % PAGE_ITEMS) * 30 - 2, contentRect.width - 1, 30);
 
   for (size_t i = pageStartIndex; i < entryOffsets.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS);
@@ -1070,4 +1082,21 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
     errorMessage = tr(STR_WIFI_CONN_FAILED);
     requestUpdate();
   }
+}
+
+bool OpdsBookBrowserActivity::selectListRow(const int index) {
+  // Two lists, two states, two selection members. `state` is read on the loop task and may have
+  // moved on since the render that recorded the band, so it decides which one a tap means.
+  if (state == BrowserState::FORMAT_SELECTION) {
+    const auto entry = getEntry(selectorIndex);
+    if (index < 0 || index >= static_cast<int>(entry.acquisitionLinks.size())) return false;
+    formatSelectorIndex = index;
+    return true;
+  }
+  if (state == BrowserState::BROWSING) {
+    if (index < 0 || index >= static_cast<int>(entryOffsets.size())) return false;
+    selectorIndex = index;
+    return true;
+  }
+  return false;
 }
