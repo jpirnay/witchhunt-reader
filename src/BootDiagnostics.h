@@ -21,9 +21,11 @@
 /// The answers are kept in three places, cheapest first:
 ///   * `.bss`      — this boot's phase stamps and wake verdict (26 bytes).
 ///   * RTC_NOINIT  — the in-flight sleep breadcrumb (12 bytes).  Survives a soft
-///                   reset, a deep-sleep wake and a hang-plus-reset; lost when the
-///                   battery latch is actually cut, which is itself the signal that
-///                   the sleep completed.
+///                   reset and a deep-sleep wake; lost whenever the rail is cut,
+///                   which on an X4 sleeping with the default useClock=0 is EVERY
+///                   normal sleep.  So its absence is evidence too, and the record
+///                   is finalised from the reset reason in that case — see
+///                   outcomeOf() and resetImpliesMcuHadStopped().
 ///   * SD          — a fixed-size ring of the last 16 sleep/boot events, so history
 ///                   survives power loss and can be read back on screen.
 ///
@@ -159,7 +161,24 @@ enum SleepFlags : uint8_t {
   kFlagFromReader = 1 << 1,      // slept with a book open (wake repaints nothing until the page lands)
   kFlagReleaseTimeout = 1 << 2,  // the power-button release wait gave up
   kFlagStageFromRtc = 1 << 3,    // final stage was amended from the RTC breadcrumb on the next boot
+  // Set by persistSleep(), cleared by the next persistBoot(). While set, `code` is only
+  // the stage reached when the record was written — the last steps had not run yet — so
+  // it must not be read as a verdict. A record still carrying this flag was written by a
+  // boot that never came back, which is itself worth seeing.
+  kFlagInProgress = 1 << 4,
+  // Final stage was deduced from this boot's reset reason because the breadcrumb did not
+  // survive. Not a measurement: see resetImpliesMcuHadStopped().
+  kFlagStageInferred = 1 << 5,
 };
+
+/// How a sleep record's `code` should be read once finalised.
+enum class SleepOutcome : uint8_t {
+  ReachedDeepSleep,  // measured: the breadcrumb showed the wake source armed
+  InferredPowerOff,  // deduced: the breadcrumb was lost because the rail was cut
+  DidNotSleep,       // the MCU was still executing when the device next reset
+  Unfinished,        // still flagged in-progress — the finalising boot never happened
+};
+SleepOutcome outcomeOf(const Record& record);
 
 /// How many events the ring keeps.  16 covers eight full sleep/wake cycles, which is
 /// more than any reporter has been asked to reproduce, at 272 bytes on the card.

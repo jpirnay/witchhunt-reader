@@ -64,11 +64,38 @@ const char* wakeCauseName(uint8_t cause) {
   }
 }
 
-// A sleep that got as far as arming the wake source is a completed sleep: the very next
-// statement is esp_deep_sleep_start(). Anything short of that means the device was still
-// running when it stopped being useful — which is the distinction the whole page exists
-// to make.
-bool sleepReachedDeepSleep(uint8_t stage) { return stage >= static_cast<uint8_t>(BootDiag::SleepStage::WakeArmed); }
+// The verdict line — the one sentence a reporter is being asked to read. Three states,
+// not two: a sleep that cut the battery latch (the X4 default) leaves no breadcrumb to
+// finalise from, so its success is deduced from the next boot's reset reason rather than
+// measured, and the page says which of the two it was.
+const char* outcomeText(const BootDiag::Record& record) {
+  switch (BootDiag::outcomeOf(record)) {
+    case BootDiag::SleepOutcome::ReachedDeepSleep:
+      return tr(STR_DIAG_SLEEP_OK);
+    case BootDiag::SleepOutcome::InferredPowerOff:
+      return tr(STR_DIAG_SLEEP_OK_INFERRED);
+    case BootDiag::SleepOutcome::Unfinished:
+      return tr(STR_DIAG_SLEEP_UNFINISHED);
+    case BootDiag::SleepOutcome::DidNotSleep:
+      break;
+  }
+  return tr(STR_DIAG_SLEEP_STUCK);
+}
+
+// Compact marker for the same thing on a history line, where a full sentence will not fit.
+const char* outcomeTag(const BootDiag::Record& record) {
+  switch (BootDiag::outcomeOf(record)) {
+    case BootDiag::SleepOutcome::ReachedDeepSleep:
+      return "ok";
+    case BootDiag::SleepOutcome::InferredPowerOff:
+      return "ok?";
+    case BootDiag::SleepOutcome::Unfinished:
+      return "open";
+    case BootDiag::SleepOutcome::DidNotSleep:
+      break;
+  }
+  return "STUCK";
+}
 
 }  // namespace
 
@@ -220,12 +247,11 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     if (lastSleep == nullptr) {
       drawRow(tr(STR_DIAG_STOPPED_AT), tr(STR_DIAG_NO_RECORDS));
     } else {
-      const bool complete = sleepReachedDeepSleep(lastSleep->code);
       drawRow(tr(STR_DIAG_STOPPED_AT), BootDiag::stageName(static_cast<BootDiag::SleepStage>(lastSleep->code)));
       // The verdict gets a full-width row of its own rather than sharing the value
       // column: it is the one line a reporter is being asked to read, and the value
       // column is too narrow to hold it next to the stage name without clipping.
-      drawWide(complete ? tr(STR_DIAG_SLEEP_OK) : tr(STR_DIAG_SLEEP_STUCK));
+      drawWide(outcomeText(*lastSleep));
       drawRow(tr(STR_DIAG_TRIGGER), BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)));
       drawRow(tr(STR_DIAG_BATTERY_LATCH),
               (lastSleep->flags & BootDiag::kFlagKeepClock) ? tr(STR_DIAG_LATCH_KEPT) : tr(STR_DIAG_LATCH_CUT));
@@ -247,7 +273,7 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     for (uint8_t i = 0; i < recordCount_ && room(1); i++) {
       const BootDiag::Record& r = records_[i];
       if (r.kind == BootDiag::KindSleep) {
-        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s%s", static_cast<unsigned long>(r.seq),
+        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s %s%s", static_cast<unsigned long>(r.seq), outcomeTag(r),
                  BootDiag::stageName(static_cast<BootDiag::SleepStage>(r.code)),
                  BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
                  (r.flags & BootDiag::kFlagKeepClock) ? "latch-kept" : "latch-cut",

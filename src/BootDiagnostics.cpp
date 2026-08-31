@@ -73,7 +73,12 @@ void crumbStore(uint8_t stage, uint8_t trigger, uint8_t flags, bool pending) {
 
 constexpr char kRingPath[] = "/.crosspoint/bootdiag.bin";
 constexpr uint32_t kRingMagic = 0x57424431;  // 'WBD1'
-constexpr uint16_t kRingVersion = 1;
+// Bumped to 2: version-1 sleep records were written at the PanelAsleep stage and only
+// ever finalised when the RTC breadcrumb survived, which on an X4 with the default
+// useClock=0 it never does (the sleep cuts the battery latch). Every such record reads as
+// "never reached deep sleep" and there is no way to tell a real one from the artefact, so
+// they are discarded rather than shown.
+constexpr uint16_t kRingVersion = 2;
 
 // Whole-file read/modify/write. At 272 bytes that is one SD block either way, so a
 // partial in-place update would buy nothing and would need seek bookkeeping the ring
@@ -194,14 +199,81 @@ Record makeSleepRecord() {
   record.kind = KindSleep;
   record.code = crumbStage();
   record.reason = crumbTrigger();
-  record.flags = crumbFlags();
+  // kFlagInProgress: this is written before the release wait and the wake arming, so the
+  // stage in it is not yet a verdict. The next boot finalises it.
+  record.flags = static_cast<uint8_t>(crumbFlags() | kFlagInProgress);
   record.msA = static_cast<uint16_t>(s_crumbWait > UINT16_MAX ? UINT16_MAX : s_crumbWait);
   const unsigned long uptimeS = millis() / 1000UL;
   record.msB = static_cast<uint16_t>(uptimeS > UINT16_MAX ? UINT16_MAX : uptimeS);
   return record;
 }
 
+/// True when this boot's reset reason proves the MCU had stopped executing: it either
+/// woke from deep sleep, or came up on a fresh rail. Every other reason — a reset press,
+/// a panic, a watchdog, a software restart — requires code to have still been running,
+/// which for an in-flight sleep means it never reached esp_deep_sleep_start().
+///
+/// This is what stands in for the breadcrumb when the breadcrumb could not survive. On an
+/// X4 sleeping with useClock=0 the sleep cuts the battery latch by design, so RTC_NOINIT
+/// is wiped on EVERY healthy sleep and this is the only evidence left.
+///
+/// The one case it gets wrong is a hang escaped by pulling the battery rather than by
+/// pressing Reset — that also arrives as POWERON and would read as a completed sleep. The
+/// documented recovery for issue #155 is a Reset press (ESP_RST_EXT), which lands on the
+/// correct side, and a record finalised this way is flagged kFlagStageInferred so the page
+/// can say it was deduced rather than measured.
+bool resetImpliesMcuHadStopped(esp_reset_reason_t reason) {
+  return reason == ESP_RST_DEEPSLEEP || reason == ESP_RST_POWERON;
+}
+
+/// Turn the newest sleep record from "as far as we had got when we wrote it" into a
+/// verdict. Runs on the boot after the sleep, which is the first moment the outcome is
+/// knowable at all.
+void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFlagBits, uint32_t waitMs,
+                         esp_reset_reason_t resetReason) {
+  const RingHeader header = imageHeader();
+  const uint8_t slot = newestSlot(header);
+  if (slot >= kCapacity) {
+    return;
+  }
+  Record record{};
+  imageGetRecord(slot, record);
+  if (record.kind != KindSleep || (record.flags & kFlagInProgress) == 0) {
+    return;  // already final, or the newest record is a boot (no sleep since)
+  }
+
+  if (hadCrumb) {
+    // The MCU stayed powered through the sleep, so the breadcrumb is a measurement of
+    // where it actually got to — including "it hung in the release wait".
+    if (record.code < crumbFinalStage) {
+      record.code = crumbFinalStage;
+    }
+    record.flags = static_cast<uint8_t>(record.flags | crumbFlagBits | kFlagStageFromRtc);
+    record.msA = static_cast<uint16_t>(waitMs > UINT16_MAX ? UINT16_MAX : waitMs);
+  } else if (resetImpliesMcuHadStopped(resetReason)) {
+    record.code = static_cast<uint8_t>(SleepStage::WakeArmed);
+    record.flags = static_cast<uint8_t>(record.flags | kFlagStageInferred);
+  }
+  // Remaining case: no crumb and a reset reason that means code was still running. The
+  // stage the record already carries IS the answer — leave it exactly as written.
+  record.flags = static_cast<uint8_t>(record.flags & ~kFlagInProgress);
+  imageSetRecord(slot, record);
+}
+
 }  // namespace
+
+SleepOutcome outcomeOf(const Record& record) {
+  if (record.kind != KindSleep) {
+    return SleepOutcome::DidNotSleep;
+  }
+  if ((record.flags & kFlagInProgress) != 0) {
+    return SleepOutcome::Unfinished;
+  }
+  if (record.code < static_cast<uint8_t>(SleepStage::WakeArmed)) {
+    return SleepOutcome::DidNotSleep;
+  }
+  return (record.flags & kFlagStageInferred) != 0 ? SleepOutcome::InferredPowerOff : SleepOutcome::ReachedDeepSleep;
+}
 
 // ---------------------------------------------------------------------------
 // Boot phase trace
@@ -371,34 +443,22 @@ void persistBoot() {
   const esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
 
   updateRing([&] {
-    if (hadCrumb) {
-      if (pending) {
-        // The sleep never reached persistSleep() — one of the two early-boot paths, which
-        // sleep before Storage.begin() and so could only leave a breadcrumb. Write it now.
-        Record record{};
-        record.kind = KindSleep;
-        record.code = finalStage;
-        record.reason = crumbTriggerBits;
-        record.flags = static_cast<uint8_t>(crumbFlagBits | kFlagStageFromRtc);
-        record.msA = static_cast<uint16_t>(waitMs > UINT16_MAX ? UINT16_MAX : waitMs);
-        imageAppend(record);
-      } else {
-        // persistSleep() wrote the record before the release wait and the wake arming, so
-        // its stage is one or two steps stale. The breadcrumb survived, which means the
-        // MCU stayed powered — amend the record with what actually happened.
-        const RingHeader header = imageHeader();
-        const uint8_t slot = newestSlot(header);
-        if (slot < kCapacity) {
-          Record record{};
-          imageGetRecord(slot, record);
-          if (record.kind == KindSleep && record.code < finalStage) {
-            record.code = finalStage;
-            record.flags = static_cast<uint8_t>(record.flags | crumbFlagBits | kFlagStageFromRtc);
-            record.msA = static_cast<uint16_t>(waitMs > UINT16_MAX ? UINT16_MAX : waitMs);
-            imageSetRecord(slot, record);
-          }
-        }
-      }
+    if (hadCrumb && pending) {
+      // The sleep never reached persistSleep() — one of the two early-boot paths, which
+      // sleep before Storage.begin() and so could only leave a breadcrumb. Write it now,
+      // already final: the breadcrumb it came from is the complete story.
+      Record record{};
+      record.kind = KindSleep;
+      record.code = finalStage;
+      record.reason = crumbTriggerBits;
+      record.flags = static_cast<uint8_t>(crumbFlagBits | kFlagStageFromRtc);
+      record.msA = static_cast<uint16_t>(waitMs > UINT16_MAX ? UINT16_MAX : waitMs);
+      imageAppend(record);
+    } else {
+      // Unconditional, crumb or no crumb: a sleep that cut the rail leaves no breadcrumb
+      // to amend from, and skipping the finalise there was what left every healthy X4
+      // sleep reading as "never reached deep sleep".
+      finalizeNewestSleep(hadCrumb, finalStage, crumbFlagBits, waitMs, resetReason);
     }
 
     Record boot{};
