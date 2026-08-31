@@ -2926,9 +2926,16 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   progressUiEnabled =
       popupFreeHeap >= MIN_FREE_HEAP_FOR_INDEXING_POPUP && popupContigHeap >= MIN_CONTIG_HEAP_FOR_INDEXING_POPUP;
   if (!progressUiEnabled) {
-    LOG_DBG("EHP", "Skipping indexing popup due to low heap (free=%u contig=%u)", popupFreeHeap, popupContigHeap);
-    // When popup is disabled, also disable mid-parse ticks.
-    progressStepPercent = 0;
+    LOG_DBG("EHP", "Low heap at parse start (free=%u contig=%u): thinning indexing progress", popupFreeHeap,
+            popupContigHeap);
+    // Thinned, not silenced. This used to set progressStepPercent = 0, which removed the
+    // only sign of life from precisely the builds most likely to be slow — low heap is what
+    // makes a section build take tens of seconds, and on a wake resume there is no splash
+    // behind it, so the screen stays on the sleep image and the device reads as dead
+    // (issue #155). A tick every 50% is two extra draws across a whole build; the caller
+    // decides whether to spend a refresh on them (EpubReaderActivity::maybeShowBuildProgress
+    // only repaints once the build has outlived a normal open).
+    progressStepPercent = 50;
   }
 
   // Show initial progress popup for files above threshold.
@@ -2956,7 +2963,10 @@ size_t ChapterHtmlSlimParser::write(const uint8_t* buffer, const size_t size) {
   // Report progress at the granularity chosen up-front (see progressStepPercent).
   // Skip the 100% callback — the page render that follows immediately replaces the popup,
   // so the final tick is wasted work.
-  if (progressFn && progressUiEnabled && progressStepPercent > 0 && totalStreamSize > 0) {
+  // No progressUiEnabled term: the low-heap case now thins progressStepPercent rather than
+  // zeroing it, so that single variable carries the decision. Gating here as well would put
+  // the suppression back and leave a slow low-heap build with no sign of life at all.
+  if (progressFn && progressStepPercent > 0 && totalStreamSize > 0) {
     const int progress = static_cast<int>(bytesStreamed * 100 / totalStreamSize);
     if (progress < 100 && progress / progressStepPercent > lastReportedProgress / progressStepPercent) {
       lastReportedProgress = progress;

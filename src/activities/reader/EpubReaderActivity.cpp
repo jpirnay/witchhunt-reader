@@ -3191,6 +3191,48 @@ EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(
                                                              : SectionBuildMode::IncrementalReleased;
 }
 
+// Repaint the indexing popup while a long build runs. Called from the parser's progress
+// callback, so it runs on the render task — the one that owns the framebuffer for the
+// duration of the build.
+void EpubReaderActivity::maybeShowBuildProgress(const int percent) {
+  // Thresholds, not a fixed cadence: every repaint is an e-ink refresh on a path that is
+  // already the slow one, so they are spent only once the build has visibly outlived a
+  // normal open.
+  constexpr uint32_t FIRST_HINT_MS = 2000;
+  constexpr uint32_t REPAINT_INTERVAL_MS = 5000;
+  constexpr uint32_t ESCALATE_MS = 12000;
+
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - buildProgressStartMs_;
+  if (elapsed < FIRST_HINT_MS) {
+    return;  // the popup drawn at the top of the build is still current
+  }
+  if (buildProgressLastMs_ != 0 && now - buildProgressLastMs_ < REPAINT_INTERVAL_MS) {
+    return;
+  }
+  buildProgressLastMs_ = now;
+
+  char message[64];
+  const bool escalate = elapsed >= ESCALATE_MS;
+  if (escalate) {
+    // Name the area of work and how long it has been there. WakeTrace's phases are exactly
+    // that vocabulary, and on a resume they are the only description of where the time went.
+    snprintf(message, sizeof(message), "%s %d%% - %s %us", tr(STR_INDEXING), percent,
+             WakeTrace::phaseName(WakeTrace::furthestReached()), static_cast<unsigned>(elapsed / 1000));
+    if (!buildProgressEscalated_) {
+      buildProgressEscalated_ = true;
+      // Force a clean waveform once. Besides being more legible, it rebases the differential:
+      // a resume paints onto a panel still holding the sleep screen with the SDK's diff buffer
+      // just cleared, so a popup drawn FAST against that baseline can be invisible. This is
+      // the recovery for a first popup nobody ever saw.
+      renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+    }
+  } else {
+    snprintf(message, sizeof(message), "%s %d%%", tr(STR_INDEXING), percent);
+  }
+  GUI.drawPopup(renderer, message);
+}
+
 EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const RenderLayout& layout,
                                                                          const bool embeddedStyle,
                                                                          const uint8_t imageRendering) {
@@ -3254,7 +3296,15 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // CSS-fallback rebuild). Background-C owns the responsive, build-while-you-read case; here we
   // just build to completion. A resumed partial build continues via the same stepSectionBuild
   // state inside createSectionFile.
-  const auto runCreate = [&]() { return section->createSectionFile(buildParams, nullptr, /*skipEviction=*/false); };
+  // A real progress callback rather than nullptr: the parser reports at its own granularity
+  // (see ChapterHtmlSlimParser::write), and those ticks are the only re-entry points a
+  // run-to-completion build offers. Without one the popup drawn above is the single frame the
+  // user gets for the whole build, however long it runs.
+  buildProgressStartMs_ = millis();
+  buildProgressLastMs_ = 0;
+  buildProgressEscalated_ = false;
+  const auto onProgress = [this](int percent) { maybeShowBuildProgress(percent); };
+  const auto runCreate = [&]() { return section->createSectionFile(buildParams, onProgress, /*skipEviction=*/false); };
 
   const uint32_t createStart = millis();
   bool createOk = runCreate();
