@@ -515,6 +515,9 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                          StrId::STR_CUSTOMISE_STATUS_BAR));
   settings.push_back(SettingInfo::Toggle(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, "statusBarClock",
                                          StrId::STR_CUSTOMISE_STATUS_BAR));
+  settings.push_back(SettingInfo::Enum(StrId::STR_CLOCK_POSITION, &CrossPointSettings::statusBarClockPosition,
+                                       {StrId::STR_ALIGN_LEFT, StrId::STR_ALIGN_RIGHT}, "statusBarClockPosition",
+                                       StrId::STR_CUSTOMISE_STATUS_BAR));
   settings.push_back(SettingInfo::Enum(StrId::STR_LOWER_PROGRESS_BAR, &CrossPointSettings::statusBarLowerProgressBar,
                                        {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE},
                                        "statusBarLowerProgressBar", StrId::STR_CUSTOMISE_STATUS_BAR));
