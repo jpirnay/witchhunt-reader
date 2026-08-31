@@ -19,6 +19,7 @@ const StrId progressBarThicknessNames[] = {StrId::STR_PROGRESS_BAR_THIN, StrId::
                                            StrId::STR_PROGRESS_BAR_THICK};
 const StrId titleNames[] = {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE};
 const StrId statusItemsPositionNames[] = {StrId::STR_TOP, StrId::STR_BOTTOM};
+const StrId clockPositionNames[] = {StrId::STR_ALIGN_LEFT, StrId::STR_ALIGN_RIGHT};
 
 // One menu row. Editing a status-bar option means: cycle `field` through `valueCount` values and
 // display its current value. Rows with an enum-style set of choices provide `valueNames` (indexed by
@@ -38,8 +39,8 @@ struct StatusBarItem {
 
 template <size_t N>
 constexpr StatusBarItem enumItem(StrId label, uint8_t CrossPointSettings::* field, const StrId (&names)[N],
-                                 uint8_t defaultValue) {
-  return {label, field, static_cast<uint8_t>(N), defaultValue, names, false};
+                                 uint8_t defaultValue, bool requiresClock = false) {
+  return {label, field, static_cast<uint8_t>(N), defaultValue, names, requiresClock};
 }
 constexpr StatusBarItem toggleItem(StrId label, uint8_t CrossPointSettings::* field, bool requiresClock = false) {
   return {label, field, 2, 1, nullptr, requiresClock};
@@ -55,6 +56,8 @@ const StatusBarItem statusBarItems[] = {
              CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE),
     toggleItem(StrId::STR_BATTERY, &CrossPointSettings::statusBarBattery),
     toggleItem(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, /*requiresClock=*/true),
+    enumItem(StrId::STR_CLOCK_POSITION, &CrossPointSettings::statusBarClockPosition, clockPositionNames,
+             CrossPointSettings::STATUS_BAR_CLOCK_POSITION::STATUS_BAR_CLOCK_LEFT, /*requiresClock=*/true),
     enumItem(StrId::STR_UPPER_PROGRESS_BAR, &CrossPointSettings::statusBarUpperProgressBar, progressBarNames,
              CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS),
     enumItem(StrId::STR_UPPER_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarUpperProgressBarThickness,
@@ -134,20 +137,18 @@ void drawPreviewStatusItems(const GfxRenderer& renderer, const Rect& rect, const
       SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
   const bool showClock = SETTINGS.useClock && SETTINGS.statusBarClock;
   const int previewClockWidth = showClock ? renderer.getTextWidth(SMALL_FONT_ID, "00:00") : 0;
+  const bool clockOnRight =
+      SETTINGS.statusBarClockPosition == CrossPointSettings::STATUS_BAR_CLOCK_POSITION::STATUS_BAR_CLOCK_RIGHT;
 
-  // Left cluster: battery then clock, laid out the same way BaseTheme::drawStatusBar does it.
-  // Reserving the battery's *measured* width (icon + percentage) is what keeps the clock off the
-  // percentage text — estimating it as `batteryWidth + 8` is what made the preview overlap.
+  // Left cluster: battery, then the clock when it is left-positioned. Reserving the battery's
+  // *measured* width (icon + percentage) is what keeps the clock off the percentage text —
+  // estimating it is what made the preview overlap (issue #214).
   const int leftClusterX = rect.x + previewInnerMargin + previewBatteryInset;
   int leftClusterWidth = 0;
   if (SETTINGS.statusBarBattery) {
     GUI.drawBatteryLeft(renderer, Rect{leftClusterX, textY, metrics.batteryWidth, metrics.batteryHeight},
                         showBatteryPercentage);
     leftClusterWidth = BaseTheme::statusBarBatteryWidth(renderer, metrics, showBatteryPercentage);
-  }
-  if (showClock) {
-    const int clockX = leftClusterX + leftClusterWidth + statusItemGap;
-    renderer.drawText(SMALL_FONT_ID, clockX, textY, "00:00");
   }
 
   // Right-aligned zone: the printed ("physical") page label sits to the LEFT of the device page
@@ -180,6 +181,21 @@ void drawPreviewStatusItems(const GfxRenderer& renderer, const Rect& rect, const
     renderer.drawText(SMALL_FONT_ID, rightEdge - printedLabelWidth, textY, printedLabel);
   }
 
+  // Clock goes at whichever end it is configured for, mirroring BaseTheme::drawStatusBar: just
+  // past the battery on the left, or just past the progress text on the right.
+  int rightClusterWidth = progressTextWidth;
+  if (showClock) {
+    int clockX;
+    if (clockOnRight) {
+      rightClusterWidth += (rightClusterWidth > 0 ? statusItemGap : 0) + previewClockWidth;
+      clockX = rightEdge - rightClusterWidth;
+    } else {
+      clockX = leftClusterX + leftClusterWidth + statusItemGap;
+      leftClusterWidth += statusItemGap + previewClockWidth;
+    }
+    renderer.drawText(SMALL_FONT_ID, clockX, textY, "00:00");
+  }
+
   if (!hasTitle) {
     return;
   }
@@ -187,11 +203,8 @@ void drawPreviewStatusItems(const GfxRenderer& renderer, const Rect& rect, const
   const char* title = SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE
                           ? tr(STR_EXAMPLE_BOOK)
                           : tr(STR_EXAMPLE_CHAPTER);
-  int leftReserve = leftClusterWidth > 0 ? previewBatteryInset + leftClusterWidth + statusItemGap : 6;
-  if (showClock) {
-    leftReserve += previewClockWidth + statusItemGap;
-  }
-  const int rightReserve = progressTextWidth > 0 ? progressTextWidth + 18 : 6;
+  const int leftReserve = leftClusterWidth > 0 ? previewBatteryInset + leftClusterWidth + statusItemGap : 6;
+  const int rightReserve = rightClusterWidth > 0 ? rightClusterWidth + 18 : 6;
   const int titleAreaWidth = rect.width - previewInnerMargin * 2 - leftReserve - rightReserve;
   if (titleAreaWidth <= 0) {
     return;

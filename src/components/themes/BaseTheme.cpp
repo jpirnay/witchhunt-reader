@@ -998,6 +998,21 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   const int textY = statusItemsAtTop ? orientedMarginTop + paddingBottom + adjacentProgressHeight + 4
                                      : screenHeight - orientedMarginBottom - paddingBottom - adjacentProgressHeight -
                                            statusItemsHeight + 4;
+
+  constexpr int statusItemGap = 8;  // gap between adjacent items within one cluster
+  constexpr int starGap = 6;        // the star sits tighter against the progress text
+
+  // Resolve the clock before anything is placed: whichever end it sits on has to reserve its width
+  // before the title is centred in what is left over.
+  char clockStr[16] = "";
+  int clockTextWidth = 0;
+  if (SETTINGS.useClock && SETTINGS.statusBarClock) {
+    HalClock::formatTime(clockStr, sizeof(clockStr), !SETTINGS.clockFormat12h);
+    clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, clockStr);
+  }
+  const bool clockOnRight =
+      SETTINGS.statusBarClockPosition == CrossPointSettings::STATUS_BAR_CLOCK_POSITION::STATUS_BAR_CLOCK_RIGHT;
+
   int progressTextWidth = 0;
   const int printedLabelWidth =
       printedPageLabel.empty() ? 0 : renderer.getTextWidth(SMALL_FONT_ID, printedPageLabel.c_str());
@@ -1047,14 +1062,26 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     batterySize = 1 + statusBarBatteryWidth(renderer, metrics, showBatteryPercentage);
   }
 
-  // Draw Clock
-  int clockTextWidth = 0;
-  if (SETTINGS.useClock && SETTINGS.statusBarClock) {
-    char clockStr[16];
-    HalClock::formatTime(clockStr, sizeof(clockStr), !SETTINGS.clockFormat12h);
-    clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, clockStr);
-    renderer.drawText(SMALL_FONT_ID, metrics.statusBarHorizontalMargin + orientedMarginLeft + batterySize + 8, textY,
-                      clockStr);
+  // Right cluster, laid out from the right edge inwards: progress text (already drawn), then the
+  // star, then the clock when it is right-positioned.
+  const int rightEdge = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight;
+  const int starWidth = isStarred ? renderer.getTextWidth(SMALL_FONT_ID, "*") : 0;
+  const int starReserve = isStarred ? starWidth + (progressTextWidth > 0 ? starGap : 0) : 0;
+  int rightClusterWidth = progressTextWidth + starReserve;
+
+  // Draw Clock at whichever end it was assigned. Left: just past the battery. Right: just past the
+  // star / progress text, so it can never land on top of either.
+  int leftClusterWidth = batterySize;
+  if (clockTextWidth > 0) {
+    int clockX;
+    if (clockOnRight) {
+      rightClusterWidth += (rightClusterWidth > 0 ? statusItemGap : 0) + clockTextWidth;
+      clockX = rightEdge - rightClusterWidth;
+    } else {
+      clockX = metrics.statusBarHorizontalMargin + orientedMarginLeft + leftClusterWidth + statusItemGap;
+      leftClusterWidth += statusItemGap + clockTextWidth;
+    }
+    renderer.drawText(SMALL_FONT_ID, clockX, textY, clockStr);
   }
 
   // Draw Title
@@ -1062,10 +1089,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int rendererableScreenWidth =
         screenWidth - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
 
-    const int starReserve = isStarred ? (renderer.getTextWidth(SMALL_FONT_ID, "*") + 6) : 0;
-    const int clockSize = clockTextWidth > 0 ? clockTextWidth + 8 : 0;
-    const int titleMarginLeft = batterySize + clockSize + 30;
-    const int titleMarginRight = progressTextWidth + starReserve + 30;
+    const int titleMarginLeft = leftClusterWidth + 30;
+    const int titleMarginRight = rightClusterWidth + 30;
 
     // Attempt to center title on the screen, but if title is too wide then later we will center it within the
     // available space.
@@ -1091,16 +1116,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   // Draw star indicator between title and progress text
   if (isStarred) {
-    const int starWidth = renderer.getTextWidth(SMALL_FONT_ID, "*");
-    int starX;
-    if (progressTextWidth > 0) {
-      // Place star just left of the progress text with a small gap
-      starX = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight - progressTextWidth - starWidth - 6;
-    } else {
-      // No progress text, place star at right edge
-      starX = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight - starWidth;
-    }
-    renderer.drawText(SMALL_FONT_ID, starX, textY, "*");
+    renderer.drawText(SMALL_FONT_ID, rightEdge - progressTextWidth - starReserve, textY, "*");
   }
 }
 
