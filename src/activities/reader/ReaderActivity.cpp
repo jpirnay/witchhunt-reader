@@ -625,16 +625,18 @@ GfxRenderer* g_openRenderer = nullptr;
 
 void onOpenProgress(const char* stage) {
   // Thresholds rather than a cadence: each paint is an e-ink refresh, and a warm open
-  // finishes well inside the first one, so a healthy book costs nothing.
+  // finishes well inside the first one, so a healthy book costs nothing. After that first
+  // hint every repaint is a liveness update on a long interval — the device saying it is
+  // still working and what on, which is what a stalled-looking open needs.
   constexpr uint32_t FIRST_HINT_MS = 2000;
-  constexpr uint32_t REPAINT_INTERVAL_MS = 5000;
+  constexpr uint32_t LIVENESS_INTERVAL_MS = 15000;
 
   const uint32_t now = millis();
   const uint32_t elapsed = now - g_openStartMs;
   if (elapsed < FIRST_HINT_MS) {
     return;
   }
-  if (g_openLastPaintMs != 0 && now - g_openLastPaintMs < REPAINT_INTERVAL_MS) {
+  if (g_openLastPaintMs != 0 && now - g_openLastPaintMs < LIVENESS_INTERVAL_MS) {
     return;
   }
   g_openLastPaintMs = now;

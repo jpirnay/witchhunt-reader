@@ -3195,26 +3195,29 @@ EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(
 // callback, so it runs on the render task — the one that owns the framebuffer for the
 // duration of the build.
 void EpubReaderActivity::maybeShowBuildProgress(const int percent) {
-  // Thresholds, not a fixed cadence: every repaint is an e-ink refresh on a path that is
-  // already the slow one, so they are spent only once the build has visibly outlived a
-  // normal open.
+  // Two thresholds. The first is quick, so a merely-slow open shows something before the
+  // user starts wondering; after that the repaints are deliberately far apart, because each
+  // one costs an e-ink refresh on the path that is already the slow one. Every repaint from
+  // there on is a liveness update — "still working, here is what on, here is how far" —
+  // which is the whole point of it: the device must never again look dead while it is busy.
   constexpr uint32_t FIRST_HINT_MS = 2000;
-  constexpr uint32_t REPAINT_INTERVAL_MS = 5000;
-  constexpr uint32_t ESCALATE_MS = 12000;
+  constexpr uint32_t LIVENESS_INTERVAL_MS = 15000;
 
   const uint32_t now = millis();
   const uint32_t elapsed = now - buildProgressStartMs_;
   if (elapsed < FIRST_HINT_MS) {
     return;  // the popup drawn at the top of the build is still current
   }
-  if (buildProgressLastMs_ != 0 && now - buildProgressLastMs_ < REPAINT_INTERVAL_MS) {
+  const bool firstHint = buildProgressLastMs_ == 0;
+  if (!firstHint && now - buildProgressLastMs_ < LIVENESS_INTERVAL_MS) {
     return;
   }
   buildProgressLastMs_ = now;
 
   char message[64];
-  const bool escalate = elapsed >= ESCALATE_MS;
-  if (escalate) {
+  if (firstHint) {
+    snprintf(message, sizeof(message), "%s %d%%", tr(STR_INDEXING), percent);
+  } else {
     // Name the area of work and how long it has been there. WakeTrace's phases are exactly
     // that vocabulary, and on a resume they are the only description of where the time went.
     snprintf(message, sizeof(message), "%s %d%% - %s %us", tr(STR_INDEXING), percent,
@@ -3227,8 +3230,6 @@ void EpubReaderActivity::maybeShowBuildProgress(const int percent) {
       // the recovery for a first popup nobody ever saw.
       renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
     }
-  } else {
-    snprintf(message, sizeof(message), "%s %d%%", tr(STR_INDEXING), percent);
   }
   GUI.drawPopup(renderer, message);
 }

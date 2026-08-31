@@ -467,45 +467,43 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
 // appears dead — which is what issue #155 turned out to be. The device is running; there is
 // simply nothing on screen and no way back.
 //
-// This gives up and restarts. The next boot lands on Home by itself: the resume path clears
-// APP_STATE.openEpubPath and bumps readerActivityLoadCount BEFORE opening the book, and only
-// EpubReaderActivity::onExit() clears that counter — so an open that never returned leaves it
-// set, and setup()'s routing sends the following boot Home with the book untouched. That
-// mechanism already existed for a reader that CRASHES; all that was missing was a trigger for
-// one that HANGS.
+// It RECORDS the stall; it does not act on it. An earlier version restarted the device to
+// land on Home (the boot-loop guard already routes there, since an open that never returned
+// leaves readerActivityLoadCount set). That was dropped deliberately: while the cause is
+// still unknown an automatic restart destroys the evidence and gives the reporter a second
+// unexplained reboot to describe. The user-visible answer to a slow open is the liveness
+// update the reader paints every LIVENESS_INTERVAL_MS — this task's job is only to leave a
+// line in the history saying which phase it was sitting in.
 //
-// Its own task, deliberately:
-//   - The stall can be in either of the two tasks that matter. A slow section build runs on
-//     the render task (loop keeps running), but Epub::load() runs inside onEnter() on the LOOP
-//     task, and a watchdog living in loop() cannot fire while loop() is the thing that is
-//     stuck. Only a third task covers both.
-//   - It takes no lock, touches no framebuffer and paints nothing. Restarting is the only
-//     action available to a task that cannot know what state the wedged one left behind;
-//     anything that needed the render lock could block on the very hang it is trying to escape.
+// Its own task, deliberately: the stall can be in either of the two tasks that matter. A slow
+// section build runs on the render task (loop keeps running), but Epub::load() runs inside
+// onEnter() on the LOOP task, and a watchdog living in loop() cannot fire while loop() is the
+// thing that is stuck. It takes no render lock and touches no framebuffer — the one thing it
+// does is an SD write, which HalStorage serialises behind its own mutex, so at worst it waits
+// out a worker that is mid-file and never gets to write at all.
+//
 // 1 KB stack: the deepest path is persistResumeStall() -> one 272-byte SD write.
-static constexpr uint32_t RESUME_STALL_TIMEOUT_MS = 20000;
+static constexpr uint32_t RESUME_STALL_REPORT_MS = 20000;
 static constexpr uint32_t RESUME_STALL_POLL_MS = 1000;
 
-static void resumeStallWatchdogTask(void*) {
+static void resumeStallReporterTask(void*) {
+  bool reported = false;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(RESUME_STALL_POLL_MS));
     // fromWakeOnly: a book opened from the library has a visible UI behind it, so a slow open
-    // there is merely slow. Only the wake resume is invisible, and only it gets restarted.
+    // there is merely slow. Only the wake resume is invisible, and only it is worth a record.
     if (!WakeTrace::openInFlight(/*fromWakeOnly=*/true)) {
+      reported = false;  // that open ended; arm again for the next one
       continue;
     }
-    if (WakeTrace::msSinceOpen() < RESUME_STALL_TIMEOUT_MS) {
+    if (reported || WakeTrace::msSinceOpen() < RESUME_STALL_REPORT_MS) {
       continue;
     }
+    reported = true;  // once per open: the point is a marker, not a running commentary
     const WakeTrace::Phase phase = WakeTrace::furthestReached();
     const unsigned long waited = WakeTrace::msSinceOpen();
-    LOG_ERR("MAIN", "Resume stalled in phase %s after %lums with no page — restarting to Home",
-            WakeTrace::phaseName(phase), waited);
+    LOG_ERR("MAIN", "Resume still has no page after %lums, stalled in phase %s", waited, WakeTrace::phaseName(phase));
     BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000));
-    // Not silentRestart(): that flushes the reading session and takes the same paths the wedged
-    // task may be holding. This is a hard restart on purpose — the boot-loop guard, not this
-    // task, is what makes the next boot land somewhere useful.
-    esp_restart();
   }
 }
 
@@ -1239,7 +1237,7 @@ void setup() {
   CooperativeAbort::setLongTaskAbortPredicate(&hasPendingButtonInput);
   // Started here, after routing: by now WakeTrace knows whether this boot is a wake resume,
   // and the watchdog only ever acts on that case.
-  xTaskCreate(&resumeStallWatchdogTask, "resumewd", 1024, nullptr, 1, nullptr);
+  xTaskCreate(&resumeStallReporterTask, "resumewd", 1024, nullptr, 1, nullptr);
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();
