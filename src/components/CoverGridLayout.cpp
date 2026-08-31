@@ -30,4 +30,29 @@ Layout compute(const Input& in) {
   return l;
 }
 
+int hitTest(const Layout& l, const int originX, const int originY, const int pageStartRow, const int itemCount,
+            const int px, const int py) {
+  if (l.cols <= 0 || l.rows <= 0 || l.cellWidth <= 0 || l.rowStride <= 0) return -1;
+
+  // Rows first: the stride includes the trailing margin, so the hit band is the cell's own
+  // height and the remainder of the stride is gutter.
+  const int dy = py - originY;
+  if (dy < 0) return -1;
+  const int row = dy / l.rowStride;
+  if (row >= l.rows) return -1;
+  if (dy - row * l.rowStride >= l.cellHeight + kLabelHeight) return -1;
+
+  // Columns: same shape, with the leading margin taken off first.
+  const int dx = px - originX - kMargin;
+  if (dx < 0) return -1;
+  const int colStride = l.cellWidth + kMargin;
+  const int col = dx / colStride;
+  if (col >= l.cols) return -1;
+  if (dx - col * colStride >= l.cellWidth) return -1;
+
+  const int index = (pageStartRow + row) * l.cols + col;
+  if (index < 0 || index >= itemCount) return -1;  // the last row is usually partial
+  return index;
+}
+
 }  // namespace CoverGridLayout

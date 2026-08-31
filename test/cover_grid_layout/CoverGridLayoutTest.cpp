@@ -98,3 +98,100 @@ TEST(CoverGridLayout, DegenerateInputsDoNotProduceNonsense) {
   EXPECT_GE(l.cellWidth, 1);
   EXPECT_EQ(l.cellHeight, CoverGridLayout::kMinCellHeight);
 }
+
+// --- hitTest ------------------------------------------------------------------------------
+//
+// The inverse of the cell placement RecentBooksActivity::renderGridView does:
+//   cx = originX + kMargin + col * (cellWidth + kMargin)
+//   cy = originY + (row - pageStartRow) * rowStride
+// Restated here so a change to either side fails loudly rather than silently mis-aiming taps.
+
+namespace {
+
+constexpr int kOriginX = 0;
+constexpr int kOriginY = 100;
+
+// The real X4 portrait grid: 2 columns, full-size cells.
+CoverGridLayout::Layout x4Grid() { return CoverGridLayout::compute(portrait(480, 800, kLyra, /*isX3=*/false)); }
+
+// Centre of the cell at (row, col) on the current page, in the frame hitTest expects.
+void cellCentre(const CoverGridLayout::Layout& l, int row, int col, int& x, int& y) {
+  x = kOriginX + CoverGridLayout::kMargin + col * (l.cellWidth + CoverGridLayout::kMargin) + l.cellWidth / 2;
+  y = kOriginY + row * l.rowStride + (l.cellHeight + CoverGridLayout::kLabelHeight) / 2;
+}
+
+}  // namespace
+
+TEST(CoverGridLayoutHitTest, HitsEveryCellOfTheFirstPageAtItsCentre) {
+  const auto l = x4Grid();
+  const int count = l.cols * l.rows;
+  for (int row = 0; row < l.rows; ++row) {
+    for (int col = 0; col < l.cols; ++col) {
+      int x = 0;
+      int y = 0;
+      cellCentre(l, row, col, x, y);
+      EXPECT_EQ(row * l.cols + col, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, y))
+          << "row " << row << " col " << col;
+    }
+  }
+}
+
+TEST(CoverGridLayoutHitTest, ResolvesThroughThePageOffset) {
+  const auto l = x4Grid();
+  const int perPage = l.cols * l.rows;
+  int x = 0;
+  int y = 0;
+  cellCentre(l, 0, 0, x, y);
+  // Second page: the top-left cell on screen is the first item of that page.
+  EXPECT_EQ(l.rows * l.cols, CoverGridLayout::hitTest(l, kOriginX, kOriginY, l.rows, perPage * 3, x, y));
+}
+
+TEST(CoverGridLayoutHitTest, TheGutterBetweenCoversIsAMiss) {
+  const auto l = x4Grid();
+  const int count = l.cols * l.rows;
+  ASSERT_GE(l.cols, 2);
+  int x = 0;
+  int y = 0;
+  cellCentre(l, 0, 0, x, y);
+  // Just past the right edge of column 0, inside the margin before column 1.
+  const int gutterX = kOriginX + CoverGridLayout::kMargin + l.cellWidth;
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, gutterX, y));
+  EXPECT_EQ(0, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, gutterX - 1, y));
+  // And the leading margin before column 0.
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, kOriginX, y));
+}
+
+TEST(CoverGridLayoutHitTest, TheRowGutterBelowTheLabelIsAMiss) {
+  const auto l = x4Grid();
+  const int count = l.cols * l.rows;
+  int x = 0;
+  int y = 0;
+  cellCentre(l, 0, 0, x, y);
+  const int cellBottom = kOriginY + l.cellHeight + CoverGridLayout::kLabelHeight;
+  EXPECT_EQ(0, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom - 1));
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom));
+}
+
+// The last row of a library is usually partial: the empty cells beside the final cover must not
+// resolve to an item that does not exist.
+TEST(CoverGridLayoutHitTest, EmptyCellsInAPartialLastRowMiss) {
+  const auto l = x4Grid();
+  ASSERT_GE(l.cols, 2);
+  const int count = l.cols * (l.rows - 1) + 1;  // one book alone on the last row
+  int x = 0;
+  int y = 0;
+  cellCentre(l, l.rows - 1, 0, x, y);
+  EXPECT_EQ(count - 1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, y));
+  cellCentre(l, l.rows - 1, 1, x, y);
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, y));
+}
+
+TEST(CoverGridLayoutHitTest, MissesAboveTheGridAndBelowTheLastRow) {
+  const auto l = x4Grid();
+  const int count = l.cols * l.rows;
+  int x = 0;
+  int y = 0;
+  cellCentre(l, 0, 0, x, y);
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, kOriginY - 1));
+  EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, kOriginY + l.rows * l.rowStride));
+}

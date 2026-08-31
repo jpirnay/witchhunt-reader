@@ -80,6 +80,11 @@ class RecentBooksActivity final : public Activity {
   void renderGridView(RenderLock&&);
   // Columns currently on screen — derived from the panel size and theme metrics, not a constant.
   int gridColumns() const;
+  // Open the book under the selection. Shared by Confirm and by a tap, so the two agree.
+  void openSelectedBook(bool longPress);
+  // Tap on a cover (grid) or a row (list): Down moves the selection, Tap opens. Returns true
+  // when the touch was consumed. Inert on non-touch boards.
+  bool handleBookTouch();
 
  public:
   explicit RecentBooksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, int focusIndex = -1)

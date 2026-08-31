@@ -314,32 +314,100 @@ void RecentBooksActivity::showSelectedBookInfo() {
   }
 }
 
+// Open the book under the selection. Shared by the Confirm button and by a tap on a cover or a
+// row, so the two cannot drift: a long Confirm additionally arms a KOReader pull, a tap never
+// does (touch has no press-type distinction here and a sync is not something to trigger by
+// accident).
+void RecentBooksActivity::openSelectedBook(const bool longPress) {
+  if (recentBooks.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(recentBooks.size())) return;
+  const bool wantsSync = longPress && KOREADER_STORE.hasCredentials();
+  const std::string& selectedPath = recentBooks[selectorIndex].path;
+  const bool isEpubBook = FsHelpers::hasEpubExtension(selectedPath);
+  LOG_DBG("RBA", "Selected recent book: %s (sync=%d epub=%d)", selectedPath.c_str(), wantsSync ? 1 : 0,
+          isEpubBook ? 1 : 0);
+  if (wantsSync && isEpubBook) {
+    auto& sync = APP_STATE.koReaderSyncSession;
+    sync.autoPullEpubPath = selectedPath;
+    sync.postAction = KOReaderSyncPostAction::Reader;
+    APP_STATE.saveToFile();
+  }
+  openingBook = true;
+  ReturnHint hint;
+  hint.target = ReturnTo::RecentBooks;
+  hint.selectIndex = selectorIndex;
+  activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
+}
+
+// A tap on a cover (grid) or a row (list). Two-step like every other list in the firmware:
+// resting a finger moves the selection, lifting it opens the book.
+//
+// The two views resolve the hit differently, and neither re-derives geometry. The list view
+// draws through GUI.drawList, so its rows are already published in ListTouchBand and
+// mappedInput.listTouch() matches against what was painted. The grid draws its own cells, but
+// their geometry comes from computeGridLayout() -- the same function the render calls -- so the
+// inverse runs here against a fresh copy rather than against a recorded snapshot. That is
+// strictly better for the grid: pageStartRow follows selectorIndex, which this task owns, so
+// there is no render-task staleness to reason about at all.
+bool RecentBooksActivity::handleBookTouch() {
+  if (recentBooks.empty()) return false;
+
+  int index = -1;
+  MappedInputManager::RowTouch touch = MappedInputManager::RowTouch::None;
+
+  if (APP_STATE.recentBooksGridView) {
+    const GridLayout layout = computeGridLayout(renderer);
+    const int cols = std::max(1, layout.cells.cols);
+    const int visibleRows = std::max(1, layout.cells.rows);
+    const int pageStartRow = (selectorIndex / cols / visibleRows) * visibleRows;
+    const int itemCount = static_cast<int>(recentBooks.size());
+    const auto hit = [&](const int x, const int y) {
+      const int cell =
+          CoverGridLayout::hitTest(layout.cells, layout.content.x, layout.contentTop, pageStartRow, itemCount, x, y);
+      if (cell < 0) return false;
+      index = cell;
+      return true;
+    };
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y) && hit(x, y)) {
+      touch = MappedInputManager::RowTouch::Down;
+    } else if (mappedInput.wasScreenTapped(x, y) && hit(x, y)) {
+      touch = MappedInputManager::RowTouch::Tap;
+    }
+  } else {
+    touch = mappedInput.listTouch(index);
+  }
+
+  if (touch == MappedInputManager::RowTouch::None) return false;
+  if (index < 0 || index >= static_cast<int>(recentBooks.size())) return true;
+
+  if (touch == MappedInputManager::RowTouch::Down) {
+    if (index != selectorIndex) {
+      selectorIndex = index;
+      requestUpdate();
+    }
+    return true;
+  }
+
+  selectorIndex = index;
+  openSelectedBook(/*longPress=*/false);
+  return true;
+}
+
 void RecentBooksActivity::loop() {
   const bool gridView = APP_STATE.recentBooksGridView;
   const int listSize = static_cast<int>(recentBooks.size());
+
+  // Ahead of the button queue: a tap that opens a book replaces this activity, and draining
+  // queued button events into a screen that is going away serves nobody.
+  if (handleBookTouch()) return;
 
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
     // Confirm short/long: open book (long = KOReader sync for EPUBs)
     if (ev.button == MappedInputManager::Button::Confirm &&
         (ev.type == ButtonEventManager::PressType::Short || ev.type == ButtonEventManager::PressType::Long)) {
-      if (recentBooks.empty() || selectorIndex >= static_cast<int>(recentBooks.size())) return;
-      const bool longPress = (ev.type == ButtonEventManager::PressType::Long) && KOREADER_STORE.hasCredentials();
-      const std::string& selectedPath = recentBooks[selectorIndex].path;
-      const bool isEpubBook = FsHelpers::hasEpubExtension(selectedPath);
-      LOG_DBG("RBA", "Selected recent book: %s (sync=%d epub=%d)", selectedPath.c_str(), longPress ? 1 : 0,
-              isEpubBook ? 1 : 0);
-      if (longPress && isEpubBook) {
-        auto& sync = APP_STATE.koReaderSyncSession;
-        sync.autoPullEpubPath = selectedPath;
-        sync.postAction = KOReaderSyncPostAction::Reader;
-        APP_STATE.saveToFile();
-      }
-      openingBook = true;
-      ReturnHint hint;
-      hint.target = ReturnTo::RecentBooks;
-      hint.selectIndex = selectorIndex;
-      activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
+      openSelectedBook(ev.type == ButtonEventManager::PressType::Long);
       return;
     }
 
