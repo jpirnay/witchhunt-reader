@@ -404,8 +404,9 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
         // A wake resume that still had no page after RESUME_STALL_REPORT_MS, and the phase it
         // was sitting in. A marker only — nothing acted on it, so the device carried on and
         // whatever the user saw next is still theirs to describe.
-        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us", static_cast<unsigned long>(r.seq),
-                 WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA);
+        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us %s", static_cast<unsigned long>(r.seq),
+                 WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA,
+                 (r.flags & BootDiag::kFlagStillTicking) ? "working" : "NO-TICKS");
       } else if (r.kind == BootDiag::KindAborted) {
         snprintf(buf, sizeof(buf), "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(r.seq), r.msA,
                  r.msA >= BootDiag::kAbortCountCap ? "+" : "",

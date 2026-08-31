@@ -63,6 +63,11 @@ enum SleepFlags : uint8_t {
   // The breadcrumb did not survive, so the outcome was deduced from the fact that the rail
   // went away rather than measured.
   kFlagStageInferred = 1 << 5,
+  // KindResumeStall only. The long task was still ticking through its yield points when the
+  // stall was recorded — slow, not wedged. Its absence is the stronger signal: nothing
+  // reached a yield point at all, so the work is stuck inside one uninterruptible step
+  // rather than grinding through many.
+  kFlagStillTicking = 1 << 6,
 };
 
 /// How far a deep-sleep attempt got. Ordered: a larger value is strictly more progress.

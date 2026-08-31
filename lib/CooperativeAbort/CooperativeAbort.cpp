@@ -1,12 +1,21 @@
 #include "CooperativeAbort.h"
 
+#include "LongTaskProgress.h"
+
 namespace CooperativeAbort {
 namespace {
 bool (*gAbortPredicate)() = nullptr;
 bool gAborted = false;
 }  // namespace
 
-bool shouldAbortLongTask() { return gAbortPredicate != nullptr && gAbortPredicate(); }
+bool shouldAbortLongTask() {
+  // Every long task in the lib layer already polls this at its natural boundary, which makes
+  // it the one place that sees them all. Recording liveness here means a new yield point
+  // gets it for free, and none of the existing ones had to be touched — see
+  // LongTaskProgress.h for why those points can report progress but must not paint.
+  LongTaskProgress::noteAlive();
+  return gAbortPredicate != nullptr && gAbortPredicate();
+}
 
 void setLongTaskAbortPredicate(bool (*predicate)()) { gAbortPredicate = predicate; }
 

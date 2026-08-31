@@ -478,12 +478,13 @@ void persistReleaseTimeout(bool storageLive) {
   });
 }
 
-void persistResumeStall(uint8_t wakePhase, uint16_t seconds) {
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking) {
   updateRing([&] {
     Record record{};
     record.kind = KindResumeStall;
     record.code = wakePhase;
     record.msA = seconds;
+    record.flags = stillTicking ? kFlagStillTicking : 0;
     imageAppend(record);
   });
 }
