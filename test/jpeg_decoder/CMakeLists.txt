@@ -5,6 +5,7 @@ add_executable(JpegDecoderTest
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/lib/CooperativeAbort/CooperativeAbort.cpp
+  ${REPO_ROOT}/lib/CooperativeAbort/LongTaskProgress.cpp
   ${REPO_ROOT}/lib/TJpgDec/src/tjpgd.c
 )
 
