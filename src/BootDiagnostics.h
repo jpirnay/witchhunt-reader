@@ -187,6 +187,15 @@ struct AbortCounts {
 };
 AbortCounts abortCounts();
 
+/// Record that a book open stalled: the resume watchdog gave up waiting for the first page
+/// and is about to restart the device.  `wakePhase` is the furthest WakeTrace phase reached
+/// (the area of work it was sitting in) and `seconds` is how long it waited.
+///
+/// Written to the card immediately, because the restart that follows is the whole point: the
+/// evidence has to outlive it.  Rendered in the history as its own line so a stalled resume
+/// is never again confused with a device that failed to wake.
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds);
+
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.
 uint8_t loadRecords(Record* out, uint8_t maxRecords);

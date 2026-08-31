@@ -44,6 +44,10 @@ enum Kind : uint8_t {
   // per run because "it refused 7 times" and "it refused 4 times for one reason and 3 for
   // another" are different faults.
   KindAborted = 2,
+  // A book open that never produced a page. The resume watchdog writes one of these just
+  // before restarting the device, so the reason for the restart outlives it — without it a
+  // watchdog reboot is indistinguishable from the user pressing Reset.
+  KindResumeStall = 3,
 };
 
 /// Record::flags bits, sleep records only.
