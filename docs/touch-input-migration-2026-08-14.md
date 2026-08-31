@@ -660,17 +660,26 @@ passes `drawList` `selectedSettingIndex - 1`, because index 0 is the category ta
 list does not paint. Band row *i* is `selectedSettingIndex` *i+1*. A tap therefore cannot reach
 the tab row — correct, since the tab bar is its own (still unbuilt) `colTouch` target.
 
-**One correction, and it is the interesting one.** The first two commits acted on
-`RowTouch::Down` — move the selection, repaint — and then activated on `Tap` and repainted
-again. `wasScreenTouchDown()` fires once a contact has been held `TOUCH_DOWN_SELECT_DELAY_MS`
-(90 ms), which an ordinary finger tap comfortably exceeds. So a single tap cost **two full
-e-paper refreshes**, roughly a second, and the first of them was feedback that arrives after the
-finger has gone. `Down` is now claimed but not acted on, everywhere. This is P2 arriving by a
-different road: on e-paper a full repaint is not usable as tap feedback, and the only version
-that works is a cheap localised invert (upstream's `setFlash`/`clearTapFlash`). **P2 is now the
-highest-value remaining touch item**, not an optional polish.
+**Interaction rule: point then confirm.** The first tap on a row moves the selection there and
+stops; only a tap on the row that is already selected runs the action. The rule lives in
+`ListRowTap::apply()` and is exercised on the host, so nineteen screens share one definition of
+it. Reaching a row you did not mean costs one more tap and can never cost an action.
 
-Cost of the touch surface on C3: **+416 bytes RAM, +7,770 bytes flash.** Gates:
+This took two goes to get right, and the wrong turn is worth keeping. The first version activated
+on a single tap, and it also acted on `RowTouch::Down` — move the selection, repaint — before
+activating on `Tap` and repainting again. `wasScreenTouchDown()` fires once a contact has been
+held `TOUCH_DOWN_SELECT_DELAY_MS` (90 ms), which an ordinary finger tap comfortably exceeds, so
+**one gesture cost two full refreshes** and the first was feedback arriving after the finger had
+gone. Dropping the `Down` half was right. Concluding from it that two-step feedback was too
+expensive was **not**: two deliberate taps, each doing one thing, are a completely different
+trade from one contact firing twice. `Down` remains claimed-but-inert; the two-step is between
+separate taps.
+
+That first repaint is the only feedback e-paper affords until a localised invert exists
+(upstream's `setFlash`/`clearTapFlash`). **P2 remains the highest-value remaining touch item** —
+it would let the first tap flash the row instead of repainting the screen.
+
+Cost of the touch surface on C3: **+416 bytes RAM, +8,132 bytes flash.** Gates:
 `test/list_touch_band` (12), `test/tap_targets` (11), 6 more in `test/cover_grid_layout`; host
 suite 689/689. **No touch board has run any of it.**
 
