@@ -195,9 +195,16 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     // The raw fingerprint, not just the name it resolved to: two units can report the same
     // controller and still differ here, and an unrun or inconclusive probe is itself a
     // finding. Bytes are what a cross-reference between two reporters actually compares.
-    if (probe.valid) {
+    // All-FF is a floating bus, not a fingerprint: the controller answered nothing and the
+    // profile default stands. Printing the raw FFs reads like corruption, and it is what an
+    // X4 always shows — say what it means instead.
+    const bool probeSilent = probe.ver[0] == 0xFF && probe.ver[1] == 0xFF && probe.ver[2] == 0xFF &&
+                             probe.ver[3] == 0xFF && probe.ver[4] == 0xFF;
+    if (probe.valid && !probeSilent) {
       snprintf(buf, sizeof(buf), "ver %02X %02X %02X %02X %02X flg %02X v%u%s", probe.ver[0], probe.ver[1],
                probe.ver[2], probe.ver[3], probe.ver[4], probe.flg, probe.verdict, probe.mtpValid ? " mtp" : "");
+    } else if (probe.valid) {
+      snprintf(buf, sizeof(buf), "%s", tr(STR_DIAG_PROBE_SILENT));
     } else {
       snprintf(buf, sizeof(buf), "%s", tr(STR_DIAG_UNKNOWN));
     }
@@ -210,8 +217,18 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // chip has no ESP_RST_EXT — so this row cannot tell them apart and the row below is what
   // does. Shown anyway: it still separates a panic, a watchdog and a deep-sleep wake.
   drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
-  drawRow(tr(STR_DIAG_PREV_SESSION),
-          BootDiag::previousSessionEndedWithoutSleep() ? tr(STR_DIAG_PREV_NO_SLEEP) : tr(STR_DIAG_PREV_SLEPT));
+  const char* prevText = tr(STR_DIAG_PREV_UNKNOWN);
+  switch (BootDiag::previousSession()) {
+    case BootDiag::PreviousSession::EndedAtSleepPath:
+      prevText = tr(STR_DIAG_PREV_SLEPT);
+      break;
+    case BootDiag::PreviousSession::EndedWithoutSleep:
+      prevText = tr(STR_DIAG_PREV_NO_SLEEP);
+      break;
+    case BootDiag::PreviousSession::Unknown:
+      break;
+  }
+  drawRow(tr(STR_DIAG_PREV_SESSION), prevText);
   // Headline row rather than history-only: a device that wakes, refuses the press and
   // sleeps again leaves the panel untouched, so this counter is the only thing separating
   // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
@@ -255,7 +272,14 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
       drawWide(buf);
     }
   }
-  drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
+  // esp_sleep_get_wakeup_cause() reads an RTC register that is only written when a sleep
+  // actually ends. After a power-on or a software restart it holds whatever the last sleep
+  // left there — every field report so far read "timer", which is the idle light-sleep slice
+  // from before the reboot and says nothing about this boot. Only quote it when it can mean
+  // something.
+  drawRow(tr(STR_DIAG_WAKE_CAUSE), esp_reset_reason() == ESP_RST_DEEPSLEEP
+                                       ? wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause()))
+                                       : tr(STR_DIAG_NA));
 
   const auto& check = BootDiag::wakeCheck();
   snprintf(buf, sizeof(buf), "%s (held %u ms, needs %u ms)", HalGPIO::wakeVerdictName(check.verdict), check.heldMs,
@@ -338,6 +362,13 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
       // column is too narrow to hold it next to the stage name without clipping.
       drawWide(outcomeText(*lastSleep));
       drawRow(tr(STR_DIAG_TRIGGER), BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)));
+      // The single most diagnostic bit on this page: sleeping from a book sets
+      // showBootScreen=false, so the wake paints NOTHING until the reader's first render
+      // lands. A slow or stalled build there is indistinguishable from a device that never
+      // woke — which is what issue #155 turned out to be. It was recorded from the start
+      // and simply never displayed.
+      drawRow(tr(STR_DIAG_SLEPT_FROM),
+              (lastSleep->flags & BootDiag::kFlagFromReader) ? tr(STR_DIAG_FROM_BOOK) : tr(STR_DIAG_FROM_MENU));
       drawRow(tr(STR_DIAG_BATTERY_LATCH),
               (lastSleep->flags & BootDiag::kFlagKeepClock) ? tr(STR_DIAG_LATCH_KEPT) : tr(STR_DIAG_LATCH_CUT));
       snprintf(buf, sizeof(buf), "%u ms%s", lastSleep->msA,
@@ -358,15 +389,23 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     for (uint8_t i = 0; i < recordCount_ && room(1); i++) {
       const BootDiag::Record& r = records_[i];
       if (r.kind == BootDiag::KindSleep) {
-        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s %s%s", static_cast<unsigned long>(r.seq), outcomeTag(r),
+        // Every token here has to survive truncation at roughly 40 characters, which the
+        // first field reports did not: "latch-cut" ate the width and the from-reader bit —
+        // the one that identifies the fault — never appeared at all. The latch policy is
+        // still spelled out in the Last sleep section above, so it is dropped here in
+        // favour of "book", which is not shown anywhere else.
+        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s%s%s", static_cast<unsigned long>(r.seq), outcomeTag(r),
                  BootDiag::stageName(static_cast<BootDiag::SleepStage>(r.code)),
                  BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
-                 (r.flags & BootDiag::kFlagKeepClock) ? "latch-kept" : "latch-cut",
-                 (r.flags & BootDiag::kFlagReleaseTimeout) ? " rel-timeout" : "");
+                 (r.flags & BootDiag::kFlagFromReader) ? " book" : "",
+                 (r.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
       } else {
-        snprintf(buf, sizeof(buf), "%lu boot  %s/%s %s %ums sd@%ums", static_cast<unsigned long>(r.seq),
-                 resetReasonName(r.reason), wakeCauseName(r.flags),
-                 HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)), r.msB, r.msC);
+        // Wake cause is dropped: it is only meaningful after a deep-sleep reset (see the
+        // Wake cause row) and printing a stale "none"/"timer" on every line cost width the
+        // sd@ stamp needed. The gate's held-ms goes too — it is on the Wake gate row for the
+        // boot that matters, and sd@ is the one that says how far this boot actually got.
+        snprintf(buf, sizeof(buf), "%lu boot %s %s sd@%ums", static_cast<unsigned long>(r.seq),
+                 resetReasonName(r.reason), HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)), r.msC);
       }
       drawWide(buf);
     }
