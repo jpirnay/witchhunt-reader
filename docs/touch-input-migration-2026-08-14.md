@@ -622,11 +622,31 @@ Still untouched, and each a different shape rather than more of the same:
 |---|---|---|
 | `KeyboardEntryActivity` | key grid (`selectedRow`/`selectedCol`) | A grid, not a row run. The plan already calls this "the single best tap payoff in the firmware". |
 | `DictionaryWordSelectActivity` | word boxes over a page of text | Hundreds of targets — far past `TapTargets`' capacity. It already holds per-word boxes, so it should hit-test its own data directly, like the RecentBooks grid does. |
-| `SliderPickerActivity` | drag | Needs `isScreenTouchHeld`, which is phase 5, not 4b. |
 | Settings tab bar | horizontal strip | `colTouch`, still open from 4a. |
 
 `ConfirmationActivity` needs nothing: it has no selection state, and its Back/Confirm are already
 tappable through the 4a hint strip.
+
+**Sliders: DONE (2026-08-31), pulled forward from phase 5.** One `SliderPickerActivity` backs
+every slider in the firmware — go-to-percent, the KOReader settings, `SliderSettingPicker` — so
+one change covers them all. Tap and drag both work.
+
+Drag on e-paper needed a decision rather than a port. A repaint is a panel refresh of several
+hundred ms, so the slider cannot track a finger the way an LCD one does. The split that makes it
+usable: the **value** follows the finger every loop pass, the **repaint** happens only when the
+value changes, and the render task supersedes a pending update when a newer one arrives. The
+number lands where the finger stopped even though the screen shows only some intermediate
+positions. `setValue()`'s early return on an unchanged value is load-bearing —
+`isScreenTouchHeld()` reports on every pass while the finger is down.
+
+A tap does not confirm; it moves the value and leaves committing to Confirm, matching the
+buttons. Confirm is already reachable through the hint strip.
+
+The mapping lives in `SliderGeometry`, used by both the draw and the hit test, with a test that
+walks every value, draws it, and hit-tests the pixel it was drawn at. That round-trip caught two
+things: `valueForX` must ROUND rather than truncate (truncating makes the top of a 0..100 range
+untappable), and `fillWidthFor` returned a negative width for a degenerate bar where its inverse
+already guarded the same trap.
 
 **Invalidation belongs to the render pass, not to the screens.** A screen can stop drawing its
 list *without* changing activity — `WifiSelection` swaps the network list for a "no networks"
@@ -650,7 +670,7 @@ different road: on e-paper a full repaint is not usable as tap feedback, and the
 that works is a cheap localised invert (upstream's `setFlash`/`clearTapFlash`). **P2 is now the
 highest-value remaining touch item**, not an optional polish.
 
-Cost of the whole 4b surface on C3: **+416 bytes RAM, +7,384 bytes flash.** Gates:
+Cost of the touch surface on C3: **+416 bytes RAM, +7,770 bytes flash.** Gates:
 `test/list_touch_band` (12), `test/tap_targets` (11), 6 more in `test/cover_grid_layout`; host
 suite 689/689. **No touch board has run any of it.**
 
