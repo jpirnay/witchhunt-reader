@@ -216,10 +216,22 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // sleeps again leaves the panel untouched, so this counter is the only thing separating
   // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
   {
+    // records_ is newest-first, and persistBoot() appends the abort summary BEFORE this
+    // boot's own record — so slot 0 is always our own KindBoot entry and has to be stepped
+    // over. Stop at the next KindBoot, which is the previous completed boot: anything at or
+    // beyond it belongs to an earlier run and is history, not this one's diagnosis.
     uint16_t aborted = 0;
+    bool steppedOverOwnBoot = false;
     for (uint8_t i = 0; i < recordCount_; i++) {
-      if (records_[i].kind == BootDiag::KindBoot) break;  // only the run since this boot
-      if (records_[i].kind == BootDiag::KindAborted) aborted = records_[i].msA;
+      if (records_[i].kind == BootDiag::KindBoot) {
+        if (steppedOverOwnBoot) break;
+        steppedOverOwnBoot = true;
+        continue;
+      }
+      if (records_[i].kind == BootDiag::KindAborted) {
+        aborted = records_[i].msA;
+        break;
+      }
     }
     if (aborted == 0) {
       drawRow(tr(STR_DIAG_ABORTED_BOOTS), tr(STR_DIAG_ABORTED_NONE));

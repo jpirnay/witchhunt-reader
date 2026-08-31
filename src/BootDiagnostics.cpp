@@ -542,7 +542,7 @@ void persistBoot() {
   const esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
   const AbortTally abortTally = readAbortTally();
 
-  updateRing([&] {
+  const bool ringWritten = updateRing([&] {
     if (hadCrumb && pending) {
       // The sleep never reached persistSleep() — one of the two early-boot paths, which
       // sleep before Storage.begin() and so could only leave a breadcrumb. Write it now,
@@ -585,10 +585,10 @@ void persistBoot() {
     imageAppend(boot);
   });
 
-  if (abortTally.count > 0) {
-    // Drained into the ring above, so the next completed boot starts a fresh run. Only
-    // written when there was something to clear, which keeps the healthy path free of NVS
-    // writes entirely.
+  if (abortTally.count > 0 && ringWritten) {
+    // Cleared only once the ring actually took the summary — a failed card write would
+    // otherwise discard the count and the aborts would vanish entirely. Guarded on
+    // count > 0 as well, so the healthy path stays free of NVS writes.
     clearAbortTally();
   }
 
