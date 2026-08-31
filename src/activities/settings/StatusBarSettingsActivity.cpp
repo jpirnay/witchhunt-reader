@@ -299,8 +299,10 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool StatusBarSettingsActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(visibleItemCount())) return false;
-  selectedIndex = static_cast<uint8_t>(index);
-  return true;
+ListRowTap::Result StatusBarSettingsActivity::selectListRow(const int index) {
+  // selectedIndex is a uint8_t; apply() takes an int& to update, so round-trip through one.
+  int selection = static_cast<int>(selectedIndex);
+  const auto result = ListRowTap::apply(index, static_cast<int>(visibleItemCount()), selection);
+  selectedIndex = static_cast<uint8_t>(selection);
+  return result;
 }

@@ -1180,8 +1180,6 @@ void WifiSelectionActivity::onComplete(const bool connected) {
   finish();
 }
 
-bool WifiSelectionActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(networks.size())) return false;
-  selectedNetworkIndex = index;
-  return true;
+ListRowTap::Result WifiSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(networks.size()), selectedNetworkIndex);
 }

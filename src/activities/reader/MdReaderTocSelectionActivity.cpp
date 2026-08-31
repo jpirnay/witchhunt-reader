@@ -112,8 +112,6 @@ void MdReaderTocSelectionActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool MdReaderTocSelectionActivity::selectListRow(const int index) {
-  if (index < 0 || index >= getTotalItems()) return false;
-  selectorIndex = index;
-  return true;
+ListRowTap::Result MdReaderTocSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getTotalItems(), selectorIndex);
 }

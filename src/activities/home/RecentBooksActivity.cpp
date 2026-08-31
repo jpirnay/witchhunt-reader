@@ -21,6 +21,7 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "activities/ListRowTap.h"
 #include "activities/reader/ReaderActivity.h"
 #include "components/CoverGridLayout.h"
 #include "components/UITheme.h"
@@ -338,9 +339,13 @@ void RecentBooksActivity::openSelectedBook(const bool longPress) {
   activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
 }
 
-// A tap on a cover (grid) or a row (list): it opens the book. Tap only, not the two-step
-// "hold to move the selection, lift to open" -- see ActivityManager::dispatchListTap() for why
-// that costs two full e-paper refreshes per tap and buys feedback that arrives too late.
+// A tap on a cover (grid) or a row (list).
+//
+// Point-then-confirm, the same rule ActivityManager::dispatchListTap() applies to every other
+// list: the first tap on a cover moves the selection to it, and only a tap on the cover that is
+// already selected opens the book. The highlight moving IS the confirmation step -- opening a
+// book on a single mis-tap costs a page load and a navigation back, which is the most expensive
+// thing a stray finger can do on this screen.
 //
 // The two views resolve the hit differently, and neither re-derives geometry. The list view
 // draws through GUI.drawList, so its rows are already published in ListTouchBand and
@@ -381,11 +386,19 @@ bool RecentBooksActivity::handleBookTouch() {
 
   if (touch == MappedInputManager::RowTouch::None) return false;
   // Down is claimed but not acted on, so the same contact cannot also be read by anything else.
+  // Acting on it would move the selection mid-contact and defeat the two-step below.
   if (touch == MappedInputManager::RowTouch::Down) return true;
-  if (index < 0 || index >= static_cast<int>(recentBooks.size())) return true;
 
-  selectorIndex = index;
-  openSelectedBook(/*longPress=*/false);
+  switch (ListRowTap::apply(index, static_cast<int>(recentBooks.size()), selectorIndex)) {
+    case ListRowTap::Result::Rejected:
+      return true;
+    case ListRowTap::Result::Selected:
+      requestUpdate();
+      return true;
+    case ListRowTap::Result::Activate:
+      openSelectedBook(/*longPress=*/false);
+      return true;
+  }
   return true;
 }
 

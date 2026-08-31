@@ -86,14 +86,12 @@ void MenuListActivity::loop() {
   handleNavigation();
 }
 
-bool MenuListActivity::selectListRow(const int index) {
-  // Range-checked against the CURRENT items, not the ones the render saw: the band is recorded
-  // on the render task and menuItems can be rebuilt between that render and this tap.
-  if (index < 0 || index >= static_cast<int>(menuItems.size())) return false;
+ListRowTap::Result MenuListActivity::selectListRow(const int index) {
   // Separators are already excluded by the band (recorded non-selectable, the same exclusion
   // initMenuList()'s predicate makes for button navigation); declining here as well is belt and
   // braces for a list rebuilt between the render and the tap.
-  if (menuItems[index].isSeparator) return false;
-  selectedIndex = index;
-  return true;
+  if (index >= 0 && index < static_cast<int>(menuItems.size()) && menuItems[index].isSeparator) {
+    return ListRowTap::Result::Rejected;
+  }
+  return ListRowTap::apply(index, static_cast<int>(menuItems.size()), selectedIndex);
 }

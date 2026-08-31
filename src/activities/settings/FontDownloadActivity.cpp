@@ -986,8 +986,6 @@ void FontDownloadActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool FontDownloadActivity::selectListRow(const int index) {
-  if (index < 0 || index >= listItemCount()) return false;
-  selectedIndex_ = index;
-  return true;
+ListRowTap::Result FontDownloadActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, listItemCount(), selectedIndex_);
 }

@@ -61,7 +61,7 @@ class FinishedBookActivity : public Activity {
 
   void onEnter() override;
   // Tap on an action row -> move the selection there; ActivityManager synthesizes Confirm.
-  bool selectListRow(int index) override;
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 

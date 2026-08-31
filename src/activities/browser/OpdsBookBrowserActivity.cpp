@@ -1084,19 +1084,15 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
   }
 }
 
-bool OpdsBookBrowserActivity::selectListRow(const int index) {
+ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
   // Two lists, two states, two selection members. `state` is read on the loop task and may have
   // moved on since the render that recorded the band, so it decides which one a tap means.
   if (state == BrowserState::FORMAT_SELECTION) {
     const auto entry = getEntry(selectorIndex);
-    if (index < 0 || index >= static_cast<int>(entry.acquisitionLinks.size())) return false;
-    formatSelectorIndex = index;
-    return true;
+    return ListRowTap::apply(index, static_cast<int>(entry.acquisitionLinks.size()), formatSelectorIndex);
   }
   if (state == BrowserState::BROWSING) {
-    if (index < 0 || index >= static_cast<int>(entryOffsets.size())) return false;
-    selectorIndex = index;
-    return true;
+    return ListRowTap::apply(index, static_cast<int>(entryOffsets.size()), selectorIndex);
   }
-  return false;
+  return ListRowTap::Result::Rejected;
 }

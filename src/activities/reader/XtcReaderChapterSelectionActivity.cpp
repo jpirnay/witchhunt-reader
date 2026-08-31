@@ -127,9 +127,7 @@ void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool XtcReaderChapterSelectionActivity::selectListRow(const int index) {
-  if (xtc == nullptr) return false;
-  if (index < 0 || index >= static_cast<int>(xtc->getChapters().size())) return false;
-  selectorIndex = index;
-  return true;
+ListRowTap::Result XtcReaderChapterSelectionActivity::selectListRow(const int index) {
+  if (xtc == nullptr) return ListRowTap::Result::Rejected;
+  return ListRowTap::apply(index, static_cast<int>(xtc->getChapters().size()), selectorIndex);
 }

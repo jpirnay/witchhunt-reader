@@ -236,8 +236,6 @@ void OpdsSettingsActivity::render(RenderLock&&) {
   }
 }
 
-bool OpdsSettingsActivity::selectListRow(const int index) {
-  if (index < 0 || index >= getMenuItemCount()) return false;
-  selectedIndex = index;
-  return true;
+ListRowTap::Result OpdsSettingsActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getMenuItemCount(), selectedIndex);
 }

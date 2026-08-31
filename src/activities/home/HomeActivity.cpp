@@ -975,9 +975,10 @@ void HomeActivity::render(RenderLock&&) {
 // three covers, a carousel, and a menu that is a vertical row list in two themes and a
 // horizontal icon strip in the carousel).
 //
-// Tap only, not the two-step hold-then-lift: see MenuListActivity::selectListRow() and
-// ActivityManager::dispatchListTap() for why a
-// Down repaint costs a second full e-paper refresh and delivers its feedback too late to help.
+// Point-then-confirm, the same rule ActivityManager::dispatchListTap() applies to every list:
+// the first tap moves the selection to the cover or menu entry under the finger, and only a tap
+// on the one already selected acts. Home is where that matters most — its entries open books and
+// launch whole activities, so a mis-tap is the most expensive thing a stray finger can do here.
 bool HomeActivity::handleHomeTouch() {
   if (!mappedInput.hasTouch()) return false;
   if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
@@ -1009,14 +1010,25 @@ bool HomeActivity::handleHomeTouch() {
 
   int x = 0;
   int y = 0;
-  if (mappedInput.wasScreenTouchDown(x, y) && resolve(x, y)) return true;  // claimed, no repaint
+  // Claimed but not acted on: moving the selection mid-contact would defeat the two-step below.
+  if (mappedInput.wasScreenTouchDown(x, y) && resolve(x, y)) return true;
   if (!mappedInput.wasScreenTapped(x, y) || !resolve(x, y)) return false;
 
-  selectorIndex = selector;
-  if (isBook) {
-    onSelectBook(recentBooks[selector].path);
-  } else {
-    dispatchMenuAction(menuEntries[selector - recentsCount].action);
+  // The whole selector is one range (covers then menu), so the comparison happens in that frame
+  // and a tap on the menu correctly counts as "new" while a cover is selected, and vice versa.
+  switch (ListRowTap::apply(selector, recentsCount + menuCount, selectorIndex)) {
+    case ListRowTap::Result::Rejected:
+      return true;
+    case ListRowTap::Result::Selected:
+      requestUpdate();
+      return true;
+    case ListRowTap::Result::Activate:
+      if (isBook) {
+        onSelectBook(recentBooks[selector].path);
+      } else {
+        dispatchMenuAction(menuEntries[selector - recentsCount].action);
+      }
+      return true;
   }
   return true;
 }

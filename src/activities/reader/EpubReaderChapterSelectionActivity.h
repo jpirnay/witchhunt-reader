@@ -33,7 +33,7 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   void onEnter() override;
   void onExit() override;
   // Tap on a chapter row -> move the selection there; ActivityManager synthesizes Confirm.
-  bool selectListRow(int index) override;
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 };

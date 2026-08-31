@@ -38,7 +38,7 @@ class OpdsBookBrowserActivity final : public Activity {
   void onExit() override;
   // Tap on a row -> move the selection there; ActivityManager synthesizes Confirm. Serves
   // BOTH of this screen's lists (the entry list and the format picker), keyed on state.
-  bool selectListRow(int index) override;
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 

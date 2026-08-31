@@ -899,8 +899,6 @@ void FileBrowserActivity::doFlashFirmware(const std::string& fullPath) {
                          [this](const ActivityResult&) { requestUpdate(); });
 }
 
-bool FileBrowserActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(entryCount())) return false;
-  selectorIndex = index;
-  return true;
+ListRowTap::Result FileBrowserActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(entryCount()), selectorIndex);
 }

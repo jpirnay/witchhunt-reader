@@ -10,6 +10,7 @@
 #include "ActivityResult.h"
 #include "ButtonEventManager.h"
 #include "GfxRenderer.h"
+#include "ListRowTap.h"
 #include "MappedInputManager.h"
 #include "RenderLock.h"
 
@@ -52,19 +53,20 @@ class Activity {
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
 
-  // Move this screen's list selection to `index`, for a tap on the row at that index. Return
-  // true when the selection was actually taken, false to decline (no list, index out of range,
-  // a screen that is not in a list-shaped state right now).
+  // What a tap on the row at `index` should do, moving this screen's selection if it lands on a
+  // new row. See ListRowTap.h for the rule; most implementations are one call to
+  // ListRowTap::apply().
   //
-  // Implemented by every screen that draws a list through GUI.drawList. Returning true is what
-  // makes the row activate: ActivityManager::dispatchListTap() then synthesizes a Confirm press
-  // on the screen's behalf, so a tap runs the SAME handler the button does rather than a second
-  // copy of it that can drift. That is the whole reason this is a one-line hook and not a
-  // per-screen touch handler.
+  // Point-then-confirm: `Selected` means the highlight moved and the dispatcher only repaints,
+  // `Activate` means the finger landed on the row that was already selected and the dispatcher
+  // synthesizes a Confirm press on the screen's behalf. Synthesizing is the point -- a tap then
+  // runs the SAME handler the button does rather than a second copy of it that can drift, which
+  // is why this is a one-line hook and not a per-screen touch handler.
   //
-  // Screens whose list is not a plain GUI.drawList band -- Home's covers and menu, RecentBooks'
-  // cover grid -- consume the tap in their own loop() instead and leave this alone.
-  virtual bool selectListRow(int /*index*/) { return false; }
+  // Screens whose list is not a plain recorded row band -- Home's covers and menu, RecentBooks'
+  // cover grid -- consume the tap in their own loop() instead and leave this alone. They follow
+  // the same two-step rule there.
+  virtual ListRowTap::Result selectListRow(int /*index*/) { return ListRowTap::Result::Rejected; }
 
   // Return true while this activity owns the raw serial input stream (e.g. the
   // USB serial file-transfer activity reading a binary protocol). When true,

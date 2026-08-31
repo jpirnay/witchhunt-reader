@@ -287,8 +287,6 @@ void GlobalBookmarksActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool GlobalBookmarksActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(rows.size())) return false;
-  selectorIndex = index;
-  return true;
+ListRowTap::Result GlobalBookmarksActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(rows.size()), selectorIndex);
 }

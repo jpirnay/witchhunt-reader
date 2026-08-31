@@ -829,14 +829,10 @@ void FinishedBookActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool FinishedBookActivity::selectListRow(const int index) {
+ListRowTap::Result FinishedBookActivity::selectListRow(const int index) {
   // buildRowModel() allocates, which is why loop() builds it exactly once per pass rather than
   // per event. Building it again here is affordable because this runs only when a tap actually
   // landed on a row -- not on every loop -- and the alternative is worse: accepting an index
-  // without a bound would let loop()'s own clamp silently move it to a different row, and the
-  // synthesized Confirm would then activate something the finger never touched.
-  const int optionCount = buildRowModel().count();
-  if (index < 0 || index >= optionCount) return false;
-  selectedIndex_ = index;
-  return true;
+  // without a bound would let loop()'s own clamp silently move it to a different row.
+  return ListRowTap::apply(index, buildRowModel().count(), selectedIndex_);
 }

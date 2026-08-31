@@ -199,8 +199,6 @@ void OpdsServerListActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool OpdsServerListActivity::selectListRow(const int index) {
-  if (index < 0 || index >= getItemCount()) return false;
-  selectedIndex = index;
-  return true;
+ListRowTap::Result OpdsServerListActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getItemCount(), selectedIndex);
 }

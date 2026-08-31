@@ -585,20 +585,36 @@ void ActivityManager::dispatchListTap() {
   int index = -1;
   if (mappedInput.listTouch(index) != MappedInputManager::RowTouch::Tap) return;
 
-  // The screen decides whether that row is selectable right now, and moves its own selection.
-  // Declining leaves the tap consumed but inert, which is correct: the finger landed on a row
-  // this screen painted, so nothing else should get to interpret it.
-  if (currentActivity == nullptr || !currentActivity->selectListRow(index)) return;
+  if (currentActivity == nullptr) return;
 
-  // Then let the screen's OWN Confirm handler do the rest. Synthesizing the press rather than
-  // calling an "activate" hook is deliberate: every one of these screens already has a Confirm
-  // path, often several branches deep (a category row that cycles, an entry that opens, a value
-  // that toggles), and a tap must run that exact code rather than a parallel copy of it. Raw
-  // rather than logical so the user's button remapping still applies, exactly as the hint strip
-  // does it. Both the wasPressed() bitmask consumers and ButtonEventManager's press-type FSM see
-  // an ordinary Short press, one tick from now.
-  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Confirm));
-  LOG_DBG("TCH", "List tap -> row %d, Confirm synthesized", index);
+  // Point-then-confirm. The screen decides what the tap means given where its selection already
+  // is; declining leaves the tap consumed but inert, which is correct, because the finger landed
+  // on a row this screen painted and nothing else should get to reinterpret it.
+  switch (currentActivity->selectListRow(index)) {
+    case ListRowTap::Result::Rejected:
+      return;
+
+    case ListRowTap::Result::Selected:
+      // First tap on a row: move the highlight and stop. This repaint IS the feedback -- the
+      // reader sees the selection land on their choice before anything happens, and a mis-tap
+      // costs one more tap instead of an action to undo. On e-paper it is the only feedback
+      // available until a localised tap-flash exists (P2).
+      currentActivity->requestUpdate();
+      LOG_DBG("TCH", "List tap -> row %d selected", index);
+      return;
+
+    case ListRowTap::Result::Activate:
+      // Second tap, on the row already selected. Let the screen's OWN Confirm handler do the
+      // rest: every one of these screens already has a Confirm path, often several branches deep
+      // (a category row that cycles, an entry that opens, a value that toggles), and a tap must
+      // run that exact code rather than a parallel copy of it. Raw rather than logical so the
+      // user's button remapping still applies, exactly as the hint strip does it. Both the
+      // wasPressed() bitmask consumers and ButtonEventManager's press-type FSM see an ordinary
+      // Short press, one tick from now.
+      mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Confirm));
+      LOG_DBG("TCH", "List tap -> row %d already selected, Confirm synthesized", index);
+      return;
+  }
 }
 
 void ActivityManager::dispatchHintStripTap() {

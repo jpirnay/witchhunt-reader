@@ -1117,11 +1117,9 @@ void KOReaderSyncActivity::loop() {
   }
 }
 
-bool KOReaderSyncActivity::selectListRow(const int index) {
+ListRowTap::Result KOReaderSyncActivity::selectListRow(const int index) {
   // Guarded on the state that actually draws the options: `state` is read on the loop task and
   // could have moved on since the render that recorded the band.
-  if (state != SHOWING_RESULT) return false;
-  if (index < 0 || index >= OPTION_COUNT) return false;
-  selectedOption = index;
-  return true;
+  if (state != SHOWING_RESULT) return ListRowTap::Result::Rejected;
+  return ListRowTap::apply(index, OPTION_COUNT, selectedOption);
 }

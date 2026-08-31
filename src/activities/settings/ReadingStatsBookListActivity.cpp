@@ -117,8 +117,6 @@ void ReadingStatsBookListActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool ReadingStatsBookListActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(sortedBooks.size())) return false;
-  selectedIndex = index;
-  return true;
+ListRowTap::Result ReadingStatsBookListActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(sortedBooks.size()), selectedIndex);
 }

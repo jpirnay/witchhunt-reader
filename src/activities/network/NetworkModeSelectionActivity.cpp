@@ -101,8 +101,6 @@ void NetworkModeSelectionActivity::onCancel() {
   finish();
 }
 
-bool NetworkModeSelectionActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(MENU_ITEM_COUNT)) return false;
-  selectedIndex = index;
-  return true;
+ListRowTap::Result NetworkModeSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(MENU_ITEM_COUNT), selectedIndex);
 }

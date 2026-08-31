@@ -127,8 +127,6 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-bool EpubReaderFootnotesActivity::selectListRow(const int index) {
-  if (index < 0 || index >= static_cast<int>(footnotes.size())) return false;
-  selectedIndex = index;
-  return true;
+ListRowTap::Result EpubReaderFootnotesActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(footnotes.size()), selectedIndex);
 }

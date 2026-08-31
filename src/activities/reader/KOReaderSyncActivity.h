@@ -55,7 +55,7 @@ class KOReaderSyncActivity final : public Activity {
   void onExit() override;
   // Tap on one of the three conflict options -> select it; ActivityManager synthesizes
   // Confirm. Only accepted in SHOWING_RESULT, the one state that draws them.
-  bool selectListRow(int index) override;
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
   // UPLOADING belongs here too: sleeping mid-PUT drops the connection with the write in
