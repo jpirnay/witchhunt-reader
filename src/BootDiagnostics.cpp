@@ -11,6 +11,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <numeric>
 
 namespace BootDiag {
 namespace {
@@ -92,11 +94,9 @@ struct AbortTally {
   uint32_t lifetime = 0;
 
   uint32_t total() const {
-    uint32_t sum = 0;
-    for (uint16_t count : buckets) {
-      sum += count;
-    }
-    return sum;
+    // uint32_t seed, not 0: the accumulator takes its type from the seed, so a plain 0
+    // would sum uint16_t buckets in an int and a saturated run could overflow it.
+    return std::accumulate(std::begin(buckets), std::end(buckets), uint32_t{0});
   }
 };
 
