@@ -583,10 +583,18 @@ for a shape the others cannot express:
 | `TapTargets` | arbitrary rects, each with a value | that value |
 
 - **Lists.** `BaseTheme::drawList`, `LyraTheme::drawList` and the shared `drawWrappedList`
-  record their rows. That is all of them, and it covers **23 direct `GUI.drawList` callers plus
-  `MenuListActivity`'s 8 subclasses** (one `handleListTouch()` in the base `loop()`) with no
-  per-screen work. `rowTouch()` could not have done the wrapped lists at all — its arithmetic is
-  a uniform step, and those rows are one, two or three lines tall.
+  record their rows — that is all of them. `rowTouch()` could not have done the wrapped lists at
+  all: its arithmetic is a uniform step, and those rows are one, two or three lines tall.
+
+  **Recording is only half of it, and the first attempt shipped only that half.** A recorded row
+  is *matchable*; something still has to read the band and act. `ActivityManager::dispatchListTap()`
+  now does the reading, asks the screen to move its selection via `Activity::selectListRow()`,
+  and then **synthesizes a Confirm press** — the hint-strip pattern. Synthesizing matters: each
+  of these screens already has a Confirm path several branches deep, and a tap must run that
+  exact code rather than a parallel copy. One small override per screen instead of a
+  restructured `loop()`. Coverage: **26 list screens, 25 wired, 1 excluded on purpose**
+  (`ButtonRemapActivity` — a wizard that assigns roles from the physical button pressed, so a
+  synthesized Confirm would record itself as the reader's choice).
 - **Recent books.** The list view rides the band. The grid view instead got
   `CoverGridLayout::hitTest()`, the inverse of its own placement, sitting next to `compute()`.
   No recording there and none wanted: the geometry already comes from `computeGridLayout()`,
@@ -598,6 +606,18 @@ for a shape the others cannot express:
   region without calling `drawRecentBookCover()` at all, so the slot geometry is factored and
   recorded from both paths.
 
+**Invalidation belongs to the render pass, not to the screens.** A screen can stop drawing its
+list *without* changing activity — `WifiSelection` swaps the network list for a "no networks"
+message, `FontDownload` for a progress screen — and `drawList` is then simply not called, so a
+band recorded earlier kept answering taps against rows nothing paints any more. Clearing on
+activity transitions never covered it. All three recorders are cleared at the top of every render
+pass instead, so what they hold is exactly what the current frame painted.
+
+**`SettingsActivity` is off by one**, and would have been wrong under any blanket edit: `render()`
+passes `drawList` `selectedSettingIndex - 1`, because index 0 is the category tab row, which the
+list does not paint. Band row *i* is `selectedSettingIndex` *i+1*. A tap therefore cannot reach
+the tab row — correct, since the tab bar is its own (still unbuilt) `colTouch` target.
+
 **One correction, and it is the interesting one.** The first two commits acted on
 `RowTouch::Down` — move the selection, repaint — and then activated on `Tap` and repainted
 again. `wasScreenTouchDown()` fires once a contact has been held `TOUCH_DOWN_SELECT_DELAY_MS`
@@ -608,7 +628,7 @@ different road: on e-paper a full repaint is not usable as tap feedback, and the
 that works is a cheap localised invert (upstream's `setFlash`/`clearTapFlash`). **P2 is now the
 highest-value remaining touch item**, not an optional polish.
 
-Cost of the whole 4b surface on C3: **+416 bytes RAM, +4,052 bytes flash.** Gates:
+Cost of the whole 4b surface on C3: **+416 bytes RAM, +5,332 bytes flash.** Gates:
 `test/list_touch_band` (12), `test/tap_targets` (11), 6 more in `test/cover_grid_layout`; host
 suite 689/689. **No touch board has run any of it.**
 
