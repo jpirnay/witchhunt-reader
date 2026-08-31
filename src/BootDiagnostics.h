@@ -175,6 +175,18 @@ void persistSleep();
 /// startDeepSleep() has already cut the card by this point.
 void persistReleaseTimeout(bool storageLive);
 
+/// Abort counters read straight out of NVS, independent of the ring.
+///
+/// `lifetime` is never cleared, so a zero there means the abort path has never run on this
+/// installation — which is the only way to tell "it never aborted" apart from "it aborted
+/// and the drain into the ring lost it".  `undrained` is what the current run has counted
+/// but no completed boot has filed yet; normally zero by the time anything can read it.
+struct AbortCounts {
+  uint32_t lifetime = 0;
+  uint16_t undrained = 0;
+};
+AbortCounts abortCounts();
+
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.
 uint8_t loadRecords(Record* out, uint8_t maxRecords);

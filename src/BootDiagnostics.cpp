@@ -78,10 +78,18 @@ void crumbStore(uint8_t stage, uint8_t trigger, uint8_t flags, bool pending) {
 constexpr char kAbortNamespace[] = "wbdiag";
 // One blob rather than a key per bucket: a single read-modify-write per abort, and the
 // layout can grow a bucket without stranding orphaned keys in the namespace.
-constexpr char kAbortBucketsKey[] = "abrtB";
+// Key renamed with the layout: getBytes() refuses a size mismatch and returns 0 without
+// touching the buffer, so a stale entry under the old name would silently read as "no
+// aborts" rather than as an error. A fresh name makes the old one simply unreachable.
+constexpr char kAbortBucketsKey[] = "abrtB2";
 
 struct AbortTally {
   uint16_t buckets[kAbortBucketCount] = {};
+  // Never cleared, unlike the buckets. Counts every abort this installation has recorded,
+  // so "did the abort path run at all" can be answered independently of whether the drain
+  // into the ring worked — otherwise those two failures look identical on the page, which
+  // is exactly the ambiguity that left an X3 reporting nothing with no way to narrow it.
+  uint32_t lifetime = 0;
 
   uint32_t total() const {
     uint32_t sum = 0;
@@ -100,17 +108,22 @@ AbortTally readAbortTally() {
   }
   // Short read (an older layout, or a truncated entry) leaves the rest zeroed, which reads
   // as "no aborts in those buckets" — the safe direction.
-  nvs.getBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
+  nvs.getBytes(kAbortBucketsKey, &tally, sizeof(tally));
   nvs.end();
   return tally;
 }
 
-void clearAbortTally() {
+/// Zero the per-run buckets, keeping the lifetime counter. Not nvs.clear(): the lifetime
+/// total has to outlive every drain or it cannot answer "has this ever fired".
+void clearAbortBuckets() {
   Preferences nvs;
   if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
     return;
   }
-  nvs.clear();
+  AbortTally tally;
+  nvs.getBytes(kAbortBucketsKey, &tally, sizeof(tally));
+  memset(tally.buckets, 0, sizeof(tally.buckets));
+  nvs.putBytes(kAbortBucketsKey, &tally, sizeof(tally));
   nvs.end();
 }
 
@@ -419,14 +432,19 @@ void noteAbortedBoot(SleepTrigger trigger, HalGPIO::WakeVerdict verdict) {
     return;
   }
   AbortTally tally;
-  nvs.getBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
+  nvs.getBytes(kAbortBucketsKey, &tally, sizeof(tally));
   if (tally.buckets[bucket] < kAbortCountCap) {
     tally.buckets[bucket]++;
-    nvs.putBytes(kAbortBucketsKey, tally.buckets, sizeof(tally.buckets));
+    tally.lifetime++;
+    const size_t written = nvs.putBytes(kAbortBucketsKey, &tally, sizeof(tally));
+    if (written != sizeof(tally)) {
+      LOG_ERR("BOOT", "Aborted boot could not be counted: NVS write returned %u", static_cast<unsigned>(written));
+    }
   }
   nvs.end();
-  LOG_INF("BOOT", "Aborted boot: %s / gate %s (x%u in this run) — going straight back to sleep", triggerName(trigger),
-          HalGPIO::wakeVerdictName(verdict), tally.buckets[bucket]);
+  LOG_INF("BOOT", "Aborted boot: %s / gate %s (x%u this run, %lu lifetime) — going straight back to sleep",
+          triggerName(trigger), HalGPIO::wakeVerdictName(verdict), tally.buckets[bucket],
+          static_cast<unsigned long>(tally.lifetime));
 }
 
 void persistReleaseTimeout(bool storageLive) {
@@ -517,7 +535,7 @@ void persistBoot() {
     // Cleared only once the ring actually took the summary — a failed card write would
     // otherwise discard the count and the aborts would vanish entirely. Guarded on
     // count > 0 as well, so the healthy path stays free of NVS writes.
-    clearAbortTally();
+    clearAbortBuckets();
   }
 
   // Consumed either way: a crumb that could not be written is still spent, and leaving it
@@ -525,6 +543,15 @@ void persistBoot() {
   s_crumbMagic = 0;
   s_crumbSleep = 0;
   s_crumbWait = 0;
+}
+
+AbortCounts abortCounts() {
+  const AbortTally tally = readAbortTally();
+  AbortCounts counts;
+  counts.lifetime = tally.lifetime;
+  const uint32_t undrained = tally.total();
+  counts.undrained = static_cast<uint16_t>(undrained > UINT16_MAX ? UINT16_MAX : undrained);
+  return counts;
 }
 
 uint8_t loadRecords(Record* out, uint8_t maxRecords) {

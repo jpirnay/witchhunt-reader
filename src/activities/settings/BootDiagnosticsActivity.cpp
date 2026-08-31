@@ -217,10 +217,20 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
   {
     const uint16_t aborted = BootDiag::abortsInCurrentRun(records_, recordCount_);
-    if (aborted == 0) {
+    // Read straight out of NVS as well as out of the ring. A zero here with a non-zero
+    // lifetime means the aborts were counted but lost on the way to the card; a zero
+    // lifetime means the abort path never ran at all. Those two look identical if only the
+    // ring is consulted, which is why an X3 reporting nothing could not be narrowed down.
+    const BootDiag::AbortCounts counts = BootDiag::abortCounts();
+    if (aborted == 0 && counts.lifetime == 0) {
       drawRow(tr(STR_DIAG_ABORTED_BOOTS), tr(STR_DIAG_ABORTED_NONE));
+    } else if (aborted == 0) {
+      snprintf(buf, sizeof(buf), "%s (%lu %s)", tr(STR_DIAG_ABORTED_NONE), static_cast<unsigned long>(counts.lifetime),
+               tr(STR_DIAG_ABORTED_LIFETIME));
+      drawRow(tr(STR_DIAG_ABORTED_BOOTS), buf);
     } else {
-      snprintf(buf, sizeof(buf), "%u — %s", aborted, tr(STR_DIAG_ABORTED_FMT));
+      snprintf(buf, sizeof(buf), "%u — %s (%lu %s)", aborted, tr(STR_DIAG_ABORTED_FMT),
+               static_cast<unsigned long>(counts.lifetime), tr(STR_DIAG_ABORTED_LIFETIME));
       drawRow(tr(STR_DIAG_ABORTED_BOOTS), buf);
       // Every reason on its own continuation row. The total alone says "it is looping"; the
       // breakdown says which way to look — a run of released-early is a user pressing too
@@ -238,6 +248,11 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
           drawWide(buf);
         }
       }
+    }
+    // Non-zero only when a completed boot could not write the ring — normally invisible.
+    if (counts.undrained > 0 && room(1)) {
+      snprintf(buf, sizeof(buf), "   %u %s", counts.undrained, tr(STR_DIAG_ABORTED_PENDING));
+      drawWide(buf);
     }
   }
   drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
