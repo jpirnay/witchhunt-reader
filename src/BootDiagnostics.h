@@ -187,13 +187,13 @@ struct AbortCounts {
 };
 AbortCounts abortCounts();
 
-/// Record that a book open stalled: the resume watchdog gave up waiting for the first page
-/// and is about to restart the device.  `wakePhase` is the furthest WakeTrace phase reached
-/// (the area of work it was sitting in) and `seconds` is how long it waited.
+/// Record that a wake resume still had no page after the reporter's threshold.  `wakePhase`
+/// is the furthest WakeTrace phase reached (the area of work it was sitting in) and
+/// `seconds` is how long it had been waiting.
 ///
-/// Written to the card immediately, because the restart that follows is the whole point: the
-/// evidence has to outlive it.  Rendered in the history as its own line so a stalled resume
-/// is never again confused with a device that failed to wake.
+/// A marker, not a trigger: nothing acts on it.  Written once per open so the history shows
+/// that a resume ran long and where, without an automatic restart destroying the evidence or
+/// giving the reporter a second unexplained reboot to account for.
 void persistResumeStall(uint8_t wakePhase, uint16_t seconds);
 
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.

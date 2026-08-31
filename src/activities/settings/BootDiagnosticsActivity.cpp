@@ -401,10 +401,10 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
                  (r.flags & BootDiag::kFlagFromReader) ? " book" : "",
                  (r.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
       } else if (r.kind == BootDiag::KindResumeStall) {
-        // The resume watchdog gave up and restarted the device. Without this line that
-        // restart is indistinguishable from the user pressing Reset — which is exactly the
-        // confusion the whole page exists to remove.
-        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us -> restart", static_cast<unsigned long>(r.seq),
+        // A wake resume that still had no page after RESUME_STALL_REPORT_MS, and the phase it
+        // was sitting in. A marker only — nothing acted on it, so the device carried on and
+        // whatever the user saw next is still theirs to describe.
+        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us", static_cast<unsigned long>(r.seq),
                  WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA);
       } else if (r.kind == BootDiag::KindAborted) {
         snprintf(buf, sizeof(buf), "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(r.seq), r.msA,
