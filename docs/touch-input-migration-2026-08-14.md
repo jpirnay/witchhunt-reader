@@ -606,6 +606,28 @@ for a shape the others cannot express:
   region without calling `drawRecentBookCover()` at all, so the slot geometry is factored and
   recorded from both paths.
 
+**Two sweeps were needed, because the first used the wrong criterion.** Looking for callers of
+`GUI.drawList` misses every screen that draws its own rows, and six do: the three chapter/TOC
+selectors, the footnote picker, the OPDS browser (two lists) and the KOReader conflict prompt.
+They all share one shape, so `ListTouchBand::recordUniformRows()` records it and each gets the
+same `selectListRow()` hook. The lesson for the next screen: **"does it have a selection index"
+is the question, not "does it call drawList"**.
+
+Current coverage, by that question: **33 selection screens, 32 wired, 1 excluded on purpose**
+(`ButtonRemapActivity`).
+
+Still untouched, and each a different shape rather than more of the same:
+
+| Screen | Shape | Why it is not just another band |
+|---|---|---|
+| `KeyboardEntryActivity` | key grid (`selectedRow`/`selectedCol`) | A grid, not a row run. The plan already calls this "the single best tap payoff in the firmware". |
+| `DictionaryWordSelectActivity` | word boxes over a page of text | Hundreds of targets — far past `TapTargets`' capacity. It already holds per-word boxes, so it should hit-test its own data directly, like the RecentBooks grid does. |
+| `SliderPickerActivity` | drag | Needs `isScreenTouchHeld`, which is phase 5, not 4b. |
+| Settings tab bar | horizontal strip | `colTouch`, still open from 4a. |
+
+`ConfirmationActivity` needs nothing: it has no selection state, and its Back/Confirm are already
+tappable through the 4a hint strip.
+
 **Invalidation belongs to the render pass, not to the screens.** A screen can stop drawing its
 list *without* changing activity — `WifiSelection` swaps the network list for a "no networks"
 message, `FontDownload` for a progress screen — and `drawList` is then simply not called, so a
@@ -628,7 +650,7 @@ different road: on e-paper a full repaint is not usable as tap feedback, and the
 that works is a cheap localised invert (upstream's `setFlash`/`clearTapFlash`). **P2 is now the
 highest-value remaining touch item**, not an optional polish.
 
-Cost of the whole 4b surface on C3: **+416 bytes RAM, +5,332 bytes flash.** Gates:
+Cost of the whole 4b surface on C3: **+416 bytes RAM, +7,384 bytes flash.** Gates:
 `test/list_touch_band` (12), `test/tap_targets` (11), 6 more in `test/cover_grid_layout`; host
 suite 689/689. **No touch board has run any of it.**
 
