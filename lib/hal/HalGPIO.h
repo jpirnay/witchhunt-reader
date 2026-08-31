@@ -243,6 +243,10 @@ class HalGPIO {
   // already guarded inside the SDK and compiles to an inert false/0 on non-touch
   // boards, so the C3 pays nothing for these.
   bool hasTouch() const;
+  // True only on a controller that reports more than one contact (GT911). Gates
+  // the two-finger gestures out of the settings screen on single-contact panels,
+  // where they could never fire.
+  bool supportsMultiTouch() const;
   // Capacitive Home key reported by the touch controller (X4 Pro). The tap
   // event fires on release and excludes a long hold.
   bool hasHomeKey() const;

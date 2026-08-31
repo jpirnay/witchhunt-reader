@@ -108,6 +108,12 @@ void ButtonEventManager::drain() {
   eventHead = eventTail = 0;
   // Drop edges the sampler queued for the outgoing activity so they don't bleed in.
   input.flushRawEdges();
+  // Queued touch gestures go the same way and for the same reason. They are not
+  // button events, so this class has no other business with them — but drain()
+  // is the transition hook every caller already reaches for, and a pinch made on
+  // the screen being left must not fire on the one being entered. Inert on
+  // boards without multi-touch.
+  input.flushMultiTouch();
 }
 
 void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool pressed, const unsigned long t) {

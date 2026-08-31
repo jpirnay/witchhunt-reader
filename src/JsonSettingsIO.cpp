@@ -225,6 +225,11 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Font family uses a DynamicEnumCtx in SettingsList (no valuePtr) so the generic
   // loop above skips it. Save manually.
   doc["fontFamily"] = s.fontFamily;
+  // Same for the frontlight switch, which is a DynamicToggle because the live
+  // hardware rather than this field is the authority for "is the light on".
+  // Saved unconditionally, not behind the board's capability: a settings file
+  // carried to a board with no light must come back with the preference intact.
+  doc["frontlightOn"] = s.frontlightOn;
   if (s.dictionaryName[0] != '\0') {
     doc["dictionaryName"] = s.dictionaryName;
   }
@@ -386,6 +391,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // loop above skips it. Load manually.
   s.fontFamily = clamp(doc["fontFamily"] | (uint8_t)CrossPointSettings::BOOKERLY,
                        CrossPointSettings::BUILTIN_FONT_COUNT, CrossPointSettings::BOOKERLY);
+  // Frontlight switch: dynamic in SettingsList, so it needs loading manually too.
+  s.frontlightOn = (doc["frontlightOn"] | 0) ? 1 : 0;
   const char* dictName = doc["dictionaryName"] | "";
   strncpy(s.dictionaryName, dictName, sizeof(s.dictionaryName) - 1);
   s.dictionaryName[sizeof(s.dictionaryName) - 1] = '\0';

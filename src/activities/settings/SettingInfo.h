@@ -45,6 +45,9 @@ enum class SettingRequires : uint8_t {
   // A second (warm) light channel, so colour temperature is a real control.
   // Sub-capability of Frontlight — the T5S3's single backlight channel has none.
   WarmLight,
+  // A touch controller that reports more than one contact (GT911). Pinch and
+  // rotation can never fire without it. Sub-capability of TouchPanel.
+  MultiTouchPanel,
 };
 
 enum class SettingAction {

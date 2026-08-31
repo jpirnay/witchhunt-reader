@@ -359,6 +359,35 @@ class CrossPointSettings {
   // tap zones, which is what upstream ships; the X4 Pro has no back/confirm
   // button, so leaving it off would strand the reader.
   uint8_t touchReaderControls = TOUCH_READER_ON;
+  // --- Gesture actions (touch boards) ---------------------------------------
+  // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
+  // fields above, and with the same meaning for BTN_DEFAULT: leave this input
+  // alone and let the reader interpret it as it always has. That is why every
+  // one of these defaults to BTN_DEFAULT rather than to the behaviour it would
+  // replace — an unconfigured device must behave as though gestures were never
+  // added. See src/TouchGestures.h for the zone geometry and the field table.
+  //
+  // Only consulted inside the reader. Everywhere else the screen's own touch
+  // targets (list rows, the home grid, the button-hint strip) own the contact.
+  uint8_t gestSwipeLeft = BTN_DEFAULT;
+  uint8_t gestSwipeRight = BTN_DEFAULT;
+  uint8_t gestSwipeUp = BTN_DEFAULT;
+  uint8_t gestSwipeDown = BTN_DEFAULT;
+  uint8_t gestTapLeft = BTN_DEFAULT;
+  uint8_t gestTapRight = BTN_DEFAULT;
+  uint8_t gestTapCentre = BTN_DEFAULT;
+  uint8_t gestTapTop = BTN_DEFAULT;
+  uint8_t gestTapBottom = BTN_DEFAULT;
+  uint8_t gestLongTapLeft = BTN_DEFAULT;
+  uint8_t gestLongTapRight = BTN_DEFAULT;
+  uint8_t gestLongTapCentre = BTN_DEFAULT;
+  uint8_t gestLongTapTop = BTN_DEFAULT;
+  uint8_t gestLongTapBottom = BTN_DEFAULT;
+  uint8_t gestPinchIn = BTN_DEFAULT;
+  uint8_t gestPinchOut = BTN_DEFAULT;
+  uint8_t gestRotateCw = BTN_DEFAULT;
+  uint8_t gestRotateCcw = BTN_DEFAULT;
+
   // Centre-third tap opens the reader menu. Separate from touchReaderControls
   // so the page-turn style and the menu tap can be chosen independently.
   uint8_t tapForReaderMenu = 1;

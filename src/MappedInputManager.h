@@ -148,6 +148,15 @@ class MappedInputManager {
   // hold and its release edge — so the ensuing lift can't also tap-dismiss
   // whatever the long-press opened. The SDK owns that latch and self-clears it.
   bool wasScreenLongPress(int& x, int& y) const;
+  // Same event, WITHOUT the suppression — for a caller that must decide whether
+  // the long press is one it wants before claiming the contact. Pair it with
+  // suppressTouchContact() when the answer is yes; leave the contact alone when
+  // it is no, and the lift will go on to be a tap as usual.
+  bool peekScreenLongPress(int& x, int& y) const;
+  // Ignore the rest of this contact — its continued hold and its release edge.
+  // For a caller that has acted on a tap or swipe and must stop the same contact
+  // reaching the screen underneath as well.
+  void suppressTouchContact() const { gpio.suppressTouchContact(); }
   // Live contact position while the finger is down, with no tap-slop gate —
   // drag tracking.
   bool isScreenTouchHeld(int& x, int& y) const;

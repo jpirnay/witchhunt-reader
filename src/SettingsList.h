@@ -13,6 +13,7 @@
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "SdCardFontGlobals.h"
+#include "TouchGestures.h"
 #include "activities/settings/SettingInfo.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -129,7 +130,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
   };
 
   std::vector<SettingInfo> settings;
-  settings.reserve(77);
+  settings.reserve(100);
 
   // --- Display ---
   settings.push_back(SettingInfo::Action(StrId::STR_TIME_TO_SLEEP, SettingAction::SleepTimeoutPicker)
@@ -441,6 +442,22 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Toggle(StrId::STR_TAP_FOR_READER_MENU, &CrossPointSettings::tapForReaderMenu,
                                          "tapReaderMenu", StrId::STR_CAT_CONTROLS)
                          .requiring(SettingRequires::TouchPanel));
+  // --- Gesture actions (reader only) ---
+  // Generated from TouchGestures::BINDINGS rather than written out row by row:
+  // eighteen near-identical push_backs is exactly the kind of ladder that drifts
+  // out of step with the table the input layer reads. Every row offers the same
+  // action list as a button, and every one defaults to Built-in — which for a
+  // gesture means "leave this contact to the reader", so an untouched device is
+  // unaffected by the whole feature.
+  for (const auto& binding : TouchGestures::BINDINGS) {
+    settings.push_back(
+        SettingInfo::Enum(binding.label, binding.field, makeBtnActionOptions(StrId::STR_BTN_DEF_BUILTIN), binding.key,
+                          StrId::STR_CAT_CONTROLS)
+            .withSubmenu(StrId::STR_MENU_GESTURE_ACTIONS)
+            .withSubcategory(binding.group)
+            .withSelectorActivity()
+            .requiring(binding.needsMultiTouch ? SettingRequires::MultiTouchPanel : SettingRequires::TouchPanel));
+  }
   // Tilt page turn (X3-only)
   settings.push_back(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                                          StrId::STR_CAT_CONTROLS)
@@ -614,6 +631,8 @@ inline std::vector<SettingInfo> getSettingsList() {
         return Frontlight.present();
       case SettingRequires::WarmLight:
         return Frontlight.present() && Frontlight.hasColorTemperature();
+      case SettingRequires::MultiTouchPanel:
+        return gpio.hasTouch() && gpio.supportsMultiTouch();
     }
     return true;
   };

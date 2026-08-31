@@ -36,6 +36,7 @@
 #include "ButtonEventManager.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
@@ -67,6 +68,7 @@ static BootHeapProbe s_probeMainFirst(4);
 GfxRenderer renderer(display);
 MappedInputManager mappedInputManager(gpio, renderer);
 ButtonEventManager buttonEventManager(mappedInputManager);
+GestureEventManager gestureEventManager(mappedInputManager, renderer);
 
 // Lets lib-layer long tasks (image decoders) bail out mid-work so a queued button
 // press is serviced on the next main-loop pass. Installed once in setup().
@@ -1604,19 +1606,13 @@ void loop() {
           return false;
       }
     };
-    ButtonEventManager::ButtonEvent ev;
-    std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
-    defaultEvents.reserve(8);
-    while (buttonEventManager.consumeEvent(ev)) {
-      const uint8_t action = actionFor(ev);
-      // Fall through to the activity when the event has no global effect here: either an
-      // explicit Default mapping, or a reader-scoped action while not in the reader.
-      if (action == BA::BTN_DEFAULT || (isReaderScopedAction(action) && !activityManager.isReaderActivity())) {
-        defaultEvents.push_back(ev);
-        continue;
-      }
-
-      switch (static_cast<BA>(action)) {
+    // Executes one resolved action. Extracted from the button loop below so the
+    // gesture path runs exactly the same code: a gesture bound to "Reader Menu"
+    // must do precisely what a button bound to it does, and two copies of this
+    // ladder would not stay that way. Returns false only when the device is on
+    // its way into deep sleep and the caller must stop.
+    auto runAction = [&](const BA action) -> bool {
+      switch (action) {
         case BA::BTN_PAGE_FORWARD:
           activityManager.dispatchButtonAction(BA::BTN_PAGE_FORWARD);
           break;
@@ -1634,7 +1630,9 @@ void loop() {
           break;
         case BA::BTN_SLEEP:
           enterDeepSleep(/*fromTimeout=*/false, BootDiag::SleepTrigger::ButtonAction);
-          return;  // enterDeepSleep() never returns, but return here to stop processing
+          // enterDeepSleep() never returns; report it anyway rather than relying
+          // on that, so the caller stops processing.
+          return false;
         case BA::BTN_FORCE_REFRESH: {
           // In the reader, route through the activity so it re-displays the CURRENT page in
           // the requested mode (a raw displayBuffer() here can flush a Background-A pre-render
@@ -1731,10 +1729,39 @@ void loop() {
         default:
           break;
       }
+      return true;
+    };
+
+    ButtonEventManager::ButtonEvent ev;
+    std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
+    defaultEvents.reserve(8);
+    while (buttonEventManager.consumeEvent(ev)) {
+      const uint8_t action = actionFor(ev);
+      // Fall through to the activity when the event has no global effect here: either an
+      // explicit Default mapping, or a reader-scoped action while not in the reader.
+      if (action == BA::BTN_DEFAULT || (isReaderScopedAction(action) && !activityManager.isReaderActivity())) {
+        defaultEvents.push_back(ev);
+        continue;
+      }
+      if (!runAction(static_cast<BA>(action))) return;
     }
 
     for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
       buttonEventManager.pushEventFront(it->button, it->type);
+    }
+
+    // Gestures, in the reader only. Everywhere else the screen's own touch
+    // targets own the contact — a tap on a list row is that row, not a bindable
+    // "tap centre" — and there is no way to arbitrate between the two that a
+    // user could predict.
+    //
+    // GestureEventManager reports only gestures the user has actually bound, and
+    // suppresses the contact when it reports one. So a device with nothing bound
+    // is untouched by this, and a bound gesture cannot both run its action and
+    // fall through to the reader as a page turn.
+    if (activityManager.isReaderActivity()) {
+      BA gestureAction = BA::BTN_DEFAULT;
+      if (gestureEventManager.consumeAction(gestureAction) && !runAction(gestureAction)) return;
     }
   }
 
