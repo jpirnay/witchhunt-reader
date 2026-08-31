@@ -460,6 +460,55 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
   }
 }
 
+// --- Resume stall watchdog -------------------------------------------------------------
+// A wake straight back into a book paints NOTHING until the reader's first render lands (see
+// BootResume::ReaderResume). That was designed around a ~700 ms open; when the open instead
+// takes minutes or never finishes, the panel keeps showing the sleep screen and every button
+// appears dead — which is what issue #155 turned out to be. The device is running; there is
+// simply nothing on screen and no way back.
+//
+// This gives up and restarts. The next boot lands on Home by itself: the resume path clears
+// APP_STATE.openEpubPath and bumps readerActivityLoadCount BEFORE opening the book, and only
+// EpubReaderActivity::onExit() clears that counter — so an open that never returned leaves it
+// set, and setup()'s routing sends the following boot Home with the book untouched. That
+// mechanism already existed for a reader that CRASHES; all that was missing was a trigger for
+// one that HANGS.
+//
+// Its own task, deliberately:
+//   - The stall can be in either of the two tasks that matter. A slow section build runs on
+//     the render task (loop keeps running), but Epub::load() runs inside onEnter() on the LOOP
+//     task, and a watchdog living in loop() cannot fire while loop() is the thing that is
+//     stuck. Only a third task covers both.
+//   - It takes no lock, touches no framebuffer and paints nothing. Restarting is the only
+//     action available to a task that cannot know what state the wedged one left behind;
+//     anything that needed the render lock could block on the very hang it is trying to escape.
+// 1 KB stack: the deepest path is persistResumeStall() -> one 272-byte SD write.
+static constexpr uint32_t RESUME_STALL_TIMEOUT_MS = 20000;
+static constexpr uint32_t RESUME_STALL_POLL_MS = 1000;
+
+static void resumeStallWatchdogTask(void*) {
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(RESUME_STALL_POLL_MS));
+    // fromWakeOnly: a book opened from the library has a visible UI behind it, so a slow open
+    // there is merely slow. Only the wake resume is invisible, and only it gets restarted.
+    if (!WakeTrace::openInFlight(/*fromWakeOnly=*/true)) {
+      continue;
+    }
+    if (WakeTrace::msSinceOpen() < RESUME_STALL_TIMEOUT_MS) {
+      continue;
+    }
+    const WakeTrace::Phase phase = WakeTrace::furthestReached();
+    const unsigned long waited = WakeTrace::msSinceOpen();
+    LOG_ERR("MAIN", "Resume stalled in phase %s after %lums with no page — restarting to Home",
+            WakeTrace::phaseName(phase), waited);
+    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000));
+    // Not silentRestart(): that flushes the reading session and takes the same paths the wedged
+    // task may be holding. This is a hard restart on purpose — the boot-loop guard, not this
+    // task, is what makes the next boot land somewhere useful.
+    esp_restart();
+  }
+}
+
 // Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on
 // Timeout"). `trigger` is diagnostics only — it does not change behaviour, it just records
 // which gesture asked for the sleep, which is the first thing a "it did not wake up" report
@@ -1188,6 +1237,9 @@ void setup() {
   // Now that the background sampler is live, let long lib-layer tasks (cover image
   // decoders) poll for queued presses and yield so button input keeps priority.
   CooperativeAbort::setLongTaskAbortPredicate(&hasPendingButtonInput);
+  // Started here, after routing: by now WakeTrace knows whether this boot is a wake resume,
+  // and the watchdog only ever acts on that case.
+  xTaskCreate(&resumeStallWatchdogTask, "resumewd", 1024, nullptr, 1, nullptr);
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();

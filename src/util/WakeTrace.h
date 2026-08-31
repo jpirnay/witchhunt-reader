@@ -65,4 +65,24 @@ void setSectionCacheHit(bool hit);
 // that can produce the first visible page need no coordination between them.
 void logSummary();
 
+// --- Stall detection ----------------------------------------------------------------
+// A resume that never reaches PageVisible is the failure behind issue #155: the wake
+// deliberately paints nothing until the page lands, so a book open that stalls is
+// indistinguishable from a device that never woke. These let the watchdog notice, and let
+// the on-screen progress hint name the phase it is stuck in.
+
+// True while a book open is in flight and the first page has not appeared yet.  `fromWake`
+// narrows it to the deep-sleep resume, which is the only open with no splash behind it.
+bool openInFlight(bool fromWakeOnly);
+
+// Milliseconds since begin() stamped ReaderEnter, or 0 when no open is in flight.  Full
+// width, unlike the uint16 phase stamps: a stall is precisely the case that outlives them.
+unsigned long msSinceOpen();
+
+// Furthest phase stamped so far — the "area of work" a stalled open is sitting in.
+Phase furthestReached();
+
+// Short label for a phase ("rdr", "book", "sect", ...).  Points at a string literal.
+const char* phaseName(Phase phase);
+
 }  // namespace WakeTrace

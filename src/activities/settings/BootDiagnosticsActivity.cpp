@@ -16,6 +16,7 @@
 #include "SystemStatus.h"  // displayControllerName()
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/WakeTrace.h"
 
 namespace {
 
@@ -399,6 +400,17 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
                  BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
                  (r.flags & BootDiag::kFlagFromReader) ? " book" : "",
                  (r.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
+      } else if (r.kind == BootDiag::KindResumeStall) {
+        // The resume watchdog gave up and restarted the device. Without this line that
+        // restart is indistinguishable from the user pressing Reset — which is exactly the
+        // confusion the whole page exists to remove.
+        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us -> restart", static_cast<unsigned long>(r.seq),
+                 WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA);
+      } else if (r.kind == BootDiag::KindAborted) {
+        snprintf(buf, sizeof(buf), "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(r.seq), r.msA,
+                 r.msA >= BootDiag::kAbortCountCap ? "+" : "",
+                 BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
+                 HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)));
       } else {
         // Wake cause is dropped: it is only meaningful after a deep-sleep reset (see the
         // Wake cause row) and printing a stale "none"/"timer" on every line cost width the

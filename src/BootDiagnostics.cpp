@@ -478,6 +478,16 @@ void persistReleaseTimeout(bool storageLive) {
   });
 }
 
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds) {
+  updateRing([&] {
+    Record record{};
+    record.kind = KindResumeStall;
+    record.code = wakePhase;
+    record.msA = seconds;
+    imageAppend(record);
+  });
+}
+
 void persistBoot() {
   const bool hadCrumb = crumbValid();
   const uint8_t finalStage = hadCrumb ? crumbStage() : 0;
