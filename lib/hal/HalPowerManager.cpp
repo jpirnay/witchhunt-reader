@@ -351,16 +351,16 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     gpio_deep_sleep_hold_en();
   }
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
-  if (sleepStepHook_) sleepStepHook_(SleepStep::RailsConfigured, 0, false);
+  if (sleepStepHook_) sleepStepHook_(SleepStep::RailsConfigured, 0, false, gpio13IsBatteryLatch);
 
   // Now wait for the power button to be fully released before arming the wakeup
   // trigger and entering sleep — prevents immediate re-wake from a held button.
   // Bounded (see waitForStablePowerRelease): a pin stuck LOW used to freeze the device
   // here with the sleep screen displayed and no watchdog covering this task.
-  if (sleepStepHook_) sleepStepHook_(SleepStep::AwaitingRelease, 0, false);
+  if (sleepStepHook_) sleepStepHook_(SleepStep::AwaitingRelease, 0, false, gpio13IsBatteryLatch);
   const unsigned long releaseWaitMs = gpio.waitForStablePowerRelease();
   const bool releaseTimedOut = releaseWaitMs >= HalGPIO::POWER_RELEASE_TIMEOUT_MS;
-  if (sleepStepHook_) sleepStepHook_(SleepStep::ReleaseDone, releaseWaitMs, releaseTimedOut);
+  if (sleepStepHook_) sleepStepHook_(SleepStep::ReleaseDone, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
 
   // Arm the wakeup trigger *after* the button is released
   // Note: when keepClockAlive is false, this is only useful for waking up on USB power. On battery, the MCU will be
@@ -368,7 +368,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // regardless of the wakeup source configuration.
   // When keepClockAlive is true, this is the actual wakeup mechanism since the MCU stays powered.
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
-  if (sleepStepHook_) sleepStepHook_(SleepStep::WakeArmed, releaseWaitMs, releaseTimedOut);
+  if (sleepStepHook_) sleepStepHook_(SleepStep::WakeArmed, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
   // Enter Deep Sleep
   esp_deep_sleep_start();
 }

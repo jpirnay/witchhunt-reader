@@ -172,13 +172,29 @@ enum SleepFlags : uint8_t {
 };
 
 /// How a sleep record's `code` should be read once finalised.
+///
+/// Deliberately does NOT lean on esp_reset_reason() to separate a clean power-down from a
+/// reset-button rescue: on the ESP32-C3 it cannot. Its get_reset_reason() has no
+/// ESP_RST_EXT case at all — RESET_REASON_CHIP_POWER_ON covers both a real power-on and a
+/// CHIP_PU (EN pin) reset, and both surface as ESP_RST_POWERON. So the two boots are
+/// indistinguishable at that level by hardware, and anything claiming otherwise would be
+/// guessing. What separates them instead is evidence written while the device was still
+/// running: kFlagReleaseTimeout (persisted the moment the release wait gives up) and the
+/// shape of the history, where an unclean end leaves a boot record with no sleep before it.
 enum class SleepOutcome : uint8_t {
-  ReachedDeepSleep,  // measured: the breadcrumb showed the wake source armed
-  InferredPowerOff,  // deduced: the breadcrumb was lost because the rail was cut
-  DidNotSleep,       // the MCU was still executing when the device next reset
-  Unfinished,        // still flagged in-progress — the finalising boot never happened
+  ReachedDeepSleep,   // measured: the breadcrumb survived and showed the wake source armed
+  ReleaseTimedOut,    // measured: the release wait gave up, so the device was still running
+  PoweredOffAsAsked,  // the rail was cut, which is what this sleep's policy asked for
+  PoweredOffUnasked,  // the rail was cut although the policy said the MCU should stay up
+  DidNotSleep,        // the recorded stage itself shows it never got there
+  Unfinished,         // still flagged in-progress — the finalising boot never happened
 };
 SleepOutcome outcomeOf(const Record& record);
+
+/// True when this boot's record is not preceded by a sleep — the previous session ended
+/// without reaching the sleep path at all (a reset while awake, a crash, a rail cut). This
+/// is the discriminator that survives a rail cut, since the reset reason cannot provide it.
+bool previousSessionEndedWithoutSleep();
 
 /// How many events the ring keeps.  16 covers eight full sleep/wake cycles, which is
 /// more than any reporter has been asked to reproduce, at 272 bytes on the card.
@@ -193,6 +209,16 @@ void persistBoot();
 /// release wait and the wake arming remain.  Appends the sleep record so it survives a
 /// power cut, a hang, or a battery pull.
 void persistSleep();
+
+/// Persist "the power-button release wait gave up" into the sleep record already on the
+/// card.  Called only when the wait actually timed out, which is the one moment on this
+/// path where writing is both safe and worth it: the device is provably still executing
+/// (so no rail is collapsing under the write) and provably in the pathological state.  A
+/// clean release must NOT write here — on an X4 sleeping with the latch cut, the rail
+/// drops the instant the button opens, and a write into a collapsing rail is how SD cards
+/// lose their FAT.  `storageLive` comes from the HAL: the rail-teardown branch of
+/// startDeepSleep() has already cut the card by this point.
+void persistReleaseTimeout(bool storageLive);
 
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.

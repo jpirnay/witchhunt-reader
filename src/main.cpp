@@ -433,7 +433,7 @@ static bool keepClockAliveForSleep() { return SETTINGS.useClock && !gpio.deviceI
 // HAL cannot call BootDiag directly (it must not depend on app code), and startDeepSleep()
 // does not return, so this is the only point at which "we got as far as arming the wake
 // source" can be recorded at all.
-static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs, bool timedOut) {
+static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs, bool timedOut, bool storageLive) {
   using Step = HalPowerManager::SleepStep;
   switch (step) {
     case Step::RailsConfigured:
@@ -444,6 +444,15 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
       break;
     case Step::ReleaseDone:
       BootDiag::noteReleaseWait(waitedMs, timedOut);
+      // Persist ONLY on a timeout. The breadcrumb cannot carry this: on an X4 sleeping
+      // with the latch cut the rail is gone before the next boot, and the C3 cannot tell a
+      // reset press from a power-on, so without this the pathological case leaves no trace
+      // at all. A timeout is also the one safe moment to write — the device is provably
+      // still executing, whereas a clean release drops the rail immediately and a write
+      // into a collapsing rail is how SD cards lose their FAT.
+      if (timedOut) {
+        BootDiag::persistReleaseTimeout(storageLive);
+      }
       break;
     case Step::WakeArmed:
       BootDiag::markSleepStage(BootDiag::SleepStage::WakeArmed);

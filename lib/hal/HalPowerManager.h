@@ -73,7 +73,13 @@ class HalPowerManager {
   // signature and heap-allocates its closure, and this is called on the sleep path where
   // the heap may already be why we are sleeping. Owned by the app layer so the HAL takes
   // no dependency on the diagnostics module.
-  using SleepStepHook = void (*)(SleepStep step, unsigned long waitedMs, bool timedOut);
+  //
+  // `storageLive` says whether the SD rail is still powered at this point in the teardown,
+  // which only the HAL knows: the battery-latch branch leaves the card alone, while the
+  // rail-teardown branch has already cut it via powerDownRailsForSleep(). An observer that
+  // wants to persist something from inside the sleep path has to be told, or it writes
+  // into a card that is no longer there.
+  using SleepStepHook = void (*)(SleepStep step, unsigned long waitedMs, bool timedOut, bool storageLive);
   void setSleepStepHook(SleepStepHook hook) { sleepStepHook_ = hook; }
 
  private:

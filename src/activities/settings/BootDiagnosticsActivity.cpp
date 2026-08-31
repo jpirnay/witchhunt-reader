@@ -72,8 +72,12 @@ const char* outcomeText(const BootDiag::Record& record) {
   switch (BootDiag::outcomeOf(record)) {
     case BootDiag::SleepOutcome::ReachedDeepSleep:
       return tr(STR_DIAG_SLEEP_OK);
-    case BootDiag::SleepOutcome::InferredPowerOff:
-      return tr(STR_DIAG_SLEEP_OK_INFERRED);
+    case BootDiag::SleepOutcome::ReleaseTimedOut:
+      return tr(STR_DIAG_SLEEP_REL_TIMEOUT);
+    case BootDiag::SleepOutcome::PoweredOffAsAsked:
+      return tr(STR_DIAG_SLEEP_POWERED_OFF);
+    case BootDiag::SleepOutcome::PoweredOffUnasked:
+      return tr(STR_DIAG_SLEEP_POWERED_OFF_BAD);
     case BootDiag::SleepOutcome::Unfinished:
       return tr(STR_DIAG_SLEEP_UNFINISHED);
     case BootDiag::SleepOutcome::DidNotSleep:
@@ -86,9 +90,13 @@ const char* outcomeText(const BootDiag::Record& record) {
 const char* outcomeTag(const BootDiag::Record& record) {
   switch (BootDiag::outcomeOf(record)) {
     case BootDiag::SleepOutcome::ReachedDeepSleep:
-      return "ok";
-    case BootDiag::SleepOutcome::InferredPowerOff:
-      return "ok?";
+      return "slept";
+    case BootDiag::SleepOutcome::ReleaseTimedOut:
+      return "STUCK";
+    case BootDiag::SleepOutcome::PoweredOffAsAsked:
+      return "off";
+    case BootDiag::SleepOutcome::PoweredOffUnasked:
+      return "off!";
     case BootDiag::SleepOutcome::Unfinished:
       return "open";
     case BootDiag::SleepOutcome::DidNotSleep:
@@ -169,7 +177,12 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
 
   // ---- This boot -----------------------------------------------------------------
   drawSection(tr(STR_DIAG_THIS_BOOT));
+  // On the C3 a reset-button press and a real power-on are the SAME reset reason — the
+  // chip has no ESP_RST_EXT — so this row cannot tell them apart and the row below is what
+  // does. Shown anyway: it still separates a panic, a watchdog and a deep-sleep wake.
   drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
+  drawRow(tr(STR_DIAG_PREV_SESSION),
+          BootDiag::previousSessionEndedWithoutSleep() ? tr(STR_DIAG_PREV_NO_SLEEP) : tr(STR_DIAG_PREV_SLEPT));
   drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
 
   const auto& check = BootDiag::wakeCheck();

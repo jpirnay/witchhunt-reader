@@ -208,21 +208,17 @@ Record makeSleepRecord() {
   return record;
 }
 
-/// True when this boot's reset reason proves the MCU had stopped executing: it either
-/// woke from deep sleep, or came up on a fresh rail. Every other reason — a reset press,
-/// a panic, a watchdog, a software restart — requires code to have still been running,
-/// which for an in-flight sleep means it never reached esp_deep_sleep_start().
+/// True when this boot's reset reason proves the rail went away — nothing more.
 ///
-/// This is what stands in for the breadcrumb when the breadcrumb could not survive. On an
-/// X4 sleeping with useClock=0 the sleep cuts the battery latch by design, so RTC_NOINIT
-/// is wiped on EVERY healthy sleep and this is the only evidence left.
-///
-/// The one case it gets wrong is a hang escaped by pulling the battery rather than by
-/// pressing Reset — that also arrives as POWERON and would read as a completed sleep. The
-/// documented recovery for issue #155 is a Reset press (ESP_RST_EXT), which lands on the
-/// correct side, and a record finalised this way is flagged kFlagStageInferred so the page
-/// can say it was deduced rather than measured.
-bool resetImpliesMcuHadStopped(esp_reset_reason_t reason) {
+/// It deliberately does NOT try to separate a clean power-down from a reset-button rescue.
+/// On the ESP32-C3 that separation does not exist: reset_reason.c's get_reset_reason() has
+/// no ESP_RST_EXT case at all, RESET_REASON_CHIP_POWER_ON covers both a real power-on and
+/// a CHIP_PU (EN pin) reset, and both come back as ESP_RST_POWERON. An earlier version of
+/// this file read POWERON as proof that an in-flight sleep had completed; on this chip that
+/// reads a rescued hang as a healthy sleep, which is exactly backwards for the bug the page
+/// exists to diagnose (issue #155). The record is finalised as "the rail was cut" and the
+/// page qualifies that against the sleep's own policy instead.
+bool resetImpliesRailWasCut(esp_reset_reason_t reason) {
   return reason == ESP_RST_DEEPSLEEP || reason == ESP_RST_POWERON;
 }
 
@@ -250,8 +246,11 @@ void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFl
     }
     record.flags = static_cast<uint8_t>(record.flags | crumbFlagBits | kFlagStageFromRtc);
     record.msA = static_cast<uint16_t>(waitMs > UINT16_MAX ? UINT16_MAX : waitMs);
-  } else if (resetImpliesMcuHadStopped(resetReason)) {
-    record.code = static_cast<uint8_t>(SleepStage::WakeArmed);
+  } else if (resetImpliesRailWasCut(resetReason)) {
+    // No breadcrumb and the rail went away. That is all this proves — see
+    // resetImpliesRailWasCut(). Flag it inferred and leave the stage where it was:
+    // outcomeOf() reads the flag plus the sleep's own latch policy rather than pretending
+    // a stage was measured.
     record.flags = static_cast<uint8_t>(record.flags | kFlagStageInferred);
   }
   // Remaining case: no crumb and a reset reason that means code was still running. The
@@ -269,10 +268,31 @@ SleepOutcome outcomeOf(const Record& record) {
   if ((record.flags & kFlagInProgress) != 0) {
     return SleepOutcome::Unfinished;
   }
-  if (record.code < static_cast<uint8_t>(SleepStage::WakeArmed)) {
-    return SleepOutcome::DidNotSleep;
+  // Measured, and the only failure verdict that survives a rail cut: the release wait gave
+  // up, so the device was still executing long after it should have been asleep.
+  if ((record.flags & kFlagReleaseTimeout) != 0) {
+    return SleepOutcome::ReleaseTimedOut;
   }
-  return (record.flags & kFlagStageInferred) != 0 ? SleepOutcome::InferredPowerOff : SleepOutcome::ReachedDeepSleep;
+  if ((record.flags & kFlagStageInferred) != 0) {
+    // The breadcrumb did not survive, so all that is known is that the rail went away.
+    // Whether that is the right answer depends on what this sleep asked for: a latch-cut
+    // sleep powering the board off is the intended end, a latch-kept one is not.
+    return (record.flags & kFlagKeepClock) != 0 ? SleepOutcome::PoweredOffUnasked : SleepOutcome::PoweredOffAsAsked;
+  }
+  return record.code >= static_cast<uint8_t>(SleepStage::WakeArmed) ? SleepOutcome::ReachedDeepSleep
+                                                                    : SleepOutcome::DidNotSleep;
+}
+
+bool previousSessionEndedWithoutSleep() {
+  // Newest first: [0] is this boot's own record, [1] is whatever preceded it. Two boots
+  // back to back mean the session between them never reached the sleep path — a reset
+  // while awake, a crash, or a rail cut. On the C3 that is the ONLY way to see it, since
+  // the reset reason cannot separate a reset press from a power-on.
+  Record recent[2] = {};
+  if (loadRecords(recent, 2) < 2) {
+    return false;  // nothing to compare against yet
+  }
+  return recent[0].kind == KindBoot && recent[1].kind == KindBoot;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +449,28 @@ void persistSleep() {
     // one for the same sleep.
     crumbStore(crumbStage(), crumbTrigger(), crumbFlags(), /*pending=*/false);
   }
+}
+
+void persistReleaseTimeout(bool storageLive) {
+  if (!storageLive) {
+    return;  // this board's teardown path has already cut the SD rail
+  }
+  updateRing([] {
+    const RingHeader header = imageHeader();
+    const uint8_t slot = newestSlot(header);
+    if (slot >= kCapacity) {
+      return;
+    }
+    Record record{};
+    imageGetRecord(slot, record);
+    if (record.kind != KindSleep) {
+      return;
+    }
+    record.code = static_cast<uint8_t>(SleepStage::ReleaseTimedOut);
+    record.flags = static_cast<uint8_t>(record.flags | kFlagReleaseTimeout);
+    record.msA = static_cast<uint16_t>(s_crumbWait > UINT16_MAX ? UINT16_MAX : s_crumbWait);
+    imageSetRecord(slot, record);
+  });
 }
 
 void persistBoot() {
