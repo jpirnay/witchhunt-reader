@@ -233,6 +233,34 @@ void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
   edgeTail_ = next;
 }
 
+// Reads the SDK's one-shot multi-touch flags and queues whatever it classified.
+// Runs on the sampler task, outside inputMux_ — the SDK reads must not happen
+// with interrupts disabled — and takes the lock only to push. Drops the newest
+// gesture when the ring is full, matching pushEdgeLocked's policy.
+void HalGPIO::latchTouchGestures(const uint32_t timeMs) {
+  const auto push = [&](const TouchGesture::Kind kind, const float magnitude, const float nx, const float ny) {
+    portENTER_CRITICAL(&inputMux_);
+    const int next = (gestureTail_ + 1) % GESTURE_BUF;
+    if (next != gestureHead_) {
+      gestureBuf_[gestureTail_] = {kind, magnitude, nx, ny, timeMs};
+      gestureTail_ = next;
+    }
+    portEXIT_CRITICAL(&inputMux_);
+  };
+
+  float nx = 0.0f;
+  float ny = 0.0f;
+  unsigned long durationMs = 0;
+  float degrees = 0.0f;
+  if (inputMgr.wasMultiTouchRotation(degrees, nx, ny, durationMs)) {
+    push(TouchGesture::Kind::Rotate, degrees, nx, ny);
+  }
+  float scale = 1.0f;
+  if (inputMgr.wasMultiTouchPinch(scale, nx, ny, durationMs)) {
+    push(TouchGesture::Kind::Pinch, scale, nx, ny);
+  }
+}
+
 // One sampling pass: read + debounce the buttons, then latch any edges. Runs on
 // the sampler task once started; also called synchronously from update() before
 // the sampler is up. inputMgr.update() does the ADC read and must run OUTSIDE the
@@ -288,6 +316,10 @@ void HalGPIO::sampleOnce() {
   }
   const uint32_t now = millis();
   const unsigned long held = inputMgr.getHeldTime();
+
+  // Before the critical section: these read the SDK, and the queue push inside
+  // takes inputMux_ itself. Inert on non-touch boards.
+  latchTouchGestures(now);
 
   // Capacitive home key -> synthetic CONFIRM button.
   //
@@ -492,6 +524,25 @@ bool HalGPIO::popButtonEdge(ButtonEdge& out) {
   }
   portEXIT_CRITICAL(&inputMux_);
   return got;
+}
+
+bool HalGPIO::popTouchGesture(TouchGesture& out) {
+  bool got = false;
+  portENTER_CRITICAL(&inputMux_);
+  if (gestureHead_ != gestureTail_) {
+    out = gestureBuf_[gestureHead_];
+    gestureHead_ = (gestureHead_ + 1) % GESTURE_BUF;
+    got = true;
+  }
+  portEXIT_CRITICAL(&inputMux_);
+  return got;
+}
+
+void HalGPIO::flushTouchGestures() {
+  portENTER_CRITICAL(&inputMux_);
+  gestureHead_ = 0;
+  gestureTail_ = 0;
+  portEXIT_CRITICAL(&inputMux_);
 }
 
 void HalGPIO::flushButtonEdges() {

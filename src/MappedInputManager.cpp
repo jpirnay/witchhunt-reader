@@ -340,6 +340,23 @@ MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
   return RowTouch::None;
 }
 
+MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {
+  HalGPIO::TouchGesture gesture;
+  if (!gpio.popTouchGesture(gesture)) return MultiTouch::None;
+  renderer.tapToLogical(gesture.nx, gesture.ny, x, y);
+  switch (gesture.kind) {
+    case HalGPIO::TouchGesture::Kind::Pinch:
+      // magnitude is end separation over start separation, and the SDK rejects
+      // anything inside 0.8..1.2, so it is never ambiguously 1.
+      return gesture.magnitude < 1.0f ? MultiTouch::PinchIn : MultiTouch::PinchOut;
+    case HalGPIO::TouchGesture::Kind::Rotate:
+      // Positive degrees is clockwise: the panel's Y axis points down, so a
+      // positive cross product is a clockwise turn as seen by the reader.
+      return gesture.magnitude > 0.0f ? MultiTouch::RotateClockwise : MultiTouch::RotateCounterClockwise;
+  }
+  return MultiTouch::None;
+}
+
 bool MappedInputManager::decodeSwipe(int& sx, int& sy, int& ex, int& ey) const {
   float nxs = 0.0f;
   float nys = 0.0f;

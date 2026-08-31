@@ -184,6 +184,24 @@ class MappedInputManager {
   RowTouch listTouch(int& index) const;
 
   SwipeDir wasSwipe() const;
+
+  // --- Multi-touch ------------------------------------------------------------
+  // A completed two-finger gesture, already resolved to what it means ON SCREEN,
+  // with the centre in logical pixels. Rotation direction and pinch direction
+  // both survive a screen rotation unchanged — none of the four orientations
+  // mirrors the panel, so a clockwise turn of the fingers is a clockwise turn of
+  // the picture whichever way the device is held — so only the centre point
+  // needs the orientation transform.
+  //
+  // These come off HalGPIO's latched queue rather than a live flag, so one made
+  // during an e-paper refresh still arrives. Pops at most one per call; call
+  // until None to drain. Inert on boards without multi-touch (only the GT911
+  // reports more than one contact), so callers need no ifdefs.
+  enum class MultiTouch : uint8_t { None, PinchIn, PinchOut, RotateClockwise, RotateCounterClockwise };
+  MultiTouch popMultiTouch(int& x, int& y) const;
+  // Drop every queued multi-touch gesture — activity transitions, so a pinch
+  // made on the screen being left cannot act on the one being entered.
+  void flushMultiTouch() const { gpio.flushTouchGestures(); }
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.
   bool wasBackGesture() const;

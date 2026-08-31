@@ -102,6 +102,27 @@ class HalGPIO {
     uint32_t timeMs = 0;
   };
 
+  // A completed multi-touch gesture, as the SDK classified it. Panel-native
+  // normalized centre, no orientation applied — MappedInputManager gives these
+  // screen meaning, exactly as it does for taps and swipes.
+  //
+  // Unlike the single-contact events above these are LATCHED on the sampler
+  // task and queued, because they are one-shot flags the SDK clears on its next
+  // update() — a ~10 ms life. A pinch is precisely the gesture a reader makes
+  // while the loop task is inside an e-paper refresh, so passing them straight
+  // through would drop most of them. Buttons have been latched for this reason
+  // since the sampler was introduced; these follow the same rule.
+  struct TouchGesture {
+    enum class Kind : uint8_t { Pinch, Rotate };
+    Kind kind = Kind::Pinch;
+    // Pinch: end separation over start separation, so < 1 is a pinch in and > 1
+    // a spread. Rotate: signed degrees, positive = clockwise on screen.
+    float magnitude = 0.0f;
+    float nx = 0.0f;
+    float ny = 0.0f;
+    uint32_t timeMs = 0;
+  };
+
  private:
   DeviceType _deviceType = DeviceType::X4;
 
@@ -125,6 +146,15 @@ class HalGPIO {
   ButtonEdge edgeBuf_[EDGE_BUF] = {};
   int edgeHead_ = 0;
   int edgeTail_ = 0;
+  // Four is deliberately small. A multi-touch gesture ends when the fingers
+  // leave the glass, so they cannot arrive faster than a person can lift and
+  // replace two fingers; a backlog deeper than this means the loop has been gone
+  // long enough that acting on the oldest entry would surprise the user more
+  // than dropping it.
+  static constexpr int GESTURE_BUF = 4;
+  TouchGesture gestureBuf_[GESTURE_BUF] = {};
+  int gestureHead_ = 0;
+  int gestureTail_ = 0;
 
   // Loop-side snapshot refreshed by update(); only the loop task reads/writes these.
   uint8_t snapState_ = 0;
@@ -145,6 +175,10 @@ class HalGPIO {
 
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
+  // Drain the SDK's one-shot multi-touch flags into gestureBuf_. Called from
+  // sampleOnce() with inputMux_ NOT held: it reads the SDK, which the critical
+  // section must not do.
+  void latchTouchGestures(uint32_t timeMs);
   static void samplerTask(void* arg);
 
  public:
@@ -232,6 +266,11 @@ class HalGPIO {
   void suppressTouchContact();
   unsigned long lastTouchHeldMs() const;
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
+  // Drain one queued multi-touch gesture (FIFO). Returns false when empty.
+  bool popTouchGesture(TouchGesture& out);
+  // Drop every queued gesture (activity transitions), so a pinch made on the
+  // screen being left cannot act on the one being entered.
+  void flushTouchGestures();
   // Coarse "the user touched the screen" signal — the touch analogue of
   // wasAnyPressed(). Feed this into the idle/sleep timer so touch counts as
   // activity (phase 3).
