@@ -88,6 +88,11 @@ class MenuListActivity : public Activity {
   // Handle up/down navigation via buttonNavigator.  Call from loop() if overriding.
   void handleNavigation();
 
+  // Handle a tap on a list row: Down moves the selection, Tap activates. Returns true when the
+  // touch was consumed, so an overriding loop() can early-out exactly as it does for a button.
+  // Inert on non-touch boards and on any frame with no tap.
+  bool handleListTouch();
+
   // Toggle/cycle the currently selected item.  For ACTION items, delegates to onActionSelected().
   virtual void toggleCurrentItem();
 

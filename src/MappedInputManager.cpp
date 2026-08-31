@@ -5,6 +5,7 @@
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
+#include "components/themes/ListTouchBand.h"
 
 namespace fui = freeink::ui;
 
@@ -314,6 +315,23 @@ MappedInputManager::RowTouch MappedInputManager::colTouch(int& col, const int le
   // Columns are the same test with the axes swapped: band along x, bounded on y.
   const auto hit = [&](const int x, const int y) {
     return touchtransform::bandHit(x, y, left, colStep, colCount, yStart, yEnd, colWidth, col);
+  };
+  int x = 0;
+  int y = 0;
+  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
+  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
+  return RowTouch::None;
+}
+
+MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
+  // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
+  // orientation the renderer is in rather than forcing Portrait, so that is the frame its rows
+  // were recorded in. See ListTouchBand.h.
+  const auto hit = [&](const int x, const int y) {
+    const int item = ListTouchBand::hitTest(x, y);
+    if (item < 0) return false;
+    index = item;
+    return true;
   };
   int x = 0;
   int y = 0;

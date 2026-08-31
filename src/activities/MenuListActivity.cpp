@@ -83,5 +83,44 @@ void MenuListActivity::loop() {
     toggleCurrentItem();
     return;
   }
+  if (handleListTouch()) return;
   handleNavigation();
+}
+
+// Touch equivalent of "move the selection, then confirm", against the rows drawMenuList()
+// actually painted. One place, so all eight subclasses gain it without being touched.
+//
+// Two-step on purpose, matching the buttons rather than firing on first contact: resting a
+// finger on a row moves the highlight (Down), lifting it activates (Tap). On e-paper a
+// mis-activation costs a screen the reader then has to navigate back out of, so the cheap
+// half happens under the finger and the expensive half only on release.
+//
+// Separator rows never appear here -- the band records them as non-selectable, the same
+// exclusion initMenuList()'s predicate makes for button navigation -- so a tap on a section
+// heading falls through as a miss rather than selecting it.
+bool MenuListActivity::handleListTouch() {
+  int index = -1;
+  switch (mappedInput.listTouch(index)) {
+    case MappedInputManager::RowTouch::Down:
+      // Range-check even though the band was recorded from this same list: the record happens
+      // on the render task and menuItems can be rebuilt between that render and this tap.
+      if (index < 0 || index >= static_cast<int>(menuItems.size())) return true;
+      if (index != selectedIndex) {
+        selectedIndex = index;
+        requestUpdate();
+      }
+      return true;
+    case MappedInputManager::RowTouch::Tap:
+      if (index < 0 || index >= static_cast<int>(menuItems.size())) return true;
+      selectedIndex = index;
+      // Repaint even when the item did not move the selection: toggleCurrentItem() requests one
+      // for a value change, but an ACTION item that opens nothing leaves the highlight where a
+      // preceding Down put it, and the row under the finger must end up looking selected.
+      requestUpdate();
+      toggleCurrentItem();
+      return true;
+    case MappedInputManager::RowTouch::None:
+      return false;
+  }
+  return false;
 }

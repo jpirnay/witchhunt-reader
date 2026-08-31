@@ -2,19 +2,24 @@
 
 #include "ActivityManager.h"
 #include "components/themes/ButtonHintStrip.h"
+#include "components/themes/ListTouchBand.h"
 
-// The recorded button-hint strip belongs to the screen that painted it. Drop it on every
-// transition, in both directions: a screen that draws no hints would otherwise inherit the
-// previous one's boxes, and taps near the bottom edge would fire phantom button presses.
-// Each screen re-records on its next render, so the only gap is between the transition and
-// that render -- during which there is correctly no strip.
+// The recorded button-hint strip and list rows belong to the screen that painted them. Drop
+// both on every transition, in both directions: a screen that draws no hints would otherwise
+// inherit the previous one's boxes and turn taps near the bottom edge into phantom button
+// presses, and one that draws no list would inherit its rows and turn a tap anywhere in the
+// content area into a phantom selection. Each screen re-records on its next render, so the
+// only gap is between the transition and that render -- during which there is correctly
+// neither.
 void Activity::onEnter() {
   ButtonHintStrip::invalidate();
+  ListTouchBand::invalidate();
   LOG_DBG("ACT", "Entering activity: %s", name.c_str());
 }
 
 void Activity::onExit() {
   ButtonHintStrip::invalidate();
+  ListTouchBand::invalidate();
   LOG_DBG("ACT", "Exiting activity: %s", name.c_str());
 }
 

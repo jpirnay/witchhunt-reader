@@ -171,6 +171,18 @@ class MappedInputManager {
   // Horizontal variant for side-by-side button pairs (confirmation prompts).
   RowTouch colTouch(int& col, int left, int colStep, int colCount, int yStart, int yEnd, int colWidth = 0) const;
 
+  // The same interaction against the list the themes actually painted, rather than against
+  // geometry the caller re-derives. `index` is an ITEM index, already resolved through the
+  // page or scroll offset, so a caller assigns it straight to its selection.
+  //
+  // Prefer this to rowTouch() for anything drawn by GUI.drawList: rowTouch cannot express a
+  // wrapped list (its rows differ in height), and a screen computing its own band is a second
+  // copy of the theme's layout rule. rowTouch stays for the bands no theme draws — option
+  // prompts, custom row heights, menus.
+  //
+  // Returns None when no list was recorded, so it is inert on every screen that draws none.
+  RowTouch listTouch(int& index) const;
+
   SwipeDir wasSwipe() const;
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.

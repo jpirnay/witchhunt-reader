@@ -31,6 +31,7 @@
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
 #include "components/themes/ButtonHintLayout.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -290,6 +291,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       (rowSubtitle != nullptr) ? LyraMetrics::values.listWithSubtitleRowHeight : LyraMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
   if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
+  if (pageItems <= 0 || itemCount <= 0 || rowTitle == nullptr) {
+    ListTouchBand::invalidate();
+    return;
+  }
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
@@ -333,6 +338,12 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   // Draw all items
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  // Rows published for touch as they are painted — see BaseTheme::drawList for why this is
+  // recorded from the draw rather than re-derived by each screen. Full rect.width, matching
+  // where the row's own selection fill reads as a target.
+  ListTouchBand::Builder touchBand;
+  touchBand.begin(rect.x, rect.width, pageStartIndex);
+
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
     int rowTextWidth = textWidth;
@@ -349,6 +360,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     auto itemName = rowTitle(i);
     const bool isSeparator = UITheme::isSeparatorTitle(itemName);
+    touchBand.addRow(itemY, rowHeight, !isSeparator);
     if (isSeparator) {
       itemName = UITheme::stripSeparatorTitle(itemName);
       drawListSeparator(renderer,
@@ -402,6 +414,8 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                         itemY + 6, valueText.c_str(), !(i == selectedIndex && highlightValue));
     }
   }
+
+  touchBand.commit();
 }
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
