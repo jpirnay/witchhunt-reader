@@ -41,6 +41,31 @@ struct GridLayout {
   CoverGridLayout::Layout cells;
 };
 
+// Whether the recents grid draws its one-line gesture hint below the last row.
+//
+// ONE question, asked in one place, because it drives two things that must agree: the
+// hint itself and the vertical space reserved for it (bottomReserve below). They were
+// separate `gpio.deviceIsX3()` tests until this was extracted, which is a latent bug —
+// a board answering differently in the two spots either reserves a strip it never
+// paints, or paints the hint over the bottom row of covers.
+//
+// It is still spelled by board name, and that is NOT right. The real question is
+// whether a hint line fits under the grid; the original comment ("On X4 (taller
+// screen) there is room") is not even self-consistent, since in portrait the X3 is the
+// taller panel at 792x528 against the X4's 800x480. Resolving it means deriving the
+// answer from the leftover height CoverGridLayout actually leaves, which changes what
+// the C3 renders and therefore wants a device in hand.
+//
+// One thing it must NOT be converted to, having been tried: "does the board have Left
+// and Right buttons", on the theory that the hint names Up/Left/Right combos and a
+// board without those keys should not advertise them. Both X3 and X4 carry
+// `left = right = PIN_UNASSIGNED` — they are XteinkAdcLadder boards whose Left/Right
+// come off a resistor ladder, not GPIOs — so a pin-presence predicate reads false on
+// the very boards that do draw the hint.
+//
+// Until then it is at least wrong in exactly one place instead of three.
+bool gridShowsGestureHint() { return !gpio.deviceIsX3(); }
+
 GridLayout computeGridLayout(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -49,11 +74,12 @@ GridLayout computeGridLayout(const GfxRenderer& renderer) {
   l.contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   l.contentHeight = l.content.height - l.contentTop - metrics.verticalSpacing;
 
-  // The gesture-hint line sits at the bottom of the content area on X4; keep the last row's
-  // labels clear of it (the scroll arrows share that strip).
+  // Reserve the strip the gesture-hint line occupies, on the boards that draw one; the
+  // scroll arrows share it either way, hence the 12 px floor. Same predicate as the draw,
+  // so the two cannot drift apart.
   l.cells = CoverGridLayout::compute({.contentWidth = l.content.width,
                                       .contentHeight = l.contentHeight,
-                                      .bottomReserve = gpio.deviceIsX3() ? 12 : 24,
+                                      .bottomReserve = gridShowsGestureHint() ? 24 : 12,
                                       .maxCellHeight = RecentBooksActivity::GRID_MAX_CELL_HEIGHT});
   return l;
 }
@@ -483,7 +509,7 @@ void RecentBooksActivity::renderListView(RenderLock&&) {
         [this](int index) { return UITheme::getFileIcon(recentBooks[index].path); });
   }
 
-  if (!gpio.deviceIsX3()) {
+  if (gridShowsGestureHint()) {
     const int hintY = contentRect.y + contentRect.height - metrics.verticalSpacing - 14;
     const std::string hint = std::string(tr(STR_DIR_UP)) + "+L: " + tr(STR_VIEW_GRID) + "/" + tr(STR_VIEW_LIST) +
                              "   " + tr(STR_DIR_LEFT) + "+L: " + tr(STR_REMOVE) + "   " + tr(STR_DIR_RIGHT) +
@@ -670,8 +696,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     }
   }
 
-  // On X4 (taller screen) there is room for a one-line gesture hint below the grid.
-  if (!gpio.deviceIsX3()) {
+  if (gridShowsGestureHint()) {
     const int hintY = contentRect.y + contentRect.height - metrics.verticalSpacing - 14;
     const std::string hint = std::string(tr(STR_DIR_UP)) + "+L: " + tr(STR_VIEW_GRID) + "/" + tr(STR_VIEW_LIST) +
                              "   " + tr(STR_DIR_LEFT) + "+L: " + tr(STR_REMOVE) + "   " + tr(STR_DIR_RIGHT) +

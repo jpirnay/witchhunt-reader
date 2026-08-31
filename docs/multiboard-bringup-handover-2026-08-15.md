@@ -657,9 +657,38 @@ gains a capability the name-based condition never anticipated.
 
 | Site | Effect on the T5S3 |
 |---|---|
-| `LyraTheme.cpp:401`, `BaseTheme.cpp:171` | `x3ButtonPositions : x4ButtonPositions` — gets X4 hint positions computed for an 800x480 four-button board |
-| `RecentBooksActivity.cpp:444,625` | prints `Up+L` / `Left+L` / `Right+L` hints for buttons this board does not have |
+| ~~`LyraTheme.cpp:401`, `BaseTheme.cpp:171`~~ | **Fixed.** Both now go through `ButtonHintLayout::positions()`, which derives the slots from the panel width instead of picking an X3-or-X4 table. |
+| `RecentBooksActivity.cpp` | prints `Up+L` / `Left+L` / `Right+L` hints for buttons this board does not have. Still board-name-keyed, but the three copies of the test are now one `gridShowsGestureHint()` — see below. |
 | `UITheme.cpp:155-182`, `KeyboardEntryActivity.cpp:363` | layout branches keyed on the board name |
+
+**Re-audited after the 2026-08-31 master resync.** Master added two more
+board-name conditions while this branch was away; both are converted:
+
+- `main.cpp`'s `keepClockAliveForSleep()` reintroduced `!deviceIsX3()` for "has an
+  RTC" — the exact condition this audit had already recorded as falsified. Now
+  `hasHardwareRtc()`.
+- `HalDisplay.cpp`'s new FAST-promotion log line asked `deviceIsX4()`, which is
+  false on every S3 board by construction, so an X4 Pro promoted to the same
+  SSD1677 driver would have logged the misleading "mode=FAST took 1755 ms" the
+  check exists to prevent. Now `!deviceIsX3()`.
+
+Master also added a *third* copy of the recents-grid question — `bottomReserve =
+deviceIsX3() ? 12 : 24`, reserving space for a hint line that two other
+`deviceIsX3()` tests decide whether to draw. Three spellings of one question that
+must agree: disagreement either reserves a strip nothing paints, or paints the
+hint across the bottom row of covers. Collapsed into `gridShowsGestureHint()`,
+value unchanged.
+
+**A predicate that looks right and is not.** The obvious conversion for that site
+is "does the board have Left and Right buttons" — the hint names `Up+L`/`Left+L`/
+`Right+L`, so a board without those keys should not advertise them. It is wrong:
+both X3 and X4 carry `left = right = PIN_UNASSIGNED`, because they are
+`XteinkAdcLadder` boards whose Left/Right come off a resistor ladder rather than
+GPIOs. A pin-presence predicate reads **false on the two boards that do draw the
+hint**. `HalCapabilities::hasBackAndConfirmButtons()` rests on the same pin
+fields and carries the same caveat — it is sound for the X4 Pro, whose back and
+confirm genuinely come from the GT911, but it is not a general "has this key"
+test on an ADC-ladder board. Check `inputStyle` before reaching for pin presence.
 
 **Legitimate, leave alone:** `HalGPIO.cpp:140,147` (the fingerprint feeding
 `selectDevice()` — the actual identity use B0 said would stay), `529/776/836`
