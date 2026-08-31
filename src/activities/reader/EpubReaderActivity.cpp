@@ -43,6 +43,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DictionaryWordSelectActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
@@ -62,6 +63,7 @@
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
 #include "activities/home/BookInfoActivity.h"
+#include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -172,15 +174,6 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
 
-// Free heap the deferred footnote gather needs before it will start. It opens the ZIP once per
-// spine and each open takes a 4 KB contiguous EOCD buffer plus a 1 KB stream chunk; starting it
-// without room does not merely fail, it produces a cache that records "no footnotes" for the book
-// permanently (see gatherFootnotesIfBuildNeedsThem). Sized well above that so it declines and
-// retries rather than limping.
-#ifndef FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES
-#define FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES (48 * 1024)
-#endif
-constexpr uint32_t FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V = FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES;
 // Quiet period after the last page reached the screen before B may take the buffer. B's borrow
 // costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
 // only start once the reader has settled. Below this the reader is flipping (skimming, or
@@ -483,12 +476,21 @@ void EpubReaderActivity::onEnter() {
   // screen's filter setting rather than adding a second one: it is the same tone curve,
   // and a separate inline-image toggle is display surface the reader does not need.
   //
-  // Only ADAPTIVE_TONE carries over. The other values are sleep-screen compositing modes
-  // (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning for an
-  // image sitting inside a page of text.
-  const bool adaptiveToneImages =
-      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE;
-  image_tone::setFilterId(adaptiveToneImages ? CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE : 0);
+  // Only the two tone-curve values carry over. The others are sleep-screen compositing
+  // modes (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning
+  // for an image sitting inside a page of text.
+  switch (SETTINGS.sleepScreenCoverFilter) {
+    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE:
+      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE, adaptive_tone::Mode::Stretch);
+      break;
+    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE:
+      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE,
+                            adaptive_tone::Mode::Equalize);
+      break;
+    default:
+      image_tone::setFilter(0, adaptive_tone::Mode::Stretch);
+      break;
+  }
 
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.
@@ -592,11 +594,6 @@ void EpubReaderActivity::onEnter() {
   bookFontSizeNormalizationOverride = currentBook.fontSizeNormalizationOverride;
   bookGuideDotsOverride = currentBook.guideDotsOverride;
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
-  // Prime the footnote-cache flag with one existence probe: an already-gathered book must
-  // report previews-available immediately, or makeSectionBuildParams() would key its sections
-  // to the previews-OFF variant and rebuild the whole book. The gather itself now runs lazily,
-  // on the first page that actually contains a footnote (see render()).
-  footnotePreviewCacheReady_ = FootnotePreviews::cacheExists(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_recent_books");
 
   // Start a reading-stats session. We use the cheap filename-based hash here:
@@ -655,10 +652,13 @@ void EpubReaderActivity::onExit() {
     secondaryBorrowed_ = false;
     secondaryBufferDegraded_ = false;
     LOG_INF("ERS", "onExit: returned secondary buffer borrowed by Background-C");
-  }
-  // Background-C may instead have RELEASED the secondary buffer for headroom; the build is now
-  // aborted, so restore the global "buffer resident" invariant before the next activity renders.
-  if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
+  } else if (secondaryBufferDegraded_ && !renderer.hasSecondaryBuffer()) {
+    // Background-C may INSTEAD have RELEASED the secondary buffer for headroom; the build is now
+    // aborted, so restore the global "buffer resident" invariant before the next activity renders.
+    // `else if` because borrowed and released are alternatives, never both: returning a borrow
+    // above already makes the buffer resident. That used to be expressed by the borrow branch
+    // clearing secondaryBufferDegraded_, which left this branch's reachability depending on a
+    // flag write two lines up rather than on the state it actually tests.
     if (reallocSecondaryEvictingCaches()) {
       LOG_INF("ERS", "onExit: restored secondary buffer released by Background-C");
     }
@@ -690,6 +690,15 @@ void EpubReaderActivity::loop() {
   if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
     pendingProgressSave.pending.store(false, std::memory_order_relaxed);
     saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+  }
+
+  // Deferred by the render task (renderFinishedBookPass) because it ends in pushActivity().
+  // After the progress flush and before input handling: this is the reader's LAST loop() pass —
+  // the launch pushes it onto the activity stack, which stops loop() being called — so anything
+  // still owed must be flushed above, and nothing below it will run again.
+  if (finishedBookLaunchPending_) {
+    serviceFinishedBookLaunch();
+    return;
   }
 
   if (inputDrainGuard.shouldDrain(mappedInput)) {
@@ -1009,15 +1018,93 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
   p.bionicReadingEnabled = getEffectiveBionicReading();
-  // ACTUAL availability, not just the setting. This is what lets the gather be deferred: a
-  // section built before footnotes.bin exists genuinely has no previews baked in, so it must be
-  // cached under the previews-OFF hash. Once the gather runs the hash flips, the preview-less
-  // cache entry is simply not looked up, and the spine rebuilds with previews. Keying this on
-  // the setting alone is why the gather previously had to run up-front for every book.
-  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews() && footnotePreviewCacheReady_;
+  // The SETTING, nothing else. Availability is guaranteed by construction: a preview-enabled
+  // build resolves the note text its own spine needs before it lays out a single line (see
+  // Section::resolveInlineFootnotePreviews), so this key can never describe a page cache that
+  // says "previews on" while showing bare markers. It used to be ANDed with "is the book-level
+  // cache ready", which meant the key flipped mid-session and dragged a rebuild behind it.
+  p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews();
   p.imageRendering = lastRenderStats.imageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   return p;
+}
+
+void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& activity,
+                                                ActivityResultHandler resultHandler) {
+  // See the header: B's borrow must not outlive the reader being the top activity, or every
+  // redraw the child makes runs a HALF waveform. No-op unless B currently holds the block.
+  //
+  // endBackgroundBorrow() rather than resetBackgroundBuild(): the former discards only a build
+  // that is still live, and keeps a COMPLETED one for buildSection() to adopt. Resetting would
+  // throw that finished section away and make the next page turn rebuild it — paying for the
+  // refresh fix with a page-turn stall.
+  //
+  // Under the render lock, like every other endBackgroundBorrow() call site. This runs on the
+  // loop task, and the render task calls the same function from recoverSecondaryBufferIfNeeded()
+  // at the top of every render(). Its `if (!backgroundBorrowActive_) return;` is a plain bool,
+  // not a guard against concurrency: unlocked, both tasks pass it and both run the teardown —
+  // double-destroying backgroundSection_ and buildScratch_ (two frees into TLSF, which corrupts
+  // the free list and hangs a later malloc) while returnSecondaryBuffer() memcpy's 48 KB into a
+  // framebuffer the render task is using.
+  {
+    RenderLock lock(*this);
+    if (backgroundBorrowActive_) {
+      LOG_INF("ERS", "Overlay '%s' opening; returning Background-B's borrowed buffer so its refreshes stay fast",
+              activity ? activity->getName().c_str() : "<null>");
+    }
+    // Not a preemption. backgroundPreemptCount_ measures one specific thing — a build that keeps
+    // losing the race against page turns — and BG_BUILD_MAX_PREEMPTIONS (2) makes B abandon the
+    // spine to the foreground once it is hit. An overlay opening says nothing about whether the
+    // parse fits between two turns, so letting it burn that budget would mean two visits to the
+    // reader menu permanently demote the next section to a blocking Background-C build with its
+    // popup. Restore the count so B resumes with exactly the budget it had.
+    const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+    endBackgroundBorrow();
+    backgroundPreemptCount_ = preemptionsBeforeOverlay;
+  }
+  Activity::startActivityForResult(std::move(activity), std::move(resultHandler));
+}
+
+void EpubReaderActivity::suspendBackgroundWork() {
+  if (backgroundWorkSuspended_) return;
+  backgroundWorkSuspended_ = true;
+  {
+    // Under the render lock, like every other borrow teardown: the render task
+    // calls endBackgroundBorrow() from the top of every render(), and two
+    // unlocked teardowns double-free the same Section.
+    RenderLock lock(*this);
+    // endBackgroundBorrow(), NOT resetBackgroundBuild(). This releases what is
+    // actually large — the lent 48 KB region and the build arena inside it —
+    // and aborts only a build that is still live, which is resumable by design:
+    // abortSectionBuild() keeps a completed extraction, so the retry skips the
+    // inflate. A build that already FINISHED is left alone. Its Section is a
+    // few hundred bytes of page-offset LUT, and the work itself is not in RAM
+    // at all: the cache file on the card is the durable artifact, which is why
+    // the look-ahead's own Probe state discards the Section object the moment
+    // loadSectionFile() finds the file. Dropping it here would free nothing
+    // worth having and cost the next visit a needless re-open.
+    const uint8_t preemptionsBeforeOverlay = backgroundPreemptCount_;
+    endBackgroundBorrow();
+    // Same reasoning as startActivityForResult's: an overlay opening says
+    // nothing about whether the parse fits between two page turns, so it must
+    // not burn the budget that makes B abandon a spine.
+    backgroundPreemptCount_ = preemptionsBeforeOverlay;
+  }
+  // Discard the pre-rendered next page: it lives in the secondary framebuffer,
+  // which the overlay is about to draw over. render()'s prologue also clears
+  // this on any pass that is not PreRender/BufferDisplay, so the flag would not
+  // survive the reader's next render either -- but doing it here means the
+  // discard does not depend on which pass that render turns out to be.
+  preRenderedPage = {};
+  LOG_INF("ERS", "Background work suspended for a dictionary interaction");
+}
+
+void EpubReaderActivity::resumeBackgroundWork() {
+  if (!backgroundWorkSuspended_) return;
+  backgroundWorkSuspended_ = false;
+  // Nothing to restart explicitly: the look-ahead re-probes from Probe on the
+  // next loop() and the pre-render re-arms on the next render().
+  LOG_INF("ERS", "Background work resumed");
 }
 
 void EpubReaderActivity::resetBackgroundBuild() {
@@ -1107,7 +1194,7 @@ void EpubReaderActivity::endBackgroundBorrow() {
 }
 
 void EpubReaderActivity::stepBackgroundSectionBuild() {
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING) {
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_) {
     return;
   }
   // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
@@ -1216,6 +1303,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       const bool cached = backgroundSection_->loadSectionFile(p);
       if (cached && !backgroundSection_->isEmbeddedStyleFallback()) {
         backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // already-built runway counts toward the budget
+        backgroundSection_.reset();
+        backgroundBuildState_ = BackgroundBuildState::Settled;
+      } else if (getEffectiveInlineFootnotePreviews() &&
+                 !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine)) {
+        // This spine still owes the resolver work: its links have never been scanned, so a build
+        // of it would have to scan the document and stream every note file it points at, inside
+        // ONE loop-task slice. Look-ahead is not worth a stall the reader can feel mid-page.
+        // Leave the spine to the foreground build, which does the same work behind the "Indexing"
+        // popup, and move the cursor on. Costs the look-ahead exactly once per chapter with
+        // notes: the foreground build sets the bit, and B pre-builds it freely from then on.
+        LOG_DBG("ERS", "Background build spine=%d skipped: footnote previews not resolved yet", targetSpine);
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
@@ -1349,13 +1447,6 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         step = backgroundSection_->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
       }
       checkHeapIntegrity("after_b_slice");
-      if (gatherFootnotesIfBuildNeedsThem(backgroundSection_.get())) {
-        // Variant hash changed under this build; discard and let B start again on the
-        // previews-ON variant.
-        backgroundSection_.reset();
-        backgroundBuildState_ = BackgroundBuildState::Settled;
-        return;
-      }
       if (step == Section::BuildStep::More) {
         // Proactive low-heap guard, the mirror of Background-C's residentAbort. Only a build
         // that is NOT in the borrowed arena allocates its working set from the heap; a borrowed
@@ -1546,16 +1637,6 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   }
   checkHeapIntegrity("after_c_slice");
 
-  if (gatherFootnotesIfBuildNeedsThem(section.get())) {
-    // Variant hash changed under this build; drop it and re-enter, which rebuilds this spine
-    // with the preview text baked in. No RenderLock here: this function already holds one for
-    // its whole body, and renderingMutex is a plain (non-recursive) mutex taken with
-    // portMAX_DELAY — a second take from this task would hang the loop task permanently.
-    section.reset();
-    requestUpdate();
-    return;
-  }
-
   if (step == Section::BuildStep::More) {
     // Proactive low-heap guard: while the build is resident (AA buffer kept), bail to the released
     // path before heap reaches the fault zone. Only meaningful when the buffer is still resident —
@@ -1690,6 +1771,44 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   }
 }
 
+void EpubReaderActivity::openDictionary() {
+  if (!section) return;
+
+  if (SETTINGS.dictionaryName[0] == '\0') {
+    // Send the user somewhere they can act rather than showing a popup that
+    // only tells them what is missing.
+    suspendBackgroundWork();
+    startActivityForResult(std::make_unique<DictionarySelectionActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) {
+                             resumeBackgroundWork();
+                             requestUpdate();
+                           });
+    return;
+  }
+
+  // During an active build the on-disk LUT is not written yet, so the page has
+  // to come from the in-memory one -- the same choice the pre-render pass makes.
+  auto page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(section->currentPage))
+                                        : section->loadPageFromSectionFile();
+  if (!page) {
+    LOG_ERR("ERS", "Dictionary: could not load the current page");
+    return;
+  }
+
+  const RenderLayout layout = computeRenderLayout();
+  const int effectiveFontId = getEffectiveReaderFontId();
+  // Before startActivityForResult, which only hands back the borrowed buffer:
+  // the overlay wants the heap a completed look-ahead section is sitting on.
+  suspendBackgroundWork();
+  startActivityForResult(
+      std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page), effectiveFontId,
+                                                     layout.marginLeft, layout.marginTop),
+      [this](const ActivityResult&) {
+        resumeBackgroundWork();
+        requestUpdate();
+      });
+}
+
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
@@ -1725,19 +1844,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::DICTIONARY:
+      openDictionary();
+      break;
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
-      // Opportunistic: when the book-level footnote cache exists (gathered for inline
-      // previews), show each entry's note text in the list. Purely passive — no cache,
-      // plain marker list as before; opening the list never triggers a gather.
-      std::vector<std::string> footnotePreviews(currentPageFootnotes.size());
-      FootnotePreviews::Lookup previewLookup;
-      if (previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
-        for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
-          previewLookup.find(currentPageFootnotes[i].href, footnotePreviews[i]);
-        }
-      }
+      // Show each entry's note text when the book-level cache can supply it — see
+      // footnotePreviewsForCurrentPage() for when opening the list may gather it.
       startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes,
-                                                                           std::move(footnotePreviews)),
+                                                                           footnotePreviewsForCurrentPage()),
                              [this](const ActivityResult& result) {
                                if (!result.isCancelled) {
                                  const auto& footnoteResult = std::get<FootnoteResult>(result.data);
@@ -1874,7 +1988,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       onGoHome();
       return;
     }
-    case EpubReaderMenuActivity::MenuAction::READING_STATS: {
+    case EpubReaderMenuActivity::MenuAction::READING_STATS_FOR_BOOK: {
       // Jump to this book's detail screen using the same filename-hash docId
       // the session was opened with. The in-flight session's time isn't
       // visible here — it lands in the store only when end() runs on reader
@@ -2729,76 +2843,21 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
   return false;
 }
 
-bool EpubReaderActivity::gatherFootnotesIfBuildNeedsThem(const Section* target) {
-  if (!target || !getEffectiveInlineFootnotePreviews() || footnotePreviewCacheReady_ ||
-      footnotePreviewGatherAttempted_ || !target->sawFootnote()) {
-    return false;
+std::vector<std::string> EpubReaderActivity::footnotePreviewsForCurrentPage() {
+  std::vector<std::string> previews(currentPageFootnotes.size());
+  if (!epub) {
+    return previews;
   }
-  // The build in progress is laying this spine out WITHOUT previews, and we now know it needs
-  // them. Stop here rather than at first render: a whole-book-in-one-spine EPUB (Small Gods is
-  // one 583991-byte spine) would otherwise lay out the entire novel, render, and only then
-  // discover it must do all of it again. Polled between build slices, so the work discarded is
-  // whatever came before the first footnote link — typically a page or two.
-  // The gather is heap-hungry in its own right: it opens the ZIP and streams every spine, and
-  // each open needs a 4 KB contiguous EOCD buffer. Mid-build with the framebuffer lent out is
-  // the thinnest the heap ever gets, i.e. the worst possible moment to start it.
-  //
-  // Device-observed on alice: the trigger fired while Background-B held the borrow, all 15
-  // spines failed with "Failed to allocate EOCD scan buffer (4096 bytes)", and the gather then
-  // wrote a cache recording ZERO previews. That file is authoritative — cacheExists() reports
-  // ready on every subsequent open — so the book's footnotes would have stayed dead until
-  // someone deleted the cache directory by hand.
-  //
-  // Deliberately does NOT set the attempted latch when it declines: this is "not now", not
-  // "never". The next build slice re-asks, by which time the borrow is usually back.
-  if (!renderer.hasSecondaryBuffer() || secondaryBorrowed_) {
-    return false;
+  // Purely a read. Whatever the reader has walked through has already resolved its notes at
+  // build time, so the entries for this page are in the store; a link the store does not know
+  // renders as its plain marker and stays navigable.
+  FootnotePreviews::Lookup previewLookup;
+  if (previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
+    for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
+      previewLookup.find(currentPageFootnotes[i].href, previews[i]);
+    }
   }
-  if (esp_get_free_heap_size() < FOOTNOTE_GATHER_MIN_FREE_HEAP_BYTES_V) {
-    return false;
-  }
-
-  footnotePreviewGatherAttempted_ = true;
-  LOG_INF("ERS", "Build for spine %d hit a footnote before previews were gathered; gathering now", currentSpineIndex);
-  if (!ensureFootnotePreviewCache()) {
-    return false;  // gather failed; the latch stops us retrying, build continues preview-less
-  }
-  return true;  // caller must drop the section: its variant hash just changed
-}
-
-bool EpubReaderActivity::pageHasFootnoteShapedLink() const {
-  // currentPageFootnotes holds EVERY internal link on the page, because every internal link is
-  // navigable from the footnote list. Only marker-shaped ones are worth a gather — see
-  // FootnoteShape.h for what a Calibre table-of-contents spine costs otherwise.
-  //
-  // Note the asymmetry with the build-slice trigger: FootnoteEntry carries no noteref bit (it
-  // would cost a section-cache format bump for a flag nothing renders), so a noteref-tagged link
-  // whose text is a word rather than a marker is invisible here. Such a book still gathers via
-  // the build-slice trigger the first time one of its spines is actually built.
-  return std::any_of(currentPageFootnotes.begin(), currentPageFootnotes.end(),
-                     [](const auto& fn) { return FootnoteShape::isMarkerText(fn.number, strlen(fn.number)); });
-}
-
-bool EpubReaderActivity::ensureFootnotePreviewCache() {
-  if (!epub || !getEffectiveInlineFootnotePreviews()) {
-    return true;
-  }
-  if (footnotePreviewCacheReady_) {
-    return true;
-  }
-  if (FootnotePreviews::cacheExists(epub->getCachePath())) {
-    footnotePreviewCacheReady_ = true;
-    return true;
-  }
-  // One-time whole-book scan (foreground by design — no background variant to keep the
-  // build paths simple). An empty result still writes a valid cache, so this runs once
-  // per book, not once per open.
-  GUI.drawPopup(renderer, tr(STR_GATHERING_FOOTNOTES));
-  footnotePreviewCacheReady_ = FootnotePreviews::gather(*epub);
-  if (!footnotePreviewCacheReady_) {
-    LOG_ERR("ERS", "Footnote preview gather failed; building without previews");
-  }
-  return footnotePreviewCacheReady_;
+  return previews;
 }
 
 void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
@@ -2948,7 +3007,7 @@ EpubReaderActivity::RenderPass EpubReaderActivity::classifyRenderPass() const {
   return RenderPass::Normal;
 }
 
-void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spineCount) {
+void EpubReaderActivity::renderFinishedBookPass(const int spineCount) {
   // Immediately transition to finished-book flow instead of showing an end-of-book screen
   if (finishedBookActivityStarted_) {
     return;
@@ -2959,7 +3018,19 @@ void EpubReaderActivity::renderFinishedBookPass(RenderLock& lock, const int spin
   finishedBookSyncSpineIndex_ = lastSpineIndex;
   finishedBookSyncPage_ = 0;
   finishedBookSyncPageCount_ = 0;
-  lock.unlock();
+  // Arm only; loop() performs the launch on the loop task (see finishedBookLaunchPending_).
+  // This pass used to drop the render lock and call launchFinishedBookFlow() from here, which
+  // both mutated ActivityManager's pending-activity state from the wrong task and did SD work
+  // (findNextBookInDirectory) on the render task's stack. The lock is now simply kept: nothing
+  // below it is long-running any more.
+  finishedBookLaunchPending_ = true;
+}
+
+void EpubReaderActivity::serviceFinishedBookLaunch() {
+  if (!finishedBookLaunchPending_ || !epub) {
+    return;
+  }
+  finishedBookLaunchPending_ = false;
   BookFinished::launchFinishedBookFlow(
       *this, renderer, mappedInput, epub->getPath(), epub->getSeries(), epub->getSeriesIndex(), epub->getAuthor(),
       [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this,
@@ -3000,7 +3071,7 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
 
 void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
   // Pre-render pass: render next page content into the frame buffer (no status bar, no flush).
-  if (!section || preRenderedPage.ready) {
+  if (!section || preRenderedPage.ready || backgroundWorkSuspended_) {
     return;
   }
   const int nextPage = section->currentPage + 1;
@@ -3239,24 +3310,22 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     checkHeapIntegrity("after_createSectionFile_retry");
   }
 
-  // Eager image pre-decode only on the released path (it needs the freed headroom).
-  // warmAllImageCaches writes pixels into the framebuffer as a side effect; clearScreen()
-  // follows. In-place builds skip this — images decode lazily at first render, where
-  // renderContents releases + reallocs the buffer per image page on demand.
-  if (createOk && released) {
-    const bool indexForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-    const uint32_t warmStart = millis();
-    // Warm the AA grayscale variant here too: this is the released-buffer path, the point of
-    // maximum contiguous heap. Skipping it would push that decode into renderContents' own warm
-    // pass on the first image page, where headroom is worse.
-    section->warmAllImageCaches(0, 0, indexForceLoad, /*monochromeOutput=*/true,
-                                /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing());
-    LOG_INF("ERS", "warmAllImageCaches done in %ums (free=%lu contig=%lu)", millis() - warmStart,
-            esp_get_free_heap_size(),
-            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-    renderer.clearScreen();
-    checkHeapIntegrity("after_warmAllImageCaches");
-  }
+  // No eager image pre-decode here. Only the dimensions are needed to lay a section out, and
+  // those come from the ZIP entry header at parse time (ImageDecoderFactory::getDimensions-
+  // FromZipEntry) — nothing about building the section requires an image to be extracted.
+  //
+  // This pass used to decode EVERY image in the section while the framebuffer was released, on
+  // the theory that this is the point of maximum contiguous heap and renderContents' own warm
+  // pass would have less headroom. That premise is stale: the per-page warm now BORROWS the
+  // secondary framebuffer as a decode arena rather than competing for contiguous heap
+  // (docs/memory-allocation-strategy.md §9.3, device-measured on both panels), and it applies
+  // exactly the same force-load / monochrome / grayscale policy this pass did.
+  //
+  // What it cost was time to first page: measured on X4, 72 s before anything appeared — 11
+  // pages of images, each decoded twice (1-bit plane plus the AA grayscale plane) at ~0.6-3.2 s
+  // per decode, whether or not the reader ever turned to those pages. Per-image cost is
+  // unchanged and still amortised by the .pxc; it is now paid by the page that needs it.
+  // In-place builds have always behaved this way.
 
   // Restore the secondary buffer only if we released it. The realloc gives a white baseline that
   // no longer matches the panel, so arm a one-shot half-refresh (X4 only). The in-place path
@@ -3410,9 +3479,17 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     // wastes). A lookup failure leaves 0 = unknown -> static floors only, the old behaviour.
     size_t inflatedSize = 0;
     epub->getSpineItemInflatedSize(currentSpineIndex, &inflatedSize);
-    const SectionBuildMode mode = (resumeBackgroundBuild || !cacheHit) && !cssFallbackRebuild
-                                      ? chooseSectionBuildMode(embeddedStyle, inflatedSize)
-                                      : SectionBuildMode::Blocking;
+    SectionBuildMode mode = (resumeBackgroundBuild || !cacheHit) && !cssFallbackRebuild
+                                ? chooseSectionBuildMode(embeddedStyle, inflatedSize)
+                                : SectionBuildMode::Blocking;
+#ifdef EHP_FORCE_BLOCKING_BUILD
+    // Experiment harness only (see docs/memory-allocation-strategy.md 8.4a). Pins every section to
+    // the blocking path so two instrumented runs are comparable: the Background-C decision depends
+    // on live heap, which is the very thing under measurement, and a run that takes a different
+    // path -- or aborts before reaching the construct being measured -- produces numbers that
+    // cannot be read against the other arm. Never defined in a shipped build.
+    mode = SectionBuildMode::Blocking;
+#endif
     const bool incremental = mode != SectionBuildMode::Blocking;
     bool runBlocking = !incremental;
 
@@ -3718,31 +3795,6 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
     // Collect footnotes from the loaded page
     currentPageFootnotes = std::move(p->footnotes);
 
-    // Deferred gather: the first page that actually carries a footnote is the first moment we
-    // know this book needs previews at all. Doing it here instead of before every first section
-    // build means a book with no notes never pays the whole-book two-pass scan (2822 ms on X3).
-    // Latched so a failed gather is not retried on every single page turn.
-    //
-    // The build-slice trigger (gatherFootnotesIfBuildNeedsThem) covers spines built this
-    // session; this path covers the rest — a section loaded from cache never runs a parse, so
-    // it produces no sawFootnote() signal at all. That is the normal case when previews are
-    // switched on for a book that has already been read.
-    // Latches first: the shape scan walks the page's links and runs on every render, whereas
-    // these three are false for the whole session on the overwhelmingly common paths.
-    if (getEffectiveInlineFootnotePreviews() && !footnotePreviewCacheReady_ && !footnotePreviewGatherAttempted_ &&
-        pageHasFootnoteShapedLink()) {
-      footnotePreviewGatherAttempted_ = true;
-      if (ensureFootnotePreviewCache()) {
-        // The section on disk was built as previews-OFF and is now the wrong variant:
-        // makeSectionBuildParams() yields the previews-ON hash from here on. Drop it and
-        // re-enter render(), which rebuilds this spine with the preview text baked in.
-        LOG_INF("ERS", "Footnote previews gathered on demand (spine %d); rebuilding with previews", currentSpineIndex);
-        section.reset();
-        requestUpdate();
-        automaticPageTurnActive = false;
-        return;
-      }
-    }
     lastRenderStats.hadImages = p->hasImages();
     lastRenderStats.footnoteCount = static_cast<int>(currentPageFootnotes.size());
     lastRenderStats.spineIndex = currentSpineIndex;
@@ -3835,6 +3887,10 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     buildDisplayedPage_ = target;
     if (page && !page->hasImages()) {
       buildingPopupShown_ = false;
+      // This page is now the one on screen, so it owns the footnote state too. Without this the
+      // footnote list and the menu's "has footnotes" flag kept describing whatever page was
+      // displayed BEFORE the build started — the reader can open both while a build runs.
+      currentPageFootnotes = std::move(page->footnotes);
       displayBuildPage(lock, *page, layout);  // releases the lock before the waveform wait
       return;
     }
@@ -3866,9 +3922,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   clampSpineIndex(spineCount);
 
-  // The finished-book pass needs no layout/stats setup and consumes the lock itself.
+  // The finished-book pass needs no layout/stats setup, and only arms a flag — the lock stays
+  // held for the rest of this call and is released by the render task as usual.
   if (currentSpineIndex == spineCount) {
-    renderFinishedBookPass(lock, spineCount);
+    renderFinishedBookPass(spineCount);
     return;
   }
 
@@ -4452,6 +4509,19 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // waveform for input handling and pre-render scheduling.
   lock.unlock();
 
+#ifdef ERS_TEST_WIDEN_RENDER_WINDOW_MS
+  // TEST HOOK — never defined by any environment in platformio.ini. Holds the mid-render
+  // unlocked window open so a transition requested during it deterministically overlaps a live
+  // render pass, which is otherwise a ~1-2 s target that has to be hit by hand. Validates
+  // RenderLock(ExclusiveActivityAccess): with the guard, the transition logs
+  // "Transition waited Nms" and proceeds safely; swap the two ExclusiveActivityAccess call
+  // sites in ActivityManager::loop() back to the plain constructor and the same gesture runs
+  // the activity's destructor while this pass is still using `this`.
+  // Build with: PLATFORMIO_BUILD_FLAGS=-DERS_TEST_WIDEN_RENDER_WINDOW_MS=4000 pio run
+  LOG_INF("ERS", "TEST: holding the mid-render unlocked window open for %d ms", ERS_TEST_WIDEN_RENDER_WINDOW_MS);
+  delay(ERS_TEST_WIDEN_RENDER_WINDOW_MS);
+#endif
+
   // Sleep until BUSY deasserts, then do post-waveform SPI work (DTM1 resync
   // on X3, conditioning passes, flag updates). SPI ownership transfers back
   // to this task only after completeDisplay() returns.
@@ -4825,9 +4895,22 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   // Push current position onto saved stack
   if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
-    savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage};
+    SavedPosition& saved = savedPositions[footnoteDepth];
+    saved = {};
+    saved.spineIndex = currentSpineIndex;
+    saved.pageNumber = section->currentPage;
+    // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
+    // total; the paragraph anchor below is unaffected either way.
+    if (!section->hasActiveBuild()) {
+      saved.pageCount = section->pageCount;
+      if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
+        saved.paragraphIndex = *paragraphIndex;
+        saved.hasParagraph = true;
+      }
+    }
     footnoteDepth++;
-    LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d", footnoteDepth, currentSpineIndex, section->currentPage);
+    LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, currentSpineIndex,
+            section->currentPage, saved.hasParagraph ? saved.paragraphIndex : -1);
   }
 
   // Extract fragment anchor (e.g. "#note1" or "chapter2.xhtml#note1")
@@ -4867,12 +4950,16 @@ void EpubReaderActivity::restoreSavedPosition() {
   if (footnoteDepth <= 0) return;
   footnoteDepth--;
   const auto& pos = savedPositions[footnoteDepth];
-  LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d", footnoteDepth, pos.spineIndex, pos.pageNumber);
+  LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, pos.spineIndex,
+          pos.pageNumber, pos.hasParagraph ? pos.paragraphIndex : -1);
 
   {
     RenderLock lock(*this);
     currentSpineIndex = pos.spineIndex;
-    navTarget = NavigationTarget::makePage(pos.pageNumber);
+    navTarget = pos.hasParagraph ? NavigationTarget::makeParagraph(pos.paragraphIndex, pos.pageNumber)
+                                 : NavigationTarget::makePage(pos.pageNumber);
+    navTarget.cachedPageCount = pos.pageCount;
+    navTarget.cachedSpineIdx = pos.spineIndex;
     section.reset();
   }
   requestUpdate();
@@ -5151,19 +5238,22 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         requestUpdate();
       }
       break;
+    case BA::BTN_DICTIONARY:
+      openDictionary();
+      break;
     case BA::BTN_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {
         if (currentPageFootnotes.size() == 1) {
           navigateToHref(currentPageFootnotes[0].href, true);
         } else {
-          startActivityForResult(
-              std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes),
-              [this](const ActivityResult& result) {
-                if (!result.isCancelled) {
-                  const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                  navigateToHref(footnoteResult.href, true);
-                }
-              });
+          startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(
+                                     renderer, mappedInput, currentPageFootnotes, footnotePreviewsForCurrentPage()),
+                                 [this](const ActivityResult& result) {
+                                   if (!result.isCancelled) {
+                                     const auto& footnoteResult = std::get<FootnoteResult>(result.data);
+                                     navigateToHref(footnoteResult.href, true);
+                                   }
+                                 });
         }
       }
       break;

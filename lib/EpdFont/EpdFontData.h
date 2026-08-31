@@ -83,7 +83,26 @@ typedef struct {
   uint32_t compressedSize;    ///< Compressed DEFLATE stream size
   uint32_t uncompressedSize;  ///< Decompressed size
   uint16_t glyphCount;        ///< Number of glyphs in this group
-  uint32_t firstGlyphIndex;   ///< First glyph index in the global glyph array
+  /// Bytes of decoded history this group's DEFLATE stream can reach back into — i.e. the
+  /// largest back-reference distance the encoder actually emitted, which fontconvert.py
+  /// measures by parsing the finished stream.
+  ///
+  /// This is what the decoder has to hold in RAM, and it is NOT uncompressedSize: the group
+  /// is streamed through a ring of exactly this size and each glyph is compacted straight out
+  /// of the stream (FontDecompressor::GroupStream), so the group never exists in memory at
+  /// once. Decoupling the two is the whole point — the group may be as large as compression
+  /// likes while the transient allocation stays small and, unlike a malloc sized by the data,
+  /// predictable.
+  ///
+  /// 0 means "not measured" and the decoder falls back to uncompressedSize, which is always
+  /// safe (a reference can never outrun the bytes produced so far). That keeps fonts generated
+  /// before this field was added decodable.
+  ///
+  /// Sits here rather than at the end on purpose: it fills the padding hole after glyphCount,
+  /// so the struct is still 20 bytes and the table costs no extra flash (static_assert in
+  /// FontDecompressor.cpp).
+  uint16_t ringBytes;
+  uint32_t firstGlyphIndex;  ///< First glyph index in the global glyph array
 } EpdFontGroup;
 
 /// Glyph interval structure
@@ -122,7 +141,38 @@ typedef struct {
   const uint16_t* glyphToGroup;               ///< Per-glyph group ID (nullptr for contiguous-group fonts)
   const EpdKernClassEntry* kernLeftClasses;   ///< Sorted left-side class map (nullptr if none)
   const EpdKernClassEntry* kernRightClasses;  ///< Sorted right-side class map (nullptr if none)
-  const int8_t* kernMatrix;              ///< Flat leftClassCount x rightClassCount matrix, 4.4 fixed-point in pixels
+  /// Split form of the two class maps, used by the built-in fonts instead of the packed
+  /// EpdKernClassEntry arrays above (which are left null for them). Same total size — 2 + 1 bytes
+  /// per entry either way — but measurably faster: the class lookups are ~96% of getKerning(),
+  /// and splitting them measured -13 to -14% on that path. Two reasons. The binary search only
+  /// ever reads codepoints, so keeping the classId payload out of the searched array shrinks its
+  /// footprint by a third; and a uint16 array is naturally aligned where a 3-byte packed struct
+  /// leaves two of every three codepoint reads unaligned.
+  ///
+  /// SD-card fonts keep the packed form: the .cpfont format stores it verbatim and maps it in
+  /// place (see the static_asserts in SdCardFont.cpp). Same coexistence rule as the kerning
+  /// matrix below — whichever pointer is non-null selects the representation.
+  const uint16_t* kernLeftCodepoints;   ///< nullptr when this font uses the packed form
+  const uint8_t* kernLeftClassIds;      ///< parallel to kernLeftCodepoints
+  const uint16_t* kernRightCodepoints;  ///< nullptr when this font uses the packed form
+  const uint8_t* kernRightClassIds;     ///< parallel to kernRightCodepoints
+  const int8_t* kernMatrix;             ///< Flat leftClassCount x rightClassCount matrix, 4.4 fixed-point in pixels
+  /// Sparse (CSR) kerning — the built-in fonts use this instead of `kernMatrix`, which is left
+  /// null for them. Measured across the built-in set, 504682 of 583049 dense entries are zero
+  /// (86.6%), so storing only the non-zero ones costs ~165 KB where the dense matrices cost
+  /// ~583 KB. Values are identical, so layout and pagination are unaffected.
+  ///
+  /// SD-card fonts keep using `kernMatrix`: the .cpfont format stores the dense matrix verbatim
+  /// and is memory-mapped in place (see the static_asserts in SdCardFont.cpp), so switching them
+  /// would break every font file already on a user's card. getKerning() reads whichever is
+  /// present, so the two representations coexist with one branch.
+  ///
+  /// kernRowOffsets has kernLeftClassCount + 1 entries; row `l` occupies
+  /// [kernRowOffsets[l], kernRowOffsets[l+1]) in the other two arrays, sorted ascending by
+  /// column so the lookup can binary-search it.
+  const uint16_t* kernRowOffsets;        ///< nullptr when this font uses the dense matrix
+  const uint8_t* kernSparseCols;         ///< 0-based right class of each stored entry
+  const int8_t* kernSparseValues;        ///< 4.4 fixed-point value of each stored entry
   uint16_t kernLeftEntryCount;           ///< Entries in kernLeftClasses
   uint16_t kernRightEntryCount;          ///< Entries in kernRightClasses
   uint8_t kernLeftClassCount;            ///< Number of distinct left classes (matrix rows)

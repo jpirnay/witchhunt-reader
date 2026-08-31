@@ -28,7 +28,7 @@
 // unaligned multi-byte access):
 //   uint16_t textOff[wordCount]   byte offset of word i's text within text[]
 //   int16_t  xpos[wordCount]
-//   uint8_t  styles[wordCount]
+//   uint8_t  styles[wordCount]    low 7 bits EpdFontFamily::Style, bit 7 = continues
 //   uint8_t  sizes[wordCount]     present only when sizesPresent
 //   char     text[textBytes]      all words back to back, each NUL-terminated
 //
@@ -121,13 +121,16 @@ class TextBlock final : public Block {
   }
 
  public:
+  // Spare high bit of the packed style byte: EpdFontFamily::Style only uses bits 0-6.
+  static constexpr uint8_t WORD_CONTINUES_BIT = 0x80;
+
   // Flatten-on-construct: copies the layout-time vectors into the arena; the
   // vectors die with the caller. An all-100% sizes vector is normalized to "no
   // sizes". On arena OOM the block is empty and valid() is false -- callers must
   // check and drop the line instead of using it.
   explicit TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle = BlockStyle(),
-                     std::vector<uint8_t> word_sizes = {});
+                     std::vector<uint8_t> word_sizes = {}, const std::vector<bool>& word_continues = {});
 
   // Slice of a laid-out block, addressed directly in the caller's storage.
   // Layout produces lines as [first, first + count) windows over the block's word arrays;
@@ -140,6 +143,9 @@ class TextBlock final : public Block {
     const std::vector<std::string>* words = nullptr;
     const std::vector<EpdFontFamily::Style>* styles = nullptr;
     const std::vector<uint8_t>* sizes = nullptr;  // may be null/empty => uniform 100%
+    // Layout's per-word "attaches to the previous word with no space" flags, indexed like
+    // `words`. May be null, meaning every word is space-separated.
+    const std::vector<bool>* continues = nullptr;
     size_t first = 0;
     size_t count = 0;
   };
@@ -148,7 +154,10 @@ class TextBlock final : public Block {
   // copies. Soft hyphens are stripped during the arena copy (they must not reach the glyph
   // stream, and the measured widths already exclude them), which is what the vector path used
   // a mutable copy of each word for.
-  TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle);
+  // xpos by const reference, not by value: it is only read (copied into the arena below), and
+  // by-value forced the caller to hand over a vector it had just built, which meant one heap
+  // allocation per rendered LINE for pure scratch. See ParsedText::extractLine.
+  TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle);
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
@@ -164,7 +173,15 @@ class TextBlock final : public Block {
     return end - textOffArr[i] - 1;  // exclude the NUL
   }
   int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
-  EpdFontFamily::Style wordStyle(const uint16_t i) const { return static_cast<EpdFontFamily::Style>(stylesArr[i]); }
+  EpdFontFamily::Style wordStyle(const uint16_t i) const {
+    return static_cast<EpdFontFamily::Style>(stylesArr[i] & ~WORD_CONTINUES_BIT);
+  }
+  // True when word i is glued to word i-1 with no space between them: the two halves of a
+  // bionic-reading word, an attached punctuation token, a styled run that changes mid-word.
+  // Word 0 carries the flag layout gave the line's first token, so it is only meaningful for
+  // i > 0. Rides in the spare high bit of the style byte, so it costs no RAM and no cache
+  // bytes; a cache written before the bit existed simply reports false everywhere.
+  bool wordContinues(const uint16_t i) const { return (stylesArr[i] & WORD_CONTINUES_BIT) != 0; }
   bool hasWordSizes() const { return sizesPresent; }
   uint8_t wordSizePct(const uint16_t i) const { return sizesPresent ? sizesArr[i] : 100; }
   // Diagnostic/test helper: materializes the per-word size vector (empty when uniform).
@@ -175,6 +192,26 @@ class TextBlock final : public Block {
   // vertical advance scales with this so an enlarged inline word doesn't collide
   // with the next line.
   uint8_t maxSizePct() const;
+
+  // Screen box of one word, in the same coordinate space render(fontId, x, y)
+  // draws it in. Shares render()'s geometry rather than restating it: the
+  // effective font (a heading block draws with headingFontId), the per-word
+  // scale, the baseline alignment that shifts smaller words down, and the
+  // SUP/SUB offsets all have to agree, or a caller drawing over a word lands
+  // beside it. Used by the dictionary's word-selection overlay.
+  struct WordBox {
+    int16_t x = 0;
+    int16_t y = 0;
+    int16_t width = 0;
+    int16_t height = 0;
+    // Everything else render() needs to draw this word, so a caller repainting
+    // over it produces the same glyphs: a heading block draws with its own
+    // font, and a word may carry a style and a size scale of its own.
+    int fontId = 0;
+    EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+    float scale = 1.0f;
+  };
+  WordBox wordBox(const GfxRenderer& renderer, uint16_t i, int fontId, int x, int y) const;
 
   // Guide dots reading aid: when enabled, render() draws a small dot centered in
   // the empty space between adjacent words of a line -- never before the first

@@ -9,6 +9,12 @@
 void heapTrackBegin();
 // Stop tracking and return the peak live bytes observed since begin().
 size_t heapTrackEnd();
+// Suspend/resume counting without clearing the counters. The dump harness reads every page back
+// through the same Section code the build uses, and that read-back is test scaffolding that never
+// runs on device -- profiling it made loadPageFromSectionFile the largest "allocation site" in the
+// whole book. Bracket anything that is not the build.
+void heapTrackPause();
+void heapTrackResume();
 // Number of allocations since begin(). Peak bytes alone hides allocation CHURN — many
 // short-lived blocks can leave peak flat while still fragmenting a no-compaction heap,
 // which is the failure mode on the ESP32-C3. Valid after heapTrackEnd().
@@ -17,3 +23,11 @@ size_t heapTrackAllocCount();
 // Fills up to `count` buckets. Reveals which allocations dominate by COUNT, which is what
 // fragments a no-compaction heap.
 void heapTrackSizeHistogram(size_t* out, int count);
+// Top allocation SITES by count, as raw return addresses (symbolize with addr2line).
+// Writes up to `count` pairs into out[]; returns how many were written.
+struct HeapTrackSite {
+  unsigned long long pc;
+  size_t count;
+  size_t bytes;
+};
+int heapTrackTopSites(HeapTrackSite* out, int count);

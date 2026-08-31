@@ -238,6 +238,93 @@ TEST(WordSizeSerialization, ArenaRoundTripPreservesPerWordFields) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Word continuation (issue #206: bionic reading and hyphenation split one word)
+// ---------------------------------------------------------------------------
+
+// Bionic reading rewrites "reading" into a bold "rea" plus a plain "ding". The pieces have to
+// reach the line marked as one word, or the dictionary overlay selects half of it.
+TEST(WordContinuation, BionicHalvesAreMarkedAsOneWord) {
+  GfxRenderer renderer;
+  ParsedText text(false, false, noIndentStyle(), /*bionicReadingEnabled=*/true);
+  text.addWord("reading", EpdFontFamily::REGULAR);
+  text.addWord("here", EpdFontFamily::REGULAR);
+
+  const auto result = layout(text, renderer, 400);
+  ASSERT_EQ(result.lines.size(), 1u);
+  const TextBlock& line = *result.lines[0];
+  ASSERT_EQ(line.wordCount(), 4);
+  EXPECT_STREQ(line.wordText(0), "read");
+  EXPECT_STREQ(line.wordText(1), "ing");
+  EXPECT_STREQ(line.wordText(2), "he");
+  EXPECT_STREQ(line.wordText(3), "re");
+  EXPECT_FALSE(line.wordContinues(0));
+  EXPECT_TRUE(line.wordContinues(1));
+  EXPECT_FALSE(line.wordContinues(2));
+  EXPECT_TRUE(line.wordContinues(3));
+  // The bold prefix is what makes the two pieces look like separate words on screen; the flag
+  // has to survive alongside it.
+  EXPECT_EQ(line.wordStyle(0), EpdFontFamily::BOLD);
+  EXPECT_EQ(line.wordStyle(1), EpdFontFamily::REGULAR);
+}
+
+// Punctuation the parser attaches to a word arrives as its own token with the same flag, so it
+// travels with the word instead of becoming a selectable "word" of its own.
+TEST(WordContinuation, AttachedPunctuationIsMarkedAsContinuation) {
+  GfxRenderer renderer;
+  ParsedText text(false, false, noIndentStyle());
+  text.addWord("question", EpdFontFamily::REGULAR);
+  text.addWord("?", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
+
+  const auto result = layout(text, renderer, 400);
+  ASSERT_EQ(result.lines.size(), 1u);
+  EXPECT_FALSE(result.lines[0]->wordContinues(0));
+  EXPECT_TRUE(result.lines[0]->wordContinues(1));
+}
+
+// Hyphenation splits the word ACROSS lines, so the halves land in different blocks and no flag
+// can join them. What survives is the shape the overlay keys on: the first line ends on the
+// inserted hyphen and the next starts with the rest of the word.
+TEST(WordContinuation, HyphenationLeavesTheHyphenOnTheFirstLine) {
+  GfxRenderer renderer;
+  ParsedText text(false, /*hyphenationEnabled=*/true, noIndentStyle());
+  text.addWord("Quadratkilometer", EpdFontFamily::REGULAR);
+
+  // Narrow enough that the single word cannot fit, so the breaker has to split it.
+  const auto result = layout(text, renderer, 120);
+  ASSERT_GE(result.lines.size(), 2u);
+  const TextBlock& first = *result.lines[0];
+  const std::string prefix = first.wordText(first.wordCount() - 1);
+  ASSERT_FALSE(prefix.empty());
+  EXPECT_EQ(prefix.back(), '-');
+  EXPECT_FALSE(result.lines[1]->wordContinues(0));  // a new line always starts a new run
+  const std::string suffix = result.lines[1]->wordText(0);
+  ASSERT_FALSE(suffix.empty());
+  // Dropping the inserted hyphen and joining is what reconstructs the word.
+  EXPECT_EQ(prefix.substr(0, prefix.size() - 1) + suffix, "Quadratkilometer");
+}
+
+// The continuation flag shares the style byte with EpdFontFamily::Style, and the arena is
+// written to the section cache verbatim, so the flag has to come back off disk intact.
+TEST(WordSizeSerialization, ContinuationFlagRoundTrips) {
+  const std::vector<std::string> words = {"rea", "ding", "next"};
+  const std::vector<EpdFontFamily::Style> styles = {EpdFontFamily::BOLD, EpdFontFamily::REGULAR, EpdFontFamily::ITALIC};
+  TextBlock original(words, {0, 30, 80}, styles, BlockStyle(), {}, {false, true, false});
+  ASSERT_TRUE(original.valid());
+
+  FsFile file = HalFile::forReadWrite();
+  ASSERT_TRUE(original.serialize(file));
+  ASSERT_TRUE(file.seek(0));
+
+  const auto restored = TextBlock::deserialize(file);
+  ASSERT_NE(restored, nullptr);
+  ASSERT_EQ(restored->wordCount(), words.size());
+  EXPECT_FALSE(restored->wordContinues(0));
+  EXPECT_TRUE(restored->wordContinues(1));
+  EXPECT_FALSE(restored->wordContinues(2));
+  for (uint16_t i = 0; i < words.size(); ++i) EXPECT_EQ(restored->wordStyle(i), styles[i]);
+}
+
 // An empty word ("") is stored as a bare NUL; the offset table must still be
 // strictly increasing and validation must accept it.
 TEST(WordSizeSerialization, EmptyStringWordRoundTrips) {

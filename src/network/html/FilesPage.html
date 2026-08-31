@@ -5832,11 +5832,11 @@
             }
           }
 
-          // Normalize JPEG/PNG to baseline JPEG via a canvas round-trip.
+          // Normalize JPEG to baseline JPEG via a canvas round-trip.
           // The browser decodes any JPEG variant (including multi-scan progressive)
           // and canvas.toBlob always emits baseline JPEG — which the device's
           // baseline-only TJpgDec decoder can handle.
-          if ((isJpeg || isPng) && !needsConversion) {
+          if (isJpeg && !needsConversion) {
             try {
               file = await normalizeImageToBaseline(file);
             } catch (e) {

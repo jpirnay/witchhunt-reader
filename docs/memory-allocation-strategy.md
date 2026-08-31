@@ -394,6 +394,84 @@ demonstrated. Before committing to either change above, log `contig` at several 
 `createSectionFile` on device and find where the block actually collapses. That is a few log
 lines and it decides whether the target is the small objects or something else entirely.
 
+### 8.4a Partially answered: table layout is a named contributor (2026-08-22)
+
+`SCT_HEAP_TRACE=1` on X3 2.24-dev, appendix-b of "Through the Brazilian Wilderness". Tables
+sit on pages ~30-39 of that section; everything else is prose, so the section is its own
+control:
+
+| page        | free   | contig      | allocBlk | freeBlk | allocBytes |
+|-------------|--------|-------------|----------|---------|------------|
+| 0-25 prose  | ~30000 | 23540-26612 | 440-445  | 8-11    | ~226000    |
+| 30 table    | 20604  | 9204        | 575      | 17      | 233312     |
+| 35 table    | 16980  | 13300       | 658      | 28      | 235608     |
+| 40-65 prose | ~29000 | **20468**   | 448-455  | 11-15   | ~227000    |
+
+This is the measurement 8.4 asks for, and it answers the question for one construct:
+
+1. Table pages allocate **130-215 extra blocks** (+7-9.4 KB). The cost is block COUNT, not
+   bytes — one `TextBlock` per cell line, each with its own vectors, all live simultaneously
+   because `layoutTableRow` holds every cell before the packer takes the row.
+2. Nothing is retained. `allocBlk` and `allocBytes` return to baseline immediately after the
+   tables, so the fragment packer drains correctly. A residency explanation was tested and
+   disproven.
+3. `contig` is **permanently** damaged: 26612 before the tables, 20468 for all 30 pages after.
+   Six KB of largest-free-block lost by a build that gave every byte back. `freeBlk` spiking
+   to 17 and 28 against a baseline of 8-11, on exactly those pages, is the churn doing it.
+
+So for tables the answer to 8.4 is: allocation **count** is what collapses the contiguous
+block, and the mechanism is churn rather than retention. That does not yet generalise to the
+whole parse — prose pages hold `allocBlk` flat while `contig` still drifts, so something else
+contributes too and remains unnamed.
+
+A consequence worth recording separately: the low-heap gate on table row layout is tripped by
+the table's own footprint. The readings it refuses rows at (page 30 `free=20604 contig=9204`,
+page 35 `free=16980`) are the table pages' own dip, not pressure from elsewhere. Moving that
+threshold only relocates the problem; reducing the churn is the fix.
+
+Also observed on the same run: two of seven refusals failed the contiguous check by **12
+bytes** (`12276` against a `12288` bar). Largest-free-block readings land 12 under the round
+number, so a hard gate on a power-of-two contig threshold is close to unreachable.
+
+### 8.4b Tried and reverted: pooling table line storage (2026-08-22)
+
+The obvious response to 8.4a is to take those allocations off the general heap. It was built
+(`TextBlockLinePool`, a bump pool for `TextBlock` word storage during table row layout, rewinding
+only when its live-line count reaches zero) and measured with a controlled A/B:
+`-DSCT_HEAP_TRACE=1 -DEHP_FORCE_BLOCKING_BUILD -DEHP_TABLE_LINE_POOL=0|1`, cache cleared between,
+both arms BLOCKING at free 95428 / 94740, both 68 pages, both zero degraded rows.
+
+Compare excess over each arm's OWN prose baseline — arm B's baseline sits 30 blocks above arm A's,
+so raw figures mislead:
+
+| page | excess blk (off) | excess blk (on) | delta | excess bytes (off) | excess bytes (on) |
+|------|-----------------:|----------------:|------:|-------------------:|------------------:|
+| 31   | +364 | +285 | -22% | +14593 | +20129 |
+| 33   | +401 | +315 | -21% | +16453 | +21693 |
+
+It removed about a fifth of the block churn. It was reverted anyway, because of the column on the
+right: the pool's own 6 KB is resident for as long as a table is being laid out, and it cost ~4 KB
+of contiguous space. The secondary framebuffer is 52272 bytes. Arm A's contig sat at 53236, just
+above; arm B's at 49140, just below:
+
+    arm A: reallocSecondary failures = 0,  successes = 3
+    arm B: reallocSecondary failures = 51, successes = 2
+
+The reader could not restore its secondary buffer, dropped to single-buffer mode, and every page
+turn in the book became a HALF refresh. **Never take a large contiguous block during a section
+build**; the framebuffer realloc threshold is a cliff, and this is the second time this codebase
+has walked off it (the word-width cache was the first).
+
+Two further readings worth keeping. The 21% fell well short of the ~50% predicted from "one of two
+blocks per line", and the pool's own peak was only ~5063 bytes — so most of a table page's excess
+is NOT line word storage but the per-cell `std::vector` allocations (`TableCell::lines`,
+`TableRow::cells`) plus the `make_shared` control blocks. A future attempt should aim there, and
+must do it by REMOVING allocations rather than relocating them into a reservation.
+
+And contig recovers after the tables at ~95 KB free (53236 -> 38900 -> 53236). The permanent
+26612 -> 20468 collapse in 8.4a happened at ~30 KB free, so the durable damage is a function of
+how tight the heap already is, not an unconditional property of table layout.
+
 ### 8.5 Landed from this round
 
 - **TARGET 2** — `image_scratch` pass arena; PNG ring + scanline buffers and the JPEG work pool

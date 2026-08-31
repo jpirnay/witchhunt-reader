@@ -8,3 +8,6 @@ size_t heapTrackAllocCount() { return 0; }
 void heapTrackSizeHistogram(size_t* out, const int count) {
   for (int i = 0; i < count; i++) out[i] = 0;
 }
+void heapTrackPause() {}
+void heapTrackResume() {}
+int heapTrackTopSites(HeapTrackSite*, int) { return 0; }

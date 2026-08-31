@@ -1,0 +1,234 @@
+BOOK title=Hanging Indent Test lang=en spine=1 toc=1 reliableToc=1
+SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=31 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=77 s=1 z=100 t=Hanging
+   W x=210 s=1 z=100 t=Indent
+   W x=322 s=1 z=100 t=Test
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=1.
+   W x=40 s=0 z=100 t=WRAPPER:
+   W x=123 s=0 z=100 t=every
+   W x=175 s=0 z=100 t=line
+   W x=216 s=0 z=100 t=of
+   W x=244 s=0 z=100 t=both
+   W x=290 s=0 z=100 t=stanzas
+   W x=368 s=0 z=100 t=starts
+   W x=432 s=0 z=100 t=at
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=same
+   W x=89 s=0 z=100 t=x.
+   W x=115 s=0 z=100 t=Before
+   W x=181 s=0 z=100 t=the
+   W x=221 s=0 z=100 t=fix
+   W x=253 s=0 z=100 t=only
+   W x=302 s=0 z=100 t=the
+   W x=342 s=0 z=100 t=first
+   W x=394 s=0 z=100 t=line
+   W x=438 s=0 z=100 t=of
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=each
+   W x=46 s=0 z=100 t=stanza
+   W x=115 s=0 z=100 t=did.
+  LINE y=110 x=36 align=0 mult=1.000 hfid=0 words=2
+   W x=-18 s=0 z=100 t=Listen,
+   W x=53 s=0 z=100 t=listen
+  LINE y=134 x=36 align=0 mult=1.000 hfid=0 words=3
+   W x=-18 s=0 z=100 t=Remember
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=wane
+  LINE y=158 x=36 align=0 mult=1.000 hfid=0 words=6
+   W x=-18 s=0 z=100 t=Of
+   W x=6 s=0 z=100 t=suns
+   W x=52 s=0 z=100 t=fury
+   W x=95 s=0 z=100 t=and
+   W x=132 s=0 z=100 t=waving
+   W x=196 s=0 z=100 t=grain
+  LINE y=182 x=36 align=0 mult=1.000 hfid=0 words=4
+   W x=-18 s=0 z=100 t=We
+   W x=6 s=0 z=100 t=fell
+   W x=49 s=0 z=100 t=and
+   W x=86 s=0 z=100 t=fell
+  LINE y=206 x=36 align=0 mult=1.000 hfid=0 words=4
+   W x=-18 s=0 z=100 t=My
+   W x=2 s=0 z=100 t=son,
+   W x=48 s=0 z=100 t=my
+   W x=72 s=0 z=100 t=son
+  LINE y=230 x=36 align=0 mult=1.000 hfid=0 words=3
+   W x=-18 s=0 z=100 t=Remember
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=burn
+  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=2.
+   W x=51 s=0 z=100 t=CONTROL:
+   W x=137 s=0 z=100 t=the
+   W x=184 s=0 z=100 t=same
+   W x=240 s=0 z=100 t=indent
+   W x=311 s=0 z=100 t=stated
+   W x=385 s=0 z=100 t=on
+   W x=424 s=0 z=100 t=the
+  LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=paragraph
+   W x=98 s=0 z=100 t=itself,
+   W x=170 s=0 z=100 t=which
+   W x=224 s=0 z=100 t=never
+   W x=284 s=0 z=100 t=lost
+   W x=335 s=0 z=100 t=its
+   W x=371 s=0 z=100 t=inset.
+   W x=437 s=0 z=100 t=It
+  LINE y=302 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=must
+   W x=46 s=0 z=100 t=still
+   W x=95 s=0 z=100 t=land
+   W x=141 s=0 z=100 t=where
+   W x=191 s=0 z=100 t=case
+   W x=234 s=0 z=100 t=1
+   W x=246 s=0 z=100 t=does.
+  LINE y=326 x=36 align=0 mult=1.000 hfid=0 words=2
+   W x=-18 s=0 z=100 t=Listen,
+   W x=53 s=0 z=100 t=listen
+  LINE y=350 x=36 align=0 mult=1.000 hfid=0 words=3
+   W x=-18 s=0 z=100 t=Remember
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=wane
+  LINE y=374 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=18 s=0 z=100 t=3.
+   W x=43 s=0 z=100 t=OVER
+   W x=89 s=0 z=100 t=CAP:
+   W x=131 s=0 z=100 t=a
+   W x=150 s=0 z=100 t=six
+   W x=179 s=0 z=100 t=em
+   W x=205 s=0 z=100 t=inset
+   W x=257 s=0 z=100 t=is
+   W x=279 s=0 z=100 t=capped
+   W x=334 s=0 z=100 t=at
+   W x=363 s=0 z=100 t=four,
+   W x=419 s=0 z=100 t=so
+   W x=447 s=0 z=100 t=a
+  LINE y=398 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=six
+   W x=29 s=0 z=100 t=em
+   W x=55 s=0 z=100 t=hang
+   W x=108 s=0 z=100 t=would
+   W x=161 s=0 z=100 t=put
+   W x=195 s=0 z=100 t=two
+   W x=230 s=0 z=100 t=em
+   W x=256 s=0 z=100 t=of
+   W x=285 s=0 z=100 t=every
+   W x=338 s=0 z=100 t=line
+   W x=380 s=0 z=100 t=off
+   W x=419 s=0 z=100 t=the
+  LINE y=422 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=panel.
+  LINE y=446 x=72 align=0 mult=1.000 hfid=0 words=2
+   W x=-72 s=0 z=100 t=Listen,
+   W x=-1 s=0 z=100 t=listen
+  LINE y=470 x=72 align=0 mult=1.000 hfid=0 words=3
+   W x=-72 s=0 z=100 t=Remember
+   W x=6 s=0 z=100 t=the
+   W x=43 s=0 z=100 t=wane
+  LINE y=494 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=4.
+   W x=45 s=0 z=100 t=NEGATIVE
+   W x=122 s=0 z=100 t=MARGIN:
+   W x=186 s=0 z=100 t=nothing
+   W x=267 s=0 z=100 t=to
+   W x=297 s=0 z=100 t=pull
+   W x=340 s=0 z=100 t=back
+   W x=381 s=0 z=100 t=into,
+   W x=436 s=0 z=100 t=so
+  LINE y=518 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=this
+   W x=43 s=0 z=100 t=line
+   W x=84 s=0 z=100 t=starts
+   W x=148 s=0 z=100 t=at
+   W x=176 s=0 z=100 t=the
+   W x=213 s=0 z=100 t=text
+   W x=255 s=0 z=100 t=edge
+   W x=298 s=0 z=100 t=like
+   W x=336 s=0 z=100 t=any
+   W x=373 s=0 z=100 t=other.
+  LINE y=542 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=18 s=0 z=100 t=Listen,
+   W x=89 s=0 z=100 t=listen
+  LINE y=566 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=5.
+   W x=48 s=0 z=100 t=BR
+   W x=78 s=0 z=100 t=VERSE:
+   W x=151 s=0 z=100 t=one
+   W x=193 s=0 z=100 t=paragraph,
+   W x=298 s=0 z=100 t=so
+   W x=329 s=0 z=100 t=only
+   W x=379 s=0 z=100 t=its
+   W x=414 s=0 z=100 t=first
+  LINE y=590 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=line
+   W x=46 s=0 z=100 t=is
+   W x=72 s=0 z=100 t=indented
+   W x=155 s=0 z=100 t=and
+   W x=197 s=0 z=100 t=the
+   W x=239 s=0 z=100 t=rest
+   W x=286 s=0 z=100 t=keep
+   W x=329 s=0 z=100 t=the
+   W x=371 s=0 z=100 t=paragraph
+  LINE y=614 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=inset.
+  LINE y=638 x=36 align=0 mult=1.000 hfid=0 words=2
+   W x=-18 s=0 z=100 t=Listen,
+   W x=53 s=0 z=100 t=listen
+  LINE y=662 x=36 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Remember
+   W x=78 s=0 z=100 t=the
+   W x=115 s=0 z=100 t=wane
+  LINE y=686 x=36 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=We
+   W x=24 s=0 z=100 t=fell
+   W x=67 s=0 z=100 t=and
+   W x=104 s=0 z=100 t=fell
+  LINE y=710 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=6.
+   W x=52 s=0 z=100 t=NESTED:
+   W x=133 s=0 z=100 t=the
+   W x=177 s=0 z=100 t=blockquote
+   W x=281 s=0 z=100 t=inset
+   W x=339 s=0 z=100 t=adds
+   W x=389 s=0 z=100 t=to
+   W x=424 s=0 z=100 t=the
+  LINE y=734 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=stanza
+   W x=69 s=0 z=100 t=inset.
+ PAGE 1 elements=5 footnotes=0
+  LINE y=0 x=63 align=0 mult=1.000 hfid=0 words=2
+   W x=-18 s=0 z=100 t=Listen,
+   W x=53 s=0 z=100 t=listen
+  LINE y=24 x=63 align=0 mult=1.000 hfid=0 words=3
+   W x=-18 s=0 z=100 t=Remember
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=wane
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=7.
+   W x=50 s=0 z=100 t=SIBLING:
+   W x=133 s=0 z=100 t=this
+   W x=180 s=0 z=100 t=paragraph
+   W x=277 s=0 z=100 t=follows
+   W x=354 s=0 z=100 t=the
+   W x=395 s=0 z=100 t=wrappers
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=above
+   W x=60 s=0 z=100 t=and
+   W x=100 s=0 z=100 t=must
+   W x=149 s=0 z=100 t=be
+   W x=173 s=0 z=100 t=back
+   W x=215 s=0 z=100 t=at
+   W x=246 s=0 z=100 t=the
+   W x=286 s=0 z=100 t=text
+   W x=331 s=0 z=100 t=edge,
+   W x=385 s=0 z=100 t=indented
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=only
+   W x=46 s=0 z=100 t=by
+   W x=66 s=0 z=100 t=the
+   W x=103 s=0 z=100 t=ordinary
+   W x=182 s=0 z=100 t=first-line
+   W x=275 s=0 z=100 t=indent.

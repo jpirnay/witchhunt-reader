@@ -62,6 +62,18 @@ class UITheme {
   static Rect getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static std::string getCoverThumbPath(std::string coverBmpPath, int width, int height);
+  // Edge length of the "this book has no usable cover" marker BMP written by
+  // ReaderActivity::writeCoverPlaceholderBmp(). It is a real, complete 1x1 BMP so
+  // isCoverThumbComplete() reports the book as resolved and the cover loops never re-open the
+  // EPUB to rediscover the absence — while being a size no genuine thumbnail can have, so the
+  // themes can recognise it (isCoverPlaceholderBmp) and draw their own no-cover tile instead of
+  // blitting a blank rectangle over the slot.
+  static constexpr int COVER_PLACEHOLDER_DIM = 1;
+  // True if a parsed cover BMP is the no-cover marker rather than real artwork. Call after
+  // parseHeaders() succeeds and BEFORE drawBitmap(): the marker must never be scaled into a slot.
+  static bool isCoverPlaceholderBmp(const int width, const int height) {
+    return width == COVER_PLACEHOLDER_DIM && height == COVER_PLACEHOLDER_DIM;
+  }
   // Reads the overall progress percent (0..100) for a recent book from its cached
   // progress.bin. Cheap: derives the cache path from the book path, no book parsing.
   // Returns -1 when the book was never opened or the percent byte isn't written yet.

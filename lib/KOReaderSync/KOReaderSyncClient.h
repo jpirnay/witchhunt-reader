@@ -43,6 +43,15 @@ struct KOReaderProgress {
  */
 class KOReaderSyncClient {
  public:
+  /**
+   * Accept any TLS certificate on the sync connection (mirrors the app's
+   * "skip HTTPS validation" setting, which this library cannot read itself).
+   * The app pushes the current value before it uses the client. Off by default:
+   * the sync request carries the account password, so an unverified peer gets
+   * the credentials.
+   */
+  static void setSkipTlsValidation(bool skip);
+
   enum Error {
     OK = 0,
     NO_CREDENTIALS,

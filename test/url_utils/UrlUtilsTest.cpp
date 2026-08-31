@@ -96,3 +96,38 @@ TEST(UrlUtils, ExtractHostnameRejectsMalformedInputs) {
   ASSERT_EQ(UrlUtils::extractHostname("mailto:user@example.com"), "");
   ASSERT_EQ(UrlUtils::extractHostname("urn:isbn:1234567890"), "");
 }
+
+TEST(UrlUtils, RepairsMistypedSchemeSeparator) {
+  // The failure this guards: a hand-typed "https:/host" has no "://", so every
+  // scheme check treats it as scheme-less and prepends a second scheme.
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https:/kosync.example.com"), "https://kosync.example.com");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("http:/example.com:8080/path"), "http://example.com:8080/path");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https:example.com"), "https://example.com");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https:///example.com"), "https://example.com");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("HTTPS:/example.com"), "https://example.com");
+}
+
+TEST(UrlUtils, CollapsesDoubledScheme) {
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("http://https://example.com"), "https://example.com");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("http://https:/example.com/path"), "https://example.com/path");
+}
+
+TEST(UrlUtils, LeavesWellFormedAndUnrelatedUrlsUnchanged) {
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https://example.com/path"), "https://example.com/path");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("http://192.168.0.5:8080"), "http://192.168.0.5:8080");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("example.com"), "example.com");
+  // host:port without a scheme must not be mistaken for a scheme separator
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("localhost:8080"), "localhost:8080");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("ftp:/example.com"), "ftp:/example.com");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https://"), "https://");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator("https:"), "https:");
+  ASSERT_EQ(UrlUtils::repairSchemeSeparator(""), "");
+}
+
+TEST(UrlUtils, EnsureProtocolRepairsBeforeItPrepends) {
+  ASSERT_EQ(UrlUtils::ensureProtocol("example.com/feed"), "http://example.com/feed");
+  // A mistyped scheme must be repaired, never treated as scheme-less.
+  ASSERT_EQ(UrlUtils::ensureProtocol("https:/example.com"), "https://example.com");
+  ASSERT_EQ(UrlUtils::ensureProtocol("http:/example.com"), "http://example.com");
+  ASSERT_EQ(UrlUtils::ensureProtocol("https://example.com"), "https://example.com");
+}

@@ -32,6 +32,10 @@
 namespace {
 
 // Wrapper around ImageFormatDetector that reads from file and seeks to origin
+// Bytes detectCoverImageFormat() sniffs. Also the threshold at which "this is not a format we
+// support" becomes a PERMANENT answer rather than "the extractor hasn't got that far yet".
+constexpr uint32_t COVER_FORMAT_SNIFF_BYTES = 8;
+
 ImageFormatDetector::Format detectCoverImageFormat(FsFile& imageFile) {
   if (!imageFile || !imageFile.seek(0)) {
     return ImageFormatDetector::Format::Unknown;
@@ -1014,6 +1018,24 @@ bool Epub::coverImageCachedValidOnly() const {
   return nonEmpty && fmt != ImageFormatDetector::Format::Unknown;
 }
 
+bool Epub::coverImageCachedButUnsupported() const {
+  const auto coverCachePath = getCoverImageCachePath();
+  if (!Storage.exists(coverCachePath.c_str())) return false;
+  FsFile existing;
+  if (!Storage.openFileForRead("EBP", coverCachePath, existing)) {
+    existing.close();
+    return false;  // can't open to validate — treat as transient, not as a permanent verdict
+  }
+  const uint32_t size = existing.size();
+  const auto fmt = detectCoverImageFormat(existing);
+  existing.close();
+  // detectCoverImageFormat sniffs the first 8 bytes only, and those are the first bytes the
+  // sliced extractor writes — so a PARTIALLY extracted PNG/JPEG/GIF already sniffs correctly
+  // and never reaches this verdict. Requiring the full 8 bytes is what keeps a mid-extraction
+  // file (0..7 bytes on disk) from being condemned as undecodable.
+  return size >= COVER_FORMAT_SNIFF_BYTES && fmt == ImageFormatDetector::Format::Unknown;
+}
+
 bool Epub::coverImageCachedAndValid(bool allowExtract) const {
   // Fast path: already-extracted and valid — no inflate needed in either mode.
   if (coverImageCachedValidOnly()) return true;
@@ -1220,6 +1242,17 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
     return ThumbResult::StructurallyAbsent;
   }
 
+  // An extracted-but-undecodable cover is structural, and must be answered BEFORE the
+  // transient bail below: coverImageCachedAndValid() reports false for it exactly as it does
+  // for a not-yet-extracted cover, so without this the caller re-runs the extractor, gets the
+  // same bytes, and defers again — forever (observed: a .png that is really an AVIF, re-inflated
+  // from the ZIP every ~1.3 s). The unsupported-format branch further down never sees it.
+  if (coverImageCachedButUnsupported()) {
+    LOG_ERR("EBP", "Cached cover.img is not a supported format for h=%d — writing structural sentinel", height);
+    writeThumbSentinel(getThumbBmpPath(height));
+    return ThumbResult::StructurallyAbsent;
+  }
+
   if (!coverImageCachedAndValid(allowExtract)) {
     // cover.img not yet extracted (or extraction failed transiently). No sentinel — let the
     // sliced extractor produce it, or retry next pass/boot. The caller counts these.
@@ -1292,6 +1325,14 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract) con
   // since no amount of extraction or retry can conjure a cover that the OPF doesn't declare.
   if (getCoverItemHref().empty()) {
     LOG_DBG("EBP", "No cover item for %dx%d — writing structural sentinel", width, height);
+    writeThumbSentinel(getThumbBmpPath(width, height));
+    return ThumbResult::StructurallyAbsent;
+  }
+
+  // See the h= overload above: extracted-but-undecodable must be answered before the transient
+  // bail, or the extractor is re-run forever on bytes that can never decode.
+  if (coverImageCachedButUnsupported()) {
+    LOG_ERR("EBP", "Cached cover.img is not a supported format for %dx%d — writing structural sentinel", width, height);
     writeThumbSentinel(getThumbBmpPath(width, height));
     return ThumbResult::StructurallyAbsent;
   }
@@ -1389,18 +1430,61 @@ size_t Epub::readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, c
   return got;
 }
 
-bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath) const {
-  if (itemHref.empty() || destPath.empty()) return false;
+bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena) const {
+  const std::string path = FsHelpers::normalisePath(itemHref);
+  ZipFile zip(filepath);
+  primeZip(zip);
+
+  // EntryReader is the only deflate path in ZipFile that can take an arena; readFileToStream
+  // always mallocs. Same 1 KB chunk size as that path, so the SD write pattern is unchanged.
+  ZipFile::EntryReader reader(zip, 1024, arena);
+  const bool opened = reader.open(path.c_str());
+  adoptZipDetails(zip);
+  if (!opened) return false;
+
+  // Staging buffer on the stack rather than from the arena: the reader holds an arena block
+  // until close(), and a nested block would have to be released before it (BuildArena is LIFO).
+  // 512 B is nothing against the ~8 KB task stack, and this runs once per image, ever.
+  uint8_t buffer[512];
+  bool done = false;
+  while (!done) {
+    size_t produced = 0;
+    if (!reader.step(buffer, sizeof(buffer), &produced, &done)) {
+      LOG_ERR("EBP", "Arena extract failed mid-stream: %s", path.c_str());
+      return false;
+    }
+    if (produced > 0 && out.write(buffer, produced) != produced) {
+      LOG_ERR("EBP", "Failed to write all extracted bytes: %s", path.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
   FsFile destFile;
   if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
     LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
     return false;
   }
-  const bool ok = readItemContentsToStream(itemHref, destFile, 1024);
+  const bool ok = arena ? readItemContentsToStreamWithArena(itemHref, destFile, arena)
+                        : readItemContentsToStream(itemHref, destFile, 1024);
   destFile.flush();
   destFile.close();
   if (!ok) Storage.remove(destPath.c_str());
   return ok;
+}
+
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
+  if (itemHref.empty() || destPath.empty()) return false;
+  if (arena) {
+    if (extractItemToFileOnce(itemHref, destPath, arena)) return true;
+    // EntryReader does NOT fall back to the heap once it has been given an arena — a short
+    // arena just makes open() fail. Retry on the heap so passing one can only ever add a way
+    // to succeed. extractItemToFileOnce() removed the partial file, so this starts clean.
+    LOG_DBG("EBP", "Arena extract failed for %s, retrying on the heap", itemHref.c_str());
+  }
+  return extractItemToFileOnce(itemHref, destPath, nullptr);
 }
 
 bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {

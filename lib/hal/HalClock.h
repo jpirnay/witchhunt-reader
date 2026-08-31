@@ -73,6 +73,50 @@ void updatePeriodic();
 /// may have drifted.  Cleared on NTP sync.
 bool isApproximate();
 
+/// True when the clock was seeded from an NVS epoch older than the staleness threshold.
+///
+/// The wall clock IS set in that case, deliberately: a last-known-good time is a sound LOWER
+/// BOUND, and the machine uses on these RTC-less boards need one. 1970 is not a neutral fallback
+/// — it makes every curated TLS root's notBefore look unreached, so the trust store fails to load
+/// and https stops working entirely (see HalClock::isPlausibleForTls). Cache TTLs and session
+/// timestamps degrade the same way.
+///
+/// What a stale epoch is NOT is a time of day, so formatTime() shows "--:--" while this is set.
+/// Cleared by a successful NTP sync.
+bool isStaleRestore();
+
+/// True when the system clock sits inside the window where TLS certificate
+/// date validation can succeed.
+///
+/// wolfSSL rejects a CA whose notBefore lies in the *future* of the device
+/// clock (ASN_BEFORE_DATE_E) and one that has expired (ASN_AFTER_DATE_E), and
+/// it does so when the trust store is LOADED, not just during the handshake —
+/// wolfSSL_CTX_load_verify_buffer() runs with WOLFSSL_LOAD_FLAG_NONE, so
+/// WOLFSSL_LOAD_FLAG_DATE_ERR_OKAY is not in play. On these RTC-less C3 boards
+/// a cold boot leaves the clock at 1970 (restore() deliberately discards a
+/// stale NVS epoch rather than trusting it), which puts every curated root's
+/// notBefore in the future and makes the whole trust store fail to load.
+///
+/// "Approximate" is fine here: an NVS-restored clock that is merely a few hours
+/// off still lands inside every root's validity window, so it verifies fine.
+/// Only genuinely unset or wildly-wrong clocks matter.
+bool isPlausibleForTls();
+
+/// Make the clock usable for TLS: a no-op returning true when it already is,
+/// otherwise one SNTP attempt against `preferredServer`. Returns whether the
+/// clock ended up plausible.
+///
+/// CALL THIS AFTER WIFI IS UP AND BEFORE THE FIRST TLS CONNECT of any network
+/// flow. Skipping it does not produce a verification warning — it produces a
+/// trust store that will not load at all, which surfaces as a bare "connect
+/// failed" with no verification error to classify (and therefore no
+/// verified->insecure fallback either).
+///
+/// Failed attempts are rate-limited rather than latched, so a call made before
+/// the radio was ready does not poison the rest of the session; repeated calls
+/// on a healthy clock cost one time() comparison.
+bool ensureUsableForTls(const char* preferredServer = nullptr);
+
 /// Returns the epoch of the last successful NTP sync (from NVS), or 0 if
 /// no sync has ever been recorded.
 time_t lastSyncTime();

@@ -112,7 +112,10 @@ bool fetchTimezonePayload(const char* url, std::string& payload) {
   // Give DNS a moment after WiFi connect.
   delay(500);
   for (int attempt = 0; attempt < 2; ++attempt) {
-    if (HttpDownloader::fetchUrl(url, payload)) {
+    // Public IP/timezone lookup with no credentials. Unverified: see the
+    // TlsPolicy notes in HttpDownloader.h. The answer only seeds the timezone
+    // SETTING, which the user sees and can correct.
+    if (HttpDownloader::fetchUrl(url, payload, "", "", HttpDownloader::TlsPolicy::Unverified)) {
       return true;
     }
     delay(300);

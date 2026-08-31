@@ -177,7 +177,7 @@ BmpReaderError Bitmap::parseHeaders() {
   // that gives 256 distinct luminances, enough for percentiles to mean something.
   // Below that (<=4 bpp, so <=16 levels, and only 4 at 2 bpp) they do not, and such
   // images take the nativePalette path anyway.
-  if (toneMapping == BitmapToneMapping::Adaptive && bpp >= 8) {
+  if (toneMapping != BitmapToneMapping::None && bpp >= 8) {
     analyzeAdaptiveTone();
     const BmpReaderError rewindResult = rewindToData();
     if (rewindResult != BmpReaderError::Ok) {
@@ -188,14 +188,17 @@ BmpReaderError Bitmap::parseHeaders() {
 
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
-    // Adaptive output is already level-corrected, so it wants the evenly-spaced
-    // quantizer; the display-tuned thresholds would compensate a second time.
-    const Gray4QuantizationMode quantizationMode =
-        adaptiveTonePoints.active ? Gray4QuantizationMode::Native : Gray4QuantizationMode::DisplayTuned;
+    // Always DisplayTuned, tone mapping or not: the tone curve corrects the IMAGE's
+    // range and the quantizer's thresholds correct for the PANEL, so the two are
+    // orthogonal and there is nothing for a mode swap to avoid. The earlier swap to
+    // Native on tone-mapped input was a real bug (near-black sleep covers), but so was
+    // the thing it was compensating for -- DisplayTuned used to feed error diffusion a
+    // bunched 15/30/80/210 level spacing, which is what actually washed the midtones
+    // out. Both live under Gray4QuantizationMode now; see the note there.
     if (USE_ATKINSON) {
-      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width, quantizationMode);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
     } else {
-      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width, quantizationMode);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
     }
   }
 
@@ -206,10 +209,10 @@ uint8_t Bitmap::applyAdaptiveTone(const uint8_t luminance) const {
   return adaptive_tone::apply(adaptiveTonePoints, luminance);
 }
 
-// Builds a 256-bin luminance histogram over a row-subsampled pass and derives the
-// black/white points from its tail percentiles. Leaves the points inactive (i.e.
-// the renderer unchanged) on any allocation failure, short read, or too-narrow
-// range, so a failed analysis degrades to current behaviour rather than to a
+// Builds a 256-bin luminance histogram over a row-subsampled pass and derives the tone
+// curve from it, in whichever mode the caller selected. Leaves the points inactive (i.e.
+// the renderer unchanged) on any allocation failure, short read, or a histogram the
+// analysis declines, so a failed analysis degrades to current behaviour rather than to a
 // broken image. Only called for bpp >= 8.
 bool Bitmap::analyzeAdaptiveTone() {
   adaptiveTonePoints = {};
@@ -265,14 +268,16 @@ bool Bitmap::analyzeAdaptiveTone() {
 
   if (sampled == 0) return false;
 
-  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled);
+  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping));
   if (!adaptiveTonePoints.active) {
-    LOG_DBG("BMP", "Adaptive tone skipped: range too narrow");
+    LOG_DBG("BMP", "Adaptive tone (%s) declined: line art or range too narrow",
+            toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch");
     return false;
   }
 
-  LOG_DBG("BMP", "Adaptive tone enabled: black=%u white=%u", static_cast<unsigned>(adaptiveTonePoints.blackPoint),
-          static_cast<unsigned>(adaptiveTonePoints.whitePoint));
+  LOG_DBG("BMP", "Adaptive tone (%s) enabled: black=%u white=%u",
+          toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch",
+          static_cast<unsigned>(adaptiveTonePoints.blackPoint), static_cast<unsigned>(adaptiveTonePoints.whitePoint));
   return true;
 }
 
@@ -301,11 +306,10 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
       if (nativePalette) {
         // Palette matches native gray levels: direct mapping (still apply brightness/contrast/gamma)
         color = static_cast<uint8_t>(adjusted >> 6);
-      } else if (adaptiveTonePoints.active) {
-        // Already level-corrected: quantize evenly rather than re-compensating.
-        color = quantizeGray4(adjusted, Gray4QuantizationMode::Native).index;
       } else {
-        // Non-native palette with dithering disabled: simple quantization
+        // Non-native palette with dithering disabled: simple quantization. Tone-mapped
+        // input takes this path too -- the curve has already corrected the image, and
+        // these thresholds still have to account for the panel (see parseHeaders).
         color = quantize(adjusted, currentX, prevRowY);
       }
     }

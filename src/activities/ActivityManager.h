@@ -4,6 +4,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include <atomic>
 #include <cassert>
 #include <memory>
 #include <string>
@@ -77,6 +78,18 @@ class ActivityManager {
   // Mutex to protect rendering operations from race conditions
   // Must only be used via RenderLock
   SemaphoreHandle_t renderingMutex = nullptr;
+
+  // True while the render task is inside currentActivity->render(). Set and cleared by the
+  // render task WHILE HOLDING renderingMutex, which is what makes it usable as a lifetime
+  // guard: a task that holds the mutex and reads this false knows no pass can start until it
+  // releases, because starting one requires the same mutex.
+  //
+  // It exists because holding renderingMutex is not sufficient to prove the render task is
+  // done with the activity — render() drops the mutex mid-pass (see the comment on
+  // RenderLock(ExclusiveActivityAccess)) and then keeps using the object. Destroying the
+  // activity in that window is a use-after-free, so every transition that can destroy
+  // currentActivity acquires its lock through that constructor.
+  std::atomic<bool> renderPassActive{false};
 
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions

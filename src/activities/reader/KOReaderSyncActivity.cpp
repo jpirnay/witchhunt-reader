@@ -1,5 +1,6 @@
 #include "KOReaderSyncActivity.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <I18n.h>
@@ -32,6 +33,19 @@ void logSyncMemSnapshot(const char* stage) {
   LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
 }
 
+// Freshness policy, on top of HalClock::ensureUsableForTls()'s correctness floor. The floor
+// guarantees "inside the certs' validity window", which is genuinely all the SYNC needs: the
+// upload carries no timestamp (updateProgress() sends document/progress/percentage/device/
+// device_id and the server stamps the record), and the timestamp the server returns is parsed
+// into KOReaderProgress::timestamp and never read. An earlier version of this comment claimed
+// the freshness policy kept an uploaded timestamp from drifting; there is no such timestamp.
+//
+// What it is actually for is the device clock everything ELSE reads -- the status bar, reading
+// stats, cache ages -- for which a network session is simply the only chance to correct it. That
+// is worth keeping while HalClock::syncNtp()'s fast path costs ~20 ms; it would not be worth a
+// multi-second stall. Note the two guards answer different questions: an unset clock reads as
+// `now <= 0` here, but it is ensureUsableForTls() that makes the handshake possible at all, so
+// this must never be the only guard before a TLS call.
 bool shouldSyncNtpNow() {
   const time_t lastSync = HalClock::lastSyncTime();
   const time_t now = HalClock::now();
@@ -55,6 +69,9 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   }
 
   LOG_DBG("KOSync", "WiFi connected, starting sync");
+  // Push the current setting before any request: the library cannot read SETTINGS,
+  // and the value may have changed since boot.
+  KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
 
   {
     RenderLock lock(*this);
@@ -70,6 +87,11 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   } else {
     LOG_DBG("KOSync", "Skipping NTP sync (recently synced)");
   }
+  // Independent of the freshness policy above: guarantee the clock is at least inside the
+  // certificate validity window, or the trust store will not load. Cheap when the sync above
+  // just ran (one time() comparison) and it is what makes this path's safety deliberate rather
+  // than a side effect of shouldSyncNtpNow() happening to return true on an unset clock.
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
 
   {
     RenderLock lock(*this);
@@ -620,6 +642,23 @@ void KOReaderSyncActivity::onExit() {
   if (wifiActivated) {
     WiFi.disconnect(false);
     delay(30);
+    // The reboot stays, and it is now a measured decision rather than an inherited one.
+    //
+    // The old rationale -- "a WiFi session fragments the heap past rebuilding the reader in
+    // place" -- turned out to be wrong on wolfSSL: contig runs 61428 -> 61428 -> 61428 across a
+    // push, and only ~6 KB is lost across a pull. Rebuilding in place genuinely works, and is
+    // faster (792 ms to first page against 2023 ms via the reboot).
+    //
+    // What kills it is a different number. A full esp_wifi_stop + deinit still ends
+    // ~20.5 KB below the pre-WiFi free-heap baseline, measured at -20560 / -20588 / -20644 across
+    // three sessions -- consistent enough to look like a one-time netif/event-loop cost rather
+    // than a per-session leak, but never proven so, and 20 KB is a large permanent narrowing on a
+    // 380 KB device. Reclaiming the framebuffer late also leaves contig at 25588 against 65524
+    // on a clean boot, which is below what an image decode needs.
+    //
+    // So: the reboot is not paying for fragmentation during the session, it is paying for a heap
+    // that never fully comes back. Until that ~20 KB is identified, rebooting is the cheaper
+    // trade. Do not remove this on the strength of the contig numbers alone.
     switch (postAction_) {
       case KOReaderSyncPostAction::Home:
       case KOReaderSyncPostAction::OpdsSearch:
@@ -1001,12 +1040,12 @@ void KOReaderSyncActivity::loop() {
   if (state == SHOWING_RESULT) {
     // Navigate options. Up and Down previously both advanced, which was invisible with two rows
     // and wrong as soon as a third existed.
-    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
-        mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
       selectedOption = (selectedOption + OPTION_COUNT - 1) % OPTION_COUNT;
       requestUpdate();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) ||
-               mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
       selectedOption = (selectedOption + 1) % OPTION_COUNT;
       requestUpdate();
     }

@@ -38,6 +38,8 @@ class GfxRenderer {
   HalDisplay& display;
   std::atomic<int> renderMode;
   std::atomic<int> orientation;
+  // Mirrors `orientation` except across the themes' transient hint-strip flips. See setOrientation.
+  std::atomic<int> heldOrientation;
   std::atomic<bool> fadingFix;
   // Text darkness for 2-bit grayscale glyph rendering.
   std::atomic<uint8_t> textDarkness;
@@ -163,6 +165,7 @@ class GfxRenderer {
       : display(halDisplay),
         renderMode(static_cast<int>(BW)),
         orientation(static_cast<int>(Portrait)),
+        heldOrientation(static_cast<int>(Portrait)),
         fadingFix(false),
         textDarkness(1) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
@@ -218,8 +221,23 @@ class GfxRenderer {
   bool restoreFontMetadata() const;
 
   // Orientation control (affects logical width/height and coordinate transforms)
-  void setOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  void setOrientation(const Orientation o) {
+    orientation.store(static_cast<int>(o), std::memory_order_relaxed);
+    heldOrientation.store(static_cast<int>(o), std::memory_order_relaxed);
+  }
   Orientation getOrientation() const { return static_cast<Orientation>(orientation.load(std::memory_order_relaxed)); }
+
+  // Draw in `o` WITHOUT changing what getHeldOrientation() reports. For furniture that has to sit
+  // on a fixed panel edge whichever way the device is held — the button-hint strips flip to
+  // Portrait so their boxes land beside the physical buttons, then flip back.
+  void setDrawOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  // The orientation the reader is actually holding the device in, unaffected by the transient
+  // flips above. Render runs on its own task, so anything sampling orientation from OUTSIDE a
+  // render pass — the input layer's logical directions above all — must read this instead of
+  // getOrientation(), or it will now and then catch a hint strip mid-draw and answer Portrait.
+  Orientation getHeldOrientation() const {
+    return static_cast<Orientation>(heldOrientation.load(std::memory_order_relaxed));
+  }
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix.store(enabled, std::memory_order_relaxed); }
@@ -328,6 +346,28 @@ class GfxRenderer {
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;
+
+  // Save / restore a rectangle of the framebuffer, in logical (orientation-
+  // aware) coordinates. Pixels are packed 1bpp, row-major, MSB first, with a
+  // set bit meaning "dark" -- so a region needs (width*height + 7) / 8 bytes.
+  //
+  // For an overlay that repaints a small moving element over an otherwise
+  // unchanged frame: save what is under it, and restore that instead of
+  // re-rendering the whole page to erase it. The dictionary's word-selection
+  // highlight is the first caller -- without this, moving the cursor one word
+  // costs a full two-pass page render, which also reloads every SD-font glyph
+  // on the page.
+  //
+  // readFramebufferRegion returns the number of bytes written, or 0 when the
+  // rectangle is empty, off-panel, or larger than bufferSize. Restoring a
+  // region saved at a different size or position is undefined -- pass back the
+  // same rectangle.
+  size_t readFramebufferRegion(int x, int y, int width, int height, uint8_t* buffer, size_t bufferSize) const;
+  void writeFramebufferRegion(int x, int y, int width, int height, const uint8_t* buffer) const;
+
+  // Whether the pixel at logical (x, y) is dark. Bounds-checked: off-panel
+  // reads report false rather than sampling a neighbouring row.
+  bool getPixel(int x, int y) const;
   // Copy one packed 1bpp row in the device's physical portrait coordinate
   // space into the controller framebuffer. Source and framebuffer are MSB-first
   // with 0 = black, 1 = white; set invertBits when the source row uses 1 = ink.

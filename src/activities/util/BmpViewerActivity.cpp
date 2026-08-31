@@ -421,14 +421,17 @@ void BmpViewerActivity::loop() {
     }
 
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Short &&
+    if (ev.button == MappedInputManager::frontStripPrevious() && ev.type == ButtonEventManager::PressType::Short &&
         !isBmpFile(filePath) && grayscaleDisplay) {
       cycleDitherMode();
       return;
     }
 #endif
 
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Short) {
+    // The viewer's two commands are labelled on the front strip and stay there; only which of the
+    // two is drawn first changes with orientation, and frontStripPrevious/Next answer for that
+    // exactly as mapLabels() does below.
+    if (ev.button == MappedInputManager::frontStripNext() && ev.type == ButtonEventManager::PressType::Short) {
       setAsSleepScreen();
       return;
     }

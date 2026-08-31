@@ -42,7 +42,14 @@ bool ImageBlock::ensureExtracted() const {
   }
   LOG_TRC("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
   Epub epub(epubFilePath_, "/.crosspoint");
-  if (!epub.extractItemToFile(epubEntryPath_, imagePath)) {
+  // Extraction runs inside the reader's warm pass, which has already borrowed the secondary
+  // framebuffer as image_scratch for the decoders — but the ZIP inflate ring was the one 32 KB
+  // contiguous block in the image path still taken from the heap, and it is the first to fail
+  // when the heap is fragmented. Device-measured on X4 at contig=13300: every image on the page
+  // logged "Failed to init inflate reader" and rendered as nothing at all. The extract finishes
+  // and gives the block back before the decode starts, so the two never overlap in the arena.
+  BuildArena* const arena = image_scratch::canServe(Epub::EXTRACT_ARENA_BYTES) ? image_scratch::get() : nullptr;
+  if (!epub.extractItemToFile(epubEntryPath_, imagePath, arena)) {
     LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
     return false;
   }
@@ -55,9 +62,14 @@ bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str());
 namespace image_tone {
 namespace {
 uint8_t g_filterId = 0;
+adaptive_tone::Mode g_mode = adaptive_tone::Mode::Stretch;
+}  // namespace
+void setFilter(const uint8_t filterId, const adaptive_tone::Mode mode) {
+  g_filterId = filterId;
+  g_mode = mode;
 }
-void setFilterId(const uint8_t filterId) { g_filterId = filterId; }
 uint8_t getFilterId() { return g_filterId; }
+adaptive_tone::Mode getMode() { return g_mode; }
 }  // namespace image_tone
 
 namespace image_scratch {
@@ -116,10 +128,10 @@ adaptive_tone::Points analyzeImageTone(const std::string& imagePath) {
     for (auto& c : ext) c = tolower(c);
   }
   if (JpegToFramebufferConverter::supportsFormat(ext)) {
-    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath);
+    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
   }
   if (PngToFramebufferConverter::supportsFormat(ext)) {
-    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath);
+    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
   }
   return {};
 }

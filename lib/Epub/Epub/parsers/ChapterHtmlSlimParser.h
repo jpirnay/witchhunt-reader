@@ -166,7 +166,6 @@ class ChapterHtmlSlimParser final : public Print {
   std::string contentBase;
   std::string imageBasePath;
   int imageCounter = 0;
-  bool lowMemoryImageFallback = false;
 
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
@@ -222,7 +221,7 @@ class ChapterHtmlSlimParser final : public Print {
     std::vector<TableCell> cells;
     uint16_t height = 0;  // content height + 2 x TABLE_CELL_PADDING
     bool isHeaderRow = false;
-    uint8_t renderCols = 0;  // 1 for a full-width single-cell row, else the table's column count
+    uint8_t renderCols = 0;  // grid columns this row was laid out on (the table's column count)
   };
   // Rows accumulated for the PageTableFragment currently being packed. A fragment carries a single
   // column count and must fit the viewport, so a change in either forces a flush.
@@ -231,6 +230,7 @@ class ChapterHtmlSlimParser final : public Print {
     uint16_t height = 0;
     uint8_t cols = 0;
     uint16_t totalWidth = 0;
+    int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
     bool hasBorder = true;
   };
   struct BufferedTable {
@@ -242,6 +242,10 @@ class ChapterHtmlSlimParser final : public Print {
     // packer.cols, which is per-fragment and resets on every flush: without this a ragged row
     // landing just after a page break would narrow the table's second half.
     uint8_t columnCount = 0;
+    // The table's own box, from the <table> element's resolved CSS margins and padding. Columns
+    // divide contentWidth rather than the full viewport, so an indented table stays indented
+    // instead of being stretched edge to edge.
+    uint16_t contentWidth = 0;
     int depth = 0;          // nesting depth; > 1 means we're inside a nested table
     bool hasBorder = true;  // false when border="0" on the <table> element
     // This table can never be a grid (nested table, rowspan, low heap): every cell from here on
@@ -256,6 +260,17 @@ class ChapterHtmlSlimParser final : public Print {
     bool rowOverflowed = false;
     // Attributed resident bytes held by pendingRow's cells (see MAX_TABLE_ROW_BUFFER_BYTES).
     size_t pendingRowBytes = 0;
+    // The table's leading header row, re-emitted at the top of every continuation fragment so a
+    // table that spans a page break keeps its column labels. Held in its BUFFERED form and laid
+    // out again per fragment, NOT as a laid-out LayoutRow whose TextBlocks are shared between
+    // fragments. Sharing them was cheaper but it couples the header's lifetime to every page the
+    // table touches, which rules out ever scoping line storage to a page (see the table scratch
+    // arena). Re-layout costs one row of work per page break and keeps each fragment's lines
+    // owned solely by that fragment. Bounded: one row, captured only if it opens the table, and
+    // only while it is short enough to be worth the space it costs each page.
+    std::unique_ptr<BufferedTableRow> repeatHeader;
+    uint16_t repeatHeaderHeight = 0;    // laid-out height, measured once at capture
+    bool repeatHeaderResolved = false;  // set after the table's first row; only that row qualifies
   };
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
@@ -278,6 +293,27 @@ class ChapterHtmlSlimParser final : public Print {
     int16_t width;
   };
   std::vector<ContainerWidthEntry> containerWidthStack_;
+
+  // Horizontal insets (margin + padding, per side) of the block-level elements currently open.
+  // Every block nested inside them starts at their sum: layout has no box model, so without
+  // this a wrapper's inset would reach only its FIRST child -- the empty-block merge in
+  // startNewTextBlock() -- and every later sibling would jump back to the viewport edge. With a
+  // hanging indent on the children (verse: div{margin-left:2em} > p{text-indent:-1em}) those
+  // siblings then start left of the panel and lose their first glyph (issue #198).
+  // depth = parser depth at push (pre-increment); popped in endElement when that scope closes.
+  struct BlockInsetEntry {
+    int depth;
+    int16_t left;
+    int16_t right;
+  };
+  // Insets nested deeper than this are dropped rather than tracked: the total is capped at 4em
+  // either way, and a book that nests inset wrappers this deep is pathological, not typographic.
+  static constexpr size_t kMaxBlockInsetDepth = 8;
+  std::vector<BlockInsetEntry> blockInsetStack_;
+
+  // Fold the insets of every enclosing block-level element into `style`, capping each side at
+  // MAX_HORIZONTAL_INSET_EM so deep nesting cannot squeeze the text column away.
+  void addAncestorInsets(BlockStyle& style, float emSize) const;
 
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
   int completedPageCount = 0;
@@ -342,22 +378,16 @@ class ChapterHtmlSlimParser final : public Print {
   int footnoteLinkDepth = -1;
   FootnoteEntry currentFootnote = {};
   size_t currentFootnoteLinkTextLen = 0;
-  // epub:type="noteref" / role="doc-noteref" on the open <a>. Not part of FootnoteEntry —
-  // it feeds only the sawFootnote_ latch and would otherwise cost a section-cache format
-  // bump for a bit no renderer reads.
-  bool currentFootnoteIsNoteref = false;
   // Non-owning; the Section's BuildState keeps the lookup alive across build slices.
-  // Membership in the book-level preview cache is the sole expansion gate: it already
-  // encodes "this link points at a real note", so no epub:type/same-file checks here.
+  // Membership in the book's preview store is the sole expansion gate: it already encodes
+  // "this link points at a real note", so no epub:type/same-file checks here. The store is
+  // filled for this spine before the parse starts (Section::resolveInlineFootnotePreviews).
   FootnotePreviews::Lookup* inlineFootnotePreviews = nullptr;
   std::string pendingInlineFootnotePreview;
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
   int wordsExtractedInBlock = 0;
   bool bionicReadingEnabled = false;
   bool layoutFailed = false;
-  // True once a link that FootnotePreviews::gather would actually collect has been seen in
-  // this chapter — NOT merely any internal link. Latched; see sawFootnote().
-  bool sawFootnote_ = false;
 
   // Per-chapter caches: resolveStyle and parseInlineStyle are called for every HTML element;
   // caching by (tag|classAttr) and styleAttr avoids repeated string operations and hash lookups.
@@ -381,7 +411,13 @@ class ChapterHtmlSlimParser final : public Print {
   void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
   CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;
   bool ensureHeapForTextLayout(const char* phase);
+  // Whether the heap can afford the ~32 KB inflate ring a ZIP image-header read needs. Checked at
+  // the call site, never latched: the heap recovers between pages, and a single dip must not
+  // disable images for the rest of the chapter (that result gets baked into the section cache).
+  bool heapAllowsImageHeaderRead() const;
   void startNewTextBlock(const BlockStyle& blockStyle);
+  void clearSpentBlockHeadingStyle();
+  bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   void makePages();
   // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.
@@ -494,12 +530,6 @@ class ChapterHtmlSlimParser final : public Print {
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
-  // True once this chapter has yielded at least one link that FootnotePreviews::gather would
-  // collect (see FootnoteShape). Readable mid-parse, which is the point: it lets a caller
-  // abandon a build that is being laid out without previews as soon as it learns previews are
-  // needed, instead of after the whole spine is done. Deliberately narrower than
-  // pendingFootnotes, which stays broad because every internal link is navigable.
-  bool sawFootnote() const { return sawFootnote_; }
 
   // Print interface — fed by Epub::readItemContentsToStream.
   size_t write(uint8_t) override;

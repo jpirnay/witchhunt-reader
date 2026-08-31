@@ -9,6 +9,66 @@
 #include <cstdlib>
 #include <cstring>
 
+namespace {
+
+// One group's inflate buffer, for the duration of one decompress-and-extract.
+//
+// Prefers the slot arena when one is installed, because the moment this allocation fails is
+// precisely the moment the arena exists and is half empty: a page drawn *during* a section build.
+// Measured X4 2026-08-18, mid-build draw with the framebuffer lent to the build — four
+// consecutive refusals (7796, 8110, 8184, 8145 bytes) against contig 14324, while the borrowed
+// 48000-byte region the slots were already drawing from had room for all of them. The slots moved
+// there for the same reason (see FontCacheManager::ScopedSlotArena); the group temp was simply
+// left behind on the heap.
+//
+// Falls back to the heap when there is no arena (the ordinary foreground draw) or when the build
+// has the arena filled, so this can only ever turn a failure into a success.
+class GroupTemp {
+ public:
+  GroupTemp(BuildArena* arena, const uint32_t bytes) {
+    if (arena && arena->valid()) {
+      // Nested inside the page-wide block ScopedSlotArena holds. Released before this object
+      // dies, so the newest-first ordering release() enforces always holds.
+      block_ = arena->reserveBlock();
+      if (block_.valid()) {
+        buf_ = static_cast<uint8_t*>(arena->alloc(bytes));
+        if (buf_) {
+          arena_ = arena;
+          return;
+        }
+        arena->release(block_);
+      }
+    }
+    buf_ = static_cast<uint8_t*>(malloc(bytes));
+  }
+  ~GroupTemp() {
+    if (arena_) {
+      arena_->release(block_);
+    } else {
+      free(buf_);
+    }
+  }
+  GroupTemp(const GroupTemp&) = delete;
+  GroupTemp& operator=(const GroupTemp&) = delete;
+
+  uint8_t* get() const { return buf_; }
+  bool fromArena() const { return arena_ != nullptr; }
+
+ private:
+  BuildArena* arena_ = nullptr;
+  BuildArena::Block block_;
+  uint8_t* buf_ = nullptr;
+};
+
+// Room left in an installed arena, for the OOM diagnostics: distinguishes "no arena here" from
+// "arena was there and full", which are different bugs with the same symptom.
+uint32_t arenaHeadroom(const BuildArena* arena) {
+  if (!arena || !arena->valid()) return 0;
+  return static_cast<uint32_t>(arena->capacity() - arena->used());
+}
+
+}  // namespace
+
 FontDecompressor::~FontDecompressor() { deinit(); }
 
 bool FontDecompressor::init() {
@@ -57,19 +117,86 @@ uint16_t FontDecompressor::getGroupIndex(const EpdFontData* fontData, uint32_t g
   return fontData->groupCount;  // sentinel = not found
 }
 
-bool FontDecompressor::decompressGroup(const EpdFontData* fontData, uint16_t groupIndex, uint8_t* outBuf,
-                                       uint32_t outSize) {
-  const EpdFontGroup& group = fontData->groups[groupIndex];
-  const uint32_t tDecomp = millis();
-  inflateReader.init(false);
-  inflateReader.setSource(&fontData->bitmap[group.compressedOffset], group.compressedSize);
+// --- Streaming group reads ---
 
-  if (!inflateReader.read(outBuf, outSize)) {
-    stats.decompressTimeMs += millis() - tDecomp;
-    LOG_ERR("FDC", "Decompression failed for group %u", groupIndex);
-    return false;
+static_assert(sizeof(EpdFontGroup) == 20, "ringBytes must fit the padding hole, not grow the table");
+
+uint32_t FontDecompressor::ringBytesFor(const EpdFontGroup& group) {
+  const uint32_t measured = group.ringBytes != 0 ? group.ringBytes : group.uncompressedSize;
+  // A back-reference can never reach further back than the bytes produced so far, so the group
+  // is always a sufficient ring — and for a group smaller than its own window it is the cheaper
+  // of the two. Also the safety net for a font whose ringBytes is somehow too large.
+  return std::min(measured, group.uncompressedSize);
+}
+
+bool FontDecompressor::GroupStream::begin(const EpdFontData* fontData, const EpdFontGroup& group, uint8_t* ring,
+                                          const uint32_t ringBytes) {
+  if (!ring || ringBytes == 0) return false;
+  if (!reader_.initWithExternalRing(ring, ringBytes)) return false;
+  reader_.setSource(&fontData->bitmap[group.compressedOffset], group.compressedSize);
+  pos_ = 0;
+  limit_ = group.uncompressedSize;
+  return true;
+}
+
+bool FontDecompressor::GroupStream::readExact(uint8_t* dest, uint32_t len) {
+  while (len > 0) {
+    size_t produced = 0;
+    const InflateStatus st = reader_.readAtMost(dest, len, &produced);
+    if (st == InflateStatus::Error) return false;
+    // A clean end that produced nothing means the stream is shorter than the group table says,
+    // or a back-reference outran the ring (uzlib reports TINF_DICT_ERROR for that, so a font
+    // whose ringBytes is too small fails here loudly instead of decoding to garbage).
+    if (produced == 0) return false;
+    dest += produced;
+    len -= static_cast<uint32_t>(produced);
+    pos_ += static_cast<uint32_t>(produced);
   }
-  stats.decompressTimeMs += millis() - tDecomp;
+  return true;
+}
+
+bool FontDecompressor::GroupStream::skipTo(const uint32_t offset) {
+  if (offset < pos_) return false;  // a stream cannot rewind; see the ordering contract
+  uint8_t sink[MAX_ROW_STRIDE];
+  while (pos_ < offset) {
+    const uint32_t want = std::min<uint32_t>(sizeof(sink), offset - pos_);
+    if (!readExact(sink, want)) return false;
+  }
+  return true;
+}
+
+bool FontDecompressor::GroupStream::extractGlyph(const uint32_t alignedOffset, const EpdGlyph& glyph,
+                                                 uint8_t* packedDst) {
+  if (glyph.width == 0 || glyph.height == 0) return true;  // no payload; consumes nothing
+  const uint32_t rowStride = (glyph.width + 3u) / 4u;
+  if (rowStride > MAX_ROW_STRIDE) return false;  // unreachable for a uint8_t width; guards the buffers
+  if (alignedOffset + rowStride * glyph.height > limit_) return false;
+  if (!skipTo(alignedOffset)) return false;
+
+  // A width that is a multiple of 4 leaves no row padding, so the byte-aligned and packed forms
+  // are identical and the stream lands straight in the destination.
+  if (glyph.width % 4 == 0) return readExact(packedDst, rowStride * glyph.height);
+
+  // Otherwise repack as the rows arrive. The bit accumulator deliberately carries across rows:
+  // packed pixels flow continuously where byte-aligned rows are padded to a byte. Same bit order
+  // as to_byte_aligned() in fontconvert.py, read backwards.
+  uint8_t row[MAX_ROW_STRIDE];
+  uint8_t outByte = 0;
+  uint8_t outBits = 0;
+  uint32_t writeIdx = 0;
+  for (uint8_t y = 0; y < glyph.height; y++) {
+    if (!readExact(row, rowStride)) return false;
+    for (uint8_t x = 0; x < glyph.width; x++) {
+      outByte = static_cast<uint8_t>((outByte << 2) | ((row[x / 4] >> ((3 - (x % 4)) * 2)) & 0x3));
+      outBits += 2;
+      if (outBits == 8) {
+        packedDst[writeIdx++] = outByte;
+        outByte = 0;
+        outBits = 0;
+      }
+    }
+  }
+  if (outBits > 0) packedDst[writeIdx] = static_cast<uint8_t>(outByte << (8 - outBits));
   return true;
 }
 
@@ -102,31 +229,7 @@ uint32_t FontDecompressor::getAlignedOffset(const EpdFontData* fontData, uint16_
   return offset;
 }
 
-void FontDecompressor::compactSingleGlyph(const uint8_t* alignedSrc, uint8_t* packedDst, uint8_t width,
-                                          uint8_t height) {
-  if (width == 0 || height == 0) return;
-  const uint32_t rowStride = (width + 3) / 4;
-  if (width % 4 == 0) {
-    memcpy(packedDst, alignedSrc, rowStride * height);
-    return;
-  }
-  uint8_t outByte = 0, outBits = 0;
-  uint32_t writeIdx = 0;
-  for (uint8_t y = 0; y < height; y++) {
-    for (uint8_t x = 0; x < width; x++) {
-      outByte = (outByte << 2) | ((alignedSrc[y * rowStride + x / 4] >> ((3 - (x % 4)) * 2)) & 0x3);
-      outBits += 2;
-      if (outBits == 8) {
-        packedDst[writeIdx++] = outByte;
-        outByte = 0;
-        outBits = 0;
-      }
-    }
-  }
-  if (outBits > 0) packedDst[writeIdx] = outByte << (8 - outBits);
-}
-
-// --- getBitmap: page buffer → transient malloc + decompress + compact ---
+// --- getBitmap: page buffer → transient ring + streamed compact ---
 
 const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const EpdGlyph* glyph, uint32_t glyphIndex) {
   const uint32_t tStart = micros();
@@ -195,7 +298,9 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
     return nullptr;
   }
 
-  if (group.uncompressedSize > stats.peakTempBytes) stats.peakTempBytes = group.uncompressedSize;
+  // What this glyph costs to reach is the group's ring, not the group (see ringBytesFor).
+  const uint32_t ringBytes = ringBytesFor(group);
+  if (ringBytes > stats.peakTempBytes) stats.peakTempBytes = ringBytes;
 
   // OOM latch. This is the per-glyph-occurrence path, so a page whose prewarm did not cover
   // it calls through here hundreds of times. The heap cannot recover mid-pass (the render
@@ -205,30 +310,28 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
   // identical ERR lines in 40 ms, 147 ms of getBitmap time against ~1 ms normally, and a
   // page render of 129 ms against 43. Only the failing size class is latched out; a smaller
   // group may still fit and is still attempted.
-  if (stats.fallbackOomBytes != 0 && group.uncompressedSize >= stats.fallbackOomBytes) {
+  if (stats.fallbackOomBytes != 0 && ringBytes >= stats.fallbackOomBytes) {
     stats.fallbackOomGlyphs++;
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
 
-  uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
-  if (!groupBuf) {
+  GroupTemp temp(slotArena_, ringBytes);
+  uint8_t* ring = temp.get();
+  if (!ring) {
     // Logged once per size class per pass; the running total goes out in logStats().
-    LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u fallback; skipping this size and larger for the pass",
-            group.uncompressedSize, groupIndex);
-    stats.fallbackOomBytes = group.uncompressedSize;
+    LOG_ERR("FDC",
+            "OOM: cannot allocate a %lu-byte ring for group %u fallback (arena headroom %lu); skipping this size and "
+            "larger for the pass",
+            ringBytes, groupIndex, arenaHeadroom(slotArena_));
+    stats.fallbackOomBytes = ringBytes;
     stats.fallbackOomGlyphs++;
     stats.getBitmapTimeUs += micros() - tStart;
     return nullptr;
   }
+  if (temp.fromArena()) stats.arenaTemps++;
 
-  if (!decompressGroup(fontData, groupIndex, groupBuf, group.uncompressedSize)) {
-    free(groupBuf);
-    stats.getBitmapTimeUs += micros() - tStart;
-    return nullptr;
-  }
-
-  uint32_t alignedOff = getAlignedOffset(fontData, groupIndex, glyphIndex);
+  const uint32_t alignedOff = getAlignedOffset(fontData, groupIndex, glyphIndex);
 
   uint8_t lruIndex = 0;
   uint32_t oldestTick = UINT32_MAX;
@@ -239,8 +342,20 @@ const uint8_t* FontDecompressor::getBitmap(const EpdFontData* fontData, const Ep
     }
   }
 
-  compactSingleGlyph(&groupBuf[alignedOff], _fallbackCache[lruIndex].buffer, glyph->width, glyph->height);
-  free(groupBuf);
+  // Streams only as far as this one glyph and stops — the tail of the group is never decoded,
+  // which is where the fallback path wins back the CPU that a whole-group inflate spent.
+  const uint32_t tDecomp = millis();
+  GroupStream stream;
+  if (!stream.begin(fontData, group, ring, ringBytes) ||
+      !stream.extractGlyph(alignedOff, *glyph, _fallbackCache[lruIndex].buffer)) {
+    stats.decompressTimeMs += millis() - tDecomp;
+    LOG_ERR("FDC", "Streaming group %u failed at glyph %lu", groupIndex, glyphIndex);
+    stats.getBitmapTimeUs += micros() - tStart;
+    return nullptr;
+  }
+  stats.decompressTimeMs += millis() - tDecomp;
+  stats.streamedBytes += stream.consumed();
+  stats.groupBytes += group.uncompressedSize;
 
   _fallbackCache[lruIndex].fontData = fontData;
   _fallbackCache[lruIndex].glyphIndex = glyphIndex;
@@ -612,48 +727,90 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     }
   }
 
-  // Step 4: For each unique group, malloc a transient buffer, decompress, extract needed glyphs, free.
-  // One malloc/free per group per prewarm call. Groups are visited in sorted order, so
-  // only one group buffer is alive at a time — peak heap = page buffer + largest single group.
+  // Step 4: For each unique group, take a transient ring (arena first, else heap — see
+  // GroupTemp), stream the group through it compacting needed glyphs as they pass, release.
+  // Groups are visited in sorted order, so only one ring is alive at a time — peak = page buffer
+  // + largest single ring, and the ring is the group's measured back-reference reach rather than
+  // its uncompressed size (see ringBytesFor).
   uint32_t writeOffset = 0;
   int missed = 0;
+  uint8_t arenaTempCount = 0;
 
   for (uint8_t g = 0; g < groupCount; g++) {
     uint16_t groupIdx = neededGroups[g];
     const EpdFontGroup& group = fontData->groups[groupIdx];
+    const uint32_t ringBytes = ringBytesFor(group);
 
-    if (group.uncompressedSize > stats.peakTempBytes) stats.peakTempBytes = group.uncompressedSize;
+    if (ringBytes > stats.peakTempBytes) stats.peakTempBytes = ringBytes;
 
-    uint8_t* groupBuf = static_cast<uint8_t*>(malloc(group.uncompressedSize));
-    if (!groupBuf) {
-      LOG_ERR("FDC", "OOM: cannot allocate %lu bytes for group %u during prewarm", group.uncompressedSize, groupIdx);
-      missed++;
+    // Glyphs this group owes the page, so a refusal reports what the reader actually loses
+    // rather than counting groups. Computed up front: the extraction loop below is what would
+    // otherwise clear them, and on the failure paths it never runs.
+    uint16_t owed = 0;
+    for (uint16_t i = 0; i < slot.glyphCount; i++) {
+      if (slot.glyphs[i].groupIndex == groupIdx && slot.glyphs[i].bufferOffset == UINT32_MAX) owed++;
+    }
+
+    GroupTemp temp(slotArena_, ringBytes);
+    uint8_t* ring = temp.get();
+    if (!ring) {
+      LOG_ERR("FDC",
+              "OOM: cannot allocate a %lu-byte ring for group %u during prewarm (arena headroom %lu, %u glyphs lost)",
+              ringBytes, groupIdx, arenaHeadroom(slotArena_), owed);
+      missed += owed;
+      continue;
+    }
+    if (temp.fromArena()) {
+      stats.arenaTemps++;
+      arenaTempCount++;
+    }
+
+    const uint32_t tDecomp = millis();
+    GroupStream stream;
+    if (!stream.begin(fontData, group, ring, ringBytes)) {
+      stats.decompressTimeMs += millis() - tDecomp;
+      LOG_ERR("FDC", "Cannot start streaming group %u", groupIdx);
+      missed += owed;
       continue;
     }
 
-    if (!decompressGroup(fontData, groupIdx, groupBuf, group.uncompressedSize)) {
-      free(groupBuf);
-      missed++;
-      continue;
-    }
-
-    // Extract needed glyphs directly from the byte-aligned buffer, compacting on the fly.
-    // alignedOffset was pre-computed in step 3b — no full-group compact scan needed.
+    // Compact needed glyphs straight out of the passing stream. alignedOffset was pre-computed
+    // in step 3b, and ascending glyph index means ascending alignedOffset within a group, which
+    // is exactly the forward-only order the stream requires. The loop stops at the last glyph
+    // this page wants, so the rest of the group is never decoded.
+    uint16_t extracted = 0;
     for (uint16_t i = 0; i < slot.glyphCount; i++) {
       if (slot.glyphs[i].bufferOffset != UINT32_MAX) continue;  // already extracted
       if (slot.glyphs[i].groupIndex != groupIdx) continue;
 
       const EpdGlyph& glyph = fontData->glyph[slot.glyphs[i].glyphIndex];
-      compactSingleGlyph(&groupBuf[slot.glyphs[i].alignedOffset], &slot.buffer[writeOffset], glyph.width, glyph.height);
+      if (!stream.extractGlyph(slot.glyphs[i].alignedOffset, glyph, &slot.buffer[writeOffset])) {
+        LOG_ERR("FDC", "Streaming group %u failed after %u of %u glyph(s)", groupIdx, extracted, owed);
+        break;
+      }
       slot.glyphs[i].bufferOffset = writeOffset;
       writeOffset += glyph.dataLength;
+      extracted++;
     }
-
-    free(groupBuf);
+    stats.decompressTimeMs += millis() - tDecomp;
+    stats.streamedBytes += stream.consumed();
+    stats.groupBytes += group.uncompressedSize;
+    missed += owed - extracted;
   }
 
   LOG_TRC("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
           missed);
+
+  // Positive evidence that the arena path did something — only a draw racing a section build can
+  // produce it (see GroupTemp), and it is silent on every ordinary page.
+  //
+  // Logged here rather than in logStats() because logStats() is only ever called from
+  // renderContents(); displayBuildPage() — the one function that draws mid-build and the only
+  // one that installs the slot arena — never calls it, so a stats-time report could not fire for
+  // the very case this counter exists to prove.
+  if (arenaTempCount > 0) {
+    LOG_DBG("FDC", "prewarm: %u/%u group inflate(s) from the slot arena", arenaTempCount, groupCount);
+  }
 
   return missed;
 }
@@ -677,8 +834,12 @@ void FontDecompressor::logStats(const char* label) {
   LOG_TRC("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
           total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
   LOG_TRC("FDC", "[%s] decompress=%lums groups_accessed=%u", label, stats.decompressTimeMs, stats.uniqueGroupsAccessed);
-  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakTemp=%lu", label, stats.pageBufferBytes,
-          stats.pageGlyphsBytes, stats.peakTempBytes);
+  LOG_TRC("FDC", "[%s] mem: pageBuf=%lu pageGlyphs=%lu peakRing=%lu arenaTemps=%u", label, stats.pageBufferBytes,
+          stats.pageGlyphsBytes, stats.peakTempBytes, stats.arenaTemps);
+  if (stats.groupBytes > 0) {
+    LOG_TRC("FDC", "[%s] streamed %lu of %lu group bytes (%.0f%%)", label, stats.streamedBytes, stats.groupBytes,
+            100.0f * stats.streamedBytes / stats.groupBytes);
+  }
 
   // getBitmap timing is the exception: a prewarm that missed its font sends every glyph down the
   // hot-group path at thousands of us each (measured 5642 us/glyph against 1 us prewarmed), and

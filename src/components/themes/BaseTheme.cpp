@@ -13,6 +13,7 @@
 
 #include "I18n.h"
 #include "RecentBooksStore.h"
+#include "components/ListLayout.h"
 #include "components/UITheme.h"
 #include "components/themes/ButtonHintLayout.h"
 #include "fontIds.h"
@@ -159,8 +160,16 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
-  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  // The strip is laid out in panel coordinates so each box lands beside the button it names. In
+  // PortraitInverted the panel is simply turned 180°, so drawing it inverted instead of upright
+  // keeps the boxes on the same panel edge AND lets the reader read the labels — drawing them
+  // upright there put every word upside down. (The landscape modes are a different problem: their
+  // strip is a vertical column, which needs rotated text rather than a rotated page.)
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
 
+  const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = 106;
   constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
@@ -173,6 +182,10 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   ButtonHintLayout::positions(renderer.getScreenWidth(), buttonWidth, x4ButtonPositions, x3ButtonPositions,
                               buttonPositions);
   const char* labels[] = {btn1, btn2, btn3, btn4};
+  // Inverted flips both axes, so the strip's panel-bottom band becomes the top one and each slot
+  // mirrors across the width. Labels keep their hardware index — the mirroring is what carries
+  // each box back to its own button.
+  const int stripY = inverted ? 0 : pageHeight - buttonY;
 
   // Publish the geometry for touch. Recorded from the same values the draw uses, so the
   // tap target cannot drift from the painted box.
@@ -189,68 +202,92 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   for (int i = 0; i < 4; i++) {
     // Only draw if the label is non-empty
     if (labels[i] != nullptr && labels[i][0] != '\0') {
-      const int x = buttonPositions[i];
-      renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
-      renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
+      const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
+      renderer.fillRect(x, stripY, buttonWidth, buttonHeight, false);
       const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, labels[i]);
       const int textX = x + (buttonWidth - 1 - textWidth) / 2;
-      renderer.drawText(UI_10_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+      renderer.drawText(UI_10_FONT_ID, textX, stripY + textYOffset, labels[i]);
+      renderer.drawRect(x, stripY, buttonWidth, buttonHeight);
     }
   }
 
-  renderer.setOrientation(orig_orientation);
+  renderer.setDrawOrientation(orig_orientation);
 }
 
-void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
+void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
+  // Like drawButtonHints: the geometry below is written in PANEL coordinates, so each box stays
+  // beside the button it names whichever way the device is held. The side buttons sit on the
+  // panel's right edge (BTN_UP nearest the top) — which is the edge getContentRect() reserves in
+  // every orientation, while the logical right edge is a different one in three of the four.
+  const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
+  const bool inverted = orig_orientation == GfxRenderer::Orientation::PortraitInverted;
+  renderer.setDrawOrientation(inverted ? GfxRenderer::Orientation::PortraitInverted
+                                       : GfxRenderer::Orientation::Portrait);
+
   const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 4;
+
+  // Panel -> drawing space. Upright, that is the identity; inverted, both axes mirror, and these
+  // three wrappers are the only place that has to know. Text is anchored at the left edge of its
+  // rotated column and at the END of the run (it extends upwards), so its anchor mirrors to the
+  // opposite corner of the box it occupies rather than point-for-point.
+  const auto mx = [&](const int x) { return inverted ? screenWidth - 1 - x : x; };
+  const auto my = [&](const int y) { return inverted ? screenHeight - 1 - y : y; };
+  const auto line = [&](const int x1, const int y1, const int x2, const int y2) {
+    renderer.drawLine(mx(x1), my(y1), mx(x2), my(y2));
+  };
+  const auto rect = [&](const int x, const int y, const int w, const int h) {
+    renderer.drawRect(inverted ? screenWidth - x - w : x, inverted ? screenHeight - y - h : y, w, h);
+  };
+  const auto textCW = [&](const int x, const int y, const char* text) {
+    const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, text);
+    const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+    renderer.drawTextRotated90CW(SMALL_FONT_ID, inverted ? screenWidth - x - textHeight : x,
+                                 inverted ? screenHeight - 1 - y + textWidth : y, text);
+  };
 
   if (gpio.deviceIsX3()) {
     // X3 layout: Up on left side, Down on right side, positioned higher
     constexpr int x3ButtonY = 155;
 
-    if (topBtn != nullptr && topBtn[0] != '\0') {
+    if (upBtn != nullptr && upBtn[0] != '\0') {
       const int leftX = buttonMargin;
-      renderer.drawRect(leftX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
+      rect(leftX, x3ButtonY, buttonWidth, buttonHeight);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, upBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-      const int textX = leftX + (buttonWidth - textHeight) / 2;
-      const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, topBtn);
+      textCW(leftX + (buttonWidth - textHeight) / 2, x3ButtonY + (buttonHeight + textWidth) / 2, upBtn);
     }
 
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
+    if (downBtn != nullptr && downBtn[0] != '\0') {
       const int rightX = screenWidth - buttonMargin - buttonWidth;
-      renderer.drawRect(rightX, x3ButtonY, buttonWidth, buttonHeight);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
+      rect(rightX, x3ButtonY, buttonWidth, buttonHeight);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, downBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-      const int textX = rightX + (buttonWidth - textHeight) / 2;
-      const int textY = x3ButtonY + (buttonHeight + textWidth) / 2;
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, bottomBtn);
+      textCW(rightX + (buttonWidth - textHeight) / 2, x3ButtonY + (buttonHeight + textWidth) / 2, downBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
     constexpr int topButtonY = 345;
-    const char* labels[] = {topBtn, bottomBtn};
+    const char* labels[] = {upBtn, downBtn};
     const int x = screenWidth - buttonMargin - buttonWidth;
 
-    if (topBtn != nullptr && topBtn[0] != '\0') {
-      renderer.drawLine(x, topButtonY, x + buttonWidth - 1, topButtonY);
-      renderer.drawLine(x, topButtonY, x, topButtonY + buttonHeight - 1);
-      renderer.drawLine(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
+    if (upBtn != nullptr && upBtn[0] != '\0') {
+      line(x, topButtonY, x + buttonWidth - 1, topButtonY);
+      line(x, topButtonY, x, topButtonY + buttonHeight - 1);
+      line(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
     }
 
-    if ((topBtn != nullptr && topBtn[0] != '\0') || (bottomBtn != nullptr && bottomBtn[0] != '\0')) {
-      renderer.drawLine(x, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + buttonHeight);
+    if ((upBtn != nullptr && upBtn[0] != '\0') || (downBtn != nullptr && downBtn[0] != '\0')) {
+      line(x, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + buttonHeight);
     }
 
-    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
-      renderer.drawLine(x, topButtonY + buttonHeight, x, topButtonY + 2 * buttonHeight - 1);
-      renderer.drawLine(x + buttonWidth - 1, topButtonY + buttonHeight, x + buttonWidth - 1,
-                        topButtonY + 2 * buttonHeight - 1);
-      renderer.drawLine(x, topButtonY + 2 * buttonHeight - 1, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
+    if (downBtn != nullptr && downBtn[0] != '\0') {
+      line(x, topButtonY + buttonHeight, x, topButtonY + 2 * buttonHeight - 1);
+      line(x + buttonWidth - 1, topButtonY + buttonHeight, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
+      line(x, topButtonY + 2 * buttonHeight - 1, x + buttonWidth - 1, topButtonY + 2 * buttonHeight - 1);
     }
 
     for (int i = 0; i < 2; i++) {
@@ -258,9 +295,140 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
         const int y = topButtonY + i * buttonHeight;
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
         const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
-        const int textX = x + (buttonWidth - textHeight) / 2;
-        const int textY = y + (buttonHeight + textWidth) / 2;
-        renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, textY, labels[i]);
+        textCW(x + (buttonWidth - textHeight) / 2, y + (buttonHeight + textWidth) / 2, labels[i]);
+      }
+    }
+  }
+
+  renderer.setDrawOrientation(orig_orientation);
+}
+
+void BaseTheme::drawListOverflowArrows(const GfxRenderer& renderer, const Rect rect) {
+  constexpr int indicatorWidth = 20;
+  constexpr int arrowSize = 6;
+  constexpr int margin = 15;  // Offset from right edge
+
+  const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+  const int indicatorTop = rect.y;  // Offset to avoid overlapping side button hints
+  const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+  // Draw up arrow at top (^) - narrow point at top, wide base at bottom
+  for (int i = 0; i < arrowSize; ++i) {
+    const int lineWidth = 1 + i * 2;
+    const int startX = centerX - i;
+    renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+  }
+
+  // Draw down arrow at bottom (v) - wide base at top, narrow point at bottom
+  for (int i = 0; i < arrowSize; ++i) {
+    const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+    const int startX = centerX - (arrowSize - 1 - i);
+    renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                      indicatorBottom - arrowSize + 1 + i);
+  }
+}
+
+// Variable-height rows: a title too long for one line is wrapped over up to
+// view.maxTitleLines lines and its row grows by one line height per extra line. Shared by every
+// theme — see BaseTheme::wrappedListStyle() for the per-theme look.
+void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, const int itemCount,
+                                const int selectedIndex, const std::function<std::string(int index)>& rowTitle,
+                                const std::function<UIIcon(int index)>& rowIcon, ListViewState& view) const {
+  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
+  const WrappedListStyle style = wrappedListStyle();
+  const int baseRowHeight = metrics.listRowHeight;
+  if (itemCount <= 0 || rect.height < baseRowHeight || rowTitle == nullptr) {
+    view.visibleRows = 0;
+    return;
+  }
+
+  const int maxLines = std::min(view.maxTitleLines, maxWrappedTitleLines);
+  const int lineStep = renderer.getLineHeight(UI_10_FONT_ID);
+
+  // Reserve the scroll bar strip unconditionally. Whether the list scrolls depends on the wrapped
+  // row heights, which depend on the text width, which would depend on the bar — reserving first
+  // breaks that circle, and the bar is still only DRAWN when the rows really do not all fit.
+  const int contentWidth = rect.width - (style.scrollBarWidth + style.scrollBarRightOffset);
+  const int iconGap = (rowIcon != nullptr && style.iconSize > 0) ? style.iconSize + style.hPadding : 0;
+  const int textX = rect.x + metrics.contentSidePadding + style.hPadding + iconGap;
+  const int textWidth = contentWidth - metrics.contentSidePadding * 2 - style.hPadding * 2 - iconGap;
+  if (textWidth <= 0) {
+    view.visibleRows = 0;
+    return;
+  }
+
+  // Separators keep the plain row height; only real titles can grow.
+  const auto rowHeightFor = [&](const int index) {
+    const std::string title = rowTitle(index);
+    if (UITheme::isSeparatorTitle(title)) return baseRowHeight;
+    const int lines = static_cast<int>(renderer.wrappedText(UI_10_FONT_ID, title.c_str(), textWidth, maxLines).size());
+    return baseRowHeight + (lines > 1 ? (lines - 1) * lineStep : 0);
+  };
+
+  const ListLayout::Window window =
+      ListLayout::computeWindow(itemCount, selectedIndex, rect.height, view.firstVisible, rowHeightFor);
+  view.visibleRows = window.count;
+  if (window.count <= 0) return;
+
+  // Scroll position: how far the window's top row is through the rows that can be a top row.
+  if (window.count < itemCount) {
+    if (style.scrollBarWidth > 0) {
+      const int barHeight = std::max(8, rect.height * window.count / itemCount);
+      const int barY = rect.y + ((rect.height - barHeight) * window.first) / (itemCount - window.count);
+      const int barX = rect.x + rect.width - style.scrollBarRightOffset;
+      renderer.drawLine(barX, rect.y, barX, rect.y + rect.height, true);
+      renderer.fillRect(barX - style.scrollBarWidth, barY, style.scrollBarWidth, barHeight, true);
+    } else {
+      drawListOverflowArrows(renderer, rect);
+    }
+  }
+
+  for (int row = 0; row < window.count; row++) {
+    const int index = window.first + row;
+    const int rowY = rect.y + window.top[row];
+    const int rowHeight = window.height[row];
+
+    std::string title = rowTitle(index);
+    if (UITheme::isSeparatorTitle(title)) {
+      title = UITheme::stripSeparatorTitle(title);
+      drawListSeparator(
+          renderer,
+          Rect{rect.x + metrics.contentSidePadding, rowY, contentWidth - metrics.contentSidePadding * 2, rowHeight},
+          textX, textWidth, title);
+      continue;
+    }
+
+    const bool selected = (index == selectedIndex);
+    if (selected) {
+      const int selX = style.fullWidthSelection ? rect.x : rect.x + metrics.contentSidePadding;
+      const int selWidth = style.fullWidthSelection ? rect.width : contentWidth - metrics.contentSidePadding * 2;
+      if (style.cornerRadius > 0) {
+        renderer.fillRoundedRect(selX, rowY, selWidth, rowHeight, style.cornerRadius,
+                                 style.selectionIsBlack ? Color::Black : Color::LightGray);
+      } else {
+        renderer.fillRect(selX, rowY, selWidth, rowHeight);
+      }
+    }
+    // Only a black fill needs the text knocked out of it; a light-gray one keeps black text.
+    const bool textBlack = !(selected && style.selectionIsBlack);
+
+    int lineY = rowY + style.titleTextOffsetY;
+    for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, title.c_str(), textWidth, maxLines)) {
+      renderer.drawText(UI_10_FONT_ID, textX, lineY, line.c_str(), textBlack);
+      lineY += lineStep;
+    }
+
+    if (iconGap > 0) {
+      // Aligned with the first line, not the middle of a grown row, so icons stay on one baseline.
+      const uint8_t* iconBitmap = rowIconBitmap(rowIcon(index), style.iconSize);
+      if (iconBitmap != nullptr) {
+        const int iconX = rect.x + metrics.contentSidePadding + style.hPadding;
+        const int iconY = rowY + (baseRowHeight - style.iconSize) / 2;
+        if (textBlack) {
+          renderer.drawIcon(iconBitmap, iconX, iconY, style.iconSize, style.iconSize);
+        } else {
+          renderer.drawIconInverted(iconBitmap, iconX, iconY, style.iconSize, style.iconSize);
+        }
       }
     }
   }
@@ -270,35 +438,24 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
-                         const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
+                         const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                         ListViewState* view) const {
+  // Wrapping only covers title (+ icon) rows: a subtitle or a value column has its own fixed
+  // geometry inside the row, so those lists stay on the classic fixed-height path.
+  if (view != nullptr && view->wraps() && rowSubtitle == nullptr && rowValue == nullptr) {
+    drawWrappedList(renderer, rect, itemCount, selectedIndex, rowTitle, rowIcon, *view);
+    return;
+  }
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
+  // A fixed-height list still reports its page size, so Left/Right page by what is really on
+  // screen rather than by a guess.
+  if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
-    constexpr int indicatorWidth = 20;
-    constexpr int arrowSize = 6;
-    constexpr int margin = 15;  // Offset from right edge
-
-    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
-    const int indicatorTop = rect.y;  // Offset to avoid overlapping side button hints
-    const int indicatorBottom = rect.y + rect.height - arrowSize;
-
-    // Draw up arrow at top (^) - narrow point at top, wide base at bottom
-    for (int i = 0; i < arrowSize; ++i) {
-      const int lineWidth = 1 + i * 2;
-      const int startX = centerX - i;
-      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
-    }
-
-    // Draw down arrow at bottom (v) - wide base at top, narrow point at bottom
-    for (int i = 0; i < arrowSize; ++i) {
-      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
-      const int startX = centerX - (arrowSize - 1 - i);
-      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
-                        indicatorBottom - arrowSize + 1 + i);
-    }
+    drawListOverflowArrows(renderer, rect);
   }
 
   bool selectedIsSeparator = false;
@@ -477,7 +634,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     FsFile file;
     if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
       Bitmap bitmap(file);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+      // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
+      // Falling through to the existing no-cover branch shows the theme's own tile instead.
+      if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+          !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
         hasCoverImage = true;
         const int imgWidth = bitmap.getWidth();
         const int imgHeight = bitmap.getHeight();
@@ -528,7 +688,10 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       FsFile file;
       if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
         Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
+        // Falling through to the existing no-cover branch shows the theme's own tile instead.
+        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
           LOG_DBG("THEME", "Rendering bmp");
 
           renderer.fillRect(bookX, bookY, bookWidth, bookHeight, false);
@@ -874,11 +1037,19 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   // Draw Battery
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
+  int batterySize = 0;
   if (SETTINGS.statusBarBattery) {
     GUI.drawBatteryLeft(renderer,
                         Rect{metrics.statusBarHorizontalMargin + orientedMarginLeft + 1, textY, metrics.batteryWidth,
                              metrics.batteryHeight},
                         showBatteryPercentage);
+    // Measure the drawn footprint instead of estimating it: a three digit percentage ("100%")
+    // is wider than a fixed guess, and the clock/title placed to the right would overlap it.
+    batterySize = 1 + metrics.batteryWidth;
+    if (showBatteryPercentage) {
+      const auto percentageText = std::to_string(powerManager.getBatteryPercentage()) + "%";
+      batterySize += BaseTheme::batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
+    }
   }
 
   // Draw Clock
@@ -887,7 +1058,6 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     char clockStr[16];
     HalClock::formatTime(clockStr, sizeof(clockStr), !SETTINGS.clockFormat12h);
     clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, clockStr);
-    const int batterySize = SETTINGS.statusBarBattery ? (showBatteryPercentage ? 50 : 20) : 0;
     renderer.drawText(SMALL_FONT_ID, metrics.statusBarHorizontalMargin + orientedMarginLeft + batterySize + 8, textY,
                       clockStr);
   }
@@ -897,7 +1067,6 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int rendererableScreenWidth =
         screenWidth - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
 
-    const int batterySize = SETTINGS.statusBarBattery ? (showBatteryPercentage ? 50 : 20) : 0;
     const int starReserve = isStarred ? (renderer.getTextWidth(SMALL_FONT_ID, "*") + 6) : 0;
     const int clockSize = clockTextWidth > 0 ? clockTextWidth + 8 : 0;
     const int titleMarginLeft = batterySize + clockSize + 30;

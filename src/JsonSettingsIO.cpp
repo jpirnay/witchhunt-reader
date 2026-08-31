@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
+#include "util/UrlUtils.h"
 
 namespace {
 // Upper bound on any stored credential we will decode from JSON. A WPA passphrase
@@ -224,6 +225,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Font family uses a DynamicEnumCtx in SettingsList (no valuePtr) so the generic
   // loop above skips it. Save manually.
   doc["fontFamily"] = s.fontFamily;
+  if (s.dictionaryName[0] != '\0') {
+    doc["dictionaryName"] = s.dictionaryName;
+  }
   if (s.sdFontFamilyName[0] != '\0') {
     doc["sdFontFamilyName"] = s.sdFontFamilyName;
   }
@@ -382,6 +386,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // loop above skips it. Load manually.
   s.fontFamily = clamp(doc["fontFamily"] | (uint8_t)CrossPointSettings::BOOKERLY,
                        CrossPointSettings::BUILTIN_FONT_COUNT, CrossPointSettings::BOOKERLY);
+  const char* dictName = doc["dictionaryName"] | "";
+  strncpy(s.dictionaryName, dictName, sizeof(s.dictionaryName) - 1);
+  s.dictionaryName[sizeof(s.dictionaryName) - 1] = '\0';
   const char* sfn = doc["sdFontFamilyName"] | "";
   strncpy(s.sdFontFamilyName, sfn, sizeof(s.sdFontFamilyName) - 1);
   s.sdFontFamilyName[sizeof(s.sdFontFamilyName) - 1] = '\0';
@@ -448,7 +455,9 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
       *needsResave = true;
     }
   }
-  store.serverUrl = doc["serverUrl"] | std::string("");
+  // Repair a scheme typo saved by an older build, so the settings screen shows the
+  // same URL getBaseUrl() will connect to.
+  store.serverUrl = UrlUtils::repairSchemeSeparator(doc["serverUrl"] | std::string(""));
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;

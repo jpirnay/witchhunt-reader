@@ -58,6 +58,11 @@ inline std::string getSleepTimeoutDisplay(void*) {
   return std::to_string(v) + tr(STR_MIN_SUFFIX);
 }
 
+inline std::string getDictionaryDisplay(void*) {
+  if (SETTINGS.dictionaryName[0] == '\0') return std::string(tr(STR_NONE_OPT));
+  return SETTINGS.dictionaryName;
+}
+
 inline std::string getRefreshFrequencyDisplay(void*) {
   const uint8_t v = SETTINGS.refreshFrequencyPages;
   if (v == 0) return std::string(tr(STR_NEVER));
@@ -95,7 +100,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                                StrId::STR_BTN_ACT_CYCLE_FONT_SIZE,
                                                StrId::STR_BTN_ACT_CYCLE_ORIENTATION,
                                                StrId::STR_BTN_ACT_QUICK_OVERRIDES,
-                                               StrId::STR_BTN_ACT_IGNORE};
+                                               StrId::STR_BTN_ACT_IGNORE,
+                                               StrId::STR_DICTIONARY};
 
   // Prepend the per-button default action to the shared options list.
   auto makeBtnActionOptions = [&](StrId defaultAction) {
@@ -123,10 +129,10 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                                        {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode",
                                        StrId::STR_CAT_DISPLAY));
-  settings.push_back(SettingInfo::Enum(
-      StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
-      {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED, StrId::STR_FILTER_ADAPTIVE},
-      "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY));
+  settings.push_back(SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
+                                       {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED,
+                                        StrId::STR_FILTER_ADAPTIVE, StrId::STR_FILTER_EQUALIZE},
+                                       "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY));
   settings.push_back(SettingInfo::Enum(StrId::STR_SLEEP_COVER_OVERLAY, &CrossPointSettings::sleepCoverOverlay,
                                        {StrId::STR_OVERLAY_OFF, StrId::STR_OVERLAY_WHITE, StrId::STR_OVERLAY_GRAY,
                                         StrId::STR_OVERLAY_BLACK},
@@ -225,6 +231,12 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                          "hyphenationEnabled", StrId::STR_CAT_READER));
   settings.push_back(SettingInfo::Toggle(StrId::STR_FONT_SIZE_NORMALIZATION, &CrossPointSettings::fontSizeNormalization,
                                          "fontSizeNormalization", StrId::STR_CAT_READER));
+  // Which StarDict dictionary word lookup uses. An Action rather than an Enum:
+  // the options are folders discovered on the SD card at open time, not a fixed
+  // list, so the picker has to scan.
+  settings.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::DictionarySelect)
+                         .withDisplayGetter(getDictionaryDisplay)
+                         .withCategory(StrId::STR_CAT_READER));
   settings.push_back(
       SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                         {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
@@ -405,6 +417,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubmenu(StrId::STR_SHOW_FILES));
   settings.push_back(SettingInfo::Toggle(StrId::STR_INCLUDE_BETA_UPDATES, &CrossPointSettings::includeBetaUpdates,
                                          "includeRcUpdates", StrId::STR_CAT_SYSTEM));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_SKIP_HTTPS_VALIDATION, &CrossPointSettings::skipHttpsValidation,
+                                         "skipHttpsValidation", StrId::STR_CAT_SYSTEM));
   // OPDS download settings are edited from the OPDS server list. Keep them
   // category-less so they persist and remain available to the web API without
   // cluttering the device settings screen.

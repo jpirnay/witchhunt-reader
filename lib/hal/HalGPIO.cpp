@@ -7,8 +7,8 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <XteinkDetect.h>
+#include <driver/usb_serial_jtag.h>
 #include <esp_sleep.h>
-#include <soc/usb_serial_jtag_struct.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
@@ -532,26 +532,21 @@ void HalGPIO::update() {
 }
 
 void HalGPIO::updateUsbState(const unsigned long now) {
-  // SOF-based host-link sampling (see the member comment). A cheap register
-  // read, so it runs at its own short cadence on both devices and is never
-  // behind the I2C throttle below — a fresh enumeration must cancel light
+  // Host-link check (see the member comment). A single volatile read of a flag
+  // the IDF tick hook maintains, so it runs on every call on both devices and is
+  // never behind the I2C throttle below — a fresh enumeration must cancel light
   // sleep within a poll or two, or the next slice kills the CDC link again.
-  if (sofLastSampleMs == 0 || now - sofLastSampleMs >= SOF_SAMPLE_MS) {
-    const auto sof = static_cast<uint16_t>(USB_SERIAL_JTAG.fram_num.sof_frame_index);
-    usbSofActive = (sof != lastSofFrameIndex);
-    lastSofFrameIndex = sof;
-    sofLastSampleMs = now;
-  }
+  usbHostLinkActive = isUsbHostLinkActive();
 
   // Throttle the X3's I2C-based USB detection; see USB_POLL_X3_MS. First call
   // (usbLastPollMs == 0) always polls so boot state is correct. The combined
-  // verdict below is still recomputed every call so a SOF-detected attach is
-  // not held back by the throttle window.
+  // verdict below is still recomputed every call so a host-link-detected attach
+  // is not held back by the throttle window.
   if (usbLastPollMs == 0 || !deviceIsX3() || now - usbLastPollMs >= USB_POLL_X3_MS) {
     usbLastPollMs = now;
     usbElectricalConnected = isUsbElectricalConnected();
   }
-  const bool connected = usbSofActive || usbElectricalConnected;
+  const bool connected = usbHostLinkActive || usbElectricalConnected;
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
 }
@@ -581,6 +576,8 @@ bool HalGPIO::wasAnyPressed() const { return snapPressed_ != 0; }
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return (snapReleased_ & (1u << buttonIndex)) != 0; }
 
 bool HalGPIO::wasAnyReleased() const { return snapReleased_ != 0; }
+
+bool HalGPIO::isAnyPressed() const { return snapState_ != 0; }
 
 bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
@@ -630,7 +627,7 @@ bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEn
 
 bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
 
-void HalGPIO::waitForStablePowerRelease() {
+unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS
   // consecutive milliseconds.  The InputManager debounce (5 ms) is too short for
   // mechanical switch bounce which can last 10-50 ms, so we bypass it entirely here.
@@ -644,9 +641,28 @@ void HalGPIO::waitForStablePowerRelease() {
     } else {
       stableStart = 0;
     }
+    // Bounded, and deliberately so. This used to be `while (true)` with no way out, run
+    // at the point of no return on the sleep path: the input sampler is already stopped,
+    // the panel is already in deep sleep holding the sleep screen, and the loop task is
+    // not subscribed to the task WDT (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is unset
+    // and nothing calls esp_task_wdt_add on it), so nothing was going to rescue it. A pin
+    // that reads LOW indefinitely — a sticky or dirty switch, a finger that never comes
+    // off — therefore froze the device with the sleep screen displayed and every button
+    // dead, recoverable only by a reset (issue #155).
+    //
+    // Sleeping with the button still down is the lesser evil: the worst case is one
+    // immediate re-wake (the deep-sleep GPIO trigger is level-LOW), which the boot-side
+    // wake gate then classifies like any other press. A permanent freeze has no recovery
+    // at all. The caller is told how long we waited so the breadcrumb can record it.
+    if (millis() - waitStart >= timeoutMs) {
+      LOG_ERR("GPIO", "Power button still held after %lums — sleeping anyway (raw pin LOW)", timeoutMs);
+      return millis() - waitStart;
+    }
     delay(10);
   }
-  LOG_DBG("GPIO", "Power button stable-released after %lu ms", millis() - waitStart);
+  const unsigned long waited = millis() - waitStart;
+  LOG_DBG("GPIO", "Power button stable-released after %lu ms", waited);
+  return waited;
 }
 
 bool HalGPIO::isHeldNow(uint8_t buttonIndex, uint8_t confirmSamples) {
@@ -801,10 +817,14 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
   }
 }
 
+bool HalGPIO::isUsbHostLinkActive() const { return usb_serial_jtag_is_connected(); }
+
 bool HalGPIO::isUsbConnected() const {
-  // Recent SOF activity means an enumerated host regardless of what the
-  // electrical check says (false at boot until update() has sampled twice).
-  return usbSofActive || isUsbElectricalConnected();
+  // An enumerated host counts regardless of what the electrical check says. Read
+  // the IDF monitor directly rather than the cached member: callers can reach
+  // this before the first update() (main.cpp opens the serial log right after
+  // gpio.begin()), and the cached value would still be its false initializer.
+  return isUsbHostLinkActive() || isUsbElectricalConnected();
 }
 
 bool HalGPIO::isUsbElectricalConnected() const {
@@ -812,8 +832,8 @@ bool HalGPIO::isUsbElectricalConnected() const {
     // X3: GPIO20 is repurposed as I2C SDA, so the X4 pin-level USB detect is
     // unusable here — the I2C pull-ups would always report HIGH. Probe the
     // BQ27220 fuel gauge instead. Charge inference misses a data-only cable and
-    // any cable once the battery is full; the SOF check in updateUsbState()
-    // covers those.
+    // any cable once the battery is full; the host-link check in
+    // updateUsbState() covers those.
     //
     // Current() is the ONLY signal trusted here: it is signed, and current
     // flowing INTO the battery (positive, above a noise floor) only happens on a
@@ -831,9 +851,9 @@ bool HalGPIO::isUsbElectricalConnected() const {
     // device-observed on an X3 at 100% with no cable attached.
     //
     // The case FC was meant to catch — a cable to a computer with the battery
-    // already full — is now covered properly by the SOF check in
-    // updateUsbState(), which sees the host link itself rather than inferring it
-    // from charge state. The one remaining gap is a dumb wall charger with a
+    // already full — is now covered properly by the host-link check in
+    // updateUsbState(), which sees the enumerated link itself rather than
+    // inferring it from charge state. The one remaining gap is a dumb wall charger with a
     // full battery: no charge current and no SOF, so no charging indication.
     // That is the honest reading ("charged", not "charging"), and light sleep is
     // safe there because there is no CDC link to lose.

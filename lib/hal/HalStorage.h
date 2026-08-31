@@ -49,6 +49,12 @@ class HalStorage {
   bool openFileForWrite(const char* moduleName, const char* path, HalFile& file);
   bool openFileForWrite(const char* moduleName, const std::string& path, HalFile& file);
   bool openFileForWrite(const char* moduleName, const String& path, HalFile& file);
+  // Opens an EXISTING file for reading and writing without truncating it, so a caller can seek
+  // and rewrite part of it. openFileForWrite truncates, which is right for caches written in one
+  // go and wrong for any store that grows in place (see FootnotePreviews, which appends note
+  // text as the reader moves through a book). Fails when the file does not exist.
+  bool openFileForUpdate(const char* moduleName, const char* path, HalFile& file);
+  bool openFileForUpdate(const char* moduleName, const std::string& path, HalFile& file);
   bool removeDir(const char* path);
   bool copyFile(const char* moduleName, const std::string& srcPath, const char* dstPath);
 

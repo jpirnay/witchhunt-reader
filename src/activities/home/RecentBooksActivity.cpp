@@ -22,19 +22,40 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "activities/reader/ReaderActivity.h"
+#include "components/CoverGridLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
 namespace {
-int gridThumbWidth(int contentWidth) {
-  const int margin = RecentBooksActivity::GRID_THUMB_MARGIN;
-  const int cols = RecentBooksActivity::GRID_COLS;
-  return (contentWidth - (cols + 1) * margin) / cols;
-}
-
 std::string gridThumbPath(const std::string& coverBmpPath, int tw, int th) {
   return UITheme::getCoverThumbPath(coverBmpPath, tw, th);
+}
+
+// Where the grid lives on screen: the content rect and first-row offset from the active theme,
+// plus the cell geometry CoverGridLayout derives from that space.
+struct GridLayout {
+  Rect content{};     // rect the whole screen body lives in
+  int contentTop;     // y of the first row (below the header)
+  int contentHeight;  // usable height from contentTop down
+  CoverGridLayout::Layout cells;
+};
+
+GridLayout computeGridLayout(const GfxRenderer& renderer) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  GridLayout l{};
+  l.content = UITheme::getContentRect(renderer, true, true);
+  l.contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  l.contentHeight = l.content.height - l.contentTop - metrics.verticalSpacing;
+
+  // The gesture-hint line sits at the bottom of the content area on X4; keep the last row's
+  // labels clear of it (the scroll arrows share that strip).
+  l.cells = CoverGridLayout::compute({.contentWidth = l.content.width,
+                                      .contentHeight = l.contentHeight,
+                                      .bottomReserve = gpio.deviceIsX3() ? 12 : 24,
+                                      .maxCellHeight = RecentBooksActivity::GRID_MAX_CELL_HEIGHT});
+  return l;
 }
 }  // namespace
 
@@ -83,12 +104,16 @@ bool RecentBooksActivity::loadNextCover() {
       return false;  // not done yet — render() will requestUpdate() and call us again
     }
     pngSessionFiles.close();
-    pngSessionFailed = (status == PngDecodeSession::Status::Error);
+    // Local, not the member: this branch resolves the book itself and advances the index, so a
+    // failure here must not leak into the NEXT book's first attempt (as wasPostFailure it would
+    // suppress that book's session ladder and record it as coverless for the whole session).
+    const bool decodeFailed = (status == PngDecodeSession::Status::Error);
+    pngSessionFailed = false;
     pngSession.reset();
 
     RecentBook& book = recentBooks[nextCoverIndex];
     const std::string placeholder = ReaderActivity::coverThumbPlaceholder(book.path);
-    if (!pngSessionFailed) {
+    if (!decodeFailed) {
       LOG_DBG("RBA", "PNG session complete for %s", book.path.c_str());
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
       book.coverBmpPath = placeholder;
@@ -123,10 +148,17 @@ bool RecentBooksActivity::loadNextCover() {
     // resolved cover — no re-opening the EPUB three times per scan to rediscover it has no cover.
     const bool valid = ReaderActivity::isCoverThumbComplete(thumbPath, tw, th);
     if (!valid) {
-      const bool ok = (ReaderActivity::ensureCoverThumb(book.path, tw, th) == ThumbResult::Ok);
+      const ThumbResult res = ReaderActivity::ensureCoverThumb(book.path, tw, th);
+      const bool ok = (res == ThumbResult::Ok);
       const bool wasPostFailure = pngSessionFailed;
       pngSessionFailed = false;  // consumed
-      if (!ok && !wasPostFailure) {
+      // Only a TRANSIENT failure may walk the session ladder. A structural absence is already
+      // permanent — generateThumbBmp() wrote the 0-byte sentinel, and re-extracting the same ZIP
+      // entry yields the same undecodable bytes. Treating it like a transient failure livelocked
+      // this scan: the sentinel keeps isCoverThumbComplete() false, so the book never resolved,
+      // nextCoverIndex never advanced, and the cover was re-inflated from the ZIP every ~1.3 s
+      // forever (observed on an EPUB whose "cover.png" is really an AVIF). Mirrors HomeActivity.
+      if (res == ThumbResult::TransientFail && !wasPostFailure) {
         pngSession = ReaderActivity::beginPngThumbSession(book.path, tw, th, pngSessionFiles);
         if (pngSession) {
           LOG_DBG("RBA", "Started PNG session for %s (%u rows)", book.path.c_str(), pngSession->totalRows());
@@ -138,19 +170,22 @@ bool RecentBooksActivity::loadNextCover() {
                   extractSession->totalBytes());
           return false;
         }
-        // No thumb produced AND no decode/extract session could start → genuinely no extractable
-        // cover. But NOT if a sidecar image exists: that is a real cover source that simply failed
-        // to convert this pass (e.g. tight heap) and should be retried, not permanently placeholdered.
-        // Otherwise write a valid placeholder BMP so future scans treat the book as resolved and stop
-        // re-opening the EPUB. (A transient post-failure retry — wasPostFailure — is skipped here too.)
-        if (ReaderActivity::sidecarCoverPath(book.path).empty() &&
-            ReaderActivity::writeCoverPlaceholderBmp(thumbPath, tw, th)) {
-          LOG_DBG("RBA", "No extractable cover for %s — wrote placeholder", book.path.c_str());
-          RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
-          book.coverBmpPath = placeholder;
-          nextCoverIndex++;
-          return false;
-        }
+      }
+
+      // Permanent give-up: structurally absent, or no decode/extract session could be started for
+      // a transient failure. But NOT if a sidecar image exists: that is a real cover source that
+      // simply failed to convert this pass (e.g. tight heap) and should be retried, not permanently
+      // placeholdered. Otherwise write a valid placeholder BMP so future scans treat the book as
+      // resolved and stop re-opening the EPUB. (A transient post-failure retry — wasPostFailure —
+      // is skipped here too, so the next pass gets a clean attempt.)
+      const bool giveUpPermanently = (res == ThumbResult::StructurallyAbsent) || (!ok && !wasPostFailure);
+      if (giveUpPermanently && ReaderActivity::sidecarCoverPath(book.path).empty() &&
+          ReaderActivity::writeCoverPlaceholderBmp(thumbPath)) {
+        LOG_DBG("RBA", "No extractable cover for %s — wrote placeholder", book.path.c_str());
+        RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, placeholder);
+        book.coverBmpPath = placeholder;
+        nextCoverIndex++;
+        return false;
       }
       RECENT_BOOKS.updateBook(book.path, book.title, book.author, book.series, ok ? placeholder : "");
       book.coverBmpPath = ok ? placeholder : "";
@@ -289,10 +324,11 @@ void RecentBooksActivity::loop() {
     }
 
     // Up short: navigate (row up in grid, previous in list)
-    if (ev.button == MappedInputManager::Button::Up && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Up) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         if (gridView) {
-          selectorIndex = std::max(0, selectorIndex - GRID_COLS);
+          selectorIndex = std::max(0, selectorIndex - gridColumns());
         } else {
           selectorIndex = ButtonNavigator::previousIndex(selectorIndex, listSize);
         }
@@ -302,10 +338,11 @@ void RecentBooksActivity::loop() {
     }
 
     // Down short: navigate (row down in grid, next in list)
-    if (ev.button == MappedInputManager::Button::Down && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Down) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         if (gridView) {
-          selectorIndex = std::min(listSize - 1, selectorIndex + GRID_COLS);
+          selectorIndex = std::min(listSize - 1, selectorIndex + gridColumns());
         } else {
           selectorIndex = ButtonNavigator::nextIndex(selectorIndex, listSize);
         }
@@ -315,13 +352,15 @@ void RecentBooksActivity::loop() {
     }
 
     // Up long: toggle between list and grid view
-    if (ev.button == MappedInputManager::Button::Up && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Up) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       switchViewMode(!gridView);
       return;
     }
 
     // Left short: column left in grid, previous in list
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         selectorIndex = ButtonNavigator::previousIndex(selectorIndex, listSize);
         requestUpdate();
@@ -330,7 +369,8 @@ void RecentBooksActivity::loop() {
     }
 
     // Right short: column right in grid, next in list
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Short) {
       if (!recentBooks.empty()) {
         selectorIndex = ButtonNavigator::nextIndex(selectorIndex, listSize);
         requestUpdate();
@@ -339,13 +379,15 @@ void RecentBooksActivity::loop() {
     }
 
     // Left long: remove selected book (both views)
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       removeSelectedBook();
       return;
     }
 
     // Right long: show book info (both views)
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Long) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Long) {
       showSelectedBookInfo();
       return;
     }
@@ -450,9 +492,10 @@ void RecentBooksActivity::renderListView(RenderLock&&) {
   }
 
   const bool hasBooks = !recentBooks.empty();
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), hasBooks ? tr(STR_OPEN) : "", "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto hints =
+      mappedInput.mapHints(tr(STR_HOME), hasBooks ? tr(STR_OPEN) : "", "", "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }
@@ -460,7 +503,7 @@ void RecentBooksActivity::renderListView(RenderLock&&) {
 void RecentBooksActivity::renderGridCell(int index, bool selected, int cellX, int cellY, int tw, int th, int labelW) {
   const auto& book = recentBooks[index];
   const int labelY = cellY + th + 3;
-  const int cellFillHeight = th + GRID_LABEL_HEIGHT + 3;
+  const int cellFillHeight = th + CoverGridLayout::kLabelHeight + 3;
 
   if (selected) {
     renderer.fillRect(cellX, cellY, tw, cellFillHeight);
@@ -532,32 +575,38 @@ void RecentBooksActivity::renderGridCell(int index, bool selected, int cellX, in
   }
 }
 
+// Column count for row-wise navigation. Recomputed rather than cached: it depends on the theme
+// metrics, which the settings screen can change while this activity is on the stack.
+int RecentBooksActivity::gridColumns() const { return computeGridLayout(renderer).cells.cols; }
+
 void RecentBooksActivity::renderGridView(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
-  const int margin = GRID_THUMB_MARGIN;
-  const int tw = gridThumbWidth(contentRect.width);
-  const int th = GRID_CELL_HEIGHT;
-  const int cellHeight = th + GRID_LABEL_HEIGHT + margin;
-  const int visibleRows = std::max(1, contentHeight / cellHeight);
-  const int totalRows = (static_cast<int>(recentBooks.size()) + GRID_COLS - 1) / GRID_COLS;
-  const int selectedRow = selectorIndex / GRID_COLS;
+  const GridLayout layout = computeGridLayout(renderer);
+  const Rect contentRect = layout.content;
+  const int contentTop = layout.contentTop;
+  const int contentHeight = layout.contentHeight;
+  const int margin = CoverGridLayout::kMargin;
+  const int cols = layout.cells.cols;
+  const int tw = layout.cells.cellWidth;
+  const int th = layout.cells.cellHeight;
+  const int cellHeight = layout.cells.rowStride;
+  const int visibleRows = layout.cells.rows;
+  const int totalRows = (static_cast<int>(recentBooks.size()) + cols - 1) / cols;
+  const int selectedRow = selectorIndex / cols;
   const int pageStartRow = (selectedRow / visibleRows) * visibleRows;
-  const int startIndex = pageStartRow * GRID_COLS;
-  const int labelW = tw - 4;
+  const int startIndex = pageStartRow * cols;
+  const int labelW = layout.cells.labelWidth;
 
   auto cellPos = [&](int i, int& cx, int& cy) {
-    const int row = (i / GRID_COLS) - pageStartRow;
-    const int col = i % GRID_COLS;
+    const int row = (i / cols) - pageStartRow;
+    const int col = i % cols;
     cx = contentRect.x + margin + col * (tw + margin);
     cy = contentTop + row * cellHeight;
   };
   LOG_DBG("RBA", "Render grid: sel=%d prev=%d start=%d pageStartRow=%d visibleRows=%d totalRows=%d", selectorIndex,
           prevSelectorIndex, startIndex, pageStartRow, visibleRows, totalRows);
   // Partial fast path: only the selection changed within the same page
-  const int prevPage = prevSelectorIndex >= 0 ? (prevSelectorIndex / GRID_COLS / visibleRows) : -1;
+  const int prevPage = prevSelectorIndex >= 0 ? (prevSelectorIndex / cols / visibleRows) : -1;
   const int curPage = selectedRow / visibleRows;
   if (!fullRedrawNeeded && prevSelectorIndex >= 0 && prevSelectorIndex != selectorIndex && prevPage == curPage) {
     // The write framebuffer holds the frame from two refreshes ago (displayBuffer()
@@ -594,7 +643,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     return;
   }
 
-  const int endIndex = std::min(startIndex + visibleRows * GRID_COLS, static_cast<int>(recentBooks.size()));
+  const int endIndex = std::min(startIndex + visibleRows * cols, static_cast<int>(recentBooks.size()));
   LOG_DBG("RBA", "Full grid redraw: sel=%d prev=%d", selectorIndex, prevSelectorIndex);
   for (int i = startIndex; i < endIndex; i++) {
     int cx, cy;
@@ -630,9 +679,9 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     renderer.drawText(SMALL_FONT_ID, contentRect.x + metrics.contentSidePadding, hintY, hint.c_str());
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto hints = mappedInput.mapHints(tr(STR_HOME), tr(STR_OPEN), "", "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

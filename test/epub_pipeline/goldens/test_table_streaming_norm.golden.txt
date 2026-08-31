@@ -38,9 +38,9 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=437 s=0 z=100 t=as
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=paragraphs.
-  TABLE y=210 x=0 h=108 cols=2 border=1 rows=1
+  TABLE y=210 x=0 w=460 h=108 cols=2 border=1 rows=1
    ROW h=106 hdr=0 cells=2
-    CELL 0 hdr=0 lines=4
+    CELL 0 hdr=0 span=1 lines=4
      LN words=3
       W x=18 s=0 z=100 t=Outer
       W x=95 s=0 z=100 t=cell
@@ -56,7 +56,7 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
       W x=147 s=0 z=100 t=buffered
      LN words=1
       W x=0 s=0 z=100 t=normally.
-    CELL 1 hdr=0 lines=4
+    CELL 1 hdr=0 span=1 lines=4
      LN words=3
       W x=18 s=0 z=100 t=Second
       W x=102 s=0 z=100 t=outer
@@ -144,9 +144,9 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
    W x=196 s=0 z=100 t=that
    W x=246 s=0 z=100 t=declares
    W x=323 s=0 z=100 t=it.
-  TABLE y=234 x=0 h=84 cols=2 border=1 rows=1
+  TABLE y=234 x=0 w=460 h=84 cols=2 border=1 rows=1
    ROW h=82 hdr=0 cells=2
-    CELL 0 hdr=0 lines=3
+    CELL 0 hdr=0 span=1 lines=3
      LN words=3
       W x=18 s=0 z=100 t=Plain
       W x=90 s=0 z=100 t=cell
@@ -158,7 +158,7 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
       W x=203 s=0 z=100 t=is
      LN words=1
       W x=0 s=0 z=100 t=seen.
-    CELL 1 hdr=0 lines=2
+    CELL 1 hdr=0 span=1 lines=2
      LN words=4
       W x=18 s=0 z=100 t=Another
       W x=100 s=0 z=100 t=plain
@@ -239,7 +239,7 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
    W x=291 s=0 z=100 t=arrives
    W x=367 s=0 z=100 t=after
    W x=428 s=0 z=100 t=the
- PAGE 1 elements=15 footnotes=0
+ PAGE 1 elements=14 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=column
    W x=66 s=0 z=100 t=limit
@@ -309,27 +309,26 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
    W x=172 s=0 z=100 t=path
    W x=218 s=0 z=100 t=is
    W x=239 s=0 z=100 t=untouched.
-  TABLE y=324 x=0 h=36 cols=1 border=1 rows=1
+  TABLE y=324 x=0 w=460 h=71 cols=2 border=1 rows=2
    ROW h=34 hdr=1 cells=1
-    CELL 0 hdr=1 lines=1
+    CELL 0 hdr=1 span=2 lines=1
      LN words=4
       W x=18 s=0 z=100 t=Header
       W x=78 s=0 z=100 t=spanning
       W x=161 s=0 z=100 t=two
       W x=195 s=0 z=100 t=columns
-  TABLE y=360 x=0 h=36 cols=2 border=1 rows=1
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=3
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=cell
       W x=101 s=0 z=100 t=one.
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=3
       W x=18 s=0 z=100 t=Body
       W x=61 s=0 z=100 t=cell
       W x=101 s=0 z=100 t=two.
-  LINE y=396 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=395 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=Closing
    W x=74 s=0 z=100 t=text
    W x=116 s=0 z=100 t=after

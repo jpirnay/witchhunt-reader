@@ -4,7 +4,11 @@
 
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings
 enum class CssTextAlign : uint8_t { Justify = 0, Left = 1, Center = 2, Right = 3, None = 4 };
-enum class CssUnit : uint8_t { Pixels = 0, Em = 1, Rem = 2, Points = 3, Percent = 4 };
+// Auto is not a length: it is the marker for an explicit `width: auto` / `height: auto`, which
+// must beat a length set earlier in the cascade rather than be ignored as unparseable. Only
+// imageWidth/imageHeight carry it (see CssStyle::hasImageWidth/hasImageHeight, which report the
+// property as unset when it is present); toPixels() never sees it.
+enum class CssUnit : uint8_t { Pixels = 0, Em = 1, Rem = 2, Points = 3, Percent = 4, Auto = 5 };
 
 // Represents a CSS length value with its unit, allowing deferred resolution to pixels
 struct CssLength {
@@ -221,11 +225,14 @@ struct CssStyle {
       paddingRight = base.paddingRight;
       defined.paddingRight = 1;
     }
-    if (base.hasImageHeight()) {
+    // Keyed on the defined bit, not has*(): an explicit `auto` has to travel up the cascade so it
+    // can clear a length a lower-priority rule set. has*() reports it as unset, which is what the
+    // layout wants but the wrong test here.
+    if (base.defined.imageHeight) {
       imageHeight = base.imageHeight;
       defined.imageHeight = 1;
     }
-    if (base.hasImageWidth()) {
+    if (base.defined.imageWidth) {
       imageWidth = base.imageWidth;
       defined.imageWidth = 1;
     }
@@ -280,8 +287,11 @@ struct CssStyle {
   [[nodiscard]] bool hasPaddingBottom() const { return defined.paddingBottom; }
   [[nodiscard]] bool hasPaddingLeft() const { return defined.paddingLeft; }
   [[nodiscard]] bool hasPaddingRight() const { return defined.paddingRight; }
-  [[nodiscard]] bool hasImageHeight() const { return defined.imageHeight; }
-  [[nodiscard]] bool hasImageWidth() const { return defined.imageWidth; }
+  // `auto` is recorded as a defined property (so it overrides a length from a lower-priority
+  // rule via applyOver) but reports as "no explicit size", which is what it means: derive the
+  // axis from the image's aspect ratio.
+  [[nodiscard]] bool hasImageHeight() const { return defined.imageHeight && imageHeight.unit != CssUnit::Auto; }
+  [[nodiscard]] bool hasImageWidth() const { return defined.imageWidth && imageWidth.unit != CssUnit::Auto; }
   [[nodiscard]] bool hasDisplay() const { return defined.display; }
   [[nodiscard]] bool hasVerticalAlign() const { return defined.verticalAlign; }
   [[nodiscard]] bool hasListStyleNone() const { return defined.listStyleNone; }

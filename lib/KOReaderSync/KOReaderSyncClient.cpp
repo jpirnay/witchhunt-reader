@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <CrossPointRoots.h>
+#include <HalClock.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <WiFi.h>
@@ -31,6 +32,9 @@ namespace {
 // ESP_ERR_HTTP base range. Only produced/consumed within this file.
 constexpr esp_err_t KO_ERR_CONNECT = static_cast<esp_err_t>(0x7001);  // connect/transport failure (retryable)
 constexpr esp_err_t KO_ERR_EAGAIN = static_cast<esp_err_t>(0x7002);   // timeout/truncated (retryable)
+
+// Mirrors the app's "skip HTTPS validation" setting; see setSkipTlsValidation().
+bool g_skipTlsValidation = false;
 
 bool g_keepSessionOpen = false;
 // Persistent wolfSSL HTTP client for a KOSync session. Its internal keep-alive
@@ -80,6 +84,31 @@ void rememberResponsePreview(const char* body) {
   g_lastResponsePreview[sizeof(g_lastResponsePreview) - 1] = '\0';
 }
 
+// Log exactly what the server answered with. KOSync-compatible servers disagree about how
+// they say "nothing stored" — bodiless, "{}", "[]", "null", a lone newline, a BOM — and the
+// printable preview cannot tell those apart, so short bodies are dumped as hex as well.
+// The elapsed time covers connect + handshake + request + body read, and is paired with
+// whether a handshake actually ran, because that is what separates "the server is slow" from
+// "we paid for a new TLS session". INFO level: one line per request, and it is the first
+// thing a sync bug report needs.
+void logResponseBody(const char* method, const std::string& url, int status, const std::string& body,
+                     uint32_t elapsedMs, bool didHandshake) {
+  std::string hex;
+  const size_t hexLen = std::min<size_t>(body.size(), 24);
+  hex.reserve(hexLen * 3);
+  for (size_t i = 0; i < hexLen; ++i) {
+    char byteText[4];
+    snprintf(byteText, sizeof(byteText), "%02X ", static_cast<unsigned char>(body[i]));
+    hex += byteText;
+  }
+  if (body.size() > hexLen) hex += "...";
+  if (hex.empty()) hex = "-";
+
+  LOG_INF("KOSync", "Response %s %s -> HTTP %d in %lu ms (%s) | len=%u | body=%s | hex=%s", method, url.c_str(), status,
+          static_cast<unsigned long>(elapsedMs), didHandshake ? "fresh handshake" : "session reused",
+          static_cast<unsigned>(body.size()), previewBody(body.c_str()).c_str(), hex.c_str());
+}
+
 // Reset the static diagnostic state at the start of each request and capture pre-flight
 // heap so failure reporting always reflects what was available when the request started.
 void beginRequest(const char* operation) {
@@ -94,7 +123,7 @@ void beginRequest(const char* operation) {
 
 // Skip a leading UTF-8 BOM (EF BB BF) and ASCII whitespace, returning a pointer
 // to the first content character.  Used by response-body checks that verify the
-// payload starts with '{' (JSON) rather than '<' (HTML captive-portal page).
+// payload opens a JSON document rather than '<' (HTML captive-portal page).
 const char* skipBomAndWhitespace(const char* p) {
   // UTF-8 BOM
   if (static_cast<unsigned char>(p[0]) == 0xEF && static_cast<unsigned char>(p[1]) == 0xBB &&
@@ -107,17 +136,33 @@ const char* skipBomAndWhitespace(const char* p) {
   return p;
 }
 
-// True when a body is present but is not a JSON object. That did not come from the KOSync
-// API — it is the signature of a captive portal or reverse proxy answering with its own
-// HTML — so the accompanying status code cannot be trusted to mean what it says.
+// A body carrying no content: absent, or nothing but a BOM and whitespace. Servers that
+// answer "nothing stored" with a bare 200 sometimes still emit a newline, which must read
+// the same as a truly empty body rather than as a JSON parse error.
+bool bodyIsEffectivelyEmpty(const std::string& body) {
+  return body.empty() || *skipBomAndWhitespace(body.c_str()) == '\0';
+}
+
+// True when a body is present but cannot be the JSON the KOSync API speaks. That did not come
+// from the API — it is the signature of a captive portal or reverse proxy answering with its
+// own HTML — so the accompanying status code cannot be trusted to mean what it says.
+//
+// Demanding a JSON *object* here was too strict: KOSync-compatible servers signal "nothing
+// stored for this document" with whatever their framework serializes an absent record as —
+// kosync.rustysoft.de answers HTTP 200 with the empty string "" (hex 22 22), others use "[]"
+// or a bare null — and every one of those was reported to the user as a captive portal.
+// Accept any JSON root an "empty record" can serialize to and let the endpoint decide what it
+// means; only a body that cannot be JSON at all ('<' for HTML, prose from a proxy) is rejected
+// here. Numbers and true/false stay rejected: no server encodes an absent record as either,
+// and letting them through would blunt the portal/proxy heuristic this check exists for.
 //
 // An empty body is deliberately NOT a portal signature: several endpoints legitimately
 // answer bodiless (204/205), and portals always serve a page. Callers that additionally
 // require a body decide that for themselves.
 bool bodyIsNotJson(const std::string& body) {
-  if (body.empty()) return false;
-  const char c = *skipBomAndWhitespace(body.c_str());
-  return c != '\0' && c != '{';
+  if (bodyIsEffectivelyEmpty(body)) return false;
+  const char* p = skipBomAndWhitespace(body.c_str());
+  return *p != '{' && *p != '[' && *p != '"' && strncmp(p, "null", 4) != 0;
 }
 
 // Screen a response body before its status code is interpreted. Returns true when the caller
@@ -259,10 +304,24 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   }
 
   // KOSync default host is https (TLS 1.3); custom local servers may be http.
-  // SecureHttpClient verifies https against the curated roots (verified-first with
-  // insecure fallback) and passes http through a plain WiFiClient. Tiny JSON
-  // payloads, so the small-buffer intent of the old 1 KB config is naturally met.
-  http->setCACert(CROSSPOINT_ROOTS_PEM);
+  // SecureHttpClient verifies https against the curated roots and passes http
+  // through a plain WiFiClient. Tiny JSON payloads, so the small-buffer intent
+  // of the old 1 KB config is naturally met.
+  //
+  // Fail closed unless the user has explicitly disabled validation: applyAuthHeaders()
+  // puts the sync account's password on the wire (Basic auth, plus the md5 in
+  // x-auth-key), so accepting an unverifiable peer would hand those credentials to
+  // whoever answered. No roots => SecureClient skips verification entirely, which is
+  // what a self-hosted server with a private CA needs.
+  http->setCACert(g_skipTlsValidation ? nullptr : CROSSPOINT_ROOTS_PEM);
+  http->setAllowInsecureFallback(false);
+  // Last-resort clock guard. The activities are expected to have run
+  // HalClock::ensureUsableForTls() once WiFi came up (they have SETTINGS and therefore the
+  // configured NTP server; this library does not). Asking here as well means a caller that
+  // forgets does not get the old failure mode — a trust store that refuses to load, reported as
+  // a bare "connect failed" with no verification error behind it. Chain, signature and hostname
+  // stay fully enforced either way; only the validity window is waived.
+  http->setAllowCertificateDateErrors(!HalClock::isPlausibleForTls());
   http->setTimeout(5000);
   http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
   http->clearHeaders();
@@ -284,7 +343,9 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   const size_t troughBefore = http->lastHandshakeMinLargest();
   const size_t preflightLargest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
 
+  const uint32_t requestStartMs = millis();
   const int rc = http->request(method, url, body);
+  const uint32_t elapsedMs = millis() - requestStartMs;
 
   const size_t troughLargest = http->lastHandshakeMinLargest();
   const bool didHandshake = (troughLargest != troughBefore) && (troughLargest != SIZE_MAX);
@@ -300,8 +361,13 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   if (rc >= 100) {  // got an HTTP status line
     KOReaderSyncClient::lastHttpCode = rc;
     outBody = http->getBody();
+    logResponseBody(method, url, rc, outBody, elapsedMs, didHandshake);
     return ESP_OK;
   }
+  // Time a failed request too: a 5000 ms elapsed against the 5000 ms timeout says the peer
+  // went quiet, where a sub-second failure is a refused connect or a TLS rejection.
+  LOG_ERR("KOSync", "Request %s %s failed after %lu ms (rc=%d, %s)", method, url.c_str(),
+          static_cast<unsigned long>(elapsedMs), rc, didHandshake ? "fresh handshake" : "no handshake");
   // Map SecureHttpClient transport errors to the esp_err_t codes the callers
   // already branch on for retry decisions.
   switch (rc) {
@@ -324,6 +390,8 @@ static inline bool hasCredentials() {
   LOG_INF("KOSync", "No credentials configured");
   return false;
 }
+
+void KOReaderSyncClient::setSkipTlsValidation(bool skip) { g_skipTlsValidation = skip; }
 
 void KOReaderSyncClient::beginPersistentSession() {
   if (g_keepSessionOpen) {
@@ -423,15 +491,11 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   // portal's 401 + HTML surface as AUTH_FAILED, sending the user off to reset credentials
   // that were fine.
   if (shouldRejectBody(httpCode, responseBody)) return INVALID_RESPONSE;
-  if (httpCode >= 200 && httpCode < 300) {
-    // 204/205 are legitimately bodiless; every other 2xx must carry the JSON object the
-    // reference server sends on 200.
-    if (httpCode != 204 && httpCode != 205 && responseBody.empty()) {
-      g_lastInvalidBody = true;
-      return INVALID_RESPONSE;
-    }
-    return OK;
-  }
+  // A 2xx that survived the body screen is a successful authentication, bodiless or not.
+  // Requiring a body on anything but 204/205 locked out servers that acknowledge auth with a
+  // bare 200 — and reported them as a captive portal, sending users to reset working
+  // credentials. A portal cannot reach here: it serves a page, which the screen above rejects.
+  if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
   return SERVER_ERROR;
 }
@@ -504,7 +568,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     // Spring-based KOSync implementations answer 204 where the reference server
     // answers 200 with an empty object. Both belong on the same graceful
     // no-remote-progress path as 404, not in SERVER_ERROR.
-    if (responseBody.empty()) {
+    if (bodyIsEffectivelyEmpty(responseBody)) {
       LOG_INF("KOSync", "HTTP %d with no body — treating as not found", httpCode);
       return NOT_FOUND;
     }
@@ -517,10 +581,12 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
       return JSON_ERROR;
     }
 
-    // kosync convention: no stored progress for the document is signalled by
-    // HTTP 200 with an empty body ("{}"), not by 404. Detect that here so the
-    // caller doesn't apply a zeroed-out position as if it were real progress.
-    if (doc["progress"].isNull()) {
+    // kosync convention: no stored progress for the document is signalled by a 2xx
+    // carrying an empty payload, not by 404. What "empty" serializes to varies by
+    // implementation — "{}", "[]", "\"\"", or a bare null — so anything that is not an
+    // object carrying a "progress" key means no record. Detect that so the caller doesn't
+    // apply a zeroed-out position as if it were real progress.
+    if (!doc.is<JsonObject>() || doc["progress"].isNull()) {
       std::string jsonDump;
       serializeJson(doc, jsonDump);
       LOG_INF("KOSync", "Empty progress payload — treating as not found | payload=%s", jsonDump.c_str());

@@ -49,7 +49,10 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
           FsFile file;
           if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
             Bitmap bitmap(file);
-            if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+            // Never draw the no-cover marker: scaling a 1x1 BMP into the slot paints a solid block.
+            // Falling through to the existing no-cover branch shows the theme's own tile instead.
+            if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+                !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
               const float bitmapHeight = static_cast<float>(bitmap.getHeight());
               const float bitmapWidth = static_cast<float>(bitmap.getWidth());
               const float ratio = bitmapWidth / bitmapHeight;

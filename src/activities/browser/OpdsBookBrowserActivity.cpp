@@ -327,7 +327,7 @@ void OpdsBookBrowserActivity::loop() {
 
   if (state == BrowserState::BOOK_DETAIL) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
-        mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+        mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
       state = BrowserState::BROWSING;
       requestUpdate();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -368,9 +368,9 @@ void OpdsBookBrowserActivity::loop() {
       return;
     }
 
-    buttonNavigator.onNextList({MappedInputManager::Button::Down}, formatSelectorIndex,
+    buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), formatSelectorIndex,
                                static_cast<int>(entry.acquisitionLinks.size()), [this] { requestUpdate(); });
-    buttonNavigator.onPreviousList({MappedInputManager::Button::Up}, formatSelectorIndex,
+    buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), formatSelectorIndex,
                                    static_cast<int>(entry.acquisitionLinks.size()), [this] { requestUpdate(); });
     return;
   }
@@ -383,9 +383,9 @@ void OpdsBookBrowserActivity::loop() {
       }
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       navigateBack();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
       if (!searchTemplate.empty()) launchSearch();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
       if (!entryOffsets.empty()) {
         const auto entry = getEntry(selectorIndex);
         if (entry.type == OpdsEntryType::BOOK) {
@@ -400,10 +400,10 @@ void OpdsBookBrowserActivity::loop() {
     }
 
     if (!entryOffsets.empty()) {
-      // Left/Right are reserved for Back and Search, so restrict to Up/Down only.
-      buttonNavigator.onNextList({MappedInputManager::Button::Down}, selectorIndex,
+      // Logical Left/Right are reserved for Search and Info, so restrict to logical Up/Down only.
+      buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectorIndex,
                                  static_cast<int>(entryOffsets.size()), [this] { requestUpdate(); });
-      buttonNavigator.onPreviousList({MappedInputManager::Button::Up}, selectorIndex,
+      buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectorIndex,
                                      static_cast<int>(entryOffsets.size()), [this] { requestUpdate(); });
     }
   }
@@ -412,7 +412,9 @@ void OpdsBookBrowserActivity::loop() {
 void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  // Only the browsing list labels its side buttons (see below); every other state uses Back and
+  // Confirm alone, so it keeps the full width.
+  const Rect contentRect = UITheme::getContentRect(renderer, true, state == BrowserState::BROWSING);
   const int midY = contentRect.y + contentRect.height / 2;
 
   // Show server name in header if available, otherwise generic title
@@ -567,9 +569,13 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   const bool selectedIsBook = !entryOffsets.empty() && getEntry(selectorIndex).type == OpdsEntryType::BOOK;
   const char* confirmLabel = selectedIsBook ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
   const char* searchLabel = !searchTemplate.empty() ? tr(STR_SEARCH) : tr(STR_DIR_UP);
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), confirmLabel, searchLabel, selectedIsBook ? tr(STR_INFO) : tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Search/Info ride logical Left/Right, the step rides logical Up/Down: rotating the device moves
+  // each pair between the front strip and the side buttons, and the hints follow them there.
+  const auto hints =
+      mappedInput.mapHints(tr(STR_BACK), confirmLabel, searchLabel, selectedIsBook ? tr(STR_INFO) : tr(STR_DIR_DOWN),
+                           tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   if (entryOffsets.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, midY, tr(STR_NO_ENTRIES));

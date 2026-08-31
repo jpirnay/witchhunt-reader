@@ -28,8 +28,10 @@ void MenuListActivity::onEnter() {
 
 void MenuListActivity::handleNavigation() {
   const int count = static_cast<int>(menuItems.size());
-  buttonNavigator.onNextList(selectedIndex, count, [this] { requestUpdate(); });
-  buttonNavigator.onPreviousList(selectedIndex, count, [this] { requestUpdate(); });
+  // Up/Down step, Left/Right page by whatever the last render fit on screen. A menu shorter than
+  // one page pages by a single item, so short menus are unchanged.
+  buttonNavigator.onNextList(selectedIndex, count, [this] { requestUpdate(); }, listView.visibleRows);
+  buttonNavigator.onPreviousList(selectedIndex, count, [this] { requestUpdate(); }, listView.visibleRows);
 }
 
 void MenuListActivity::toggleCurrentItem() {
@@ -57,7 +59,7 @@ void MenuListActivity::drawMenuList(const Rect& rect) {
   const int count = static_cast<int>(menuItems.size());
   GUI.drawList(
       renderer, rect, count, selectedIndex, [this](int index) { return menuItems[index].getTitle(); }, nullptr, nullptr,
-      [this](int index) { return getItemValueString(index); }, true);
+      [this](int index) { return getItemValueString(index); }, true, &listView);
 }
 
 void MenuListActivity::prepareSubmenus() { SettingInfo::prepareSubmenus(menuItems, submenuData); }

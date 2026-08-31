@@ -337,26 +337,28 @@ void FileBrowserActivity::loop() {
       return;
     }
 
-    if (ev.button == MappedInputManager::Button::Left && ev.type == ButtonEventManager::PressType::Long) {
-      if (entryCount() == 0) {
-        return;
-      }
-
-      const std::string entry = entryName(selectorIndex);
-      if (entry.empty()) return;
-      const bool isDirectory = (entry.back() == '/');
-      std::string bareName = entry;
-      if (isDirectory) bareName.pop_back();
-
-      std::string cleanBase = basepath;
-      if (cleanBase.back() != '/') cleanBase += "/";
-      const std::string fullPath = cleanBase + bareName;
-
-      doRemove(fullPath, entry, isDirectory);
+    // Logical Left/Right page through the list, one screenful per press — the same thing they do in
+    // the chapter selector, and the reason the context menu moved to a long press on Right. Paging
+    // is driven from the event stream rather than ButtonNavigator: the navigator acts on the press
+    // edge, which would page on the way into every long press.
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Short && listPages()) {
+      pageSelection(1);
       return;
     }
 
-    if (ev.button == MappedInputManager::Button::Right && ev.type == ButtonEventManager::PressType::Short) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Short && listPages()) {
+      pageSelection(-1);
+      return;
+    }
+
+    // Options: a long press on the page-forward button, and a short press when the folder fits on
+    // one screen and there is nothing to page. Either way the button hint says which one it is —
+    // and it rides the same logical button, so rotating the device never separates the two.
+    const bool optionsPress = (ev.type == ButtonEventManager::PressType::Long) ||
+                              (ev.type == ButtonEventManager::PressType::Short && !listPages());
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) && optionsPress) {
       // Open the context menu for any selection. openContextMenu() shows
       // file-specific actions for supported files and the browser display
       // options (sort + visibility) for directories / unsupported types.
@@ -365,11 +367,54 @@ void FileBrowserActivity::loop() {
     }
   }
 
-  // Up/Down side buttons navigate the list (Left/Right are reserved for Back/Info actions)
+  // Logical Up/Down step through the list; logical Left/Right page (handled above).
   const int listSize = static_cast<int>(entryCount());
-  buttonNavigator.onNextList({MappedInputManager::Button::Down}, selectorIndex, listSize, [this] { requestUpdate(); });
-  buttonNavigator.onPreviousList({MappedInputManager::Button::Up}, selectorIndex, listSize,
-                                 [this] { requestUpdate(); });
+  const int indexBeforeNav = selectorIndex;
+  buttonNavigator.onNextList(
+      ButtonNavigator::getStepNextButtons(), selectorIndex, listSize, [this] { requestUpdate(); },
+      listView.visibleRows);
+  buttonNavigator.onPreviousList(
+      ButtonNavigator::getStepPreviousButtons(), selectorIndex, listSize, [this] { requestUpdate(); },
+      listView.visibleRows);
+  // The navigator's own jumps — double-tap for a page, hold for the far end — move the selection
+  // without touching the window, and the layout cannot tell a jump from a step (see
+  // pageSelection). Anchoring on anything bigger than a pair of steps gives those jumps a screen
+  // of new names too, instead of scrolling by one row. A pair, not a single step: two taps that
+  // land in one loop tick are two steps, and stepping should still scroll row by row.
+  if (std::abs(selectorIndex - indexBeforeNav) > 2) {
+    listView.firstVisible = selectorIndex;
+  }
+}
+
+// Rows one Left/Right press moves. drawList reports what the last render fit — which for wrapped
+// rows is not a constant — and before the first render there is nothing to report yet.
+int FileBrowserActivity::listPageSize() const {
+  return listView.visibleRows > 0 ? listView.visibleRows : ButtonNavigator::defaultListPageSize;
+}
+
+// True when the folder is longer than one screen. When it is not, paging has nothing to do, so
+// Right keeps its old short-press meaning (Options) instead of quietly stepping the selection.
+bool FileBrowserActivity::listPages() const { return static_cast<int>(entryCount()) > listPageSize(); }
+
+// Moves the selection a screenful, clamped at both ends.
+//
+// Deliberately relative, not ButtonNavigator::nextPageIndex: that snaps to index-aligned page
+// boundaries, which is right for the fixed-height lists it serves but wrong here. Wrapped names
+// make rows different heights, so page boundaries are not multiples of anything — snapping from
+// index 39 with 8 rows on screen would land on 40 and look like the button moved one row.
+//
+// Moving the window too, rather than only the selection, is what makes it a page turn. The layout
+// keeps the selection on screen but cannot tell a page jump from a step: landing one row past the
+// last visible row looks identical either way, so it would scroll by one and put the selection on
+// the bottom row — a "page" showing a single row the reader had not already seen. Anchoring the
+// window to the new selection puts a full screen of new names above it instead.
+void FileBrowserActivity::pageSelection(const int direction) {
+  const int total = static_cast<int>(entryCount());
+  if (total <= 0) return;
+  const int target = selectorIndex + direction * listPageSize();
+  selectorIndex = std::max(0, std::min(total - 1, target));
+  listView.firstVisible = selectorIndex;
+  requestUpdate();
 }
 
 std::string getFileName(std::string filename) {
@@ -406,14 +451,15 @@ void FileBrowserActivity::render(RenderLock&&) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else {
+    // Wrap long names over up to three lines. A folder of one series is otherwise a column of
+    // identical-looking rows: "Lynn Messina - Beatrice Hyde-Clare Mysteries 0x - ..." truncates to
+    // the same visible text for every book in it, and the part that tells them apart is the part
+    // that gets cut. Rows only grow when a name needs it, so short names cost nothing.
     GUI.drawList(
         renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(entryCount()),
         selectorIndex, [this](int index) { return getFileName(entryName(index)); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(entryName(index)); });
+        [this](int index) { return UITheme::getFileIcon(entryName(index)); }, nullptr, false, &listView);
   }
-
-  // Side buttons (Up/Down) navigate; show their hints on the side
-  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
   // Front buttons
   const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
@@ -424,8 +470,19 @@ void FileBrowserActivity::render(RenderLock&&) {
   // offers the browser display options (sort + visibility); supported files get
   // extra file-specific actions appended. So the hint shows for files and dirs alike.
   const bool showOptionsHint = mode == Mode::Books && hasEntries;
-  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, "", showOptionsHint ? tr(STR_OPTIONS) : "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // In a folder worth paging through, Left/Right are the page buttons and the hints say so —
+  // Options is then the long press on Right. In a folder that fits on one screen there is nothing
+  // to page, so the strip looks exactly as it always did.
+  const bool pages = listPages();
+  const char* prevLabel = pages ? tr(STR_LIST_PAGE_PREV) : "";
+  const char* nextLabel = pages ? tr(STR_LIST_PAGE_NEXT) : (showOptionsHint ? tr(STR_OPTIONS) : "");
+  // Paging is bound to logical Left/Right and stepping to logical Up/Down, so which physical pair
+  // carries which — and therefore which hint strip each label belongs on — is the orientation's
+  // business, not this screen's.
+  const auto hints =
+      mappedInput.mapHints(backLabel, confirmLabel, prevLabel, nextLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

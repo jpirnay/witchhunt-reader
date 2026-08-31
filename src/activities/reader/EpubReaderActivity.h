@@ -426,6 +426,9 @@ class EpubReaderActivity final : public Activity {
   //              next section in the lookahead window (or idles if the window is exhausted)
   enum class BackgroundBuildState : uint8_t { Probe, WaitHeap, Building, Settled };
   BackgroundBuildState backgroundBuildState_ = BackgroundBuildState::Probe;
+  // Set between suspendBackgroundWork() and resumeBackgroundWork(): no look-ahead
+  // build is probed, armed or stepped, and no page is pre-rendered.
+  bool backgroundWorkSuspended_ = false;
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
   // When the spine the user just entered has no cache, buildSection() starts an in-place
   // incremental build owned by `section` and hands the slicing to stepCurrentSectionBuild()
@@ -510,6 +513,13 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool finishedBookActivityStarted_ = false;
+  // Armed by renderFinishedBookPass() (render task), consumed by loop() (loop task). The launch
+  // itself must not run on the render task: it ends in pushActivity(), which writes
+  // ActivityManager's pendingActivity/pendingAction — and loop() reads and std::move()s those
+  // with no lock at all, because the invariant they rely on is "only the loop task touches
+  // them", not "the render lock covers them". A unique_ptr assigned from one task while another
+  // moves it is a double-free waiting to happen.
+  bool finishedBookLaunchPending_ = false;
   // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
   // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
   int finishedBookSyncSpineIndex_ = 0;
@@ -540,9 +550,18 @@ class EpubReaderActivity final : public Activity {
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
+  // Where a footnote jump came FROM, so page-back returns to the caller instead of to the
+  // previous page (objective: a note is a detour, not a place in the reading order). Anchored on
+  // the caller's paragraph rather than its page number: any repagination between the jump and the
+  // return — a font change made from inside the note, a background rebuild — moves page numbers,
+  // and landing a page or two off is exactly the disorientation the return is meant to prevent.
+  // pageNumber/pageCount stay as the proportional fallback for a spine with no paragraph LUT.
   struct SavedPosition {
-    int spineIndex;
-    int pageNumber;
+    int spineIndex = 0;
+    int pageNumber = 0;
+    int pageCount = 0;
+    uint16_t paragraphIndex = 0;
+    bool hasParagraph = false;
   };
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
@@ -556,33 +575,21 @@ class EpubReaderActivity final : public Activity {
   // retrying once before reporting failure. Shared by the post-build and opportunistic
   // recovery paths.
   bool reallocSecondaryEvictingCaches();
-  // One-time foreground gather of the book-level footnote preview cache (footnotes.bin),
-  // with a "Gathering footnotes" popup. No-op when previews are effectively off or the
-  // cache already exists. Returns true when the cache is usable.
-  bool ensureFootnotePreviewCache();
-  // Polled between build slices. If `target`'s build has seen a footnote and previews are wanted
-  // but not yet gathered, gathers them and returns true — meaning the caller must discard the
-  // section, whose cache variant has just changed from previews-OFF to previews-ON.
-  bool gatherFootnotesIfBuildNeedsThem(const Section* target);
-  // True when currentPageFootnotes holds at least one link the gatherer would collect. Gates
-  // the cached-section fallback trigger; see the definition for why it is shape-only.
-  bool pageHasFootnoteShapedLink() const;
-  // True once footnotes.bin is known to exist for this book (primed in onEnter, set by
-  // ensureFootnotePreviewCache). Feeds makeSectionBuildParams(), so it selects the section
-  // cache VARIANT: sections built before the gather are keyed previews-OFF and are rebuilt
-  // once it flips. Background-B is no longer gated on it.
-  bool footnotePreviewCacheReady_ = false;
-  // One gather attempt per reader session. Without this a book whose gather fails would retry
-  // the whole-book scan on every page turn that shows a footnote.
-  bool footnotePreviewGatherAttempted_ = false;
+  // Note text for each of currentPageFootnotes, for the footnote list activity (empty strings
+  // where the store has no entry). A pure read: note text is resolved by the section build that
+  // needs it, never by opening the list.
+  std::vector<std::string> footnotePreviewsForCurrentPage();
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.
   RenderLayout computeRenderLayout() const;
   // Select which pass this render() invocation should run, from pending flags + reader state.
   RenderPass classifyRenderPass() const;
-  // FinishedBook pass: transition to the finished-book flow. Consumes the lock.
-  void renderFinishedBookPass(RenderLock& lock, int spineCount);
+  // FinishedBook pass: arm the transition to the finished-book flow. Runs under the render
+  // lock and keeps it; the launch itself is deferred to the loop task (see the pair below).
+  void renderFinishedBookPass(int spineCount);
+  // Loop-task half of renderFinishedBookPass(): performs the launch it armed.
+  void serviceFinishedBookLaunch();
   // PreRender pass (Background A): render the next page's content into the framebuffer only.
   void renderPreRenderPass(const RenderLayout& layout);
   // BufferDisplay pass: framebuffer already holds the next page; add status bar + flush.
@@ -741,6 +748,29 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
+
+  // Open word selection over the current page, or the dictionary picker when no
+  // dictionary is configured. Both suspend background work for their duration.
+  void openDictionary();
+
+  // Quiesce background work and hold it quiesced until resumeBackgroundWork(),
+  // so a lookup does not compete with the look-ahead for a heap that is already
+  // fragmented by the time anyone reaches for a dictionary.
+  //
+  // Releases the lent 48 KB region and the build arena inside it, aborts a
+  // still-live look-ahead build, and discards the pre-rendered next page. Then
+  // latches, so nothing re-arms while the overlay is up.
+  //
+  // Deliberately does NOT discard a look-ahead build that already finished.
+  // Section building is designed to resume from previous work: an aborted build
+  // keeps its completed extraction so the retry skips the inflate, and a
+  // finished build's real product is the cache file on the card, not the
+  // in-memory Section (which is a page-offset LUT worth a few hundred bytes).
+  // The look-ahead's own Probe state makes the point -- it drops the Section as
+  // soon as loadSectionFile() finds the file. Throwing it away here would free
+  // nothing worth having and cost the next visit a needless re-open.
+  void suspendBackgroundWork();
+  void resumeBackgroundWork();
   void launchKOReaderSync(SyncLaunchMode mode = SyncLaunchMode::COMPARE,
                           const SyncPositionOverride* positionOverride = nullptr,
                           const SyncPostAction& postAction = {});
@@ -823,6 +853,28 @@ class EpubReaderActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&& lock) override;
+
+  // Hands Background-B's borrow back before a child activity (the reader menu and everything
+  // reachable from it) is pushed on top.
+  //
+  // While a child is on top the stack keeps this object alive but stops calling loop(), so B
+  // makes no progress — yet it still holds the display's secondary framebuffer as its build
+  // arena. With no differential baseline the driver promotes every FAST refresh to HALF
+  // (FreeInkDisplay::resolveRefreshMode), so each of the child's redraws costs ~1700 ms instead
+  // of ~500. Measured X4 2026-08-19: four consecutive menu redraws at 1755 ms each, back to
+  // 476 ms on the first refresh after the borrow was returned.
+  //
+  // Nothing is lost. This is the same endBackgroundBorrow() the first render after the overlay
+  // closes would call anyway (via recoverSecondaryBufferIfNeeded), only earlier — and it was
+  // frozen for the whole overlay regardless. A build still in flight is discarded and re-probed
+  // exactly as it would have been; a COMPLETED one survives for buildSection() to adopt, which
+  // is why this is not resetBackgroundBuild().
+  //
+  // Background-C is deliberately left alone: it builds the section the reader is waiting on, the
+  // buffer is released (not borrowed) to give that build headroom, and reclaiming it here would
+  // starve a build the user is actively waiting for. That case still degrades refreshes, and the
+  // DISP log now says so out loud.
+  void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
   bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
   // Hold full speed while a section build is in flight. A build only ever runs during reader

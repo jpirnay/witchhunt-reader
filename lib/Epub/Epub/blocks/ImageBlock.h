@@ -1,4 +1,5 @@
 #pragma once
+#include <AdaptiveTone.h>
 #include <HalStorage.h>
 #include <stdint.h>
 
@@ -23,8 +24,11 @@ static constexpr int32_t LARGE_IMAGE_PIXEL_THRESHOLD = 800 * 600;
 // see the cache-path helpers in ImageBlock.cpp. 0 means "no filter" and keeps the
 // historical unsuffixed cache names.
 namespace image_tone {
-void setFilterId(uint8_t filterId);
+// filterId and mode are set together so they cannot drift apart: the id keys the cache,
+// the mode decides which curve those cached pixels were levelled with.
+void setFilter(uint8_t filterId, adaptive_tone::Mode mode);
 uint8_t getFilterId();
+adaptive_tone::Mode getMode();
 }  // namespace image_tone
 
 // Process-wide scratch arena for image decoding, installed for the duration of a multi-image

@@ -28,7 +28,9 @@ std::optional<std::string> normalizeUrl(const std::string& url) {
     return std::nullopt;
   }
 
-  std::string normalized = url;
+  // Repair a mistyped scheme before the check below: "https:/host" has no "://",
+  // so it would otherwise be treated as scheme-less and become "https://https:/host".
+  std::string normalized = UrlUtils::repairSchemeSeparator(url);
   if (normalized.find("://") == std::string::npos) {
     normalized = "https://" + normalized;
   }

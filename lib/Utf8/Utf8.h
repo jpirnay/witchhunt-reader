@@ -23,6 +23,37 @@ inline bool utf8IsCombiningMark(const uint32_t cp) {
          || (cp >= 0xFE20 && cp <= 0xFE2F);  // Combining Half Marks
 }
 
+// Returns true for Unicode Default_Ignorable_Code_Point (BMP): formatting controls that carry
+// no text and must never occupy a cell, produce ink, or join a word.
+//
+// This matters far beyond tidiness. Books watermarked with zero-width steganography encode a
+// per-copy fingerprint as long runs of U+200B/U+200C/U+200D between words; one measured EPUB
+// carried 3,263,520 of them, 39% of its total chapter bytes, in runs of ~1400 with no
+// intervening space. Kept in the text they are laid out as ordinary characters: they inflate
+// the parse, they defeat line breaking (the longest resulting single unbreakable "word" in that
+// book was 3,217 characters), and they draw whatever the font maps them to.
+//
+// U+00AD SOFT HYPHEN is deliberately excluded: it is Default_Ignorable, but this firmware breaks
+// lines on it and must draw a hyphen when it does.
+inline bool utf8IsDefaultIgnorable(const uint32_t cp) {
+  // Ordered by how often each range is actually hit, cheapest common case first.
+  if (cp < 0x034F) return false;
+  return (cp >= 0x200B && cp <= 0x200F)      // ZWSP, ZWNJ, ZWJ, LRM, RLM
+         || (cp >= 0x202A && cp <= 0x202E)   // bidi embedding / override
+         || (cp >= 0x2060 && cp <= 0x2065)   // word joiner, invisible operators
+         || (cp >= 0x206A && cp <= 0x206F)   // deprecated format characters
+         || cp == 0xFEFF                     // zero-width no-break space / BOM
+         || (cp >= 0xFE00 && cp <= 0xFE0F)   // variation selectors 1-16
+         || cp == 0x034F                     // combining grapheme joiner
+         || cp == 0x061C                     // Arabic letter mark
+         || (cp >= 0x115F && cp <= 0x1160)   // Hangul choseong/jungseong fillers
+         || (cp >= 0x17B4 && cp <= 0x17B5)   // Khmer inherent vowels
+         || (cp >= 0x180B && cp <= 0x180F)   // Mongolian variation selectors + FVS
+         || cp == 0x3164                     // Hangul filler
+         || cp == 0xFFA0                     // halfwidth Hangul filler
+         || (cp >= 0xFFF0 && cp <= 0xFFF8);  // unassigned, reserved ignorable
+}
+
 // Returns true for any combining mark relevant to Vietnamese NFC composition,
 // including U+031B (COMBINING HORN) which falls outside the standard mark range.
 inline bool utf8IsVietnameseCombining(const uint32_t cp) { return utf8IsCombiningMark(cp) || cp == 0x031B; }

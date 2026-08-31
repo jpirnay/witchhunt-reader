@@ -44,6 +44,8 @@ class SecureHttpClient {
   // --- configuration (before request) ---
   void setCACert(const char* rootCA) { _rootCA = rootCA; }
   void setAllowInsecureFallback(bool allow) { _allowInsecureFallback = allow; }
+  // See SecureClient::setAllowCertificateDateErrors().
+  void setAllowCertificateDateErrors(bool allow) { _allowCertificateDateErrors = allow; }
   void setTimeout(uint32_t ms) { _timeoutMs = ms; }
   void setUserAgent(const std::string& ua) { _userAgent = ua; }
   void setBasicAuth(const std::string& user, const std::string& pass) {
@@ -105,6 +107,35 @@ class SecureHttpClient {
   static bool parseUrl(const std::string& in, Url& out);
   static std::string resolveRedirect(const Url& base, const std::string& location);
 
+  // Per-request trace for the half of a request that was never instrumented.
+  //
+  // SecureClient breaks the handshake down to the certificate; everything after it was a single
+  // elapsed number, so a 5 s ERR_TIMEOUT could not say whether the request left the device,
+  // whether bytes came back and we failed to read them, or whether the peer simply never
+  // answered. Each field exists to separate one of those:
+  //   connectMs          reaching a usable socket, including a handshake on a fresh connection
+  //   sendMs/sendBytes   the request actually went out, and how long the socket took to take it
+  //   firstByteMs        measured from the END of the send, so it is the peer's silence and not
+  //                      our own handshake. 0 means NOTHING ever arrived
+  //   readPolls          2 ms idle polls spent waiting; high with firstByteMs 0 is a dead wait
+  //   headerBytes        bytes that did arrive, so a partial response is distinguishable
+  // Paired with rssi and the modem-sleep mode, which is the other thing that was reasoned about
+  // rather than measured.
+  struct RequestTrace {
+    uint32_t startMs = 0;
+    uint32_t connectMs = 0;
+    uint32_t sendDoneMs = 0;
+    uint32_t sendMs = 0;
+    size_t sendBytes = 0;
+    uint32_t firstByteMs = 0;
+    uint32_t readPolls = 0;
+    size_t headerBytes = 0;
+    uint8_t attempts = 0;
+    bool reusedConnection = false;
+  };
+  RequestTrace _trace;
+  void logRequestTrace(const char* method, const Url& u, int rc) const;
+
   // Response status line + header fields that drive body framing and reuse.
   struct ResponseMeta {
     int status = 0;
@@ -146,6 +177,7 @@ class SecureHttpClient {
   // config
   const char* _rootCA = nullptr;
   bool _allowInsecureFallback = true;
+  bool _allowCertificateDateErrors = false;
   uint32_t _timeoutMs = 15000;
   std::string _userAgent = "CrossPoint-ESP32";
   std::string _user;

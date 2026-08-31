@@ -1730,312 +1730,312 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
   LINE y=299 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=CAVALIER.
   LINE y=327 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=18 s=1 z=100 t=AW
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=AWAY,
-   W x=152 s=0 z=100 t=AWARD,
-   W x=213 s=0 z=100 t=AWNING,
-   W x=274 s=0 z=100 t=DRAWN,
-   W x=334 s=0 z=100 t=BRAWL,
-   W x=397 s=0 z=100 t=SHAWL.
+   W x=0 s=1 z=100 t=AW
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=AWAY,
+   W x=134 s=0 z=100 t=AWARD,
+   W x=195 s=0 z=100 t=AWNING,
+   W x=256 s=0 z=100 t=DRAWN,
+   W x=316 s=0 z=100 t=BRAWL,
+   W x=379 s=0 z=100 t=SHAWL.
   LINE y=351 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=1 z=100 t=AY
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=As
-   W x=81 s=0 z=100 t=in
-   W x=104 s=0 z=100 t=AYAH,
-   W x=153 s=0 z=100 t=LAYER,
-   W x=221 s=0 z=100 t=PLAYER,
-   W x=298 s=0 z=100 t=PRAYER,
-   W x=374 s=0 z=100 t=BAYONET.
+   W x=0 s=1 z=100 t=AY
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=As
+   W x=63 s=0 z=100 t=in
+   W x=86 s=0 z=100 t=AYAH,
+   W x=135 s=0 z=100 t=LAYER,
+   W x=203 s=0 z=100 t=PLAYER,
+   W x=280 s=0 z=100 t=PRAYER,
+   W x=356 s=0 z=100 t=BAYONET.
   LINE y=375 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=1 z=100 t=AT
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=ATLAS,
-   W x=159 s=0 z=100 t=ATTIC,
-   W x=212 s=0 z=100 t=LATERAL,
-   W x=295 s=0 z=100 t=WATER,
-   W x=355 s=0 z=100 t=PLATTER.
+   W x=0 s=1 z=100 t=AT
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=ATLAS,
+   W x=141 s=0 z=100 t=ATTIC,
+   W x=194 s=0 z=100 t=LATERAL,
+   W x=277 s=0 z=100 t=WATER,
+   W x=337 s=0 z=100 t=PLATTER.
   LINE y=399 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=AC
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=ACORN,
-   W x=161 s=0 z=100 t=ACCURATE,
-   W x=247 s=0 z=100 t=BACON,
-   W x=303 s=0 z=100 t=PLACATE.
+   W x=0 s=1 z=100 t=AC
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=ACORN,
+   W x=143 s=0 z=100 t=ACCURATE,
+   W x=229 s=0 z=100 t=BACON,
+   W x=285 s=0 z=100 t=PLACATE.
   LINE y=423 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=AG
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=AGAIN,
-   W x=153 s=0 z=100 t=AGATE,
-   W x=208 s=0 z=100 t=DRAGON,
-   W x=274 s=0 z=100 t=STAGGER.
+   W x=0 s=1 z=100 t=AG
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=AGAIN,
+   W x=135 s=0 z=100 t=AGATE,
+   W x=190 s=0 z=100 t=DRAGON,
+   W x=256 s=0 z=100 t=STAGGER.
   LINE y=447 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=AO
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=KAOLIN,
-   W x=170 s=0 z=100 t=PHARAOH,
-   W x=244 s=0 z=100 t=EXTRAORDINARY.
+   W x=0 s=1 z=100 t=AO
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=KAOLIN,
+   W x=152 s=0 z=100 t=PHARAOH,
+   W x=226 s=0 z=100 t=EXTRAORDINARY.
   LINE y=471 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=AQ
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=AQUA,
-   W x=150 s=0 z=100 t=AQUIFER,
-   W x=227 s=0 z=100 t=AQUILINE,
-   W x=315 s=0 z=100 t=OPAQUE.
+   W x=0 s=1 z=100 t=AQ
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=AQUA,
+   W x=132 s=0 z=100 t=AQUIFER,
+   W x=209 s=0 z=100 t=AQUILINE,
+   W x=297 s=0 z=100 t=OPAQUE.
   LINE y=495 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=AU
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=AUTHOR,
-   W x=162 s=0 z=100 t=AUTUMN,
-   W x=217 s=0 z=100 t=HAUL,
-   W x=266 s=0 z=100 t=VAULT.
+   W x=0 s=1 z=100 t=AU
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=AUTHOR,
+   W x=144 s=0 z=100 t=AUTUMN,
+   W x=199 s=0 z=100 t=HAUL,
+   W x=248 s=0 z=100 t=VAULT.
   LINE y=519 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=FA
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=FACE,
-   W x=149 s=0 z=100 t=FACTOR,
-   W x=212 s=0 z=100 t=SOFA,
-   W x=260 s=0 z=100 t=AFFAIR.
+   W x=0 s=1 z=100 t=FA
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=FACE,
+   W x=131 s=0 z=100 t=FACTOR,
+   W x=194 s=0 z=100 t=SOFA,
+   W x=242 s=0 z=100 t=AFFAIR.
   LINE y=543 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=FO
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=FOLLOW,
-   W x=168 s=0 z=100 t=FORCE,
-   W x=229 s=0 z=100 t=COMFORT,
-   W x=298 s=0 z=100 t=BEFORE.
+   W x=0 s=1 z=100 t=FO
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=FOLLOW,
+   W x=150 s=0 z=100 t=FORCE,
+   W x=211 s=0 z=100 t=COMFORT,
+   W x=280 s=0 z=100 t=BEFORE.
   LINE y=567 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Fe
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=February,
-   W x=182 s=0 z=100 t=feline,
-   W x=250 s=0 z=100 t=festival.
+   W x=0 s=1 z=100 t=Fe
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=February,
+   W x=164 s=0 z=100 t=feline,
+   W x=232 s=0 z=100 t=festival.
   LINE y=591 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Fo
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=Forsyth,
-   W x=182 s=0 z=100 t=forever,
-   W x=264 s=0 z=100 t=fortune.
+   W x=0 s=1 z=100 t=Fo
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=Forsyth,
+   W x=164 s=0 z=100 t=forever,
+   W x=246 s=0 z=100 t=fortune.
   LINE y=615 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Fr
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=France,
-   W x=166 s=0 z=100 t=fragile,
-   W x=245 s=0 z=100 t=friction.
+   W x=0 s=1 z=100 t=Fr
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=France,
+   W x=148 s=0 z=100 t=fragile,
+   W x=227 s=0 z=100 t=friction.
   LINE y=639 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Fy
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=Fyodor,
-   W x=167 s=0 z=100 t=fytte.
+   W x=0 s=1 z=100 t=Fy
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=Fyodor,
+   W x=149 s=0 z=100 t=fytte.
   LINE y=663 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=LT
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=ALTITUDE,
-   W x=188 s=0 z=100 t=EXALT,
-   W x=250 s=0 z=100 t=RESULT,
-   W x=324 s=0 z=100 t=VAULT.
+   W x=0 s=1 z=100 t=LT
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=ALTITUDE,
+   W x=170 s=0 z=100 t=EXALT,
+   W x=232 s=0 z=100 t=RESULT,
+   W x=306 s=0 z=100 t=VAULT.
   LINE y=687 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=LV
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=SILVER,
-   W x=183 s=0 z=100 t=SOLVE,
-   W x=249 s=0 z=100 t=INVOLVE,
-   W x=327 s=0 z=100 t=VALVE.
+   W x=0 s=1 z=100 t=LV
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=SILVER,
+   W x=165 s=0 z=100 t=SOLVE,
+   W x=231 s=0 z=100 t=INVOLVE,
+   W x=309 s=0 z=100 t=VALVE.
   LINE y=711 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=LW
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=As
-   W x=83 s=0 z=100 t=in
-   W x=106 s=0 z=100 t=ALWAYS,
-   W x=180 s=0 z=100 t=RAILWAY,
-   W x=262 s=0 z=100 t=HALLWAY.
+   W x=0 s=1 z=100 t=LW
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=As
+   W x=65 s=0 z=100 t=in
+   W x=88 s=0 z=100 t=ALWAYS,
+   W x=162 s=0 z=100 t=RAILWAY,
+   W x=244 s=0 z=100 t=HALLWAY.
   LINE y=735 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=LY
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=As
-   W x=85 s=0 z=100 t=in
-   W x=108 s=0 z=100 t=TRULY,
-   W x=169 s=0 z=100 t=ONLY,
-   W x=221 s=0 z=100 t=HOLY,
-   W x=274 s=0 z=100 t=UGLY.
+   W x=0 s=1 z=100 t=LY
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=As
+   W x=67 s=0 z=100 t=in
+   W x=90 s=0 z=100 t=TRULY,
+   W x=151 s=0 z=100 t=ONLY,
+   W x=203 s=0 z=100 t=HOLY,
+   W x=256 s=0 z=100 t=UGLY.
  PAGE 1 elements=29 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=PA
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=PACE,
-   W x=155 s=0 z=100 t=PALACE,
-   W x=228 s=0 z=100 t=COMPANION,
-   W x=314 s=0 z=100 t=SEPARATE.
+   W x=0 s=1 z=100 t=PA
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=PACE,
+   W x=137 s=0 z=100 t=PALACE,
+   W x=210 s=0 z=100 t=COMPANION,
+   W x=296 s=0 z=100 t=SEPARATE.
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=TA
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=TABLE,
-   W x=160 s=0 z=100 t=TASTE,
-   W x=218 s=0 z=100 t=GUITAR,
-   W x=280 s=0 z=100 t=FATAL.
+   W x=0 s=1 z=100 t=TA
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=TABLE,
+   W x=142 s=0 z=100 t=TASTE,
+   W x=200 s=0 z=100 t=GUITAR,
+   W x=262 s=0 z=100 t=FATAL.
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Te
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=Ten,
-   W x=140 s=0 z=100 t=temple,
-   W x=207 s=0 z=100 t=tender.
+   W x=0 s=1 z=100 t=Te
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=Ten,
+   W x=122 s=0 z=100 t=temple,
+   W x=189 s=0 z=100 t=tender.
   LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=To
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=Tomorrow,
-   W x=191 s=0 z=100 t=together,
-   W x=286 s=0 z=100 t=towards.
+   W x=0 s=1 z=100 t=To
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=Tomorrow,
+   W x=173 s=0 z=100 t=together,
+   W x=268 s=0 z=100 t=towards.
   LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tr
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=Travel,
-   W x=169 s=0 z=100 t=trouble,
-   W x=248 s=0 z=100 t=triumph.
+   W x=0 s=1 z=100 t=Tr
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=Travel,
+   W x=151 s=0 z=100 t=trouble,
+   W x=230 s=0 z=100 t=triumph.
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tu
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Tuesday,
-   W x=179 s=0 z=100 t=tulip,
-   W x=235 s=0 z=100 t=tumble.
+   W x=0 s=1 z=100 t=Tu
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Tuesday,
+   W x=161 s=0 z=100 t=tulip,
+   W x=217 s=0 z=100 t=tumble.
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tw
-   W x=38 s=0 z=100 t=—
-   W x=51 s=0 z=100 t=As
-   W x=74 s=0 z=100 t=in
-   W x=97 s=0 z=100 t=Twelve,
-   W x=162 s=0 z=100 t=twenty,
-   W x=230 s=0 z=100 t=twilight.
+   W x=0 s=1 z=100 t=Tw
+   W x=20 s=0 z=100 t=—
+   W x=33 s=0 z=100 t=As
+   W x=56 s=0 z=100 t=in
+   W x=79 s=0 z=100 t=Twelve,
+   W x=144 s=0 z=100 t=twenty,
+   W x=212 s=0 z=100 t=twilight.
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ty
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=Tyrant,
-   W x=168 s=0 z=100 t=typical,
-   W x=240 s=0 z=100 t=type.
+   W x=0 s=1 z=100 t=Ty
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=Tyrant,
+   W x=150 s=0 z=100 t=typical,
+   W x=222 s=0 z=100 t=type.
   LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=VA
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=VALUE,
-   W x=162 s=0 z=100 t=VAGUE,
-   W x=218 s=0 z=100 t=CANVAS,
-   W x=285 s=0 z=100 t=OVAL.
+   W x=0 s=1 z=100 t=VA
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=VALUE,
+   W x=144 s=0 z=100 t=VAGUE,
+   W x=200 s=0 z=100 t=CANVAS,
+   W x=267 s=0 z=100 t=OVAL.
   LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ve
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Venice,
-   W x=166 s=0 z=100 t=verse,
-   W x=227 s=0 z=100 t=venture.
+   W x=0 s=1 z=100 t=Ve
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Venice,
+   W x=148 s=0 z=100 t=verse,
+   W x=209 s=0 z=100 t=venture.
   LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Vo
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=Voice,
-   W x=161 s=0 z=100 t=volume,
-   W x=238 s=0 z=100 t=voyage.
+   W x=0 s=1 z=100 t=Vo
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=Voice,
+   W x=143 s=0 z=100 t=volume,
+   W x=220 s=0 z=100 t=voyage.
   LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Wa
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=As
-   W x=83 s=0 z=100 t=in
-   W x=106 s=0 z=100 t=Water,
-   W x=168 s=0 z=100 t=watch,
-   W x=229 s=0 z=100 t=wander.
+   W x=0 s=1 z=100 t=Wa
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=As
+   W x=65 s=0 z=100 t=in
+   W x=88 s=0 z=100 t=Water,
+   W x=150 s=0 z=100 t=watch,
+   W x=211 s=0 z=100 t=wander.
   LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=We
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=Welcome,
-   W x=182 s=0 z=100 t=weather,
-   W x=262 s=0 z=100 t=welfare.
+   W x=0 s=1 z=100 t=We
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=Welcome,
+   W x=164 s=0 z=100 t=weather,
+   W x=244 s=0 z=100 t=welfare.
   LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Wo
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=As
-   W x=83 s=0 z=100 t=in
-   W x=106 s=0 z=100 t=Wonder,
-   W x=177 s=0 z=100 t=worry,
-   W x=233 s=0 z=100 t=worship.
+   W x=0 s=1 z=100 t=Wo
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=As
+   W x=65 s=0 z=100 t=in
+   W x=88 s=0 z=100 t=Wonder,
+   W x=159 s=0 z=100 t=worry,
+   W x=215 s=0 z=100 t=worship.
   LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ya
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=As
-   W x=85 s=0 z=100 t=in
-   W x=108 s=0 z=100 t=Yard,
-   W x=161 s=0 z=100 t=yacht,
-   W x=224 s=0 z=100 t=yawn.
+   W x=0 s=1 z=100 t=Ya
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=As
+   W x=67 s=0 z=100 t=in
+   W x=90 s=0 z=100 t=Yard,
+   W x=143 s=0 z=100 t=yacht,
+   W x=206 s=0 z=100 t=yawn.
   LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ye
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=Yellow,
-   W x=175 s=0 z=100 t=yesterday,
-   W x=270 s=0 z=100 t=yeoman.
+   W x=0 s=1 z=100 t=Ye
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=Yellow,
+   W x=157 s=0 z=100 t=yesterday,
+   W x=252 s=0 z=100 t=yeoman.
   LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Yo
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=As
-   W x=85 s=0 z=100 t=in
-   W x=108 s=0 z=100 t=Young,
-   W x=178 s=0 z=100 t=yoke,
-   W x=229 s=0 z=100 t=yoga.
+   W x=0 s=1 z=100 t=Yo
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=As
+   W x=67 s=0 z=100 t=in
+   W x=90 s=0 z=100 t=Young,
+   W x=160 s=0 z=100 t=yoke,
+   W x=211 s=0 z=100 t=yoga.
   LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Yu
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=As
-   W x=84 s=0 z=100 t=in
-   W x=107 s=0 z=100 t=Yukon,
-   W x=174 s=0 z=100 t=Yugoslavia,
-   W x=293 s=0 z=100 t=yule.
+   W x=0 s=1 z=100 t=Yu
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=As
+   W x=66 s=0 z=100 t=in
+   W x=89 s=0 z=100 t=Yukon,
+   W x=156 s=0 z=100 t=Yugoslavia,
+   W x=275 s=0 z=100 t=yule.
   LINE y=459 x=0 align=2 mult=1.150 hfid=0 words=1
    W x=174 s=1 z=100 t=Ligatures
   LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=6
@@ -2047,176 +2047,173 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
    W x=393 s=0 z=100 t=affirm,
   LINE y=520 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=magnify.
-  LINE y=548 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=fl
-   W x=45 s=0 z=100 t=—
-   W x=71 s=0 z=100 t=flag,
-   W x=140 s=0 z=100 t=flair,
-   W x=212 s=0 z=100 t=flame,
-   W x=289 s=0 z=100 t=floor,
-   W x=367 s=0 z=100 t=influence,
-  LINE y=572 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=reflect.
-  LINE y=596 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=ff
-   W x=46 s=0 z=100 t=—
-   W x=66 s=0 z=100 t=affair,
-   W x=145 s=0 z=100 t=affect,
-   W x=224 s=0 z=100 t=affirm,
-   W x=301 s=0 z=100 t=afford,
-   W x=382 s=0 z=100 t=buffalo,
-  LINE y=620 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=548 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=1 z=100 t=fl
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=flag,
+   W x=96 s=0 z=100 t=flair,
+   W x=155 s=0 z=100 t=flame,
+   W x=219 s=0 z=100 t=floor,
+   W x=284 s=0 z=100 t=influence,
+   W x=381 s=0 z=100 t=reflect.
+  LINE y=572 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=1 z=100 t=ff
+   W x=28 s=0 z=100 t=—
+   W x=51 s=0 z=100 t=affair,
+   W x=133 s=0 z=100 t=affect,
+   W x=215 s=0 z=100 t=affirm,
+   W x=295 s=0 z=100 t=afford,
+   W x=379 s=0 z=100 t=buffalo,
+  LINE y=596 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=coffin,
    W x=75 s=0 z=100 t=daffodil,
    W x=169 s=0 z=100 t=differ,
    W x=239 s=0 z=100 t=effect,
    W x=313 s=0 z=100 t=effort,
    W x=391 s=0 z=100 t=offend,
-  LINE y=644 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=620 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=offer,
-   W x=83 s=0 z=100 t=office,
-   W x=171 s=0 z=100 t=scaffold,
-   W x=282 s=0 z=100 t=stiff,
-   W x=361 s=0 z=100 t=suffocate,
-  LINE y=668 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=traffic,
-   W x=77 s=0 z=100 t=waffle.
-  LINE y=692 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=ffi
-   W x=53 s=0 z=100 t=—
-   W x=91 s=0 z=100 t=affidavit,
-   W x=216 s=0 z=100 t=affiliated,
-   W x=347 s=0 z=100 t=affirmative,
-  LINE y=716 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=baffling
-   W x=95 s=0 z=100 t=(wait
-   W x=146 s=0 z=100 t=—
-   W x=173 s=0 z=100 t=that
-   W x=237 s=0 z=100 t=is
-   W x=272 s=0 z=100 t=ffl!),
-   W x=352 s=0 z=100 t=coefficient,
- PAGE 2 elements=25 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=coffin,
-   W x=80 s=0 z=100 t=daffiness,
-   W x=188 s=0 z=100 t=diffident,
-   W x=290 s=0 z=100 t=efficient,
-   W x=392 s=0 z=100 t=fficacy,
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=0 s=0 z=100 t=muffin,
-   W x=107 s=0 z=100 t=officious,
-   W x=239 s=0 z=100 t=paraffin,
-   W x=363 s=0 z=100 t=sufficient,
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=trafficking.
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=ffl
-   W x=56 s=0 z=100 t=—
-   W x=75 s=0 z=100 t=affluent,
-   W x=177 s=0 z=100 t=baffled,ffle,
-   W x=307 s=0 z=100 t=offload,
-   W x=400 s=0 z=100 t=piffle,
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=63 s=0 z=100 t=office,
+   W x=131 s=0 z=100 t=scaffold,
+   W x=222 s=0 z=100 t=stiff,
+   W x=281 s=0 z=100 t=suffocate,
+   W x=385 s=0 z=100 t=traffic,
+  LINE y=644 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=waffle.
+  LINE y=668 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=1 z=100 t=ffi
+   W x=35 s=0 z=100 t=—
+   W x=51 s=0 z=100 t=affidavit,
+   W x=154 s=0 z=100 t=affiliated,
+   W x=263 s=0 z=100 t=affirmative,
+   W x=385 s=0 z=100 t=baffling
+  LINE y=692 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=(wait
+   W x=51 s=0 z=100 t=—
+   W x=80 s=0 z=100 t=that
+   W x=146 s=0 z=100 t=is
+   W x=183 s=0 z=100 t=ffl!),
+   W x=265 s=0 z=100 t=coefficient,
+   W x=392 s=0 z=100 t=coffin,
+  LINE y=716 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=daffiness,
+   W x=107 s=0 z=100 t=diffident,
+   W x=208 s=0 z=100 t=efficient,
+   W x=309 s=0 z=100 t=fficacy,
+   W x=392 s=0 z=100 t=muffin,
+ PAGE 2 elements=22 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=officious,
+   W x=97 s=0 z=100 t=paraffin,
+   W x=186 s=0 z=100 t=sufficient,
+   W x=289 s=0 z=100 t=trafficking.
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=1 z=100 t=ffl
+   W x=38 s=0 z=100 t=—
+   W x=62 s=0 z=100 t=affluent,
+   W x=169 s=0 z=100 t=baffled,ffle,
+   W x=304 s=0 z=100 t=offload,
+   W x=402 s=0 z=100 t=piffle,
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=raffle,
-   W x=93 s=0 z=100 t=riffle,
-   W x=180 s=0 z=100 t=ruffle,
-   W x=272 s=0 z=100 t=scaffold,
-   W x=384 s=0 z=100 t=scuffle,
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=shuffle,
-   W x=84 s=0 z=100 t=sniffle,
-   W x=162 s=0 z=100 t=stiffly,
-   W x=238 s=0 z=100 t=truffle,
-   W x=319 s=0 z=100 t=waffle.
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=1 z=100 t=ft
-   W x=46 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=after,
-   W x=126 s=0 z=100 t=craft,
-   W x=189 s=0 z=100 t=deft,
-   W x=242 s=0 z=100 t=drift,
-   W x=300 s=0 z=100 t=gift,
+   W x=72 s=0 z=100 t=riffle,
+   W x=138 s=0 z=100 t=ruffle,
+   W x=209 s=0 z=100 t=scaffold,
+   W x=300 s=0 z=100 t=scuffle,
+   W x=379 s=0 z=100 t=shuffle,
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=sniffle,
+   W x=78 s=0 z=100 t=stiffly,
+   W x=154 s=0 z=100 t=truffle,
+   W x=235 s=0 z=100 t=waffle.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=1 z=100 t=ft
+   W x=28 s=0 z=100 t=—
+   W x=46 s=0 z=100 t=after,
+   W x=114 s=0 z=100 t=craft,
+   W x=180 s=0 z=100 t=deft,
+   W x=236 s=0 z=100 t=drift,
+   W x=297 s=0 z=100 t=gift,
    W x=353 s=0 z=100 t=left,
-   W x=407 s=0 z=100 t=loft,
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=410 s=0 z=100 t=loft,
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=raft,
-   W x=63 s=0 z=100 t=shaft,
-   W x=139 s=0 z=100 t=shift,
-   W x=209 s=0 z=100 t=soft,
-   W x=273 s=0 z=100 t=swift,
-   W x=337 s=0 z=100 t=theft,
-   W x=411 s=0 z=100 t=tuft,
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=waft.
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=fb
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=halfback,
-   W x=145 s=0 z=100 t=offbeat,
-   W x=228 s=0 z=100 t=surfboard.
-  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=fh
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=wolfhound,
-   W x=166 s=0 z=100 t=cliffhanger,
-   W x=285 s=0 z=100 t=halfhearted.
+   W x=54 s=0 z=100 t=shaft,
+   W x=121 s=0 z=100 t=shift,
+   W x=182 s=0 z=100 t=soft,
+   W x=237 s=0 z=100 t=swift,
+   W x=292 s=0 z=100 t=theft,
+   W x=357 s=0 z=100 t=tuft,
+   W x=412 s=0 z=100 t=waft.
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=1 z=100 t=fb
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=halfback,
+   W x=127 s=0 z=100 t=offbeat,
+   W x=210 s=0 z=100 t=surfboard.
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=1 z=100 t=fh
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=wolfhound,
+   W x=148 s=0 z=100 t=cliffhanger,
+   W x=267 s=0 z=100 t=halfhearted.
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=1 z=100 t=st
+   W x=27 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=strong,
+   W x=119 s=0 z=100 t=first,
+   W x=178 s=0 z=100 t=last,
+   W x=234 s=0 z=100 t=must,
+   W x=290 s=0 z=100 t=fast,
+   W x=347 s=0 z=100 t=mist,
+   W x=398 s=0 z=100 t=ghost,
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=roast,
+   W x=72 s=0 z=100 t=trust,
+   W x=141 s=0 z=100 t=artist,
+   W x=217 s=0 z=100 t=honest,
+   W x=301 s=0 z=100 t=forest,
+   W x=380 s=0 z=100 t=harvest,
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=modest.
   LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=st
-   W x=45 s=0 z=100 t=—
-   W x=68 s=0 z=100 t=strong,
-   W x=153 s=0 z=100 t=first,
-   W x=220 s=0 z=100 t=last,
-   W x=284 s=0 z=100 t=must,
-   W x=348 s=0 z=100 t=fast,
-   W x=413 s=0 z=100 t=mist,
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=ghost,
-   W x=78 s=0 z=100 t=roast,
-   W x=153 s=0 z=100 t=trust,
-   W x=225 s=0 z=100 t=artist,
-   W x=304 s=0 z=100 t=honest,
-   W x=391 s=0 z=100 t=forest,
-  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=harvest,
-   W x=86 s=0 z=100 t=modest.
-  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=18 s=1 z=100 t=ct
-   W x=43 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=act,
-   W x=109 s=0 z=100 t=fact,
-   W x=167 s=0 z=100 t=strict,
-   W x=236 s=0 z=100 t=direct,
-   W x=303 s=0 z=100 t=perfect,
+   W x=0 s=1 z=100 t=ct
+   W x=25 s=0 z=100 t=—
+   W x=46 s=0 z=100 t=act,
+   W x=97 s=0 z=100 t=fact,
+   W x=158 s=0 z=100 t=strict,
+   W x=230 s=0 z=100 t=direct,
+   W x=300 s=0 z=100 t=perfect,
    W x=381 s=0 z=100 t=connect,
-  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=collect,
    W x=91 s=0 z=100 t=distinct,
    W x=186 s=0 z=100 t=instruct,
    W x=286 s=0 z=100 t=architect,
    W x=395 s=0 z=100 t=effect,
-  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=exact,
    W x=59 s=0 z=100 t=expect.
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=1 z=100 t=Th
-   W x=44 s=0 z=100 t=—
-   W x=64 s=0 z=100 t=The,
-   W x=112 s=0 z=100 t=This,
-   W x=166 s=0 z=100 t=That,
-   W x=227 s=0 z=100 t=There,
-   W x=292 s=0 z=100 t=Their,
-   W x=354 s=0 z=100 t=They,
-   W x=410 s=0 z=100 t=Than,
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=1 z=100 t=Th
+   W x=26 s=0 z=100 t=—
+   W x=48 s=0 z=100 t=The,
+   W x=98 s=0 z=100 t=This,
+   W x=154 s=0 z=100 t=That,
+   W x=217 s=0 z=100 t=There,
+   W x=284 s=0 z=100 t=Their,
+   W x=348 s=0 z=100 t=They,
+   W x=406 s=0 z=100 t=Than,
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=Though,
    W x=91 s=0 z=100 t=Through,
    W x=190 s=0 z=100 t=Thought,
    W x=291 s=0 z=100 t=Thousand,
    W x=399 s=0 z=100 t=Thrive,
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=Throne,
    W x=72 s=0 z=100 t=Thatch.
-  LINE y=484 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=412 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=27 s=0 z=100 t=“There,”
    W x=110 s=0 z=100 t=Avery
    W x=169 s=0 z=100 t=said,
@@ -2224,7 +2221,7 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
    W x=306 s=0 z=100 t=down
    W x=357 s=0 z=100 t=his
    W x=398 s=0 z=100 t=pencil.
-  LINE y=508 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=436 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=“If
    W x=39 s=0 z=100 t=a
    W x=63 s=0 z=100 t=typesetter
@@ -2234,7 +2231,7 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
    W x=336 s=0 z=100 t=word
    W x=382 s=0 z=100 t=in
    W x=411 s=0 z=100 t=that
-  LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=460 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=glossary
    W x=91 s=0 z=100 t=without
    W x=171 s=0 z=100 t=a
@@ -2242,7 +2239,7 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
    W x=264 s=0 z=100 t=misfit,
    W x=336 s=0 z=100 t=miskerned,
    W x=435 s=0 z=100 t=or
-  LINE y=556 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=484 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=malformed
    W x=104 s=0 z=100 t=glyph,
    W x=174 s=0 z=100 t=they
@@ -2250,7 +2247,7 @@ SPINE 6 href=OEBPS/chapter5.xhtml pages=3 truncated=0 cssFallback=0
    W x=309 s=0 z=100 t=their
    W x=370 s=0 z=100 t=weight
    W x=440 s=0 z=100 t=in
-  LINE y=580 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=508 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=Garamond.”
 SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
  PAGE 0 elements=28 footnotes=0
@@ -4298,180 +4295,180 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=170 s=0 z=100 t=těžký,
    W x=228 s=0 z=100 t=tělo.
   LINE y=28 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tř
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=Třebíč,
-   W x=163 s=0 z=100 t=třída,
-   W x=227 s=0 z=100 t=tři.
+   W x=0 s=1 z=100 t=Tř
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=Třebíč,
+   W x=145 s=0 z=100 t=třída,
+   W x=209 s=0 z=100 t=tři.
   LINE y=52 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Vě
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Věra,
-   W x=153 s=0 z=100 t=věda,
-   W x=208 s=0 z=100 t=věž.
+   W x=0 s=1 z=100 t=Vě
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Věra,
+   W x=135 s=0 z=100 t=věda,
+   W x=190 s=0 z=100 t=věž.
   LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Př
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Příbram,
-   W x=181 s=0 z=100 t=příroda,
-   W x=261 s=0 z=100 t=přítel.
+   W x=0 s=1 z=100 t=Př
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Příbram,
+   W x=163 s=0 z=100 t=příroda,
+   W x=243 s=0 z=100 t=přítel.
   LINE y=100 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Wą
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Wąchock,
-   W x=179 s=0 z=100 t=wąski,
-   W x=230 s=0 z=100 t=wąwóz.
+   W x=0 s=1 z=100 t=Wą
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Wąchock,
+   W x=161 s=0 z=100 t=wąski,
+   W x=212 s=0 z=100 t=wąwóz.
   LINE y=124 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Wę
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=Węgry,
-   W x=158 s=0 z=100 t=węzeł,
-   W x=209 s=0 z=100 t=Węgierska.
+   W x=0 s=1 z=100 t=Wę
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Węgry,
+   W x=140 s=0 z=100 t=węzeł,
+   W x=191 s=0 z=100 t=Węgierska.
   LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Łó
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=As
-   W x=85 s=0 z=100 t=in
-   W x=108 s=0 z=100 t=Łódź,
-   W x=159 s=0 z=100 t=łódź,
-   W x=204 s=0 z=100 t=łóżko.
+   W x=0 s=1 z=100 t=Łó
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=As
+   W x=67 s=0 z=100 t=in
+   W x=90 s=0 z=100 t=Łódź,
+   W x=141 s=0 z=100 t=łódź,
+   W x=186 s=0 z=100 t=łóżko.
   LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Łu
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=As
-   W x=85 s=0 z=100 t=in
-   W x=108 s=0 z=100 t=Łukasz,
-   W x=183 s=0 z=100 t=Łuck,
-   W x=235 s=0 z=100 t=łuk.
+   W x=0 s=1 z=100 t=Łu
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=As
+   W x=67 s=0 z=100 t=in
+   W x=90 s=0 z=100 t=Łukasz,
+   W x=165 s=0 z=100 t=Łuck,
+   W x=217 s=0 z=100 t=łuk.
   LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ły
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=Łyżka,
-   W x=167 s=0 z=100 t=łydka,
-   W x=223 s=0 z=100 t=łysy.
+   W x=0 s=1 z=100 t=Ły
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=Łyżka,
+   W x=149 s=0 z=100 t=łydka,
+   W x=205 s=0 z=100 t=łysy.
   LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Čá
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=Čáslav,
-   W x=171 s=0 z=100 t=část,
-   W x=220 s=0 z=100 t=čáp.
+   W x=0 s=1 z=100 t=Čá
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=Čáslav,
+   W x=153 s=0 z=100 t=část,
+   W x=202 s=0 z=100 t=čáp.
   LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Če
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=České,
-   W x=158 s=0 z=100 t=český,
-   W x=214 s=0 z=100 t=čelo.
+   W x=0 s=1 z=100 t=Če
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=České,
+   W x=140 s=0 z=100 t=český,
+   W x=196 s=0 z=100 t=čelo.
   LINE y=268 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ří
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=As
-   W x=81 s=0 z=100 t=in
-   W x=104 s=0 z=100 t=Říjen,
-   W x=164 s=0 z=100 t=říční,
-   W x=230 s=0 z=100 t=řízení.
+   W x=0 s=1 z=100 t=Ří
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=As
+   W x=63 s=0 z=100 t=in
+   W x=86 s=0 z=100 t=Říjen,
+   W x=146 s=0 z=100 t=říční,
+   W x=212 s=0 z=100 t=řízení.
   LINE y=292 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ře
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=Řeka,
-   W x=151 s=0 z=100 t=řeč,
-   W x=191 s=0 z=100 t=řemeslo.
+   W x=0 s=1 z=100 t=Ře
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Řeka,
+   W x=133 s=0 z=100 t=řeč,
+   W x=173 s=0 z=100 t=řemeslo.
   LINE y=316 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Šk
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=Škoda,
-   W x=163 s=0 z=100 t=škála,
-   W x=222 s=0 z=100 t=školák.
+   W x=0 s=1 z=100 t=Šk
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Škoda,
+   W x=145 s=0 z=100 t=škála,
+   W x=204 s=0 z=100 t=školák.
   LINE y=340 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=Šť
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=Šťastný.
+   W x=0 s=1 z=100 t=Šť
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=Šťastný.
   LINE y=364 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ži
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=Život,
-   W x=163 s=0 z=100 t=živý,
-   W x=212 s=0 z=100 t=živnost.
+   W x=0 s=1 z=100 t=Ži
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=Život,
+   W x=145 s=0 z=100 t=živý,
+   W x=194 s=0 z=100 t=živnost.
   LINE y=388 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Žá
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=Žádný,
-   W x=157 s=0 z=100 t=žák,
-   W x=196 s=0 z=100 t=žár.
+   W x=0 s=1 z=100 t=Žá
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Žádný,
+   W x=139 s=0 z=100 t=žák,
+   W x=178 s=0 z=100 t=žár.
   LINE y=412 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=1 z=100 t=Ať
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=As
-   W x=76 s=0 z=100 t=in
-   W x=99 s=0 z=100 t=ať
-   W x=123 s=0 z=100 t=(Czech:
-   W x=195 s=0 z=100 t=“let”
-   W x=246 s=0 z=100 t=/
-   W x=263 s=0 z=100 t=“whether”).
+   W x=0 s=1 z=100 t=Ať
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=As
+   W x=58 s=0 z=100 t=in
+   W x=81 s=0 z=100 t=ať
+   W x=105 s=0 z=100 t=(Czech:
+   W x=177 s=0 z=100 t=“let”
+   W x=228 s=0 z=100 t=/
+   W x=245 s=0 z=100 t=“whether”).
   LINE y=436 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tő
-   W x=39 s=0 z=100 t=—
-   W x=52 s=0 z=100 t=As
-   W x=75 s=0 z=100 t=in
-   W x=98 s=0 z=100 t=tőke,
-   W x=146 s=0 z=100 t=tőr,
-   W x=185 s=0 z=100 t=tőlegény.
+   W x=0 s=1 z=100 t=Tő
+   W x=21 s=0 z=100 t=—
+   W x=34 s=0 z=100 t=As
+   W x=57 s=0 z=100 t=in
+   W x=80 s=0 z=100 t=tőke,
+   W x=128 s=0 z=100 t=tőr,
+   W x=167 s=0 z=100 t=tőlegény.
   LINE y=460 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Vő
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=As
-   W x=77 s=0 z=100 t=in
-   W x=100 s=0 z=100 t=vőlegény,
-   W x=189 s=0 z=100 t=vőfél.
+   W x=0 s=1 z=100 t=Vő
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=As
+   W x=59 s=0 z=100 t=in
+   W x=82 s=0 z=100 t=vőlegény,
+   W x=171 s=0 z=100 t=vőfél.
   LINE y=484 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=İs
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=İstanbul,
-   W x=194 s=0 z=100 t=İstiklal,
-   W x=280 s=0 z=100 t=İslam.
+   W x=0 s=1 z=100 t=İs
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=İstanbul,
+   W x=176 s=0 z=100 t=İstiklal,
+   W x=262 s=0 z=100 t=İslam.
   LINE y=508 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Ğa
-   W x=50 s=0 z=100 t=—
-   W x=63 s=0 z=100 t=As
-   W x=86 s=0 z=100 t=in
-   W x=109 s=0 z=100 t=dağ,
-   W x=149 s=0 z=100 t=yağmur,
-   W x=218 s=0 z=100 t=ğaraj.
+   W x=0 s=1 z=100 t=Ğa
+   W x=32 s=0 z=100 t=—
+   W x=45 s=0 z=100 t=As
+   W x=68 s=0 z=100 t=in
+   W x=91 s=0 z=100 t=dağ,
+   W x=131 s=0 z=100 t=yağmur,
+   W x=200 s=0 z=100 t=ğaraj.
   LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Şi
-   W x=38 s=0 z=100 t=—
-   W x=51 s=0 z=100 t=As
-   W x=74 s=0 z=100 t=in
-   W x=97 s=0 z=100 t=Şişli,
-   W x=145 s=0 z=100 t=şifa,
-   W x=194 s=0 z=100 t=şirin.
+   W x=0 s=1 z=100 t=Şi
+   W x=20 s=0 z=100 t=—
+   W x=33 s=0 z=100 t=As
+   W x=56 s=0 z=100 t=in
+   W x=79 s=0 z=100 t=Şişli,
+   W x=127 s=0 z=100 t=şifa,
+   W x=176 s=0 z=100 t=şirin.
   LINE y=560 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=27 s=0 z=100 t=“If
    W x=64 s=0 z=100 t=we
@@ -5285,164 +5282,164 @@ SPINE 9 href=OEBPS/chapter8.xhtml pages=5 truncated=0 cssFallback=0
    W x=61 s=0 z=100 t=Галилея,
    W x=140 s=0 z=100 t=газета.
   LINE y=397 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ге
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Генерал,
-   W x=134 s=0 z=100 t=герой.
+   W x=0 s=1 z=100 t=Ге
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Генерал,
+   W x=116 s=0 z=100 t=герой.
   LINE y=421 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Го
-   W x=39 s=0 z=100 t=—
-   W x=52 s=0 z=100 t=Гоголь,
-   W x=114 s=0 z=100 t=город.
+   W x=0 s=1 z=100 t=Го
+   W x=21 s=0 z=100 t=—
+   W x=34 s=0 z=100 t=Гоголь,
+   W x=96 s=0 z=100 t=город.
   LINE y=445 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Гу
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Гусары,
-   W x=121 s=0 z=100 t=губерния.
+   W x=0 s=1 z=100 t=Гу
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Гусары,
+   W x=103 s=0 z=100 t=губерния.
   LINE y=469 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Гр
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=Грамота,
-   W x=127 s=0 z=100 t=граница.
+   W x=0 s=1 z=100 t=Гр
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=Грамота,
+   W x=109 s=0 z=100 t=граница.
   LINE y=493 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=Та
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Там,
-   W x=93 s=0 z=100 t=также,
-   W x=153 s=0 z=100 t=танец.
+   W x=0 s=1 z=100 t=Та
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Там,
+   W x=75 s=0 z=100 t=также,
+   W x=135 s=0 z=100 t=танец.
   LINE y=517 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=18 s=1 z=100 t=Те
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Тепло,
-   W x=117 s=0 z=100 t=текст,
-   W x=185 s=0 z=100 t=тело.
+   W x=0 s=1 z=100 t=Те
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Тепло,
+   W x=99 s=0 z=100 t=текст,
+   W x=167 s=0 z=100 t=тело.
   LINE y=541 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=То
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Только,
-   W x=116 s=0 z=100 t=товар.
+   W x=0 s=1 z=100 t=То
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Только,
+   W x=98 s=0 z=100 t=товар.
   LINE y=565 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ту
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Тульский,
-   W x=146 s=0 z=100 t=туча.
+   W x=0 s=1 z=100 t=Ту
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Тульский,
+   W x=128 s=0 z=100 t=туча.
   LINE y=589 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Тр
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=Три,
-   W x=93 s=0 z=100 t=труба.
+   W x=0 s=1 z=100 t=Тр
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=Три,
+   W x=75 s=0 z=100 t=труба.
   LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Тя
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Тяньцзинь.
+   W x=0 s=1 z=100 t=Тя
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Тяньцзинь.
   LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ра
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Работа,
-   W x=124 s=0 z=100 t=разум.
+   W x=0 s=1 z=100 t=Ра
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Работа,
+   W x=106 s=0 z=100 t=разум.
   LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ре
-   W x=50 s=0 z=100 t=—
-   W x=63 s=0 z=100 t=Речи,
-   W x=118 s=0 z=100 t=река.
+   W x=0 s=1 z=100 t=Ре
+   W x=32 s=0 z=100 t=—
+   W x=45 s=0 z=100 t=Речи,
+   W x=100 s=0 z=100 t=река.
   LINE y=685 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ро
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Россия,
-   W x=129 s=0 z=100 t=род.
+   W x=0 s=1 z=100 t=Ро
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Россия,
+   W x=111 s=0 z=100 t=род.
   LINE y=709 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ру
-   W x=50 s=0 z=100 t=—
-   W x=63 s=0 z=100 t=Русский,
-   W x=148 s=0 z=100 t=рука.
+   W x=0 s=1 z=100 t=Ру
+   W x=32 s=0 z=100 t=—
+   W x=45 s=0 z=100 t=Русский,
+   W x=130 s=0 z=100 t=рука.
   LINE y=733 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ау
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=Аудитория.
+   W x=0 s=1 z=100 t=Ау
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=Аудитория.
  PAGE 4 elements=27 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ав
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Авиатор.
+   W x=0 s=1 z=100 t=Ав
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Авиатор.
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ат
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=Атлас,
-   W x=123 s=0 z=100 t=атом.
+   W x=0 s=1 z=100 t=Ат
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=Атлас,
+   W x=105 s=0 z=100 t=атом.
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ад
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=Адресат.
+   W x=0 s=1 z=100 t=Ад
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=Адресат.
   LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ув
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Уверенность.
+   W x=0 s=1 z=100 t=Ув
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Уверенность.
   LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Уд
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Удалось.
+   W x=0 s=1 z=100 t=Уд
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Удалось.
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ук
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Укрепить.
+   W x=0 s=1 z=100 t=Ук
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Укрепить.
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ум
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=Ум,
-   W x=93 s=0 z=100 t=умник.
+   W x=0 s=1 z=100 t=Ум
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=Ум,
+   W x=75 s=0 z=100 t=умник.
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Да
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Дальний,
-   W x=122 s=0 z=100 t=дата.
+   W x=0 s=1 z=100 t=Да
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Дальний,
+   W x=104 s=0 z=100 t=дата.
   LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Де
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=День,
-   W x=104 s=0 z=100 t=дело.
+   W x=0 s=1 z=100 t=Де
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=День,
+   W x=86 s=0 z=100 t=дело.
   LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=До
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Дома,
-   W x=100 s=0 z=100 t=дорога.
+   W x=0 s=1 z=100 t=До
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Дома,
+   W x=82 s=0 z=100 t=дорога.
   LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ла
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Лампа,
-   W x=108 s=0 z=100 t=лавка.
+   W x=0 s=1 z=100 t=Ла
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Лампа,
+   W x=90 s=0 z=100 t=лавка.
   LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ле
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Ленинград,
-   W x=148 s=0 z=100 t=лес.
+   W x=0 s=1 z=100 t=Ле
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Ленинград,
+   W x=130 s=0 z=100 t=лес.
   LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ло
-   W x=40 s=0 z=100 t=—
-   W x=53 s=0 z=100 t=Лондон,
-   W x=111 s=0 z=100 t=лодка.
+   W x=0 s=1 z=100 t=Ло
+   W x=22 s=0 z=100 t=—
+   W x=35 s=0 z=100 t=Лондон,
+   W x=93 s=0 z=100 t=лодка.
   LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Ча
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Часы,
-   W x=107 s=0 z=100 t=чай.
+   W x=0 s=1 z=100 t=Ча
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Часы,
+   W x=89 s=0 z=100 t=чай.
   LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Чо
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Чорное,
-   W x=125 s=0 z=100 t=чорт.
+   W x=0 s=1 z=100 t=Чо
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Чорное,
+   W x=107 s=0 z=100 t=чорт.
   LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Чу
-   W x=50 s=0 z=100 t=—
-   W x=63 s=0 z=100 t=Чудо,
-   W x=119 s=0 z=100 t=чувство.
+   W x=0 s=1 z=100 t=Чу
+   W x=32 s=0 z=100 t=—
+   W x=45 s=0 z=100 t=Чудо,
+   W x=101 s=0 z=100 t=чувство.
   LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Фа
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=Факультет.
+   W x=0 s=1 z=100 t=Фа
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=Факультет.
   LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Фо
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=Фонтанка.
+   W x=0 s=1 z=100 t=Фо
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=Фонтанка.
   LINE y=436 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=27 s=0 z=100 t=“Cyrillic
    W x=108 s=0 z=100 t=has
@@ -6331,93 +6328,93 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=118 s=0 z=100 t=Țara,
    W x=176 s=0 z=100 t=țară.
   LINE y=644 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Țe
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=As
-   W x=83 s=0 z=100 t=in
-   W x=106 s=0 z=100 t=Țesătura,
-   W x=197 s=0 z=100 t=țesut.
+   W x=0 s=1 z=100 t=Țe
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=As
+   W x=65 s=0 z=100 t=in
+   W x=88 s=0 z=100 t=Țesătura,
+   W x=179 s=0 z=100 t=țesut.
   LINE y=668 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Țo
-   W x=50 s=0 z=100 t=—
-   W x=63 s=0 z=100 t=As
-   W x=86 s=0 z=100 t=in
-   W x=109 s=0 z=100 t=Țoca,
-   W x=166 s=0 z=100 t=țocul.
+   W x=0 s=1 z=100 t=Țo
+   W x=32 s=0 z=100 t=—
+   W x=45 s=0 z=100 t=As
+   W x=68 s=0 z=100 t=in
+   W x=91 s=0 z=100 t=Țoca,
+   W x=148 s=0 z=100 t=țocul.
   LINE y=692 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Șa
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=As
-   W x=84 s=0 z=100 t=in
-   W x=107 s=0 z=100 t=Șase,
-   W x=161 s=0 z=100 t=șarpe.
+   W x=0 s=1 z=100 t=Șa
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=As
+   W x=66 s=0 z=100 t=in
+   W x=89 s=0 z=100 t=Șase,
+   W x=143 s=0 z=100 t=șarpe.
   LINE y=716 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Șe
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=As
-   W x=81 s=0 z=100 t=in
-   W x=104 s=0 z=100 t=Șeful,
-   W x=167 s=0 z=100 t=șed.
+   W x=0 s=1 z=100 t=Șe
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=As
+   W x=63 s=0 z=100 t=in
+   W x=86 s=0 z=100 t=Șeful,
+   W x=149 s=0 z=100 t=șed.
  PAGE 4 elements=8 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tơ
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=As
-   W x=78 s=0 z=100 t=in
-   W x=101 s=0 z=100 t=Tơi,
-   W x=137 s=0 z=100 t=tơi
-   W x=169 s=0 z=100 t=sáng.
+   W x=0 s=1 z=100 t=Tơ
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=As
+   W x=60 s=0 z=100 t=in
+   W x=83 s=0 z=100 t=Tơi,
+   W x=119 s=0 z=100 t=tơi
+   W x=151 s=0 z=100 t=sáng.
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tư
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=As
-   W x=79 s=0 z=100 t=in
-   W x=102 s=0 z=100 t=Tươi,
-   W x=149 s=0 z=100 t=tương
-   W x=208 s=0 z=100 t=lai.
+   W x=0 s=1 z=100 t=Tư
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=As
+   W x=61 s=0 z=100 t=in
+   W x=84 s=0 z=100 t=Tươi,
+   W x=131 s=0 z=100 t=tương
+   W x=190 s=0 z=100 t=lai.
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Vơ
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=As
-   W x=80 s=0 z=100 t=in
-   W x=103 s=0 z=100 t=Vơi,
-   W x=141 s=0 z=100 t=vơ.
+   W x=0 s=1 z=100 t=Vơ
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=As
+   W x=62 s=0 z=100 t=in
+   W x=85 s=0 z=100 t=Vơi,
+   W x=123 s=0 z=100 t=vơ.
   LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Vư
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=As
-   W x=81 s=0 z=100 t=in
-   W x=104 s=0 z=100 t=Vừa,
-   W x=149 s=0 z=100 t=vươn.
+   W x=0 s=1 z=100 t=Vư
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=As
+   W x=63 s=0 z=100 t=in
+   W x=86 s=0 z=100 t=Vừa,
+   W x=131 s=0 z=100 t=vươn.
   LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Tǎ
-   W x=38 s=0 z=100 t=—
-   W x=51 s=0 z=100 t=As
-   W x=74 s=0 z=100 t=in
-   W x=97 s=0 z=100 t=Tǎmen
-   W x=145 s=0 z=100 t=(Pinyin).
+   W x=0 s=1 z=100 t=Tǎ
+   W x=20 s=0 z=100 t=—
+   W x=33 s=0 z=100 t=As
+   W x=56 s=0 z=100 t=in
+   W x=79 s=0 z=100 t=Tǎmen
+   W x=127 s=0 z=100 t=(Pinyin).
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=18 s=1 z=100 t=Tǖ
-   W x=39 s=0 z=100 t=—
-   W x=52 s=0 z=100 t=As
-   W x=75 s=0 z=100 t=in
-   W x=98 s=0 z=100 t=nǖ
-   W x=122 s=0 z=100 t=(Pinyin:
-   W x=198 s=0 z=100 t=female).
+   W x=0 s=1 z=100 t=Tǖ
+   W x=21 s=0 z=100 t=—
+   W x=34 s=0 z=100 t=As
+   W x=57 s=0 z=100 t=in
+   W x=80 s=0 z=100 t=nǖ
+   W x=104 s=0 z=100 t=(Pinyin:
+   W x=180 s=0 z=100 t=female).
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Ƒa
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=Ƒarin
-   W x=156 s=0 z=100 t=(Hausa).
+   W x=0 s=1 z=100 t=Ƒa
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=Ƒarin
+   W x=138 s=0 z=100 t=(Hausa).
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=18 s=1 z=100 t=Ƒo
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=As
-   W x=82 s=0 z=100 t=in
-   W x=105 s=0 z=100 t=Ƒoto
-   W x=153 s=0 z=100 t=(Hausa).
+   W x=0 s=1 z=100 t=Ƒo
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=As
+   W x=64 s=0 z=100 t=in
+   W x=87 s=0 z=100 t=Ƒoto
+   W x=135 s=0 z=100 t=(Hausa).
 SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
  PAGE 0 elements=27 footnotes=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=2
@@ -7151,108 +7148,108 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=65 s=0 z=100 t=Γαλήνη,
    W x=138 s=0 z=100 t=γαλαξίας.
   LINE y=388 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Γε
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=Γεωργία,
-   W x=137 s=0 z=100 t=γερός.
+   W x=0 s=1 z=100 t=Γε
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=Γεωργία,
+   W x=119 s=0 z=100 t=γερός.
   LINE y=412 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Γο
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Γοργόνα,
-   W x=132 s=0 z=100 t=γονιός.
+   W x=0 s=1 z=100 t=Γο
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Γοργόνα,
+   W x=114 s=0 z=100 t=γονιός.
   LINE y=436 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Γυ
-   W x=49 s=0 z=100 t=—
-   W x=62 s=0 z=100 t=Γυμνάσιο,
-   W x=151 s=0 z=100 t=γύρος.
+   W x=0 s=1 z=100 t=Γυ
+   W x=31 s=0 z=100 t=—
+   W x=44 s=0 z=100 t=Γυμνάσιο,
+   W x=133 s=0 z=100 t=γύρος.
   LINE y=460 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Γρ
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Γραμματική.
+   W x=0 s=1 z=100 t=Γρ
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Γραμματική.
   LINE y=484 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Τα
-   W x=39 s=0 z=100 t=—
-   W x=52 s=0 z=100 t=Ταξίδι,
-   W x=118 s=0 z=100 t=ταχύ.
+   W x=0 s=1 z=100 t=Τα
+   W x=21 s=0 z=100 t=—
+   W x=34 s=0 z=100 t=Ταξίδι,
+   W x=100 s=0 z=100 t=ταχύ.
   LINE y=508 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Τε
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Τεχνολογία.
+   W x=0 s=1 z=100 t=Τε
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Τεχνολογία.
   LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Το
-   W x=39 s=0 z=100 t=—
-   W x=52 s=0 z=100 t=Τοποθεσία.
+   W x=0 s=1 z=100 t=Το
+   W x=21 s=0 z=100 t=—
+   W x=34 s=0 z=100 t=Τοποθεσία.
   LINE y=556 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Τυ
-   W x=45 s=0 z=100 t=—
-   W x=58 s=0 z=100 t=Τυρί,
-   W x=110 s=0 z=100 t=τυχερός.
+   W x=0 s=1 z=100 t=Τυ
+   W x=27 s=0 z=100 t=—
+   W x=40 s=0 z=100 t=Τυρί,
+   W x=92 s=0 z=100 t=τυχερός.
   LINE y=580 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=18 s=1 z=100 t=Αυ
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=Αυτός,
-   W x=127 s=0 z=100 t=αυλή.
+   W x=0 s=1 z=100 t=Αυ
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=Αυτός,
+   W x=109 s=0 z=100 t=αυλή.
   LINE y=604 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Αν
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=Ανατολή.
+   W x=0 s=1 z=100 t=Αν
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=Ανατολή.
   LINE y=628 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ατ
-   W x=46 s=0 z=100 t=—
-   W x=59 s=0 z=100 t=Ατλαντικός.
+   W x=0 s=1 z=100 t=Ατ
+   W x=28 s=0 z=100 t=—
+   W x=41 s=0 z=100 t=Ατλαντικός.
   LINE y=652 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Αδ
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Αδελφός.
+   W x=0 s=1 z=100 t=Αδ
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Αδελφός.
   LINE y=676 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Υγ
-   W x=42 s=0 z=100 t=—
-   W x=55 s=0 z=100 t=Υγεία.
+   W x=0 s=1 z=100 t=Υγ
+   W x=24 s=0 z=100 t=—
+   W x=37 s=0 z=100 t=Υγεία.
   LINE y=700 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Υπ
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=Υπουργός.
+   W x=0 s=1 z=100 t=Υπ
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=Υπουργός.
   LINE y=724 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ρα
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Ραδιόφωνο.
+   W x=0 s=1 z=100 t=Ρα
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Ραδιόφωνο.
  PAGE 4 elements=18 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ρε
-   W x=47 s=0 z=100 t=—
-   W x=60 s=0 z=100 t=Ρεύμα.
+   W x=0 s=1 z=100 t=Ρε
+   W x=29 s=0 z=100 t=—
+   W x=42 s=0 z=100 t=Ρεύμα.
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Ρο
-   W x=43 s=0 z=100 t=—
-   W x=56 s=0 z=100 t=Ροδός.
+   W x=0 s=1 z=100 t=Ρο
+   W x=25 s=0 z=100 t=—
+   W x=38 s=0 z=100 t=Ροδός.
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Φα
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=Φαντασία.
+   W x=0 s=1 z=100 t=Φα
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=Φαντασία.
   LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Φο
-   W x=41 s=0 z=100 t=—
-   W x=54 s=0 z=100 t=Φοίνικας.
+   W x=0 s=1 z=100 t=Φο
+   W x=23 s=0 z=100 t=—
+   W x=36 s=0 z=100 t=Φοίνικας.
   LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Δα
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Δασκάλα.
+   W x=0 s=1 z=100 t=Δα
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Δασκάλα.
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Δε
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=Δελφοί.
+   W x=0 s=1 z=100 t=Δε
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=Δελφοί.
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Λα
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Λαμπρή.
+   W x=0 s=1 z=100 t=Λα
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Λαμπρή.
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Λε
-   W x=48 s=0 z=100 t=—
-   W x=61 s=0 z=100 t=Λευκάδα.
+   W x=0 s=1 z=100 t=Λε
+   W x=30 s=0 z=100 t=—
+   W x=43 s=0 z=100 t=Λευκάδα.
   LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=18 s=1 z=100 t=Λο
-   W x=44 s=0 z=100 t=—
-   W x=57 s=0 z=100 t=Λονδίνο.
+   W x=0 s=1 z=100 t=Λο
+   W x=26 s=0 z=100 t=—
+   W x=39 s=0 z=100 t=Λονδίνο.
   LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=“And
    W x=74 s=0 z=100 t=with

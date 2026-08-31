@@ -122,7 +122,9 @@ WeatherData WeatherClient::fetchFromApi(const WeatherSettingsStore& settings) {
 
   std::string response;
   LOG_DBG("WEA", "fetchFromApi[3] HttpDownloader::fetchUrl before");
-  if (!HttpDownloader::fetchUrl(url, response)) {
+  // Public forecast data, no credentials sent: verifying the chain would cost a
+  // multi-second ECDSA walk to protect nothing. Unverified and honest about it.
+  if (!HttpDownloader::fetchUrl(url, response, "", "", HttpDownloader::TlsPolicy::Unverified)) {
     data.errorMessage = "Network error";
     LOG_ERR("WEA", "Failed to fetch weather data");
     return data;
@@ -363,7 +365,8 @@ std::vector<GeocodingResult> WeatherClient::searchCity(const std::string& query)
   url += "&count=5&language=en";
 
   std::string response;
-  if (!HttpDownloader::fetchUrl(url, response)) {
+  // Public geocoding lookup; see fetchFromApi() for why this is not verified.
+  if (!HttpDownloader::fetchUrl(url, response, "", "", HttpDownloader::TlsPolicy::Unverified)) {
     LOG_ERR("WEA", "Geocoding request failed");
     return results;
   }

@@ -100,6 +100,8 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasPrintedPages) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PRINTED_PAGE, SettingAction::None));
   }
+  // Auto page turn: ACTION type with custom cycling in onActionSelected
+  menuItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
 
   // Bookmarks, footnotes
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_BOOKMARKS));
@@ -111,6 +113,10 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasFootnotes) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_FOOTNOTES, SettingAction::None));
   }
+  // Always offered, even with no dictionary configured: choosing it then opens
+  // the picker, which is more useful than hiding the feature from the person
+  // who has not found the setting yet.
+  menuItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
 
   // --- Appearance ---
   menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_APPEARANCE));
@@ -342,11 +348,6 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                           })
                           .withSubmenu(StrId::STR_READER_OVERRIDES));
 
-  // Helper functions, reading ruler, auto page turn, orientation
-  menuItems.push_back(SettingInfo::Separator(StrId::STR_READER_UTILS));
-  // Auto page turn: ACTION type with custom cycling in onActionSelected
-  menuItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
-
   // --- Synchronisation (only if credentials are set) ---
   if (KOREADER_STORE.hasCredentials()) {
     menuItems.push_back(SettingInfo::Separator(StrId::STR_KOREADER_SYNC));
@@ -391,6 +392,8 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::STAR_PAGE;
     case StrId::STR_FOOTNOTES:
       return MenuAction::FOOTNOTES;
+    case StrId::STR_DICTIONARY:
+      return MenuAction::DICTIONARY;
     case StrId::STR_AUTO_TURN_PAGES_PER_MIN:
       return MenuAction::AUTO_PAGE_TURN;
     case StrId::STR_EMBEDDED_STYLE:
@@ -418,7 +421,7 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
     case StrId::STR_GO_HOME_BUTTON:
       return MenuAction::GO_HOME;
     case StrId::STR_READING_STATS_FOR_THIS_BOOK:
-      return MenuAction::READING_STATS;
+      return MenuAction::READING_STATS_FOR_BOOK;
     case StrId::STR_BOOK_INFO:
       return MenuAction::BOOK_INFO;
     default:
@@ -704,7 +707,7 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
                    std::to_string(totalPages) + std::string(tr(STR_PAGES_SEPARATOR));
   }
   progressLine += std::string(tr(STR_BOOK_PREFIX)) + std::to_string(bookProgressPercent) + "%";
-  renderer.drawCenteredText(UI_10_FONT_ID, 45, progressLine.c_str());
+  renderer.drawCenteredText(UI_10_FONT_ID, 45 + contentRect.y, progressLine.c_str());
 
   // Menu Items
   const int startY = 75 + contentRect.y;

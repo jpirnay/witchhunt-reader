@@ -3,11 +3,13 @@
 #include <GfxRenderer.h>
 #include <HTTPClient.h>
 #include <HalClock.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <NetworkClient.h>
 #include <WiFi.h>
 #include <esp_mac.h>
+#include <esp_wifi.h>
 
 #include <cstring>
 #include <ctime>
@@ -53,9 +55,13 @@ void WifiSelectionActivity::onEnter() {
   // STA_CONNECTED = association (auth + 4-way handshake done).
   // STA_GOT_IP    = DHCP done.
   evtIdConnected = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
         currentAttemptAssociated = true;
-        LOG_DBG("WIFI", "EVT associated at %lu ms", millis() - connectionStartTime);
+        // Which AP we landed on, not just when. On a mesh SSID the sorted candidate list is the
+        // whole story: pairing this BSSID with the one in the disconnect below says whether a
+        // failed attempt cost us a bad node, or whether the same node needed two tries.
+        LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u", millis() - connectionStartTime,
+                formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
@@ -63,6 +69,33 @@ void WifiSelectionActivity::onEnter() {
         LOG_DBG("WIFI", "EVT got_ip at %lu ms", millis() - connectionStartTime);
       },
       ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  // STA_START = the driver finished esp_wifi_start() (PHY init + RF calibration). Splits
+  // driver bring-up from the scan/auth/assoc that follows it, which the association timestamp
+  // alone cannot: measured begin->associated is a flat ~2.5 s regardless of scan method, hint,
+  // or RSSI, and that invariance is what this pair exists to explain.
+  evtIdStaStart = WiFi.onEvent(
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+        LOG_DBG("WIFI", "EVT sta_start at %lu ms (driver up; scan/auth begins here)", millis() - connectionStartTime);
+      },
+      ARDUINO_EVENT_WIFI_STA_START);
+  // The one that should settle it. A cost that flat across every configuration looks like a
+  // fixed retry/backoff rather than a negotiation, and a retry means a disconnect event with a
+  // reason code. If nothing fires between begin() and STA_CONNECTED, the ~2.5 s is genuinely
+  // the AP taking that long and there is nothing here to win; if AUTH_EXPIRE / ASSOC_EXPIRE /
+  // HANDSHAKE_TIMEOUT shows up mid-connect, that names the second we are paying for.
+  evtIdDisconnected = WiFi.onEvent(
+      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+        const uint8_t reason = info.wifi_sta_disconnected.reason;
+        // bssid/rssi name the AP that failed and how loud it was at the moment it gave up, which
+        // is what separates "the driver picked a node it cannot actually hold" from "the whole
+        // SSID is too weak here".
+        LOG_DBG("WIFI", "EVT disconnected at %lu ms: reason=%u (%s) assoc=%d bssid=%s rssi=%d",
+                millis() - connectionStartTime, reason,
+                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
+                formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
+                static_cast<int>(info.wifi_sta_disconnected.rssi));
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   // Load saved WiFi credentials - SD card operations need lock as we use SPI
   // for both
@@ -134,6 +167,14 @@ void WifiSelectionActivity::onExit() {
   if (evtIdGotIp != 0) {
     WiFi.removeEvent(evtIdGotIp);
     evtIdGotIp = 0;
+  }
+  if (evtIdStaStart != 0) {
+    WiFi.removeEvent(evtIdStaStart);
+    evtIdStaStart = 0;
+  }
+  if (evtIdDisconnected != 0) {
+    WiFi.removeEvent(evtIdDisconnected);
+    evtIdDisconnected = 0;
   }
 
   LOG_DBG("WIFI", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
@@ -222,11 +263,10 @@ void WifiSelectionActivity::tryNextAutoCycleCandidate() {
   connectionStartTime = millis();
   connectedIP.clear();
   connectionError.clear();
-  hintFallbackDone = false;
   requestUpdate();
 
   prepareForConnect();
-  issueWifiBegin(/*useHint=*/true);
+  issueWifiBegin();
 }
 
 void WifiSelectionActivity::processWifiScanResults() {
@@ -349,14 +389,21 @@ void WifiSelectionActivity::attemptConnection() {
   connectionStartTime = millis();
   connectedIP.clear();
   connectionError.clear();
-  hintFallbackDone = false;
   requestUpdate();
 
   prepareForConnect();
-  issueWifiBegin(/*useHint=*/true);
+  issueWifiBegin();
 }
 
 void WifiSelectionActivity::prepareForConnect() {
+  // Before anything touches the radio. WiFi does not work below 80 MHz on this SoC and the idle
+  // governor parks the CPU at 10 MHz, so association from there hangs rather than failing — the
+  // observed symptom was a dead device after a long-press into KOReader sync, whose hold crossed
+  // the idle threshold before the action fired. main.cpp now keeps the clock up while a button is
+  // held, which removes that particular trigger; this stays as the guarantee at the point that
+  // actually depends on it, for every other way the clock could be low when we get here.
+  powerManager.ensureFullSpeedForRadio();
+
   WiFi.persistent(false);  // Credentials are managed by WifiCredentialStore; suppress SDK NVS auto-connect
 
   // Only switch mode if we're not already STA — the mode setter touches the netif and
@@ -375,9 +422,18 @@ void WifiSelectionActivity::prepareForConnect() {
     WiFi.disconnect(true, true);
   }
 
-  // Scan all channels so networks with multiple APs use the strongest matching
-  // BSSID instead of the first match found by the framework's default fast scan.
-  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  // Modem sleep OFF for the whole network session. The Arduino core arms WIFI_PS_MIN_MODEM at
+  // STA_START, so it is active across the scan/auth/assoc we are about to pay for: the radio
+  // dozes between DTIM beacons, and a missed beacon on a weak link is reported as
+  // reason=200 (BEACON_TIMEOUT) with assoc=0 -- a ~10 s dead attempt before the driver retries.
+  // OtaUpdater already does this for its transfer (WifiPowerSaveGuard); the connect itself is
+  // just as beacon-sensitive. Set before begin() so the STA_START handler picks up this value
+  // rather than the default. Left off for the session: every network activity here stops the
+  // radio outright when it is done, so there is no idle-with-WiFi-up state to save power in.
+  WiFi.setSleep(WIFI_PS_NONE);
+
+  // Ranks what the full scan collected, so the strongest AP for the SSID wins. This is what makes
+  // dropping the channel/BSSID hint correct on a mesh -- see issueWifiBegin().
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
   // Use stable base MAC so hostname suffix is deterministic across WiFi states.
@@ -385,66 +441,87 @@ void WifiSelectionActivity::prepareForConnect() {
   readDeviceBaseMac(baseMac);
   String hostname = "CrossPoint-Reader-" + formatMacCompact(baseMac);
   WiFi.setHostname(hostname.c_str());
+
+  applyScanBudget();
 }
 
-void WifiSelectionActivity::issueWifiBegin(bool useHint) {
-  std::memset(currentAttemptBssid, 0, 6);
-  currentAttemptChannel = 0;
+// Bounds how long the connect-time scan may take.
+//
+// esp_wifi_set_scan_parameters() is explicit that "the values set using this API are also used
+// for scans used while connecting", so this is the real knob for the full sweep issueWifiBegin()
+// now always performs -- not a workaround.
+//
+// Worth being precise about what the cost actually depends on: a scan sits on each channel for a
+// fixed dwell and collects whatever answers within it, so the duration is CHANNELS x DWELL and is
+// independent of how many SSIDs are in the air. A crowded band costs driver memory for the AP
+// record list, not time. At the IDF default of 120 ms a 13-channel sweep is ~1560 ms, which is
+// most of the ~2.57 s that unhinted associations used to take (the rest being auth/assoc).
+//
+// 80 ms was tried here and is back out: it produced exactly the miss this comment used to warn
+// about -- "EVT disconnected at 1546 ms: reason=201 (NO_AP_FOUND) assoc=0
+// bssid=00-00-00-00-00-00 rssi=-128", an all-zero BSSID meaning the sweep never saw the AP at
+// all, followed by the driver's own full re-sweep. A miss costs a whole second sweep (~1.5 s),
+// three times what the shorter dwell saves, so the trade only paid when it happened to work.
+//
+// 120 ms is the IDF default and there is a reason it sits above 100: the standard beacon
+// interval IS 100 ms, so a dwell shorter than that is not guaranteed to overlap a single beacon
+// on the channel -- it leaves the scan depending on catching the probe response alone, and a
+// probe response is one frame that can be lost. Do not go below 100 again without a mechanism
+// that does not need to hear a beacon.
+//
+// home_chan_dwell_time is set to its documented 30 ms minimum: it only matters while already
+// associated (returning to the home channel between scanned ones), which is not this path.
+void WifiSelectionActivity::applyScanBudget() {
+  wifi_scan_default_params_t params = {};
+  params.scan_time.active.min = 0;
+  params.scan_time.active.max = SCAN_ACTIVE_DWELL_MAX_MS;
+  params.scan_time.passive = SCAN_PASSIVE_DWELL_MS;
+  params.home_chan_dwell_time = SCAN_HOME_CHAN_DWELL_MS;
+
+  // Requires station mode to have been started (returns ESP_FAIL otherwise), which is why this
+  // runs at the end of prepareForConnect() rather than alongside the other WiFi.set* calls.
+  const esp_err_t err = esp_wifi_set_scan_parameters(&params);
+  if (err != ESP_OK) {
+    LOG_DBG("WIFI", "Scan budget not applied (%s); driver defaults apply (~120 ms/channel)", esp_err_to_name(err));
+    return;
+  }
+  LOG_DBG("WIFI", "Scan budget: active<=%u ms/chan, passive %u ms, home dwell %u ms", SCAN_ACTIVE_DWELL_MAX_MS,
+          SCAN_PASSIVE_DWELL_MS, SCAN_HOME_CHAN_DWELL_MS);
+}
+
+void WifiSelectionActivity::issueWifiBegin() {
   currentAttemptAssociated = false;
 
-  if (useHint) {
-    const auto* cred = WIFI_STORE.findCredential(selectedSSID);
-    if (cred && cred->channel != 0) {
-      // Discard the cached BSSID/channel hint once it ages past the TTL. The observed IP
-      // profile is cleared with it, but is never replayed. cacheTimestamp==0 predates clock
-      // sync (trust indefinitely); now==0 means the clock isn't synced right now so we
-      // can't judge age (keep it). Signed arithmetic so a future timestamp (clock corrected
-      // backwards between write and read) reads as fresh rather than ancient.
-      constexpr int64_t TTL_SECONDS = 7 * 24 * 60 * 60;
-      const time_t now = HalClock::now();
-      const int64_t elapsed = (now == 0) ? 0 : (static_cast<int64_t>(now) - static_cast<int64_t>(cred->cacheTimestamp));
-      const bool ttlExpired = (cred->cacheTimestamp != 0) && (now != 0) && (elapsed >= TTL_SECONDS);
-      if (ttlExpired) {
-        LOG_DBG("WIFI", "Connection cache aged out (ts=%u, now=%ld), discarding for full scan + DHCP",
-                cred->cacheTimestamp, (long)now);
-        RenderLock lock(*this);  // clearConnectionCache writes the SD/SPI bus shared with the display
-        WIFI_STORE.clearConnectionCache(selectedSSID);
-      } else {
-        std::memcpy(currentAttemptBssid, cred->bssid, 6);
-        currentAttemptChannel = cred->channel;
-
-        // DHCP-derived IP and DNS data can become stale long before the hint TTL.
-        // Keep it only for diagnostics; always renew the network profile through DHCP.
-        if (cred->ip[0] != 0) {
-          IPAddress ip(cred->ip[0], cred->ip[1], cred->ip[2], cred->ip[3]);
-          IPAddress gw(cred->gateway[0], cred->gateway[1], cred->gateway[2], cred->gateway[3]);
-          IPAddress mask(cred->mask[0], cred->mask[1], cred->mask[2], cred->mask[3]);
-          IPAddress dns(cred->dns[0], cred->dns[1], cred->dns[2], cred->dns[3]);
-          LOG_DBG("WIFI", "Cached network profile ignored: ip=%s gw=%s mask=%s dns=%s ts=%u age=%lld",
-                  ip.toString().c_str(), gw.toString().c_str(), mask.toString().c_str(), dns.toString().c_str(),
-                  cred->cacheTimestamp, static_cast<long long>(elapsed));
-        }
-      }
-    }
-  }
+  // Always a full, signal-sorted scan. The cached channel/BSSID hint that used to shortcut this
+  // is gone, and the device data is unambiguous about why:
+  //
+  //  - It never paid. Hinted association measured 2517/2518/2535 ms against unhinted
+  //    2569/2571 ms -- ~40 ms apart, because under WIFI_ALL_CHANNEL_SCAN conf.sta.channel cannot
+  //    short-circuit the sweep at all.
+  //  - Made to work (WIFI_FAST_SCAN), it became a coin flip: 201 ms when the pinned probe hit,
+  //    but "EVT disconnected: reason=201 (NO_AP_FOUND)" at 2462 ms when it missed, with the
+  //    driver's own retry then associating 150 ms later. That is the whole of the supposed
+  //    "flat ~2.5 s association".
+  //  - Unpinning the BSSID to fix that broke AP selection instead: WIFI_FAST_SCAN takes the
+  //    FIRST match, and setSortMethod() only ranks what a full scan collected. On a mesh SSID it
+  //    attached to a -86 dBm AP on channel 1 in place of the -63 dBm one on channel 11.
+  //
+  // A full scan sees every AP for the SSID and sort-by-signal picks the strongest, which is the
+  // only correct answer on a mesh -- and the cost is bounded by applyScanBudget(), not by how
+  // many SSIDs are in the air.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
 
   // Reset to DHCP in case a previous attempt left a static config behind.
   WiFi.config(IPAddress(), IPAddress(), IPAddress(), IPAddress());
 
   const char* pwd = (selectedRequiresPassword && !enteredPassword.empty()) ? enteredPassword.c_str() : nullptr;
   const unsigned long preBeginMs = millis() - connectionStartTime;
-  if (currentAttemptChannel != 0) {
-    LOG_DBG("WIFI", "WiFi.begin -> %s ch=%d bssid=%02x:%02x:%02x:%02x:%02x:%02x dhcp=yes (pre-begin %lu ms)",
-            selectedSSID.c_str(), currentAttemptChannel, currentAttemptBssid[0], currentAttemptBssid[1],
-            currentAttemptBssid[2], currentAttemptBssid[3], currentAttemptBssid[4], currentAttemptBssid[5], preBeginMs);
-    WiFi.begin(selectedSSID.c_str(), pwd, currentAttemptChannel, currentAttemptBssid, true);
+  LOG_DBG("WIFI", "WiFi.begin -> %s (scan=all-channel sorted-by-signal, pre-begin %lu ms)", selectedSSID.c_str(),
+          preBeginMs);
+  if (pwd) {
+    WiFi.begin(selectedSSID.c_str(), pwd);
   } else {
-    LOG_DBG("WIFI", "WiFi.begin -> %s (no hint, pre-begin %lu ms)", selectedSSID.c_str(), preBeginMs);
-    if (pwd) {
-      WiFi.begin(selectedSSID.c_str(), pwd);
-    } else {
-      WiFi.begin(selectedSSID.c_str());
-    }
+    WiFi.begin(selectedSSID.c_str());
   }
 }
 
@@ -500,13 +577,17 @@ void WifiSelectionActivity::checkConnectionStatus() {
     connectedIP = ipStr;
     autoConnecting = false;
 
-    LOG_DBG("WIFI", "Connected to %s in %lu ms (rssi=%d ch=%d ip=%s gw=%s mask=%s dns=%s hint=%s)",
-            selectedSSID.c_str(), millis() - connectionStartTime, WiFi.RSSI(), WiFi.channel(), ipStr,
-            WiFi.gatewayIP().toString().c_str(), WiFi.subnetMask().toString().c_str(), WiFi.dnsIP().toString().c_str(),
-            currentAttemptChannel != 0 ? "yes" : "no");
+    LOG_DBG("WIFI", "Connected to %s in %lu ms (rssi=%d ch=%d ip=%s gw=%s mask=%s dns=%s)", selectedSSID.c_str(),
+            millis() - connectionStartTime, WiFi.RSSI(), WiFi.channel(), ipStr, WiFi.gatewayIP().toString().c_str(),
+            WiFi.subnetMask().toString().c_str(), WiFi.dnsIP().toString().c_str());
 
-    // Cache BSSID/channel to skip channel scanning. Retain the DHCP profile only for
-    // diagnostics; reconnects always renew it. SD card operations need the display lock.
+    // Records what we actually connected to. NOTHING reads the BSSID/channel back to shortcut a
+    // later connect any more -- issueWifiBegin() always does a full signal-sorted scan, for the
+    // reasons documented there. The whole record is diagnostic now (the "Reset info" prompt below
+    // clears it, and the IP profile has been diagnostic-only for a while), so the storage in
+    // WifiCredentialStore is a candidate for deletion once the full-scan path has some mileage.
+    // Kept for now rather than widening this change into the settings serialisation.
+    // SD card operations need the display lock.
     {
       RenderLock lock(*this);
       WIFI_STORE.setLastConnectedSsid(selectedSSID);
@@ -551,32 +632,6 @@ void WifiSelectionActivity::checkConnectionStatus() {
               "completing immediately");
       onComplete(true);
     }
-    return;
-  }
-
-  // If this attempt used a hint and the hint hasn't paid off (channel may have changed
-  // because the AP is part of a mesh / roamed), retry once with a full scan before
-  // surfacing failure or moving to the next candidate. Triggered on either a hard
-  // failure status or a short timeout — whichever comes first.
-  const bool usingHint = currentAttemptChannel != 0;
-  const bool hintHardFail =
-      usingHint && !hintFallbackDone && (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL);
-  const bool hintTimedOut = usingHint && !hintFallbackDone && !currentAttemptAssociated &&
-                            (millis() - connectionStartTime > HINT_ATTEMPT_TIMEOUT_MS);
-  if (hintHardFail || hintTimedOut) {
-    LOG_DBG("WIFI", "Hint attempt did not connect (%s after %lu ms), retrying with full scan",
-            hintHardFail ? "hard fail" : "timeout", millis() - connectionStartTime);
-    hintFallbackDone = true;
-    // Wipe the stale cache before retrying. If the fallback succeeds, the success
-    // path writes a fresh cache (one extra SD write). If it fails or is interrupted,
-    // we won't carry a known-bad hint into the next session.
-    {
-      RenderLock lock(*this);
-      WIFI_STORE.clearConnectionCache(selectedSSID);
-    }
-    WiFi.disconnect(true, false);
-    connectionStartTime = millis();
-    issueWifiBegin(/*useHint=*/false);
     return;
   }
 
@@ -644,14 +699,14 @@ void WifiSelectionActivity::loop() {
 
   // Handle save prompt state
   if (state == WifiSelectionState::SAVE_PROMPT) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (savePromptSelection > 0) {
         savePromptSelection--;
         requestUpdate();
       }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-               mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (savePromptSelection < 1) {
         savePromptSelection++;
         requestUpdate();
@@ -673,14 +728,14 @@ void WifiSelectionActivity::loop() {
 
   // Handle forget prompt state (connection failed with saved credentials)
   if (state == WifiSelectionState::FORGET_PROMPT) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (forgetPromptSelection > 0) {
         forgetPromptSelection--;
         requestUpdate();
       }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-               mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (forgetPromptSelection < 2) {
         forgetPromptSelection++;
         requestUpdate();
@@ -688,10 +743,10 @@ void WifiSelectionActivity::loop() {
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (forgetPromptSelection == 1) {
         RenderLock lock(*this);
-        // User chose "Reset info" - drop the cached BSSID/channel hint + IP/gw/mask/DNS but
-        // keep the saved password, so the next connect does a full scan + DHCP and re-fetches
-        // a fresh DNS. Fixes a stale cached DNS that survives because static config never
-        // re-pulls it from DHCP.
+        // User chose "Reset info" - drop the recorded BSSID/channel + IP/gw/mask/DNS but keep
+        // the saved password. Connects already do a full scan + DHCP unconditionally, so this is
+        // now about clearing the diagnostic record rather than changing what the next connect
+        // does.
         WIFI_STORE.clearConnectionCache(selectedSSID);
       } else if (forgetPromptSelection == 2) {
         RenderLock lock(*this);
@@ -776,12 +831,12 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       startWifiScan();
       return;
     }
 
-    const bool leftPressed = mappedInput.wasPressed(MappedInputManager::Button::Left);
+    const bool leftPressed = mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left);
     if (leftPressed) {
       const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
       if (hasSavedPassword) {
@@ -794,9 +849,13 @@ void WifiSelectionActivity::loop() {
     }
 
     // Handle navigation
-    buttonNavigator.onNextList(selectedNetworkIndex, static_cast<int>(networks.size()), [this] { requestUpdate(); });
-    buttonNavigator.onPreviousList(selectedNetworkIndex, static_cast<int>(networks.size()),
-                                   [this] { requestUpdate(); });
+    // Step on logical Up/Down only: logical Left opens the saved-network options and logical Right
+    // rescans (handled above), so they must not also move the selection. The page jump is the
+    // double-click on Up/Down.
+    buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectedNetworkIndex,
+                               static_cast<int>(networks.size()), [this] { requestUpdate(); });
+    buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectedNetworkIndex,
+                                   static_cast<int>(networks.size()), [this] { requestUpdate(); });
   }
 }
 
@@ -872,7 +931,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
 
 void WifiSelectionActivity::renderNetworkList() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
 
   if (networks.empty()) {
     // No networks found or scan failed
@@ -901,8 +960,13 @@ void WifiSelectionActivity::renderNetworkList() const {
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* optionsLabel = hasSavedPassword ? tr(STR_OPTIONS_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), optionsLabel, tr(STR_RETRY));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Options/Retry ride logical Left/Right and the step rides logical Up/Down, so in landscape the
+  // two pairs change places along with the labels — hence both hint strips, and the side gutter
+  // reserved above.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_CONNECT), optionsLabel, tr(STR_RETRY), tr(STR_DIR_UP),
+                                          tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 }
 
 void WifiSelectionActivity::renderConnecting() const {
@@ -984,7 +1048,11 @@ void WifiSelectionActivity::renderSavePrompt() const {
   }
 
   // Use centralized button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  // Either axis moves the selection here, so label the front strip with whichever pair it carries.
+  const auto labels = mappedInput
+                          .mapHints(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP),
+                                    tr(STR_DIR_DOWN))
+                          .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -1046,7 +1114,10 @@ void WifiSelectionActivity::renderForgetPrompt() const {
   }
 
   // Use centralized button hints
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  const auto labels =
+      mappedInput
+          .mapHints(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+          .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

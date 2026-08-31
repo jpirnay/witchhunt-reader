@@ -459,3 +459,331 @@ TEST(SaxParser, PairedMetaParsesWhenRepairDisabled) {
   EXPECT_TRUE(sawText);
   EXPECT_FALSE(p.truncationFlags() & SaxParser::kVoidTagRepaired);
 }
+
+// ---------------------------------------------------------------------------
+// Void elements that the document ALSO closes explicitly
+//
+// XHTML 1.1 requires a void element to either self-close or be paired, so
+// converters targeting it emit "<meta ...></meta>". Repairing the start tag into
+// "<meta ... />" leaves that end tag closing nothing, which aborts the parse --
+// issue #157, where every content file of a FictionBook->XHTML book began
+// <meta ...></meta><link ...></link> and the book would not open on any spine.
+// ---------------------------------------------------------------------------
+
+TEST(SaxParser, PairedVoidElementEndTagIsDropped) {
+  const char* xml = "<html><head><meta charset=\"UTF-8\"></meta><title>T</title></head></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  // Exactly one start/end pair for meta -- the synthesized one; the source's own
+  // </meta> must not surface as a second end event.
+  int metaStarts = 0;
+  int metaEnds = 0;
+  for (const auto& e : c.events) {
+    if (e.name != "meta") continue;
+    if (e.type == Event::Type::Start) ++metaStarts;
+    if (e.type == Event::Type::End) ++metaEnds;
+  }
+  EXPECT_EQ(metaStarts, 1);
+  EXPECT_EQ(metaEnds, 1);
+}
+
+// The head shape from issue_157.epub, reduced: paired <meta> and <link>, both on
+// one line, with a real element between and after.
+TEST(SaxParser, Issue157HeadWithPairedMetaAndLinkParses) {
+  const char* xml =
+      "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+      "<meta http-equiv=\"content-type\" content=\"text/xhtml; charset=UTF-8\"></meta>"
+      "<title>Chapter</title>"
+      "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"></link>"
+      "<link rel=\"stylesheet\" type=\"text/css\" href=\"unicode_fonts.css\"></link>"
+      "</head><body><p>Body text</p></body></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  // The body must survive: before the fix the parse died in <head> and no
+  // content ever reached the renderer.
+  bool sawBodyText = false;
+  for (const auto& e : c.events) {
+    if (e.text == "Body text") sawBodyText = true;
+  }
+  EXPECT_TRUE(sawBodyText);
+}
+
+TEST(SaxParser, PairedVoidEndTagToleratesWhitespaceBetween) {
+  const char* xml = "<head><meta charset=\"UTF-8\">\n  </meta><title>T</title></head>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  int metaEnds = 0;
+  for (const auto& e : c.events) {
+    if (e.name == "meta" && e.type == Event::Type::End) ++metaEnds;
+  }
+  EXPECT_EQ(metaEnds, 1);
+}
+
+// Suppression must be exact: a DIFFERENT tag following a self-close is replayed
+// intact, not swallowed. This is the regression that a naive "skip the next end
+// tag" implementation would introduce.
+TEST(SaxParser, NonMatchingTagAfterSelfCloseIsReplayed) {
+  const char* xml = "<div><br><span>kept</span></div>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  bool sawSpanStart = false;
+  bool sawSpanEnd = false;
+  bool sawText = false;
+  for (const auto& e : c.events) {
+    if (e.name == "span" && e.type == Event::Type::Start) sawSpanStart = true;
+    if (e.name == "span" && e.type == Event::Type::End) sawSpanEnd = true;
+    if (e.text == "kept") sawText = true;
+  }
+  EXPECT_TRUE(sawSpanStart);
+  EXPECT_TRUE(sawSpanEnd);
+  EXPECT_TRUE(sawText);
+}
+
+// Two void elements of the same name in a row: the second start tag must not be
+// mistaken for the first's end tag.
+TEST(SaxParser, ConsecutiveSameNameVoidElementsBothSurvive) {
+  const char* xml = "<head><meta name=\"a\"><meta name=\"b\"></head>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  int metaStarts = 0;
+  for (const auto& e : c.events) {
+    if (e.name == "meta" && e.type == Event::Type::Start) ++metaStarts;
+  }
+  EXPECT_EQ(metaStarts, 2);
+}
+
+// The candidate end tag split across feed() chunks — the reason it is buffered in
+// the impl rather than decided byte-by-byte.
+TEST(SaxParser, PairedVoidEndTagSplitAcrossFeeds) {
+  const std::string xml = "<head><meta charset=\"UTF-8\"></meta><title>T</title></head>";
+  const size_t split = xml.find("</meta>") + 3;  // mid end-tag
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  ASSERT_TRUE(p.feed(bytes, split));
+  ASSERT_TRUE(p.feed(bytes + split, xml.size() - split));
+  ASSERT_TRUE(p.finalize());
+
+  int metaEnds = 0;
+  bool sawTitle = false;
+  for (const auto& e : c.events) {
+    if (e.name == "meta" && e.type == Event::Type::End) ++metaEnds;
+    if (e.name == "title" && e.type == Event::Type::Start) sawTitle = true;
+  }
+  EXPECT_EQ(metaEnds, 1);
+  EXPECT_TRUE(sawTitle);
+}
+
+// Strict-XML mode (the EPUB3 OPF path) is unchanged: no repair, no suppression.
+TEST(SaxParser, StrictModeLeavesPairedMetaAlone) {
+  const char* xml = "<package><metadata><meta property=\"x\">v</meta></metadata></package>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(
+      p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/false));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  bool sawValue = false;
+  for (const auto& e : c.events) {
+    if (e.text == "v") sawValue = true;
+  }
+  EXPECT_TRUE(sawValue);
+  EXPECT_FALSE(p.truncationFlags() & SaxParser::kVoidTagRepaired);
+}
+
+// Not a meta/link special case: EVERY void element breaks the same way when the
+// document pairs it. In issue_157.epub the counts across 69 content files were
+// </br> 640, </link> 138, </img> 87, </meta> 69 -- so <br></br>, once written off
+// in this file as "essentially never emitted by real tools", was the single most
+// common form, and </img> meant even a repaired <head> would have died in <body>.
+TEST(SaxParser, PairedBrAndImgInBodyAreDropped) {
+  const char* xml =
+      "<body><p>One<br></br>Two</p>"
+      "<p><img src=\"i.png\" alt=\"a\"></img>after</p></body>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
+  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+
+  int brStarts = 0, brEnds = 0, imgStarts = 0, imgEnds = 0;
+  bool sawTwo = false, sawAfter = false;
+  for (const auto& e : c.events) {
+    if (e.name == "br") (e.type == Event::Type::Start ? brStarts : brEnds)++;
+    if (e.name == "img") (e.type == Event::Type::Start ? imgStarts : imgEnds)++;
+    if (e.text == "Two") sawTwo = true;
+    if (e.text == "after") sawAfter = true;
+  }
+  EXPECT_EQ(brStarts, 1);
+  EXPECT_EQ(brEnds, 1);
+  EXPECT_EQ(imgStarts, 1);
+  EXPECT_EQ(imgEnds, 1);
+  // Content after each paired void element must survive.
+  EXPECT_TRUE(sawTwo);
+  EXPECT_TRUE(sawAfter);
+}
+
+// ---------------------------------------------------------------------------
+// Trailing data after the root element (crosspoint-reader#3134)
+// ---------------------------------------------------------------------------
+
+TEST(SaxParser, TrailingPaddingBytesAfterRootAreIgnored) {
+  // Real EPUBs carry padding bytes after </html>. Every callback must still fire,
+  // the parse must succeed, and the repair must be reported.
+  const std::string xml = std::string("<html><body>hello</body></html>") + std::string(3, '\x05');
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  EXPECT_TRUE(p.feed(bytes, xml.size()));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTrailingDataIgnored);
+
+  ASSERT_EQ(c.events.size(), 5u);
+  EXPECT_EQ(c.events[2].text, "hello");
+  EXPECT_EQ(c.events[4].type, Event::Type::End);
+  EXPECT_EQ(c.events[4].name, "html");
+}
+
+TEST(SaxParser, TrailingDataToleranceAppliesToStrictParsers) {
+  // The latch is the root element close, not a tag name, so the strict-XML
+  // parsers (OPF, NCX, container, page-map, OPDS) get the same tolerance.
+  const std::string xml = std::string("<package><metadata/></package>") + std::string(2, '\x02');
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  EXPECT_TRUE(p.feed(bytes, xml.size()));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTrailingDataIgnored);
+  EXPECT_TRUE(p.isStopped());
+}
+
+TEST(SaxParser, TrailingDataInASeparateFeedIsIgnored) {
+  // The padding usually arrives in the last chunk of the streamed spine, after
+  // the chunk that closed the root — and every later chunk must be a no-op too.
+  const char* doc = "<html><body>hi</body></html>";
+  const char* pad = "\x10\x10\x10";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  ASSERT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(doc), strlen(doc)));
+  const size_t eventsAtRootClose = c.events.size();
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(pad), strlen(pad)));
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(pad), strlen(pad)));
+  EXPECT_TRUE(p.finalize());
+
+  EXPECT_EQ(c.events.size(), eventsAtRootClose);  // no callbacks after the root closed
+}
+
+TEST(SaxParser, MalformedMarkupBeforeRootCloseStillFails) {
+  // The tolerance must not swallow a real error inside the document: the same
+  // class of syntax error one tag earlier is corruption, not trailing junk.
+  const char* xml = "<html><body>hello</body></wrong></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_FALSE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_STRNE(p.errorString(), "");
+}
+
+TEST(SaxParser, SiblingAfterRootCloseIsIgnoredNotParsed) {
+  // A well-formed-looking second root is still past the end of the document.
+  // yxml rejects it; we stop there rather than failing the whole parse.
+  const char* xml = "<html><body>hi</body></html><html><body>ignored</body></html>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_TRUE(p.finalize());
+  for (const auto& e : c.events) {
+    EXPECT_NE(e.text, "ignored");
+  }
+}
+
+TEST(SaxParser, TrailingWhitespaceKeepsFlagsClear) {
+  // Whitespace after the root is legal XML: no error, and nothing to report.
+  const char* xml = "<html><body>hi</body></html>\n\n";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/true));
+
+  EXPECT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  EXPECT_TRUE(p.finalize());
+  EXPECT_EQ(p.truncationFlags(), 0u);
+  EXPECT_FALSE(p.isStopped());
+}
+
+TEST(SaxParser, DeepNestingDoesNotLatchRootClosedEarly) {
+  // The latch counts opens/closes without a capacity limit, unlike the fixed
+  // kMaxDepth name stack: a document nested past that stack must NOT look like
+  // it closed its root partway through, or later corruption would be ignored.
+  std::string xml = "<r>";
+  constexpr int kDeep = 64;  // <r> plus this many: deeper than the element-name stack
+  for (int i = 0; i < kDeep; ++i) xml += "<d>";
+  for (int i = 0; i < kDeep; ++i) xml += "</d>";
+  xml += "</wrong>";  // corruption INSIDE <r>, must still fail
+  xml += "</r>";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+
+  EXPECT_FALSE(p.feed(reinterpret_cast<const uint8_t*>(xml.data()), xml.size()));
+}

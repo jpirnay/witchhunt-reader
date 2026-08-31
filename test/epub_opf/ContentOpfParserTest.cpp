@@ -145,6 +145,47 @@ TEST(ContentOpfParser, ExtractsMetadataManifestAndGuideFields) {
   EXPECT_EQ(parser.guideCoverPageHref, "book/OEBPS/text/cover.xhtml");
 }
 
+// A cover/metadata load (Epub::loadForCover / loadForMetadata) passes a null cache. It must still
+// resolve the EPUB2 <meta name="cover"> -> manifest image item, and it must NOT build the .items.bin
+// item store: that store exists only to resolve spine idrefs, which a null cache skips entirely.
+// Building it there wrote the whole manifest to SD per cover pass and — since those load paths never
+// call setupCacheDir() — usually failed to open and logged three "probably fatal" errors per book.
+TEST(ContentOpfParser, ResolvesMetaCoverWithoutCacheAndWritesNoItemStore) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  TempDirGuard dirGuard(cacheDir);
+
+  const std::string base = "/book/OEBPS/";
+  const std::string xml =
+      "<?xml version='1.0' encoding='utf-8'?>"
+      "<package xmlns:opf='http://www.idpf.org/2007/opf' xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+      "<metadata>"
+      "<dc:title>Cover By Meta</dc:title>"
+      "<meta name='cover' content='cover-img'/>"
+      "</metadata>"
+      "<manifest>"
+      "<item id='chap1' href='text/chapter-1.xhtml' media-type='application/xhtml+xml'/>"
+      "<item id='cover-img' href='images/front.jpeg' media-type='image/jpeg'/>"
+      "</manifest>"
+      "<spine>"
+      "<itemref idref='chap1'/>"
+      "</spine>"
+      "</package>";
+
+  ContentOpfParser parser(cacheDir, base, xml.size(), nullptr);
+  ASSERT_TRUE(parseOpfXml(parser, xml));
+
+  // The cover href is matched inline as manifest items stream past — never read back from the
+  // item store — so dropping the store cannot break it.
+  EXPECT_EQ(parser.coverItemHref, "book/OEBPS/images/front.jpeg");
+  EXPECT_EQ(parser.title, "Cover By Meta");
+
+  // The store must never have been created. (The destructor removes it, so check while the
+  // parser is still alive.)
+  EXPECT_FALSE(std::filesystem::exists(cacheDir + "/.items.bin"))
+      << "null-cache parse built an item store it will never read";
+}
+
 TEST(ContentOpfParser, DecodesNumericCharacterReferencesInDescription) {
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());

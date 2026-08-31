@@ -8,9 +8,10 @@
 /**
  * HTTP client utility for fetching content and downloading files. Built on the
  * wolfSSL-backed SecureNet stack: https is verified against the curated
- * CrossPoint root set (TLS 1.3, verified-first with an insecure fallback for
- * browsing paths); plain http uses a WiFiClient passthrough (transport is
- * chosen from the URL scheme). Use fetchUrlVerified() for fail-closed transfers.
+ * CrossPoint root set (TLS 1.3); plain http uses a WiFiClient passthrough
+ * (transport is chosen from the URL scheme). Every https caller picks a
+ * TlsPolicy — see the enum: the default browsing posture, fail-closed, or
+ * explicitly unverified. Use fetchUrlVerified() for fail-closed streaming.
  */
 class HttpDownloader {
  public:
@@ -24,6 +25,29 @@ class HttpDownloader {
     HTTP_ERROR,
     FILE_ERROR,
     ABORTED,
+  };
+
+  /**
+   * TLS verification posture for an https transfer.
+   *
+   * Verified — verify against the curated roots and abort if that fails, unless
+   *   the user has turned SETTINGS.skipHttpsValidation on. The default: there is
+   *   no "verify, then retry unverified" middle any more, because an on-path
+   *   attacker presenting a bad certificate was simply accepted on the retry —
+   *   it authenticated nothing while paying for the chain verification twice.
+   *   Reaching a private-CA or self-signed server is now an explicit,
+   *   user-visible choice instead of a silent per-call downgrade.
+   * Strict — always verified; the skip setting does not apply. For firmware,
+   *   which the device executes, so it is not the user's to downgrade.
+   * Unverified — never verified: no roots loaded, no hostname check, one
+   *   handshake. For public read-only data where there is no secret to leak and
+   *   nothing to authenticate; also materially cheaper, since the ECDSA chain
+   *   verify dominates a handshake on this chip.
+   */
+  enum class TlsPolicy {
+    Verified,
+    Strict,
+    Unverified,
   };
 
   /**
@@ -58,10 +82,10 @@ class HttpDownloader {
    * Fetch text content from a URL with optional credentials.
    */
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
-                       const std::string& password = "");
+                       const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
   static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                       const std::string& password = "");
+                       const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "");
@@ -93,7 +117,7 @@ class HttpDownloader {
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
-                                      const std::string& password = "");
+                                      const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
   /**
    * Session-based variant. The first call on a fresh session opens the
@@ -102,5 +126,5 @@ class HttpDownloader {
    */
   static DownloadError downloadToFile(Session& session, const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
-                                      const std::string& password = "");
+                                      const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 };

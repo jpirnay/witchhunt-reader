@@ -13,7 +13,6 @@
 #include <cctype>
 
 #include "../../Epub.h"
-#include "../FootnoteShape.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
@@ -64,27 +63,57 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
 #endif
 
+// Reading an image header straight out of the ZIP (ImageDecoderFactory::getDimensionsFromZipEntry)
+// spins up a ~32 KB inflate ring. That is the ONLY allocation in image handling large enough to
+// threaten a parse, so it is the only thing gated on heap — see the image branch in startElement.
+// Sized ring + slack rather than reusing the text-layout floors, which are far too permissive for
+// a 32 KB request and were never chosen with one in mind.
+#ifndef EHP_IMAGE_HEADER_MIN_FREE_HEAP
+#define EHP_IMAGE_HEADER_MIN_FREE_HEAP (40 * 1024)
+#endif
+#ifndef EHP_IMAGE_HEADER_MIN_MAX_ALLOC
+#define EHP_IMAGE_HEADER_MIN_MAX_ALLOC (34 * 1024)
+#endif
+constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_FREE_HEAP;
+constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_MAX_ALLOC;
+
+// Largest-free-block readings land a few bytes UNDER the round number -- the allocator's own
+// bookkeeping, documented at ensureHeapForTextLayout below. Any contiguous threshold that DROPS
+// CONTENT when it is missed subtracts this, so a block genuinely of the required size is never
+// read as short. Thresholds that only warn do not need it.
+constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
+
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_ALLOC;
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC;
 
-// Guard: minimum free heap before attempting table layout (cell wrapping allocates TextBlock
-// vectors). Checked on <td> as cells accumulate, so a table that cannot afford grid layout
-// degrades before the row is built — and again in commitPendingRow(), immediately before the
-// layout allocations, so a dip costs the pending row rather than the rows already packed.
-// Unlike the row-scoped bounds, this one takes the whole table: a heap this low will not have
-// recovered by the next row.
-constexpr size_t MIN_FREE_HEAP_FOR_TABLE = 20 * 1024;
+// heapAllowsTableRowLayout() guards the row-layout allocations (cell wrapping allocates
+// TextBlock vectors). It deliberately reuses the TEXT LAYOUT thresholds above rather than
+// carrying its own: a bespoke
+// 20 KB free-only floor used to live here, which was wrong twice over. It ignored
+// getMaxAllocHeap(), unlike every other gate in this file, while the allocations it guards are
+// contiguous ones and contiguous runs far below free on this device (a device trace of this
+// chapter: free=41244 contig=20468). And 20 KB free was STRICTER than the gate on paragraph
+// layout, which is strictly more work -- ensureHeapForTextLayout lays out at 18 KB/12 KB and
+// keeps going in degraded mode down to 9 KB/6 KB. Under pressure that inversion sacrificed the
+// table on a page while never losing a word of the prose beside it, which is exactly how
+// appendix-b of Roosevelt's "Through the Brazilian Wilderness" lost its tables.
+//
+// Sampled ONLY here, immediately before the allocations. The old copy of this check at <td>
+// open sampled while the paragraph machinery was at ITS peak (a full page of PageLines awaiting
+// emit), so it read another subsystem's trough and degraded a row that could afford itself. The
+// deterministic buffered-byte budget below is what bounds a row as it accumulates.
 
 // Size bound on the buffered row (the gate that actually fires in time).
 //
-// MIN_FREE_HEAP_FOR_TABLE above is a POINT check at cell open, so it cannot bound a row that
-// grows into the margin: X3 alice spine 2 opened its table at ~30 KB free, passed every per-cell
-// check, and was at 9776 free / 5364 max alloc by the time </table> drained it as paragraphs --
-// 20 KB consumed in 61 ms with no switch. By construction the heap check only trips once enough
-// memory is ALREADY committed to buffers that still have to be drained; on a fragmented session
-// (contig 15860 instead of 27636) the same table hard-abort()ed instead of degrading.
+// A heap sample cannot bound a row that grows into the margin. This file used to take one at
+// every <td> as well; it could not: X3 alice spine 2 opened its table at ~30 KB free, passed
+// every per-cell check, and was at 9776 free / 5364 max alloc by the time </table> drained it as
+// paragraphs -- 20 KB consumed in 61 ms with no switch. By construction a heap check only trips
+// once enough memory is ALREADY committed to buffers that still have to be drained; on a
+// fragmented session (contig 15860 instead of 27636) the same table hard-abort()ed instead of
+// degrading. That per-<td> sample is gone; the pre-allocation one in commitPendingRow() remains.
 //
 // So bound the quantity we can actually measure as it accumulates -- attributed buffered bytes --
 // instead of sampling the heap. Deterministic, book-independent, and it fires BEFORE the memory
@@ -118,8 +147,19 @@ constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 // <td> at which to switch, and buffered to the hard floor. The row budget is charged per word and
 // acts with a cell open via degradeRowAtOpenCell(), so it covers that case directly.
 
-const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre"};
+// "caption" belongs here even though it only ever appears inside a <table>: it is a block in
+// its own right, and without block treatment its text joins whatever inline context preceded
+// the table instead of getting its own style, spacing and font-size normalization.
+const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre", "caption"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
+
+// Elements whose own horizontal inset also applies to the blocks nested inside them
+// (blockInsetStack_). Everything that can hold another block belongs here, plus <p>/<li>/<pre>,
+// whose <br>-separated lines each become a block of their own and must keep the inset of the
+// paragraph they belong to. <ul>/<ol> deliberately stay out: list indentation is synthesised
+// per <li> from the list depth, so counting the list's own margin as well would double it.
+const char* INSET_CONTAINER_TAGS[] = {"div", "blockquote", "section", "article", "aside", "main", "p", "li", "pre"};
+constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(INSET_CONTAINER_TAGS[0]);
 
 const char* BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
@@ -140,6 +180,40 @@ const char* SKIP_TAGS[] = {"head"};
 constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
+
+// Length in bytes of the Default_Ignorable UTF-8 sequence starting at s[i], or 0 if there
+// isn't one. Every BMP default-ignorable encodes as 2 bytes (U+034F, U+061C) or 3 bytes, so
+// only those two forms are decoded.
+//
+// A sequence that runs past `len` returns 0 rather than matching on a prefix: the text handler
+// is fed in chunks and may split a codepoint at the boundary. Answering "not ignorable" there
+// is the safe direction — the bytes stay in the word buffer and the next chunk completes them,
+// which is exactly what the U+00A0 / U+202F checks further down already do.
+int defaultIgnorableLen(const char* s, const int i, const int len) {
+  const auto b0 = static_cast<uint8_t>(s[i]);
+  // All default-ignorables are >= U+034F, whose lead byte is 0xCD. Anything below that (ASCII,
+  // Latin-1 supplement, Latin Extended-A) cannot be one, and that is nearly every byte here.
+  if (b0 < 0xCD) return 0;
+
+  if ((b0 & 0xE0) == 0xC0) {  // 2-byte form
+    if (i + 1 >= len) return 0;
+    const auto b1 = static_cast<uint8_t>(s[i + 1]);
+    if ((b1 & 0xC0) != 0x80) return 0;
+    const uint32_t cp = ((b0 & 0x1Fu) << 6) | (b1 & 0x3Fu);
+    return utf8IsDefaultIgnorable(cp) ? 2 : 0;
+  }
+
+  if ((b0 & 0xF0) == 0xE0) {  // 3-byte form
+    if (i + 2 >= len) return 0;
+    const auto b1 = static_cast<uint8_t>(s[i + 1]);
+    const auto b2 = static_cast<uint8_t>(s[i + 2]);
+    if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) return 0;
+    const uint32_t cp = ((b0 & 0x0Fu) << 12) | ((b1 & 0x3Fu) << 6) | (b2 & 0x3Fu);
+    return utf8IsDefaultIgnorable(cp) ? 3 : 0;
+  }
+
+  return 0;
+}
 
 bool hasAttributeToken(const char* value, const char* token) {
   if (!value || !token) return false;
@@ -300,6 +374,15 @@ bool isZeroHeightSpacerParagraph(const char* name, const std::string& styleAttr)
   return hasZeroHeight && hasZeroMargin && hasZeroBorder;
 }
 
+namespace {
+// Half-width, in percent, of the "this is really body text" band around 100%.
+// Wide when font-size normalization is on (publisher near-body sizing snaps to native
+// glyphs), otherwise a tight float-rounding cleanup. Shared by the per-word channel
+// (updateEffectiveInlineStyle) and the block channel (normalizeFontSizeForElement) so a
+// publisher's near-body size is treated the same whichever one it arrives on.
+constexpr int nearBodyDeadZonePct(const bool normalizationEnabled) { return normalizationEnabled ? 10 : 3; }
+}  // namespace
+
 // Update effective bold/italic/underline based on block style and inline style stack
 void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // Start with block-level styles
@@ -361,7 +444,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   // outside the band and survive. Deliberate <10% per-word gradients lose their faintest
   // steps, an accepted trade for body-text comfort. When disabled, only a tight ±3% band
   // is applied (float-rounding cleanup), so publisher near-body wrappers are preserved.
-  const int deadZone = fontSizeNormalization ? 10 : 3;
+  const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
   if (sizePct >= 100 - deadZone && sizePct <= 100 + deadZone) {
     sizePct = 100;
   }
@@ -448,8 +531,30 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
   if (hasRootFontSizeBaseline_ && isRootFontSizeElement(tagName)) {
     normalized.fontSizeMultiplier = 1.0f;
   }
-  if (hasMainTextFontSizeBaseline_ && isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0) {
+  const bool blockLevel = isHeaderOrBlock(tagName) && strcmp(tagName, "br") != 0;
+  if (hasMainTextFontSizeBaseline_ && blockLevel) {
     normalized.fontSizeMultiplier /= mainTextFontSizeBaseline_;
+  }
+  // Block twin of the per-word near-body snap in updateEffectiveInlineStyle. The same
+  // publisher sizing arrives either as a <span style="font-size:1.1em"> wrapping the
+  // paragraph or as the paragraph's own class (`p.body { font-size: 1.1em }`), and the
+  // two must land identically — otherwise a whole book's prose renders as resampled
+  // glyphs (or, via FontSizeLadder, on the wrong sibling font) with normalization on.
+  // Applied here, on the element's own size, so a nested run keeps its size relative to
+  // the now-body block: a 0.8 footnote span inside a 1.1 paragraph resolves to 0.8, not
+  // 0.88. Headings are exempt: a heading is meant to stand apart from the prose, so the
+  // size its author gave it is kept even when the margin is slim — the point of the band
+  // is to spare BODY text a scale nobody asked for, not to flatten the page's hierarchy.
+  // (The main-text baseline division above still applies to them, as it always has.)
+  if (blockLevel && !matches(tagName, HEADER_TAGS, NUM_HEADER_TAGS)) {
+    const int deadZone = nearBodyDeadZonePct(fontSizeNormalization);
+    // Rounded to integer percent like the per-word channel (applyCssFontSizeToEntry), so the
+    // same declared size lands the same side of the band edge on either channel — a float
+    // 1.1em multiplies out a hair either side of 110.
+    const int pct = static_cast<int>(normalized.fontSizeMultiplier * 100.0f + 0.5f);
+    if (pct >= 100 - deadZone && pct <= 100 + deadZone) {
+      normalized.fontSizeMultiplier = 1.0f;
+    }
   }
   return normalized;
 }
@@ -466,8 +571,27 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
 
   // Soft low-memory zone: keep parsing in degraded mode and only hard-abort when
   // both free and contiguous heap fall to critical levels.
-  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD && maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) {
-    lowMemoryImageFallback = true;
+  //
+  // The contiguous floor carries the same slack the comment below describes, because on THIS
+  // branch being a few bytes short does not merely warn -- it falls through to streamFailed and
+  // saxParser_.stop(), and the half-built section is written to cache. Device log, appendix-b:
+  //
+  //   Table row layout skipped (16864 free, 6132 max alloc); row falls back to paragraphs
+  //   [ERR] Low heap (16596 free, 6132 max alloc), aborting parse before table cell paragraph
+  //   [ERR] Parse incomplete; keeping partial section cache with 30 pages
+  //
+  // 6132 against a 6144 floor. Free heap was 16596, nearly double its own floor of 9216; nothing
+  // was actually exhausted. Losing half a chapter to twelve bytes of allocator bookkeeping is the
+  // one outcome this gate exists to prevent.
+  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD &&
+      maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK) {
+    // Deliberately does NOT latch image handling off any more. This gate trips on a transient dip
+    // — and trips often, because the soft floor (12 * 1024) is a value the allocator can never
+    // report: every largest-free-block it returns is 512k - 12, so the neighbours are 12276 and
+    // 12788 and the effective floor is the latter. A single 12-bytes-short reading used to
+    // disable images for the REST OF THE CHAPTER, and because the parse writes the section cache,
+    // that alt-text stood in for every later image until the cache was invalidated. Image cost is
+    // now judged where it is actually incurred (heapAllowsImageHeaderRead).
     LOG_DBG("EHP", "Low heap (%u free, %u max alloc) before %s; continuing in degraded mode", freeHeap, maxAllocHeap,
             phase);
     return true;
@@ -478,6 +602,72 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   layoutFailed = true;
   saxParser_.stop();
   return false;
+}
+
+// The SOFT text-layout thresholds (18 KB free / 12 KB contig), and deliberately NOT the hard pair
+// that ensureHeapForTextLayout aborts on.
+//
+// The obvious-looking argument for the hard pair is wrong, and it was tried on device. It runs:
+// the soft floor is only where text layout WARNS, it keeps laying out below that, so gating the
+// grid on the soft floor makes a table more fragile than the prose beside it. Every step of that
+// is true and the conclusion still destroys the chapter. What it misses is that these two floors
+// are not interchangeable -- the higher one is the RESERVE FOR THE LOWER one. The grid path is
+// what drives the heap down (it holds every cell's lines at once until the row is packed); the
+// paragraph path survives lower because it drains and frees one cell at a time. Gate the grid
+// where text layout dies and the grid eats the margin the fallback needs, so when a row finally
+// does decline there is nothing left to fall back INTO:
+//
+//   Table row layout skipped (9436 free, 6132 max alloc); row falls back to paragraphs
+//   [ERR] Low heap (9216 free, 6132 max alloc), aborting parse before table cell paragraph
+//   createSectionFile spine=18 parse done: pages=33          <-- 70 with the soft pair
+//
+// That is a truncated section written to cache: half of appendix-b of Roosevelt's "Through the
+// Brazilian Wilderness" silently gone. The soft pair costs a handful of degraded rows on that
+// same chapter and keeps every page.
+//
+// (Note the 6132 against a 6144 bar -- 12 short. Largest-free-block readings come back 12 bytes
+// under the round number, so a threshold on a power of two is close to unreachable. Another
+// reason not to set a bespoke one here.)
+//
+// See the note by MAX_TABLE_ROW_BUFFER_BYTES for why the heap is sampled here, immediately before
+// the allocations, rather than as cells accumulate.
+bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
+  // Free heap uses the SOFT text-layout floor (see the note by MAX_TABLE_ROW_BUFFER_BYTES for why
+  // not the hard one). The contiguous bar is deliberately NOT the matching soft value.
+  //
+  // It was, briefly, and it made tables disappear completely. MIN_MAX_ALLOC_FOR_TEXT_LAYOUT
+  // (12 KB) guards laying out a whole PARAGRAPH; a table cell line allocates one TextBlock word
+  // arena, tens to a few hundred bytes. Requiring 12 KB contiguous to place a 200-byte line is
+  // disproportionate, and it is fatal on the Background-C path, where the secondary buffer is lent
+  // to the build arena and contig sits structurally at 8-12 KB: every row of every table was
+  // refused while free heap sat at a comfortable 22-33 KB. Every measurement that missed this ran
+  // blocking with the framebuffer released, where contig is 30-57 KB.
+  //
+  // So the contiguous bar is the HARD floor -- the order of magnitude a row actually allocates --
+  // while the free-heap bar stays soft and keeps the margin the paragraph fallback needs. The
+  // slack term is the allocator's own bookkeeping: largest-free-block readings land a few bytes
+  // under the round number (a row was once refused at 12276 against a 12288 bar, twelve short,
+  // with the memory plainly there), so neither bar sits on a power of two.
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
+                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK;
+  if (!ok) {
+    LOG_DBG("EHP", "Table row layout skipped (%u free, %u max alloc); row falls back to paragraphs", freeHeap,
+            maxAllocHeap);
+  }
+  return ok;
+}
+
+bool ChapterHtmlSlimParser::heapAllowsImageHeaderRead() const {
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER && maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER;
+  if (!ok) {
+    LOG_DBG("EHP", "Skipping ZIP image-header read (%u free, %u max alloc); image falls back to alt text", freeHeap,
+            maxAllocHeap);
+  }
+  return ok;
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
@@ -859,6 +1049,22 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
           capWidth + kDropCapGapPx, zoneHeight);
 }
 
+void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emSize) const {
+  if (blockInsetStack_.empty()) return;
+  int left = style.leftInset();
+  int right = style.rightInset();
+  for (const auto& entry : blockInsetStack_) {
+    left += entry.left;
+    right += entry.right;
+  }
+  const int cap = static_cast<int>(emSize * BlockStyle::MAX_HORIZONTAL_INSET_EM);
+  // Only the sum is ever laid out (leftInset()/rightInset()), so the capped total goes on the
+  // margin and the padding keeps its own value. Both stay >= 0: fromCssStyle clamps each
+  // element's contribution to [0, cap], so the capped total can never fall below the padding.
+  style.marginLeft = static_cast<int16_t>(std::min(left, cap) - style.paddingLeft);
+  style.marginRight = static_cast<int16_t>(std::min(right, cap) - style.paddingRight);
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   nextWordContinues = false;  // New block = new paragraph, no continuation
@@ -1121,6 +1327,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
       self->makePages();
     }
+    // makePages() empties a block but keeps it, and startNewTextBlock() treats a surviving EMPTY
+    // block as a wrapper whose style the next paragraph should inherit (<div style=...><h1>).
+    // That is right for a wrapper and wrong for spent remains: <h1>Title</h1><table>… left the
+    // heading's 1.6x multiplier standing, so the first block after the table -- a <caption>, or
+    // the paragraph following the grid -- merged it and rendered at heading size. Clear the
+    // heading sizing rather than destroying the block: text can still arrive before the next
+    // block tag opens, and flushPartWordBuffer drops words when there is no block to take them.
+    self->clearSpentBlockHeadingStyle();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
     if (atts != nullptr) {
@@ -1130,7 +1344,21 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         }
       }
     }
-    self->currentTable->packer.totalWidth = self->viewportWidth;
+    // Give the table the box its own CSS asks for. Ported from CrossInk commit 61c8d78f
+    // ("feat: improve table rendering (#89)", Julia <julia@uxj.io>), which sizes the grid from
+    // the table's block inset; we reuse BlockStyle::fromCssStyle so the 4em inset cap and the
+    // em/percentage resolution stay shared with every other block.
+    const float tableEmSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+    BlockStyle tableBlockStyle = BlockStyle::fromCssStyle(
+        cssStyle, tableEmSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+    self->addAncestorInsets(tableBlockStyle, tableEmSize);
+    const int16_t horizontalInset = tableBlockStyle.totalHorizontalInset();
+    self->currentTable->contentWidth = (horizontalInset > 0 && horizontalInset < self->viewportWidth)
+                                           ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
+                                           : self->viewportWidth;
+    self->currentTable->packer.totalWidth = self->currentTable->contentWidth;
+    self->currentTable->packer.xInset =
+        (self->currentTable->contentWidth < self->viewportWidth) ? tableBlockStyle.leftInset() : 0;
     self->currentTable->packer.hasBorder = self->currentTable->hasBorder;
     self->depth += 1;
     return;
@@ -1156,17 +1384,16 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       if (!self->flushPartWordBuffer()) return;
     }
     // Gates on the BUFFERING side, so a row that cannot afford grid layout degrades before the
-    // memory is committed rather than after. No cell is open at this point, so degradeRow() is
-    // safe here; the mid-cell case goes through degradeRowAtOpenCell() from the word handler.
+    // memory is committed rather than after. Both are deterministic quantities that accumulate;
+    // the heap is NOT sampled here (see heapAllowsTableRowLayout). No cell is open at this
+    // point, so degradeRow() is safe here; the mid-cell case goes through degradeRowAtOpenCell()
+    // from the word handler.
     if (!self->currentTable->degraded && !self->currentTable->rowDegraded) {
       if (self->currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES) {
         self->degradeRow("row size budget");
       } else if (self->currentTable->rowOverflowed) {
         // Deferred from the previous <td>, which was open when the row outgrew MAX_TABLE_COLS.
         self->degradeRow("column overflow");
-      } else if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
-        // Unlike the two above, a heap this low will not have recovered by the next row.
-        self->degradeTable("low heap");
       }
     }
     // Parse colspan attribute (inspired by uxjulia/CrossInk; rewritten for our codebase).
@@ -1324,11 +1551,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       if (!src.empty() && self->imageRendering != 1) {
         LOG_TRC("EHP", "Found image: src=%s", src.c_str());
 
-        if (self->lowMemoryImageFallback) {
-          handleImageFallback();
-          return;
-        }
-
         {
           // Resolve the image path relative to the HTML file
           std::string resolvedPath = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->contentBase + src));
@@ -1362,7 +1584,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 dimsOk = true;
               }
             }
-            if (!dimsOk) {
+            if (!dimsOk && self->heapAllowsImageHeaderRead()) {
+              // Only reached when neither the tag nor the manifest could supply dimensions. On
+              // refusal dimsOk stays false and the code below already falls through to
+              // handleImageFallback(), so a tight heap degrades exactly this image and no other.
               dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
             }
             if (dimsOk) {
@@ -1400,14 +1625,23 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 }
 
                 if (hasCssHeight && hasCssWidth && dims.width > 0 && dims.height > 0) {
-                  // Both CSS height and width set: resolve both, then clamp to
-                  // current container preserving requested ratio.
+                  // Both CSS height and width set: resolve both, fit the image inside that box,
+                  // then clamp to the current container.
                   displayHeight = static_cast<int>(
                       imgStyle.imageHeight.toPixels(emSize, static_cast<float>(self->viewportHeight)) + 0.5f);
                   displayWidth =
                       static_cast<int>(imgStyle.imageWidth.toPixels(emSize, static_cast<float>(containerWidth)) + 0.5f);
                   if (displayHeight < 1) displayHeight = 1;
                   if (displayWidth < 1) displayWidth = 1;
+                  // A browser stretches the image to fill a box of a different ratio. We
+                  // deliberately do not: the decoders scale each axis independently and would
+                  // honour it, so a stylesheet we only partly understand (no min-/max-width, no
+                  // box model) could hand us a box that squashes the picture. Fit inside the
+                  // requested box and keep the source ratio.
+                  const float boxScale = std::min(static_cast<float>(displayWidth) / dims.width,
+                                                  static_cast<float>(displayHeight) / dims.height);
+                  displayWidth = std::max(1, static_cast<int>(dims.width * boxScale + 0.5f));
+                  displayHeight = std::max(1, static_cast<int>(dims.height * boxScale + 0.5f));
                   if (displayWidth > containerWidth || displayHeight > self->viewportHeight) {
                     float scaleX =
                         (displayWidth > containerWidth) ? static_cast<float>(containerWidth) / displayWidth : 1.0f;
@@ -1685,8 +1919,6 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
-      self->currentFootnoteIsNoteref =
-          FootnoteShape::isNoterefTagged(getAttribute(atts, "epub:type"), getAttribute(atts, "role"));
 
       // Apply underline style to visually indicate the link
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -1725,8 +1957,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   }
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
-  const auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
+  auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+
+  // This element's own inset is what its children inherit; capture it before the ancestors are
+  // folded in, or each level would count itself once per descendant.
+  const int16_t ownInsetLeft = userAlignmentBlockStyle.leftInset();
+  const int16_t ownInsetRight = userAlignmentBlockStyle.rightInset();
+  self->addAncestorInsets(userAlignmentBlockStyle, emSize);
+  if ((ownInsetLeft > 0 || ownInsetRight > 0) &&
+      self->blockInsetStack_.size() < ChapterHtmlSlimParser::kMaxBlockInsetDepth &&
+      matches(name, INSET_CONTAINER_TAGS, NUM_INSET_CONTAINER_TAGS)) {
+    self->blockInsetStack_.push_back({self->depth, ownInsetLeft, ownInsetRight});
+  }
 
   // Block/header boundaries must flush any buffered trailing word first.
   // Otherwise tags like ..."item?"<p ...> can carry the final word into the next paragraph.
@@ -1745,6 +1988,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth);
+    self->addAncestorInsets(headerBlockStyle, emSize);
     headerBlockStyle.textAlignDefined = true;
     if (self->embeddedStyle && cssStyle.hasTextAlign() &&
         self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
@@ -1797,6 +2041,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
+      // The horizontal inset is the enclosing block's, not the <br>'s: a <br> splits one
+      // paragraph into several blocks, and all of them sit inside the same containing block.
+      // (Vertical margins are deliberately not carried — they would repeat per line.)
+      self->addAncestorInsets(brStyle, emSize);
       // text-indent is not inherited across <br>: it applies to the first line of a block only.
       // Span-based indents (poem stanza pattern) are applied directly to each block at span-open time.
       brStyle.fromBrElement = true;
@@ -1813,7 +2061,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // distinguishable. listStack.size() == 1 for top-level, 2 for first nested, etc.
       if (strcmp(name, "li") == 0 && !cssStyle.hasMarginLeft() && !self->listStack.empty()) {
         const int depth = static_cast<int>(std::min(self->listStack.size(), size_t(3)));
-        blockStyle.marginLeft = static_cast<int16_t>(emSize * 1.5f * depth);
+        blockStyle.marginLeft = static_cast<int16_t>(blockStyle.marginLeft + emSize * 1.5f * depth);
       }
       self->startNewTextBlock(blockStyle);
       self->updateEffectiveInlineStyle();
@@ -2173,6 +2421,12 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
     bool overflow = false;
     for (; i < len; i++) {
       if (isWhitespace(s[i])) continue;
+      // Same reason as in the word flow below: a formatting control must not become the
+      // drop cap. A watermarked chapter can open with a run of them.
+      if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+        i += ignorableLen - 1;
+        continue;
+      }
       if (self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;
@@ -2230,6 +2484,21 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       // Whitespace is a real word boundary — reset continuation state
       self->nextWordContinues = false;
       // Skip the whitespace char
+      continue;
+    }
+
+    // Drop Default_Ignorable formatting controls before they can become text.
+    //
+    // Unlike the no-break spaces below these produce NO token at all: they are not word
+    // boundaries (so the surrounding text stays one word — "wor<ZWJ>d" is "word"), they carry no
+    // width, and they must not reach the renderer. See utf8IsDefaultIgnorable for why this is
+    // load-bearing rather than cosmetic on watermarked books.
+    //
+    // NOTE: this also drops U+200B ZERO WIDTH SPACE, which in correct typography is a break
+    // OPPORTUNITY. That is not a regression — isWhitespace() above is ASCII-only, so U+200B has
+    // never been a break opportunity in this parser. Making it one is a separate improvement.
+    if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+      i += ignorableLen - 1;  // loop's ++i consumes the last byte
       continue;
     }
 
@@ -2425,6 +2694,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
     self->containerWidthStack_.pop_back();
   }
 
+  // Pop horizontal insets whose block-level element is now out of scope
+  while (!self->blockInsetStack_.empty() && self->blockInsetStack_.back().depth >= self->depth) {
+    self->blockInsetStack_.pop_back();
+  }
+
   // Closing a footnote link — create entry from collected text and href
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
     if (self->currentFootnote.number[0] != '\0' && self->currentFootnote.href[0] != '\0') {
@@ -2432,23 +2706,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
-      // Earliest possible signal that this book needs footnote previews. Latched (never
-      // cleared) so a caller can act on it the moment it appears rather than after the whole
-      // spine is laid out — which for a whole-book-in-one-spine EPUB is minutes of work.
-      //
-      // Gated on the SAME shape test the gatherer applies, not on "is an internal link":
-      // pendingFootnotes above is deliberately broad (every internal link is navigable), but a
-      // Calibre HTML table of contents is 20 chapter links and zero footnotes, and triggering
-      // the whole-book two-pass gather on it cost ~2.8 s behind a popup at book open for an
-      // empty cache. See FootnoteShape.h.
-      if (self->currentFootnoteIsNoteref ||
-          FootnoteShape::isMarkerText(self->currentFootnote.number, self->currentFootnoteLinkTextLen)) {
-        self->sawFootnote_ = true;
-      }
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {
-      // Membership in the book-level preview cache is the gate: the gatherer only
-      // stored targets of footnote-shaped links, so any resolving href — same-file or
+      // Membership in the preview store is the gate: only targets of footnote-shaped links
+      // are ever resolved into it, so any resolving href — same-file or
       // cross-file ("../Text/notes.xhtml#n3", Calibre filepos anchors) — is a real note.
       std::string preview;
       if (self->inlineFootnotePreviews->find(self->currentFootnote.href, preview)) {
@@ -2497,6 +2758,18 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
       row.isHeaderRow = allHeaders;
     }
     self->currentTableCell = nullptr;
+    self->nextWordContinues = false;
+  }
+
+  // A caption has to reach the page BEFORE the grid does. The table fragment is only emitted at
+  // </table>, so a caption still pending in currentTextBlock is flushed after it and renders
+  // BELOW its own table -- which is what happened until a caption long enough to trip the
+  // 96-word block split (and only that) accidentally came out in the right order.
+  if (self->currentTable && self->currentTable->depth == 1 && strcmp(name, "caption") == 0) {
+    if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
+      self->makePages();
+    }
+    self->clearSpentBlockHeadingStyle();  // see the <table> open handler
     self->nextWordContinues = false;
   }
 
@@ -2713,15 +2986,16 @@ bool ChapterHtmlSlimParser::finalize() {
   // truncated (dropped) the excess. Surface it so out-of-bounds documents are
   // diagnosable rather than failing invisibly (e.g. XPath/anchor drift). Also
   // surfaces voidTag: the source had an HTML-style unclosed void element
-  // (<br>, <hr>, ...) that the parser auto-closed rather than failing on.
+  // (<br>, <hr>, ...) that the parser auto-closed rather than failing on, and
+  // trailingData: the file had padding bytes after </html> that were ignored.
   if (const uint32_t trunc = saxParser_.truncationFlags()) {
     LOG_DBG("EHP",
             "SaxParser hit fixed-capacity limits (flags=0x%lx): elemName=%d attrName=%d attrVal=%d maxAttrs=%d "
-            "maxDepth=%d voidTag=%d",
+            "maxDepth=%d voidTag=%d trailingData=%d",
             static_cast<unsigned long>(trunc), (trunc & SaxParser::kTruncElemName) != 0,
             (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
             (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0,
-            (trunc & SaxParser::kVoidTagRepaired) != 0);
+            (trunc & SaxParser::kVoidTagRepaired) != 0, (trunc & SaxParser::kTrailingDataIgnored) != 0);
   }
 
   // Process last page if there is still text. Done unconditionally so that a partial
@@ -2856,6 +3130,16 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
 
   currentPageNextY += lineHeight;
   return ParsedText::LineProcessResult::Accepted;
+}
+
+// Strip heading sizing from a block that makePages() has already drained, so the next block
+// does not inherit it through startNewTextBlock's empty-block merge. See the <table> handler.
+void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
+  if (!currentTextBlock || !currentTextBlock->isEmpty()) return;
+  BlockStyle& spent = currentTextBlock->getBlockStyle();
+  spent.fontSizeMultiplier = 1.0f;
+  spent.headingFontId = 0;
+  spent.fontResolved = false;
 }
 
 void ChapterHtmlSlimParser::makePages() {
@@ -3015,7 +3299,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     return;
   }
 
-  const uint16_t colWidth = viewportWidth / columnCount;
+  const uint16_t colWidth = t.contentWidth / columnCount;
   const uint16_t innerColWidth =
       (colWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(colWidth - 2 * TABLE_CELL_PADDING) : 0;
   if (innerColWidth < MIN_COL_INNER_WIDTH) {
@@ -3025,8 +3309,8 @@ void ChapterHtmlSlimParser::commitPendingRow() {
 
   // Gate before the layout allocations rather than after: a heap dip now costs this row, not the
   // rows already packed into the fragment.
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_TABLE) {
-    degradeTable("low heap at row layout");
+  if (!heapAllowsTableRowLayout()) {
+    degradeRow("low heap at row layout");
     return;
   }
 
@@ -3036,6 +3320,28 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     return;
   }
   t.columnCount = columnCount;
+
+  // Capture the table's leading header row for the continuation fragments below. Only a row that
+  // OPENS the table qualifies (in practice a <thead> row), and only while it is short enough that
+  // repeating it does not eat the page it exists to make readable.
+  if (!t.repeatHeaderResolved) {
+    t.repeatHeaderResolved = true;
+    if (lr.isHeaderRow && lr.height <= viewportHeight / 3) {
+      // The BUFFERED row is kept, not the laid-out one: layoutTableRow preserves its source
+      // (preserveSource=true), so the cells can be laid out again for each continuation fragment
+      // and every fragment ends up owning its own lines. Height is recorded here so the packing
+      // arithmetic below does not have to lay the header out just to measure it.
+      //
+      // MOVED, not copied -- BufferedTableCell owns a unique_ptr<ParsedText> and is not copyable,
+      // and this row's cells are discarded at the end of this function regardless, so taking them
+      // costs nothing. The clear() at the bottom then runs on an already-emptied vector.
+      auto header = std::unique_ptr<BufferedTableRow>(new (std::nothrow) BufferedTableRow(std::move(t.pendingRow)));
+      if (header) {
+        t.repeatHeader = std::move(header);
+        t.repeatHeaderHeight = lr.height;
+      }
+    }
+  }
 
   if (!currentPage) {
     currentPage.reset(new Page());
@@ -3049,6 +3355,13 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
 
   const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
+
+  // Height the repeated header adds when this row is the one that opens a continuation fragment.
+  // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
+  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
+  const uint16_t headerContrib =
+      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
+                       : 0;
 
   // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
   // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
@@ -3066,8 +3379,24 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // it, and the table arrives on the next page split into a one-row box followed by the rest --
   // two bordered boxes where the reader should see one continuous table. Only reachable now that
   // tables span pages as grids rather than flattening at 48 rows.
-  if (t.packer.rows.empty() && currentPageNextY > 0 && currentPageNextY + rowContrib > viewportHeight) {
+  if (t.packer.rows.empty() && currentPageNextY > 0 && currentPageNextY + headerContrib + rowContrib > viewportHeight) {
     emitPage(lastBodyChildByteOffset);
+  }
+
+  // Reopen a continuation fragment with the table's header row, so the reader still has column
+  // labels on every page the table covers rather than only the first.
+  if (repeatHeaderHere && t.packer.rows.empty()) {
+    // Laid out afresh for this fragment. A failure here is not fatal -- the continuation simply
+    // opens without a header, which is what every table did before this existed.
+    LayoutRow hdrLayout;
+    if (layoutTableRow(*t.repeatHeader, columnCount, hdrLayout) && hdrLayout.renderCols == lr.renderCols) {
+      TableRow hdr;
+      hdr.isHeaderRow = hdrLayout.isHeaderRow;
+      hdr.height = hdrLayout.height;
+      hdr.cells = std::move(hdrLayout.cells);
+      t.packer.rows.push_back(std::move(hdr));
+      t.packer.height += headerContrib;
+    }
   }
 
   TableRow tr;
@@ -3264,38 +3593,42 @@ void ChapterHtmlSlimParser::emitRowImagesAsBlocks(BufferedTableRow& row) {
 }
 
 bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8_t columnCount, LayoutRow& out) {
-  const bool isFullWidthSpan = bufRow.cells.size() == 1 && bufRow.cells[0].colSpan == columnCount;
-
-  const uint8_t renderCols = isFullWidthSpan ? 1 : columnCount;
-  const uint16_t renderColWidth = viewportWidth / renderCols;
-  const uint16_t renderInnerWidth =
-      (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
-
-  // Any other colspan structure falls back; we only handle full-span or plain cells.
-  const bool hasMergedCell =
-      std::any_of(bufRow.cells.begin(), bufRow.cells.end(), [](const BufferedTableCell& c) { return c.colSpan != 1; });
-  if (hasMergedCell && !isFullWidthSpan) {
-    LOG_DBG("EHP", "Table row has unsupported colspan — falling back to paragraphs");
-    return false;
-  }
+  // Every row is laid out on the same `columnCount` grid; a colspan cell simply covers `colSpan`
+  // of those columns. Row widths use the floor'd column width the renderer also starts from, so a
+  // span is never laid out wider than the box it will be drawn in.
+  const uint16_t colWidth = currentTable->contentWidth / columnCount;
 
   // Cap an in-cell graphic so it never alone overflows the viewport (which would force the
   // paragraph fallback and drop the image).
   const uint16_t cellImageMaxHeight = static_cast<uint16_t>(
       std::min<int>(MAX_CELL_IMAGE_HEIGHT, std::max<int>(1, viewportHeight - 2 * TABLE_CELL_PADDING)));
-  const uint16_t cellImageMaxWidth =
-      (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
   const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
 
   out.cells.clear();
   out.isHeaderRow = bufRow.isHeaderRow;
-  out.renderCols = renderCols;
-  out.cells.reserve(renderCols);
-  uint16_t maxContentHeight = 0;  // tallest cell's text + image, in pixels
+  out.renderCols = columnCount;
+  out.cells.reserve(columnCount);  // spans sum to columnCount, so that is the padded upper bound
+  uint16_t maxContentHeight = 0;   // tallest cell's text + image, in pixels
+  uint8_t col = 0;                 // first grid column of the cell being laid out
 
   for (auto& bufCell : bufRow.cells) {
     TableCell cell;
     cell.isHeader = bufCell.isHeader;
+    // A row whose spans overrun the grid cannot be represented; effectiveCols feeds columnCount,
+    // so this only fires on a malformed row that changed shape after the count was taken.
+    const uint8_t span = bufCell.colSpan ? bufCell.colSpan : 1;
+    if (col + span > columnCount) {
+      LOG_DBG("EHP", "Table row spans past its %u columns — falling back to paragraphs",
+              static_cast<unsigned>(columnCount));
+      return false;
+    }
+    cell.colSpan = span;
+    const uint16_t renderColWidth = static_cast<uint16_t>(span * colWidth);
+    const uint16_t renderInnerWidth =
+        (renderColWidth > 2 * TABLE_CELL_PADDING) ? static_cast<uint16_t>(renderColWidth - 2 * TABLE_CELL_PADDING) : 0;
+    const uint16_t cellImageMaxWidth =
+        (renderInnerWidth > 0) ? renderInnerWidth : static_cast<uint16_t>(MIN_COL_INNER_WIDTH);
+    col = static_cast<uint8_t>(col + span);
 
     if (bufCell.text && !bufCell.text->isEmpty()) {
       // Count past the cap rather than stopping at it: the overflow itself is the signal, and
@@ -3348,11 +3681,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
     out.cells.push_back(std::move(cell));
   }
 
-  // Pad non-spanning rows that have fewer cells than columnCount with empty cells.
-  if (!isFullWidthSpan) {
-    while (out.cells.size() < columnCount) {
-      out.cells.emplace_back();
-    }
+  // Pad a short row out to the full grid so the renderer's spans always sum to columnCount.
+  while (col < columnCount) {
+    out.cells.emplace_back();
+    ++col;
   }
 
   if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
@@ -3374,7 +3706,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
 
   currentPage->elements.push_back(std::make_shared<PageTableFragment>(
       packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
-      /*xPos=*/0, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder));
+      /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder));
   currentPageNextY += fragTotalHeight;
   packer.rows.clear();
   packer.height = 0;

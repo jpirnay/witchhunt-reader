@@ -36,6 +36,10 @@ class CrossPointSettings {
     INVERTED_BLACK_AND_WHITE = 2,
     // Greyscale like NO_FILTER, but stretches the image's own tonal range first.
     ADAPTIVE_TONE = 3,
+    // Greyscale too, but levels via the histogram's own CDF rather than its endpoints.
+    // Reaches bimodal images that ADAPTIVE_TONE leaves flat, at the cost of more dither
+    // texture in smooth gradients -- see AdaptiveTone.h.
+    EQUALIZE_TONE = 4,
     SLEEP_SCREEN_COVER_FILTER_COUNT
   };
   enum QUICK_RESUME_SLEEP_SCREEN {
@@ -273,6 +277,11 @@ class CrossPointSettings {
   uint8_t fontFamily = BOOKERLY;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
+  // Folder name under /dictionaries (or /.dictionaries) of the StarDict
+  // dictionary used for word lookup; empty means no dictionary is selected.
+  // A folder NAME, not a path: DictionaryRegistry::resolveBasePath rejects
+  // separators and dot prefixes so a hand-edited value cannot escape the roots.
+  char dictionaryName[32] = "";
   uint8_t fontSize = MEDIUM;
   // Reader font settings (TXT / MD) — defaults to EPUB settings when not explicitly set
   uint8_t txtFontFamily = NOTOSANS;
@@ -291,7 +300,8 @@ class CrossPointSettings {
   uint8_t halfRefreshAfterImagePage = 1;
   uint8_t hyphenationEnabled = 0;
   // Snap near-body font sizes (within ±10% of the body size) to plain body text, so publisher
-  // wrappers like <span style="font-size:0.92em"> around whole paragraphs render native. Default on.
+  // sizing renders native — both inline wrappers like <span style="font-size:0.92em"> around whole
+  // paragraphs and a size stated on the block itself (p.body { font-size: 1.1em }). Default on.
   uint8_t fontSizeNormalization = 1;
 
   // Reader screen margin settings
@@ -385,6 +395,15 @@ class CrossPointSettings {
   uint8_t useWeather = 1;
   // Include release candidate builds when checking for OTA updates.
   uint8_t includeBetaUpdates = 0;
+  // Accept any TLS certificate on https requests (1 = skip validation).
+  //
+  // For self-hosted servers with a private CA or a self-signed certificate —
+  // an OPDS catalog or a local KOReader sync server — where the alternative is
+  // that the device simply cannot reach them. It disables authentication of the
+  // peer for every https call the firmware makes, so credentials sent to such a
+  // server are only as safe as the network path. OTA is deliberately exempt:
+  // firmware is executed, so it stays verified whatever this is set to.
+  uint8_t skipHttpsValidation = 0;
 
   // Configurable actions for short / double / long press on each logical button.
   //
@@ -420,6 +439,7 @@ class CrossPointSettings {
     BTN_CYCLE_ORIENTATION,
     BTN_QUICK_OVERRIDES,
     BTN_IGNORE,
+    BTN_DICTIONARY,
     BUTTON_ACTION_COUNT
   };
 

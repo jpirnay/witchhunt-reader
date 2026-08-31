@@ -65,18 +65,21 @@ class HalGPIO {
   // X4 detection is a single digitalRead and stays per-loop.
   static constexpr unsigned long USB_POLL_X3_MS = 1000;
 
-  // USB-Serial-JTAG SOF activity, sampled by update(): the host sends a SOF
-  // frame every 1 ms while the bus is enumerated, so a frame index that moved
-  // between two samples means a live host link. Catches what the charge-based
-  // X3 check misses: a data-only cable, and any cable once the battery is full
-  // (charge current ~0). Both matter for HalPowerManager::lightSleep(), which
-  // must not halt the chip out from under an enumerated CDC link. Samples must
-  // be >SOF_SAMPLE_MS apart — update() can be called back-to-back (inner input
-  // loops), and adjacent reads would compare equal and flicker the verdict.
-  uint16_t lastSofFrameIndex = 0;
-  unsigned long sofLastSampleMs = 0;
-  bool usbSofActive = false;
-  static constexpr unsigned long SOF_SAMPLE_MS = 10;
+  // Live USB host link, straight from the IDF's SOF monitor
+  // (usb_serial_jtag_is_connected(), maintained by a FreeRTOS tick hook that
+  // watches the SOF interrupt bit with a 3 ms no-SOF tolerance). Catches what
+  // the charge-based X3 check misses: a data-only cable, and any cable once the
+  // battery is full (charge current ~0). Both matter for
+  // HalPowerManager::lightSleep(), which must not halt the chip out from under
+  // an enumerated CDC link — and for main.cpp, which only opens the serial log
+  // when a host is present.
+  //
+  // This used to be sampled here by diffing USB_SERIAL_JTAG.fram_num: that index
+  // is 11 bits and wraps every 2.048 s, so any sampling cadence landing on a
+  // multiple of that read two equal values and reported "no host" while a
+  // monitor was attached. The IDF hook has no such blind spot and costs nothing
+  // to read.
+  bool usbHostLinkActive = false;
 
   // Per-device electrical/charge-inference USB check (fresh read; X3 = BQ27220
   // charge current over I2C, X4 = VBUS-driven level on GPIO20).
@@ -180,6 +183,10 @@ class HalGPIO {
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
+  // True while ANY button is currently held down. Distinct from wasAnyPressed(), which is
+  // edge-triggered and therefore false for every loop iteration after the initial press —
+  // a held button looks exactly like an idle device to an edge-only check.
+  bool isAnyPressed() const;
   // True while a raw button-state change is still inside the debounce window.
   // The idle loop polls fast while this is set so the confirming sample lands
   // ~10 ms after the first; at the light-sleep cadence a short tap can
@@ -259,7 +266,17 @@ class HalGPIO {
   // Wait until the raw power-button GPIO reads HIGH (released) for a sustained period.
   // Uses the raw pin directly instead of the InputManager debounced state to avoid
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
-  void waitForStablePowerRelease();
+  // Block until the raw power pin has read HIGH for 200 ms straight, or `timeoutMs`
+  // elapses — whichever comes first. Returns how long it waited; compare against
+  // `timeoutMs` to tell a clean release from a give-up. Bypasses the InputManager
+  // debounce deliberately (5 ms is too short for 10-50 ms mechanical release bounce),
+  // and reads the pin directly so it works with the input sampler stopped.
+  unsigned long waitForStablePowerRelease(unsigned long timeoutMs = POWER_RELEASE_TIMEOUT_MS);
+
+  // Ceiling for the wait above. Long enough that no deliberate hold reaches it (the
+  // longest configurable power-hold-to-sleep gesture is well under this), short enough
+  // that a stuck pin costs the user seconds rather than a reset.
+  static constexpr unsigned long POWER_RELEASE_TIMEOUT_MS = 5000;
 
   // "Is this button held right now?", answered from fresh hardware samples rather than
   // the cache isPressed() reads. The six front buttons are resistor dividers on two ADC
@@ -318,6 +335,12 @@ class HalGPIO {
 
   // Check if USB is connected
   bool isUsbConnected() const;
+
+  // Enumerated USB host link only (SOF activity), with no charge-state
+  // inference mixed in. Separated out so a caller that needs to know *why* the
+  // verdict came out the way it did — the serial-log gate's diagnostic — can
+  // report the two terms apart.
+  bool isUsbHostLinkActive() const;
 
   // USB state as sampled by the last update() call. Prefer this in per-loop
   // polling: isUsbConnected() performs a fresh I2C read on X3.

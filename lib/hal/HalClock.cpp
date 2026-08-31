@@ -7,6 +7,7 @@
 #include <Preferences.h>
 #include <Rtc.h>  // SDK driver, used for the PCF8563 family (DS3231 is handled inline below)
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <Wire.h>  // Needed for I2C communication with the RTC
 #include <esp_private/esp_clk.h>
 #include <esp_sntp.h>
@@ -58,7 +59,16 @@ static time_t timegm_compat(const struct tm* tm) {
 // ---- RTC-memory state (survives deep sleep, not cold boot) ----------------
 
 static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1D;
-static constexpr uint32_t CLOCK_RTC_FLAG_LP_VALID = 0x00000001u;
+// Set when the LP timer will KEEP RUNNING from this capture until the next restore(), so the
+// elapsed-time correction in restore() is usable. That is true for every reboot (a CPU reset
+// leaves the RTC domain running) and for a deep sleep that holds the clock rail up; it is false
+// only for a deep sleep that powers the rail down (X3, or useClock off).
+//
+// Previously named ..._LP_VALID and set only from saveBeforeSleep(), which made it mean "the LP
+// timer survives the upcoming SLEEP". restore() reads it as "the LP timer is usable NOW", and
+// those differ for a reboot -- which is how syncNtp()'s capture(false) came to strand the clock
+// on the uncorrected NVS path after every silent restart.
+static constexpr uint32_t CLOCK_RTC_FLAG_LP_CONTINUOUS = 0x00000001u;
 
 // Temperature drift model for ESP32 RTC-based timekeeping.
 //
@@ -85,6 +95,13 @@ RTC_NOINIT_ATTR static float rtcTemperatureC;  // captured chip temperature at s
 RTC_NOINIT_ATTR static uint32_t rtcStateChecksum;
 
 static bool clockApproximate = true;
+
+// True when the clock was seeded from an NVS epoch too old to be shown to the user (see the
+// stale branch in restore()). The wall clock IS set in that case -- a last-known-good time is a
+// usable LOWER BOUND for certificate validity windows, cache TTLs and session timestamps, all of
+// which previously got 1970 instead -- but the UI must not present it as the time of day.
+// Cleared by a successful NTP sync.
+static bool clockStaleRestore = false;
 
 // How long the deep sleep that this boot woke from lasted, in seconds; 0 when it
 // cannot be established. Set once by restore(), reported on the System Information
@@ -521,7 +538,8 @@ static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
 }
 
 /// Capture current time + LP timer into RTC memory, and epoch into NVS.
-static void capture(bool lpValid) {
+/// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
+static void capture(bool lpContinuous) {
   rtcEpoch = time(nullptr);
   // Update DS3231 only when the current time is authoritative.
   if (initExternalRTC() && !clockApproximate) {
@@ -531,7 +549,7 @@ static void capture(bool lpValid) {
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTemperatureC = readChipTemperatureC();
   rtcClockMagic = CLOCK_RTC_MAGIC;
-  rtcClockFlags = lpValid ? CLOCK_RTC_FLAG_LP_VALID : 0;
+  rtcClockFlags = lpContinuous ? CLOCK_RTC_FLAG_LP_CONTINUOUS : 0;
   rtcStateChecksum = computeRtcStateChecksum();
   nvsWrite(rtcEpoch);
   nvsWriteSleepMark(rtcEpoch);
@@ -561,6 +579,114 @@ static const char* sntpStatusName(sntp_sync_status_t status) {
   }
 }
 
+// ---- direct SNTP query ----------------------------------------------------
+//
+// esp_sntp_init() sends nothing when it is called. IDF ships
+// CONFIG_LWIP_SNTP_STARTUP_DELAY=y with CONFIG_LWIP_SNTP_MAXIMUM_STARTUP_DELAY=5000, so
+// sntp_init() arms sys_timeout(LWIP_RAND() % 5000, sntp_request) and the FIRST packet leaves
+// after a uniformly random 0-5000 ms. The delay exists so a fleet of devices does not stampede a
+// public pool at power-on; on a sync the user is sitting and watching it is 2.5 s of dead air on
+// average (measured 3.41 s in a KOReader sync trace, against an exchange that takes tens of ms),
+// and it is compiled into the prebuilt SDK libs where sdkconfig cannot reach it.
+//
+// A client SNTP request is a single 48-byte datagram, so asking directly costs a few lines and
+// skips both the startup delay and lwip's serial 3-s-per-server timeout: every target is asked at
+// once and the first valid answer wins. This is a fast path only -- syncNtp() falls back to the
+// full esp_sntp client whenever it returns false, so hostname servers, DNS, and the polling
+// behaviour all still exist untouched behind it.
+namespace {
+
+constexpr uint16_t NTP_PORT = 123;
+constexpr size_t NTP_PACKET_SIZE = 48;
+// Seconds between the NTP epoch (1900-01-01) and the Unix epoch (1970-01-01).
+constexpr uint32_t NTP_TO_UNIX_OFFSET = 2208988800UL;
+// A malformed or spoofed reply that sets the clock is worse than no sync at all -- it would also
+// silently break TLS certificate validity checks -- so anything outside a plausible window is
+// dropped rather than trusted.
+constexpr time_t NTP_MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01
+constexpr time_t NTP_MAX_PLAUSIBLE_EPOCH = 2524608000;  // 2050-01-01
+// Generous: a gateway answers in single-digit ms and a public server in tens. Exceeding this
+// means the fast path is not going to work here, and the fallback wants the remaining budget.
+constexpr uint32_t QUICK_SNTP_TIMEOUT_MS = 1000;
+
+bool isUnsetAddress(const IPAddress& addr) { return static_cast<uint32_t>(addr) == 0; }
+
+bool quickSntpQuery(const IPAddress* targets, size_t targetCount, time_t& outEpoch, IPAddress& outSource) {
+  WiFiUDP udp;
+  if (udp.begin(0) == 0) {
+    LOG_DBG("CLK", "Quick SNTP: could not open a UDP socket");
+    return false;
+  }
+
+  uint8_t packet[NTP_PACKET_SIZE] = {};
+  packet[0] = 0x1B;  // LI=0 (no warning), VN=3, Mode=3 (client)
+
+  size_t sent = 0;
+  for (size_t i = 0; i < targetCount; ++i) {
+    if (isUnsetAddress(targets[i])) continue;
+    if (udp.beginPacket(targets[i], NTP_PORT) != 1) continue;
+    udp.write(packet, NTP_PACKET_SIZE);
+    if (udp.endPacket() == 1) sent++;
+  }
+  if (sent == 0) {
+    udp.stop();
+    return false;
+  }
+
+  const uint32_t deadline = millis() + QUICK_SNTP_TIMEOUT_MS;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    const int size = udp.parsePacket();
+    if (size <= 0) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    uint8_t reply[NTP_PACKET_SIZE] = {};
+    const int received = (size >= static_cast<int>(NTP_PACKET_SIZE)) ? udp.read(reply, NTP_PACKET_SIZE) : 0;
+    // Whatever that datagram was, none of it may be left behind: parsePacket() refuses to fetch
+    // the next one while the receive buffer still holds anything, and with several servers asked
+    // at once the good answer is often the one queued behind the bad. A runt datagram we never
+    // read, or the tail of an authenticated reply (48 bytes of SNTP plus a key id and digest),
+    // would otherwise wedge this loop until the deadline.
+    udp.flush();
+    if (received < static_cast<int>(NTP_PACKET_SIZE)) {
+      continue;
+    }
+
+    const uint8_t leapIndicator = reply[0] >> 6;
+    const uint8_t mode = reply[0] & 0x07;
+    const uint8_t stratum = reply[1];
+    // LI=3 is the server declaring its own clock unsynchronised; mode 4 is a server reply and 5
+    // a broadcast; stratum 0 is a kiss-o'-death packet and 16+ means unsynchronised. Any of those
+    // is an answer that arrived but must not be believed.
+    if (leapIndicator == 3 || (mode != 4 && mode != 5) || stratum == 0 || stratum > 15) {
+      continue;
+    }
+
+    // Transmit timestamp, seconds part: bytes 40..43, big endian.
+    const uint32_t ntpSeconds = (static_cast<uint32_t>(reply[40]) << 24) | (static_cast<uint32_t>(reply[41]) << 16) |
+                                (static_cast<uint32_t>(reply[42]) << 8) | static_cast<uint32_t>(reply[43]);
+    if (ntpSeconds <= NTP_TO_UNIX_OFFSET) continue;
+
+    const time_t epoch = static_cast<time_t>(ntpSeconds - NTP_TO_UNIX_OFFSET);
+    if (epoch < NTP_MIN_PLAUSIBLE_EPOCH || epoch > NTP_MAX_PLAUSIBLE_EPOCH) {
+      LOG_DBG("CLK", "Quick SNTP: rejecting implausible epoch %lld from %s", (long long)epoch,
+              udp.remoteIP().toString().c_str());
+      continue;
+    }
+
+    outEpoch = epoch;
+    outSource = udp.remoteIP();
+    udp.stop();
+    return true;
+  }
+
+  udp.stop();
+  return false;
+}
+
+}  // namespace
+
 bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   if (errorBuf && errorBufSize > 0) {
     errorBuf[0] = '\0';
@@ -582,50 +708,105 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   time_t prevSyncTime = nvsReadSyncTime();
   float prevSyncTemp = nvsReadLastSyncTemp();
 
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-  }
-
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  // Register servers in priority order. A user-configured server (host or IP),
-  // when set, is polled first. The hardcoded anycast IP (Cloudflare
-  // time.cloudflare.com) needs no DNS lookup, so it always sits ahead of the
-  // pool hostname -- this avoids a full timeout when the local resolver is slow
-  // to answer right after DHCP. SNTP polls all registered servers, so a working
-  // answer from any of them completes the sync.
-  uint8_t idx = 0;
   const bool havePreferred = (preferredServer != nullptr) && (preferredServer[0] != '\0');
-  if (havePreferred) {
-    esp_sntp_setservername(idx++, preferredServer);
-    LOG_DBG("CLK", "NTP preferred server: %s", preferredServer);
-  }
-  esp_sntp_setservername(idx++, "162.159.200.1");
-  esp_sntp_setservername(idx++, "pool.ntp.org");
-  esp_sntp_init();
 
-  int retry = 0;
-  constexpr int maxRetries = 50;  // 5 seconds
-  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < maxRetries) {
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    retry++;
-  }
-
-  if (retry >= maxRetries) {
-    const char* statusName = sntpStatusName(sntp_get_sync_status());
-    if (errorBuf && errorBufSize > 0) {
-      snprintf(errorBuf, errorBufSize, "NTP timeout (%s)", statusName);
+  // Ask directly first; see the quickSntpQuery() comment for why the SDK's own client cannot be
+  // asked to hurry. Everything below this block is unchanged and still runs whenever it fails.
+  bool synced = false;
+  {
+    IPAddress quickTargets[2];
+    size_t quickCount = 0;
+    if (havePreferred) {
+      // A configured server is a deliberate choice, so the fast path either uses that server or
+      // steps aside entirely -- it must never quietly sync from somewhere the user did not pick.
+      // Only an IP literal qualifies: resolving a hostname is the one part of this that can block
+      // unpredictably, and the full client below already does it properly.
+      IPAddress preferredIp;
+      if (preferredIp.fromString(preferredServer)) {
+        quickTargets[quickCount++] = preferredIp;
+      }
+    } else {
+      // No configured server. The gateway is one hop away and most home routers answer NTP; the
+      // Cloudflare anycast address needs no DNS. Both are asked at once and the first valid
+      // answer wins, so a router that does not serve time costs nothing.
+      const IPAddress gateway = WiFi.gatewayIP();
+      if (!isUnsetAddress(gateway)) {
+        quickTargets[quickCount++] = gateway;
+      }
+      quickTargets[quickCount++] = IPAddress(162, 159, 200, 1);
     }
-    LOG_ERR("CLK", "NTP sync timeout after %lu ms (%s, dns=%s)", millis() - syncStartMs, statusName,
-            WiFi.dnsIP().toString().c_str());
-    // Stop SNTP on the failure path so a later applyClientTime() (which
-    // refuses while SNTP is enabled) isn't blocked by a dangling instance.
-    esp_sntp_stop();
-    return false;
+
+    time_t quickEpoch = 0;
+    IPAddress quickSource;
+    if (quickCount > 0 && quickSntpQuery(quickTargets, quickCount, quickEpoch, quickSource)) {
+      setSystemClock(quickEpoch);
+      LOG_INF("CLK", "Quick SNTP: %s answered in %lu ms", quickSource.toString().c_str(), millis() - syncStartMs);
+      synced = true;
+    } else {
+      LOG_DBG("CLK", "Quick SNTP: no usable answer after %lu ms; falling back to the SNTP client",
+              millis() - syncStartMs);
+    }
+  }
+
+  if (!synced) {
+    if (esp_sntp_enabled()) {
+      esp_sntp_stop();
+    }
+
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    // Register servers in priority order. A user-configured server (host or IP),
+    // when set, is polled first. The hardcoded anycast IP (Cloudflare
+    // time.cloudflare.com) needs no DNS lookup, so it always sits ahead of the
+    // pool hostname -- this avoids a full timeout when the local resolver is slow
+    // to answer right after DHCP. SNTP polls all registered servers, so a working
+    // answer from any of them completes the sync.
+    uint8_t idx = 0;
+    if (havePreferred) {
+      esp_sntp_setservername(idx++, preferredServer);
+      LOG_DBG("CLK", "NTP preferred server: %s", preferredServer);
+    }
+    esp_sntp_setservername(idx++, "162.159.200.1");
+    esp_sntp_setservername(idx++, "pool.ntp.org");
+    esp_sntp_init();
+
+    int retry = 0;
+    constexpr int maxRetries = 50;  // 5 seconds
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < maxRetries) {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      retry++;
+    }
+
+    if (retry >= maxRetries) {
+      const char* statusName = sntpStatusName(sntp_get_sync_status());
+      if (errorBuf && errorBufSize > 0) {
+        snprintf(errorBuf, errorBufSize, "NTP timeout (%s)", statusName);
+      }
+      LOG_ERR("CLK", "NTP sync timeout after %lu ms (%s, dns=%s)", millis() - syncStartMs, statusName,
+              WiFi.dnsIP().toString().c_str());
+      // Stop SNTP on the failure path so a later applyClientTime() (which
+      // refuses while SNTP is enabled) isn't blocked by a dangling instance.
+      esp_sntp_stop();
+      return false;
+    }
   }
 
   // NTP sync yields authoritative time; allow DS3231 to be updated.
   clockApproximate = false;
-  capture(false);
+  clockStaleRestore = false;
+  // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
+  // across which the RTC domain and the LP timer keep running, so restore() can and should apply
+  // the elapsed correction -- or a deep sleep, which re-captures through saveBeforeSleep() with
+  // the real rail state and supersedes this.
+  //
+  // With false, every silentRestart() after a sync (and there is one after every KOReader sync,
+  // web-server exit, font download, OTA and heap recovery) fell through to the uncorrected NVS
+  // path and set the clock back to this instant, discarding everything since. Device evidence:
+  // never once "Restored from RTC + LP timer" across dozens of boots, always "Restored from NVS
+  // ... (no elapsed correction)", with the clock visibly stepping backwards over the reboot
+  // (13:06:52 -> 13:05:21). The losses compound per reboot and surfaced as a 45%-slow clock
+  // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
+  // floor -- the drift learner was measuring reboot count, not temperature.
+  capture(true);
   nvsWriteSyncTime(rtcEpoch);
 
   float currentTemp = rtcTemperatureC;
@@ -716,7 +897,7 @@ void restore() {
   }
 
   rtcDriftScale = nvsReadDriftScale();
-  const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_VALID) != 0;
+  const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_CONTINUOUS) != 0;
   if (rtcValid() && lpValid) {
     // RTC memory survived — we woke from deep sleep.
     //
@@ -774,10 +955,22 @@ void restore() {
   time_t epoch = nvsRead();
   if (epoch > 0) {
     time_t lastSync = nvsReadSyncTime();
-    if (lastSync > 0 && (epoch - lastSync) > STALE_THRESHOLD_S) {
-      LOG_ERR("CLK", "NVS epoch %lld is stale (last NTP sync %lld, %lld h ago), discarding", (long long)epoch,
-              (long long)lastSync, (long long)((epoch - lastSync) / 3600));
-      return;
+    const bool stale = (lastSync > 0 && (epoch - lastSync) > STALE_THRESHOLD_S);
+    if (stale) {
+      // Previously this returned, leaving the clock at 1970. That protected the DISPLAY from
+      // showing a badly drifted time, which is right -- but it threw the value away for everyone
+      // else, and on these RTC-less boards the machine uses care more than the UI does. A stale
+      // epoch is still a sound lower bound: it cannot make a certificate's notBefore look
+      // unreached (which 1970 does, and which stops the whole TLS trust store from loading), and
+      // it keeps cache TTLs and session timestamps in the right century.
+      //
+      // So set the clock and drop only the authority: clockStaleRestore suppresses the time of
+      // day in the UI until an NTP sync replaces it.
+      clockStaleRestore = true;
+      LOG_ERR("CLK",
+              "NVS epoch %lld is stale (last NTP sync %lld, %lld h ago); using it as a lower bound, "
+              "not for display",
+              (long long)epoch, (long long)lastSync, (long long)((epoch - lastSync) / 3600));
     }
     setSystemClock(epoch);
     rtcEpoch = epoch;
@@ -862,10 +1055,60 @@ void updatePeriodic() {
 }
 
 bool isSynced() {
-  return time(nullptr) > 1577836800;  // > 2020-01-01
+  // Deliberately false for a stale restore even though the clock IS set. Every caller of this is
+  // asking "may I present or record this as the time?", and a lower bound is not that. Keeping
+  // the answer no preserves the previous behaviour exactly at all of them -- status bars, reading
+  // stats timestamps, updatePeriodic()'s drift nudge -- while time() itself now returns something
+  // usable for the machine checks that read it directly (isPlausibleForTls, cache TTLs).
+  return time(nullptr) > 1577836800 && !clockStaleRestore;  // > 2020-01-01
 }
 
 bool isApproximate() { return clockApproximate; }
+
+bool isPlausibleForTls() {
+  // Lower bound: comfortably after the newest curated root's notBefore, so any clock at or
+  // past it satisfies every one of them. Upper bound: the curated set's latest notAfter is
+  // 2038, so cap below that — a wildly-wrong FUTURE clock breaks notAfter just as effectively
+  // as 1970 breaks notBefore, and must also be treated as "needs SNTP".
+  constexpr time_t MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01 00:00:00 UTC
+  constexpr time_t MAX_PLAUSIBLE_EPOCH = 2114380800;  // 2037-01-01 00:00:00 UTC
+  const time_t nowEpoch = time(nullptr);
+  return nowEpoch >= MIN_PLAUSIBLE_EPOCH && nowEpoch < MAX_PLAUSIBLE_EPOCH;
+}
+
+bool ensureUsableForTls(const char* preferredServer) {
+  if (isPlausibleForTls()) {
+    // Deliberately no SNTP round-trip here even when the clock is only "approximate": the
+    // cert-date check passes anywhere inside the roots' validity window, so an NVS-restored
+    // clock that is hours out still verifies. Syncing anyway would cost ~5 s (and an
+    // intermittent timeout) on every cold start that already had a good-enough time, and would
+    // churn the heap right before the handshake's peak allocations.
+    return true;
+  }
+
+  // Rate-limit FAILED attempts instead of latching "attempted" forever. A one-shot latch means
+  // a single call made before the radio was ready disables the sync for the rest of the
+  // session, and every later TLS connect then fails to load its trust store with no way back.
+  constexpr unsigned long RETRY_MIN_INTERVAL_MS = 30000;
+  static unsigned long lastAttemptMs = 0;
+  static bool everAttempted = false;
+  const unsigned long nowMs = millis();
+  if (everAttempted && (nowMs - lastAttemptMs) < RETRY_MIN_INTERVAL_MS) {
+    return false;
+  }
+  everAttempted = true;
+  lastAttemptMs = nowMs;
+
+  LOG_INF("CLK", "Clock unset/implausible for TLS (epoch %lld); running SNTP before the handshake",
+          static_cast<long long>(time(nullptr)));
+  char err[64] = {0};
+  if (!syncNtp(err, sizeof(err), preferredServer)) {
+    LOG_ERR("CLK", "SNTP failed (%s) — the TLS trust store will not load until the clock is set", err);
+    return false;
+  }
+  LOG_INF("CLK", "SNTP complete; epoch now %lld", static_cast<long long>(time(nullptr)));
+  return isPlausibleForTls();
+}
 
 time_t lastSyncTime() { return nvsReadSyncTime(); }
 
@@ -892,6 +1135,8 @@ void formatTime(char* buf, size_t bufSize, bool use24h) {
     snprintf(buf, bufSize, "%s%d:%02d%s", prefix, hour, timeinfo.tm_min, ampm);
   }
 }
+
+bool isStaleRestore() { return clockStaleRestore; }
 
 void formatLogTime(char* buf, size_t bufSize) {
   if (!isSynced()) {

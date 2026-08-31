@@ -9,6 +9,7 @@
 
 #include "../Activity.h"
 #include "RecentBooksStore.h"
+#include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
 
 class FileBrowserActivity final : public Activity {
@@ -31,6 +32,11 @@ class FileBrowserActivity final : public Activity {
   ButtonNavigator buttonNavigator;
 
   int selectorIndex = 0;
+  // Long file names wrap over up to three lines, so rows here are variable height: the list
+  // scrolls rather than paging, and its scroll position and on-screen row count live here between
+  // renders. drawList keeps both current; nothing resets them, because a selection above the
+  // window pulls the window back to it.
+  ListViewState listView{BaseTheme::maxWrappedTitleLines};
 
   Mode mode = Mode::Books;
 
@@ -53,6 +59,9 @@ class FileBrowserActivity final : public Activity {
   // Data loading
   void loadFiles();
   size_t findEntry(const std::string& name);
+  [[nodiscard]] int listPageSize() const;
+  [[nodiscard]] bool listPages() const;
+  void pageSelection(int direction);
   void sortFileList();
   std::string getFileExtension(const std::string& name) const;
   void showBrowserOptionsMenu();

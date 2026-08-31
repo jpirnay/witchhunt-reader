@@ -73,18 +73,20 @@ void EpubReaderPrintedPageInputActivity::moveCursor(int delta) {
 
 void EpubReaderPrintedPageInputActivity::onEnter() {
   Activity::onEnter();
-  // Force the FSM to wait for the double-click window on Up/Down so we can distinguish
-  // Short (±1) from Double (±10). Adds ~300ms latency to single Up/Down presses; that's
-  // the price for the larger step. Back/Confirm/Left/Right stay on the immediate
-  // wasPressed path — no latency for navigation.
-  buttonEvents.forceDoubleAction(MappedInputManager::Button::Up, true);
-  buttonEvents.forceDoubleAction(MappedInputManager::Button::Down, true);
+  // Force the FSM to wait for the double-click window on the digit buttons so we can distinguish
+  // Short (±1) from Double (±10). Adds ~300ms latency to a single press; that's the price for the
+  // larger step. The cursor buttons stay on the immediate wasPressed path — no latency for
+  // navigation. Which physical buttons those are follows the orientation, so resolve them here
+  // rather than naming Up/Down: forcing the mask onto a button this dialog does not use would
+  // leave the real digit buttons firing Short with no window at all.
+  buttonEvents.forceDoubleAction(MappedInputManager::buttonFor(MappedInputManager::Direction::Up), true);
+  buttonEvents.forceDoubleAction(MappedInputManager::buttonFor(MappedInputManager::Direction::Down), true);
   requestUpdate();
 }
 
 void EpubReaderPrintedPageInputActivity::onExit() {
-  buttonEvents.forceDoubleAction(MappedInputManager::Button::Up, false);
-  buttonEvents.forceDoubleAction(MappedInputManager::Button::Down, false);
+  buttonEvents.forceDoubleAction(MappedInputManager::buttonFor(MappedInputManager::Direction::Up), false);
+  buttonEvents.forceDoubleAction(MappedInputManager::buttonFor(MappedInputManager::Direction::Down), false);
   Activity::onExit();
 }
 
@@ -101,30 +103,30 @@ void EpubReaderPrintedPageInputActivity::loop() {
     finish();
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
     moveCursor(1);  // cursor moves toward higher digits on Left, matching screen layout
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
     moveCursor(-1);
     return;
   }
 
-  // Up/Down come through the FSM-backed event queue so we can react to Short vs Double.
-  // Short = ±1, Double = ±10. Both Up and PageBack map to the same hardware button; the
-  // FSM emits an event for each logical button, but we only handle the Up/Down variants
-  // here. The global dispatcher consumes PageBack/PageForward variants (they're configured
-  // as page-turn actions in the reader) and dispatch is a no-op while this dialog is
-  // current, so they're effectively swallowed.
+  // The digit buttons come through the FSM-backed event queue so we can react to Short vs Double.
+  // Short = ±1, Double = ±10. In portrait they are the side buttons, and PageBack/PageForward are
+  // the same hardware under another name; the FSM emits an event for each logical button, but we
+  // only handle the direction variants here. The global dispatcher consumes PageBack/PageForward
+  // variants (they're configured as page-turn actions in the reader) and dispatch is a no-op while
+  // this dialog is current, so they're effectively swallowed.
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
-    if (ev.button == MappedInputManager::Button::Up) {
+    if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Up)) {
       if (ev.type == ButtonEventManager::PressType::Short) {
         adjustDigit(1);
       } else if (ev.type == ButtonEventManager::PressType::Double) {
         adjustDigitTimes(10, 1);
       }
-    } else if (ev.button == MappedInputManager::Button::Down) {
+    } else if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Down)) {
       if (ev.type == ButtonEventManager::PressType::Short) {
         adjustDigit(-1);
       } else if (ev.type == ButtonEventManager::PressType::Double) {
@@ -174,9 +176,11 @@ void EpubReaderPrintedPageInputActivity::render(RenderLock&&) {
   // Step hint.
   renderer.drawCenteredText(SMALL_FONT_ID, underlineY + 50, tr(STR_GO_TO_PRINTED_PAGE_HINT), true);
 
-  // Button hints.
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Button hints. The cursor buttons carry the labels and ride logical Left/Right, so they move to
+  // whichever pair lies across the screen; the digit buttons are described by the step hint above.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), "-", "+", "", "");
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
 }

@@ -1,10 +1,12 @@
 #include "SettingActionDispatch.h"
 
+#include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
 #include "DetectTimezoneActivity.h"
+#include "DictionarySelectionActivity.h"
 #include "EnumSelectionActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
@@ -55,12 +57,16 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<WeatherSettingsActivity>(renderer, mappedInput);
     case SettingAction::SystemInfo:
       return std::make_unique<SystemInformationActivity>(renderer, mappedInput);
+    case SettingAction::BootDiagnostics:
+      return std::make_unique<BootDiagnosticsActivity>(renderer, mappedInput);
     case SettingAction::SyncTime:
       return std::make_unique<SyncTimeActivity>(renderer, mappedInput);
     case SettingAction::DetectTimezone:
       return std::make_unique<DetectTimezoneActivity>(renderer, mappedInput);
     case SettingAction::ReadingStats:
       return std::make_unique<ReadingStatsActivity>(renderer, mappedInput);
+    case SettingAction::DictionarySelect:
+      return std::make_unique<DictionarySelectionActivity>(renderer, mappedInput);
     case SettingAction::Submenu:
     case SettingAction::None:
       return nullptr;

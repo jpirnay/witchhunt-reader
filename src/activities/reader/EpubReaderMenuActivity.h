@@ -15,6 +15,7 @@ class EpubReaderMenuActivity final : public MenuListActivity {
     NONE,
     SELECT_CHAPTER,
     FOOTNOTES,
+    DICTIONARY,
     EMBEDDED_STYLE,
     IMAGE_RENDERING,
     TEXT_DARKNESS,
@@ -32,7 +33,7 @@ class EpubReaderMenuActivity final : public MenuListActivity {
     MARK_AS_READ,
     DELETE_CACHE,
     RENDER_BENCHMARK,
-    READING_STATS,
+    READING_STATS_FOR_BOOK,
     BOOK_INFO,
   };
 

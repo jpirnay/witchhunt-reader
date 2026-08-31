@@ -231,6 +231,21 @@ bool HalStorage::openFileForWrite(const char* moduleName, const String& path, Ha
   return openFileForWrite(moduleName, path.c_str(), file);
 }
 
+bool HalStorage::openFileForUpdate(const char* moduleName, const char* path, HalFile& file) {
+  StorageLock lock;  // ensure thread safety for the duration of this function
+  FsFile fsFile = SDCard.open(path, O_RDWR);
+  const bool ok = static_cast<bool>(fsFile);
+  if (!ok) {
+    LOG_ERR(moduleName, "Failed to open %s for update", path);
+  }
+  file = HalFile(std::make_unique<HalFile::Impl>(std::move(fsFile)));
+  return ok;
+}
+
+bool HalStorage::openFileForUpdate(const char* moduleName, const std::string& path, HalFile& file) {
+  return openFileForUpdate(moduleName, path.c_str(), file);
+}
+
 bool HalStorage::removeDir(const char* path) { HAL_STORAGE_WRAPPED_CALL(removeDir, path); }
 
 bool HalStorage::copyFile(const char* moduleName, const std::string& srcPath, const char* dstPath) {

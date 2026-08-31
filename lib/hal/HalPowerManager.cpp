@@ -102,6 +102,35 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // Otherwise, no change needed
 }
 
+void HalPowerManager::ensureFullSpeedForRadio() {
+  if (normalFreq <= 0) {
+    return;  // begin() not called yet — nothing to restore to
+  }
+  // Clear BOTH downclock owners before touching the frequency. The idle governor
+  // (isLowPower) and the waveform hook (waveformLowPower_) track their drops separately, and
+  // whichever one is live would otherwise restore or re-drop the clock behind the radio's back.
+  xSemaphoreTake(modeMutex, portMAX_DELAY);
+  const bool wasIdleLow = isLowPower;
+  const bool wasWaveformLow = waveformLowPower_;
+  isLowPower = false;
+  waveformLowPower_ = false;
+  xSemaphoreGive(modeMutex);
+
+  const int current = getCpuFrequencyMhz();
+  if (current >= normalFreq) {
+    return;  // already at full speed; nothing to do beyond the flag reconciliation above
+  }
+  if (setCpuFrequencyMhz(normalFreq)) {
+    LOG_INF("PWR", "CPU %d -> %d MHz for radio bring-up (idleLow=%d waveformLow=%d)", current, normalFreq,
+            wasIdleLow ? 1 : 0, wasWaveformLow ? 1 : 0);
+  } else {
+    // Worth an error rather than a debug line: WiFi association from a 10 MHz clock does not
+    // fail cleanly, it hangs, and this is the only place that would have seen it coming.
+    LOG_ERR("PWR", "Failed to restore %d MHz before radio bring-up (still %d MHz) — WiFi may hang", normalFreq,
+            current);
+  }
+}
+
 void HalPowerManager::enterWaveformWait() {
   if (normalFreq <= 0) {
     return;  // begin() not called yet — nothing to restore to
@@ -228,6 +257,11 @@ bool HalPowerManager::lightSleep(const HalGPIO& gpio) {
   // output mode. Non-Xteink boards are left alone — GPIO13 is an ordinary signal
   // there (SPI MOSI on the LilyGo T5S3, display CS on the X4 Pro).
   if (gpio.isXteinkDevice()) {
+    // gpio_hold_dis() first: a hold left over from an earlier slice (or from a previous
+    // sleep cycle) makes gpio_set_level() a silent no-op, so without this the pin would
+    // keep whatever level it was latched at — the exact failure mode documented at
+    // startDeepSleep()'s own gpio_hold_dis below. Re-holding immediately after is free.
+    gpio_hold_dis(GPIO_BATTERY_LATCH);
     gpio_set_level(GPIO_BATTERY_LATCH, 1);
     gpio_set_direction(GPIO_BATTERY_LATCH, GPIO_MODE_OUTPUT);
     gpio_hold_en(GPIO_BATTERY_LATCH);
@@ -334,15 +368,33 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
     gpio_deep_sleep_hold_en();
     gpio_hold_en(GPIO_SPIWP);
   } else {
+    // Same release, for the boards that reach GPIO13 through the SDK's rail teardown
+    // instead of the latch branch above. It matters on X3: lightSleep() re-holds GPIO13
+    // HIGH on every idle slice for ALL Xteink C3 boards (isXteinkDevice()), but only the
+    // X4 branch above released it — so powerDownRailsForSleep() could not drive the X3's
+    // SD rail enable LOW and the card stayed powered through deep sleep, draining the
+    // battery. Guarded to Xteink C3 for the same reason the branch above is: elsewhere
+    // GPIO13 is an ordinary bus signal (SPI MOSI on the T5S3, display CS on the X4 Pro)
+    // that nothing has held and that we must not touch.
+    if (gpio.isXteinkDevice()) {
+      gpio_hold_dis(GPIO_NUM_13);
+    }
+    gpio_deep_sleep_hold_dis();
     freeink::PowerManager::powerDownRailsForSleep();
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
   }
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
+  if (sleepStepHook_) sleepStepHook_(SleepStep::RailsConfigured, 0, false, gpio13IsBatteryLatch);
 
   // Now wait for the power button to be fully released before arming the wakeup
   // trigger and entering sleep — prevents immediate re-wake from a held button.
-  gpio.waitForStablePowerRelease();
+  // Bounded (see waitForStablePowerRelease): a pin stuck LOW used to freeze the device
+  // here with the sleep screen displayed and no watchdog covering this task.
+  if (sleepStepHook_) sleepStepHook_(SleepStep::AwaitingRelease, 0, false, gpio13IsBatteryLatch);
+  const unsigned long releaseWaitMs = gpio.waitForStablePowerRelease();
+  const bool releaseTimedOut = releaseWaitMs >= HalGPIO::POWER_RELEASE_TIMEOUT_MS;
+  if (sleepStepHook_) sleepStepHook_(SleepStep::ReleaseDone, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
 
   // Arm the wakeup trigger *after* the button is released
   // Note: when keepClockAlive is false, this is only useful for waking up on USB power. On battery, the MCU will be
@@ -363,6 +415,7 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
 #else
 #error "No deep-sleep wake source available for this target — add one before enabling this board."
 #endif
+  if (sleepStepHook_) sleepStepHook_(SleepStep::WakeArmed, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
   // Enter Deep Sleep
   esp_deep_sleep_start();
 }

@@ -60,8 +60,31 @@ class HalPowerManager {
     uint32_t rejIdf = 0;         // esp_light_sleep_start() returned non-OK
   };
 
+  // The last steps of startDeepSleep(), reported to an optional observer. That
+  // function does not return, so the only way anything downstream can learn how far it
+  // got is to be told on the way past.
+  enum class SleepStep : uint8_t {
+    RailsConfigured,  // GPIO13 / rail teardown done, wake pin pulled up
+    AwaitingRelease,  // about to block on the power-button release
+    ReleaseDone,      // release seen, or the wait gave up (see `timedOut`)
+    WakeArmed,        // wake source armed; esp_deep_sleep_start() is the next statement
+  };
+  // Plain function pointer, not std::function: the latter costs ~2-4 KB of binary per
+  // signature and heap-allocates its closure, and this is called on the sleep path where
+  // the heap may already be why we are sleeping. Owned by the app layer so the HAL takes
+  // no dependency on the diagnostics module.
+  //
+  // `storageLive` says whether the SD rail is still powered at this point in the teardown,
+  // which only the HAL knows: the battery-latch branch leaves the card alone, while the
+  // rail-teardown branch has already cut it via powerDownRailsForSleep(). An observer that
+  // wants to persist something from inside the sleep path has to be told, or it writes
+  // into a card that is no longer there.
+  using SleepStepHook = void (*)(SleepStep step, unsigned long waitedMs, bool timedOut, bool storageLive);
+  void setSleepStepHook(SleepStepHook hook) { sleepStepHook_ = hook; }
+
  private:
   LightSleepStats lightSleepStats_;
+  SleepStepHook sleepStepHook_ = nullptr;
   unsigned long lastSliceEndMs_ = 0;
 
  public:
@@ -80,6 +103,22 @@ class HalPowerManager {
 
   // Control CPU frequency for power saving
   void setPowerSaving(bool enabled);
+
+  // Force the CPU back to its normal frequency before bringing the radio up.
+  //
+  // CALL THIS IMMEDIATELY BEFORE WiFi.mode()/WiFi.begin()/softAP(). WiFi does not work below
+  // 80 MHz on this SoC — the same fact enterWaveformWait() relies on when it refuses to
+  // downclock while WiFi is up — and LOW_POWER_FREQ is 10 MHz. Bringing the radio up from
+  // there wedges PHY init.
+  //
+  // setPowerSaving(false) is NOT a substitute. It only acts when its own isLowPower flag is
+  // set, and it forces enabled=false only once WiFi.getMode() is already non-null — i.e. it
+  // protects a radio that is already up, and nothing raised the clock on the way in. It is also
+  // blind to a clock dropped by enterWaveformWait(), which tracks its own waveformLowPower_
+  // flag; that combination leaves the CPU at 10 MHz with isLowPower false, so every later
+  // setPowerSaving(false) is a silent no-op. This clears both flags and restores the frequency
+  // unconditionally.
+  void ensureFullSpeedForRadio();
 
   // Waveform-wait power hooks, installed on the display driver by HalDisplay:
   // drop the CPU clock while the render task sleeps on the e-ink BUSY-ISR

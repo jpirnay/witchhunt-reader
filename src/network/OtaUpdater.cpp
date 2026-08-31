@@ -67,7 +67,9 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   for (int attempt = 1; attempt <= otaHttpMaxAttempts; ++attempt) {
     ReleaseJsonParser releaseParser;
     size_t bytesSeen = 0;
-    const bool ok = HttpDownloader::fetchUrl(
+    // Fail closed like the firmware download itself: this response names the URL
+    // installUpdate() then fetches, so an unverified answer chooses the binary.
+    const bool ok = HttpDownloader::fetchUrlVerified(
         releaseApiUrl,
         [&releaseParser, &bytesSeen](const uint8_t* data, size_t len) {
           bytesSeen += len;

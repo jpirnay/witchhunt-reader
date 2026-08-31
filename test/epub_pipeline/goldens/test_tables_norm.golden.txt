@@ -21,21 +21,21 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=13 s=0 z=100 t=columns,
    W x=96 s=0 z=100 t=2
    W x=109 s=0 z=100 t=rows
-  TABLE y=162 x=0 h=71 cols=2 border=1 rows=2
+  TABLE y=162 x=0 w=460 h=71 cols=2 border=1 rows=2
    ROW h=34 hdr=1 cells=2
-    CELL 0 hdr=1 lines=1
+    CELL 0 hdr=1 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Col
       W x=55 s=0 z=100 t=1
-    CELL 1 hdr=1 lines=1
+    CELL 1 hdr=1 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Col
       W x=55 s=0 z=100 t=2
    ROW h=34 hdr=0 cells=2
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Some
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Text
   LINE y=233 x=0 align=0 mult=1.000 hfid=0 words=4
@@ -43,28 +43,28 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=14 s=0 z=100 t=columns,
    W x=97 s=0 z=100 t=2
    W x=110 s=0 z=100 t=rows
-  TABLE y=275 x=0 h=71 cols=3 border=1 rows=2
+  TABLE y=275 x=0 w=460 h=71 cols=3 border=1 rows=2
    ROW h=34 hdr=1 cells=3
-    CELL 0 hdr=1 lines=1
+    CELL 0 hdr=1 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Col
       W x=55 s=0 z=100 t=1
-    CELL 1 hdr=1 lines=1
+    CELL 1 hdr=1 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Col
       W x=55 s=0 z=100 t=2
-    CELL 2 hdr=1 lines=1
+    CELL 2 hdr=1 span=1 lines=1
      LN words=2
       W x=18 s=0 z=100 t=Col
       W x=55 s=0 z=100 t=3
    ROW h=34 hdr=0 cells=3
-    CELL 0 hdr=0 lines=1
+    CELL 0 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Some
-    CELL 1 hdr=0 lines=1
+    CELL 1 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Text
-    CELL 2 hdr=0 lines=1
+    CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Oho
 SPINE 3 href=EPUB/text/ch002.xhtml pages=1 truncated=0 cssFallback=0

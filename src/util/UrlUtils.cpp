@@ -1,6 +1,7 @@
 #include "UrlUtils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <string_view>
 
 namespace UrlUtils {
@@ -152,6 +153,17 @@ std::string_view extractHostView(const std::string_view url) {
   return authorityEnd == std::string::npos ? url : url.substr(0, authorityEnd);
 }
 
+bool startsWithHttpScheme(const std::string& url) {
+  const size_t colon = url.find(':');
+  if (colon == 0 || colon == std::string::npos) {
+    return false;
+  }
+  std::string scheme = url.substr(0, colon);
+  std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return scheme == "http" || scheme == "https";
+}
+
 void appendView(std::string& out, const std::string_view view) { out.append(view.data(), view.size()); }
 
 std::string buildResolvedUrl(const std::string_view host, const std::string_view path, const std::string_view query,
@@ -175,10 +187,54 @@ std::string normalizeJoinedPath(const std::string_view baseDir, const std::strin
 }  // namespace
 
 std::string ensureProtocol(const std::string& url) {
-  if (url.find("://") == std::string::npos) {
-    return "http://" + url;
+  // Repair first: "https:/host" carries a scheme the "://" test cannot see, and
+  // prepending on top of it yields the unconnectable "http://https:/host".
+  const std::string repaired = repairSchemeSeparator(url);
+  if (repaired.find("://") == std::string::npos) {
+    return "http://" + repaired;
   }
-  return url;
+  return repaired;
+}
+
+std::string repairSchemeSeparator(const std::string& url) {
+  std::string repaired = url;
+
+  // Loop so a doubled scheme ("http://https://host") collapses in one pass too.
+  for (int guard = 0; guard < 2; guard++) {
+    const size_t colon = repaired.find(':');
+    if (colon == 0 || colon == std::string::npos) {
+      break;
+    }
+
+    std::string scheme = repaired.substr(0, colon);
+    std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (scheme != "http" && scheme != "https") {
+      break;
+    }
+
+    size_t restStart = colon + 1;
+    size_t slashCount = 0;
+    while (restStart < repaired.size() && repaired[restStart] == '/') {
+      restStart++;
+      slashCount++;
+    }
+    if (restStart >= repaired.size()) {
+      break;  // bare scheme, nothing to repair
+    }
+
+    const std::string rest = repaired.substr(restStart);
+    const bool restCarriesItsOwnScheme = startsWithHttpScheme(rest);
+    if (slashCount == 2 && !restCarriesItsOwnScheme) {
+      break;  // already well formed
+    }
+
+    // A second scheme inside the URL means the outer one was prepended by mistake;
+    // keep the inner one and let the next pass fix its own separator.
+    repaired = restCarriesItsOwnScheme ? rest : scheme + "://" + rest;
+  }
+
+  return repaired;
 }
 
 std::string extractHost(const std::string& url) { return std::string(extractHostView(url)); }

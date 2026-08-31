@@ -254,10 +254,17 @@ bool ContentOpfParser::setup() {
   return true;
 }
 
-ContentOpfParser::~ContentOpfParser() {
+// The item store is only opened when there is a cache to serve (see the manifest/spine branches in
+// startElement), so a null-cache parse reaches the manifest/spine/guide end tags with a handle that
+// was never opened. One place to ask that question, instead of four.
+void ContentOpfParser::closeItemStore() {
   if (tempItemStore) {
     tempItemStore.close();
   }
+}
+
+ContentOpfParser::~ContentOpfParser() {
+  closeItemStore();
   const auto itemCachePath = cachePath + itemCacheFile;
   if (Storage.exists(itemCachePath.c_str())) {
     Storage.remove(itemCachePath.c_str());
@@ -400,19 +407,31 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
 
   if (self->state == IN_PACKAGE && isManifestTag(name)) {
     self->state = IN_MANIFEST;
-    if (!Storage.openFileForWrite("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
-      LOG_ERR("COF", "Couldn't open temp items file for writing. This is probably going to be a fatal error.");
+    // The item store exists for ONE job: resolving spine idrefs to hrefs, which only happens when
+    // there is a cache to write spine entries into. A cover/metadata load (OpfCacheMode::Disabled)
+    // passes a null cache and skips spine parsing entirely, so building the store there wrote the
+    // whole manifest to SD for nothing — and, because those load paths never call setupCacheDir(),
+    // usually failed to open at all and logged three "probably going to be a fatal error" lines per
+    // book per pass. coverItemHref does not come from here; it is matched inline as items stream by.
+    if (self->cache) {
+      if (!Storage.openFileForWrite("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
+        LOG_ERR("COF", "Couldn't open temp items file for writing. This is probably going to be a fatal error.");
+      }
+      self->itemWriter_.emplace(self->tempItemStore);
     }
-    self->itemWriter_.emplace(self->tempItemStore);
     return;
   }
 
   if (self->state == IN_PACKAGE && isSpineTag(name)) {
     self->state = IN_SPINE;
-    if (!Storage.openFileForRead("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
-      LOG_ERR("COF", "Couldn't open temp items file for reading. This is probably going to be a fatal error.");
+    // No cache => no spine parsing (see the isItemRefTag branch), so nothing will read this.
+    // resolveSpineItemRefHref() already treats an absent reader as "cannot resolve".
+    if (self->cache) {
+      if (!Storage.openFileForRead("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
+        LOG_ERR("COF", "Couldn't open temp items file for reading. This is probably going to be a fatal error.");
+      }
+      self->itemReader_.emplace(self->tempItemStore);
     }
-    self->itemReader_.emplace(self->tempItemStore);
 
     // Sort item index for binary search if we have enough items
     if (self->itemIndex.size() >= LARGE_SPINE_THRESHOLD) {
@@ -448,8 +467,12 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
     self->state = IN_GUIDE;
     // TODO Remove print
     LOG_DBG("COF", "Entering guide state.");
-    if (!Storage.openFileForRead("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
-      LOG_ERR("COF", "Couldn't open temp items file for reading. This is probably going to be a fatal error.");
+    // Guide references carry their own href attribute and never consult the item store, so this
+    // open only has to keep the (cached) reader pointing at a valid handle.
+    if (self->cache) {
+      if (!Storage.openFileForRead("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
+        LOG_ERR("COF", "Couldn't open temp items file for reading. This is probably going to be a fatal error.");
+      }
     }
     return;
   }
@@ -550,7 +573,7 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
     // Write items down to SD card (buffered — thousands of tiny field writes otherwise cost a
     // full FsFile call each). The index entry records the position AFTER the id string:
     // hash-trusted lookups seek straight to the href and never re-read the id.
-    self->itemWriter_->writeString(itemId);
+    if (self->itemWriter_.has_value()) self->itemWriter_->writeString(itemId);
     if (self->tempItemStore && !self->indexDisabled_) {
       ItemIndexEntry entry;
       entry.idHash = fnvHash(itemId);
@@ -568,7 +591,7 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
         self->itemIndex.clear();  // free the partial index; lookups use the linear scan
       }
     }
-    self->itemWriter_->writeString(href);
+    if (self->itemWriter_.has_value()) self->itemWriter_->writeString(href);
 
     if (itemId == self->coverItemId) {
       // Some EPUBs set meta name="cover" to an XHTML wrapper item.
@@ -704,13 +727,13 @@ void ContentOpfParser::endElement(void* userData, const char* name) {
   if (self->state == IN_SPINE && isSpineTag(name)) {
     self->state = IN_PACKAGE;
     self->itemReader_.reset();
-    self->tempItemStore.close();
+    self->closeItemStore();
     return;
   }
 
   if (self->state == IN_GUIDE && isGuideTag(name)) {
     self->state = IN_PACKAGE;
-    self->tempItemStore.close();
+    self->closeItemStore();
     return;
   }
 
@@ -721,7 +744,7 @@ void ContentOpfParser::endElement(void* userData, const char* name) {
       self->itemWriter_->flush();
       self->itemWriter_.reset();
     }
-    self->tempItemStore.close();
+    self->closeItemStore();
     return;
   }
 

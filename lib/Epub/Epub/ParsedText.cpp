@@ -324,10 +324,15 @@ void ParsedText::layoutAndExtractLines(
   // Compute firstLineIndent once here so all layout helpers use the same value.
   // On a continuation flush the remaining words are mid-paragraph, so no indent.
   // firstLineExtraIndent adds extra indent on the first line (on top of CSS text-indent).
+  // A negative text-indent is the hanging-indent pattern (margin-left:3em; text-indent:-1em),
+  // where the inset is what the first line hangs out of. It may pull left by at most that inset:
+  // the block's own left edge is where the CSS containing block starts, and anything past it
+  // renders off the panel and silently loses its first glyphs (issue #198).
   const int cssTextIndent =
       !isContinuation_ && blockStyle.textIndentDefined &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? std::min(std::max<int>(static_cast<int>(blockStyle.textIndent), -(pageWidth - 1)), pageWidth - 1)
+          ? std::min(std::max<int>(static_cast<int>(blockStyle.textIndent), -static_cast<int>(blockStyle.leftInset())),
+                     pageWidth - 1)
           : 0;
   const int firstLineIndent = cssTextIndent + (isContinuation_ ? 0 : static_cast<int>(blockStyle.firstLineExtraIndent));
 
@@ -702,6 +707,10 @@ void ParsedText::applyParagraphIndent(const GfxRenderer& renderer, const int fon
 
   if (blockStyle.textIndentDefined) {
     // CSS text-indent is explicitly set (even if 0) — handled by extractLine() via firstLineIndent.
+  } else if (blockStyle.fromBrElement) {
+    // A block created by an inline <br> is the next line of the SAME paragraph, so it gets no
+    // first-line indent. (A <br> standing between two paragraphs leaves its block empty; that
+    // block is merged into the following one, which brings its own indent.)
   } else if (!extraParagraphSpacing && blockStyle.floatZoneCount == 0 &&
              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)) {
     // No CSS text-indent defined — apply a font-size-relative pixel indent so paragraph
@@ -1168,7 +1177,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   // Pre-calculate X positions for words
   // Continuation words attach to the previous word with no space before them
-  std::vector<int16_t> lineXPos;
+  std::vector<int16_t>& lineXPos = lineXPosScratch_;
+  lineXPos.clear();  // keeps the capacity: the point is to stop reallocating per line
   lineXPos.reserve(lineWordCount);
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
@@ -1215,12 +1225,16 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.words = &words;
   range.styles = &wordStyles;
   range.sizes = &wordSizes;
+  // Carried into the block so a reader-side consumer can tell one logical word from the
+  // fragments layout split it into (bionic-reading halves, attached punctuation). Nothing on
+  // the render path reads it; the xpos above already encodes the spacing.
+  range.continues = &continuesVec;
   range.first = lastBreakAt;
   range.count = lineWordCount;
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = std::make_shared<TextBlock>(range, std::move(lineXPos), blockStyle);
+  auto block = std::make_shared<TextBlock>(range, lineXPos, blockStyle);
   if (!block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return LineProcessResult::Accepted;

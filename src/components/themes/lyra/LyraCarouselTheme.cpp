@@ -375,7 +375,11 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
       FsFile file;
       if (Storage.openFileForRead("HOME", thumbPath, file)) {
         Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        // The no-cover marker must never be drawn — scaling a 1x1 BMP into the tile would paint a
+        // solid block. Leaving hasCover/tilePending false drops through to the no-cover tile below,
+        // which is a better picture than the blank box the old slot-sized placeholder produced.
+        if (bitmap.parseHeaders() == BmpReaderError::Ok &&
+            !UITheme::isCoverPlaceholderBmp(bitmap.getWidth(), bitmap.getHeight())) {
           // Height always fills the tile. Only crop horizontally if the cover is
           // wider than the tile; narrow covers get white space on the sides.
           const float bmpRatio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
@@ -426,6 +430,17 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
                                  /*roundTopRight=*/false, /*roundBottomLeft=*/roundLeft,
                                  /*roundBottomRight=*/roundRight, Color::Black);
         renderer.drawIcon(CoverIcon, x + maxW / 2 - 16, y + 8, 32, 32);
+        // Name the book inside the tile. The centre tile also carries author/title underneath, but
+        // the two SIDE tiles have no label at all — without this a coverless book is unidentifiable
+        // until it is scrolled into the centre. Drawn in the white upper third, under the icon.
+        const int titleY = y + 8 + 32 + 4;
+        const int titleLineH = renderer.getLineHeight(SMALL_FONT_ID);
+        // Keep inside the white band: the black block starts at maxH/3.
+        if (titleY + titleLineH <= y + maxH / 3) {
+          const std::string tileTitle = renderer.truncatedText(SMALL_FONT_ID, book.title.c_str(), maxW - 8);
+          const int tileTitleW = renderer.getTextWidth(SMALL_FONT_ID, tileTitle.c_str());
+          renderer.drawText(SMALL_FONT_ID, x + (maxW - tileTitleW) / 2, titleY, tileTitle.c_str(), true);
+        }
       }
     }
     return true;
@@ -591,11 +606,25 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
 // ---------------------------------------------------------------------------
 // List — solid black highlight, inverted text and icons on selected row
 // ---------------------------------------------------------------------------
+BaseTheme::WrappedListStyle LyraCarouselTheme::wrappedListStyle() const {
+  WrappedListStyle style = LyraTheme::wrappedListStyle();
+  style.cornerRadius = kCornerRadius;
+  style.scrollBarWidth = LyraCarouselMetrics::values.scrollBarWidth;
+  style.scrollBarRightOffset = LyraCarouselMetrics::values.scrollBarRightOffset;
+  style.selectionIsBlack = true;  // solid black bar, text and icon inverted
+  return style;
+}
+
 void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                                  const std::function<std::string(int index)>& rowTitle,
                                  const std::function<std::string(int index)>& rowSubtitle,
                                  const std::function<UIIcon(int index)>& rowIcon,
-                                 const std::function<std::string(int index)>& rowValue, bool highlightValue) const {
+                                 const std::function<std::string(int index)>& rowValue, bool highlightValue,
+                                 ListViewState* view) const {
+  if (view != nullptr && view->wraps() && rowSubtitle == nullptr && rowValue == nullptr) {
+    drawWrappedList(renderer, rect, itemCount, selectedIndex, rowTitle, rowIcon, *view);
+    return;
+  }
   constexpr int hPad = 8;
   constexpr int listIconSz = 24;
   constexpr int mainMenuIconSz = 32;
@@ -605,6 +634,7 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
   const int rowHeight = (rowSubtitle != nullptr) ? LyraCarouselMetrics::values.listWithSubtitleRowHeight
                                                  : LyraCarouselMetrics::values.listRowHeight;
   const int pageItems = rect.height / rowHeight;
+  if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
   if (pageItems <= 0 || itemCount <= 0) return;
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
 

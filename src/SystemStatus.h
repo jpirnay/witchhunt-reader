@@ -50,8 +50,14 @@ inline const char* displayControllerName(BoardConfig::DisplayController controll
 // System Information activity so both surfaces show consistent data.
 struct SystemStatus {
   const char* version;
-  const char* displaySdk;         // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
-  const char* deviceType;         // display name of the active board, e.g. "X4", "T5 S3 Pro"
+  const char* displaySdk;  // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
+  const char* deviceType;  // display name of the active board, e.g. "X4", "X4 Pro", "T5 S3 Pro"
+  // Exact BoardProfile selected at boot, e.g. "xteink_x4" / "xteink_x3" /
+  // "xteink_x3_uc8279" / "xteink_x4_pro". deviceType alone is not enough to identify a
+  // unit: each model ships in more than one silicon variant (per-batch panel swaps), and
+  // two bug reports are only comparable once it is known whether they came from the same
+  // one. It is also the only field that separates two boards sharing a display name.
+  const char* boardProfile;
   const char* displayController;  // panel controller silicon resolved at boot, e.g. "UC8253"
   uint16_t displayWidth;          // Native panel width in pixels (long edge)
   uint16_t displayHeight;         // Native panel height in pixels (short edge)
@@ -105,6 +111,9 @@ struct SystemStatus {
     s.deviceType = HalCapabilities::boardDisplayName(BoardConfig::ACTIVE.board);
     s.displayWidth = BoardConfig::ACTIVE.displayWidth;
     s.displayHeight = BoardConfig::ACTIVE.displayHeight;
+    // The build slug beside the display name: two profiles can share a name (the X3's
+    // UC8253 and UC8279 variants both read "X3") and only this tells them apart.
+    s.boardProfile = BoardConfig::ACTIVE.name;
     s.displayController = displayControllerName(BoardConfig::ACTIVE.displayController);
     s.chipVersion = ESP.getChipModel();
     s.chipVersion += " rev ";

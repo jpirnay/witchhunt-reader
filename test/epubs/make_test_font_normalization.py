@@ -14,6 +14,12 @@ The whole-paragraph wrapper cases mirror the real publisher markup the feature
 targets (<span style="font-size:0.92em"> around a full paragraph); the mid-line
 cases confirm snapping happens per word without disturbing its neighbours.
 
+The band applies to a size stated on the block itself as well (`p.body {
+font-size: 1.1em }`, how a publisher states the same thing without a wrapper),
+so cases 8 and 9 travel the block-style path instead of the per-word channel.
+Headings are the one exemption (case 10): they are meant to stand apart, so a
+heading's size survives the band under either setting.
+
 Regenerate with:  python test/epubs/make_test_font_normalization.py
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
 """
@@ -99,6 +105,15 @@ CSS = """/* Dead-zone boundaries. OFF snaps +/-3%, ON snaps +/-10%. */
 /* Nested composition: 1.05 x 0.9 = 94.5% -> inside ON band only. */
 .outer105 { font-size: 1.05em }
 .inner090 { font-size: 0.9em }
+
+/* Upper band EDGE, stated on the paragraph class - the shape that made a whole
+   book's prose render as resampled glyphs. Bare `p` carries no size, so the
+   main-text baseline never sees it. */
+.p110 { font-size: 1.1em }
+
+/* Inside the ON band but on a HEADING, which is exempt: a heading is meant to
+   stand apart, so its author's size survives both settings. */
+.h106 { font-size: 1.06em }
 """
 
 CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
@@ -174,6 +189,19 @@ CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
 
   <p class="p080">8b. BLOCK LEVEL DISTINCT: an eighty percent block, outside
   both bands, which must keep its size either way.</p>
+
+  <!-- 9. Block level at the upper band edge, with a distinct nested run ── -->
+  <p class="p110">9. BLOCK EDGE: a whole book of prose stated at one hundred ten
+  percent on the paragraph class, which is exactly the upper edge of the ON
+  band. It must snap to body under ON, and <span class="p080">this nested
+  eighty percent run</span> must then measure eighty percent of body — not of
+  the hundred and ten.</p>
+
+  <!-- 10. Headings are exempt from the band ─────────────────────── -->
+  <h3 class="h106">10. HEADING EDGE: one hundred six percent</h3>
+  <p>A heading sized inside the ON band keeps its size under both settings — the
+  band spares body text a scale nobody asked for, it does not flatten the
+  page's hierarchy.</p>
 
 </body>
 </html>

@@ -11,6 +11,15 @@
 
 bool TextBlock::guideDotsEnabled = false;
 
+namespace {
+// Style and continuation share one arena byte: bits 0-6 are the EpdFontFamily::Style, bit 7
+// says the word is glued to its predecessor. See TextBlock::wordContinues.
+uint8_t packStyle(const EpdFontFamily::Style style, const bool continues) {
+  return static_cast<uint8_t>((static_cast<uint8_t>(style) & ~TextBlock::WORD_CONTINUES_BIT) |
+                              (continues ? TextBlock::WORD_CONTINUES_BIT : 0));
+}
+}  // namespace
+
 TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const bool hasSizes) {
   // Layout documented in TextBlock.h: 16-bit arrays first (textOff, xpos), then
   // 8-bit arrays (styles, optional sizes), then the text blob. textOff sits at 0.
@@ -39,7 +48,7 @@ void TextBlock::bindArenaPointers() {
 
 TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
                      std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle,
-                     std::vector<uint8_t> word_sizes)
+                     std::vector<uint8_t> word_sizes, const std::vector<bool>& word_continues)
     // Narrow the parser's full BlockStyle to the render-only slice: the spacing
     // fields have already been consumed into word_xpos / the line's y by layout.
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
@@ -101,7 +110,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   for (uint16_t i = 0; i < numWords; i++) {
     textOff[i] = off;
     xpos[i] = word_xpos[i];
-    styles[i] = static_cast<uint8_t>(word_styles[i]);
+    styles[i] = packStyle(word_styles[i], i < word_continues.size() && word_continues[i]);
     memcpy(text + off, words[i].data(), words[i].size());
     off += static_cast<uint16_t>(words[i].size());
     text[off++] = '\0';
@@ -113,7 +122,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   bindArenaPointers();
 }
 
-TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, const BlockStyle& blockStyle)
+TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle)
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
   if (range.words == nullptr || range.styles == nullptr) {
     LOG_ERR("TXB", "Construction failed: null word range");
@@ -128,6 +137,10 @@ TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, con
   // Every source array must actually span [first, first + count); xpos is per line so it is
   // indexed from 0 and only needs `count` entries.
   const bool hasSizeSrc = range.sizes != nullptr && !range.sizes->empty();
+  // Optional, and only used when it actually spans the range -- a caller that does not track
+  // continuation (or hands over a short vector) just produces space-separated words.
+  const std::vector<bool>* continuesSrc =
+      (range.continues != nullptr && first + count <= range.continues->size()) ? range.continues : nullptr;
   if (count > 10000 || first + count > words.size() || first + count > styleSrc.size() || word_xpos.size() != count ||
       (hasSizeSrc && first + count > range.sizes->size())) {
     LOG_ERR("TXB", "Construction failed: range out of bounds (first=%u, count=%u, words=%u, xpos=%u)",
@@ -194,7 +207,7 @@ TextBlock::TextBlock(const WordRange& range, std::vector<int16_t> word_xpos, con
   for (uint16_t i = 0; i < numWords; i++) {
     textOff[i] = off;
     xpos[i] = word_xpos[i];
-    styles[i] = static_cast<uint8_t>(styleSrc[first + i]);
+    styles[i] = packStyle(styleSrc[first + i], continuesSrc != nullptr && (*continuesSrc)[first + i]);
     // Copy the word one soft-hyphen-free run at a time.
     const std::string& w = words[first + i];
     size_t start = 0;
@@ -224,6 +237,49 @@ uint8_t TextBlock::maxSizePct() const {
   uint8_t m = 0;
   for (uint16_t i = 0; i < numWords; i++) m = std::max(m, sizesArr[i]);
   return m;
+}
+
+// Mirrors the per-word geometry in render() below. Kept adjacent to it on
+// purpose: the two must move together.
+TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_t i, const int fontId, const int x,
+                                      const int y) const {
+  WordBox box;
+  if (!isValid || i >= numWords) return box;
+
+  const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
+  const float blockScale = renderStyle.fontSizeMultiplier;
+  const int blockAscender = (blockScale == 1.0f) ? renderer.getFontAscenderSize(effFontId)
+                                                 : renderer.getFontAscenderSizeScaled(effFontId, blockScale);
+  int lineAscender = blockAscender;
+  if (sizesPresent) {
+    lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
+  }
+
+  const char* word = wordText(i);
+  const EpdFontFamily::Style style = wordStyle(i);
+  const float scale = wordScale(i);
+  const int ascender = (scale == blockScale) ? blockAscender : renderer.getFontAscenderSizeScaled(effFontId, scale);
+
+  int wordY = y + (lineAscender - ascender);
+  if ((style & EpdFontFamily::SUP) != 0) {
+    wordY -= blockAscender * 2 / 5;
+  } else if ((style & EpdFontFamily::SUB) != 0) {
+    wordY += blockAscender / 4;
+  }
+
+  box.fontId = effFontId;
+  box.style = style;
+  box.scale = scale;
+  box.x = static_cast<int16_t>(xposArr[i] + x);
+  box.y = static_cast<int16_t>(wordY);
+  // Scaled measurement, not getTextAdvanceX: a book with publisher font sizes
+  // gives words a per-word scale, and an unscaled width drifts wider or
+  // narrower than the glyphs actually drawn.
+  box.width = static_cast<int16_t>((scale == 1.0f) ? renderer.getTextWidth(effFontId, word, style)
+                                                   : renderer.getTextWidthScaled(effFontId, word, style, scale));
+  box.height = static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(effFontId)
+                                                    : renderer.getLineHeightScaled(effFontId, scale));
+  return box;
 }
 
 void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int x, const int y) const {

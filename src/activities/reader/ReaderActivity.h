@@ -62,7 +62,7 @@ class ReaderActivity final : public Activity {
   // to mark a book that has no extractable cover. Being a complete BMP it passes
   // isCoverThumbComplete(), so the cover loops treat the book as resolved and never re-open the EPUB
   // to rediscover the absence — without the 0-byte-file "mess" (we now treat empty files as invalid).
-  static bool writeCoverPlaceholderBmp(const std::string& path, int width, int height);
+  static bool writeCoverPlaceholderBmp(const std::string& path);
 
   // Sliced extraction of a ZIP entry to a file, one chunk per continueStep() call.
   // Used to extract an embedded PNG cover (cover.img) without blocking loop() for

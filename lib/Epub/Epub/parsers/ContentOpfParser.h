@@ -124,6 +124,8 @@ class ContentOpfParser final : public Print {
   bool resolveItemRefHrefWithIndex(const std::string& idref, std::string& href);
   bool resolveItemRefHrefLinearScan(const std::string& idref, std::string& href);
   bool resolveSpineItemRefHref(const std::string& idref, std::string& href);
+  // Closes tempItemStore if it was ever opened — a null-cache parse never opens it.
+  void closeItemStore();
   void handleSpineItemRefElement(const char** atts);
 
  public:

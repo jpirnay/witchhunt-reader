@@ -17,6 +17,7 @@
 #include "Epub/css/CssParser.h"
 
 class ZipFile;
+class BuildArena;  // lib/Memory — optional scratch for the extraction inflate ring
 
 enum class OpfCacheMode { Disabled, Enabled };
 
@@ -174,6 +175,10 @@ class Epub {
   bool ensureCoverImageCached() const;
   // True if cover.img is already extracted and a supported format (no ZIP inflate).
   bool coverImageCachedValidOnly() const;
+  // True if cover.img is on disk with a complete header that is NOT a format we decode.
+  // Distinguishes "not extracted yet" (retry) from "extracted, undecodable" (give up):
+  // coverImageCachedValidOnly() answers false for both, which would otherwise loop forever.
+  bool coverImageCachedButUnsupported() const;
   // True if cover.img is usable now. allowExtract=false never inflates — it only reports
   // whether an already-cached cover.img exists, deferring extraction to a sliced session.
   bool coverImageCachedAndValid(bool allowExtract) const;
@@ -202,8 +207,20 @@ class Epub {
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
   // Read up to maxBytes decompressed bytes from a ZIP entry — no SD write, header-only use.
   size_t readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, size_t maxBytes) const;
+  // Arena bytes one extractItemToFile() needs to keep its inflate ring off the heap:
+  // a 1 KB read buffer plus the worst-case 32 KB ring (the entry size is not known until
+  // open(), so budget the cap). Callers gate on image_scratch::canServe(this).
+  static constexpr size_t EXTRACT_ARENA_BYTES = 33 * 1024;
+
   // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
-  bool extractItemToFile(const std::string& itemHref, const std::string& destPath) const;
+  //
+  // arena (optional): carve the read buffer and the inflate ring out of it rather than the
+  // heap. The ring is up to 32 KB CONTIGUOUS and is the first thing to fail on a fragmented
+  // heap — measured on X4 at contig=13300, "Failed to init inflate reader" turned into
+  // "Lazy extraction failed" and the page rendered with no image at all. Falls back to the
+  // heap path if the arena cannot serve the reader, so a tight arena never turns a working
+  // extraction into a failed one. See docs/memory-allocation-strategy.md §4 (class D).
+  bool extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena = nullptr) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
   bool getSpineItemInflatedSize(int spineIndex, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
@@ -256,6 +273,13 @@ class Epub {
   std::optional<PrintedPageEntry> findPrintedPageByLabel(int target) const;
 
  private:
+  // One extraction attempt. arena==nullptr is the historical heap path (readItemContentsToStream);
+  // non-null streams through ZipFile::EntryReader, which carves its buffers from the arena.
+  // Removes a partial destination file on failure, so the caller can simply retry.
+  bool extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const;
+  // Drain one ZIP entry into `out` through an arena-backed EntryReader.
+  bool readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena) const;
+
   // Streams pagelist.bin at path into visit(href, anchor, label) per entry; visit returns false to
   // stop early. The single place that knows the on-disk format, so no caller reserves the whole
   // list. Silently no-ops when the file is absent or unreadable.

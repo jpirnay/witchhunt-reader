@@ -373,7 +373,7 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   const int screenH = renderer.getScreenHeight();
   const int cfgX = config.x + (int)(st->frameLeft * scale);
   const int cfgY = config.y + (int)(st->frameTop * scale);
-  int lastDstY = -1;
+  int nextDstY = 0;  // first destination row not yet emitted (progressive GIFs only)
   bool aborted = false;
 
   DirectPixelWriter pw;
@@ -386,19 +386,10 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     caching = false;
   }
 
-  int srcRow = gifDecodeLzw(f, *st, indexedRow, [&](int actualY, const uint8_t* idxRow, int w) {
-    if (CooperativeAbort::shouldAbortLongTask()) {
-      CooperativeAbort::markAborted();
-      aborted = true;
-      return false;
-    }
-    esp_task_wdt_reset();
-    indexedToGray(idxRow, grayRow, w, *st);
-    int dstY = (int)(actualY * scale);
-    if (dstY == lastDstY || dstY >= dstH) return true;
-    lastDstY = dstY;
-    int outY = cfgY + dstY;
-    if (outY < 0 || outY >= screenH) return true;
+  // Paint one destination row from whatever is currently in grayRow.
+  const auto emitRow = [&](const int dstY) {
+    const int outY = cfgY + dstY;
+    if (outY < 0 || outY >= screenH) return;
     pw.beginRow(outY);
 
     DirectCacheWriter cw;
@@ -426,6 +417,35 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
         srcX++;
       }
     }
+  };
+
+  int srcRow = gifDecodeLzw(f, *st, indexedRow, [&](int actualY, const uint8_t* idxRow, int w) {
+    if (CooperativeAbort::shouldAbortLongTask()) {
+      CooperativeAbort::markAborted();
+      aborted = true;
+      return false;
+    }
+    esp_task_wdt_reset();
+    indexedToGray(idxRow, grayRow, w, *st);
+
+    // Interlaced rows arrive out of order, so there is no monotonic cursor to run and no way
+    // to know which neighbours are still coming: map each source row to the single destination
+    // row it lands on. Caching is off in this mode (see `caching` above), so a row a downscale
+    // never selects is only missing from the screen, not baked into a .pxc.
+    if (st->interlaced) {
+      const int dstY = (int)((int64_t)actualY * dstH / srcH);
+      if (dstY < dstH) emitRow(dstY);
+      return true;
+    }
+
+    // Progressive: cover EVERY destination row this source row spans, rather than the one row
+    // `actualY * scale` happens to land on. That mapping was derived from the horizontal scale,
+    // so a box whose aspect ratio does not match the source stopped short and left the rows
+    // below the picture to PixelCache's fill; it also skipped rows outright on an upscale.
+    int dstYEnd = (int)((int64_t)(actualY + 1) * dstH / srcH);
+    if (dstYEnd > dstH) dstYEnd = dstH;
+    for (int dstY = nextDstY; dstY < dstYEnd; dstY++) emitRow(dstY);
+    if (dstYEnd > nextDstY) nextDstY = dstYEnd;
     return true;
   });
 

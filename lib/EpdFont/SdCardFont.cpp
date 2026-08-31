@@ -55,14 +55,28 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
   // Clear dangling pointers in miniData and stubData (kern data points to freed mini arrays)
   s.miniData.kernLeftClasses = nullptr;
   s.miniData.kernRightClasses = nullptr;
+  s.miniData.kernLeftCodepoints = nullptr;  // SD fonts use the packed class maps, not the split ones
+  s.miniData.kernLeftClassIds = nullptr;
+  s.miniData.kernRightCodepoints = nullptr;
+  s.miniData.kernRightClassIds = nullptr;
   s.miniData.kernMatrix = nullptr;
+  s.miniData.kernRowOffsets = nullptr;  // SD fonts are always dense; see EpdFontData::kernRowOffsets
+  s.miniData.kernSparseCols = nullptr;
+  s.miniData.kernSparseValues = nullptr;
   s.miniData.kernLeftEntryCount = 0;
   s.miniData.kernRightEntryCount = 0;
   s.miniData.kernLeftClassCount = 0;
   s.miniData.kernRightClassCount = 0;
   s.stubData.kernLeftClasses = nullptr;
   s.stubData.kernRightClasses = nullptr;
+  s.stubData.kernLeftCodepoints = nullptr;  // SD fonts use the packed class maps, not the split ones
+  s.stubData.kernLeftClassIds = nullptr;
+  s.stubData.kernRightCodepoints = nullptr;
+  s.stubData.kernRightClassIds = nullptr;
   s.stubData.kernMatrix = nullptr;
+  s.stubData.kernRowOffsets = nullptr;
+  s.stubData.kernSparseCols = nullptr;
+  s.stubData.kernSparseValues = nullptr;
   s.stubData.kernLeftEntryCount = 0;
   s.stubData.kernRightEntryCount = 0;
   s.stubData.kernLeftClassCount = 0;
@@ -234,7 +248,18 @@ void SdCardFont::applyKernLigaturePointers(const PerStyle& s, EpdFontData& data)
   // kern matrix is never resident — see PerStyle::miniKernMatrix comment.
   data.kernLeftClasses = s.miniKernLeftClasses;
   data.kernRightClasses = s.miniKernRightClasses;
+  // Packed form, as stored in the .cpfont; the split arrays are built-in only.
+  data.kernLeftCodepoints = nullptr;
+  data.kernLeftClassIds = nullptr;
+  data.kernRightCodepoints = nullptr;
+  data.kernRightClassIds = nullptr;
   data.kernMatrix = s.miniKernMatrix;
+  // The .cpfont format stores a dense matrix and is mapped in place, so SD fonts never use the
+  // sparse form the built-in fonts switched to. Set explicitly rather than relying on the
+  // caller's initialisation: getKerning() picks the representation by which pointer is non-null.
+  data.kernRowOffsets = nullptr;
+  data.kernSparseCols = nullptr;
+  data.kernSparseValues = nullptr;
   data.kernLeftEntryCount = s.miniKernLeftEntryCount;
   data.kernRightEntryCount = s.miniKernRightEntryCount;
   data.kernLeftClassCount = s.miniKernLeftClassCount;

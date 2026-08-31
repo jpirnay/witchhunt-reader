@@ -146,9 +146,35 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   // upgraded to HALF on a cold panel), so the mode asked for is not always what ran.
   const unsigned long refreshStart = millis();
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
-  LOG_DBG("DISP", "#%lu displayBuffer mode=%s took %lu ms", static_cast<unsigned long>(++panelSeq),
-          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
-          millis() - refreshStart);
+  const unsigned long refreshMs = millis() - refreshStart;
+  const char* const modeName =
+      mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL");
+  const unsigned long seq = ++panelSeq;
+
+  // The X4 differential keeps its previous-frame baseline in the host-managed secondary buffer,
+  // so a FAST requested without one is promoted to HALF inside the driver
+  // (FreeInkDisplay::resolveRefreshMode) — roughly 500 ms becoming 1700 ms. That used to be
+  // invisible: the line read "mode=FAST took 1755 ms", which reads as a stuck panel rather than
+  // a promotion, and cost a whole debugging session when Background-B's borrow of the secondary
+  // buffer degraded every refresh behind the reader menu.
+  //
+  // The two flags are reported rather than the resolved mode on purpose: resolveRefreshMode() is
+  // internal to the driver, and re-deriving its verdict here would be a second copy of the rule
+  // that can drift from the first. These are the inputs it decides on, which is enough to explain
+  // the duration without asserting what the driver did.
+  //
+  // Gated on the panel keeping its baseline in a host buffer rather than on deviceIsX4(): that
+  // question is about the display path, and asking it by board name answers "no" on every S3
+  // board by construction, so an X4 Pro promoted to the same driver would log the misleading
+  // line this exists to prevent.
+  if (mode == RefreshMode::FAST_REFRESH && !deviceIsX3() && !einkDisplay.hasSecondaryBuffer() &&
+      !einkDisplay.singleBufferFastDiff()) {
+    LOG_DBG("DISP",
+            "#%lu displayBuffer mode=%s took %lu ms (no diff baseline: secondary=0 fastDiff=0 -> driver runs HALF)",
+            seq, modeName, refreshMs);
+  } else {
+    LOG_DBG("DISP", "#%lu displayBuffer mode=%s took %lu ms", seq, modeName, refreshMs);
+  }
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
@@ -188,6 +214,7 @@ void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
 static uint32_t fbufContig() { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT); }
 
 bool HalDisplay::releaseSecondaryBuffer() {
+  HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
   // Double-release guard. releaseSecondaryBuffer() returning false means the
   // secondary buffer was already gone — i.e. a caller released it without
   // tracking that it had, then released again. The release windows here are
@@ -208,6 +235,7 @@ bool HalDisplay::releaseSecondaryBuffer() {
 }
 
 bool HalDisplay::reallocSecondaryBuffer() {
+  HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
   const bool ok = einkDisplay.reallocSecondaryBuffer();
   LOG_INF("FBUF", "reallocSecondary -> %d (hasSecondary=%d redSynced=%d contig=%lu)", ok ? 1 : 0,
           einkDisplay.hasSecondaryBuffer() ? 1 : 0, einkDisplay.isRedRamSynced() ? 1 : 0,
@@ -217,7 +245,22 @@ bool HalDisplay::reallocSecondaryBuffer() {
 
 bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
 
+// The four buffer-ownership transitions below all take the SPI bus lock, for two reasons that
+// both trace back to them running on the LOOP task (reader background builds) while the render
+// task drives the panel:
+//
+//  - borrowSecondaryBuffer() is not a pointer swap. It calls syncPendingAsync(), which runs the
+//    driver's displayFinish() — real SPI traffic plus a BUSY wait. Unlocked, that collides with
+//    the render task's own refresh and with SD transfers, which is precisely the unsynchronised
+//    SdSpiCard failure this lock exists to prevent (see HalSpiBus.h).
+//  - all four reassign frameBufferActive, which a deferred refresh still reads (X3's
+//    post-waveform DTM1 sync). Serialising them behind the same lock the display paths take
+//    means the swap cannot land mid-refresh.
+//
+// The mutex is recursive, so a caller that already holds it is unaffected, and the lock is
+// uncontended on the normal path — this costs nothing when nothing else is on the bus.
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
+  HalSpiBus::Lock spiLock;
   uint8_t* buf = einkDisplay.borrowSecondaryBuffer(size);
   LOG_INF("FBUF", "borrowSecondary -> %d (size=%lu hasSecondary=%d)", buf ? 1 : 0,
           static_cast<unsigned long>(buf && size ? *size : 0), einkDisplay.hasSecondaryBuffer() ? 1 : 0);
@@ -225,6 +268,7 @@ uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
 }
 
 bool HalDisplay::returnSecondaryBuffer() {
+  HalSpiBus::Lock spiLock;
   const bool ok = einkDisplay.returnSecondaryBuffer();
   LOG_INF("FBUF", "returnSecondary -> %d (hasSecondary=%d)", ok ? 1 : 0, einkDisplay.hasSecondaryBuffer() ? 1 : 0);
   return ok;

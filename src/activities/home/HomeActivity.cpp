@@ -196,7 +196,7 @@ void HomeActivity::giveUpCover(RecentBook& book, ThumbResult res, const std::vec
     bool allWritten = !slots.empty();
     for (const auto& slot : slots) {
       if (!ReaderActivity::isCoverThumbComplete(slot.path, slot.width, slot.height) &&
-          !ReaderActivity::writeCoverPlaceholderBmp(slot.path, slot.width, slot.height)) {
+          !ReaderActivity::writeCoverPlaceholderBmp(slot.path)) {
         allWritten = false;
       }
     }
@@ -648,6 +648,12 @@ void HomeActivity::restoreSecondaryBuffer(bool callerHoldsRenderLock) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
+  // The Lyra themes print a pace-based ETA badge on each recent book (UITheme::bookEtaSuffix),
+  // which is the one reading-stats consumer outside the settings screens. Load the history for
+  // as long as Home is on screen and release it on the way out — the reader must not inherit it,
+  // since that ~15 KB and its effect on the largest free block is what starves a section build.
+  statsLoad_.emplace();
+
   // A finished-book "sync to KOReader, then search OPDS for this author" request that just
   // rebooted (the sync reboots to reclaim WiFi-session heap fragmentation, see
   // KOReaderSyncActivity::onExit()) lands here first — there's no reader to hand it to the way
@@ -717,6 +723,7 @@ void HomeActivity::onEnter() {
 
 void HomeActivity::onExit() {
   Activity::onExit();
+  statsLoad_.reset();
   freeCoverBuffer();
   UITheme::getInstance().getMutableTheme().invalidateFrameCache();
   // Never hand the next activity a degraded display: if we exit mid-load (e.g. the
@@ -798,16 +805,16 @@ void HomeActivity::loop() {
     // lastCarouselBookIndex (= bookCount, an invalid carousel index), permanently
     // stranding the selector in the menu row — Left/Right still move the icon highlight
     // but Up/Down can never return to the carousel. One-direction-per-tick prevents it.
-    const bool rowToggle = mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-                           mappedInput.wasPressed(MappedInputManager::Button::Down);
+    const bool rowToggle = mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
+                           mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down);
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + 1) % bookCount;
       else if (!inCarouselRow)
         selectorIndex = bookCount + (menuIdx + 1) % menuItemCount;
       requestUpdate();
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + bookCount - 1) % bookCount;
       else if (!inCarouselRow)
@@ -873,7 +880,12 @@ void HomeActivity::render(RenderLock&&) {
 
   // Fast path: theme owns its own pre-rendered frame cache
   if (isCarousel) {
-    const auto carouselLabels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    // The carousel scrolls along logical Left/Right and the row toggle sits on logical Up/Down, so
+    // in landscape the front strip carries the toggle instead — mapHints puts the matching arrows
+    // there. (Only the front strip is drawn; the side buttons are unlabelled on the home screen.)
+    const auto carouselLabels =
+        mappedInput.mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+            .front;
     const bool handled = GUI.tryFastHomeRender(
         renderer, recentBooks, selectorIndex, menuCount,
         [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
@@ -921,7 +933,10 @@ void HomeActivity::render(RenderLock&&) {
       [this](int index) { return std::string(I18N.get(menuEntries[index].label)); },
       [this](int index) { return menuEntries[index].icon; });
 
-  const auto labels = isCarousel ? mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT))
+  const auto labels = isCarousel ? mappedInput
+                                       .mapHints("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
+                                                 tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                                       .front
                                  : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
