@@ -92,6 +92,8 @@ constexpr int PROGRESS_BAR_ITEMS = 3;
 constexpr int previewHorizontalInset = 10;
 constexpr int previewHeight = 78;
 constexpr int previewInnerMargin = 4;
+constexpr int previewBatteryInset = 2;  // matches the battery's inset from the margin in the real bar
+constexpr int statusItemGap = 8;        // gap between adjacent status items, as in BaseTheme::drawStatusBar
 
 void drawPreviewProgressBar(const GfxRenderer& renderer, const Rect& rect, const uint8_t progressBar,
                             const uint8_t thickness, const bool topEdge) {
@@ -133,13 +135,18 @@ void drawPreviewStatusItems(const GfxRenderer& renderer, const Rect& rect, const
   const bool showClock = SETTINGS.useClock && SETTINGS.statusBarClock;
   const int previewClockWidth = showClock ? renderer.getTextWidth(SMALL_FONT_ID, "00:00") : 0;
 
+  // Left cluster: battery then clock, laid out the same way BaseTheme::drawStatusBar does it.
+  // Reserving the battery's *measured* width (icon + percentage) is what keeps the clock off the
+  // percentage text — estimating it as `batteryWidth + 8` is what made the preview overlap.
+  const int leftClusterX = rect.x + previewInnerMargin + previewBatteryInset;
+  int leftClusterWidth = 0;
   if (SETTINGS.statusBarBattery) {
-    GUI.drawBatteryLeft(renderer,
-                        Rect{rect.x + previewInnerMargin + 2, textY, metrics.batteryWidth, metrics.batteryHeight},
+    GUI.drawBatteryLeft(renderer, Rect{leftClusterX, textY, metrics.batteryWidth, metrics.batteryHeight},
                         showBatteryPercentage);
+    leftClusterWidth = BaseTheme::statusBarBatteryWidth(renderer, metrics, showBatteryPercentage);
   }
   if (showClock) {
-    const int clockX = rect.x + previewInnerMargin + (SETTINGS.statusBarBattery ? metrics.batteryWidth + 8 : 0);
+    const int clockX = leftClusterX + leftClusterWidth + statusItemGap;
     renderer.drawText(SMALL_FONT_ID, clockX, textY, "00:00");
   }
 
@@ -180,19 +187,9 @@ void drawPreviewStatusItems(const GfxRenderer& renderer, const Rect& rect, const
   const char* title = SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE
                           ? tr(STR_EXAMPLE_BOOK)
                           : tr(STR_EXAMPLE_CHAPTER);
-  int leftReserve = 6;
-  if (SETTINGS.statusBarBattery) {
-    leftReserve = metrics.batteryWidth + 28;
-    if (showBatteryPercentage) {
-      const int percentReserve = 2 + metrics.batteryWidth + BaseTheme::batteryPercentSpacing +
-                                 renderer.getTextWidth(SMALL_FONT_ID, "100%") + 8;
-      leftReserve = std::max(leftReserve, percentReserve);
-    }
-    if (showClock) {
-      leftReserve += previewClockWidth + 8;
-    }
-  } else if (showClock) {
-    leftReserve = std::max(leftReserve, previewClockWidth + 8);
+  int leftReserve = leftClusterWidth > 0 ? previewBatteryInset + leftClusterWidth + statusItemGap : 6;
+  if (showClock) {
+    leftReserve += previewClockWidth + statusItemGap;
   }
   const int rightReserve = progressTextWidth > 0 ? progressTextWidth + 18 : 6;
   const int titleAreaWidth = rect.width - previewInnerMargin * 2 - leftReserve - rightReserve;

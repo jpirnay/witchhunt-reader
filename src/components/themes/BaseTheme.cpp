@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
 #include "I18n.h"
@@ -109,6 +110,18 @@ void BaseTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bo
   }
 
   drawBatteryIcon(renderer, rect.x, y, BaseMetrics::values.batteryWidth, rect.height, percentage);
+}
+
+int BaseTheme::statusBarBatteryWidth(const GfxRenderer& renderer, const ThemeMetrics& metrics,
+                                     const bool showPercentage) {
+  int width = metrics.batteryWidth;
+  if (showPercentage) {
+    char percentageText[8];
+    snprintf(percentageText, sizeof(percentageText), "%u%%",
+             static_cast<unsigned>(powerManager.getBatteryPercentage()));
+    width += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, percentageText);
+  }
+  return width;
 }
 
 void BaseTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
@@ -1030,11 +1043,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                         showBatteryPercentage);
     // Measure the drawn footprint instead of estimating it: a three digit percentage ("100%")
     // is wider than a fixed guess, and the clock/title placed to the right would overlap it.
-    batterySize = 1 + metrics.batteryWidth;
-    if (showBatteryPercentage) {
-      const auto percentageText = std::to_string(powerManager.getBatteryPercentage()) + "%";
-      batterySize += BaseTheme::batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, percentageText.c_str());
-    }
+    // The leading 1 is the icon's own inset from the horizontal margin, above.
+    batterySize = 1 + statusBarBatteryWidth(renderer, metrics, showBatteryPercentage);
   }
 
   // Draw Clock
