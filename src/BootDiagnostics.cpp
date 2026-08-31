@@ -256,16 +256,25 @@ void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFl
 
 }  // namespace
 
-bool previousSessionEndedWithoutSleep() {
+PreviousSession previousSession() {
   // Newest first: [0] is this boot's own record, [1] is whatever preceded it. Two boots
   // back to back mean the session between them never reached the sleep path — a reset
   // while awake, a crash, or a rail cut. On the C3 that is the ONLY way to see it, since
   // the reset reason cannot separate a reset press from a power-on.
   Record recent[2] = {};
   if (loadRecords(recent, 2) < 2) {
-    return false;  // nothing to compare against yet
+    return PreviousSession::Unknown;
   }
-  return recent[0].kind == KindBoot && recent[1].kind == KindBoot;
+  if (recent[0].kind != KindBoot) {
+    return PreviousSession::Unknown;  // newest is not this boot's record; nothing to say
+  }
+  // An aborted-boot summary sits between the boot and whatever preceded it, and does not
+  // itself end a session — skip it before judging.
+  const Record& before = recent[1];
+  if (before.kind == KindAborted) {
+    return PreviousSession::Unknown;
+  }
+  return before.kind == KindBoot ? PreviousSession::EndedWithoutSleep : PreviousSession::EndedAtSleepPath;
 }
 
 // ---------------------------------------------------------------------------

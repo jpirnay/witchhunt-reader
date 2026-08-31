@@ -191,10 +191,17 @@ AbortCounts abortCounts();
 /// Returns how many were filled.  No heap: the caller owns the storage.
 uint8_t loadRecords(Record* out, uint8_t maxRecords);
 
-/// True when this boot's record is not preceded by a sleep — the previous session ended
-/// without reaching the sleep path at all (a reset while awake, a crash, a rail cut).  On
-/// the C3 this is the only way to see that, since the reset reason cannot separate a reset
-/// press from a power-on.
-bool previousSessionEndedWithoutSleep();
+/// How the session before this boot ended.  Tri-state on purpose: with fewer than two
+/// records there is nothing to compare against, and the first build asserted "ended at the
+/// sleep path" on a device whose history held a single boot — a claim it had no basis for.
+///
+/// `EndedWithoutSleep` (two boot records back to back) is the discriminator that survives a
+/// rail cut, since on the C3 the reset reason cannot separate a reset press from a power-on.
+enum class PreviousSession : uint8_t {
+  Unknown,            // fewer than two records — nothing to compare against
+  EndedAtSleepPath,   // a sleep record precedes this boot: an orderly end
+  EndedWithoutSleep,  // two boots back to back: a reset while awake, or a crash
+};
+PreviousSession previousSession();
 
 }  // namespace BootDiag
