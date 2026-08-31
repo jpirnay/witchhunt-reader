@@ -380,6 +380,39 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
       gpio_hold_dis(GPIO_NUM_13);
     }
     gpio_deep_sleep_hold_dis();
+
+    // Hold every configured power-latch pin HIGH through deep sleep. These are keep-alive
+    // enables — the X4 Pro's master peripheral rail on GPIO1 — and
+    // esp_sleep_config_gpio_isolate() below strips the output driver off any pad without an
+    // armed hold. holdPowerRails() asserts the latches at boot but arms no sleep hold, so
+    // the X4 Pro's latch drops the moment external power leaves and the next power-button
+    // press cold-boots (~8-15 s) instead of fast-waking (~1-2 s).
+    //
+    // Ported from crosspoint-reader PR #3215 ("fix(x4pro): hold power-latch pins HIGH
+    // through deep sleep", Antoine Aflalo / @Belphemur), filed against upstream issue #2863.
+    //
+    // ORDER OF OPERATIONS, and it is not optional: holding the rail up means the panel keeps
+    // its VCC through sleep, so the panel MUST actually be parked or its charge pump stays
+    // biased and draws mA — the exact regression #3215 exposed. The driver-side half is
+    // freeink-sdk 7f541f3, which makes deepSleep() always emit POF before DSLP instead of
+    // gating it on an _isScreenOn flag that an AA pass desynchronises. Both halves are in
+    // this tree as of the SDK bump to 1be4233; do NOT bring this loop forward past that.
+    //
+    // The loop is unreachable on the C3 anyway (gpio13IsBatteryLatch takes the branch above
+    // on X4, and on X3 latch0 is unassigned), but skip GPIO13 explicitly rather than rely on
+    // that: it IS power.latch0 on the C3 Xteink boards, where LOW is a deliberate battery
+    // power-off and driving it HIGH here would be the opposite of what the caller asked for.
+    for (const int8_t latchPin : {BoardConfig::ACTIVE.power.latch0, BoardConfig::ACTIVE.power.latch1}) {
+      if (latchPin < 0 || static_cast<gpio_num_t>(latchPin) == GPIO_BATTERY_LATCH) continue;
+      const auto latch = static_cast<gpio_num_t>(latchPin);
+      // Release any surviving pad hold first: a held pad silently ignores the drive below,
+      // the same trap the GPIO13 branch above documents.
+      gpio_hold_dis(latch);
+      gpio_set_level(latch, 1);
+      gpio_set_direction(latch, GPIO_MODE_OUTPUT);
+      gpio_hold_en(latch);
+    }
+
     freeink::PowerManager::powerDownRailsForSleep();
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
