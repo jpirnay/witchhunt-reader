@@ -569,7 +569,57 @@ turns a tap on a box into the button press it depicts. Notes:
   `MappedInputManager::wasScreenTappedIn(...)` beside it. An earlier draft carried a
   "bail unless live orientation is Portrait" guard instead — wrong fix, removed.
 
-The list half (4b) is unstarted. What follows is the original plan.
+**4b lists, covers and home: DONE, unvalidated (2026-08-31).** Built the way 4a was rather than
+the way the plan below assumed, and the difference is worth recording because the plan's
+`rowTouch`-per-screen framing made 4b look more expensive than it is.
+
+The draw records what it painted; the input side matches against that. Three recorders now, each
+for a shape the others cannot express:
+
+| Recorder | Shape | Resolves to |
+|---|---|---|
+| `ButtonHintStrip` (4a) | four equal boxes in a fixed strip | a raw button index |
+| `ListTouchBand` | a contiguous vertical run of full-width rows, heights may differ | an item index |
+| `TapTargets` | arbitrary rects, each with a value | that value |
+
+- **Lists.** `BaseTheme::drawList`, `LyraTheme::drawList` and the shared `drawWrappedList`
+  record their rows. That is all of them, and it covers **23 direct `GUI.drawList` callers plus
+  `MenuListActivity`'s 8 subclasses** (one `handleListTouch()` in the base `loop()`) with no
+  per-screen work. `rowTouch()` could not have done the wrapped lists at all — its arithmetic is
+  a uniform step, and those rows are one, two or three lines tall.
+- **Recent books.** The list view rides the band. The grid view instead got
+  `CoverGridLayout::hitTest()`, the inverse of its own placement, sitting next to `compute()`.
+  No recording there and none wanted: the geometry already comes from `computeGridLayout()`,
+  which the loop task calls anyway, and `pageStartRow` follows `selectorIndex`, which that task
+  owns — so there is no render-task staleness to reason about.
+- **Home.** `TapTargets`, two named instances (covers, menu), recorded by all four themes. Two
+  traps found here: the cover draw is skipped on a cached repaint, so the targets are recorded
+  ahead of it; and `LyraCarouselTheme::tryFastHomeRender()` restores the covers from a cached
+  region without calling `drawRecentBookCover()` at all, so the slot geometry is factored and
+  recorded from both paths.
+
+**One correction, and it is the interesting one.** The first two commits acted on
+`RowTouch::Down` — move the selection, repaint — and then activated on `Tap` and repainted
+again. `wasScreenTouchDown()` fires once a contact has been held `TOUCH_DOWN_SELECT_DELAY_MS`
+(90 ms), which an ordinary finger tap comfortably exceeds. So a single tap cost **two full
+e-paper refreshes**, roughly a second, and the first of them was feedback that arrives after the
+finger has gone. `Down` is now claimed but not acted on, everywhere. This is P2 arriving by a
+different road: on e-paper a full repaint is not usable as tap feedback, and the only version
+that works is a cheap localised invert (upstream's `setFlash`/`clearTapFlash`). **P2 is now the
+highest-value remaining touch item**, not an optional polish.
+
+Cost of the whole 4b surface on C3: **+416 bytes RAM, +4,052 bytes flash.** Gates:
+`test/list_touch_band` (12), `test/tap_targets` (11), 6 more in `test/cover_grid_layout`; host
+suite 689/689. **No touch board has run any of it.**
+
+Still unconverted, and each still keyed on the board name rather than a capability:
+`UITheme.cpp:155-182`, `KeyboardEntryActivity.cpp:363`, and the recents gesture-hint predicate
+(`gridShowsGestureHint()`, now at least asked in one place instead of three).
+
+What follows is the original plan, kept for the 4b-vs-FUI argument in it.
+
+---
+
 
 Two ways to spend this phase. Both are legitimate; pick one deliberately.
 
