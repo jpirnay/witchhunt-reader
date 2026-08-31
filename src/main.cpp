@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <CooperativeAbort.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
@@ -24,6 +25,7 @@
 #include <cstring>
 #include <vector>
 
+#include "BootDiagnostics.h"
 #include "ButtonEventManager.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -356,7 +358,7 @@ static unsigned long allowSleepAt = 0;
 // as a second click, which on a device with double-click-to-sleep configured would put it
 // straight back to sleep.
 //
-// Serviced by serviceBootPowerRelease(), defined below markBootPhase().
+// Serviced by serviceBootPowerRelease(), defined below BootDiag::markPhase().
 static bool bootPowerReleasePending = false;
 static unsigned long bootPowerHighSince = 0;
 
@@ -374,95 +376,12 @@ static void logStartupMemory(const char* stage) {
           static_cast<unsigned long>(freeInternal), static_cast<unsigned long>(largestInternal));
 }
 
-// --- Boot phase trace ---------------------------------------------------------------
-// millis() stamp per boot phase, summarized at the end of setup() and again whenever the
-// serial link comes up. The wake gesture is only a ~300 ms gate (getPowerWakeHoldDuration),
-// but the splash lands seconds later because the settle waits, the SD mount, the config
-// loads, the panel bring-up and the first (non-differential) waveform all sit between the
-// two. Without per-phase stamps that gap is invisible in the log — every phase before
-// Serial.begin() has no output at all — and "the power button feels unresponsive" reports
-// cannot be attributed to a phase.
-//
-// The stamps stay live in .bss for the whole session precisely so they can be re-emitted:
-// a wake from deep sleep re-enumerates USB, so a host monitor reconnecting mid-boot misses
-// the first lines, and the RTC ring buffer (16 entries) has usually rolled past them by
-// the time anyone looks.
-//
-// Cost is 2 bytes per phase of .bss plus one log line; no heap, no allocation. Stamps are
-// clamped to 16 bits (a boot that reaches 65 s is pathological and reads as 65535).
-enum class BootPhase : uint8_t {
-  SetupEntry,      // first statement of setup()
-  NvsSettings,     // startup settings read from NVS (precedes the wake gate)
-  WakeGate,        // power-button wake gesture decided
-  HwInit,          // system / SPI bus / GPIO / power / tilt brought up
-  SerialUp,        // USB-CDC opened (only when USB is connected; earlier phases log nothing)
-  RecoverySettle,  // 500 ms UP+POWER recovery-combo sample window
-  SdMount,         // Storage.begin()
-  ConfigLoad,      // settings, app state, i18n, KOReader, OPDS, weather, theme
-  DisplayFonts,    // panel init + framebuffer alloc + font registration + SD font scan
-  FirstPaint,      // splash / quick-resume frame handed to the panel (logo now visible)
-  StoreLoad,       // clock, recent books, bookmarks, reading stats
-  ActivityRoute,   // target activity entered (home / reader / recovery)
-  PowerRelease,    // wake press released (stable), input sampler about to start
-  Count,
-};
-
-static uint16_t bootPhaseMs[static_cast<uint8_t>(BootPhase::Count)] = {};
-// Which phases were reached — a stamp of 0 is a legal millis() value, so "reached" cannot
-// be inferred from the value. 13 phases fit a uint16_t mask with room to spare.
-static uint16_t bootPhaseReached = 0;
-// What the wake gate decided this boot. Kept for the whole session so it can be re-emitted
-// alongside the phase trace; 4 bytes.
-static HalGPIO::WakeCheck bootWakeCheck;
-static_assert(static_cast<uint8_t>(BootPhase::Count) <= 16, "bootPhaseReached mask is 16 bits wide");
-
-static void markBootPhase(BootPhase phase) {
-  const unsigned long ms = millis();
-  bootPhaseMs[static_cast<uint8_t>(phase)] = static_cast<uint16_t>(ms > UINT16_MAX ? UINT16_MAX : ms);
-  bootPhaseReached |= static_cast<uint16_t>(1u << static_cast<uint8_t>(phase));
-}
-
-// Short labels so the whole trace fits one 256-byte ring-buffer entry (Logging.cpp).
-static constexpr const char* BOOT_PHASE_NAMES[] = {"entry", "nvs",  "gate",  "hw",    "ser",   "recov", "sd",
-                                                   "cfg",   "disp", "paint", "store", "route", "rel"};
-static_assert(sizeof(BOOT_PHASE_NAMES) / sizeof(BOOT_PHASE_NAMES[0]) == static_cast<size_t>(BootPhase::Count),
-              "BOOT_PHASE_NAMES must stay in sync with BootPhase");
-
-// One "name+costMs" token per reached phase, then the two absolute numbers worth
-// quoting. Deltas rather than absolutes because the cost of a phase is the actionable
-// figure and absolutes are just their running sum — and because the whole line has to
-// fit one 256-byte ring-buffer entry including logPrintf's timestamp/level prefix
-// (Logging.cpp, MAX_ENTRY_LEN). Unreached phases are skipped (e.g. `ser` on battery,
-// `recov` on a non-button boot), so a short trace is itself a signal about which path
-// the boot took.
-static void logBootTrace() {
-  char line[160];
-  size_t used = 0;
-  uint16_t previous = 0;
-  for (uint8_t i = 0; i < static_cast<uint8_t>(BootPhase::Count); i++) {
-    if ((bootPhaseReached & (1u << i)) == 0) continue;
-    const int written = snprintf(line + used, sizeof(line) - used, "%s%s+%u", used ? " " : "", BOOT_PHASE_NAMES[i],
-                                 static_cast<unsigned>(bootPhaseMs[i] - previous));
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(line) - used) break;
-    used += static_cast<size_t>(written);
-    previous = bootPhaseMs[i];
-  }
-  // millis() excludes the ROM/2nd-stage bootloader (~200-300 ms), so time-to-logo as the
-  // user experiences it is that much longer than `logo` reports.
-  // Worst case (five-digit stamps throughout) still fits MAX_ENTRY_LEN: 29 prefix + 15
-  // here + 160 line + 38 tail = 242 of 256. Keep that budget in mind when editing either.
-  LOG_INF("BOOT", "phase cost ms: %s | logo=%u setup=%u (+bootloader)", line,
-          bootPhaseMs[static_cast<uint8_t>(BootPhase::FirstPaint)], previous);
-}
-
-// The whole boot story in two lines: what the power button was judged to be, and where the
-// time went. Re-emitted on every serial (re)connect — see the note above the phase table.
-static void logBootSummary() {
-  LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
-          HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
-          CrossPointSettings::getPowerWakeHoldDuration());
-  logBootTrace();
-}
+// The boot phase trace, the wake-gate verdict and the sleep breadcrumb all live in
+// BootDiagnostics now, so BootDiagnosticsActivity can render them on device — a reporter
+// without a serial monitor could not read any of it before, and a battery-powered device
+// never even opens the log wire. Only the BootPhase name is pulled in unqualified: it
+// appears at fourteen call sites through setup() and reads better unqualified there.
+using BootDiag::BootPhase;
 
 // Poll the raw power pin and keep the boot press away from the event system until it has
 // been released for RELEASE_STABLE_MS. See the latch's declaration for why boot no longer
@@ -490,13 +409,62 @@ static void serviceBootPowerRelease() {
     // Stamped here rather than in setup(), so `rel` in the boot trace still reports how long
     // the user kept holding past the point the device was ready — it just no longer costs
     // that time. Read it back with CMD:BOOTLOG, which now prints it after the fact.
-    markBootPhase(BootPhase::PowerRelease);
+    BootDiag::markPhase(BootPhase::PowerRelease);
     LOG_DBG("MAIN", "Wake press released at %lu ms (boot was not blocked on it)", now);
   }
 }
 
-// Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on Timeout").
-void enterDeepSleep(bool fromTimeout = false) {
+// Whether GPIO13 (the X4 battery latch) stays HIGH through deep sleep, keeping the MCU
+// powered at ~3-4 mA so the LP timer keeps running and RTC memory survives.
+//
+// Every path that sleeps must agree on this. It used to be computed only inside
+// enterDeepSleep(), so the two early-boot "go straight back to sleep" paths took
+// startDeepSleep()'s keepClockAlive=false default instead: one short tap on a sleeping
+// device (or any spurious wake) was enough to have the wake gate reject the press and put
+// the device back down with the battery latch CUT, converting "asleep, wakes on a tap"
+// into "powered off, needs a hold long enough to carry the whole boot" — and losing the
+// clock with it, because those paths also never called HalClock::saveBeforeSleep().
+//
+// X3 is excluded: its DS3231 keeps time independently, so it never needs the LP timer
+// held alive, and GPIO13 there is the SD rail enable rather than a battery latch.
+static bool keepClockAliveForSleep() { return SETTINGS.useClock && !gpio.deviceIsX3(); }
+
+// Translate HalPowerManager's report of its own last steps into breadcrumb stages. The
+// HAL cannot call BootDiag directly (it must not depend on app code), and startDeepSleep()
+// does not return, so this is the only point at which "we got as far as arming the wake
+// source" can be recorded at all.
+static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs, bool timedOut, bool storageLive) {
+  using Step = HalPowerManager::SleepStep;
+  switch (step) {
+    case Step::RailsConfigured:
+      BootDiag::markSleepStage(BootDiag::SleepStage::RailsConfigured);
+      break;
+    case Step::AwaitingRelease:
+      BootDiag::markSleepStage(BootDiag::SleepStage::AwaitingRelease);
+      break;
+    case Step::ReleaseDone:
+      BootDiag::noteReleaseWait(waitedMs, timedOut);
+      // Persist ONLY on a timeout. The breadcrumb cannot carry this: on an X4 sleeping
+      // with the latch cut the rail is gone before the next boot, and the C3 cannot tell a
+      // reset press from a power-on, so without this the pathological case leaves no trace
+      // at all. A timeout is also the one safe moment to write — the device is provably
+      // still executing, whereas a clean release drops the rail immediately and a write
+      // into a collapsing rail is how SD cards lose their FAT.
+      if (timedOut) {
+        BootDiag::persistReleaseTimeout(storageLive);
+      }
+      break;
+    case Step::WakeArmed:
+      BootDiag::markSleepStage(BootDiag::SleepStage::WakeArmed);
+      break;
+  }
+}
+
+// Enter deep sleep mode. fromTimeout=true marks an auto-sleep (gates "Quick Resume on
+// Timeout"). `trigger` is diagnostics only — it does not change behaviour, it just records
+// which gesture asked for the sleep, which is the first thing a "it did not wake up" report
+// needs pinned down.
+void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = BootDiag::SleepTrigger::PowerHold) {
   LOG_DBG("MAIN", "enterDeepSleep called at millis=%lu, powerBtn isPressed=%d, rawPin=%d", millis(),
           gpio.isPressed(HalGPIO::BTN_POWER), digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
   // The web server activity releases BOTH framebuffers for WiFi heap
@@ -507,6 +475,8 @@ void enterDeepSleep(bool fromTimeout = false) {
     silentRestartToSleep(fromTimeout);
     return;  // not reached — silentRestartToSleep() restarts the chip
   }
+  BootDiag::beginSleep(fromTimeout ? BootDiag::SleepTrigger::Timeout : trigger, keepClockAliveForSleep(),
+                       activityManager.isReaderActivity());
   // Stop the background sampler before tearing down the display/power rails so no
   // ADC read races with that teardown. From here sleep prep reads the power pin
   // directly (HalGPIO::startDeepSleep / waitForStablePowerRelease).
@@ -515,7 +485,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // On X3 the DS3231 keeps time independently, so there's no need to keep the MCU
   // powered during deep sleep for LP timer preservation.
-  const bool keepLpAlive = SETTINGS.useClock && !gpio.deviceIsX3();
+  const bool keepLpAlive = keepClockAliveForSleep();
   HalClock::saveBeforeSleep(keepLpAlive);
   // If sleeping from a running reader the book loaded successfully, so the boot-loop
   // guard count is no longer needed. Reset it now because onExit() is never called
@@ -550,6 +520,7 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.showBootScreen = !(isQuickResumeSleep || resumeIntoReader);
 
   APP_STATE.saveToFile();
+  BootDiag::markSleepStage(BootDiag::SleepStage::StatePersisted);
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -571,9 +542,16 @@ void enterDeepSleep(bool fromTimeout = false) {
     saveSleepFrameBuffer();
   }
 
+  BootDiag::markSleepStage(BootDiag::SleepStage::ScreenPainted);
   halTiltSensor.deepSleep();
 
   display.deepSleep();
+  BootDiag::markSleepStage(BootDiag::SleepStage::PanelAsleep);
+  // Persist before the last two steps, which are the ones that can strand the device:
+  // the release wait and the wake arming. Everything that could still touch the SD card
+  // is done, so this is the last safe moment to write. The record is amended in place on
+  // the next boot when the RTC breadcrumb survived — see BootDiag::persistBoot().
+  BootDiag::persistSleep();
   LOG_DBG("MAIN", "Entering deep sleep (powerBtn isPressed=%d, rawPin=%d)", gpio.isPressed(HalGPIO::BTN_POWER),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 
@@ -767,14 +745,36 @@ static bool openSerialLogIfHostPresent() {
 #endif
 
 void setup() {
-  markBootPhase(BootPhase::SetupEntry);
+  // FIRST statement, ahead of the NVS read and the wake gate: on the X4 the battery
+  // MOSFET is gated by GPIO13 (BoardProfile power.latch0), and BoardConfig documents a
+  // hardware revision in the field that does NOT self-latch — those units stay powered
+  // only while the power button physically bridges the rail. holdPowerRails() drives the
+  // latch and is the SDK's documented "call it first thing in setup()" contract
+  // (BoardConfig.h: selectDevice() re-asserts it once the real board is known, on the
+  // premise that the consumer already called it once).
+  //
+  // Until this landed, the latch was first asserted inside gpio.begin() — after the NVS
+  // read, after the wake gate's up-to-300 ms hold window, after three full
+  // heap_caps_check_integrity_all() walks and the OTA state read. A non-self-latching
+  // unit therefore had to be held for the whole of that (plus the ~200-300 ms bootloader
+  // that millis() does not count) or the rail dropped mid-boot and nothing happened at
+  // all: the panel still showed the sleep screen, so it read as "stuck asleep, the power
+  // button does nothing" (issue #155). Asserting it here is a no-op on self-latching
+  // units and costs one GPIO write.
+  //
+  // Safe before device detection: the dual C3 binary boots with the X4 profile, whose
+  // latch0 is GPIO13; the X3 profiles leave latch0 unassigned and carry GPIO13 as their
+  // SD rail enable, which wants HIGH at boot anyway. selectDevice() in gpio.begin()
+  // re-runs holdPowerRails() with the resolved profile.
+  BoardConfig::holdPowerRails();
+  BootDiag::markPhase(BootPhase::SetupEntry);
   // Load just the settings we need before any other init, so the wake gesture mirrors
   // whichever press type(s) the user configured to put the device to sleep.
   SETTINGS.loadStartupFromNvs();
-  markBootPhase(BootPhase::NvsSettings);
-  bootWakeCheck =
-      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerWakeHoldDuration());
-  markBootPhase(BootPhase::WakeGate);
+  BootDiag::markPhase(BootPhase::NvsSettings);
+  BootDiag::setWakeCheck(
+      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerWakeHoldDuration()));
+  BootDiag::markPhase(BootPhase::WakeGate);
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
@@ -838,6 +838,7 @@ void setup() {
     setSerialWireMuted(true);
   }
 
+  powerManager.setSleepStepHook(onSleepStep);
   HalSystem::begin();
   // Create the shared-SPI-bus mutex before anything can touch the panel or the
   // SD card, so no first-use allocation happens inside a refresh or read path.
@@ -846,7 +847,7 @@ void setup() {
   powerManager.begin();
   halTiltSensor.begin();
   gpio_deep_sleep_hold_dis();  // Release deep sleep GPIO hold state from previous sleep cycle
-  markBootPhase(BootPhase::HwInit);
+  BootDiag::markPhase(BootPhase::HwInit);
 
   const auto wakeupReason = gpio.getWakeupReason();
 
@@ -854,13 +855,23 @@ void setup() {
     // If USB power caused a cold boot, go back to sleep immediately without initializing subsystems
     LOG_DBG("MAIN", "Wakeup reason: After USB Power => Deep sleep");
     halTiltSensor.deepSleep();
-    powerManager.startDeepSleep(gpio);
+    // Same policy the device slept under, not startDeepSleep()'s default — see
+    // keepClockAliveForSleep(). saveBeforeSleep() no-ops when the clock was never
+    // restored (it returns early on !isSynced()), which is the case this early in boot.
+    const bool keepLpAlive = keepClockAliveForSleep();
+    // This boot is being abandoned before Storage.begin(), so it writes no boot record,
+    // and on an X4 sleeping with the latch cut the breadcrumb dies with the rail. Count it
+    // in NVS instead — otherwise a run of these is invisible and the device just looks dead.
+    BootDiag::noteAbortedBoot(BootDiag::SleepTrigger::UsbPowerBoot, BootDiag::wakeCheck().verdict);
+    BootDiag::beginSleep(BootDiag::SleepTrigger::UsbPowerBoot, keepLpAlive, /*fromReader=*/false);
+    HalClock::saveBeforeSleep(keepLpAlive);
+    powerManager.startDeepSleep(gpio, keepLpAlive);
     return;
   }
 
 #ifdef ENABLE_SERIAL_LOG
   if (openSerialLogIfHostPresent()) {
-    markBootPhase(BootPhase::SerialUp);
+    BootDiag::markPhase(BootPhase::SerialUp);
   }
 #endif
 
@@ -869,8 +880,8 @@ void setup() {
   // level: a rejected wake leaves no other trace, and release builds must be able to
   // answer "why did nothing happen when I pressed power".
   LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
-          HalGPIO::wakeVerdictName(bootWakeCheck.verdict), bootWakeCheck.decidedAtMs, bootWakeCheck.heldMs,
-          CrossPointSettings::getPowerWakeHoldDuration());
+          HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict), BootDiag::wakeCheck().decidedAtMs,
+          BootDiag::wakeCheck().heldMs, CrossPointSettings::getPowerWakeHoldDuration());
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
@@ -911,11 +922,24 @@ void setup() {
 #endif
   logStartupMemory("after_hw_init");
 
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !bootWakeCheck.accepted()) {
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !BootDiag::wakeCheck().accepted()) {
     LOG_INF("BOOT", "Wake gate rejected the press (%s), returning to deep sleep",
-            HalGPIO::wakeVerdictName(bootWakeCheck.verdict));
+            HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict));
     halTiltSensor.deepSleep();
-    powerManager.startDeepSleep(gpio);
+    // Go back down under the SAME policy the device slept under. Rejecting a press is a
+    // "nothing happened" answer, so it must not change the power state: with the default
+    // keepClockAlive=false this branch cut the X4 battery latch, so a single too-short tap
+    // silently downgraded a sleeping device to a powered-off one (see
+    // keepClockAliveForSleep()).
+    const bool keepLpAlive = keepClockAliveForSleep();
+    // Same as the USB path above, and this is the one that matters: a device waking,
+    // refusing the press and sleeping again — several times a minute, leaving the panel
+    // untouched — is indistinguishable from a dead one unless the aborts are counted
+    // somewhere that survives the rail.
+    BootDiag::noteAbortedBoot(BootDiag::SleepTrigger::WakeGateRejected, BootDiag::wakeCheck().verdict);
+    BootDiag::beginSleep(BootDiag::SleepTrigger::WakeGateRejected, keepLpAlive, /*fromReader=*/false);
+    HalClock::saveBeforeSleep(keepLpAlive);
+    powerManager.startDeepSleep(gpio, keepLpAlive);
     return;
   }
 
@@ -942,7 +966,7 @@ void setup() {
       recoveryFirmwareMode = true;
       LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
     }
-    markBootPhase(BootPhase::RecoverySettle);
+    BootDiag::markPhase(BootPhase::RecoverySettle);
   }
 
   // SD Card Initialization
@@ -950,13 +974,17 @@ void setup() {
   if (!Storage.begin()) {
     LOG_ERR("MAIN", "SD card initialization failed");
     setupDisplayAndFonts();
-    markBootPhase(BootPhase::DisplayFonts);
+    BootDiag::markPhase(BootPhase::DisplayFonts);
     activityManager.goToFullScreenMessage("SD card error", EpdFontFamily::BOLD);
-    markBootPhase(BootPhase::FirstPaint);
-    logBootSummary();
+    BootDiag::markPhase(BootPhase::FirstPaint);
+    BootDiag::logSummary();
     return;
   }
-  markBootPhase(BootPhase::SdMount);
+  BootDiag::markPhase(BootPhase::SdMount);
+  // First point at which the card is writable. Files this boot's record and amends the
+  // previous sleep's, so the pair "how the last sleep ended" / "how this boot started"
+  // is on the card before anything later in setup() can hang or panic.
+  BootDiag::persistBoot();
   logStartupMemory("after_storage_begin");
 
   SETTINGS.loadFromFile();
@@ -991,7 +1019,7 @@ void setup() {
     return MappedInputManager::ScreenOrientation::Portrait;
   });
 
-  markBootPhase(BootPhase::ConfigLoad);
+  BootDiag::markPhase(BootPhase::ConfigLoad);
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
   logStartupMemory("before_display_fonts");
@@ -1016,7 +1044,7 @@ void setup() {
   // host is waiting through. Safe because that activity reboots on exit.
   const bool bootToSerialTransfer = (silentRebootTargetSnapshot == SILENT_REBOOT_TARGET_SERIAL_TRANSFER);
   setupDisplayAndFonts(resume != BootResume::Splash, bootToSerialTransfer);
-  markBootPhase(BootPhase::DisplayFonts);
+  BootDiag::markPhase(BootPhase::DisplayFonts);
   logStartupMemory("after_display_fonts");
 
   switch (resume) {
@@ -1077,7 +1105,7 @@ void setup() {
   // stamp is the moment the panel finished the waveform — i.e. when the user actually
   // sees the logo. On a power-button boot it is also the first visible feedback of any
   // kind, which is what makes the gap back to `gate` the number that matters.
-  markBootPhase(BootPhase::FirstPaint);
+  BootDiag::markPhase(BootPhase::FirstPaint);
 
   HalClock::restore();
   // Split checkpoints: two boots of the same firmware differed by 14780 B of free heap and, far
@@ -1096,7 +1124,7 @@ void setup() {
   // — while keeping it resident cost, measured on X4 with 36 books, ~15 KB of heap and dropped
   // largest8 from 65524 to 26612 before the first book was even opened. Consumers load it for
   // the duration they need it (ReadingStatsStore::ScopedLoad) and release it after.
-  markBootPhase(BootPhase::StoreLoad);
+  BootDiag::markPhase(BootPhase::StoreLoad);
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
@@ -1143,7 +1171,7 @@ void setup() {
     activityManager.goToReader(path);
   }
 
-  markBootPhase(BootPhase::ActivityRoute);
+  BootDiag::markPhase(BootPhase::ActivityRoute);
   logStartupMemory("after_activity_route");
 
   // The wake press may still be held. Arm the latch that swallows it (and its release
@@ -1168,7 +1196,7 @@ void setup() {
   // the wake-press a fraction late; without this guard the loop() power-hold check would
   // immediately fire enterDeepSleep().
   allowSleepAt = millis() + 2000;
-  logBootSummary();
+  BootDiag::logSummary();
   logStartupMemory("setup_complete");
 }
 
@@ -1209,7 +1237,7 @@ void loop() {
     const bool serialIsUp = static_cast<bool>(Serial);
     if (serialIsUp && !serialWasUp && bootSummaryRepeats < MAX_BOOT_SUMMARY_REPEATS) {
       bootSummaryRepeats++;
-      logBootSummary();
+      BootDiag::logSummary();
     }
     serialWasUp = serialIsUp;
   }
@@ -1266,7 +1294,7 @@ void loop() {
       } else if (cmd == "BOOTLOG") {
         // On-demand replay of this session's boot summary, for when the monitor was
         // attached too late to catch it and the automatic repeats are used up.
-        logBootSummary();
+        BootDiag::logSummary();
       }
     }
   }
@@ -1510,7 +1538,7 @@ void loop() {
           activityManager.goHome();
           break;
         case BA::BTN_SLEEP:
-          enterDeepSleep();
+          enterDeepSleep(/*fromTimeout=*/false, BootDiag::SleepTrigger::ButtonAction);
           return;  // enterDeepSleep() never returns, but return here to stop processing
         case BA::BTN_FORCE_REFRESH: {
           // In the reader, route through the activity so it re-displays the CURRENT page in

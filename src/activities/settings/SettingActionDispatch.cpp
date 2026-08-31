@@ -1,5 +1,6 @@
 #include "SettingActionDispatch.h"
 
+#include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
@@ -56,6 +57,8 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<WeatherSettingsActivity>(renderer, mappedInput);
     case SettingAction::SystemInfo:
       return std::make_unique<SystemInformationActivity>(renderer, mappedInput);
+    case SettingAction::BootDiagnostics:
+      return std::make_unique<BootDiagnosticsActivity>(renderer, mappedInput);
     case SettingAction::SyncTime:
       return std::make_unique<SyncTimeActivity>(renderer, mappedInput);
     case SettingAction::DetectTimezone:

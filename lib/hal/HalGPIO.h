@@ -200,7 +200,17 @@ class HalGPIO {
   // Wait until the raw power-button GPIO reads HIGH (released) for a sustained period.
   // Uses the raw pin directly instead of the InputManager debounced state to avoid
   // the 5 ms debounce being fooled by mechanical switch bounce during release.
-  void waitForStablePowerRelease();
+  // Block until the raw power pin has read HIGH for 200 ms straight, or `timeoutMs`
+  // elapses — whichever comes first. Returns how long it waited; compare against
+  // `timeoutMs` to tell a clean release from a give-up. Bypasses the InputManager
+  // debounce deliberately (5 ms is too short for 10-50 ms mechanical release bounce),
+  // and reads the pin directly so it works with the input sampler stopped.
+  unsigned long waitForStablePowerRelease(unsigned long timeoutMs = POWER_RELEASE_TIMEOUT_MS);
+
+  // Ceiling for the wait above. Long enough that no deliberate hold reaches it (the
+  // longest configurable power-hold-to-sleep gesture is well under this), short enough
+  // that a stuck pin costs the user seconds rather than a reset.
+  static constexpr unsigned long POWER_RELEASE_TIMEOUT_MS = 5000;
 
   // "Is this button held right now?", answered from fresh hardware samples rather than
   // the cache isPressed() reads. The six front buttons are resistor dividers on two ADC
