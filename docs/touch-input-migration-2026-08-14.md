@@ -1063,12 +1063,38 @@ lookup on a hold, and universal convention for pinch and rotate:
 | Pinch in / out | Smaller / Larger Text | Long tap bottom | Star Page |
 | Rotate either way | Cycle Orientation | | |
 
-**The one thing these take away:** a bound Swipe down claims the top-edge
-down-swipe that opens the reader menu. The menu keeps its centre tap
-(`tapForReaderMenu`, on by default) and the Confirm button. Everything else that
-is bound was dead before.
+Brightness steps by 5, matching CrossInk's panel. Ten was too coarse: the SDK's
+gamma-1.6554 curve puts most of the usable range in the bottom third, where a
+10-point step is a large visible jump.
 
-### 8.6 Two ordering rules that are easy to break
+**These take nothing away** — see §8.6 for the two rules that make that true,
+which were added after the first draft did cost the reader menu its swipe.
+
+### 8.6 The menu edge, and the rule that protects it
+
+Binding both vertical swipes to the light collides with the reader menu, which
+had the top-edge down-swipe. Two changes resolve it, and **both are needed** —
+either alone leaves the menu with no gesture at all.
+
+**The menu edge moves on boards that have a light.** `wasMenuGesture()` is now
+the BOTTOM-edge up-swipe when `Frontlight.present()`, and the top-edge
+down-swipe otherwise. A downward swipe naturally starts at the top, so leaving
+the menu there would permanently shadow "dim". CrossInk makes the same trade on
+its light-bearing boards and goes further, moving the reader menu's tabs to the
+bottom with it so they sit thumb-close; we move the gesture only, because our
+menu is a list rather than a tab bar. Keyed on the light being present rather
+than on a board name: without one, `dropUnsupportedActions()` clears the light
+bindings at boot, nothing contends for the top edge, and the menu stays exactly
+where existing users expect it.
+
+**The gesture layer declines the menu's own edge swipe.** `consumeAction()` asks
+`wasMenuGesture()` before claiming a bound Swipe up/down, and leaves it alone
+when the answer is yes. Without this the move would achieve nothing — the
+defaults bind both directions, so the layer would claim the menu edge wherever
+it sat. The resulting rule is the one phones use: a swipe that starts at the menu
+edge opens the menu, the same swipe anywhere else changes the brightness.
+
+### 8.7 Two ordering rules that are easy to break
 
 **`BUTTON_ACTION` is positional.** `SettingsList` builds each option list by
 position — index *i* is action value *i* — and drops board-gated actions on
@@ -1085,7 +1111,7 @@ name one (the light), so `main.cpp` calls that immediately after
 with a frontlight to one without, where the stored action would otherwise be both
 inert and uneditable.
 
-### 8.7 Latching, and why gestures get it when taps do not
+### 8.8 Latching, and why gestures get it when taps do not
 
 The SDK's gesture flags are one-shot and cleared by its next `update()` — a ~10 ms
 life at our sampler cadence. Buttons have been latched into a ring since the
@@ -1098,7 +1124,7 @@ They have the same exposure, but they are device-validated as they stand and
 rerouting them is a change to page turning, not to gestures. Worth revisiting if
 dropped taps are ever observed.
 
-### 8.8 Orientation must be sampled once
+### 8.9 Orientation must be sampled once
 
 `getScreenWidth()` and `tapToLogical()` both read the **live draw** orientation,
 which the themes flip to Portrait mid-pass to put the hint strips on the panel
@@ -1107,9 +1133,11 @@ resolve each against a different frame and zone a landscape tap as though it wer
 portrait — the same class of bug as issue #87. `GestureEventManager` reads
 `getHeldOrientation()` **once** and passes it to orientation-explicit overloads
 (`getScreenWidth(o)`, `wasSwipeIn(o)`, `wasScreenTappedIn(o)`,
-`peekScreenLongPressIn(o)`). `wasEdgeSwipe()` was fixed the same way.
+`peekScreenLongPressIn(o)`). `wasEdgeSwipe()` was fixed the same way, and also
+switched from the live orientation to the held one: every caller of it is on the
+loop task, so it had the same exposure.
 
-### 8.9 The reading light
+### 8.10 The reading light
 
 The SDK has carried `FrontlightManager` and a backlight entry in the T5S3 profile
 all along; this fork simply never linked it. `HalFrontlight` is ported verbatim
@@ -1124,7 +1152,7 @@ legitimately disagree. That means `JsonSettingsIO`'s generic loop skips it (no
 `valuePtr`), so it is saved and loaded by hand, next to the `fontFamily`
 precedent.
 
-### 8.10 Silencing touch outside the reader
+### 8.11 Silencing touch outside the reader
 
 `touchUiControls` gates every touch **event** query on `MappedInputManager` —
 taps, long presses, drags, swipes, edge gestures, multi-touch — through private
@@ -1143,7 +1171,7 @@ Nobody is stranded by turning it off: on a board whose Back/Confirm come from th
 capacitive Home key, `HalGPIO` synthesises those as **button** edges below this
 layer.
 
-### 8.11 Diagnostics, and the first device attempt
+### 8.12 Diagnostics, and the first device attempt
 
 The first hardware attempt (2026-09-01) produced no gesture actions at all. The
 firmware under test predated §8.5, so every gesture was still `BTN_DEFAULT` and
@@ -1176,10 +1204,10 @@ are wired. A two-finger swipe also sets `touchMultiContactSequence`, which
 suppresses the single-contact classifiers until full release — so it will not
 fall back to being a one-finger swipe either.
 
-### 8.12 Status
+### 8.13 Status
 
 Builds on `default` (C3), `x4pro` and `lilygo_t5s3`; 766 host tests green,
 including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device
-validated** — the first attempt is written up in §8.11 and did not reach the
+validated** — the first attempt is written up in §8.12 and did not reach the
 code under test. The gesture classification, the suppression handshake and the
 backlight all still need hardware.

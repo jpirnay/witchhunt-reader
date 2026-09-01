@@ -109,7 +109,19 @@ bool GestureEventManager::consumeAction(BA& action) {
     case MappedInputManager::SwipeDir::None:
       break;
   }
-  if (swipe != Gesture::Count && boundAction(swipe, action)) {
+  // A swipe that IS the reader's menu edge gesture belongs to the menu, even
+  // when its direction is bound. Without this the whole point of moving the menu
+  // edge is lost: the shipped defaults bind BOTH vertical directions to the
+  // light, so wherever the menu edge sits, the gesture layer would claim it
+  // first and the menu would have no swipe at all.
+  //
+  // The rule a reader ends up with is the one phones use — a swipe that starts
+  // at the menu edge opens the menu, the same swipe anywhere else changes the
+  // brightness. wasMenuGesture() is a const peek like the rest, so asking costs
+  // nothing and steals nothing.
+  const bool menuOwnsThisSwipe =
+      SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF && input.wasMenuGesture();
+  if (swipe != Gesture::Count && !menuOwnsThisSwipe && boundAction(swipe, action)) {
     input.suppressTouchContact();
     return true;
   }

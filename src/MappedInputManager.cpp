@@ -2,6 +2,7 @@
 
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
@@ -429,7 +430,11 @@ bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const 
   int ey = 0;
   // One orientation read for the decode AND the screen size it is tested
   // against, so the two cannot disagree about which way the screen is turned.
-  const auto orientation = renderer.getOrientation();
+  // HELD, not the live draw orientation: every caller of this is on the loop
+  // task, outside any render pass, and the themes flip the renderer to Portrait
+  // mid-pass for the hint strips. Same reasoning as GestureEventManager and as
+  // setOrientationProvider (issue #87).
+  const auto orientation = renderer.getHeldOrientation();
   if (!decodeSwipe(static_cast<touchtransform::Orientation>(orientation), sx, sy, ex, ey)) return false;
   return fui::edgeSwipe(edge, sx, sy, ex, ey, renderer.getScreenWidth(orientation),
                         renderer.getScreenHeight(orientation));
@@ -445,7 +450,22 @@ bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
-bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
+bool MappedInputManager::wasMenuGesture() const {
+  // The menu moves to the BOTTOM edge on boards with a reading light, because
+  // the top edge is where a downward swipe means "dim" once the shipped gesture
+  // defaults are in play — and a downward swipe naturally starts at the top, so
+  // leaving the menu there would shadow the light control permanently.
+  //
+  // CrossInk makes the same trade on its light-bearing boards and takes it
+  // further, moving the reader menu's tabs to the bottom with it so they sit
+  // thumb-close. We move the gesture only; our menu is a list, not a tab bar.
+  //
+  // Keyed on the light actually being present rather than on a board name: on a
+  // board without one the light gestures are cleared at boot
+  // (CrossPointSettings::dropUnsupportedActions), so nothing contends for the
+  // top edge and the menu stays where every existing user expects it.
+  return Frontlight.present() ? wasBottomEdgeUpSwipe() : wasTopEdgeDownSwipe();
+}
 
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();

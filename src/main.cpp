@@ -1498,10 +1498,11 @@ void loop() {
   {
     using BA = CrossPointSettings::BUTTON_ACTION;
     using B = MappedInputManager::Button;
-    // One press = one visible step. Ten percent covers the whole range in ten
-    // presses, which is about as many as anyone will make in a row; the
-    // brightness slider is there for setting an exact level.
-    constexpr int LIGHT_STEP_PERCENT = 10;
+    // Five percent, matching CrossInk's frontlight panel. Ten was too coarse:
+    // the SDK maps percent to duty through a gamma-1.6554 curve, so most of the
+    // usable range sits in the bottom third and a 10-point step there is a large
+    // visible jump. The brightness slider remains the way to set an exact level.
+    constexpr int LIGHT_STEP_PERCENT = 5;
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
       switch (ev.button) {
         case B::Back:

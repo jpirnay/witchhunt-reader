@@ -1,5 +1,6 @@
 #pragma once
 
+#include <HalFrontlight.h>
 #include <I18nKeys.h>
 
 #include <cstdint>
@@ -148,11 +149,19 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::SwipeRight:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
-    case Gesture::SwipeDown:
-      // The top-edge down-swipe opens the reader menu. It needs only the reading
-      // controls to be on — unlike the centre tap, it does not consult
+    case Gesture::SwipeUp:
+    case Gesture::SwipeDown: {
+      // One edge opens the reader menu, and which one depends on whether the
+      // board has a light — see MappedInputManager::wasMenuGesture(). Only the
+      // reading controls gate it; unlike the centre tap it does not consult
       // tapForReaderMenu.
-      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
+      //
+      // Said as "Reader Menu" on the direction that owns the edge, because that
+      // is what leaving the row alone gets you there. The gesture is still
+      // bindable, and a binding still works everywhere except that edge.
+      const Gesture menuSwipe = Frontlight.present() ? Gesture::SwipeUp : Gesture::SwipeDown;
+      return (readerTouchOn && gesture == menuSwipe) ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
+    }
     case Gesture::TapLeft:
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_PREV_PAGE;
