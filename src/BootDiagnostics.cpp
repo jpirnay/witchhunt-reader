@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <CrossPointSettings.h>
+#include <HalGPIO.h>
+#include <HalSpiBus.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Preferences.h>
@@ -84,6 +86,10 @@ constexpr char kAbortNamespace[] = "wbdiag";
 // touching the buffer, so a stale entry under the old name would silently read as "no
 // aborts" rather than as an error. A fresh name makes the old one simply unreachable.
 constexpr char kAbortBucketsKey[] = "abrtB2";
+// One pending record, not a counter: each watchdog reports at most once per open and a
+// second stall before a healthy boot is more useful as the newest evidence. The key name
+// versions the Record-field interpretation without forcing an SD ring migration.
+constexpr char kPendingStallKey[] = "stall1";
 
 struct AbortTally {
   uint16_t buckets[kAbortBucketCount] = {};
@@ -125,6 +131,77 @@ void clearAbortBuckets() {
   memset(tally.buckets, 0, sizeof(tally.buckets));
   nvs.putBytes(kAbortBucketsKey, &tally, sizeof(tally));
   nvs.end();
+}
+
+bool readPendingStall(Record& record) {
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/true)) {
+    return false;
+  }
+  const size_t read = nvs.getBytes(kPendingStallKey, &record, sizeof(record));
+  nvs.end();
+  return read == sizeof(record) && (record.kind == KindResumeStall || record.kind == KindBootStall);
+}
+
+bool writePendingStall(const Record& record) {
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
+    return false;
+  }
+  const size_t written = nvs.putBytes(kPendingStallKey, &record, sizeof(record));
+  nvs.end();
+  return written == sizeof(record);
+}
+
+void clearPendingStall() {
+  Preferences nvs;
+  if (!nvs.begin(kAbortNamespace, /*readOnly=*/false)) {
+    return;
+  }
+  nvs.remove(kPendingStallKey);
+  nvs.end();
+}
+
+uint8_t storageEvidenceFlags(uint8_t state) {
+  uint8_t flags = kFlagStorageSampled;
+  switch (static_cast<HalStorage::OperationState>(state)) {
+    case HalStorage::OperationState::WaitingForSpi:
+      flags |= kFlagStorageWaitingForSpi;
+      break;
+    case HalStorage::OperationState::WaitingForStorage:
+      flags |= kFlagStorageWaitingForMutex;
+      break;
+    case HalStorage::OperationState::Active:
+      flags |= kFlagStorageActive;
+      break;
+    case HalStorage::OperationState::Idle:
+      break;
+  }
+  return flags;
+}
+
+Record makeStallRecord(Kind kind, uint8_t phase, uint16_t seconds, bool stillTicking, uint8_t storageOperation,
+                       uint8_t storageState, uint16_t storageSeconds, uint8_t spiOperation, uint8_t spiState,
+                       uint16_t spiSeconds, bool panelBusyHigh) {
+  Record record{};
+  record.kind = kind;
+  record.code = phase;
+  record.reason = storageOperation < static_cast<uint8_t>(HalStorage::Operation::Count)
+                      ? storageOperation
+                      : static_cast<uint8_t>(HalStorage::Operation::None);
+  record.flags = storageEvidenceFlags(storageState);
+  if (stillTicking) {
+    record.flags |= kFlagStillTicking;
+  }
+  record.flags |= kFlagSpiSampled;
+  if (panelBusyHigh) {
+    record.flags |= kFlagPanelBusyHigh;
+  }
+  record.msA = seconds;
+  record.msB = storageSeconds;
+  record.msC = spiSeconds;
+  record.pad = packSpiEvidence(spiOperation, spiState);
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,27 +332,6 @@ void finalizeNewestSleep(bool hadCrumb, uint8_t crumbFinalStage, uint8_t crumbFl
 }
 
 }  // namespace
-
-PreviousSession previousSession() {
-  // Newest first: [0] is this boot's own record, [1] is whatever preceded it. Two boots
-  // back to back mean the session between them never reached the sleep path — a reset
-  // while awake, a crash, or a rail cut. On the C3 that is the ONLY way to see it, since
-  // the reset reason cannot separate a reset press from a power-on.
-  Record recent[2] = {};
-  if (loadRecords(recent, 2) < 2) {
-    return PreviousSession::Unknown;
-  }
-  if (recent[0].kind != KindBoot) {
-    return PreviousSession::Unknown;  // newest is not this boot's record; nothing to say
-  }
-  // An aborted-boot summary sits between the boot and whatever preceded it, and does not
-  // itself end a session — skip it before judging.
-  const Record& before = recent[1];
-  if (before.kind == KindAborted) {
-    return PreviousSession::Unknown;
-  }
-  return before.kind == KindBoot ? PreviousSession::EndedWithoutSleep : PreviousSession::EndedAtSleepPath;
-}
 
 // ---------------------------------------------------------------------------
 // Boot phase trace
@@ -488,25 +544,31 @@ void persistReleaseTimeout(bool storageLive) {
   });
 }
 
-void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking) {
-  updateRing([&] {
-    Record record{};
-    record.kind = KindResumeStall;
-    record.code = wakePhase;
-    record.msA = seconds;
-    record.flags = stillTicking ? kFlagStillTicking : 0;
-    imageAppend(record);
-  });
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking, uint8_t storageOperation,
+                        uint8_t storageState, uint16_t storageSeconds, uint8_t spiOperation, uint8_t spiState,
+                        uint16_t spiSeconds, bool panelBusyHigh) {
+  const Record record =
+      makeStallRecord(KindResumeStall, wakePhase, seconds, stillTicking, storageOperation, storageState, storageSeconds,
+                      spiOperation, spiState, spiSeconds, panelBusyHigh);
+  if (!writePendingStall(record)) {
+    LOG_ERR("BOOT", "Resume stall could not be persisted to NVS");
+  }
 }
 
 void persistBootStall(uint8_t bootPhase, uint16_t seconds) {
-  updateRing([&] {
-    Record record{};
-    record.kind = KindBootStall;
-    record.code = bootPhase;
-    record.msA = seconds;
-    imageAppend(record);
-  });
+  const HalStorage::ActivitySnapshot storage = Storage.activitySnapshot();
+  const unsigned long storageSeconds = storage.elapsedMs / 1000UL;
+  const HalSpiBus::ActivitySnapshot spi = HalSpiBus::getInstance().activitySnapshot();
+  const unsigned long spiSeconds = spi.elapsedMs / 1000UL;
+  const Record record = makeStallRecord(
+      KindBootStall, bootPhase, seconds, /*stillTicking=*/false, static_cast<uint8_t>(storage.operation),
+      static_cast<uint8_t>(storage.state),
+      static_cast<uint16_t>(storageSeconds > UINT16_MAX ? UINT16_MAX : storageSeconds),
+      static_cast<uint8_t>(spi.operation), static_cast<uint8_t>(spi.state),
+      static_cast<uint16_t>(spiSeconds > UINT16_MAX ? UINT16_MAX : spiSeconds), digitalRead(EPD_BUSY) == HIGH);
+  if (!writePendingStall(record)) {
+    LOG_ERR("BOOT", "Boot stall could not be persisted to NVS");
+  }
 }
 
 void persistBoot() {
@@ -520,6 +582,8 @@ void persistBoot() {
   const esp_reset_reason_t resetReason = esp_reset_reason();
   const esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
   const AbortTally abortTally = readAbortTally();
+  Record pendingStall{};
+  const bool hasPendingStall = readPendingStall(pendingStall);
 
   const bool ringWritten = updateRing([&] {
     if (hadCrumb && pending) {
@@ -538,6 +602,13 @@ void persistBoot() {
       // to amend from, and skipping the finalise there was what left every healthy X4
       // sleep reading as "never reached deep sleep".
       finalizeNewestSleep(hadCrumb, finalStage, crumbFlagBits, waitMs, resetReason);
+    }
+
+    // A watchdog marker is written to NVS, never directly to this SD ring: if storage is
+    // what wedged, waiting for its mutex here would make the diagnostic blind to itself.
+    // This healthy boot has mounted the card, so it can safely file the pending evidence.
+    if (hasPendingStall) {
+      imageAppend(pendingStall);
     }
 
     // Aborted boots since the last completed one, placed before this boot's record so the
@@ -576,6 +647,9 @@ void persistBoot() {
     // otherwise discard the count and the aborts would vanish entirely. Guarded on
     // count > 0 as well, so the healthy path stays free of NVS writes.
     clearAbortBuckets();
+  }
+  if (hasPendingStall && ringWritten) {
+    clearPendingStall();
   }
 
   // Consumed either way: a crumb that could not be written is still spent, and leaving it

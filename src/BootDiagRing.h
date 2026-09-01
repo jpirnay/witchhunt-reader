@@ -24,13 +24,13 @@ namespace BootDiag {
 struct Record {
   uint32_t seq;    // monotonic across boots and power cycles; establishes ordering
   uint8_t kind;    // Kind
-  uint8_t code;    // Sleep: SleepStage | Boot: HalGPIO::WakeVerdict | Aborted: last verdict
-  uint8_t reason;  // Sleep/Aborted: SleepTrigger | Boot: esp_reset_reason()
-  uint8_t flags;   // Sleep: kFlag* | Boot: esp_sleep_get_wakeup_cause()
-  uint16_t msA;    // Sleep: release-wait ms | Boot: gate decidedAtMs | Aborted: count
-  uint16_t msB;    // Sleep: uptime seconds  | Boot: gate heldMs
-  uint16_t msC;    // Sleep: unused          | Boot: millis() at SD mount
-  uint16_t pad;    // keeps the struct 16 bytes and 4-byte aligned
+  uint8_t code;    // Sleep: SleepStage | Boot: WakeVerdict | ResumeStall: WakeTrace::Phase
+  uint8_t reason;  // Sleep: SleepTrigger | Boot: reset reason | ResumeStall: storage operation
+  uint8_t flags;   // Sleep/ResumeStall: kFlag* | Boot: esp_sleep_get_wakeup_cause()
+  uint16_t msA;    // Sleep: release-wait ms | Boot: gate decidedAtMs | Stall/Aborted: seconds/count
+  uint16_t msB;    // Sleep: uptime seconds | Boot: gate heldMs | ResumeStall: storage-op age seconds
+  uint16_t msC;    // Sleep: unused | Boot: SD mount ms | Stall: SPI-operation age seconds
+  uint16_t pad;    // Stall: SPI operation (low byte) + state (high byte)
 };
 static_assert(sizeof(Record) == 16, "Record is written to SD verbatim; keep it 16 bytes");
 
@@ -54,8 +54,31 @@ enum Kind : uint8_t {
   KindBootStall = 4,
 };
 
-/// Record::flags bits, sleep records only.
+enum class PreviousSession : uint8_t {
+  Unknown,            // no usable boundary after this boot
+  EndedAtSleepPath,   // a sleep record precedes this boot: an orderly end
+  EndedWithoutSleep,  // a boot or stall precedes this boot: reset/crash while awake
+};
+
+/// Record::flags bits. Meanings are kind-specific, so stall and sleep bits may overlap.
 enum SleepFlags : uint8_t {
+  // Stall records only. The storage call had announced itself but had not acquired
+  // the shared-SPI mutex. This implicates another bus owner rather than the SD transfer.
+  kFlagStorageWaitingForSpi = 1 << 0,
+  // Stall records only. The storage call acquired shared SPI but was waiting behind
+  // another storage operation. This is the signature expected when that operation wedged.
+  kFlagStorageWaitingForMutex = 1 << 1,
+  // Stall records only. The storage call held both locks and was executing in SdFat or
+  // the Arduino SPI HAL when sampled. Together with `reason`, this is the discriminator
+  // for the issue-155 storage-wedge hypothesis.
+  kFlagStorageActive = 1 << 2,
+  // KindResumeStall/KindBootStall. Set even when storage was idle, so records made before
+  // storage tracking existed remain distinguishable from evidence that actually sampled it.
+  kFlagStorageSampled = 1 << 3,
+  // Stall records only. The shared-SPI owner/state and BUSY pin were sampled into msC/pad.
+  kFlagSpiSampled = 1 << 4,
+  // Stall records only. Raw EPD_BUSY GPIO level, deliberately not interpreted by polarity.
+  kFlagPanelBusyHigh = 1 << 5,
   kFlagKeepClock = 1 << 0,       // battery latch stays HIGH, MCU powered through sleep
   kFlagFromReader = 1 << 1,      // slept with a book open
   kFlagReleaseTimeout = 1 << 2,  // the power-button release wait gave up
@@ -73,6 +96,14 @@ enum SleepFlags : uint8_t {
   // rather than grinding through many.
   kFlagStillTicking = 1 << 6,
 };
+
+inline uint16_t packSpiEvidence(uint8_t operation, uint8_t state) {
+  return static_cast<uint16_t>(operation) | (static_cast<uint16_t>(state) << 8);
+}
+
+inline uint8_t stallSpiOperation(const Record& record) { return static_cast<uint8_t>(record.pad & 0xFF); }
+
+inline uint8_t stallSpiState(const Record& record) { return static_cast<uint8_t>(record.pad >> 8); }
 
 /// How far a deep-sleep attempt got. Ordered: a larger value is strictly more progress.
 enum class SleepStage : uint8_t {
@@ -226,6 +257,29 @@ inline uint8_t ringLoadNewestFirst(const uint8_t* image, Record* out, uint8_t ma
     ringGet(image, slot, out[i]);
   }
   return wanted;
+}
+
+/// Classify the session before the newest boot. Abort records are summaries of boot
+/// attempts that never reached the SD ring, not session boundaries, so walk past all of
+/// them. A stall marker followed by a boot is itself evidence of an awake reset.
+inline PreviousSession previousSessionOf(const Record* newestFirst, uint8_t count) {
+  if (newestFirst == nullptr || count < 2 || newestFirst[0].kind != KindBoot) {
+    return PreviousSession::Unknown;
+  }
+  for (uint8_t i = 1; i < count; i++) {
+    switch (static_cast<Kind>(newestFirst[i].kind)) {
+      case KindAborted:
+        continue;
+      case KindSleep:
+        return PreviousSession::EndedAtSleepPath;
+      case KindBoot:
+      case KindResumeStall:
+      case KindBootStall:
+        return PreviousSession::EndedWithoutSleep;
+    }
+    return PreviousSession::Unknown;
+  }
+  return PreviousSession::Unknown;
 }
 
 /// Index of the first record belonging to the run that ended with THIS boot, and one past

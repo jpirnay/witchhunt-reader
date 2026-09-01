@@ -78,16 +78,18 @@ The `BootResume::ReaderResume` branch states it outright: *"Deliberately paints 
 panel keeps physically showing the sleep screen until the reader's own first render lands."*
 No splash, no timeout, and (before this branch) no progress on that path.
 
-### 1.7 The book open runs inside `setup()` on a reader resume
+### 1.7 The EPUB load runs inside `setup()` on a reader resume
 
 `ActivityManager::replaceActivity()` calls `onEnter()` **inline** when `currentActivity` is
 null. The `BootResume::ReaderResume` branch creates no activity, so `currentActivity` is
-null when `activityManager.goToReader(path)` runs in `setup()`. The whole book open —
-`Epub::load()`, section build, first render — therefore executes inside `setup()`.
+null when `activityManager.goToReader(path)` runs in `setup()`. `ReaderActivity::onEnter()`
+therefore runs synchronously and calls `Epub::load()` inside `setup()`. It then queues
+`EpubReaderActivity`; that activity's `onEnter()`, section construction, first render, and
+panel refresh run later through `ActivityManager::loop()` and the render task.
 
-Corroborated by the field data: every captured boot trace shows `route+0`, and none of the
-captures is a reader-resume boot (the healthy one is `sw-restart` → Home; the recovery boot
-is routed to Home by `readerActivityLoadCount > 0`).
+The field data neither proves nor disproves that the load was reached: every captured boot
+trace shows `route+0`, but the trace stops at activity routing and carries no post-route
+milestone.
 
 ### 1.8 `readerActivityLoadCount` already routes a failed resume to Home
 
@@ -105,6 +107,37 @@ entry+28  nvs+1 gate+279 hw+70 recov+62 sd+161 cfg+97 disp+139 paint+1722 store+
 ```
 
 To first paint: 2147 ms and 2559 ms. Aborted boots lifetime counter: 2.
+
+### 1.10 Local X4 control captures with the NVS marker build
+
+Two healthy captures on 2026-09-01 produced no `STALLED` or `BOOT-STALL` record.
+The reader-resume capture showed:
+
+```
+boot  deep-sleep  long-hold
+route+138  setup=2297
+```
+
+The synchronous reader route, including `Epub::load()`, returned in 138 ms and setup
+completed. The history also contained one `ABORTED ... no-second-press` immediately before
+the accepted boot: the first wake gesture was rejected and went back to sleep, then the
+next long hold resumed the reader normally. This is the healthy control shape, not issue
+#155.
+
+That sequence exposed two diagnostics artifacts:
+
+- `previous=unknown` stopped at the intervening abort summary instead of scanning through
+  it to the sleep boundary. The classifier now uses the already-loaded record list, skips
+  abort summaries, and is host-tested for this exact ordering.
+- Older builds rendered IDF 5.5 reset reasons 11-15 as `other`. The screen now names USB,
+  JTAG, eFuse, power-glitch, and CPU-lockup resets and includes the raw value in serial.
+
+The older `sleep open panel-asleep power-hold book` record in that capture is a third,
+still-unresolved presentation artifact: an early rejected-wake sleep breadcrumb is appended
+on the next accepted boot without finalising the preceding on-card sleep record. It does not
+mean the reader remained stuck; subsequent wake code and the successful reader route prove
+that session ended. Do not infer its final sleep outcome from the later wake's reset reason,
+because that can misclassify latch-kept configurations.
 
 ---
 
@@ -135,6 +168,11 @@ Each of these was checked and found not to be the cause.
   with the setting both off (2026-08-28) and on (2026-08-31). No mechanism is established.
 - **Whether any change on the open branch affects the fault.** Nothing on it has run on a
   device exhibiting the failure.
+- **What could wedge an SD transfer.** Arduino-ESP32's C3 SPI HAL has unbounded waits on the
+  peripheral's `cmd.update` and `cmd.usr` bits below SdFat's protocol deadlines. That gives a
+  concrete place where an SD call can remain blocked forever while holding `storageMutex`,
+  but no panel/card interleaving or peripheral-state transition that causes either bit to
+  stick has been demonstrated.
 
 ---
 
@@ -183,6 +221,17 @@ reporting.
   itself not completing, recorded with the furthest `BootPhase`.
 - An earlier commit on this branch restarted to Home after 20 s; a later commit removed that
   deliberately. Nothing acts on a stall now — it is recorded only.
+- The stall marker no longer writes directly to the SD ring. Every lock-taking `HalStorage`
+  and `HalFile` call publishes a fixed-size snapshot (`open`, `read`, `write`, `seek`, etc.;
+  waiting for shared SPI, waiting for the storage mutex, or active). At 20 s the reporter
+  writes the phase, liveness, storage state, and operation age to one NVS slot without taking
+  either storage lock. The next boot that mounts the card drains it into the existing ring.
+- Shared SPI is now fail-closed. `HalSpiBus::Lock` previously timed out after 5 s and let the
+  caller continue without owning the bus, which could turn legitimate contention into
+  concurrent panel/card traffic. It now waits on the recursive mutex and publishes a
+  lock-free snapshot naming the active or waiting operation (`storage`, `display-refresh`,
+  `display-sleep`, etc.). The NVS stall marker also stores its age and the raw EPD BUSY level
+  in the existing 16-byte record; no ring migration or extra marker allocation is required.
 
 ### 4.3 Duplicate PR
 
@@ -195,16 +244,76 @@ and that branch deleted.
 
 ---
 
-## 5. Next step
+## 5. Next field check
 
-The one thing that would move this forward is a field capture from a build containing §4.2,
-showing either:
+The one thing that would move this forward is a field capture from a build containing the
+NVS stall marker, after reproducing the fault, pressing Reset, and opening Boot Diagnostics.
+The history line now ends with one of:
 
-- a `BOOT-STALL at <phase> after <n>s` history line — naming where in `setup()` it stopped; or
-- a `STALLED in <phase> after <n>s working|NO-TICKS` line — naming where in the book open,
-  and whether it was progressing.
+| Marker | Interpretation |
+|---|---|
+| `spi storage/active <n>s` with `sd read/active <n>s` | Strongly supports a call wedged below `HalStorage`, including the low-level SPI theory. |
+| `spi display-refresh/active <n>s busy=1` | Panel controller is still signalling BUSY while the refresh owns the bus. Investigate the X4 BUSY/power path. |
+| `spi display-refresh/active <n>s busy=0` | Display call retained the bus after BUSY deasserted; investigate post-waveform SPI work or bookkeeping. |
+| `spi <op>/waiting <n>s` | The named operation is waiting behind the active owner. The snapshot prefers the active owner when one exists, so this should mainly appear during an acquisition handoff. |
+| `sd <op>/wait-spi <n>s` | Storage is blocked behind the SPI owner named earlier on the same line. |
+| `sd <op>/wait-mutex <n>s` | Storage serialization is blocked, though the active-operation snapshot should normally identify its owner instead. |
+| `sd idle` with `NO-TICKS` | Falsifies this storage-operation theory for that occurrence; follow the recorded wake phase into parser/render code. |
+| `sd idle` with `working` | Slow work rather than an uninterruptible SD wedge; optimize the recorded phase. |
+| `spi untracked` or `sd untracked` | Record came from an older build and carries no evidence for that subsystem. |
 
-Neither has been captured yet. Both were only made reachable by commit `8f1710896`.
+No marker after a known 20-second failure is also evidence: on the single-core C3 it means
+the reporter task did not get scheduled, NVS failed, or execution stopped before either the
+book-open or generic setup watchdog could classify it.
+
+### 5.1 What a fix would look like
+
+- **Confirmed active SD/SPI wedge:** first ship bounded recovery: persist the NVS marker,
+  restart, and let `readerActivityLoadCount` route to Home. The root repair is a bounded
+  low-level SPI transfer with card/bus reinitialisation after timeout; a storage-mutex timeout
+  alone cannot release a task already spinning inside the peripheral transfer.
+- **Confirmed shared-SPI wait:** use the recorded owner to fix the specific display path
+  holding the bus. The unsafe
+  timeout-to-unlocked behavior has already been removed; waiting now preserves serialization
+  while the independent reporter records the owner.
+- **Idle or still progressing:** do not apply SPI recovery. Fix or optimize the phase named by
+  the marker instead.
+
+The restart is a user-recovery fix, not proof of root cause. It should follow marker capture,
+not replace it, or the firmware will hide the distinction this instrumentation was added to
+measure.
+
+### 5.2 Reporter test protocol
+
+Ask an affected X4 owner to use this order. The first capture must happen before changing the
+card or clearing caches, otherwise the most useful comparison is lost.
+
+1. Back up the original card, including hidden files and the `/.crosspoint` directory. Leave
+  the card itself unchanged.
+2. Flash the diagnostic firmware and retry the exact reported flow on the original card:
+  open the implicated book, sleep from the reader, then wake back into it. Keep Embedded CSS
+  at the value used when the fault was seen. Try ten sleep/wake cycles if it does not fail
+  immediately.
+3. If the sleep screen remains for 20 seconds, wait at least 10 more seconds so the NVS marker
+  is committed, then press Reset once. Do not power-cycle, remove the card, clear cache, or
+  make repeated reset attempts before collecting the evidence.
+4. Open Settings → System → Boot Diagnostics. Send a photo of the whole screen and copy the
+  complete diagnostic block from serial. Also report whether the book eventually opened,
+  card brand/model/capacity, Embedded CSS setting, and which sleep gesture was used. A
+  no-failure result after ten cycles is useful and should still be reported.
+5. Power off and insert a different known-good card, freshly formatted as FAT32. Make a
+  file-level copy of the original card, including hidden files and `/.crosspoint`, but omit
+  `/.crosspoint/bootdiag.bin` on the destination so histories cannot be confused. Do not use
+  a sector-by-sector clone. Repeat the same ten-cycle test without changing settings.
+6. If the two cards behave differently, preserve both cards in that state. Only after both
+  diagnostic captures exist, use the firmware's Clear Cache action on the failing card and
+  repeat. Failure following the physical card after a cache clear supports card, filesystem,
+  or power integrity; failure disappearing after the clear supports generated cache state.
+
+The replacement-card test is not proof by itself: a file copy changes FAT allocation and
+physical sectors as well as the card. It is a discriminator. Reproducing on both cards points
+back toward content, cache, display, or firmware timing; reproducing only on the original
+pushes card/media/power behavior higher on the list.
 
 ---
 

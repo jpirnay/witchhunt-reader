@@ -5,7 +5,10 @@
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
+#include <HalSpiBus.h>
+#include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -47,6 +50,16 @@ const char* resetReasonName(uint8_t reason) {
       return "brownout";
     case ESP_RST_SDIO:
       return "sdio";
+    case ESP_RST_USB:
+      return "usb-reset";
+    case ESP_RST_JTAG:
+      return "jtag-reset";
+    case ESP_RST_EFUSE:
+      return "efuse-error";
+    case ESP_RST_PWR_GLITCH:
+      return "power-glitch";
+    case ESP_RST_CPU_LOCKUP:
+      return "cpu-lockup";
     default:
       return "other";
   }
@@ -110,6 +123,84 @@ const char* outcomeTag(const BootDiag::Record& record) {
   return "STUCK";
 }
 
+void formatStorageEvidence(const BootDiag::Record& record, char* out, size_t outSize) {
+  if ((record.flags & BootDiag::kFlagStorageSampled) == 0) {
+    snprintf(out, outSize, "sd untracked");
+    return;
+  }
+  const char* state = "idle";
+  if ((record.flags & BootDiag::kFlagStorageActive) != 0) {
+    state = "active";
+  } else if ((record.flags & BootDiag::kFlagStorageWaitingForMutex) != 0) {
+    state = "wait-mutex";
+  } else if ((record.flags & BootDiag::kFlagStorageWaitingForSpi) != 0) {
+    state = "wait-spi";
+  }
+  if (state[0] == 'i') {
+    snprintf(out, outSize, "sd idle");
+    return;
+  }
+  snprintf(out, outSize, "sd %s/%s %us", HalStorage::operationName(static_cast<HalStorage::Operation>(record.reason)),
+           state, record.msB);
+}
+
+void formatSpiEvidence(const BootDiag::Record& record, char* out, size_t outSize) {
+  if ((record.flags & BootDiag::kFlagSpiSampled) == 0) {
+    snprintf(out, outSize, "spi untracked");
+    return;
+  }
+  const auto operation = static_cast<HalSpiBus::Operation>(BootDiag::stallSpiOperation(record));
+  const auto state = static_cast<HalSpiBus::OperationState>(BootDiag::stallSpiState(record));
+  const char* stateName = "idle";
+  if (state == HalSpiBus::OperationState::Waiting) {
+    stateName = "waiting";
+  } else if (state == HalSpiBus::OperationState::Active) {
+    stateName = "active";
+  }
+  snprintf(out, outSize, "spi %s/%s %us busy=%u", HalSpiBus::operationName(operation), stateName, record.msC,
+           static_cast<unsigned>((record.flags & BootDiag::kFlagPanelBusyHigh) != 0));
+}
+
+void formatHistoryRecord(const BootDiag::Record& record, char* out, size_t outSize) {
+  if (record.kind == BootDiag::KindSleep) {
+    snprintf(out, outSize, "%lu sleep %s %s %s%s%s", static_cast<unsigned long>(record.seq), outcomeTag(record),
+             BootDiag::stageName(static_cast<BootDiag::SleepStage>(record.code)),
+             BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(record.reason)),
+             (record.flags & BootDiag::kFlagFromReader) ? " book" : "",
+             (record.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
+    return;
+  }
+  if (record.kind == BootDiag::KindResumeStall) {
+    char storage[32];
+    char spi[48];
+    formatStorageEvidence(record, storage, sizeof(storage));
+    formatSpiEvidence(record, spi, sizeof(spi));
+    snprintf(out, outSize, "%lu STALLED %s %us %s %s %s", static_cast<unsigned long>(record.seq),
+             WakeTrace::phaseName(static_cast<WakeTrace::Phase>(record.code)), record.msA,
+             (record.flags & BootDiag::kFlagStillTicking) ? "working" : "NO-TICKS", spi, storage);
+    return;
+  }
+  if (record.kind == BootDiag::KindBootStall) {
+    char storage[32];
+    char spi[48];
+    formatStorageEvidence(record, storage, sizeof(storage));
+    formatSpiEvidence(record, spi, sizeof(spi));
+    snprintf(out, outSize, "%lu BOOT-STALL %s %us %s %s", static_cast<unsigned long>(record.seq),
+             BootDiag::phaseName(static_cast<BootDiag::BootPhase>(record.code)), record.msA, spi, storage);
+    return;
+  }
+  if (record.kind == BootDiag::KindAborted) {
+    snprintf(out, outSize, "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(record.seq), record.msA,
+             record.msA >= BootDiag::kAbortCountCap ? "+" : "",
+             BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(record.reason)),
+             HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(record.code)));
+    return;
+  }
+  snprintf(out, outSize, "%lu boot %s %s sd@%ums", static_cast<unsigned long>(record.seq),
+           resetReasonName(record.reason), HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(record.code)),
+           record.msC);
+}
+
 }  // namespace
 
 void BootDiagnosticsActivity::onEnter() {
@@ -130,8 +221,80 @@ void BootDiagnosticsActivity::loop() {
   if (!loaded_) {
     recordCount_ = BootDiag::loadRecords(records_, BootDiag::kCapacity);
     loaded_ = true;
+    logToSerial();
     requestUpdate();
   }
+}
+
+void BootDiagnosticsActivity::logToSerial() const {
+  LOG_INF("DIAG", "=== Boot Diagnostics %s ===", CROSSPOINT_VERSION);
+  LOG_INF("DIAG", "Hardware: board=%s controller=%s", BoardConfig::ACTIVE.name,
+          displayControllerName(BoardConfig::ACTIVE.displayController));
+
+  const auto& probe = freeink::getXteinkDisplayProbeDiag();
+  const bool probeSilent = probe.ver[0] == 0xFF && probe.ver[1] == 0xFF && probe.ver[2] == 0xFF &&
+                           probe.ver[3] == 0xFF && probe.ver[4] == 0xFF;
+  if (probe.valid && !probeSilent) {
+    LOG_INF("DIAG", "Panel probe: ver %02X %02X %02X %02X %02X flg %02X v%u%s%s", probe.ver[0], probe.ver[1],
+            probe.ver[2], probe.ver[3], probe.ver[4], probe.flg, probe.verdict, probe.mtpValid ? " mtp" : "",
+            probe.promoted ? " promoted" : "");
+  } else {
+    LOG_INF("DIAG", "Panel probe: %s", probe.valid ? "silent (all-FF)" : "unknown");
+  }
+
+  const char* previous = "unknown";
+  switch (BootDiag::previousSessionOf(records_, recordCount_)) {
+    case BootDiag::PreviousSession::EndedAtSleepPath:
+      previous = "ended-at-sleep-path";
+      break;
+    case BootDiag::PreviousSession::EndedWithoutSleep:
+      previous = "ended-without-sleep";
+      break;
+    case BootDiag::PreviousSession::Unknown:
+      break;
+  }
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  LOG_INF("DIAG", "This boot: reset=%s(%u) previous=%s wake=%s", resetReasonName(static_cast<uint8_t>(resetReason)),
+          static_cast<unsigned>(resetReason), previous,
+          resetReason == ESP_RST_DEEPSLEEP ? wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())) : "n/a");
+
+  const uint16_t aborted = BootDiag::abortsInCurrentRun(records_, recordCount_);
+  const BootDiag::AbortCounts counts = BootDiag::abortCounts();
+  LOG_INF("DIAG", "Aborted boots: current=%u lifetime=%lu pending=%u", aborted,
+          static_cast<unsigned long>(counts.lifetime), counts.undrained);
+  BootDiag::logSummary();
+
+  const auto& stats = powerManager.lightSleepStats();
+  const uint32_t totalMs = stats.sleptMs + stats.awakeMs;
+  const unsigned sleptPct = totalMs > 0 ? static_cast<unsigned>((stats.sleptMs * 100ULL) / totalMs) : 0;
+  LOG_INF("DIAG", "Light sleep: %us (%u%%), %u tries, %u gpio wakes", stats.sleptMs / 1000, sleptPct, stats.attempts,
+          stats.wakeGpio);
+
+  const BootDiag::Record* lastSleep = nullptr;
+  for (uint8_t i = 0; i < recordCount_; i++) {
+    if (records_[i].kind == BootDiag::KindSleep) {
+      lastSleep = &records_[i];
+      break;
+    }
+  }
+  if (lastSleep == nullptr) {
+    LOG_INF("DIAG", "Last sleep: no record");
+  } else {
+    LOG_INF("DIAG", "Last sleep: stage=%s outcome=%s trigger=%s from=%s latch=%s release=%ums%s",
+            BootDiag::stageName(static_cast<BootDiag::SleepStage>(lastSleep->code)), outcomeTag(*lastSleep),
+            BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)),
+            (lastSleep->flags & BootDiag::kFlagFromReader) ? "book" : "menu",
+            (lastSleep->flags & BootDiag::kFlagKeepClock) ? "kept" : "cut", lastSleep->msA,
+            (lastSleep->flags & BootDiag::kFlagReleaseTimeout) ? " TIMEOUT" : "");
+  }
+
+  LOG_INF("DIAG", "History: %u record(s), newest first", recordCount_);
+  for (uint8_t i = 0; i < recordCount_; i++) {
+    char line[160];
+    formatHistoryRecord(records_[i], line, sizeof(line));
+    LOG_INF("DIAG", "%s", line);
+  }
+  LOG_INF("DIAG", "=== End Boot Diagnostics ===");
 }
 
 void BootDiagnosticsActivity::render(RenderLock&&) {
@@ -219,7 +382,7 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // does. Shown anyway: it still separates a panic, a watchdog and a deep-sleep wake.
   drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
   const char* prevText = tr(STR_DIAG_PREV_UNKNOWN);
-  switch (BootDiag::previousSession()) {
+  switch (BootDiag::previousSessionOf(records_, recordCount_)) {
     case BootDiag::PreviousSession::EndedAtSleepPath:
       prevText = tr(STR_DIAG_PREV_SLEPT);
       break;
@@ -389,41 +552,7 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     }
     for (uint8_t i = 0; i < recordCount_ && room(1); i++) {
       const BootDiag::Record& r = records_[i];
-      if (r.kind == BootDiag::KindSleep) {
-        // Every token here has to survive truncation at roughly 40 characters, which the
-        // first field reports did not: "latch-cut" ate the width and the from-reader bit —
-        // the one that identifies the fault — never appeared at all. The latch policy is
-        // still spelled out in the Last sleep section above, so it is dropped here in
-        // favour of "book", which is not shown anywhere else.
-        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s%s%s", static_cast<unsigned long>(r.seq), outcomeTag(r),
-                 BootDiag::stageName(static_cast<BootDiag::SleepStage>(r.code)),
-                 BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
-                 (r.flags & BootDiag::kFlagFromReader) ? " book" : "",
-                 (r.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
-      } else if (r.kind == BootDiag::KindResumeStall) {
-        // A wake resume that still had no page after RESUME_STALL_REPORT_MS, and the phase it
-        // was sitting in. A marker only — nothing acted on it, so the device carried on and
-        // whatever the user saw next is still theirs to describe.
-        snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us %s", static_cast<unsigned long>(r.seq),
-                 WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA,
-                 (r.flags & BootDiag::kFlagStillTicking) ? "working" : "NO-TICKS");
-      } else if (r.kind == BootDiag::KindBootStall) {
-        // setup() itself never finished. `code` is a BootPhase here, not a WakeTrace phase.
-        snprintf(buf, sizeof(buf), "%lu BOOT-STALL at %s after %us", static_cast<unsigned long>(r.seq),
-                 BootDiag::phaseName(static_cast<BootDiag::BootPhase>(r.code)), r.msA);
-      } else if (r.kind == BootDiag::KindAborted) {
-        snprintf(buf, sizeof(buf), "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(r.seq), r.msA,
-                 r.msA >= BootDiag::kAbortCountCap ? "+" : "",
-                 BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
-                 HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)));
-      } else {
-        // Wake cause is dropped: it is only meaningful after a deep-sleep reset (see the
-        // Wake cause row) and printing a stale "none"/"timer" on every line cost width the
-        // sd@ stamp needed. The gate's held-ms goes too — it is on the Wake gate row for the
-        // boot that matters, and sd@ is the one that says how far this boot actually got.
-        snprintf(buf, sizeof(buf), "%lu boot %s %s sd@%ums", static_cast<unsigned long>(r.seq),
-                 resetReasonName(r.reason), HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)), r.msC);
-      }
+      formatHistoryRecord(r, buf, sizeof(buf));
       drawWide(buf);
     }
   }

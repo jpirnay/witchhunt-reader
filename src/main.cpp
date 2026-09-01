@@ -479,11 +479,11 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
 // Its own task, deliberately: the stall can be in either of the two tasks that matter. A slow
 // section build runs on the render task (loop keeps running), but Epub::load() runs inside
 // onEnter() on the LOOP task, and a watchdog living in loop() cannot fire while loop() is the
-// thing that is stuck. It takes no render lock and touches no framebuffer — the one thing it
-// does is an SD write, which HalStorage serialises behind its own mutex, so at worst it waits
-// out a worker that is mid-file and never gets to write at all.
+// thing that is stuck. It takes no render lock and touches no framebuffer. Its marker goes to
+// internal NVS and is drained to the SD ring by the next healthy boot; the reporter must never
+// wait for storage because the operation being diagnosed may hold that mutex forever.
 //
-// 1 KB stack: the deepest path is persistResumeStall() -> one 272-byte SD write.
+// 1 KB stack: the deepest path is persistResumeStall() -> one 16-byte NVS blob write.
 static constexpr uint32_t RESUME_STALL_REPORT_MS = 20000;
 // How recent a yield-point tick has to be to count as "still working". Generous: the
 // coarsest yield boundary is one page element, which can legitimately take a second or two.
@@ -529,11 +529,42 @@ static void resumeStallReporterTask(void*) {
     // uninterruptible step. Those two look identical on a dead-looking screen and want
     // completely different fixes.
     const bool ticking = LongTaskProgress::msSinceAlive() < STALL_TICK_WINDOW_MS;
-    LOG_ERR("MAIN", "Resume still has no page after %lums, in phase %s (%s, last tick %lums ago, stage %s)", waited,
-            WakeTrace::phaseName(phase), ticking ? "still ticking" : "NO TICKS",
+    const HalStorage::ActivitySnapshot storage = Storage.activitySnapshot();
+    const unsigned long storageSeconds = storage.elapsedMs / 1000UL;
+    const HalSpiBus::ActivitySnapshot spi = HalSpiBus::getInstance().activitySnapshot();
+    const unsigned long spiSeconds = spi.elapsedMs / 1000UL;
+    const char* storageState = "idle";
+    switch (storage.state) {
+      case HalStorage::OperationState::WaitingForSpi:
+        storageState = "wait-spi";
+        break;
+      case HalStorage::OperationState::WaitingForStorage:
+        storageState = "wait-storage";
+        break;
+      case HalStorage::OperationState::Active:
+        storageState = "active";
+        break;
+      case HalStorage::OperationState::Idle:
+        break;
+    }
+    LOG_ERR("MAIN",
+            "Resume still has no page after %lums, in phase %s (%s, last tick %lums ago, stage %s, storage %s %s "
+            "%lus, spi %s %s %lus busy=%d)",
+            waited, WakeTrace::phaseName(phase), ticking ? "still ticking" : "NO TICKS",
             static_cast<unsigned long>(LongTaskProgress::msSinceAlive()),
-            LongTaskProgress::currentStage() ? LongTaskProgress::currentStage() : "?");
-    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000), ticking);
+            LongTaskProgress::currentStage() ? LongTaskProgress::currentStage() : "?",
+            HalStorage::operationName(storage.operation), storageState, storageSeconds,
+            HalSpiBus::operationName(spi.operation),
+            spi.state == HalSpiBus::OperationState::Active
+                ? "active"
+                : (spi.state == HalSpiBus::OperationState::Waiting ? "waiting" : "idle"),
+            spiSeconds, digitalRead(EPD_BUSY) == HIGH ? 1 : 0);
+    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000), ticking,
+                                 static_cast<uint8_t>(storage.operation), static_cast<uint8_t>(storage.state),
+                                 static_cast<uint16_t>(storageSeconds > UINT16_MAX ? UINT16_MAX : storageSeconds),
+                                 static_cast<uint8_t>(spi.operation), static_cast<uint8_t>(spi.state),
+                                 static_cast<uint16_t>(spiSeconds > UINT16_MAX ? UINT16_MAX : spiSeconds),
+                                 digitalRead(EPD_BUSY) == HIGH);
   }
 }
 
@@ -1070,8 +1101,8 @@ void setup() {
   // created the task. Field capture on issue #155 showed exactly that: a resume that stalled
   // and left no marker, because the marker could not have been written.
   //
-  // This is the earliest point it can run: it only reads BootDiag/WakeTrace state, but it
-  // writes to the card, so Storage.begin() has to have succeeded first.
+  // This is the earliest point it needs to run: before Storage.begin() there is no reader
+  // resume and no HalStorage operation to diagnose.
   xTaskCreate(&resumeStallReporterTask, "resumewd", 1024, nullptr, 1, nullptr);
   logStartupMemory("after_storage_begin");
 

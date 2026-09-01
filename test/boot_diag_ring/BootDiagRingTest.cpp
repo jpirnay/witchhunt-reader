@@ -126,6 +126,29 @@ TEST(BootDiagRing, LoadHonoursACallerCapSmallerThanTheRing) {
   EXPECT_EQ(ringLoadNewestFirst(image.data(), out, 2), 2);
 }
 
+TEST(BootDiagRing, ResumeStallStorageEvidenceSurvivesRoundTrip) {
+  std::vector<uint8_t> image(kImageBytes);
+  ringInit(image.data());
+
+  Record stall{};
+  stall.kind = KindResumeStall;
+  stall.code = 1;    // WakeTrace::Phase::BookLoaded
+  stall.reason = 2;  // HalStorage::Operation::Read
+  stall.flags = kFlagStorageSampled | kFlagStorageActive;
+  stall.msA = 20;
+  stall.msB = 19;
+  ringAppend(image.data(), stall);
+
+  Record out{};
+  ASSERT_EQ(ringLoadNewestFirst(image.data(), &out, 1), 1);
+  EXPECT_EQ(out.kind, KindResumeStall);
+  EXPECT_EQ(out.code, 1);
+  EXPECT_EQ(out.reason, 2);
+  EXPECT_EQ(out.flags, kFlagStorageSampled | kFlagStorageActive);
+  EXPECT_EQ(out.msA, 20);
+  EXPECT_EQ(out.msB, 19);
+}
+
 // ---------------------------------------------------------------------------
 // Record semantics
 // ---------------------------------------------------------------------------
@@ -234,6 +257,45 @@ TEST(RunScan, RangeExcludesBothBoundingBootRecords) {
   ASSERT_TRUE(currentRunRange(records, 4, first, last));
   EXPECT_EQ(first, 1) << "starts after our own boot record";
   EXPECT_EQ(last, 3) << "stops at the previous completed boot";
+}
+
+TEST(PreviousSession, SkipsAbortedWakeBeforeSleepBoundary) {
+  const Record records[] = {
+      bootRecord(),
+      abortRecord(SleepTrigger::WakeGateRejected, 5, 1),
+      sleepRecord(SleepStage::WakeArmed, 0),
+  };
+  EXPECT_EQ(previousSessionOf(records, 3), PreviousSession::EndedAtSleepPath);
+}
+
+TEST(PreviousSession, StallBeforeBootMeansSessionEndedAwake) {
+  Record stall{};
+  stall.kind = KindResumeStall;
+  const Record records[] = {bootRecord(), stall, sleepRecord(SleepStage::WakeArmed, 0)};
+  EXPECT_EQ(previousSessionOf(records, 3), PreviousSession::EndedWithoutSleep);
+}
+
+TEST(PreviousSession, RequiresNewestBootAndPriorBoundary) {
+  const Record onlyBoot[] = {bootRecord()};
+  EXPECT_EQ(previousSessionOf(onlyBoot, 1), PreviousSession::Unknown);
+  const Record newestSleep[] = {sleepRecord(SleepStage::WakeArmed, 0), bootRecord()};
+  EXPECT_EQ(previousSessionOf(newestSleep, 2), PreviousSession::Unknown);
+}
+
+TEST(StallSpiEvidence, PacksOperationAndStateWithoutChangingRecordSize) {
+  Record record{};
+  record.pad = packSpiEvidence(4, 2);
+  EXPECT_EQ(stallSpiOperation(record), 4);
+  EXPECT_EQ(stallSpiState(record), 2);
+  EXPECT_EQ(sizeof(record), 16);
+}
+
+TEST(StallSpiEvidence, FlagsDistinguishBusyLevelFromUnsampledRecords) {
+  Record record{};
+  EXPECT_EQ(record.flags & kFlagSpiSampled, 0);
+  record.flags = kFlagSpiSampled | kFlagPanelBusyHigh;
+  EXPECT_NE(record.flags & kFlagSpiSampled, 0);
+  EXPECT_NE(record.flags & kFlagPanelBusyHigh, 0);
 }
 
 }  // namespace
