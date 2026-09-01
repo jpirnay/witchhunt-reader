@@ -233,9 +233,11 @@ class MappedInputManager {
   // reports more than one contact), so callers need no ifdefs.
   enum class MultiTouch : uint8_t { None, PinchIn, PinchOut, RotateClockwise, RotateCounterClockwise };
   MultiTouch popMultiTouch(int& x, int& y) const;
-  // Drop every queued multi-touch gesture — activity transitions, so a pinch
-  // made on the screen being left cannot act on the one being entered.
-  void flushMultiTouch() const { gpio.flushTouchGestures(); }
+  // Drop every latched touch event — taps, swipes, long presses and multi-touch
+  // gestures alike. For activity transitions, so a contact made on the screen
+  // being left cannot act on the one being entered; that matters more now that
+  // these outlive the tick they happened in.
+  void flushTouchEvents() const { gpio.flushTouchEvents(); }
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.
   bool wasBackGesture() const;

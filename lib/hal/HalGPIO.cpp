@@ -261,6 +261,55 @@ void HalGPIO::latchTouchGestures(const uint32_t timeMs) {
   }
 }
 
+// Latches the SDK's one-shot single-contact events. See TouchEvent for why they
+// cannot simply be read from the loop task. Drops the newest on a full ring,
+// matching pushEdgeLocked.
+void HalGPIO::latchTouchEvents() {
+  const auto push = [&](const TouchEvent& event) {
+    portENTER_CRITICAL(&inputMux_);
+    const int next = (touchEventTail_ + 1) % TOUCH_EVENT_BUF;
+    if (next != touchEventHead_) {
+      touchEventBuf_[touchEventTail_] = event;
+      touchEventTail_ = next;
+    }
+    portEXIT_CRITICAL(&inputMux_);
+  };
+
+  TouchEvent event;
+  // Long press first: it fires WHILE the finger is down, so it precedes anything
+  // the same contact produces on release. heldMs stays 0 — the SDK's latched
+  // duration belongs to the previous contact until this one ends.
+  if (inputMgr.wasTouchLongPress(event.nx, event.ny)) {
+    event.kind = TouchEvent::Kind::LongPress;
+    push(event);
+  }
+
+  // Tap and swipe are mutually exclusive by construction: a tap needs the travel
+  // at or under TOUCH_TAP_RELEASE_SLOP_PX and a swipe needs it at or over
+  // TOUCH_SWIPE_MIN_PX, and the former is defined as the latter minus one. Both
+  // are still asked independently rather than as an if/else, so this reports
+  // exactly what the SDK classified rather than a rule restated here.
+  const auto heldMs = static_cast<uint16_t>(inputMgr.lastTouchHeldMs());
+  TouchEvent swipe;
+  if (inputMgr.wasSwipe(swipe.nx, swipe.ny, swipe.nxEnd, swipe.nyEnd)) {
+    swipe.kind = TouchEvent::Kind::Swipe;
+    swipe.heldMs = heldMs;
+    push(swipe);
+  }
+  TouchEvent tap;
+  if (inputMgr.wasTouchTap(tap.nx, tap.ny)) {
+    tap.kind = TouchEvent::Kind::Tap;
+    tap.heldMs = heldMs;
+    push(tap);
+  }
+
+  if (inputMgr.wasTouchReleased()) {
+    portENTER_CRITICAL(&inputMux_);
+    touchReleasedPending_ = true;
+    portEXIT_CRITICAL(&inputMux_);
+  }
+}
+
 // One sampling pass: read + debounce the buttons, then latch any edges. Runs on
 // the sampler task once started; also called synchronously from update() before
 // the sampler is up. inputMgr.update() does the ADC read and must run OUTSIDE the
@@ -320,6 +369,7 @@ void HalGPIO::sampleOnce() {
   // Before the critical section: these read the SDK, and the queue push inside
   // takes inputMux_ itself. Inert on non-touch boards.
   latchTouchGestures(now);
+  latchTouchEvents();
 
   // Capacitive home key -> synthetic CONFIRM button.
   //
@@ -572,12 +622,7 @@ bool HalGPIO::popTouchGesture(TouchGesture& out) {
   return got;
 }
 
-void HalGPIO::flushTouchGestures() {
-  portENTER_CRITICAL(&inputMux_);
-  gestureHead_ = 0;
-  gestureTail_ = 0;
-  portEXIT_CRITICAL(&inputMux_);
-}
+void HalGPIO::flushTouchEvents() { clearTouchEventState(); }
 
 void HalGPIO::flushButtonEdges() {
   portENTER_CRITICAL(&inputMux_);
@@ -591,28 +636,33 @@ void HalGPIO::flushButtonEdges() {
 }
 
 void HalGPIO::update() {
-  if (samplerRunning_) {
-    // Drain the sampler's accumulated edges + latest state into the loop-side
-    // snapshot. No edge seen since the last drain is ever lost, regardless of how
-    // long this loop iteration took.
-    portENTER_CRITICAL(&inputMux_);
-    snapState_ = liveState_;
-    snapPressed_ = accumPressed_;
-    snapReleased_ = accumReleased_;
-    accumPressed_ = 0;
-    accumReleased_ = 0;
-    portEXIT_CRITICAL(&inputMux_);
-  } else {
+  if (!samplerRunning_) {
     // Pre-sampler (early boot): sample synchronously on the calling task.
     sampleOnce();
-    portENTER_CRITICAL(&inputMux_);
-    snapState_ = liveState_;
-    snapPressed_ = accumPressed_;
-    snapReleased_ = accumReleased_;
-    accumPressed_ = 0;
-    accumReleased_ = 0;
-    portEXIT_CRITICAL(&inputMux_);
   }
+  // Drain the sampler's accumulated edges + latest state into the loop-side
+  // snapshot. No edge seen since the last drain is ever lost, regardless of how
+  // long this loop iteration took.
+  portENTER_CRITICAL(&inputMux_);
+  snapState_ = liveState_;
+  snapPressed_ = accumPressed_;
+  snapReleased_ = accumReleased_;
+  accumPressed_ = 0;
+  accumReleased_ = 0;
+  // One discrete touch event per drain, and the snapshot is REPLACED (not
+  // merged) so each is visible for exactly one cycle — the same contract
+  // snapPressed_ has. Within that cycle it is a non-consuming peek, which is
+  // what lets the gesture classifier look at a tap, decide, and only then
+  // suppress it before the screen underneath reads the same tap.
+  if (touchEventHead_ != touchEventTail_) {
+    snapTouchEvent_ = touchEventBuf_[touchEventHead_];
+    touchEventHead_ = (touchEventHead_ + 1) % TOUCH_EVENT_BUF;
+  } else {
+    snapTouchEvent_ = TouchEvent{};
+  }
+  snapTouchReleased_ = touchReleasedPending_;
+  touchReleasedPending_ = false;
+  portEXIT_CRITICAL(&inputMux_);
   updateUsbState(millis());
 }
 
@@ -690,11 +740,20 @@ bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
 
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
-bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
+// The four discrete events answer from the loop-side snapshot, not from the SDK:
+// see TouchEvent. The level states below (candidate, held-at) stay live reads,
+// because "where is the finger now" has no meaning latched.
+
+bool HalGPIO::wasTouchTap(float& nx, float& ny) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::Tap) return false;
+  nx = snapTouchEvent_.nx;
+  ny = snapTouchEvent_.ny;
+  return true;
+}
 
 bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
 
-bool HalGPIO::wasTouchReleased() const { return inputMgr.wasTouchReleased(); }
+bool HalGPIO::wasTouchReleased() const { return snapTouchReleased_; }
 
 bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
   return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
@@ -702,17 +761,63 @@ bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) c
 
 bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
 
-bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const { return inputMgr.wasTouchLongPress(nx, ny); }
-
-void HalGPIO::suppressTouchContact() { inputMgr.suppressTouchContact(); }
-
-unsigned long HalGPIO::lastTouchHeldMs() const { return inputMgr.lastTouchHeldMs(); }
-
-bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
-  return inputMgr.wasSwipe(nxStart, nyStart, nxEnd, nyEnd);
+bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::LongPress) return false;
+  nx = snapTouchEvent_.nx;
+  ny = snapTouchEvent_.ny;
+  return true;
 }
 
-bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
+void HalGPIO::suppressTouchContact() {
+  inputMgr.suppressTouchContact();
+  // The SDK latch can only stop events it has not produced yet. Now that events
+  // are latched, the tap that follows a long press may ALREADY be queued by the
+  // time the long press is acted on — so drop what is held as well, or "ignore
+  // the rest of this contact" would not.
+  clearTouchEventState();
+}
+
+// Everything touch this class holds on the loop side or in its rings. Not
+// exposed: the two callers want it for different reasons (suppression, activity
+// transitions) and say so themselves.
+void HalGPIO::clearTouchEventState() {
+  portENTER_CRITICAL(&inputMux_);
+  touchEventHead_ = 0;
+  touchEventTail_ = 0;
+  touchReleasedPending_ = false;
+  gestureHead_ = 0;
+  gestureTail_ = 0;
+  portEXIT_CRITICAL(&inputMux_);
+  snapTouchEvent_ = TouchEvent{};
+  snapTouchReleased_ = false;
+}
+
+unsigned long HalGPIO::lastTouchHeldMs() const {
+  // The duration that belongs to the event being reported this cycle, so it
+  // cannot describe a different contact than the tap beside it. Falls back to
+  // the SDK's latched value when no event is in the snapshot.
+  if (snapTouchEvent_.kind == TouchEvent::Kind::Tap || snapTouchEvent_.kind == TouchEvent::Kind::Swipe) {
+    return snapTouchEvent_.heldMs;
+  }
+  return inputMgr.lastTouchHeldMs();
+}
+
+bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::Swipe) return false;
+  nxStart = snapTouchEvent_.nx;
+  nyStart = snapTouchEvent_.ny;
+  nxEnd = snapTouchEvent_.nxEnd;
+  nyEnd = snapTouchEvent_.nyEnd;
+  return true;
+}
+
+bool HalGPIO::wasTouchActivity() const {
+  // The latched half matters most here: this feeds the idle timer, and a tap
+  // completed while the loop was light-sleeping is exactly the activity that
+  // must stop it sleeping. The live read stays OR'd in so a press-DOWN, which is
+  // not a latched event, still counts.
+  return snapTouchEvent_.kind != TouchEvent::Kind::None || snapTouchReleased_ || inputMgr.wasTouchActivity();
+}
 
 unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS

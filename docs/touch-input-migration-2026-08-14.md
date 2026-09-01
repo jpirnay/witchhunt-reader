@@ -1157,18 +1157,44 @@ name one (the light), so `main.cpp` calls that immediately after
 with a frontlight to one without, where the stored action would otherwise be both
 inert and uneditable.
 
-### 8.8 Latching, and why gestures get it when taps do not
+### 8.8 Every touch event is latched
 
-The SDK's gesture flags are one-shot and cleared by its next `update()` — a ~10 ms
-life at our sampler cadence. Buttons have been latched into a ring since the
-sampler was introduced, because the loop task can be gone for hundreds of ms
-inside an e-paper refresh. A pinch is exactly the gesture someone makes while it
-is, so `HalGPIO` latches multi-touch the same way and the loop drains it.
+The SDK reports tap, swipe and long press as one-shot flags cleared by its next
+`update()` — a ~10 ms life at our 10 ms sampler cadence. Buttons have been
+latched into a ring for that reason since the sampler existed; touch was left as
+a live passthrough because it was device-validated as it stood.
 
-The single-contact tap and swipe passthroughs are deliberately **left alone**.
-They have the same exposure, but they are device-validated as they stand and
-rerouting them is a change to page turning, not to gestures. Worth revisiting if
-dropped taps are ever observed.
+**Device data settled it.** In one session 1 tap in 15 was dropped: the sampler
+line reported `tap=1` and no `[TCH] list tap` line followed, i.e. the loop never
+saw it. The dropped one came 2.6 s into an idle stretch, and
+`IDLE_LIGHT_SLEEP_MS` is 1000 — so the loop was almost certainly light-sleeping
+between polls. That makes the drops likeliest **while someone sits on a menu
+deciding what to tap**, not during a busy render, which is the worse of the two.
+
+So `HalGPIO` latches single-contact events the same way, and `update()` moves
+ONE into a loop-side snapshot. Three properties matter:
+
+* **Replaced, not merged.** Each event is visible for exactly one drain cycle,
+  the contract `snapPressed_` already has.
+* **Non-consuming within the cycle.** Several layers read the same tap in turn —
+  the gesture classifier looks, decides, and only then suppresses it before the
+  screen underneath reads it (§8.1). A pop-per-reader queue would have broken
+  that outright, which is why this is a snapshot and not a queue at the API.
+* **Suppression drops what is queued.** `suppressTouchContact()` now also clears
+  the ring and the snapshot. The SDK latch can only stop events it has not
+  produced yet, and after a slow tick the tap that follows a long press may
+  already be queued — without this, "ignore the rest of this contact" would not.
+
+Level states (`isTouchTapCandidate`, `isTouchHeldAt`) stay live reads: "where is
+the finger now" has no meaning latched.
+
+One consequence worth expecting: swipes made during a page refresh now queue and
+replay one per tick instead of being dropped. That is deliberate and matches what
+the button edge ring already does for a burst of presses during a slow slice.
+
+Activity transitions flush the ring (`flushTouchEvents()`, from
+`ButtonEventManager::drain()`), which matters more than it did — an event now
+outlives the tick it happened in.
 
 ### 8.9 Orientation must be sampled once
 

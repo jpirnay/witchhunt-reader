@@ -240,11 +240,10 @@ bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
 void MappedInputManager::setTouchEventsEnabled(const bool enabled) {
   if (enabled == touchEventsEnabled_) return;
   touchEventsEnabled_ = enabled;
-  // Going quiet drops what is already queued. The single-contact events expire
-  // on their own within a sampler pass, but a multi-touch gesture sits in the
-  // ring until something pops it — without this, turning touch back on would
-  // replay a pinch made while it was off.
-  if (!enabled) gpio.flushTouchGestures();
+  // Going quiet drops what is already queued: every touch event now sits in a
+  // ring until something drains it, so without this, turning touch back on would
+  // replay whatever was done while it was off.
+  if (!enabled) gpio.flushTouchEvents();
 }
 
 bool MappedInputManager::wasScreenTapped(int& x, int& y) const {

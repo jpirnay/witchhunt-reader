@@ -146,6 +146,31 @@ class HalGPIO {
   ButtonEdge edgeBuf_[EDGE_BUF] = {};
   int edgeHead_ = 0;
   int edgeTail_ = 0;
+  // A discrete single-contact touch event, latched by the sampler so it survives
+  // a loop tick that took longer than the SDK's flags live.
+  //
+  // The SDK reports tap / swipe / long-press as one-shot flags cleared by its
+  // next update(), i.e. a ~10 ms life at our sampler cadence. That is shorter
+  // than an e-paper refresh and — measured on device — shorter than the gap
+  // between polls once the idle governor starts light-sleeping at
+  // IDLE_LIGHT_SLEEP_MS, which is exactly when someone is sitting on a menu
+  // deciding what to tap. One tap in fifteen was being dropped that way.
+  //
+  // Buttons have been latched into a ring for this reason since the sampler
+  // existed; this is the same model. update() moves ONE event into the loop-side
+  // snapshot, where it stays visible for that whole cycle — which matters,
+  // because the accessors are non-consuming peeks that several layers read in
+  // turn (the gesture classifier decides before the reader sees the same tap).
+  struct TouchEvent {
+    enum class Kind : uint8_t { None, Tap, Swipe, LongPress };
+    Kind kind = Kind::None;
+    // Tap and LongPress: the touch-down point. Swipe: where it started.
+    float nx = 0.0f;
+    float ny = 0.0f;
+    float nxEnd = 0.0f;  // Swipe only.
+    float nyEnd = 0.0f;
+    uint16_t heldMs = 0;  // contact duration, latched at release (0 for LongPress)
+  };
   // Four is deliberately small. A multi-touch gesture ends when the fingers
   // leave the glass, so they cannot arrive faster than a person can lift and
   // replace two fingers; a backlog deeper than this means the loop has been gone
@@ -155,11 +180,22 @@ class HalGPIO {
   TouchGesture gestureBuf_[GESTURE_BUF] = {};
   int gestureHead_ = 0;
   int gestureTail_ = 0;
+  // Same size and the same argument as GESTURE_BUF: contacts end when a finger
+  // leaves the glass, so they cannot queue faster than someone can tap, and a
+  // deeper backlog means acting on the oldest would surprise more than dropping
+  // it.
+  static constexpr int TOUCH_EVENT_BUF = 4;
+  TouchEvent touchEventBuf_[TOUCH_EVENT_BUF] = {};
+  int touchEventHead_ = 0;
+  int touchEventTail_ = 0;
+  bool touchReleasedPending_ = false;  // release edges seen since the last drain
 
   // Loop-side snapshot refreshed by update(); only the loop task reads/writes these.
   uint8_t snapState_ = 0;
   uint8_t snapPressed_ = 0;
   uint8_t snapReleased_ = 0;
+  TouchEvent snapTouchEvent_{};
+  bool snapTouchReleased_ = false;
 
   // Capacitive home key -> the nav buttons the board physically lacks: tap emits
   // CONFIRM, hold emits BACK. Each is enabled independently in begin(), so a
@@ -188,6 +224,12 @@ class HalGPIO {
   // sampleOnce() with inputMux_ NOT held: it reads the SDK, which the critical
   // section must not do.
   void latchTouchGestures(uint32_t timeMs);
+  // Drain the SDK's one-shot single-contact flags into touchEventBuf_. Runs
+  // beside latchTouchGestures() and under the same rule: reads the SDK outside
+  // inputMux_, takes the lock only to push.
+  void latchTouchEvents();
+  // Drop every latched and snapshotted touch event, gestures included.
+  void clearTouchEventState();
   static void samplerTask(void* arg);
 
  public:
@@ -281,9 +323,11 @@ class HalGPIO {
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
   // Drain one queued multi-touch gesture (FIFO). Returns false when empty.
   bool popTouchGesture(TouchGesture& out);
-  // Drop every queued gesture (activity transitions), so a pinch made on the
-  // screen being left cannot act on the one being entered.
-  void flushTouchGestures();
+  // Drop every queued touch event — gestures AND single-contact taps, swipes and
+  // long presses, latched and snapshotted alike. For activity transitions, so a
+  // tap made on the screen being left cannot act on the one being entered, which
+  // matters more now that these outlive the tick they happened in.
+  void flushTouchEvents();
   // Coarse "the user touched the screen" signal — the touch analogue of
   // wasAnyPressed(). Feed this into the idle/sleep timer so touch counts as
   // activity (phase 3).
