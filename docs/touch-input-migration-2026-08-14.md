@@ -1056,43 +1056,59 @@ lookup on a hold, and universal convention for pinch and rotate:
 
 | Gesture | Default | Gesture | Default |
 |---|---|---|---|
-| Swipe up | Light Brighter | Long tap left | Previous Chapter |
-| Swipe down | Light Dimmer | Long tap right | Next Chapter |
-| Swipe left/right | Built-in | Long tap centre | Dictionary |
-| All five tap zones | Built-in | Long tap top | Toggle Reading Light |
-| Pinch in / out | Smaller / Larger Text | Long tap bottom | Star Page |
+| Swipe down, left half | Reader Menu | Long tap left | Previous Chapter |
+| Swipe down, right half | Light Dimmer | Long tap right | Next Chapter |
+| Swipe up, right half | Light Brighter | Long tap centre | Dictionary |
+| Swipe up, left half | Built-in | Long tap top | Toggle Reading Light |
+| Swipe left/right | Built-in | Long tap bottom | Star Page |
+| All five tap zones | Built-in | Pinch in / out | Smaller / Larger Text |
 | Rotate either way | Cycle Orientation | | |
 
 Brightness steps by 5, matching CrossInk's panel. Ten was too coarse: the SDK's
 gamma-1.6554 curve puts most of the usable range in the bottom third, where a
 10-point step is a large visible jump.
 
-**These take nothing away** — see §8.6 for the two rules that make that true,
-which were added after the first draft did cost the reader menu its swipe.
+**These take nothing away** — see §8.6.
 
-### 8.6 The menu edge, and the rule that protects it
+### 8.6 Left half is the menu, right half is the light
 
-Binding both vertical swipes to the light collides with the reader menu, which
-had the top-edge down-swipe. Two changes resolve it, and **both are needed** —
-either alone leaves the menu with no gesture at all.
+Binding a vertical swipe to the light collides with the reader menu, which owns
+the top-edge down-swipe. The answer is the one every phone already uses: a
+downward swipe means different things depending on **which half of the screen it
+starts in** — notification shade on the left, quick settings on the right.
 
-**The menu edge moves on boards that have a light.** `wasMenuGesture()` is now
-the BOTTOM-edge up-swipe when `Frontlight.present()`, and the top-edge
-down-swipe otherwise. A downward swipe naturally starts at the top, so leaving
-the menu there would permanently shadow "dim". CrossInk makes the same trade on
-its light-bearing boards and goes further, moving the reader menu's tabs to the
-bottom with it so they sit thumb-close; we move the gesture only, because our
-menu is a list rather than a tab bar. Keyed on the light being present rather
-than on a board name: without one, `dropUnsupportedActions()` clears the light
-bindings at boot, nothing contends for the top edge, and the menu stays exactly
-where existing users expect it.
+So the two vertical swipes are four gestures, split on the start point:
 
-**The gesture layer declines the menu's own edge swipe.** `consumeAction()` asks
-`wasMenuGesture()` before claiming a bound Swipe up/down, and leaves it alone
-when the answer is yes. Without this the move would achieve nothing — the
-defaults bind both directions, so the layer would claim the menu edge wherever
-it sat. The resulting rule is the one phones use: a swipe that starts at the menu
-edge opens the menu, the same swipe anywhere else changes the brightness.
+| | left half | right half |
+|---|---|---|
+| swipe down | Reader Menu | Light Dimmer |
+| swipe up | *(free)* | Light Brighter |
+
+The **start** point, not the end: a downward swipe travels, and where the finger
+ends up says nothing about which control the reader reached for. Horizontal
+swipes are deliberately not split — they are the page turn in Swipe mode, and a
+page turn does not care which half of the page it began on.
+
+Swipe-up-left is left unbound rather than filled in for symmetry. There is no
+obvious counterpart to "open the menu", and an unused gesture is better than a
+surprising one.
+
+Two earlier attempts at this collision are worth recording, because both looked
+reasonable and both were worse:
+
+* **Move the menu to the bottom edge on boards with a light** (what CrossInk
+  does). It only relocates the collision — the defaults bound *both* vertical
+  directions, so whichever edge the menu sat on would be claimed first.
+* **Have the gesture layer decline the menu's own edge swipe.** That worked, but
+  the rule "your bound swipe does nothing if you happen to start it at one
+  particular edge" is not something a user can predict from the settings screen.
+
+The split beats both because it is visible in the settings rows themselves: the
+row is called "Swipe down, left half", so what it does and where is on the
+screen in front of you. `wasMenuGesture()` is therefore back to the top-edge
+down-swipe on every board, which is where it has always been — it remains the
+built-in for both down-swipe rows, and being edge-anchored it is *narrower* than
+the rows that supersede it.
 
 ### 8.7 Two ordering rules that are easy to break
 

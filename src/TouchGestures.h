@@ -1,6 +1,5 @@
 #pragma once
 
-#include <HalFrontlight.h>
 #include <I18nKeys.h>
 
 #include <cstdint>
@@ -30,8 +29,15 @@ namespace TouchGestures {
 enum class Gesture : uint8_t {
   SwipeLeft,
   SwipeRight,
-  SwipeUp,
-  SwipeDown,
+  // Vertical swipes are split by the half of the screen they START in, the way a
+  // phone splits the notification shade from quick settings: down the left half
+  // reaches the menu, down the right half reaches the light. Horizontal swipes
+  // are not split — they are the page turn in Swipe mode, and a page turn does
+  // not care which half of the page it began on.
+  SwipeUpLeft,
+  SwipeUpRight,
+  SwipeDownLeft,
+  SwipeDownRight,
   TapLeft,
   TapRight,
   TapCentre,
@@ -71,10 +77,14 @@ inline constexpr Binding BINDINGS[] = {
      "gestSwipeLeft", false},
     {Gesture::SwipeRight, &CrossPointSettings::gestSwipeRight, StrId::STR_GEST_SWIPE_RIGHT, StrId::STR_GEST_SWIPE_GROUP,
      "gestSwipeRight", false},
-    {Gesture::SwipeUp, &CrossPointSettings::gestSwipeUp, StrId::STR_GEST_SWIPE_UP, StrId::STR_GEST_SWIPE_GROUP,
-     "gestSwipeUp", false},
-    {Gesture::SwipeDown, &CrossPointSettings::gestSwipeDown, StrId::STR_GEST_SWIPE_DOWN, StrId::STR_GEST_SWIPE_GROUP,
-     "gestSwipeDown", false},
+    {Gesture::SwipeUpLeft, &CrossPointSettings::gestSwipeUpLeft, StrId::STR_GEST_SWIPE_UP_LEFT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeUpLeft", false},
+    {Gesture::SwipeUpRight, &CrossPointSettings::gestSwipeUpRight, StrId::STR_GEST_SWIPE_UP_RIGHT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeUpRight", false},
+    {Gesture::SwipeDownLeft, &CrossPointSettings::gestSwipeDownLeft, StrId::STR_GEST_SWIPE_DOWN_LEFT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownLeft", false},
+    {Gesture::SwipeDownRight, &CrossPointSettings::gestSwipeDownRight, StrId::STR_GEST_SWIPE_DOWN_RIGHT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownRight", false},
     {Gesture::TapLeft, &CrossPointSettings::gestTapLeft, StrId::STR_GEST_TAP_LEFT, StrId::STR_GEST_TAP_GROUP,
      "gestTapLeft", false},
     {Gesture::TapRight, &CrossPointSettings::gestTapRight, StrId::STR_GEST_TAP_RIGHT, StrId::STR_GEST_TAP_GROUP,
@@ -113,9 +123,10 @@ static_assert(sizeof(BINDINGS) / sizeof(BINDINGS[0]) == static_cast<size_t>(Gest
 // enum automatically.
 inline const char* nameOf(const Gesture gesture) {
   static constexpr const char* kNames[] = {
-      "swipe-left",  "swipe-right",    "swipe-up",   "swipe-down",   "tap-left",      "tap-right",
-      "tap-centre",  "tap-top",        "tap-bottom", "longtap-left", "longtap-right", "longtap-centre",
-      "longtap-top", "longtap-bottom", "pinch-in",   "pinch-out",    "rotate-cw",     "rotate-ccw",
+      "swipe-left",       "swipe-right",  "swipe-up-left", "swipe-up-right", "swipe-down-left",
+      "swipe-down-right", "tap-left",     "tap-right",     "tap-centre",     "tap-top",
+      "tap-bottom",       "longtap-left", "longtap-right", "longtap-centre", "longtap-top",
+      "longtap-bottom",   "pinch-in",     "pinch-out",     "rotate-cw",      "rotate-ccw",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Gesture::Count),
                 "every Gesture needs a trace name");
@@ -149,19 +160,14 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::SwipeRight:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
-    case Gesture::SwipeUp:
-    case Gesture::SwipeDown: {
-      // One edge opens the reader menu, and which one depends on whether the
-      // board has a light — see MappedInputManager::wasMenuGesture(). Only the
-      // reading controls gate it; unlike the centre tap it does not consult
-      // tapForReaderMenu.
-      //
-      // Said as "Reader Menu" on the direction that owns the edge, because that
-      // is what leaving the row alone gets you there. The gesture is still
-      // bindable, and a binding still works everywhere except that edge.
-      const Gesture menuSwipe = Frontlight.present() ? Gesture::SwipeUp : Gesture::SwipeDown;
-      return (readerTouchOn && gesture == menuSwipe) ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
-    }
+    case Gesture::SwipeDownLeft:
+    case Gesture::SwipeDownRight:
+      // Left alone, a downward swipe that starts at the TOP EDGE opens the
+      // reader menu, on either half — that is the reader's own built-in
+      // (isTouchMenuGesture), and it is narrower than these rows, which fire
+      // anywhere in their half. Only the reading controls gate it; unlike the
+      // centre tap it does not consult tapForReaderMenu.
+      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::TapLeft:
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_PREV_PAGE;

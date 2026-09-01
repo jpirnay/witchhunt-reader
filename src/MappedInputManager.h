@@ -213,6 +213,11 @@ class MappedInputManager {
   // mapping both endpoints into logical pixels, so it depends on the orientation
   // exactly as a tap position does — see wasScreenTappedIn().
   SwipeDir wasSwipeIn(touchtransform::Orientation orientation) const;
+  // Same, and also reports where the swipe STARTED, in logical pixels. The start
+  // point is what decides which half of the screen a swipe belongs to — the same
+  // question a phone asks to tell the notification shade from quick settings —
+  // and TouchGestures splits the vertical swipes on it.
+  SwipeDir wasSwipeIn(touchtransform::Orientation orientation, int& startX, int& startY) const;
 
   // --- Multi-touch ------------------------------------------------------------
   // A completed two-finger gesture, already resolved to what it means ON SCREEN,

@@ -2,7 +2,6 @@
 
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
-#include <HalFrontlight.h>
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
@@ -402,11 +401,20 @@ MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
 }
 
 MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation) const {
+  int startX = 0;
+  int startY = 0;
+  return wasSwipeIn(orientation, startX, startY);
+}
+
+MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation, int& startX,
+                                                            int& startY) const {
   int sx = 0;
   int sy = 0;
   int ex = 0;
   int ey = 0;
   if (!decodeSwipe(orientation, sx, sy, ex, ey)) return SwipeDir::None;
+  startX = sx;
+  startY = sy;
   switch (fui::swipeDirection(sx, sy, ex, ey)) {
     case fui::SwipeDir::Left:
       return SwipeDir::Left;
@@ -450,22 +458,13 @@ bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
-bool MappedInputManager::wasMenuGesture() const {
-  // The menu moves to the BOTTOM edge on boards with a reading light, because
-  // the top edge is where a downward swipe means "dim" once the shipped gesture
-  // defaults are in play — and a downward swipe naturally starts at the top, so
-  // leaving the menu there would shadow the light control permanently.
-  //
-  // CrossInk makes the same trade on its light-bearing boards and takes it
-  // further, moving the reader menu's tabs to the bottom with it so they sit
-  // thumb-close. We move the gesture only; our menu is a list, not a tab bar.
-  //
-  // Keyed on the light actually being present rather than on a board name: on a
-  // board without one the light gestures are cleared at boot
-  // (CrossPointSettings::dropUnsupportedActions), so nothing contends for the
-  // top edge and the menu stays where every existing user expects it.
-  return Frontlight.present() ? wasBottomEdgeUpSwipe() : wasTopEdgeDownSwipe();
-}
+// Stays on the top edge, on every board. An earlier revision moved it to the
+// bottom on boards with a light, because the shipped defaults then bound BOTH
+// vertical directions to brightness and the top edge was contended. Splitting
+// the vertical swipes by screen half removed that contention entirely — the menu
+// and the light now share the downward swipe, one half each — so the menu stays
+// where it has always been.
+bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();

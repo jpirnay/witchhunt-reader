@@ -426,12 +426,18 @@ class CrossPointSettings {
   // binding them would override that in every mode.
   uint8_t gestSwipeLeft = BTN_DEFAULT;
   uint8_t gestSwipeRight = BTN_DEFAULT;
-  // Vertical swipes drive brightness, as they do on Kobo and Kindle. This is the
-  // one default that takes something away: a bound Swipe down claims the
-  // top-edge down-swipe that opens the reader menu. The menu keeps its centre
-  // tap (tapForReaderMenu, on by default) and the Confirm button.
-  uint8_t gestSwipeUp = BTN_LIGHT_BRIGHTER;
-  uint8_t gestSwipeDown = BTN_LIGHT_DIMMER;
+  // Vertical swipes are split by the half of the screen they start in, the way a
+  // phone splits the notification shade from quick settings: the left half is
+  // where you reach the menu, the right half is where you reach the light. That
+  // split is what lets both live on the same gesture without either losing it.
+  //
+  // Swipe up on the left is left free rather than filled for symmetry's sake —
+  // there is no obvious counterpart to "open the menu", and an unused gesture is
+  // better than a surprising one.
+  uint8_t gestSwipeUpLeft = BTN_DEFAULT;
+  uint8_t gestSwipeUpRight = BTN_LIGHT_BRIGHTER;
+  uint8_t gestSwipeDownLeft = BTN_READER_MENU;
+  uint8_t gestSwipeDownRight = BTN_LIGHT_DIMMER;
   // Every tap zone stays Built-in, and must. The reader's own tap handling is
   // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
   // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look

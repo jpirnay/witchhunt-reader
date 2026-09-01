@@ -92,8 +92,17 @@ bool GestureEventManager::consumeAction(BA& action) {
   // reports both for the same contact when the travel sits near the threshold.
   // Direction is resolved in the orientation sampled above, so it is the way the
   // page moved, not the way the panel is wired.
+  //
+  // Vertical swipes are split by the half of the screen they START in, which is
+  // the question a phone asks to tell the notification shade from quick
+  // settings. The start point rather than the end: a downward swipe travels, and
+  // where it ends up says nothing about which control the reader reached for.
+  // Horizontal swipes are not split — they are the page turn in Swipe mode, and
+  // a page turn does not care which half of the page it began on.
+  int swipeStartX = 0;
+  int swipeStartY = 0;  // unused: the split is horizontal, but decodeSwipe reports both
   Gesture swipe = Gesture::Count;
-  switch (input.wasSwipeIn(touchOrientation)) {
+  switch (input.wasSwipeIn(touchOrientation, swipeStartX, swipeStartY)) {
     case MappedInputManager::SwipeDir::Left:
       swipe = Gesture::SwipeLeft;
       break;
@@ -101,27 +110,15 @@ bool GestureEventManager::consumeAction(BA& action) {
       swipe = Gesture::SwipeRight;
       break;
     case MappedInputManager::SwipeDir::Up:
-      swipe = Gesture::SwipeUp;
+      swipe = swipeStartX < width / 2 ? Gesture::SwipeUpLeft : Gesture::SwipeUpRight;
       break;
     case MappedInputManager::SwipeDir::Down:
-      swipe = Gesture::SwipeDown;
+      swipe = swipeStartX < width / 2 ? Gesture::SwipeDownLeft : Gesture::SwipeDownRight;
       break;
     case MappedInputManager::SwipeDir::None:
       break;
   }
-  // A swipe that IS the reader's menu edge gesture belongs to the menu, even
-  // when its direction is bound. Without this the whole point of moving the menu
-  // edge is lost: the shipped defaults bind BOTH vertical directions to the
-  // light, so wherever the menu edge sits, the gesture layer would claim it
-  // first and the menu would have no swipe at all.
-  //
-  // The rule a reader ends up with is the one phones use — a swipe that starts
-  // at the menu edge opens the menu, the same swipe anywhere else changes the
-  // brightness. wasMenuGesture() is a const peek like the rest, so asking costs
-  // nothing and steals nothing.
-  const bool menuOwnsThisSwipe =
-      SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF && input.wasMenuGesture();
-  if (swipe != Gesture::Count && !menuOwnsThisSwipe && boundAction(swipe, action)) {
+  if (swipe != Gesture::Count && boundAction(swipe, action)) {
     input.suppressTouchContact();
     return true;
   }
