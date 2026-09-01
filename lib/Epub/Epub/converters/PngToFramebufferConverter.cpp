@@ -256,7 +256,20 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                     const RenderConfig& config) {
-  LOG_TRC("PNG", "Decoding PNG: %s", imagePath.c_str());
+  FsFile file;
+  if (!Storage.openFileForRead("PNG", imagePath, file)) {
+    LOG_ERR("PNG", "Failed to open PNG: %s", imagePath.c_str());
+    return false;
+  }
+  const bool ok = decodeOpenFile(file, imagePath, renderer, config);
+  file.close();
+  return ok;
+}
+
+bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& label, GfxRenderer& renderer,
+                                               const RenderConfig& config) {
+  LOG_TRC("PNG", "Decoding PNG: %s", label.c_str());
+  const std::string& imagePath = label;  // logging only; the stream is the caller's
 
   const size_t freeHeap = ESP.getFreeHeap();
   if (const size_t floor = pngDecodeHeapFloor(); freeHeap < floor) {
@@ -264,23 +277,15 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     return false;
   }
 
-  FsFile file;
-  if (!Storage.openFileForRead("PNG", imagePath, file)) {
-    LOG_ERR("PNG", "Failed to open PNG: %s", imagePath.c_str());
-    return false;
-  }
-
   auto decoder = std::unique_ptr<PngStreamDecoder>(new (std::nothrow) PngStreamDecoder());
   if (!decoder) {
     LOG_ERR("PNG", "Failed to allocate PNG decoder");
-    file.close();
     return false;
   }
   decoder->setScratchArena(image_scratch::get());
   PngStreamDecoder::Info info;
   if (!decoder->begin(file, info)) {
     LOG_ERR("PNG", "Failed to start PNG decode: %s", imagePath.c_str());
-    file.close();
     return false;
   }
 
@@ -312,7 +317,6 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   auto grayLine = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[srcWidth]);
   if (!grayLine) {
     LOG_ERR("PNG", "Failed to allocate gray line buffer");
-    file.close();
     return false;
   }
 
@@ -450,7 +454,6 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   }
 
   decoder->end();
-  file.close();
 
   if (caching) {
     if (ok) {

@@ -10,6 +10,15 @@ class PngToFramebufferConverter final : public ImageToFramebufferDecoder {
 
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
+  // Decode from an ALREADY-OPEN file whose read position is the PNG's first byte. The decoder
+  // only ever reads forward and seeks relatively, so the stream does not have to start at offset
+  // 0 of the file -- which is what lets a PNG stored uncompressed inside an EPUB be decoded in
+  // place, with no extraction to SD first (see Epub::getStoredItemRange).
+  //
+  // `label` names the source in logs only. The caller owns the file and must keep it open for
+  // the whole call; this never closes it.
+  static bool decodeOpenFile(FsFile& file, const std::string& label, GfxRenderer& renderer, const RenderConfig& config);
+
   // Builds a luminance histogram for adaptive tone mapping and returns the derived
   // black/white points, or an inactive result if the image does not need (or cannot
   // support) the correction.

@@ -171,6 +171,23 @@ bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   return found;
 }
 
+bool ZipFile::getStoredEntryRange(const char* filename, uint32_t* offset, uint32_t* size) {
+  if (!offset || !size) return false;
+  const ScopedOpenClose zip{*this};
+  if (!zip) return false;
+
+  FileStatSlim fileStat = {};
+  if (!loadFileStatSlim(filename, &fileStat)) return false;
+  if (fileStat.method != ZIP_METHOD_STORED) return false;
+
+  const long dataOffset = getDataOffset(fileStat);
+  if (dataOffset < 0) return false;
+
+  *offset = static_cast<uint32_t>(dataOffset);
+  *size = fileStat.uncompressedSize;  // identical to compressedSize for a stored entry
+  return true;
+}
+
 long ZipFile::getDataOffset(const FileStatSlim& fileStat) {
   const ScopedOpenClose zip{*this};
   if (!zip) return -1;

@@ -12,6 +12,7 @@
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/PixelCache.h"
+#include "../converters/PngToFramebufferConverter.h"
 
 // Cache file format (see PixelCache::PXC_MAGIC):
 // - uint16_t magic/version (high bit always set, distinguishing it from the legacy
@@ -94,6 +95,39 @@ std::string getBwCachePath(const std::string& imagePath) { return withSuffix(ima
 // Like the BW plane above, these pixels carry no tone correction, so one cache per image
 // serves every display setting — the name needs no key and never forks.
 std::string getGrayscaleCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".bayer.pxc"); }
+
+// Decode a PNG straight out of the EPUB, with no extraction to SD first.
+//
+// Only possible when the ZIP STORES the entry (already-compressed formats usually are): the
+// bytes in the archive are then the file, and PngStreamDecoder reads forward and seeks only
+// relatively, so a handle parked at the entry's first byte is all it needs.
+//
+// Worth doing because the extract it replaces is pure copying — 857 KB measured at ~255 KB/s,
+// 3.36 s of the 14.93 s an uncached cover cost, plus 857 KB written to the card. Deflated
+// entries cannot take this path (see Epub::getStoredItemRange) and still extract.
+//
+// Returns false if anything at all is not right, leaving the caller to extract and retry: a
+// failed attempt costs one bounded seek and whatever partial decode happened, and PixelCache
+// deletes its own partial file, so the fallback starts clean.
+bool decodePngInPlace(const std::string& epubFilePath, const std::string& epubEntryPath, GfxRenderer& renderer,
+                      const RenderConfig& config) {
+  Epub epub(epubFilePath, "/.crosspoint");
+  uint32_t offset = 0;
+  uint32_t size = 0;
+  if (!epub.getStoredItemRange(epubEntryPath, &offset, &size) || size == 0) return false;
+
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", epubFilePath, file)) return false;
+  if (!file.seekSet(offset)) {
+    file.close();
+    return false;
+  }
+  LOG_DBG("IMG", "Decoding in place from archive: %s (%u bytes at %u)", epubEntryPath.c_str(),
+          static_cast<unsigned>(size), static_cast<unsigned>(offset));
+  const bool ok = PngToFramebufferConverter::decodeOpenFile(file, epubEntryPath, renderer, config);
+  file.close();
+  return ok;
+}
 
 // srcYOffset: first source row to render (0 = top of image).
 // srcHeight:  number of rows to render (0 = full image from srcYOffset).
@@ -339,28 +373,8 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
-  // Ensure the image is extracted to SD (lazy extraction if not already present).
-  if (!ensureExtracted()) {
-    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
-    return;
-  }
-
-  // Proceed with full decode
-  FsFile file;
-  if (!Storage.openFileForRead("IMG", imagePath, file)) {
-    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
-    return;
-  }
-  size_t fileSize = file.size();
-  file.close();
-
-  if (fileSize == 0) {
-    LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
-    return;
-  }
-
-  LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
-
+  // Build the decode config before deciding HOW to reach the bytes: the in-place shortcut
+  // below needs the same config the extracted path would use.
   RenderConfig config;
   config.x = x;
   config.y = y;
@@ -387,6 +401,38 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   //
   // Leaving both variants untoned is also what keeps them interchangeable inputs: they now
   // differ only in ditherer (1-bit Atkinson vs 4-level Bayer) over an identical grey stream.
+
+  // Shortcut: a PNG the archive stores uncompressed needs no extraction at all — decode it
+  // where it lies (see decodePngInPlace). Only attempted while the file is genuinely absent
+  // from SD; once extracted, reading the plain file is simpler and no slower.
+  //
+  // The extension is a hint, not a guarantee (a .png that is really an AVIF is a thing that
+  // happens), but it costs nothing to be wrong: the decoder rejects the signature and we fall
+  // through to the extract exactly as before.
+  if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !Storage.exists(imagePath.c_str()) &&
+      FsHelpers::hasPngExtension(imagePath) && decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) {
+    return;
+  }
+
+  // Ensure the image is extracted to SD (lazy extraction if not already present).
+  if (!ensureExtracted()) {
+    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
+    return;
+  }
+
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", imagePath, file)) {
+    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
+    return;
+  }
+  const size_t fileSize = file.size();
+  file.close();
+  if (fileSize == 0) {
+    LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
+    return;
+  }
+
+  LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {

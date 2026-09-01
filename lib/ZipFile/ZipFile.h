@@ -76,6 +76,14 @@ class ZipFile {
   bool open();
   bool close();
   bool getInflatedFileSize(const char* filename, size_t* size);
+
+  // Absolute byte offset and length of an entry's data within the archive, and true, ONLY when
+  // that entry is STORED (method 0). A caller can then read the entry straight out of the .zip
+  // with no decompression and no temporary copy.
+  //
+  // False for a deflated entry -- there is no such range: those bytes are a DEFLATE stream, not
+  // the file. Also false if the entry is missing or its local header does not check out.
+  bool getStoredEntryRange(const char* filename, uint32_t* offset, uint32_t* size);
   // Batch lookup: scan ZIP central dir once and fill sizes for matching targets.
   // targets must be sorted by (hash, len). sizes[target.index] receives uncompressedSize.
   // Returns number of targets matched. Deques, not vectors: a 1700-spine book needs ~28 KB of

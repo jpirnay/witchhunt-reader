@@ -228,6 +228,15 @@ class Epub {
   // extraction into a failed one. See docs/memory-allocation-strategy.md §4 (class D).
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena = nullptr) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
+  // Byte range of an item's raw data inside the EPUB, valid ONLY when the ZIP stores that entry
+  // uncompressed (method 0). Lets a decoder read the entry in place instead of extracting it to
+  // SD first -- worth ~3.4 s on an 857 KB cover, which is pure copying at ~255 KB/s.
+  //
+  // Returns false for a deflated entry, and it must: the bytes there are DEFLATE, not the file,
+  // and streaming them into a decoder that inflates again would need two 32 KB uzlib rings live
+  // at once -- more contiguous heap than this device has. Already-compressed formats (PNG, JPEG)
+  // are commonly stored, which is exactly where the copy hurts most.
+  bool getStoredItemRange(const std::string& itemHref, uint32_t* offset, uint32_t* size) const;
   bool getSpineItemInflatedSize(int spineIndex, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;

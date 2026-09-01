@@ -1551,6 +1551,16 @@ bool Epub::getItemSize(const std::string& itemHref, size_t* size) const {
   return ok;
 }
 
+bool Epub::getStoredItemRange(const std::string& itemHref, uint32_t* offset, uint32_t* size) const {
+  if (!offset || !size) return false;
+  const std::string path = FsHelpers::normalisePath(itemHref);
+  ZipFile zip(filepath);
+  primeZip(zip);
+  const bool ok = zip.getStoredEntryRange(path.c_str(), offset, size);
+  adoptZipDetails(zip);
+  return ok;
+}
+
 void Epub::ensureSpineStats() const {
   if (spineStatsResolved_) return;
   spineStatsResolved_ = true;  // one attempt per book instance; on failure fall back to scans
