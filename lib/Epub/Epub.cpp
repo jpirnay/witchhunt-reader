@@ -1,6 +1,7 @@
 #include "Epub.h"
 
 #include <Bitmap.h>
+#include <BufferedFileIO.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
@@ -1461,14 +1462,68 @@ bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print&
   return true;
 }
 
+namespace {
+
+// Buffers the extract's writes on their way to SD.
+//
+// Both stream paths below hand the sink 512 B - 1 KB at a time, which is how they read; written
+// straight through, a cover-sized entry becomes thousands of single-sector SD writes. Device-
+// measured on X4: 857182 bytes took ~17 s that way, ~50 KB/s, while the SAME file read back by
+// the PNG decoder through its 2 KB buffer managed ~215 KB/s. Batching into EXTRACT_WRITE_BUFFER_
+// BYTES lets SdFat issue multi-sector transfers instead.
+//
+// A null/failed buffer degrades to pass-through rather than failing the extract — slow is a
+// nuisance, no cover is a bug.
+class BufferedExtractSink : public Print {
+ public:
+  BufferedExtractSink(FsFile& file, uint8_t* buffer, const size_t capacity)
+      : writer_(file, buffer, buffer ? capacity : 0) {}
+
+  size_t write(const uint8_t byte) override { return write(&byte, 1); }
+  size_t write(const uint8_t* data, const size_t size) override { return writer_.write(data, size) ? size : 0; }
+
+  // Named drain() rather than flush(): Print::flush() is virtual with a void return, and this
+  // one's result decides whether the extract succeeded.
+  bool drain() { return writer_.flush(); }
+
+ private:
+  serialization::BufferedFileWriter writer_;
+};
+
+}  // namespace
+
 bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
   FsFile destFile;
   if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
     LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
     return false;
   }
-  const bool ok = arena ? readItemContentsToStreamWithArena(itemHref, destFile, arena)
-                        : readItemContentsToStream(itemHref, destFile, 1024);
+  // The write buffer is reserved BEFORE the reader takes its own block, because BuildArena is
+  // LIFO: the reader is created and released inside the call below, so it must sit on top of
+  // this one. Falls back to a heap buffer (and then to pass-through) when there is no arena.
+  BuildArena::Block writeBlock;
+  uint8_t* writeBuf = nullptr;
+  std::unique_ptr<uint8_t[]> heapWriteBuf;
+  if (arena && arena->valid() && arena->capacity() - arena->used() >= EXTRACT_WRITE_BUFFER_BYTES) {
+    writeBlock = arena->reserveBlock();
+    writeBuf = static_cast<uint8_t*>(arena->alloc(EXTRACT_WRITE_BUFFER_BYTES));
+  }
+  if (!writeBuf) {
+    heapWriteBuf = makeUniqueNoThrow<uint8_t[]>(EXTRACT_WRITE_BUFFER_BYTES);
+    writeBuf = heapWriteBuf.get();
+  }
+
+  bool ok;
+  {
+    BufferedExtractSink sink(destFile, writeBuf, EXTRACT_WRITE_BUFFER_BYTES);
+    ok = arena ? readItemContentsToStreamWithArena(itemHref, sink, arena)
+               : readItemContentsToStream(itemHref, sink, 1024);
+    // Drain before the file is flushed/closed, and let a failed final write fail the extract:
+    // a short file would otherwise pass as a complete one and be decoded as garbage.
+    if (!sink.drain()) ok = false;
+  }
+  if (writeBlock.valid()) arena->release(writeBlock);
+
   destFile.flush();
   destFile.close();
   if (!ok) Storage.remove(destPath.c_str());

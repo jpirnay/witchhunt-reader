@@ -210,7 +210,13 @@ class Epub {
   // Arena bytes one extractItemToFile() needs to keep its inflate ring off the heap:
   // a 1 KB read buffer plus the worst-case 32 KB ring (the entry size is not known until
   // open(), so budget the cap). Callers gate on image_scratch::canServe(this).
-  static constexpr size_t EXTRACT_ARENA_BYTES = 33 * 1024;
+  // Staging buffer for an extract's SD writes. See BufferedExtractSink in the .cpp for the
+  // device measurement behind it; 4 KB is eight sectors, which is where SdFat's multi-sector
+  // path starts paying off, and small enough to come out of the heap when there is no arena.
+  static constexpr size_t EXTRACT_WRITE_BUFFER_BYTES = 4 * 1024;
+  // Inflate ring (<=32 KB) + the reader's 1 KB chunk + the write buffer above: what an extract
+  // needs from the arena to run entirely off the heap.
+  static constexpr size_t EXTRACT_ARENA_BYTES = 33 * 1024 + EXTRACT_WRITE_BUFFER_BYTES;
 
   // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
   //

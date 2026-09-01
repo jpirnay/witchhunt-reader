@@ -104,6 +104,36 @@ TEST_F(ImageExtractionFixture, TooSmallArenaFallsBackToHeapInsteadOfFailing) {
 
 }  // namespace
 
+// The write buffer is reserved from the arena BEFORE the reader takes its block, because
+// BuildArena is LIFO. Get that order wrong and the release is rejected, leaking the block for
+// the rest of the pass — so assert the arena comes back empty, not just that the bytes are right.
+TEST_F(ImageExtractionFixture, ArenaWriteBufferIsReleasedInOrder) {
+  BuildArena arena(Epub::EXTRACT_ARENA_BYTES + 1024);
+  ASSERT_TRUE(arena.valid());
+  const auto bytes = extract("ordered.png", &arena);
+
+  ASSERT_EQ(bytes.size(), kEntryBytes);
+  EXPECT_EQ(arena.used(), 0u) << "write buffer and reader block must both be released";
+  EXPECT_EQ(arena.failedAllocSize(), 0u);
+  EXPECT_GT(arena.highWater(), 32u * 1024u + Epub::EXTRACT_WRITE_BUFFER_BYTES)
+      << "both the ring and the write buffer should have come from the arena";
+}
+
+// An arena with room for the reader but not the write buffer must still extract correctly — the
+// buffer falls back to the heap, and then to unbuffered pass-through. Slow is a nuisance; a
+// truncated image is a bug.
+TEST_F(ImageExtractionFixture, WriteBufferFallsBackWithoutBreakingTheExtract) {
+  const auto viaHeap = extract("reference.png", nullptr);
+  ASSERT_EQ(viaHeap.size(), kEntryBytes);
+
+  BuildArena arena(33 * 1024 + 1024);  // reader fits, write buffer does not
+  ASSERT_TRUE(arena.valid());
+  const auto bytes = extract("tight.png", &arena);
+
+  EXPECT_EQ(bytes, viaHeap);
+  EXPECT_EQ(arena.used(), 0u);
+}
+
 // --- large-image placeholder gate ------------------------------------------------------------
 //
 // This used to compare ImageBlock's width*height — the DISPLAY dimensions — against 800*600.
