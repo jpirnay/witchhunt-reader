@@ -109,7 +109,9 @@ class Section {
   // to skip ZIP inflation. Adapted from crosspoint-reader PR #2452 by GitHub user itsthisjustin.
   std::string getSectionHtmlCachePath() const;
   // Computes the image base path for extract images related to this specific section variant
-  std::string getImageBasePath(uint32_t propertyHash) const;
+  // Directory prefix for extracted source images. Content-keyed by the caller (see
+  // ChapterHtmlSlimParser), so one extraction serves every layout variant.
+  std::string getImageBasePath() const;
   // Garbage collection: Keep only the most recent N variants per chapter
   void evictOldVariants() const;
 

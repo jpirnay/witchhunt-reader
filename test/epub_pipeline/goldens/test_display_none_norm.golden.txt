@@ -652,7 +652,7 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=111 s=0 z=100 t=should
    W x=178 s=0 z=100 t=be
    W x=199 s=0 z=100 t=visible:
-  IMG y=168 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_9_c5e4922f_0.png
+  IMG y=168 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_93fa3023e1d69067.png
   LINE y=248 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=If
    W x=51 s=0 z=100 t=you
@@ -815,7 +815,7 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=It
    W x=25 s=0 z=100 t=SHOULD
    W x=89 s=0 z=100 t=appear:
-  IMG y=236 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_9_c5e4922f_1.png
+  IMG y=236 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_de279f00d41522d8.png
   LINE y=316 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=If
    W x=45 s=0 z=100 t=the
@@ -850,7 +850,7 @@ SPINE 10 href=OEBPS/chapter11.xhtml pages=1 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=text
    W x=119 s=0 z=100 t=1
-  IMG y=86 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_10_c5e4922f_0.png
+  IMG y=86 x=170 w=120 h=80 src=<cache>/epub_<hash>/img_93fa3023e1d69067.png
   LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=text

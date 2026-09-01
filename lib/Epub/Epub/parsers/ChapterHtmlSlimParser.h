@@ -165,7 +165,6 @@ class ChapterHtmlSlimParser final : public Print {
   uint8_t imageRendering;
   std::string contentBase;
   std::string imageBasePath;
-  int imageCounter = 0;
 
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
@@ -459,7 +458,7 @@ class ChapterHtmlSlimParser final : public Print {
   void streamClosedCell(BufferedTableRow& row);
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
-  // cannot be resolved. Advances imageCounter to allocate a unique cache path.
+  // cannot be resolved. The cache path is derived from the archive entry, not from parse order.
   std::shared_ptr<ImageBlock> buildCellImage(const std::string& src, const std::string& alt, uint16_t maxWidth,
                                              uint16_t maxHeight);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.

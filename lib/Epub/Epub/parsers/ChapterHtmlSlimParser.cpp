@@ -13,10 +13,29 @@
 #include <cctype>
 
 #include "../../Epub.h"
+#include "../HashUtils.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
+
+namespace {
+// Cache filename for an image extracted out of the EPUB, keyed by the archive entry it came from.
+//
+// The entry path is the only thing that identifies these bytes. It is deliberately NOT the parse
+// order: imageCounter used to serve that role, but buildCellImage() bails before incrementing it
+// when an image's dimensions cannot be resolved, and dimension resolution depends on images.bin
+// filling in over time -- so the same document could number its images differently between runs
+// and hand a block the file belonging to a different image. Hashing the entry cannot drift.
+std::string imageCachePathFor(const std::string& imageBasePath, const std::string& resolvedPath) {
+  std::string ext;
+  const size_t extPos = resolvedPath.rfind('.');
+  if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
+  char hash[17];
+  snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(HashUtils::fnvHash64(resolvedPath)));
+  return imageBasePath + hash + ext;
+}
+}  // namespace
 
 const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
@@ -1569,10 +1588,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
           if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
             // Determine SD cache path (image will be extracted here lazily at first render).
-            std::string ext;
-            size_t extPos = resolvedPath.rfind('.');
-            if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
-            std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
+            const std::string cachedImagePath = imageCachePathFor(self->imageBasePath, resolvedPath);
 
             // Get dimensions, cheapest ring-free source first:
             //  1. explicit width/height on the tag (an SVG cover / sized <img>) — no ZIP read at all;
@@ -3465,10 +3481,7 @@ std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::str
   const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
   const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
 
-  std::string ext;
-  const size_t extPos = resolvedPath.rfind('.');
-  if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
-  const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
+  const std::string cachedPath = imageCachePathFor(imageBasePath, resolvedPath);
 
   return std::make_shared<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
                                       static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
