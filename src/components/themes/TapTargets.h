@@ -136,4 +136,15 @@ inline Recorder& homeMenu() {
   return r;
 }
 
+// The settings tab bar. A horizontal strip of variable-width tabs, so no y-band model describes
+// it and it cannot be a ListTouchBand -- the same reason the carousel theme's menu is here.
+//
+// Values are CATEGORY indices. Recorded by each theme's drawTabBar() from the same x it painted
+// the label at, because the three themes space and pad their tabs differently and re-deriving
+// that in the activity is a second copy of the layout rule.
+inline Recorder& tabBar() {
+  static Recorder r;
+  return r;
+}
+
 }  // namespace TapTargets

@@ -136,11 +136,16 @@ inline std::vector<SettingInfo> buildSettingsList() {
   const bool hasLight = Frontlight.present();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
-    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() +
-                   (hasLight ? lightActionOptions.size() : 0));
+    // Reserves for the light options whether or not this board has them: a hint
+    // does not need to be exact, and three spare pointers cost less than a
+    // condition that reads as dead code on every build without a frontlight.
+    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size());
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
     result.insert(result.end(), extraActionOptions.begin(), extraActionOptions.end());
+    // cppcheck-suppress knownConditionTrueFalse ; hasLight is a compile-time false
+    // on a build with FREEINK_CAP_FRONTLIGHT off, where present() returns a literal.
+    // It is a genuine runtime question on every board that has a light.
     if (hasLight) {
       result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
     }
@@ -473,6 +478,9 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // entry names what the reader will then do with it, the way each button row
   // names its own default, rather than a bare "Built-in" that answers nothing.
   for (const auto& binding : TouchGestures::BINDINGS) {
+    // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
+    // whole chained builder in a lambda and append through a back_inserter, which
+    // is longer and reads worse than the loop.
     settings.push_back(
         SettingInfo::Enum(binding.label, binding.field,
                           makeBtnActionOptions(TouchGestures::builtinLabelFor(binding.gesture)), binding.key,

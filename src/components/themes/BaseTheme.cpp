@@ -635,9 +635,20 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
 
   int currentX = rect.x + BaseMetrics::values.contentSidePadding;
 
+  // Published for touch as they are painted, from the same currentX the labels
+  // use — the three themes pad and space their tabs differently, so re-deriving
+  // this in the activity would be a second copy of the layout rule.
+  TapTargets::Recorder::Builder touchTabs;
+  int tabIndex = 0;
+
   for (const auto& tab : tabs) {
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    // Each target spans the whole advance to the next tab, so the gap between
+    // two labels belongs to the one on its left rather than being a dead strip.
+    // Full band height, because a tab is a small target and the bar is thin.
+    const int advance = textWidth + BaseMetrics::values.tabSpacing;
+    touchTabs.add(currentX, rect.y, advance, rect.height, tabIndex++);
 
     // Draw underline for selected tab
     if (tab.selected) {
@@ -652,8 +663,9 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
     renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
                       tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
 
-    currentX += textWidth + BaseMetrics::values.tabSpacing;
+    currentX += advance;
   }
+  TapTargets::tabBar().record(touchTabs);
 }
 
 // Draw the "Recent Book" cover card on the home screen

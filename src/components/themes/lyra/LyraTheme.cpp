@@ -241,8 +241,14 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
+  // Published for touch as they are painted — see BaseTheme::drawTabBar.
+  TapTargets::Recorder::Builder touchTabs;
+  int tabIndex = 0;
+
   for (const auto& tab : tabs) {
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
+    const int advance = textWidth + LyraMetrics::values.tabSpacing + 2 * hPaddingInSelection;
+    touchTabs.add(currentX, rect.y, advance, rect.height, tabIndex++);
 
     if (tab.selected) {
       if (selected) {
@@ -259,8 +265,9 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label, !(tab.selected && selected),
                       EpdFontFamily::REGULAR);
 
-    currentX += textWidth + LyraMetrics::values.tabSpacing + 2 * hPaddingInSelection;
+    currentX += advance;
   }
+  TapTargets::tabBar().record(touchTabs);
 
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }

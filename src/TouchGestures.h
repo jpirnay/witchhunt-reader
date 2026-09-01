@@ -2,7 +2,9 @@
 
 #include <I18nKeys.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 
 #include "CrossPointSettings.h"
 #include "components/TapZones.h"
@@ -192,10 +194,9 @@ inline uint8_t actionFor(const Gesture gesture) { return SETTINGS.*(BINDINGS[sta
 // contact, so that a device nobody has configured behaves bit-identically to one
 // built before gestures existed.
 inline bool anyBound() {
-  for (const auto& binding : BINDINGS) {
-    if (SETTINGS.*(binding.field) != CrossPointSettings::BTN_DEFAULT) return true;
-  }
-  return false;
+  return std::any_of(std::begin(BINDINGS), std::end(BINDINGS), [](const Binding& binding) {
+    return SETTINGS.*(binding.field) != CrossPointSettings::BTN_DEFAULT;
+  });
 }
 
 // The tap and long-tap gestures for a zone. Two small switches rather than

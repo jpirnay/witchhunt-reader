@@ -140,6 +140,7 @@ void ActivityManager::renderTaskLoop() {
       ListTouchBand::invalidate();
       TapTargets::homeCovers().invalidate();
       TapTargets::homeMenu().invalidate();
+      TapTargets::tabBar().invalidate();
       currentActivity->render(std::move(lock));
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.

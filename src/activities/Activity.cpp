@@ -17,6 +17,7 @@ void Activity::onEnter() {
   ListTouchBand::invalidate();
   TapTargets::homeCovers().invalidate();
   TapTargets::homeMenu().invalidate();
+  TapTargets::tabBar().invalidate();
   LOG_DBG("ACT", "Entering activity: %s", name.c_str());
 }
 
@@ -25,6 +26,7 @@ void Activity::onExit() {
   ListTouchBand::invalidate();
   TapTargets::homeCovers().invalidate();
   TapTargets::homeMenu().invalidate();
+  TapTargets::tabBar().invalidate();
   LOG_DBG("ACT", "Exiting activity: %s", name.c_str());
 }
 
