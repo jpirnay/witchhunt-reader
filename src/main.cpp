@@ -1595,33 +1595,9 @@ void loop() {
     // event — shadowing the current activity's own built-in handling for that button
     // (e.g. RecentBooks long-Left=remove / long-Right=info, which defaulted to
     // BTN_PREV_SECTION / BTN_NEXT_SECTION). Outside the reader we must let the original
-    // (button, pressType) event fall through to the activity instead.
-    auto isReaderScopedAction = [](uint8_t a) {
-      switch (static_cast<BA>(a)) {
-        case BA::BTN_PAGE_FORWARD:
-        case BA::BTN_PAGE_BACK:
-        case BA::BTN_PAGE_FORWARD_10:
-        case BA::BTN_PAGE_BACK_10:
-        case BA::BTN_OPEN_TOC:
-        case BA::BTN_STAR_PAGE:
-        case BA::BTN_FOOTNOTES:
-        case BA::BTN_NEXT_SECTION:
-        case BA::BTN_PREV_SECTION:
-        case BA::BTN_EXIT_READER:
-        case BA::BTN_READER_MENU:
-        case BA::BTN_TOGGLE_BIONIC_READING:
-        case BA::BTN_KOREADER_SYNC:
-        case BA::BTN_CYCLE_FONT_SIZE:
-        case BA::BTN_FONT_SIZE_SMALLER:
-        case BA::BTN_FONT_SIZE_LARGER:
-        case BA::BTN_CYCLE_ORIENTATION:
-        case BA::BTN_QUICK_OVERRIDES:
-        case BA::BTN_DICTIONARY:
-          return true;
-        default:  // BTN_GO_HOME / BTN_SLEEP / BTN_FORCE_*_REFRESH / BTN_OPEN_BOOKMARKS / BTN_IGNORE are global
-          return false;
-      }
-    };
+    // (button, pressType) event fall through to the activity instead. The predicate is
+    // shared with the gesture path, which needs the same answer for the same reason.
+    const auto isReaderScopedAction = [](const uint8_t a) { return CrossPointSettings::isReaderScopedAction(a); };
     // Executes one resolved action. Extracted from the button loop below so the
     // gesture path runs exactly the same code: a gesture bound to "Reader Menu"
     // must do precisely what a button bound to it does, and two copies of this
@@ -1781,18 +1757,23 @@ void loop() {
       buttonEventManager.pushEventFront(it->button, it->type);
     }
 
-    // Gestures, in the reader only. Everywhere else the screen's own touch
-    // targets own the contact — a tap on a list row is that row, not a bindable
-    // "tap centre" — and there is no way to arbitrate between the two that a
-    // user could predict.
+    // Gestures. In the reader every gesture is live; elsewhere only swipes and
+    // two-finger gestures are, because a tap on a list row is that row and no
+    // arbitration between the two would be predictable. Swipes are safe to open
+    // up: no non-reader screen consumes one, and it is what puts the reading
+    // light within reach on the home screen in the dark — the case the reader
+    // scope alone left with no answer at all.
     //
-    // GestureEventManager reports only gestures the user has actually bound, and
-    // suppresses the contact when it reports one. So a device with nothing bound
-    // is untouched by this, and a bound gesture cannot both run its action and
-    // fall through to the reader as a page turn.
-    if (activityManager.isReaderActivity()) {
+    // GestureEventManager reports only gestures the user has actually bound to
+    // an action this screen can perform, and suppresses the contact when it
+    // reports one. So an unbound gesture is untouched by this, and a bound one
+    // cannot both run its action and fall through as a page turn.
+    {
       BA gestureAction = BA::BTN_DEFAULT;
-      if (gestureEventManager.consumeAction(gestureAction) && !runAction(gestureAction)) return;
+      if (gestureEventManager.consumeAction(gestureAction, activityManager.isReaderActivity()) &&
+          !runAction(gestureAction)) {
+        return;
+      }
     }
   }
 

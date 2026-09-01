@@ -1021,11 +1021,23 @@ latched state rather than consuming calls. `peekScreenLongPress()` was added to
 complete the set — `wasScreenLongPress()` suppresses as it reads, which is right
 for a caller that has already decided.
 
-### 8.2 Reader only
+### 8.2 Scope: everything in the reader, swipes everywhere
 
-Everywhere else the screen's own touch targets own the contact: a tap on a list
-row is that row, not a bindable "tap centre", and there is no arbitration between
-the two that a user could predict.
+In the reader every gesture is live — the page has no touch targets of its own to
+compete with.
+
+Everywhere else **only swipes and two-finger gestures are**. A tap on a list row
+is that row, and no arbitration between the two would be predictable, so taps and
+long taps stay reader-only. Swipes are safe to open up because nothing outside
+the reader consumes one (the sole `wasSwipe()` consumer in the tree is
+`detectTouchPageTurn`) — and opening them is what puts the reading light within
+reach on the home screen in the dark, which the reader-only rule left with no
+answer at all.
+
+Outside the reader a gesture bound to a **reader-scoped** action is declined
+rather than swallowed, so the screen underneath still gets its touch. The
+predicate is `CrossPointSettings::isReaderScopedAction()`, shared with the button
+path, which needs the same answer for the same reason.
 
 ### 8.3 The zones are a superset, not a replacement
 
@@ -1059,10 +1071,20 @@ lookup on a hold, and universal convention for pinch and rotate:
 | Swipe down, left half | Reader Menu | Long tap left | Previous Chapter |
 | Swipe down, right half | Light Dimmer | Long tap right | Next Chapter |
 | Swipe up, right half | Light Brighter | Long tap centre | Dictionary |
-| Swipe up, left half | Built-in | Long tap top | Toggle Reading Light |
+| Swipe up, left half | **Toggle Reading Light** | Long tap top | Toggle Reading Light |
 | Swipe left/right | Built-in | Long tap bottom | Star Page |
 | All five tap zones | Built-in | Pinch in / out | Smaller / Larger Text |
 | Rotate either way | Cycle Orientation | | |
+
+**The quick light on/off is swipe up on the left half**, and it has to be a swipe
+rather than a tap or a hold for two reasons: swipes are the only gestures live
+outside the reader (§8.2), and reaching the light from the home screen at night
+is most of what a quick toggle is for. It also has to exist at all — dimming
+clamps at `MIN_BRIGHTNESS`, so there is deliberately no way to reach "off" by
+swiping down, while turning the light *on* needs no toggle (adjusting brightness
+while it is off lights it, the "obvious I want light" inference both reference
+firmwares make). Long tap top keeps the same action as the deliberate,
+hard-to-hit-by-accident version inside the reader.
 
 Brightness steps by 5, matching CrossInk's panel. Ten was too coarse: the SDK's
 gamma-1.6554 curve puts most of the usable range in the bottom third, where a

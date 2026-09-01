@@ -38,14 +38,26 @@ class GestureEventManager {
   // that fired is unbound — in the last case the contact is left untouched for
   // the activity to interpret.
   //
-  // Call once per loop tick, from the reader only.
-  bool consumeAction(CrossPointSettings::BUTTON_ACTION& action);
+  // Call once per loop tick. `inReader` narrows what is considered:
+  //
+  //   in the reader   every gesture, because the page has no touch targets of
+  //                   its own to compete with.
+  //   anywhere else   swipes and two-finger gestures only. Taps and long taps
+  //                   belong to the screen — a tap on a list row is that row —
+  //                   and no swipe is consumed by any non-reader screen, so
+  //                   opening those up costs nothing and is what lets the
+  //                   reading light be reached from the home screen at night.
+  //
+  // Outside the reader a gesture bound to a reader-scoped action is left
+  // unclaimed rather than swallowed, exactly as the button path does.
+  bool consumeAction(CrossPointSettings::BUTTON_ACTION& action, bool inReader);
 
  private:
   MappedInputManager& input;
   const GfxRenderer& renderer;
 
-  // Resolve `gesture` to its bound action. Returns false for BTN_DEFAULT, i.e.
-  // "not ours — leave the contact alone".
-  static bool boundAction(TouchGestures::Gesture gesture, CrossPointSettings::BUTTON_ACTION& action);
+  // Resolve `gesture` to its bound action. Returns false for BTN_DEFAULT, and
+  // for a reader-scoped action outside the reader — both mean "not ours, leave
+  // the contact alone".
+  static bool boundAction(TouchGestures::Gesture gesture, CrossPointSettings::BUTTON_ACTION& action, bool inReader);
 };

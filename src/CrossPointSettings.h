@@ -431,10 +431,13 @@ class CrossPointSettings {
   // where you reach the menu, the right half is where you reach the light. That
   // split is what lets both live on the same gesture without either losing it.
   //
-  // Swipe up on the left is left free rather than filled for symmetry's sake —
-  // there is no obvious counterpart to "open the menu", and an unused gesture is
-  // better than a surprising one.
-  uint8_t gestSwipeUpLeft = BTN_DEFAULT;
+  // Swipe up on the left is the quick on/off. It has to be a SWIPE rather than a
+  // tap or a hold, because swipes are the only gestures live outside the reader
+  // — and reaching the light from the home screen in the dark is most of the
+  // point of having a quick toggle at all. It also has to exist: dimming clamps
+  // at MIN_BRIGHTNESS, so there is deliberately no way to reach "off" by
+  // swiping down.
+  uint8_t gestSwipeUpLeft = BTN_LIGHT_TOGGLE;
   uint8_t gestSwipeUpRight = BTN_LIGHT_BRIGHTER;
   uint8_t gestSwipeDownLeft = BTN_READER_MENU;
   uint8_t gestSwipeDownRight = BTN_LIGHT_DIMMER;
@@ -657,6 +660,16 @@ class CrossPointSettings {
   // passed in rather than queried so this stays free of the HAL and testable on
   // the host.
   static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight);
+
+  // True for an action only the reader can carry out. Such an action must NOT be
+  // consumed on another screen: doing so would swallow the input and shadow that
+  // screen's own handling of it. Buttons let the event fall through to the
+  // activity; gestures decline to claim the contact at all.
+  //
+  // Everything not named here is global — go home, sleep, the refreshes,
+  // bookmarks, the reading light, the touch-navigation switch — and works
+  // wherever it is triggered.
+  static bool isReaderScopedAction(uint8_t action);
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.

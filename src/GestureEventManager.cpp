@@ -9,22 +9,28 @@ using BA = CrossPointSettings::BUTTON_ACTION;
 using TouchGestures::Gesture;
 }  // namespace
 
-bool GestureEventManager::boundAction(const Gesture gesture, BA& action) {
+bool GestureEventManager::boundAction(const Gesture gesture, BA& action, const bool inReader) {
   const uint8_t configured = TouchGestures::actionFor(gesture);
+  // A reader-scoped action outside the reader would funnel through
+  // dispatchButtonAction() and do nothing, having already claimed the contact.
+  // Decline instead, so the screen underneath still gets its touch.
+  const bool outOfScope = !inReader && CrossPointSettings::isReaderScopedAction(configured);
 #if defined(BUTTON_TRACE) && BUTTON_TRACE
   // The other half of the pair with HalGPIO's [TCH] release line: that one says
   // what the SDK classified, this says what the loop did about it. A gesture
   // that appears there and not here was missed by a busy loop; one that appears
   // here as "unbound" is a settings question, not an input one.
   LOG_INF("GEST", "%s -> action=%u (%s)", TouchGestures::nameOf(gesture), configured,
-          configured == BA::BTN_DEFAULT ? "unbound, left to the reader" : "claimed");
+          configured == BA::BTN_DEFAULT ? "unbound, left to the screen"
+          : outOfScope                  ? "reader-only action, not in the reader"
+                                        : "claimed");
 #endif
-  if (configured == BA::BTN_DEFAULT) return false;
+  if (configured == BA::BTN_DEFAULT || outOfScope) return false;
   action = static_cast<BA>(configured);
   return true;
 }
 
-bool GestureEventManager::consumeAction(BA& action) {
+bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   if (!input.hasTouch()) return false;
   // Nothing bound: do not so much as look at the contact. This is the guarantee
   // that an unconfigured device behaves exactly as it did before gestures
@@ -63,13 +69,13 @@ bool GestureEventManager::consumeAction(BA& action) {
   // to arrive late.
   switch (input.popMultiTouch(x, y)) {
     case MappedInputManager::MultiTouch::PinchIn:
-      return boundAction(Gesture::PinchIn, action);
+      return boundAction(Gesture::PinchIn, action, inReader);
     case MappedInputManager::MultiTouch::PinchOut:
-      return boundAction(Gesture::PinchOut, action);
+      return boundAction(Gesture::PinchOut, action, inReader);
     case MappedInputManager::MultiTouch::RotateClockwise:
-      return boundAction(Gesture::RotateClockwise, action);
+      return boundAction(Gesture::RotateClockwise, action, inReader);
     case MappedInputManager::MultiTouch::RotateCounterClockwise:
-      return boundAction(Gesture::RotateCounterClockwise, action);
+      return boundAction(Gesture::RotateCounterClockwise, action, inReader);
     case MappedInputManager::MultiTouch::None:
       break;
   }
@@ -80,9 +86,9 @@ bool GestureEventManager::consumeAction(BA& action) {
   // deliberately does NOT suppress — an unbound long tap then degrades to
   // whatever the tap in that zone does, which is the least surprising thing for
   // a reader who holds a finger down a little too long.
-  if (input.peekScreenLongPressIn(touchOrientation, x, y)) {
+  if (inReader && input.peekScreenLongPressIn(touchOrientation, x, y)) {
     const Gesture gesture = TouchGestures::longTapGestureFor(TapZones::zoneFor(x, y, width, height));
-    if (boundAction(gesture, action)) {
+    if (boundAction(gesture, action, inReader)) {
       input.suppressTouchContact();
       return true;
     }
@@ -118,14 +124,14 @@ bool GestureEventManager::consumeAction(BA& action) {
     case MappedInputManager::SwipeDir::None:
       break;
   }
-  if (swipe != Gesture::Count && boundAction(swipe, action)) {
+  if (swipe != Gesture::Count && boundAction(swipe, action, inReader)) {
     input.suppressTouchContact();
     return true;
   }
 
-  if (input.wasScreenTappedIn(touchOrientation, x, y)) {
+  if (inReader && input.wasScreenTappedIn(touchOrientation, x, y)) {
     const Gesture gesture = TouchGestures::tapGestureFor(TapZones::zoneFor(x, y, width, height));
-    if (boundAction(gesture, action)) {
+    if (boundAction(gesture, action, inReader)) {
       input.suppressTouchContact();
       return true;
     }
