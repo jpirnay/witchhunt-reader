@@ -1,7 +1,9 @@
 #include "FootnotePreviews.h"
 
+#include <BuildArena.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <InflateReader.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SaxParser/SaxParser.h>
@@ -98,6 +100,7 @@ class NoThrowArray {
     data_[size_++] = value;
     return true;
   }
+  void clear() { size_ = 0; }
   void pop() {
     if (size_ > 0) --size_;
   }
@@ -349,76 +352,137 @@ class NoteCapturer {
   }
 };
 
-// Streams one spine entry through a SAX consumer. Returns false on ZIP/read errors;
-// SAX-level errors are tolerated (consumer keeps whatever it saw — same policy as the
-// section parser, which survives loose real-world HTML).
-template <typename Consumer>
-bool streamSpineEntry(ZipFile& zip, const std::string& href, uint8_t* chunk, Consumer& consumer, FsFile* bank) {
-  ZipFile::EntryReader reader(zip, STREAM_CHUNK_BYTES);
-  if (!reader.open(FsHelpers::normalisePath(href).c_str())) {
-    return false;
-  }
-  bool done = false;
-  bool malformed = false;
-  while (!done) {
-    size_t produced = 0;
-    if (!reader.step(chunk, STREAM_CHUNK_BYTES, &produced, &done)) {
-      return false;
-    }
-    if (produced > 0) {
-      // Bank the inflated bytes as we pass them on, in the same file the section builder writes
-      // and validates by size. A note document is rarely a chapter anyone reads, so without this
-      // every chapter pointing into it would inflate it again.
-      if (bank) bank->write(chunk, produced);
-      if (!consumer.feed(chunk, produced)) {
-        malformed = true;  // malformed markup mid-stream: keep partial results
-        break;
+// One spine document, read a chunk at a time, from wherever it is cheapest.
+//
+// Prefers the inflated XHTML the section builder already left on SD (sections/html_<spine>.bin,
+// keyed on the spine alone) over re-opening and re-inflating the ZIP entry. Every spine the
+// reader has actually built is sitting there in plain text: inflating it again repeats work a
+// build just did, and needs the ZIP's 4 KB EOCD window plus a ~32 KB inflate ring at exactly the
+// moment — mid-read, framebuffer resident — the heap can least afford them. Same staleness test
+// as the builder: a size mismatch means partial or out-of-date, so fall back to the ZIP (and
+// leave the file alone; the next build re-validates it).
+//
+// next() yields AT MOST one chunk per call and keeps its position, which is what lets the
+// resolver spread a document across as many slices as it takes. The one-shot helpers below are
+// written on top of it so the two paths cannot drift.
+class DocStream {
+ public:
+  ~DocStream() { close(); }
+
+  // bankIt: write the inflated bytes to the spine's HTML cache as they stream past, so the next
+  // chapter pointing into this document reads SD instead of inflating. Ignored when the document
+  // is already being read from that cache.
+  bool open(Epub& epub, ZipFile& zip, const int spineIndex, const std::string& bankedHtmlPath, const bool bankIt,
+            BuildArena* arena = nullptr) {
+    close();
+    size_t inflatedSize = 0;
+    const std::string htmlPath =
+        bankedHtmlPath.empty() ? Section::sectionHtmlCachePath(epub.getCachePath(), spineIndex) : bankedHtmlPath;
+    if (epub.getSpineItemInflatedSize(spineIndex, &inflatedSize) && inflatedSize > 0) {
+      if (Storage.openFileForRead("FNP", htmlPath, file_)) {
+        if (file_.size() == inflatedSize) {
+          return true;
+        }
+        file_.close();
       }
     }
+    // Only the ZIP path allocates anything worth placing: a read buffer plus an inflate ring
+    // sized to the entry (up to 32 KB). Put both in the build's arena when there is room — a
+    // resolve runs in slices, so a heap-backed ring would sit on the reading heap across every
+    // page render in between. EntryReader does NOT fall back if an arena alloc fails, so the
+    // capacity is checked here (mirrors Section::runBuildParse's extract).
+    const size_t arenaWanted =
+        STREAM_CHUNK_BYTES + InflateReader::ringSizeFor(inflatedSize) + 2 * alignof(std::max_align_t);
+    BuildArena* useArena =
+        (arena && arena->valid() && arena->capacity() - arena->used() >= arenaWanted) ? arena : nullptr;
+    reader_ = makeUniqueNoThrow<ZipFile::EntryReader>(zip, STREAM_CHUNK_BYTES, useArena);
+    if (!reader_ || !reader_->open(FsHelpers::normalisePath(epub.getSpineItem(spineIndex).href).c_str())) {
+      reader_.reset();
+      return false;
+    }
+    banking_ = bankIt && Storage.openFileForWrite("FNP", htmlPath, bank_);
+    return true;
   }
-  consumer.finalize();
-  // A banked file is only usable if it is complete: the builder's staleness test is a size
-  // match, and a short file would be re-inflated anyway. Nothing to do here — the caller closes
-  // it and a partial write simply fails that test later.
-  (void)malformed;
-  return true;
-}
 
-// Feeds one spine document to a SAX consumer, preferring the inflated XHTML the section builder
-// already left on SD (sections/html_<spine>.bin, keyed on the spine alone) over re-opening and
-// re-inflating the ZIP entry. Every spine the reader has actually built is sitting there in plain
-// text: inflating it again repeats work a build just did, and needs the ZIP's 4 KB EOCD window
-// plus a ~32 KB inflate ring at exactly the moment — mid-read, framebuffer resident — the heap can
-// least afford them. Same staleness test as the builder: a size mismatch means partial or
-// out-of-date, so fall back to the ZIP (and leave the file alone; the next build re-validates it).
+  // Fills `out` with up to `cap` bytes. Returns the byte count and sets *done when the document
+  // is exhausted; -1 on a read/inflate error.
+  int next(uint8_t* out, const size_t cap, bool* done) {
+    *done = false;
+    if (file_) {
+      const int n = file_.read(out, cap);
+      if (n <= 0) {
+        *done = true;
+        return n < 0 ? -1 : 0;
+      }
+      return n;
+    }
+    if (!reader_) {
+      *done = true;
+      return 0;
+    }
+    size_t produced = 0;
+    if (!reader_->step(out, cap, &produced, done)) {
+      return -1;
+    }
+    // Bank the inflated bytes as they pass. A banked file is only usable if it is complete: the
+    // builder's staleness test is a size match, so a stream abandoned part-way simply fails that
+    // test later and is re-inflated — nothing to undo here.
+    if (banking_ && produced > 0) bank_.write(out, produced);
+    return static_cast<int>(produced);
+  }
+
+  void close() {
+    if (file_) file_.close();
+    reader_.reset();
+    if (banking_) {
+      bank_.close();
+      banking_ = false;
+    }
+  }
+
+ private:
+  FsFile file_;                                   // banked XHTML (preferred), unset on the ZIP path
+  std::unique_ptr<ZipFile::EntryReader> reader_;  // ZIP path; heap because EntryReader is not movable-in-place
+  FsFile bank_;
+  bool banking_ = false;
+};
+
+// Feeds one whole spine document to a SAX consumer in one call. Returns false on ZIP/read
+// errors; SAX-level errors are tolerated (the consumer keeps whatever it saw — same policy as
+// the section parser, which survives loose real-world HTML).
 template <typename Consumer>
 bool streamSpineDocument(Epub& epub, ZipFile& zip, const int spineIndex, const std::string& bankedHtmlPath,
                          uint8_t* chunk, Consumer& consumer, const bool bankIt = false) {
-  size_t inflatedSize = 0;
-  const std::string htmlPath =
-      bankedHtmlPath.empty() ? Section::sectionHtmlCachePath(epub.getCachePath(), spineIndex) : bankedHtmlPath;
-  if (epub.getSpineItemInflatedSize(spineIndex, &inflatedSize) && inflatedSize > 0) {
-    FsFile html;
-    if (Storage.openFileForRead("FNP", htmlPath, html)) {
-      if (html.size() == inflatedSize) {
-        while (true) {
-          const int n = html.read(chunk, STREAM_CHUNK_BYTES);
-          if (n <= 0) break;
-          if (!consumer.feed(chunk, static_cast<size_t>(n))) break;  // malformed: keep partial results
-        }
-        consumer.finalize();
-        html.close();
-        return true;
-      }
-      html.close();
+  DocStream doc;
+  if (!doc.open(epub, zip, spineIndex, bankedHtmlPath, bankIt)) {
+    return false;
+  }
+  bool done = false;
+  while (!done) {
+    const int n = doc.next(chunk, STREAM_CHUNK_BYTES, &done);
+    if (n < 0) {
+      return false;
+    }
+    if (n > 0 && !consumer.feed(chunk, static_cast<size_t>(n))) {
+      break;  // malformed markup mid-stream: keep partial results
     }
   }
-  FsFile bank;
-  const bool banking = bankIt && Storage.openFileForWrite("FNP", htmlPath, bank);
-  const bool ok = streamSpineEntry(zip, epub.getSpineItem(spineIndex).href, chunk, consumer, banking ? &bank : nullptr);
-  if (banking) bank.close();
-  return ok;
+  consumer.finalize();
+  return true;
 }
+
+// Phases of one spine's resolve. Linear: each falls through to the next, and every one of them
+// does a BOUNDED amount of work per step() so the caller keeps control of the loop task.
+enum class ResolvePhase : uint8_t {
+  ScanSpine,    // pass A: SAX-scan this spine's document for footnote-shaped links
+  OpenStore,    // read the store, work out which of those targets are missing
+  PlanNotes,    // group the missing targets by the document they live in, open the append
+  OpenNote,     // start (or finish) one note document
+  CaptureNote,  // pass B: SAX-scan that document, capturing text at the wanted anchors
+  Commit,       // write the merged index, set the resolved bit
+  Finished,
+  Failed,
+};
 
 }  // namespace
 
@@ -597,135 +661,278 @@ bool markSpineResolved(Store& store, const int spineIndex) {
 
 }  // namespace
 
-bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtmlPath) {
-  const uint32_t startMs = millis();
-  const std::string storePath = epub.getCachePath() + CACHE_FILENAME;
+struct Resolver::State {
+  Epub* epub = nullptr;
+  int spineIndex = -1;
+  std::string banked;
+  BuildArena* arena = nullptr;
+  uint32_t startMs = 0;
+  ResolvePhase phase = ResolvePhase::ScanSpine;
+
+  std::unique_ptr<uint8_t[]> chunk;
+  // Declared before `doc`: members destroy in reverse order and the reader inside DocStream
+  // holds a handle (and possibly an arena block) that must go first.
+  std::unique_ptr<ZipFile> zip;
+  DocStream doc;
+  bool docOpen = false;
+
+  NoThrowArray<Target> targets;
+  std::unique_ptr<LinkScanner> scanner;
+
+  Store store;
+  bool appending = false;  // beginAppend() succeeded; teardown must roll the store back
+  NoThrowArray<Target> missing;
+  NoThrowArray<uint16_t> noteSpines;
+  size_t noteCursor = 0;
+  NoThrowArray<uint32_t> wanted;
+  std::unique_ptr<NoteCapturer> capturer;
+
+  // Rolls back a half-finished append so the store stays exactly as complete as it was. Safe to
+  // call repeatedly, and called from the destructor: a resolve preempted mid-way (the reader
+  // turned a page and Background-B handed its buffer back) must leave nothing behind.
+  void rollBack() {
+    if (appending) {
+      appending = false;
+      store.abandon();
+    }
+  }
+};
+
+Resolver::Resolver() = default;
+Resolver::~Resolver() {
+  if (state_) state_->rollBack();
+}
+
+bool Resolver::begin(Epub& epub, const int spineIndex, const std::string& bankedHtmlPath, BuildArena* arena) {
+  state_ = makeUniqueNoThrow<State>();
+  if (!state_) {
+    LOG_ERR("FNP", "OOM: cannot allocate the resolver");
+    return false;
+  }
+  State& st = *state_;
+  st.epub = &epub;
+  st.spineIndex = spineIndex;
+  st.banked = bankedHtmlPath;
+  st.arena = arena;
+  st.startMs = millis();
 
   // Already done, in this session or an earlier one: no scan, no parser, no file reads beyond
   // one 13-byte peek. Without this every rebuild of a spine — a font change, a variant miss —
   // re-scanned the whole document with a 9.2 KB parser only to learn that nothing was missing.
   if (spineResolved(epub.getCachePath(), spineIndex)) {
+    st.phase = ResolvePhase::Finished;
     return true;
   }
 
-  auto chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
-  if (!chunk) {
-    LOG_ERR("FNP", "OOM: cannot allocate %u-byte stream chunk", static_cast<uint32_t>(STREAM_CHUNK_BYTES));
+  st.chunk = makeUniqueNoThrow<uint8_t[]>(STREAM_CHUNK_BYTES);
+  if (!st.chunk || !st.targets.reserve(16)) {
+    LOG_ERR("FNP", "OOM: cannot allocate the resolver's scan buffers");
     return false;
   }
-
   // Reuse the book's cached central-directory details: without this every pass re-scans for the
   // EOCD record, a 4 KB contiguous allocation before a single byte is read. Spines served from
   // banked XHTML never touch the ZIP at all.
-  ZipFile zip(epub.getPath());
-  epub.primeZip(zip);
-
-  // Pass A — this spine's callers, from the XHTML the build just banked.
-  NoThrowArray<Target> targets;
-  if (!targets.reserve(16)) {
-    LOG_ERR("FNP", "OOM: cannot allocate the target list");
+  st.zip = makeUniqueNoThrow<ZipFile>(epub.getPath());
+  if (!st.zip) {
+    LOG_ERR("FNP", "OOM: cannot allocate the archive reader");
     return false;
   }
-  {
-    LinkScanner scanner(epub, spineIndex, targets);
-    if (!scanner.setup()) {
-      LOG_ERR("FNP", "Link scanner setup failed (spine=%d)", spineIndex);
-      return false;
-    }
-    if (!streamSpineDocument(epub, zip, spineIndex, bankedHtmlPath, chunk.get(), scanner)) {
-      LOG_ERR("FNP", "Could not read spine %d for its link scan", spineIndex);
-      return false;
-    }
-    if (scanner.outOfMemory()) {
-      LOG_ERR("FNP", "OOM growing the target list for spine %d", spineIndex);
-      return false;
-    }
-  }
-  Store store;
-  if (!store.open(storePath)) {
-    LOG_ERR("FNP", "Could not open the preview store");
-    return false;
-  }
-
-  // A chapter with no notes still gets its bit, and that matters: the bit means "scanned, nothing
-  // outstanding", not "has notes". Background-B reads it to decide whether a spine is safe to
-  // build without doing this work itself, and a book without footnotes must not look permanently
-  // unresolved to it.
-  if (targets.size() == 0) {
-    return markSpineResolved(store, spineIndex);
-  }
-
-  // Drop what is already known. A spine resolved in an earlier session lands here with every
-  // target present and stops, having cost one SAX walk over a local file.
-  NoThrowArray<Target> missing;
-  if (!missing.reserve(targets.size())) {
-    return false;
-  }
-  for (const Target& t : targets) {
-    if (!store.contains(t.keyHash)) missing.push(t);
-  }
-  if (missing.size() == 0) {
-    LOG_DBG("FNP", "Spine %d: all %u note targets already resolved", spineIndex, static_cast<uint32_t>(targets.size()));
-    return true;
-  }
-  if (store.full()) {
-    LOG_ERR("FNP", "Preview store is at its %u-entry cap; spine %d keeps plain markers",
-            static_cast<uint32_t>(FootnotePreviews::MAX_ENTRIES), spineIndex);
-    return true;  // not a failure: the book is simply larger than the budget
-  }
-
-  // Pass B — one stream per distinct note document, capturing the anchors this spine wants.
-  NoThrowArray<uint16_t> noteSpines;
-  if (!noteSpines.reserve(missing.size())) {
-    return false;
-  }
-  for (const Target& t : missing) {
-    if (std::find(noteSpines.begin(), noteSpines.end(), t.spineIndex) == noteSpines.end()) {
-      noteSpines.push(t.spineIndex);
-    }
-  }
-
-  if (!store.beginAppend()) {
-    LOG_ERR("FNP", "Could not open the preview store for append");
-    return false;
-  }
-  for (size_t s = 0; s < noteSpines.size(); ++s) {
-    NoThrowArray<uint32_t> wanted;
-    if (!wanted.reserve(missing.size())) {
-      store.abandon();
-      return false;
-    }
-    for (const Target& t : missing) {
-      if (t.spineIndex == noteSpines[s]) wanted.push(t.keyHash);
-    }
-    NoteCapturer capturer(noteSpines[s], wanted, [&](const uint32_t keyHash, const char* text, const size_t len) {
-      store.addNote(keyHash, text, len);
-    });
-    if (!capturer.setup()) {
-      LOG_ERR("FNP", "Note capturer setup failed (spine=%u)", noteSpines[s]);
-      store.abandon();
-      return false;
-    }
-    // A note document the reader has already visited is banked like any other spine; one that
-    // has not is streamed from the ZIP and banked on the way past, so the next chapter that
-    // points into it pays an SD read instead of an inflate.
-    if (!streamSpineDocument(epub, zip, noteSpines[s], {}, chunk.get(), capturer, /*bankIt=*/true)) {
-      LOG_ERR("FNP", "Could not read note document %u", noteSpines[s]);
-      store.abandon();
-      return false;
-    }
-  }
-  const size_t added = store.added();
-  store.markResolved(spineIndex);
-  if (!store.commit()) {
-    LOG_ERR("FNP", "Could not write the preview store");
-    return false;
-  }
-  epub.adoptZipDetails(zip);
-  LOG_INF("FNP", "Spine %d: resolved %u of %u note targets from %u document(s) in %lums", spineIndex,
-          static_cast<uint32_t>(added), static_cast<uint32_t>(missing.size()), static_cast<uint32_t>(noteSpines.size()),
-          millis() - startMs);
+  epub.primeZip(*st.zip);
   return true;
+}
+
+Resolver::Step Resolver::step() {
+  if (!state_) {
+    return Step::Failed;
+  }
+  State& st = *state_;
+  const auto fail = [&st](const char* what) {
+    LOG_ERR("FNP", "%s (spine=%d)", what, st.spineIndex);
+    st.doc.close();
+    st.rollBack();
+    st.phase = ResolvePhase::Failed;
+    return Step::Failed;
+  };
+
+  switch (st.phase) {
+    case ResolvePhase::Finished:
+      return Step::Done;
+    case ResolvePhase::Failed:
+      return Step::Failed;
+
+    case ResolvePhase::ScanSpine: {
+      if (!st.docOpen) {
+        st.scanner = makeUniqueNoThrow<LinkScanner>(*st.epub, st.spineIndex, st.targets);
+        if (!st.scanner || !st.scanner->setup()) {
+          return fail("Link scanner setup failed");
+        }
+        if (!st.doc.open(*st.epub, *st.zip, st.spineIndex, st.banked, /*bankIt=*/false, st.arena)) {
+          return fail("Could not read the spine for its link scan");
+        }
+        st.docOpen = true;
+        return Step::More;
+      }
+      bool done = false;
+      const int n = st.doc.next(st.chunk.get(), STREAM_CHUNK_BYTES, &done);
+      if (n < 0) {
+        return fail("Read error during the link scan");
+      }
+      // A short feed means malformed markup: keep the partial results, exactly as the section
+      // parser does, and stop reading this document.
+      if (n > 0 && !st.scanner->feed(st.chunk.get(), static_cast<size_t>(n))) {
+        done = true;
+      }
+      if (!done) {
+        return Step::More;
+      }
+      st.scanner->finalize();
+      const bool oom = st.scanner->outOfMemory();
+      st.scanner.reset();
+      st.doc.close();
+      st.docOpen = false;
+      if (oom) {
+        return fail("OOM growing the target list");
+      }
+      st.phase = ResolvePhase::OpenStore;
+      return Step::More;
+    }
+
+    case ResolvePhase::OpenStore: {
+      if (!st.store.open(st.epub->getCachePath() + CACHE_FILENAME)) {
+        return fail("Could not open the preview store");
+      }
+      // A chapter with no notes still gets its bit, and that matters: the bit means "scanned,
+      // nothing outstanding", not "has notes". Background-B reads it to size the gates it puts
+      // in front of a build, and a book without footnotes must not look permanently unresolved.
+      // The same is true of a chapter whose every target another chapter already stored.
+      if (!st.missing.reserve(st.targets.size() > 0 ? st.targets.size() : 1)) {
+        return fail("OOM sizing the missing-target list");
+      }
+      for (const Target& t : st.targets) {
+        if (!st.store.contains(t.keyHash)) st.missing.push(t);
+      }
+      if (st.missing.size() == 0) {
+        LOG_DBG("FNP", "Spine %d: %u note targets, all already resolved", st.spineIndex,
+                static_cast<uint32_t>(st.targets.size()));
+        st.phase = ResolvePhase::Commit;
+        return Step::More;
+      }
+      if (st.store.full()) {
+        // Not a failure: the book is simply larger than the budget. No bit either — the targets
+        // really are outstanding, so a later pass with room should still try.
+        LOG_ERR("FNP", "Preview store is at its %u-entry cap; spine %d keeps plain markers",
+                static_cast<uint32_t>(MAX_ENTRIES), st.spineIndex);
+        st.phase = ResolvePhase::Finished;
+        return Step::Done;
+      }
+      st.phase = ResolvePhase::PlanNotes;
+      return Step::More;
+    }
+
+    case ResolvePhase::PlanNotes: {
+      if (!st.noteSpines.reserve(st.missing.size())) {
+        return fail("OOM planning the note documents");
+      }
+      for (const Target& t : st.missing) {
+        if (std::find(st.noteSpines.begin(), st.noteSpines.end(), t.spineIndex) == st.noteSpines.end()) {
+          st.noteSpines.push(t.spineIndex);
+        }
+      }
+      if (!st.store.beginAppend()) {
+        return fail("Could not open the preview store for append");
+      }
+      st.appending = true;
+      st.phase = ResolvePhase::OpenNote;
+      return Step::More;
+    }
+
+    case ResolvePhase::OpenNote: {
+      if (st.noteCursor >= st.noteSpines.size()) {
+        st.phase = ResolvePhase::Commit;
+        return Step::More;
+      }
+      const uint16_t noteSpine = st.noteSpines[st.noteCursor];
+      st.wanted.clear();
+      if (!st.wanted.reserve(st.missing.size())) {
+        return fail("OOM listing the anchors wanted from one note document");
+      }
+      for (const Target& t : st.missing) {
+        if (t.spineIndex == noteSpine) st.wanted.push(t.keyHash);
+      }
+      st.capturer = makeUniqueNoThrow<NoteCapturer>(
+          noteSpine, st.wanted,
+          [&st](const uint32_t keyHash, const char* text, const size_t len) { st.store.addNote(keyHash, text, len); });
+      if (!st.capturer || !st.capturer->setup()) {
+        return fail("Note capturer setup failed");
+      }
+      // A note document the reader has already visited is banked like any other spine; one that
+      // has not is streamed from the ZIP and banked on the way past, so the next chapter that
+      // points into it pays an SD read instead of an inflate.
+      if (!st.doc.open(*st.epub, *st.zip, noteSpine, {}, /*bankIt=*/true, st.arena)) {
+        return fail("Could not read a note document");
+      }
+      st.docOpen = true;
+      st.phase = ResolvePhase::CaptureNote;
+      return Step::More;
+    }
+
+    case ResolvePhase::CaptureNote: {
+      bool done = false;
+      const int n = st.doc.next(st.chunk.get(), STREAM_CHUNK_BYTES, &done);
+      if (n < 0) {
+        return fail("Read error inside a note document");
+      }
+      if (n > 0 && !st.capturer->feed(st.chunk.get(), static_cast<size_t>(n))) {
+        done = true;
+      }
+      if (!done) {
+        return Step::More;
+      }
+      st.capturer->finalize();
+      st.capturer.reset();
+      st.doc.close();
+      st.docOpen = false;
+      st.noteCursor++;
+      st.phase = ResolvePhase::OpenNote;
+      return Step::More;
+    }
+
+    case ResolvePhase::Commit: {
+      const size_t added = st.store.added();
+      if (st.appending) {
+        st.appending = false;  // commit() consumes the append; nothing left to roll back
+        st.store.markResolved(st.spineIndex);
+        if (!st.store.commit()) {
+          return fail("Could not write the preview store");
+        }
+      } else if (!markSpineResolved(st.store, st.spineIndex)) {
+        // Nothing was appended, so the store is not open: markSpineResolved does its own
+        // beginAppend/commit, and it must see the bit still unset — hence no markResolved here.
+        return fail("Could not write the preview store");
+      }
+      st.epub->adoptZipDetails(*st.zip);
+      if (added > 0) {
+        LOG_INF("FNP", "Spine %d: resolved %u of %u note targets from %u document(s) in %lums", st.spineIndex,
+                static_cast<uint32_t>(added), static_cast<uint32_t>(st.missing.size()),
+                static_cast<uint32_t>(st.noteSpines.size()), millis() - st.startMs);
+      }
+      st.phase = ResolvePhase::Finished;
+      return Step::Done;
+    }
+  }
+  return Step::Failed;
+}
+
+bool resolveSpine(Epub& epub, const int spineIndex, const std::string& bankedHtmlPath) {
+  Resolver resolver;
+  if (!resolver.begin(epub, spineIndex, bankedHtmlPath)) {
+    return false;
+  }
+  Resolver::Step step = Resolver::Step::More;
+  while (step == Resolver::Step::More) {
+    step = resolver.step();
+  }
+  return step == Resolver::Step::Done;
 }
 
 bool Lookup::open(const std::string& bookCachePath, const Epub* epub, const int currentSpineIndex) {

@@ -91,6 +91,7 @@ add_executable(EpubPipelineTest
   SidecarFilesTest.cpp
   SectionAbortTest.cpp
   FootnotePreviewStoreTest.cpp
+  FootnoteResolveSliceTest.cpp
   ImageExtractionTest.cpp
   # No-op HeapTrack: PipelineRunner brackets the dump read-back with pause/resume, and the gtest
   # binary must NOT get the real one (it overrides malloc/free process-wide). The two dump

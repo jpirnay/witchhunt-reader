@@ -174,13 +174,15 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
 // Added to the free-heap floor (either path) for a target that still owes the inline-footnote
-// resolve. That pass allocates from the HEAP even inside a borrowed build — a SAX parser (~9 KB),
-// a 1 KB stream chunk and the store's index — because FootnotePreviews knows nothing about the
-// arena. Deliberately smaller than the ~14 KB it actually wants: the floors above already carry
-// reserve, and the reading steady state is ~51 KB free (device trace, issue #211), so a bigger
-// number would push the gate out of reach and re-lose the look-ahead it exists to protect. A
-// resolve that still cannot fit fails cleanly — the build is discarded and the foreground
-// rebuilds the spine released, where it has ~52 KB more to work with.
+// resolve. That pass holds a SAX parser (~9 KB), a 1 KB stream chunk and the store's index on the
+// HEAP for as long as it runs — and because it runs in slices, that is across every page render
+// in between, not for one transient moment. (Its one big allocation, the inflate ring for an
+// un-banked note document, comes out of the build's arena instead; see DocStream::open.)
+// Deliberately smaller than the ~14 KB the pass wants: the floors above already carry reserve,
+// and the reading steady state is ~51 KB free (device trace, issue #211), so a bigger number
+// would push the gate out of reach and re-lose the look-ahead it exists to protect. A resolve
+// that still cannot fit fails cleanly — the build is discarded and the foreground rebuilds the
+// spine released, where it has ~52 KB more to work with.
 #ifndef BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES
 #define BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES (8 * 1024)
 #endif
@@ -1300,17 +1302,18 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
-        // Does this spine still owe the footnote resolver? Its build then runs one extra,
-        // unsliceable pass before the layout parse (Section::resolveInlineFootnotePreviews):
-        // a SAX scan of the extracted XHTML, plus a stream of any note document it points at
-        // that is not banked yet. B used to refuse such a spine outright and leave it to the
-        // foreground, on the assumption that the foreground would set the bit and B could
-        // pre-build the chapter from then on. That assumption was wrong: the bit is only ever
-        // set BY a build, and the only spine the foreground ever builds is the one the reader
-        // just entered — so every subsequent chapter stayed unresolved, B refused all of them,
-        // and look-ahead was dead for the whole book (issue #211, regression in 2.24). B builds
-        // them instead; the flag makes the extra pass wait for a settled reader and some heap
-        // margin, and a resolve that fails anyway is discarded below rather than cached.
+        // Does this spine still owe the footnote resolver? Its build then runs one extra pass
+        // before the layout parse — a SAX scan of the extracted XHTML, plus a stream of any note
+        // document it points at that is not banked yet — which FootnotePreviews::Resolver spreads
+        // across slices like any other build work.
+        //
+        // B used to refuse such a spine outright and leave it to the foreground, back when that
+        // pass ran to completion inside one slice. The refusal was self-perpetuating: the
+        // resolved bit is only ever set BY a build, and the only spine the foreground ever builds
+        // is the one the reader just entered, so every subsequent chapter stayed unresolved, B
+        // refused all of them, and look-ahead was dead for the whole book (issue #211, regression
+        // in 2.24). The flag no longer gates the build — it only buys the pass the heap it holds
+        // across those slices, and a resolve that fails anyway is discarded below, not cached.
         backgroundBuildNeedsResolve_ =
             getEffectiveInlineFootnotePreviews() && !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine);
         // The inflate ring is sized to the entry, so the extraction heap gate needs the
@@ -1371,15 +1374,6 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
           beginBackgroundBorrow()) {
         backgroundBuildState_ = BackgroundBuildState::Building;
-        return;
-      }
-      // Resident fallback. The borrow branch above already refuses to start while the reader is
-      // moving; the resolve needs that stillness on this path too, because its pass cannot be
-      // sliced (see the Probe comment) and cannot be abandoned half-way either — an aborted
-      // resolve would leave the chapter cached with plain markers under a "previews on" property
-      // hash, which nothing ever rebuilds. So it must land in a gap between page turns, not under
-      // one.
-      if (backgroundBuildNeedsResolve_ && (inputQueued || (now - lastActivityMs) < BG_BUILD_BORROW_QUIET_MS)) {
         return;
       }
       const uint32_t ringBytes =

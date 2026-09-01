@@ -85,7 +85,8 @@ class Section {
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
   // then points the visitor at it. Never fails the build — see the definition.
-  void resolveInlineFootnotePreviews(BuildState& st);
+  bool beginInlineFootnotePreviewResolve(BuildState& st);
+  void finishInlineFootnotePreviewResolve(BuildState& st);
 
   // Open the section file and seek to the first paragraph LUT entry, validating the header
   // and LUT bounds against fileSize. On success, returns true with `outLutStart` set to the
