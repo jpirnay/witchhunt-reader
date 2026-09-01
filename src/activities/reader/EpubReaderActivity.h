@@ -251,7 +251,7 @@ class EpubReaderActivity final : public Activity {
   // stepBackgroundSectionBuild() and stepCurrentSectionBuild() before they start any
   // heap-hungry work.
   bool imageProcessingActive_ = false;
-  // Arms forceHalfRefreshAfterPopup_ for the NEXT incremental section build, marking that build's
+  // Arms forceCleanRefreshAfterPopup_ for the NEXT incremental section build, marking that build's
   // popup -> content transition as "dramatic" and worth a clean HALF baseline (vs. the routine,
   // frequent forward-reading crossing into a still-building Background-B section, where forcing
   // HALF made every section traversal pay a slow refresh). Two dramatic cases set it:
@@ -265,12 +265,17 @@ class EpubReaderActivity final : public Activity {
   //     too, so the override paints the popup and the flag paints the content — both clean.
   bool coldOpenHalfRefreshArmed_ = true;
   // True after the "Indexing..." popup is drawn for a build flagged as a dramatic transition (see
-  // coldOpenHalfRefreshArmed_), until the first real page replaces it on screen. That first page is
-  // forced to HALF_REFRESH instead of the normal FAST cadence, establishing a clean baseline for the
-  // popup -> content transition. Consumed by whichever path shows the first real page:
-  // displayBuildPage() for a multi-slice build, or renderContents() directly when the build finishes
-  // in a single slice (e.g. a one-page cover) and never goes through displayBuildPage at all.
-  bool forceHalfRefreshAfterPopup_ = false;
+  // coldOpenHalfRefreshArmed_), until the first real page replaces it on screen. Consumed by
+  // whichever path shows that page: displayBuildPage() for a multi-slice build, or renderContents()
+  // directly when the build finishes in a single slice (e.g. a one-page cover) and never goes
+  // through displayBuildPage at all.
+  //
+  // That page used to be forced to HALF_REFRESH for a clean popup -> content baseline. It is now
+  // FAST: the HALF was measured at 1691 ms against ~100 ms of actual page work, i.e. 94% of the
+  // time to open a cover, and it fired on every cold open whether or not the page had images. The
+  // cost of the trade is a possible ghost outline of the popup box until the next full refresh.
+  // Both consumption sites carry the same note and must change together.
+  bool forceCleanRefreshAfterPopup_ = false;
   // When true, large images on the current page are decoded instead of shown as placeholders.
   // Reset to false on every page turn so the next image page starts with a placeholder again.
   bool forceLoadLargeImages = false;

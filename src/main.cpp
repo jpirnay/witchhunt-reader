@@ -1094,7 +1094,7 @@ void setup() {
       // covers the routes where a ReaderResume boot lands on Home instead: Back held at boot,
       // readerActivityLoadCount > 0 after a reader crash, or a quick-resume sleep whose frame file
       // is missing. On the cache-miss path the indexing popup clears it on X4 and re-arms
-      // forceHalfRefreshAfterPopup_ for the content page, which is the intended handoff.
+      // forceCleanRefreshAfterPopup_ for the content page, which is the intended handoff.
       renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
       break;
     case BootResume::Splash:
