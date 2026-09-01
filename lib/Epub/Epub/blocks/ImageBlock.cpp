@@ -269,10 +269,30 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 }  // namespace
 
 bool ImageBlock::isLargeImage() const {
-  // width and height are always set at construction from the ZIP manifest or
-  // image header — no file read needed. The SD cache file may not exist yet
-  // (lazy extraction), so reading it here would produce spurious error logs.
-  return int32_t(width) * int32_t(height) > LARGE_IMAGE_PIXEL_THRESHOLD;
+  if (largeImageCached_ >= 0) {
+    return largeImageCached_ != 0;
+  }
+  size_t sourceBytes = 0;
+  // Cheapest source first: once the image has been extracted (a re-render, or the other cache
+  // variant decoded earlier in the same pass) the answer is a stat away.
+  FsFile file;
+  if (Storage.openFileForRead("IMG", imagePath, file)) {
+    sourceBytes = file.size();
+    file.close();
+  } else if (!epubFilePath_.empty() && !epubEntryPath_.empty()) {
+    // Not extracted yet: ask the archive. One central-directory scan, and only ever on a
+    // pixel-cache miss — the very next thing that happens is either a placeholder (cheap) or a
+    // decode that costs seconds, so the scan is noise against both.
+    Epub epub(epubFilePath_, "/.crosspoint");
+    if (!epub.getItemSize(epubEntryPath_, &sourceBytes)) {
+      sourceBytes = 0;  // unknown: treat as not-large, i.e. render it rather than hide it
+    }
+  }
+  largeImageCached_ = static_cast<int8_t>(sourceBytes > LARGE_IMAGE_SOURCE_BYTES ? 1 : 0);
+  if (largeImageCached_ != 0) {
+    LOG_DBG("IMG", "Large image (%u bytes): %s", static_cast<uint32_t>(sourceBytes), imagePath.c_str());
+  }
+  return largeImageCached_ != 0;
 }
 
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }

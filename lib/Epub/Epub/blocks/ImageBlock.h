@@ -10,10 +10,25 @@
 
 class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch below)
 
-// Source pixel area above which an image is considered "large" and rendered
-// as a placeholder until the user explicitly requests it.
-// 800x600 covers most full-page illustrations that take >1s to dither on ESP32.
-static constexpr int32_t LARGE_IMAGE_PIXEL_THRESHOLD = 800 * 600;
+// Source file size above which an image is considered "large" and rendered as a placeholder
+// until the user explicitly requests it.
+//
+// This used to be a PIXEL area (800*600), compared against ImageBlock's width/height — which are
+// the DISPLAY dimensions, not the source's. On a 480x800 panel the largest image that can be
+// drawn covers 384000 pixels, so the test could never be true and the placeholder never appeared,
+// whatever the setting said. Bytes also happen to be the better predictor: what costs seconds is
+// pulling the entry out of the ZIP and inflating it, and that scales with the file, not with the
+// area it ends up occupying on screen.
+//
+// 256 KB, from device measurements on X4: Men at Arms' 857182-byte cover PNG cost ~17 s to
+// extract plus ~5.8 s per decode pass, while the same book's 113588-byte and 155096-byte JPEGs
+// are unremarkable. The line wants to sit above the second group and well below the first.
+//
+// Note what this does NOT cover: a small file that inflates to an enormous bitmap (a flat-colour
+// 5000x5000 PNG) is cheap to read and slow to decode, and nothing here sees that. Source pixel
+// dimensions are known at parse time but are not carried on the block; if such a book turns up,
+// that is the axis to add rather than moving this number.
+static constexpr uint32_t LARGE_IMAGE_SOURCE_BYTES = 256 * 1024;
 
 // Tone mapping for inline images. Set once from src/ (which owns the settings) before a
 // render pass; lib/Epub must not read settings itself. Applies to every ImageBlock: the
@@ -98,8 +113,11 @@ class ImageBlock final : public Block {
 
   bool imageExists() const;
 
-  // Returns true if the source image dimensions exceed LARGE_IMAGE_PIXEL_THRESHOLD.
-  // Result is cached after the first call to avoid repeated header reads.
+  // Returns true if the source image's file size exceeds LARGE_IMAGE_SOURCE_BYTES. Answered from
+  // the extracted file when there is one, otherwise from the ZIP entry's uncompressed size (one
+  // central-directory scan). Result is cached after the first call: the lookup is only ever
+  // reached on a pixel-cache miss, i.e. immediately before a decode that costs orders of
+  // magnitude more, but a page can render several times.
   bool isLargeImage() const;
 
   // Returns true if this image would be shown as a placeholder given forceLoad.
@@ -136,6 +154,9 @@ class ImageBlock final : public Block {
   // Vertical crop window into the decoded image. srcYOffset_==0 && srcHeight_==0 means full image.
   int16_t srcYOffset_ = 0;
   int16_t srcHeight_ = 0;
+  // Cached isLargeImage() answer: -1 not yet resolved, 0 no, 1 yes. Mutable because the query is
+  // const and the answer cannot change for the life of the block.
+  mutable int8_t largeImageCached_ = -1;
   std::string epubFilePath_;   // source EPUB on SD (empty if already extracted)
   std::string epubEntryPath_;  // internal EPUB entry path (e.g. "OEBPS/images/foo.jpg")
 

@@ -13,6 +13,7 @@
 //      EntryReader itself does NOT fall back once it has been handed one.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -20,6 +21,7 @@
 
 #include "BuildArena.h"
 #include "Epub.h"
+#include "Epub/blocks/ImageBlock.h"
 
 namespace fs = std::filesystem;
 
@@ -101,3 +103,72 @@ TEST_F(ImageExtractionFixture, TooSmallArenaFallsBackToHeapInsteadOfFailing) {
 }
 
 }  // namespace
+
+// --- large-image placeholder gate ------------------------------------------------------------
+//
+// This used to compare ImageBlock's width*height — the DISPLAY dimensions — against 800*600.
+// The panel is 480x800, and render() rejects anything larger than the screen, so the product
+// could never exceed 384000 and the gate was unreachable: the "show a placeholder for large
+// images" setting did nothing at all, for any book. The tests below pin both halves of the fix —
+// that the decision is made on source bytes, and that display size does not enter into it.
+
+struct LargeImageFixture : ImageExtractionFixture {
+  // A file of `bytes` at the block's imagePath, standing in for an already-extracted image.
+  std::string writeExtracted(const char* name, const size_t bytes) {
+    const std::string path = (work / name).string();
+    std::ofstream out(path, std::ios::binary);
+    const std::vector<char> chunk(1024, '\0');
+    for (size_t written = 0; written < bytes; written += chunk.size()) {
+      out.write(chunk.data(), static_cast<std::streamsize>(std::min(chunk.size(), bytes - written)));
+    }
+    return path;
+  }
+};
+
+TEST_F(LargeImageFixture, DecidesOnSourceBytesNotDisplaySize) {
+  // Tiny on screen, huge on disk: large. This is the case that matters — a full-page cover is
+  // scaled down to fit, so its display size says nothing about what it costs to get there.
+  const std::string big = writeExtracted("big.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  ImageBlock smallOnScreen(big, 32, 32, "");
+  EXPECT_TRUE(smallOnScreen.isLargeImage());
+
+  // Full screen, small file: not large. Under the old pixel test this was the only shape that
+  // could ever have qualified, and even it could not reach the threshold.
+  const std::string small = writeExtracted("small.png", 8 * 1024);
+  ImageBlock fullScreen(small, 480, 800, "");
+  EXPECT_FALSE(fullScreen.isLargeImage());
+}
+
+TEST_F(LargeImageFixture, ResolvesSizeFromTheArchiveBeforeExtraction) {
+  // Nothing extracted yet: the size has to come from the ZIP entry, which is the state the gate
+  // is actually consulted in (first view, pixel-cache miss, image not yet on SD).
+  const std::string notExtracted = (work / "never_written.png").string();
+  ASSERT_FALSE(fs::exists(notExtracted));
+
+  static_assert(kEntryBytes < LARGE_IMAGE_SOURCE_BYTES, "fixture entry must be under the threshold");
+  ImageBlock block(notExtracted, 100, 100, "", kBook, kEntry);
+  EXPECT_FALSE(block.isLargeImage()) << kEntryBytes << " bytes is under the threshold";
+  EXPECT_FALSE(fs::exists(notExtracted)) << "asking the size must not extract anything";
+
+  // The corpus has no entry above the threshold, so the archive path's TRUE case is not covered
+  // here — a failed lookup and a small entry both answer false, and there is no way to tell them
+  // apart from outside. What is pinned is that the lookup neither extracts nor throws.
+}
+
+TEST_F(LargeImageFixture, UnknownSizeRendersRatherThanHides) {
+  // No archive reference and no file on disk: nothing can be learned. Fall to "not large", so the
+  // image is attempted rather than replaced by a placeholder that would never resolve.
+  ImageBlock orphan((work / "missing.png").string(), 400, 600, "");
+  EXPECT_FALSE(orphan.isLargeImage());
+}
+
+TEST_F(LargeImageFixture, PlaceholderIsSuppressedByForceLoad) {
+  const std::string big = writeExtracted("forced.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  ImageBlock block(big, 400, 600, "");
+
+  EXPECT_TRUE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
+  EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/true, /*monochromeOutput=*/true))
+      << "the user asked for it explicitly";
+  // (The other suppressor — an existing .pxc pixel cache — is not reachable from here: the cache
+  // path is derived internally from the tone filter id and is not exposed for a test to create.)
+}
