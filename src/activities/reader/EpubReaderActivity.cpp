@@ -493,7 +493,7 @@ void EpubReaderActivity::onEnter() {
   // non-incremental entry in buildSection). Also clear any stale post-popup HALF left armed if the
   // previous reader session was abandoned mid-build.
   coldOpenHalfRefreshArmed_ = true;
-  forceCleanRefreshAfterPopup_ = false;
+  forceHalfRefreshAfterPopup_ = false;
   // Start the refresh cadence at the configured frequency so the first page uses a fast
   // differential. RED RAM is valid: the previous activity's last displayBuffer() called
   // syncRedRamFromFrameBuffer(). If the previous activity set a HALF_REFRESH override via
@@ -2283,7 +2283,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
   // arrived via the full-screen selector, the extra menu/submenu/selector redraws leave the FAST
   // baseline out of sync and the popup box ghosts. Arm a one-shot HALF so drawPopup() establishes a
   // clean baseline — the same deliberate-transition signal the chapter/percent/footnote jumps use
-  // (hasRefreshOverridePending() at the popup then also arms forceCleanRefreshAfterPopup_ for the
+  // (hasRefreshOverridePending() at the popup then also arms forceHalfRefreshAfterPopup_ for the
   // first content page). Reached only when something actually changed (early-out above), so routine
   // no-op reopens of the menu don't pay for it.
   ReaderUtils::enforceExitFullRefresh(renderer);
@@ -2711,7 +2711,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // so it doesn't reintroduce the "every section traversal pays a slow refresh" cost. X3's fast
   // differential reads the controller's DTM1 (drawPopup updated it correctly), so it never ghosts.
   if (!renderer.isX3() && buildingPopupShown_) {
-    forceCleanRefreshAfterPopup_ = true;
+    forceHalfRefreshAfterPopup_ = true;
   }
 
   auto logPageTurnWindowIfReady = [this]() {
@@ -3487,7 +3487,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       //     to a FAST diff against the popup frame and ghost its outline.
       const bool dramaticTransition = coldOpenHalfRefreshArmed_ || renderer.hasRefreshOverridePending();
       coldOpenHalfRefreshArmed_ = false;
-      // X4: the dramatic-transition HALF belongs on the first CONTENT page (forceCleanRefreshAfterPopup_
+      // X4: the dramatic-transition HALF belongs on the first CONTENT page (forceHalfRefreshAfterPopup_
       // below), not the popup. The popup is a transient box over the already-correct current page, so a
       // FAST overlay is clean and instant — drop the pending HALF override here so drawPopup() doesn't
       // spend a second ~1.7s HALF on the popup itself. On X3 the popup's own refresh IS the baseline
@@ -3569,7 +3569,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // there is pure unnecessary cost. A routine forward-reading crossing into a still-building
       // Background-B section is NOT dramatic (neither signal is set), so it keeps the fast cadence.
       if (!renderer.isX3() && dramaticTransition) {
-        forceCleanRefreshAfterPopup_ = true;
+        forceHalfRefreshAfterPopup_ = true;
       }
       renderer.clearFontAccumulation();
       readerPhase_ = ReaderPhase::PRECOMPILING;
@@ -4293,32 +4293,25 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // trigger blocks through the waveform exactly as before.
   HalDisplay::RefreshMode pageRefreshMode;
   if (secondaryBufferDegraded_) {
-    // FULL_REFRESH already gives a clean baseline, same goal as forceCleanRefreshAfterPopup_;
+    // FULL_REFRESH already gives a clean baseline, same goal as forceHalfRefreshAfterPopup_;
     // consume it here too so it doesn't carry over and force an unrelated later page to HALF.
-    forceCleanRefreshAfterPopup_ = false;
+    forceHalfRefreshAfterPopup_ = false;
     pageRefreshMode = HalDisplay::FULL_REFRESH;
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else if (forceRefreshModeNextRender_ >= 0) {
     // Manual force-refresh button: apply the requested mode for this one render. A manual refresh
     // gives its own clean baseline, so consume any armed post-popup HALF too rather than letting it
     // carry over and force an unrelated later page to HALF.
-    forceCleanRefreshAfterPopup_ = false;
+    forceHalfRefreshAfterPopup_ = false;
     pageRefreshMode = static_cast<HalDisplay::RefreshMode>(forceRefreshModeNextRender_);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
     forceRefreshModeNextRender_ = -1;
-  } else if (forceCleanRefreshAfterPopup_) {
+  } else if (forceHalfRefreshAfterPopup_) {
     // First real page after the indexing popup, shown directly here because the build finished
     // in a single slice (e.g. a one-page cover) and never went through displayBuildPage(). See
-    // forceCleanRefreshAfterPopup_.
-    //
-    // FAST, not HALF: the HALF that used to sit here was the single largest cost of opening a
-    // cover. Device-measured on X4 (Men at Arms, spine 0), the page's own work was ~100 ms
-    // (prewarm 43 + bw 31 + display 26) against a 1691 ms HALF waveform — 94% of a 1997 ms
-    // "render". The trade is deliberate: a FAST diff across the popup -> content transition can
-    // leave a ghost outline of the popup box until the next full-refresh cycle. Reverting is
-    // this constant and the twin in displayBuildPage().
-    forceCleanRefreshAfterPopup_ = false;
-    pageRefreshMode = HalDisplay::FAST_REFRESH;
+    // forceHalfRefreshAfterPopup_.
+    forceHalfRefreshAfterPopup_ = false;
+    pageRefreshMode = HalDisplay::HALF_REFRESH;
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else if (forceHalfRefreshThisPage) {
     pageRefreshMode = HalDisplay::HALF_REFRESH;
@@ -4504,14 +4497,11 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
               /*monochromeOutput=*/true);
   renderStatusBar();
-  if (forceCleanRefreshAfterPopup_) {
-    // First real page after the indexing popup. FAST rather than HALF for the reason given at
-    // the twin site in renderContents(): the HALF waveform dominated the wall-clock cost of
-    // landing this page, and a popup-box ghost until the next full refresh is the accepted
-    // trade. Both sites must move together or the multi-slice and single-slice builds would
-    // disagree on how the same transition looks.
-    forceCleanRefreshAfterPopup_ = false;
-    renderer.triggerDisplay(HalDisplay::FAST_REFRESH);
+  if (forceHalfRefreshAfterPopup_) {
+    // First real page after the indexing popup: establish a clean baseline (see
+    // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.
+    forceHalfRefreshAfterPopup_ = false;
+    renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
     ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
@@ -5211,7 +5201,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       // Deliberate chapter jump: arm a HALF refresh for the next displayed screen, exactly like the
       // other deliberate jumps (percent / TOC / footnote / reader exit). The indexing popup consumes
       // this override so hasRefreshOverridePending() reads true there, which arms
-      // forceCleanRefreshAfterPopup_; the first page of the target chapter then paints HALF instead of
+      // forceHalfRefreshAfterPopup_; the first page of the target chapter then paints HALF instead of
       // a FAST differential. Without it, the dramatic previous-chapter -> new-chapter transition
       // under-drives on X4 and the previous chapter's text ghosts through the new page.
       ReaderUtils::enforceExitFullRefresh(renderer);
