@@ -1,14 +1,25 @@
 #include "HalSpiBus.h"
 
+#include <Arduino.h>
 #include <Logging.h>
+#include <freertos/task.h>
+
+#include <cstdlib>
 
 namespace {
-// A single SPI transaction is short (a panel refresh is driven in chunks, an SD
-// transfer is block-sized), so anything past this means a lock-order mistake or
-// a wedged transfer. Waiting forever would turn that into a silent hang; time
-// out, log, and proceed unlocked so the failure is diagnosable in a log rather
-// than presenting as a frozen device.
-constexpr TickType_t SPI_LOCK_TIMEOUT_TICKS = pdMS_TO_TICKS(5000);
+
+struct TrackedActivity {
+  HalSpiBus::Operation operation = HalSpiBus::Operation::None;
+  HalSpiBus::OperationState state = HalSpiBus::OperationState::Idle;
+  uint32_t startedMs = 0;
+  TaskHandle_t owner = nullptr;
+  uint16_t depth = 0;
+};
+
+portMUX_TYPE s_activityMux = portMUX_INITIALIZER_UNLOCKED;
+TrackedActivity s_activeActivity;
+TrackedActivity s_waitingActivity;
+
 }  // namespace
 
 HalSpiBus::HalSpiBus() {
@@ -25,20 +36,79 @@ HalSpiBus& HalSpiBus::getInstance() {
 
 void HalSpiBus::begin() { (void)getInstance(); }
 
-HalSpiBus::Lock::Lock() {
+HalSpiBus::ActivitySnapshot HalSpiBus::activitySnapshot() const {
+  TrackedActivity activity;
+  portENTER_CRITICAL(&s_activityMux);
+  activity = s_activeActivity.operation != Operation::None ? s_activeActivity : s_waitingActivity;
+  portEXIT_CRITICAL(&s_activityMux);
+
+  ActivitySnapshot snapshot;
+  snapshot.operation = activity.operation;
+  snapshot.state = activity.state;
+  snapshot.elapsedMs = activity.operation == Operation::None ? 0 : millis() - activity.startedMs;
+  return snapshot;
+}
+
+const char* HalSpiBus::operationName(Operation operation) {
+  switch (operation) {
+    case Operation::None:
+      return "idle";
+    case Operation::Sd:
+      return "storage";
+    case Operation::DisplayInit:
+      return "display-init";
+    case Operation::DisplayRefresh:
+      return "display-refresh";
+    case Operation::DisplaySleep:
+      return "display-sleep";
+    case Operation::DisplayBuffer:
+      return "display-buffer";
+    case Operation::Count:
+      break;
+  }
+  return "?";
+}
+
+HalSpiBus::Lock::Lock(Operation operation) : owner(xTaskGetCurrentTaskHandle()) {
   auto& bus = HalSpiBus::getInstance();
   if (bus.mutex == nullptr) {
-    LOG_ERR("SPI", "SPI bus mutex not initialized, proceeding unlocked");
-    return;
+    LOG_ERR("SPI", "SPI bus mutex not initialized; refusing unsafe bus access");
+    abort();
   }
-  if (xSemaphoreTakeRecursive(bus.mutex, SPI_LOCK_TIMEOUT_TICKS) != pdTRUE) {
-    LOG_ERR("SPI", "Timed out acquiring SPI bus mutex - proceeding unlocked (possible lock-order bug)");
-    return;
+
+  portENTER_CRITICAL(&s_activityMux);
+  s_waitingActivity = {operation, OperationState::Waiting, millis(), owner, 0};
+  portEXIT_CRITICAL(&s_activityMux);
+
+  if (xSemaphoreTakeRecursive(bus.mutex, portMAX_DELAY) != pdTRUE) {
+    LOG_ERR("SPI", "SPI bus mutex acquisition failed; refusing unsafe bus access");
+    abort();
   }
   acquired = true;
+
+  portENTER_CRITICAL(&s_activityMux);
+  if (s_waitingActivity.owner == owner) {
+    s_waitingActivity = {};
+  }
+  if (s_activeActivity.owner == owner) {
+    s_activeActivity.depth++;
+  } else {
+    s_activeActivity = {operation, OperationState::Active, millis(), owner, 1};
+  }
+  portEXIT_CRITICAL(&s_activityMux);
 }
 
 HalSpiBus::Lock::~Lock() {
   if (!acquired) return;
   xSemaphoreGiveRecursive(HalSpiBus::getInstance().mutex);
+
+  portENTER_CRITICAL(&s_activityMux);
+  if (s_activeActivity.owner == owner) {
+    if (s_activeActivity.depth > 1) {
+      s_activeActivity.depth--;
+    } else {
+      s_activeActivity = {};
+    }
+  }
+  portEXIT_CRITICAL(&s_activityMux);
 }

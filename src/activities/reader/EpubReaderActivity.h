@@ -615,6 +615,24 @@ class EpubReaderActivity final : public Activity {
   // Outcome of compileSectionCache(). Restarting means a fragmented-heap recovery reboot was
   // triggered and the caller must return immediately without further work.
   enum class BuildOutcome : uint8_t { Built, Failed, Restarting };
+  // --- Build progress heartbeat ------------------------------------------------------
+  // The indexing popup is drawn ONCE, at the top of compileSectionCache. For a build that
+  // runs for tens of seconds that single frame is the only sign of life, and on a wake
+  // resume it is painted against a panel still holding the sleep screen — so if its
+  // refresh baseline is wrong it may not be legible at all. These repaint it as the build
+  // proceeds, driven from the parser's own progress callback (which runs on the render
+  // task, the one task that owns the framebuffer here — painting from anywhere else would
+  // race the build's use of the borrowed secondary buffer).
+  //
+  // Two thresholds, per the reporting on issue #155: a first repaint once the build has
+  // clearly outlived a normal open, then an escalated one that names the phase and forces
+  // a HALF refresh — which also repairs a bad differential baseline, so a first popup that
+  // never became visible is recovered.
+  void maybeShowBuildProgress(int percent);
+  uint32_t buildProgressStartMs_ = 0;    // millis() at the start of the current blocking build
+  uint32_t buildProgressLastMs_ = 0;     // millis() of the last progress repaint
+  bool buildProgressEscalated_ = false;  // the long-build paint has been shown once
+
   // Draws the indexing popup, then builds the section cache file for the current section.
   // Prefers an in-place build that keeps the secondary display buffer (preserving the fast-
   // refresh baseline); falls back to releasing the buffer — for parse/decode headroom — when

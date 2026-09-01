@@ -32,7 +32,7 @@ void HalDisplay::begin(bool seamless) {
   einkDisplay.setBusyWaitHooks([] { powerManager.enterWaveformWait(); }, [] { powerManager.exitWaveformWait(); });
 
   {
-    HalSpiBus::Lock spiLock;
+    HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayInit);
     einkDisplay.begin();
   }
 
@@ -90,7 +90,7 @@ void HalDisplay::requestResync(uint8_t settlePasses) {
 }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
 
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
@@ -134,7 +134,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
 
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
@@ -150,7 +150,7 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
 }
 
 void HalDisplay::deepSleep() {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplaySleep);
   einkDisplay.deepSleep();
 }
 
@@ -166,7 +166,7 @@ void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
 static uint32_t fbufContig() { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT); }
 
 bool HalDisplay::releaseSecondaryBuffer() {
-  HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayBuffer);  // see the note above borrowSecondaryBuffer()
   // Double-release guard. releaseSecondaryBuffer() returning false means the
   // secondary buffer was already gone — i.e. a caller released it without
   // tracking that it had, then released again. The release windows here are
@@ -187,7 +187,7 @@ bool HalDisplay::releaseSecondaryBuffer() {
 }
 
 bool HalDisplay::reallocSecondaryBuffer() {
-  HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayBuffer);  // see the note above borrowSecondaryBuffer()
   const bool ok = einkDisplay.reallocSecondaryBuffer();
   LOG_INF("FBUF", "reallocSecondary -> %d (hasSecondary=%d redSynced=%d contig=%lu)", ok ? 1 : 0,
           einkDisplay.hasSecondaryBuffer() ? 1 : 0, einkDisplay.isRedRamSynced() ? 1 : 0,
@@ -212,7 +212,7 @@ bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuf
 // The mutex is recursive, so a caller that already holds it is unaffected, and the lock is
 // uncontended on the normal path — this costs nothing when nothing else is on the bus.
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayBuffer);
   uint8_t* buf = einkDisplay.borrowSecondaryBuffer(size);
   LOG_INF("FBUF", "borrowSecondary -> %d (size=%lu hasSecondary=%d)", buf ? 1 : 0,
           static_cast<unsigned long>(buf && size ? *size : 0), einkDisplay.hasSecondaryBuffer() ? 1 : 0);
@@ -220,7 +220,7 @@ uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
 }
 
 bool HalDisplay::returnSecondaryBuffer() {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayBuffer);
   const bool ok = einkDisplay.returnSecondaryBuffer();
   LOG_INF("FBUF", "returnSecondary -> %d (hasSecondary=%d)", ok ? 1 : 0, einkDisplay.hasSecondaryBuffer() ? 1 : 0);
   return ok;
@@ -233,12 +233,12 @@ void HalDisplay::setSingleBufferFastDiff(bool enabled) {
 }
 
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }
 
 void HalDisplay::completeDisplay() {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.completeDisplay();
 }
 
@@ -250,12 +250,12 @@ void HalDisplay::completeDisplay() {
 // during the waveform the controller scans its own RAM and the panel is not
 // driving SPI.
 void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
 
 void HalDisplay::finishDisplayAsync() {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.finishDisplayAsync();
 }
 
@@ -285,12 +285,12 @@ void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.
 void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.displayGrayBuffer(turnOffScreen);
 }
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
-  HalSpiBus::Lock spiLock;
+  HalSpiBus::Lock spiLock(HalSpiBus::Operation::DisplayRefresh);
   einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
 }
 

@@ -16,6 +16,11 @@ bool resumeArmed = false;
 bool sectionCacheHit = false;
 bool sectionCacheHitKnown = false;
 bool summaryEmitted = true;  // seeded true so a stray logSummary() before begin() is a no-op
+// Full-width open timestamp. The per-phase stamps are uint16 and saturate at 65535 ms, which
+// is fine for measuring a healthy open and useless for detecting one that has stalled past a
+// minute — the exact case the watchdog exists for.
+unsigned long openStartMs = 0;
+bool openActive = false;
 
 // Short labels so the whole trace fits one 256-byte ring-buffer entry (Logging.cpp).
 constexpr const char* PHASE_NAMES[] = {"rdr", "book", "act", "prog", "store", "rend", "sect", "page"};
@@ -38,7 +43,33 @@ void begin() {
   sectionCacheHit = false;
   sectionCacheHitKnown = false;
   summaryEmitted = false;
+  openStartMs = millis();
+  openActive = true;
   mark(Phase::ReaderEnter);
+}
+
+bool openInFlight(const bool fromWakeOnly) {
+  if (!openActive || (fromWakeOnly && !traceFromWake)) {
+    return false;
+  }
+  return (phaseReached & static_cast<uint16_t>(1u << static_cast<uint8_t>(Phase::PageVisible))) == 0;
+}
+
+unsigned long msSinceOpen() { return openActive ? millis() - openStartMs : 0; }
+
+Phase furthestReached() {
+  uint8_t furthest = 0;
+  for (uint8_t i = 0; i < static_cast<uint8_t>(Phase::Count); i++) {
+    if (phaseReached & static_cast<uint16_t>(1u << i)) {
+      furthest = i;
+    }
+  }
+  return static_cast<Phase>(furthest);
+}
+
+const char* phaseName(const Phase phase) {
+  const uint8_t index = static_cast<uint8_t>(phase);
+  return index < static_cast<uint8_t>(Phase::Count) ? PHASE_NAMES[index] : "?";
 }
 
 void mark(Phase phase) {
@@ -87,6 +118,9 @@ void logSummary() {
   const uint8_t readerIndex = static_cast<uint8_t>(Phase::ReaderEnter);
   const uint8_t pageIndex = static_cast<uint8_t>(Phase::PageVisible);
   const bool hasPage = (phaseReached & (1u << pageIndex)) != 0;
+  // The open is over: stop msSinceOpen() counting, so the stall watchdog cannot mistake a
+  // finished open for one still in flight.
+  openActive = !hasPage;
   // open = reader entry to first visible page (the cost this trace exists to attribute).
   // page = absolute millis() at first paint, so it can be read against the boot trace's
   // `logo=`/`setup=` numbers without adding anything up by hand.

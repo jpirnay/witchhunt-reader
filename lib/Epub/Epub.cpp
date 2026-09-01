@@ -8,6 +8,7 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <LongTaskProgress.h>
 #include <PngToBmpConverter.h>
 #include <Serialization.h>
 #include <SidecarFiles.h>
@@ -605,6 +606,9 @@ void Epub::parseCssFiles() const {
 // load in the meta data for the epub file
 bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   LOG_DBG("EBP", "Loading ePub: %s", filepath.c_str());
+  // Milestones for the progress hook. Every one of these can take seconds on a large book,
+  // and on a wake resume there is nothing on screen behind them (see LongTaskProgress.h).
+  LongTaskProgress::step("open");
   tocReliability = TocReliability::Unknown;
 
   // Initialize spine/TOC cache
@@ -618,6 +622,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   // from; a mismatch invalidates the entire cache dir (sections, CSS, thumbs —
   // all derived from the old bytes).
   uint64_t zipFp = 0;
+  LongTaskProgress::step("fingerprint");
   const bool haveFp = computeZipFingerprint(&zipFp);
   if (haveFp && BookMetadataCache::cacheExists(cachePath)) {
     uint64_t storedFp = 0;
@@ -632,11 +637,16 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   }
 
   // Try to load existing cache first
+  LongTaskProgress::step("index");
   if (bookMetadataCache->load()) {
     if (!skipLoadingCss) {
       // Rebuild CSS cache when missing or when cache version changed (loadFromCache removes stale file)
       if (!cssParser->hasCache() || !cssParser->loadFromCache()) {
         LOG_DBG("EBP", "CSS rules cache missing or stale, attempting to parse CSS files");
+        // The slowest branch of a warm-cache open by some margin: reparse the OPF, scan the
+        // ZIP for stylesheets, compile them, then delete every section cache so they rebuild
+        // against the new CSS. Seconds on a large book, and it painted nothing at all.
+        LongTaskProgress::step("css");
         cssParser->deleteCache();
 
         if (!parseContentOpf(bookMetadataCache->coreMetadata, OpfCacheMode::Disabled)) {
@@ -645,13 +655,17 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
         } else {
           // Handle case where CSS files are not listed in OPF manifest
           // but are still referenced by HTML files - discover and parse them too
+          LongTaskProgress::step("css-scan");
           discoverCssFilesFromZip();
         }
+        LongTaskProgress::step("css-parse");
         parseCssFiles();
+        LongTaskProgress::step("css-evict");
         // Invalidate section caches so they are rebuilt with the new CSS
         Storage.removeDir((cachePath + "/sections").c_str());
       }
     }
+    LongTaskProgress::step("meta");
     applyMetadataSidecar();
     LOG_DBG("EBP", "Loaded ePub: %s", filepath.c_str());
     return true;

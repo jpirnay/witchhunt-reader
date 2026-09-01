@@ -16,6 +16,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <LongTaskProgress.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
@@ -457,6 +458,113 @@ static void onSleepStep(HalPowerManager::SleepStep step, unsigned long waitedMs,
     case Step::WakeArmed:
       BootDiag::markSleepStage(BootDiag::SleepStage::WakeArmed);
       break;
+  }
+}
+
+// --- Resume stall watchdog -------------------------------------------------------------
+// A wake straight back into a book paints NOTHING until the reader's first render lands (see
+// BootResume::ReaderResume). That was designed around a ~700 ms open; when the open instead
+// takes minutes or never finishes, the panel keeps showing the sleep screen and every button
+// appears dead — which is what issue #155 turned out to be. The device is running; there is
+// simply nothing on screen and no way back.
+//
+// It RECORDS the stall; it does not act on it. An earlier version restarted the device to
+// land on Home (the boot-loop guard already routes there, since an open that never returned
+// leaves readerActivityLoadCount set). That was dropped deliberately: while the cause is
+// still unknown an automatic restart destroys the evidence and gives the reporter a second
+// unexplained reboot to describe. The user-visible answer to a slow open is the liveness
+// update the reader paints every LIVENESS_INTERVAL_MS — this task's job is only to leave a
+// line in the history saying which phase it was sitting in.
+//
+// Its own task, deliberately: the stall can be in either of the two tasks that matter. A slow
+// section build runs on the render task (loop keeps running), but Epub::load() runs inside
+// onEnter() on the LOOP task, and a watchdog living in loop() cannot fire while loop() is the
+// thing that is stuck. It takes no render lock and touches no framebuffer. Its marker goes to
+// internal NVS and is drained to the SD ring by the next healthy boot; the reporter must never
+// wait for storage because the operation being diagnosed may hold that mutex forever.
+//
+// 1 KB stack: the deepest path is persistResumeStall() -> one 16-byte NVS blob write.
+static constexpr uint32_t RESUME_STALL_REPORT_MS = 20000;
+// How recent a yield-point tick has to be to count as "still working". Generous: the
+// coarsest yield boundary is one page element, which can legitimately take a second or two.
+static constexpr uint32_t STALL_TICK_WINDOW_MS = 3000;
+static constexpr uint32_t RESUME_STALL_POLL_MS = 1000;
+
+// Set as the last statement of setup(). Read by the reporter task to tell a boot that is
+// still working through setup() from one that finished and handed over to loop().
+static volatile bool setupComplete = false;
+
+static void resumeStallReporterTask(void*) {
+  bool reported = false;
+  bool bootReported = false;
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(RESUME_STALL_POLL_MS));
+
+    // setup() still running long past any healthy boot. Skipped while a book open is in
+    // flight, because that case has its own marker below with a far more specific phase —
+    // and on a wake resume the open runs INSIDE setup() (replaceActivity() calls onEnter()
+    // inline when there is no current activity), so both would otherwise fire at once.
+    if (!setupComplete && !bootReported && !WakeTrace::openInFlight(/*fromWakeOnly=*/false) &&
+        millis() >= RESUME_STALL_REPORT_MS) {
+      bootReported = true;
+      const BootPhase phase = BootDiag::furthestPhase();
+      LOG_ERR("MAIN", "setup() still running after %lums, furthest phase %s", millis(), BootDiag::phaseName(phase));
+      BootDiag::persistBootStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(millis() / 1000));
+    }
+    // fromWakeOnly: a book opened from the library has a visible UI behind it, so a slow open
+    // there is merely slow. Only the wake resume is invisible, and only it is worth a record.
+    if (!WakeTrace::openInFlight(/*fromWakeOnly=*/true)) {
+      reported = false;  // that open ended; arm again for the next one
+      continue;
+    }
+    if (reported || WakeTrace::msSinceOpen() < RESUME_STALL_REPORT_MS) {
+      continue;
+    }
+    reported = true;  // once per open: the point is a marker, not a running commentary
+    const WakeTrace::Phase phase = WakeTrace::furthestReached();
+    const unsigned long waited = WakeTrace::msSinceOpen();
+    // Slow or wedged? The decoders and the page renderer poll CooperativeAbort at per-block
+    // and per-element boundaries, and every one of those polls records liveness. Recent ticks
+    // mean the work is grinding forward; none at all means it is stuck inside a single
+    // uninterruptible step. Those two look identical on a dead-looking screen and want
+    // completely different fixes.
+    const bool ticking = LongTaskProgress::msSinceAlive() < STALL_TICK_WINDOW_MS;
+    const HalStorage::ActivitySnapshot storage = Storage.activitySnapshot();
+    const unsigned long storageSeconds = storage.elapsedMs / 1000UL;
+    const HalSpiBus::ActivitySnapshot spi = HalSpiBus::getInstance().activitySnapshot();
+    const unsigned long spiSeconds = spi.elapsedMs / 1000UL;
+    const char* storageState = "idle";
+    switch (storage.state) {
+      case HalStorage::OperationState::WaitingForSpi:
+        storageState = "wait-spi";
+        break;
+      case HalStorage::OperationState::WaitingForStorage:
+        storageState = "wait-storage";
+        break;
+      case HalStorage::OperationState::Active:
+        storageState = "active";
+        break;
+      case HalStorage::OperationState::Idle:
+        break;
+    }
+    LOG_ERR("MAIN",
+            "Resume still has no page after %lums, in phase %s (%s, last tick %lums ago, stage %s, storage %s %s "
+            "%lus, spi %s %s %lus busy=%d)",
+            waited, WakeTrace::phaseName(phase), ticking ? "still ticking" : "NO TICKS",
+            static_cast<unsigned long>(LongTaskProgress::msSinceAlive()),
+            LongTaskProgress::currentStage() ? LongTaskProgress::currentStage() : "?",
+            HalStorage::operationName(storage.operation), storageState, storageSeconds,
+            HalSpiBus::operationName(spi.operation),
+            spi.state == HalSpiBus::OperationState::Active
+                ? "active"
+                : (spi.state == HalSpiBus::OperationState::Waiting ? "waiting" : "idle"),
+            spiSeconds, digitalRead(EPD_BUSY) == HIGH ? 1 : 0);
+    BootDiag::persistResumeStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(waited / 1000), ticking,
+                                 static_cast<uint8_t>(storage.operation), static_cast<uint8_t>(storage.state),
+                                 static_cast<uint16_t>(storageSeconds > UINT16_MAX ? UINT16_MAX : storageSeconds),
+                                 static_cast<uint8_t>(spi.operation), static_cast<uint8_t>(spi.state),
+                                 static_cast<uint16_t>(spiSeconds > UINT16_MAX ? UINT16_MAX : spiSeconds),
+                                 digitalRead(EPD_BUSY) == HIGH);
   }
 }
 
@@ -985,6 +1093,17 @@ void setup() {
   // previous sleep's, so the pair "how the last sleep ended" / "how this boot started"
   // is on the card before anything later in setup() can hang or panic.
   BootDiag::persistBoot();
+  // Started HERE, not at the end of setup(). It used to be created after the activity
+  // routing, which made it useless for the one case it exists to watch: on a wake straight
+  // back into a book ActivityManager::replaceActivity() runs onEnter() inline (there is no
+  // current activity on that branch), so the entire book open — load, section build, first
+  // render — happens inside setup(), and a boot that hung there never reached the line that
+  // created the task. Field capture on issue #155 showed exactly that: a resume that stalled
+  // and left no marker, because the marker could not have been written.
+  //
+  // This is the earliest point it needs to run: before Storage.begin() there is no reader
+  // resume and no HalStorage operation to diagnose.
+  xTaskCreate(&resumeStallReporterTask, "resumewd", 1024, nullptr, 1, nullptr);
   logStartupMemory("after_storage_begin");
 
   SETTINGS.loadFromFile();
@@ -1198,6 +1317,9 @@ void setup() {
   allowSleepAt = millis() + 2000;
   BootDiag::logSummary();
   logStartupMemory("setup_complete");
+  // Last statement: from here the reporter task stops watching for a setup() that never
+  // finished. Everything after this point is loop()'s, and has its own markers.
+  setupComplete = true;
 }
 
 void loop() {

@@ -13,7 +13,8 @@
 ///
 /// The page is deliberately one screenful with no scrolling: its job is to be
 /// photographed and pasted into an issue. Row labels are translated; the values stay as
-/// English technical tokens so reports from different locales stay comparable.
+/// English technical tokens so reports from different locales stay comparable. Once the
+/// persisted history loads, the same evidence is emitted to serial without screen clipping.
 class BootDiagnosticsActivity final : public Activity {
  public:
   explicit BootDiagnosticsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -24,6 +25,8 @@ class BootDiagnosticsActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
+  void logToSerial() const;
+
   // Fixed storage rather than a vector: 256 bytes as part of the activity object, which
   // is already a heap allocation, versus a second one that would have to be sized from
   // the file anyway. loadRecords() fills it newest-first.

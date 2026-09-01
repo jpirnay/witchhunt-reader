@@ -28,6 +28,8 @@
 ///                   normal sleep.  So its absence is evidence too, and the record
 ///                   is finalised from the reset reason in that case — see
 ///                   outcomeOf() and resetImpliesMcuHadStopped().
+///   * NVS         — aborted-boot counters and one pending stall marker. A stall marker
+///                   must not use SD because storage itself may be what has wedged.
 ///   * SD          — a fixed-size ring of the last 16 sleep/boot events, so history
 ///                   survives power loss and can be read back on screen.
 ///
@@ -71,6 +73,8 @@ enum class BootPhase : uint8_t {
 };
 
 void markPhase(BootPhase phase);
+/// Furthest phase stamped so far — where a boot that never finished got to.
+BootPhase furthestPhase();
 bool phaseReached(BootPhase phase);
 uint16_t phaseMs(BootPhase phase);
 /// Short label ("entry", "gate", "sd", ...).  Points at a string literal.
@@ -187,14 +191,27 @@ struct AbortCounts {
 };
 AbortCounts abortCounts();
 
+/// Record that a wake resume still had no page after the reporter's threshold.  `wakePhase`
+/// is the furthest WakeTrace phase reached (the area of work it was sitting in) and
+/// `seconds` is how long it had been waiting.
+///
+/// A marker, not a trigger: nothing acts on it. Written once per open to NVS, then drained
+/// into the SD history by the next healthy boot. The storage and SPI fields are lock-free
+/// snapshots; `panelBusyHigh` is the raw GPIO level rather than a polarity-specific verdict.
+void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking, uint8_t storageOperation,
+                        uint8_t storageState, uint16_t storageSeconds, uint8_t spiOperation, uint8_t spiState,
+                        uint16_t spiSeconds, bool panelBusyHigh);
+
+/// Record that setup() itself had not completed after the reporter's threshold, and how far
+/// it had got.  Covers the hangs the resume marker cannot: on a wake straight back into a
+/// book, ActivityManager::replaceActivity() runs onEnter() INLINE when there is no current
+/// activity — which is exactly the reader-resume case — so the whole book open happens
+/// inside setup(), and a boot record written at the SD mount says nothing about what
+/// happened afterwards.
+void persistBootStall(uint8_t bootPhase, uint16_t seconds);
+
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.
 uint8_t loadRecords(Record* out, uint8_t maxRecords);
-
-/// True when this boot's record is not preceded by a sleep — the previous session ended
-/// without reaching the sleep path at all (a reset while awake, a crash, a rail cut).  On
-/// the C3 this is the only way to see that, since the reset reason cannot separate a reset
-/// press from a power-on.
-bool previousSessionEndedWithoutSleep();
 
 }  // namespace BootDiag

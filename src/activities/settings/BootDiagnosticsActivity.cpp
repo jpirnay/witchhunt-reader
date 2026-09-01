@@ -5,7 +5,10 @@
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
+#include <HalSpiBus.h>
+#include <HalStorage.h>
 #include <I18n.h>
+#include <Logging.h>
 #include <XteinkDetect.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -16,6 +19,7 @@
 #include "SystemStatus.h"  // displayControllerName()
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/WakeTrace.h"
 
 namespace {
 
@@ -46,6 +50,16 @@ const char* resetReasonName(uint8_t reason) {
       return "brownout";
     case ESP_RST_SDIO:
       return "sdio";
+    case ESP_RST_USB:
+      return "usb-reset";
+    case ESP_RST_JTAG:
+      return "jtag-reset";
+    case ESP_RST_EFUSE:
+      return "efuse-error";
+    case ESP_RST_PWR_GLITCH:
+      return "power-glitch";
+    case ESP_RST_CPU_LOCKUP:
+      return "cpu-lockup";
     default:
       return "other";
   }
@@ -109,6 +123,84 @@ const char* outcomeTag(const BootDiag::Record& record) {
   return "STUCK";
 }
 
+void formatStorageEvidence(const BootDiag::Record& record, char* out, size_t outSize) {
+  if ((record.flags & BootDiag::kFlagStorageSampled) == 0) {
+    snprintf(out, outSize, "sd untracked");
+    return;
+  }
+  const char* state = "idle";
+  if ((record.flags & BootDiag::kFlagStorageActive) != 0) {
+    state = "active";
+  } else if ((record.flags & BootDiag::kFlagStorageWaitingForMutex) != 0) {
+    state = "wait-mutex";
+  } else if ((record.flags & BootDiag::kFlagStorageWaitingForSpi) != 0) {
+    state = "wait-spi";
+  }
+  if (state[0] == 'i') {
+    snprintf(out, outSize, "sd idle");
+    return;
+  }
+  snprintf(out, outSize, "sd %s/%s %us", HalStorage::operationName(static_cast<HalStorage::Operation>(record.reason)),
+           state, record.msB);
+}
+
+void formatSpiEvidence(const BootDiag::Record& record, char* out, size_t outSize) {
+  if ((record.flags & BootDiag::kFlagSpiSampled) == 0) {
+    snprintf(out, outSize, "spi untracked");
+    return;
+  }
+  const auto operation = static_cast<HalSpiBus::Operation>(BootDiag::stallSpiOperation(record));
+  const auto state = static_cast<HalSpiBus::OperationState>(BootDiag::stallSpiState(record));
+  const char* stateName = "idle";
+  if (state == HalSpiBus::OperationState::Waiting) {
+    stateName = "waiting";
+  } else if (state == HalSpiBus::OperationState::Active) {
+    stateName = "active";
+  }
+  snprintf(out, outSize, "spi %s/%s %us busy=%u", HalSpiBus::operationName(operation), stateName, record.msC,
+           static_cast<unsigned>((record.flags & BootDiag::kFlagPanelBusyHigh) != 0));
+}
+
+void formatHistoryRecord(const BootDiag::Record& record, char* out, size_t outSize) {
+  if (record.kind == BootDiag::KindSleep) {
+    snprintf(out, outSize, "%lu sleep %s %s %s%s%s", static_cast<unsigned long>(record.seq), outcomeTag(record),
+             BootDiag::stageName(static_cast<BootDiag::SleepStage>(record.code)),
+             BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(record.reason)),
+             (record.flags & BootDiag::kFlagFromReader) ? " book" : "",
+             (record.flags & BootDiag::kFlagReleaseTimeout) ? " REL-TIMEOUT" : "");
+    return;
+  }
+  if (record.kind == BootDiag::KindResumeStall) {
+    char storage[32];
+    char spi[48];
+    formatStorageEvidence(record, storage, sizeof(storage));
+    formatSpiEvidence(record, spi, sizeof(spi));
+    snprintf(out, outSize, "%lu STALLED %s %us %s %s %s", static_cast<unsigned long>(record.seq),
+             WakeTrace::phaseName(static_cast<WakeTrace::Phase>(record.code)), record.msA,
+             (record.flags & BootDiag::kFlagStillTicking) ? "working" : "NO-TICKS", spi, storage);
+    return;
+  }
+  if (record.kind == BootDiag::KindBootStall) {
+    char storage[32];
+    char spi[48];
+    formatStorageEvidence(record, storage, sizeof(storage));
+    formatSpiEvidence(record, spi, sizeof(spi));
+    snprintf(out, outSize, "%lu BOOT-STALL %s %us %s %s", static_cast<unsigned long>(record.seq),
+             BootDiag::phaseName(static_cast<BootDiag::BootPhase>(record.code)), record.msA, spi, storage);
+    return;
+  }
+  if (record.kind == BootDiag::KindAborted) {
+    snprintf(out, outSize, "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(record.seq), record.msA,
+             record.msA >= BootDiag::kAbortCountCap ? "+" : "",
+             BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(record.reason)),
+             HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(record.code)));
+    return;
+  }
+  snprintf(out, outSize, "%lu boot %s %s sd@%ums", static_cast<unsigned long>(record.seq),
+           resetReasonName(record.reason), HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(record.code)),
+           record.msC);
+}
+
 }  // namespace
 
 void BootDiagnosticsActivity::onEnter() {
@@ -129,8 +221,80 @@ void BootDiagnosticsActivity::loop() {
   if (!loaded_) {
     recordCount_ = BootDiag::loadRecords(records_, BootDiag::kCapacity);
     loaded_ = true;
+    logToSerial();
     requestUpdate();
   }
+}
+
+void BootDiagnosticsActivity::logToSerial() const {
+  LOG_INF("DIAG", "=== Boot Diagnostics %s ===", CROSSPOINT_VERSION);
+  LOG_INF("DIAG", "Hardware: board=%s controller=%s", BoardConfig::ACTIVE.name,
+          displayControllerName(BoardConfig::ACTIVE.displayController));
+
+  const auto& probe = freeink::getXteinkDisplayProbeDiag();
+  const bool probeSilent = probe.ver[0] == 0xFF && probe.ver[1] == 0xFF && probe.ver[2] == 0xFF &&
+                           probe.ver[3] == 0xFF && probe.ver[4] == 0xFF;
+  if (probe.valid && !probeSilent) {
+    LOG_INF("DIAG", "Panel probe: ver %02X %02X %02X %02X %02X flg %02X v%u%s%s", probe.ver[0], probe.ver[1],
+            probe.ver[2], probe.ver[3], probe.ver[4], probe.flg, probe.verdict, probe.mtpValid ? " mtp" : "",
+            probe.promoted ? " promoted" : "");
+  } else {
+    LOG_INF("DIAG", "Panel probe: %s", probe.valid ? "silent (all-FF)" : "unknown");
+  }
+
+  const char* previous = "unknown";
+  switch (BootDiag::previousSessionOf(records_, recordCount_)) {
+    case BootDiag::PreviousSession::EndedAtSleepPath:
+      previous = "ended-at-sleep-path";
+      break;
+    case BootDiag::PreviousSession::EndedWithoutSleep:
+      previous = "ended-without-sleep";
+      break;
+    case BootDiag::PreviousSession::Unknown:
+      break;
+  }
+  const esp_reset_reason_t resetReason = esp_reset_reason();
+  LOG_INF("DIAG", "This boot: reset=%s(%u) previous=%s wake=%s", resetReasonName(static_cast<uint8_t>(resetReason)),
+          static_cast<unsigned>(resetReason), previous,
+          resetReason == ESP_RST_DEEPSLEEP ? wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())) : "n/a");
+
+  const uint16_t aborted = BootDiag::abortsInCurrentRun(records_, recordCount_);
+  const BootDiag::AbortCounts counts = BootDiag::abortCounts();
+  LOG_INF("DIAG", "Aborted boots: current=%u lifetime=%lu pending=%u", aborted,
+          static_cast<unsigned long>(counts.lifetime), counts.undrained);
+  BootDiag::logSummary();
+
+  const auto& stats = powerManager.lightSleepStats();
+  const uint32_t totalMs = stats.sleptMs + stats.awakeMs;
+  const unsigned sleptPct = totalMs > 0 ? static_cast<unsigned>((stats.sleptMs * 100ULL) / totalMs) : 0;
+  LOG_INF("DIAG", "Light sleep: %us (%u%%), %u tries, %u gpio wakes", stats.sleptMs / 1000, sleptPct, stats.attempts,
+          stats.wakeGpio);
+
+  const BootDiag::Record* lastSleep = nullptr;
+  for (uint8_t i = 0; i < recordCount_; i++) {
+    if (records_[i].kind == BootDiag::KindSleep) {
+      lastSleep = &records_[i];
+      break;
+    }
+  }
+  if (lastSleep == nullptr) {
+    LOG_INF("DIAG", "Last sleep: no record");
+  } else {
+    LOG_INF("DIAG", "Last sleep: stage=%s outcome=%s trigger=%s from=%s latch=%s release=%ums%s",
+            BootDiag::stageName(static_cast<BootDiag::SleepStage>(lastSleep->code)), outcomeTag(*lastSleep),
+            BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)),
+            (lastSleep->flags & BootDiag::kFlagFromReader) ? "book" : "menu",
+            (lastSleep->flags & BootDiag::kFlagKeepClock) ? "kept" : "cut", lastSleep->msA,
+            (lastSleep->flags & BootDiag::kFlagReleaseTimeout) ? " TIMEOUT" : "");
+  }
+
+  LOG_INF("DIAG", "History: %u record(s), newest first", recordCount_);
+  for (uint8_t i = 0; i < recordCount_; i++) {
+    char line[160];
+    formatHistoryRecord(records_[i], line, sizeof(line));
+    LOG_INF("DIAG", "%s", line);
+  }
+  LOG_INF("DIAG", "=== End Boot Diagnostics ===");
 }
 
 void BootDiagnosticsActivity::render(RenderLock&&) {
@@ -195,9 +359,16 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     // The raw fingerprint, not just the name it resolved to: two units can report the same
     // controller and still differ here, and an unrun or inconclusive probe is itself a
     // finding. Bytes are what a cross-reference between two reporters actually compares.
-    if (probe.valid) {
+    // All-FF is a floating bus, not a fingerprint: the controller answered nothing and the
+    // profile default stands. Printing the raw FFs reads like corruption, and it is what an
+    // X4 always shows — say what it means instead.
+    const bool probeSilent = probe.ver[0] == 0xFF && probe.ver[1] == 0xFF && probe.ver[2] == 0xFF &&
+                             probe.ver[3] == 0xFF && probe.ver[4] == 0xFF;
+    if (probe.valid && !probeSilent) {
       snprintf(buf, sizeof(buf), "ver %02X %02X %02X %02X %02X flg %02X v%u%s", probe.ver[0], probe.ver[1],
                probe.ver[2], probe.ver[3], probe.ver[4], probe.flg, probe.verdict, probe.mtpValid ? " mtp" : "");
+    } else if (probe.valid) {
+      snprintf(buf, sizeof(buf), "%s", tr(STR_DIAG_PROBE_SILENT));
     } else {
       snprintf(buf, sizeof(buf), "%s", tr(STR_DIAG_UNKNOWN));
     }
@@ -210,8 +381,18 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
   // chip has no ESP_RST_EXT — so this row cannot tell them apart and the row below is what
   // does. Shown anyway: it still separates a panic, a watchdog and a deep-sleep wake.
   drawRow(tr(STR_DIAG_RESET_REASON), resetReasonName(static_cast<uint8_t>(esp_reset_reason())));
-  drawRow(tr(STR_DIAG_PREV_SESSION),
-          BootDiag::previousSessionEndedWithoutSleep() ? tr(STR_DIAG_PREV_NO_SLEEP) : tr(STR_DIAG_PREV_SLEPT));
+  const char* prevText = tr(STR_DIAG_PREV_UNKNOWN);
+  switch (BootDiag::previousSessionOf(records_, recordCount_)) {
+    case BootDiag::PreviousSession::EndedAtSleepPath:
+      prevText = tr(STR_DIAG_PREV_SLEPT);
+      break;
+    case BootDiag::PreviousSession::EndedWithoutSleep:
+      prevText = tr(STR_DIAG_PREV_NO_SLEEP);
+      break;
+    case BootDiag::PreviousSession::Unknown:
+      break;
+  }
+  drawRow(tr(STR_DIAG_PREV_SESSION), prevText);
   // Headline row rather than history-only: a device that wakes, refuses the press and
   // sleeps again leaves the panel untouched, so this counter is the only thing separating
   // "it is looping" from "it is dead". Non-zero here IS the diagnosis.
@@ -255,7 +436,14 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
       drawWide(buf);
     }
   }
-  drawRow(tr(STR_DIAG_WAKE_CAUSE), wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause())));
+  // esp_sleep_get_wakeup_cause() reads an RTC register that is only written when a sleep
+  // actually ends. After a power-on or a software restart it holds whatever the last sleep
+  // left there — every field report so far read "timer", which is the idle light-sleep slice
+  // from before the reboot and says nothing about this boot. Only quote it when it can mean
+  // something.
+  drawRow(tr(STR_DIAG_WAKE_CAUSE), esp_reset_reason() == ESP_RST_DEEPSLEEP
+                                       ? wakeCauseName(static_cast<uint8_t>(esp_sleep_get_wakeup_cause()))
+                                       : tr(STR_DIAG_NA));
 
   const auto& check = BootDiag::wakeCheck();
   snprintf(buf, sizeof(buf), "%s (held %u ms, needs %u ms)", HalGPIO::wakeVerdictName(check.verdict), check.heldMs,
@@ -338,6 +526,13 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
       // column is too narrow to hold it next to the stage name without clipping.
       drawWide(outcomeText(*lastSleep));
       drawRow(tr(STR_DIAG_TRIGGER), BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(lastSleep->reason)));
+      // The single most diagnostic bit on this page: sleeping from a book sets
+      // showBootScreen=false, so the wake paints NOTHING until the reader's first render
+      // lands. A slow or stalled build there is indistinguishable from a device that never
+      // woke — which is what issue #155 turned out to be. It was recorded from the start
+      // and simply never displayed.
+      drawRow(tr(STR_DIAG_SLEPT_FROM),
+              (lastSleep->flags & BootDiag::kFlagFromReader) ? tr(STR_DIAG_FROM_BOOK) : tr(STR_DIAG_FROM_MENU));
       drawRow(tr(STR_DIAG_BATTERY_LATCH),
               (lastSleep->flags & BootDiag::kFlagKeepClock) ? tr(STR_DIAG_LATCH_KEPT) : tr(STR_DIAG_LATCH_CUT));
       snprintf(buf, sizeof(buf), "%u ms%s", lastSleep->msA,
@@ -357,17 +552,7 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
     }
     for (uint8_t i = 0; i < recordCount_ && room(1); i++) {
       const BootDiag::Record& r = records_[i];
-      if (r.kind == BootDiag::KindSleep) {
-        snprintf(buf, sizeof(buf), "%lu sleep %s %s %s %s%s", static_cast<unsigned long>(r.seq), outcomeTag(r),
-                 BootDiag::stageName(static_cast<BootDiag::SleepStage>(r.code)),
-                 BootDiag::triggerName(static_cast<BootDiag::SleepTrigger>(r.reason)),
-                 (r.flags & BootDiag::kFlagKeepClock) ? "latch-kept" : "latch-cut",
-                 (r.flags & BootDiag::kFlagReleaseTimeout) ? " rel-timeout" : "");
-      } else {
-        snprintf(buf, sizeof(buf), "%lu boot  %s/%s %s %ums sd@%ums", static_cast<unsigned long>(r.seq),
-                 resetReasonName(r.reason), wakeCauseName(r.flags),
-                 HalGPIO::wakeVerdictName(static_cast<HalGPIO::WakeVerdict>(r.code)), r.msB, r.msC);
-      }
+      formatHistoryRecord(r, buf, sizeof(buf));
       drawWide(buf);
     }
   }

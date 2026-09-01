@@ -13,9 +13,37 @@ class HalFile;
 
 class HalStorage {
  public:
+  enum class Operation : uint8_t {
+    None = 0,
+    Open,
+    Read,
+    Write,
+    Seek,
+    Metadata,
+    Directory,
+    Modify,
+    Close,
+    Count,
+  };
+
+  enum class OperationState : uint8_t {
+    Idle = 0,
+    WaitingForSpi,
+    WaitingForStorage,
+    Active,
+  };
+
+  struct ActivitySnapshot {
+    Operation operation = Operation::None;
+    OperationState state = OperationState::Idle;
+    uint32_t elapsedMs = 0;
+  };
+
   HalStorage();
   bool begin();
   bool ready() const;
+  ActivitySnapshot activitySnapshot() const;
+  static const char* operationName(Operation operation);
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);

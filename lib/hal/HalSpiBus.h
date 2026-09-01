@@ -3,6 +3,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <cstdint>
+
 // Serializes access to the SPI bus shared by the e-ink panel and the SD card.
 //
 // The two devices share the physical bus (see SPI_MISO in HalGPIO.h, "shared
@@ -29,15 +31,38 @@
 // (~FsFile calls SdFat's close() directly, not the locking HalFile::close()).
 class HalSpiBus {
  public:
+  enum class Operation : uint8_t {
+    None = 0,
+    Sd,
+    DisplayInit,
+    DisplayRefresh,
+    DisplaySleep,
+    DisplayBuffer,
+    Count,
+  };
+
+  enum class OperationState : uint8_t {
+    Idle = 0,
+    Waiting,
+    Active,
+  };
+
+  struct ActivitySnapshot {
+    Operation operation = Operation::None;
+    OperationState state = OperationState::Idle;
+    uint32_t elapsedMs = 0;
+  };
+
   class Lock {
    public:
-    Lock();
+    explicit Lock(Operation operation);
     ~Lock();
     Lock(const Lock&) = delete;
     Lock& operator=(const Lock&) = delete;
 
    private:
     bool acquired = false;
+    TaskHandle_t owner = nullptr;
   };
 
   static HalSpiBus& getInstance();
@@ -46,6 +71,8 @@ class HalSpiBus {
   // or storage access. Lock construction falls back to lazy creation, but doing
   // it explicitly keeps mutex allocation out of the first refresh path.
   static void begin();
+  ActivitySnapshot activitySnapshot() const;
+  static const char* operationName(Operation operation);
 
  private:
   HalSpiBus();
