@@ -1,7 +1,7 @@
 BOOK title=Table streaming fallbacks lang=en-US spine=4 toc=2 reliableToc=1
 SPINE 0 href=EPUB/text/cover.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=1 footnotes=0
-  IMG y=0 x=2 w=456 h=760 src=<cache>/epub_<hash>/img_0_c5e4922f_0.png
+  IMG y=0 x=2 w=456 h=760 src=<cache>/epub_<hash>/img_07b22faa91ec6d21.png
 SPINE 1 href=EPUB/text/title_page.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=2 footnotes=0
   LINE y=54 x=0 align=2 mult=2.000 hfid=0 words=3

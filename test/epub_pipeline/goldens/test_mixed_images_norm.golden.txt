@@ -46,7 +46,7 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=baseline
    W x=232 s=0 z=100 t=JPEG
    W x=276 s=0 z=100 t=encoding.
-  IMG y=86 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_1_c5e4922f_0.jpg
+  IMG y=86 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_8baf343f5e8b08fd.jpg
 SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=4
@@ -60,7 +60,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=78 s=0 z=100 t=a
    W x=96 s=0 z=100 t=PNG
    W x=125 s=0 z=100 t=image:
-  IMG y=62 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_2_c5e4922f_0.png
+  IMG y=62 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_7c9e21097dc96b96.png
 SPINE 3 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=5
@@ -73,12 +73,12 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
    W x=18 s=0 z=100 t=Progressive
    W x=126 s=0 z=100 t=JPEG
    W x=170 s=0 z=100 t=image:
-  IMG y=62 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_3_c5e4922f_0.jpg
+  IMG y=62 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_4dc41aaea588d9dd.jpg
   LINE y=662 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=PNG
    W x=47 s=0 z=100 t=image:
  PAGE 1 elements=2 footnotes=0
-  IMG y=0 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_3_c5e4922f_1.png
+  IMG y=0 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_9190b4ae3b9b566d.png
   LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=Both
    W x=67 s=0 z=100 t=should

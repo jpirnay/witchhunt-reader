@@ -57,7 +57,7 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=67 s=0 z=100 t=PNG
    W x=96 s=0 z=100 t=decoding
    W x=174 s=0 z=100 t=test.
-  IMG y=62 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_1_c5e4922f_0.png
+  IMG y=62 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_7c9e21097dc96b96.png
   LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=If
    W x=51 s=0 z=100 t=the
@@ -86,7 +86,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=206 s=0 z=100 t=levels
    W x=269 s=0 z=100 t=are
    W x=304 s=0 z=100 t=visible.
-  IMG y=62 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_2_c5e4922f_0.png
+  IMG y=62 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_9190b4ae3b9b566d.png
 SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -99,7 +99,7 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=244 s=0 z=100 t=to
    W x=272 s=0 z=100 t=4
    W x=287 s=0 z=100 t=bands.
-  IMG y=62 x=30 w=400 h=500 src=<cache>/epub_<hash>/img_3_c5e4922f_0.png
+  IMG y=62 x=30 w=400 h=500 src=<cache>/epub_<hash>/img_f5e7c964f08573fc.png
 SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -111,7 +111,7 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=127 s=0 z=100 t=is
    W x=148 s=0 z=100 t=centered
    W x=225 s=0 z=100 t=horizontally.
-  IMG y=62 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_4_c5e4922f_0.png
+  IMG y=62 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_c0fff1590ea9de6d.png
 SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=5 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -137,7 +137,7 @@ SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
    W x=191 s=0 z=100 t=down
    W x=234 s=0 z=100 t=to
    W x=262 s=0 z=100 t=fit.
-  IMG y=110 x=0 w=460 h=575 src=<cache>/epub_<hash>/img_5_c5e4922f_0.png
+  IMG y=110 x=0 w=460 h=575 src=<cache>/epub_<hash>/img_76bd337c76bb138b.png
 SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=6 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
@@ -167,7 +167,7 @@ SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=cache
    W x=53 s=0 z=100 t=mismatches.
-  IMG y=134 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_6_c5e4922f_0.png
+  IMG y=134 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_7d1fe9c8ee1cf9d3.png
 SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=5
@@ -185,7 +185,7 @@ SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
    W x=258 s=0 z=100 t=the
    W x=295 s=0 z=100 t=load
    W x=342 s=0 z=100 t=time.
-  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_7_c5e4922f_0.png
+  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_2a264b3a1d234812.png
   LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Navigate
    W x=103 s=0 z=100 t=to
@@ -207,7 +207,7 @@ SPINE 8 href=OEBPS/chapter9.xhtml pages=1 truncated=0 cssFallback=0
    W x=83 s=0 z=100 t=cache
    W x=136 s=0 z=100 t=test
    W x=180 s=0 z=100 t=page.
-  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_8_c5e4922f_0.png
+  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_21b53c214baddbdf.png
   LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=Navigate
    W x=105 s=0 z=100 t=back
@@ -270,7 +270,7 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=justified,
    W x=90 s=0 z=100 t=not
    W x=129 s=0 z=100 t=centered.
-  IMG y=182 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_9_c5e4922f_0.png
+  IMG y=182 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_c0fff1590ea9de6d.png
   LINE y=582 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=FIRST
    W x=80 s=0 z=100 t=PARAGRAPH

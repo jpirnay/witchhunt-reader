@@ -1,5 +1,4 @@
 #pragma once
-#include <AdaptiveTone.h>
 #include <HalStorage.h>
 #include <stdint.h>
 
@@ -10,26 +9,25 @@
 
 class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch below)
 
-// Source pixel area above which an image is considered "large" and rendered
-// as a placeholder until the user explicitly requests it.
-// 800x600 covers most full-page illustrations that take >1s to dither on ESP32.
-static constexpr int32_t LARGE_IMAGE_PIXEL_THRESHOLD = 800 * 600;
-
-// Tone mapping for inline images. Set once from src/ (which owns the settings) before a
-// render pass; lib/Epub must not read settings itself. Applies to every ImageBlock: the
-// filter is a global display preference, not per-image state, and threading it through
-// every cache-query and warm signature would touch a dozen call sites to carry a constant.
+// Source file size above which an image is considered "large" and rendered as a placeholder
+// until the user explicitly requests it.
 //
-// filterId keys the pixel caches, because tone mapping is baked into the cached pixels —
-// see the cache-path helpers in ImageBlock.cpp. 0 means "no filter" and keeps the
-// historical unsuffixed cache names.
-namespace image_tone {
-// filterId and mode are set together so they cannot drift apart: the id keys the cache,
-// the mode decides which curve those cached pixels were levelled with.
-void setFilter(uint8_t filterId, adaptive_tone::Mode mode);
-uint8_t getFilterId();
-adaptive_tone::Mode getMode();
-}  // namespace image_tone
+// This used to be a PIXEL area (800*600), compared against ImageBlock's width/height — which are
+// the DISPLAY dimensions, not the source's. On a 480x800 panel the largest image that can be
+// drawn covers 384000 pixels, so the test could never be true and the placeholder never appeared,
+// whatever the setting said. Bytes also happen to be the better predictor: what costs seconds is
+// pulling the entry out of the ZIP and inflating it, and that scales with the file, not with the
+// area it ends up occupying on screen.
+//
+// 256 KB, from device measurements on X4: Men at Arms' 857182-byte cover PNG cost ~17 s to
+// extract plus ~5.8 s per decode pass, while the same book's 113588-byte and 155096-byte JPEGs
+// are unremarkable. The line wants to sit above the second group and well below the first.
+//
+// Note what this does NOT cover: a small file that inflates to an enormous bitmap (a flat-colour
+// 5000x5000 PNG) is cheap to read and slow to decode, and nothing here sees that. Source pixel
+// dimensions are known at parse time but are not carried on the block; if such a book turns up,
+// that is the axis to add rather than moving this number.
+static constexpr uint32_t LARGE_IMAGE_SOURCE_BYTES = 256 * 1024;
 
 // Process-wide scratch arena for image decoding, installed for the duration of a multi-image
 // pass (see Section::warmAllImageCaches).
@@ -43,7 +41,7 @@ adaptive_tone::Mode getMode();
 // A global rather than a parameter because the arena has to reach decoders several layers down
 // (Section -> Page -> ImageBlock -> converter -> PngStreamDecoder) through interfaces shared
 // with callers that have no arena. Decoders fall back to the heap when none is installed, so
-// this is an optimisation, never a requirement. Mirrors image_tone above.
+// this is an optimisation, never a requirement.
 namespace image_scratch {
 // The installed arena, or nullptr. Not owned.
 BuildArena* get();
@@ -98,8 +96,11 @@ class ImageBlock final : public Block {
 
   bool imageExists() const;
 
-  // Returns true if the source image dimensions exceed LARGE_IMAGE_PIXEL_THRESHOLD.
-  // Result is cached after the first call to avoid repeated header reads.
+  // Returns true if the source image's file size exceeds LARGE_IMAGE_SOURCE_BYTES. Answered from
+  // the extracted file when there is one, otherwise from the ZIP entry's uncompressed size (one
+  // central-directory scan). Result is cached after the first call: the lookup is only ever
+  // reached on a pixel-cache miss, i.e. immediately before a decode that costs orders of
+  // magnitude more, but a page can render several times.
   bool isLargeImage() const;
 
   // Returns true if this image would be shown as a placeholder given forceLoad.
@@ -124,7 +125,12 @@ class ImageBlock final : public Block {
 
   // monochromeOutput=true: 1-bit Atkinson dither → BW-plane rendering (AA off)
   // monochromeOutput=false: 4-level Bayer dither → also replayed in grayscale passes (AA on)
-  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true);
+  // alsoCacheOtherVariant: on a decode (cache miss), write the OTHER dither variant's .pxc in
+  // the same pass as well. Saves the second full inflate when the caller knows it needs both --
+  // see Page::warmImageCaches. Ignored when the render is served from cache or a placeholder,
+  // and best-effort: only the PNG decoder honours it, so callers must re-check.
+  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true,
+              bool alsoCacheOtherVariant = false);
   bool serialize(FsFile& file);
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 
@@ -136,6 +142,9 @@ class ImageBlock final : public Block {
   // Vertical crop window into the decoded image. srcYOffset_==0 && srcHeight_==0 means full image.
   int16_t srcYOffset_ = 0;
   int16_t srcHeight_ = 0;
+  // Cached isLargeImage() answer: -1 not yet resolved, 0 no, 1 yes. Mutable because the query is
+  // const and the answer cannot change for the life of the block.
+  mutable int8_t largeImageCached_ = -1;
   std::string epubFilePath_;   // source EPUB on SD (empty if already extracted)
   std::string epubEntryPath_;  // internal EPUB entry path (e.g. "OEBPS/images/foo.jpg")
 

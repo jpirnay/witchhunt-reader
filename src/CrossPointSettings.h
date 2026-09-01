@@ -77,6 +77,15 @@ class CrossPointSettings {
     STATUS_BAR_ITEMS_POSITION_COUNT
   };
 
+  // Which end of the status-item lane the clock sits on. There is deliberately no centre option:
+  // the middle of the lane is the title's slot, so a centred clock would either displace the title
+  // or collide with it.
+  enum STATUS_BAR_CLOCK_POSITION {
+    STATUS_BAR_CLOCK_LEFT = 0,
+    STATUS_BAR_CLOCK_RIGHT = 1,
+    STATUS_BAR_CLOCK_POSITION_COUNT
+  };
+
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
     LANDSCAPE_CW = 1,   // 800x480 logical coordinates, rotated 180° (swap top/bottom)
@@ -421,6 +430,8 @@ class CrossPointSettings {
   uint8_t syncFinishedBookToKOReader = 0;
   // Show clock in the reader status bar
   uint8_t statusBarClock = 0;
+  // Which end of the status-item lane the clock is drawn at (see STATUS_BAR_CLOCK_POSITION).
+  uint8_t statusBarClockPosition = STATUS_BAR_CLOCK_LEFT;
   // Clock format: 0 = 24h (14:00), 1 = 12h (2:00pm)
   uint8_t clockFormat12h = 0;
   // Timezone selection (applies POSIX TZ rules for DST)

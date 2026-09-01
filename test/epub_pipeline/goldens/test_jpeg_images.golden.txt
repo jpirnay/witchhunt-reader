@@ -70,7 +70,7 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=baseline
    W x=232 s=0 z=100 t=JPEG
    W x=276 s=0 z=100 t=encoding.
-  IMG y=86 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_1_d90fc326_0.jpg
+  IMG y=86 x=55 w=350 h=250 src=<cache>/epub_<hash>/img_8baf343f5e8b08fd.jpg
   LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=If
    W x=43 s=0 z=100 t=the
@@ -101,7 +101,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=progressive
    W x=260 s=0 z=100 t=JPEG
    W x=304 s=0 z=100 t=encoding.
-  IMG y=86 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_2_d90fc326_0.jpg
+  IMG y=86 x=30 w=400 h=600 src=<cache>/epub_<hash>/img_4dc41aaea588d9dd.jpg
 SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -121,7 +121,7 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=progressive
    W x=260 s=0 z=100 t=JPEG
    W x=304 s=0 z=100 t=encoding.
-  IMG y=86 x=30 w=400 h=500 src=<cache>/epub_<hash>/img_3_d90fc326_0.jpg
+  IMG y=86 x=30 w=400 h=500 src=<cache>/epub_<hash>/img_c035d364d19f59d0.jpg
 SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -133,7 +133,7 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=127 s=0 z=100 t=is
    W x=148 s=0 z=100 t=centered
    W x=225 s=0 z=100 t=horizontally.
-  IMG y=62 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_4_d90fc326_0.jpg
+  IMG y=62 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_7d335759789761dd.jpg
 SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=6 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
@@ -166,7 +166,7 @@ SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=progressive
    W x=260 s=0 z=100 t=JPEG
    W x=304 s=0 z=100 t=encoding.
-  IMG y=134 x=0 w=460 h=575 src=<cache>/epub_<hash>/img_5_d90fc326_0.jpg
+  IMG y=134 x=0 w=460 h=575 src=<cache>/epub_<hash>/img_ba6e9d7c0cb676d3.jpg
 SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=7 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
@@ -203,7 +203,7 @@ SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
    W x=155 s=0 z=100 t=progressive
    W x=260 s=0 z=100 t=JPEG
    W x=304 s=0 z=100 t=encoding.
-  IMG y=158 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_6_d90fc326_0.jpg
+  IMG y=158 x=0 w=459 h=187 src=<cache>/epub_<hash>/img_5d6843c96ce24d3b.jpg
 SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=5
@@ -221,7 +221,7 @@ SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
    W x=258 s=0 z=100 t=the
    W x=295 s=0 z=100 t=load
    W x=342 s=0 z=100 t=time.
-  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_7_d90fc326_0.jpg
+  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_d33cb139ebd3c246.jpg
   LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Navigate
    W x=103 s=0 z=100 t=to
@@ -243,7 +243,7 @@ SPINE 8 href=OEBPS/chapter9.xhtml pages=1 truncated=0 cssFallback=0
    W x=83 s=0 z=100 t=cache
    W x=136 s=0 z=100 t=test
    W x=180 s=0 z=100 t=page.
-  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_8_d90fc326_0.jpg
+  IMG y=62 x=30 w=400 h=300 src=<cache>/epub_<hash>/img_7824f6217c963bcf.jpg
   LINE y=362 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=Navigate
    W x=105 s=0 z=100 t=back
@@ -306,7 +306,7 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=justified,
    W x=90 s=0 z=100 t=not
    W x=129 s=0 z=100 t=centered.
-  IMG y=182 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_9_d90fc326_0.jpg
+  IMG y=182 x=55 w=350 h=400 src=<cache>/epub_<hash>/img_7d335759789761dd.jpg
   LINE y=582 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=FIRST
    W x=80 s=0 z=100 t=PARAGRAPH

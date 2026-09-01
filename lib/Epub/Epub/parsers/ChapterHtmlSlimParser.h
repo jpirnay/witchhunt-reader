@@ -165,7 +165,6 @@ class ChapterHtmlSlimParser final : public Print {
   uint8_t imageRendering;
   std::string contentBase;
   std::string imageBasePath;
-  int imageCounter = 0;
 
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
@@ -371,6 +370,8 @@ class ChapterHtmlSlimParser final : public Print {
   int progressStepPercent = 0;
   bool progressUiEnabled = true;
   bool streamFailed = false;
+  // Set when the heap gate refused an image-header read (see imageHeaderDegraded()).
+  bool imageHeaderSkippedForHeap = false;
   uint32_t streamStartTimeMs = 0;
 
   // Footnote link tracking
@@ -457,7 +458,7 @@ class ChapterHtmlSlimParser final : public Print {
   void streamClosedCell(BufferedTableRow& row);
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
-  // cannot be resolved. Advances imageCounter to allocate a unique cache path.
+  // cannot be resolved. The cache path is derived from the archive entry, not from parse order.
   std::shared_ptr<ImageBlock> buildCellImage(const std::string& src, const std::string& alt, uint16_t maxWidth,
                                              uint16_t maxHeight);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
@@ -529,6 +530,11 @@ class ChapterHtmlSlimParser final : public Print {
   bool setup(size_t totalInflatedSize);
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
+  // True when at least one image was dropped to alt text because the heap gate refused its
+  // header read — a transient condition, unlike an unreadable or unsupported image. The pages
+  // are usable but incomplete, and the caller must not keep them: see the latch site in
+  // startElement's image branch.
+  [[nodiscard]] bool imageHeaderDegraded() const { return imageHeaderSkippedForHeap; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
 
   // Print interface — fed by Epub::readItemContentsToStream.

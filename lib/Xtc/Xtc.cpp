@@ -8,6 +8,7 @@
 #include "Xtc.h"
 
 #include <Bitmap.h>
+#include <BufferedPrint.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -317,6 +318,9 @@ bool Xtc::generateCoverBmp() const {
     LOG_DBG("XTC", "Failed to create cover BMP file");
     return false;
   }
+  // The rows below are small (a 1-bit 480px row is 60 bytes) and the header goes out in 2- and
+  // 4-byte fields, so unbuffered this was well over a thousand file calls. See BufferedPrint.
+  BufferedPrint out(coverBmp);
 
   const uint8_t padding[4] = {0, 0, 0, 0};
 
@@ -342,16 +346,16 @@ bool Xtc::generateCoverBmp() const {
 
     auto writeLE16 = [&](uint16_t v) {
       const uint8_t b[2] = {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8)};
-      coverBmp.write(b, 2);
+      out.write(b, 2);
     };
     auto writeLE32 = [&](uint32_t v) {
       const uint8_t b[4] = {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
                             static_cast<uint8_t>(v >> 24)};
-      coverBmp.write(b, 4);
+      out.write(b, 4);
     };
 
     // BITMAPFILEHEADER
-    coverBmp.write(reinterpret_cast<const uint8_t*>("BM"), 2);
+    out.write(reinterpret_cast<const uint8_t*>("BM"), 2);
     writeLE32(offBits + imageSize);  // bfSize
     writeLE16(0);                    // bfReserved1
     writeLE16(0);                    // bfReserved2
@@ -371,12 +375,13 @@ bool Xtc::generateCoverBmp() const {
     // Palette: black, dark gray, light gray, white (BGRA)
     const uint8_t palette[16] = {0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x55, 0x00,
                                  0xAA, 0xAA, 0xAA, 0x00, 0xFF, 0xFF, 0xFF, 0x00};
-    coverBmp.write(palette, sizeof(palette));
+    out.write(palette, sizeof(palette));
 
     // Stream the column-major page through a row-major transpose (small RAM band +
     // temp file) instead of holding the whole page in heap.
     XthRowTranspose xth(mutParser, 0, pageInfo.width, pageInfo.height, cachePath + "/cover.t2bit");
     if (!xth.ok) {
+      out.discard();  // the file is about to be deleted; do not flush into it
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
@@ -388,6 +393,7 @@ bool Xtc::generateCoverBmp() const {
       LOG_ERR("XTC", "OOM cover row buffers (%d + %u bytes)", xth.packedRowBytes, (unsigned)dstRowSize);
       free(packedRow);
       free(rowBuffer);
+      out.discard();  // the file is about to be deleted; do not flush into it
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
@@ -404,12 +410,13 @@ bool Xtc::generateCoverBmp() const {
         const uint8_t bmpVal = kXthToBmp[packedPixel(packedRow, x)];
         rowBuffer[(x * 2) / 8] |= static_cast<uint8_t>(bmpVal << (6 - ((x * 2) % 8)));
       }
-      coverBmp.write(rowBuffer, dstRowSize);
-      if (paddingSize > 0) coverBmp.write(padding, paddingSize);
+      out.write(rowBuffer, dstRowSize);
+      if (paddingSize > 0) out.write(padding, paddingSize);
     }
     free(packedRow);
     free(rowBuffer);
     if (failed) {
+      out.discard();  // the file is about to be deleted; do not flush into it
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
@@ -418,7 +425,7 @@ bool Xtc::generateCoverBmp() const {
     // 1-bit source: write a 1-bit BMP header and stream source rows straight to it.
     BmpHeader bmpHeader;
     createBmpHeader(&bmpHeader, pageInfo.width, pageInfo.height, BmpRowOrder::TopDown);
-    coverBmp.write(reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
+    out.write(reinterpret_cast<const uint8_t*>(&bmpHeader), sizeof(bmpHeader));
 
     const uint32_t rowSize = ((pageInfo.width + 31) / 32) * 4;
     const size_t srcRowSize = (pageInfo.width + 7) / 8;  // packed 1-bit source/dest row
@@ -427,6 +434,7 @@ bool Xtc::generateCoverBmp() const {
     uint8_t* rowBuffer = static_cast<uint8_t*>(malloc(srcRowSize));  // freed before every return below
     if (!rowBuffer) {
       LOG_ERR("XTC", "OOM cover row buffer (%u bytes)", (unsigned)srcRowSize);
+      out.discard();  // the file is about to be deleted; do not flush into it
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
@@ -438,18 +446,27 @@ bool Xtc::generateCoverBmp() const {
         failed = true;
         break;
       }
-      coverBmp.write(rowBuffer, srcRowSize);
-      if (paddingSize > 0) coverBmp.write(padding, paddingSize);
+      out.write(rowBuffer, srcRowSize);
+      if (paddingSize > 0) out.write(padding, paddingSize);
     }
     mutParser->endPageRange();
     free(rowBuffer);
     if (failed) {
+      out.discard();  // the file is about to be deleted; do not flush into it
       coverBmp.close();
       Storage.remove(getCoverBmpPath().c_str());
       return false;
     }
   }
 
+  // Flush before the close, so the destructor never writes into a closed handle -- and so a
+  // write that fails at the very end is not reported as a complete cover.
+  if (!out.flushBuffer()) {
+    LOG_ERR("XTC", "Failed to flush buffered cover BMP");
+    coverBmp.close();
+    Storage.remove(getCoverBmpPath().c_str());
+    return false;
+  }
   coverBmp.close();
   LOG_DBG("XTC", "Generated cover BMP: %s", getCoverBmpPath().c_str());
   return true;

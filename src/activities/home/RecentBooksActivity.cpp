@@ -262,6 +262,8 @@ void RecentBooksActivity::onEnter() {
 }
 
 void RecentBooksActivity::onExit() {
+  // The cover-loading burst is over; release the one book's metadata the memo still holds.
+  Epub::clearCoverMetadataMemo();
   Activity::onExit();
   recentBooks.clear();
   bookProgress.clear();

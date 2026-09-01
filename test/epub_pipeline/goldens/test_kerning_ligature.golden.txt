@@ -1,7 +1,7 @@
 BOOK title=Kerning & Ligature Edge Cases lang=en spine=13 toc=11 reliableToc=1
 SPINE 0 href=OEBPS/cover.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=1 footnotes=0
-  IMG y=0 x=0 w=460 h=686 src=<cache>/epub_<hash>/img_0_d90fc326_0.jpg
+  IMG y=0 x=0 w=460 h=686 src=<cache>/epub_<hash>/img_91f282312742c715.jpg
 SPINE 1 href=OEBPS/toc.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=13 footnotes=11
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=5

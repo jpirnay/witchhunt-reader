@@ -33,6 +33,16 @@ class Section {
   // usable but visually degraded; background callers discard it so the foreground
   // blocking path (more headroom) rebuilds it clean.
   bool cssLowHeapDegraded_ = false;
+  // Set by the last build when its inline-footnote resolve pass could not complete (OOM, an
+  // unreadable note document). The pages are cached under a "previews on" property hash — see
+  // EpubReaderActivity::makeSectionBuildParams — but the notes this spine points at never made
+  // it into the store, so those markers stay plain and nothing would ever rebuild them.
+  // Background callers discard such a result and leave the spine to the foreground path.
+  bool footnotePreviewsUnresolved_ = false;
+  // Set by the last build when an image was dropped to alt text because the heap gate refused
+  // its header read. The pages are cached under the same property hash as a complete build, so
+  // the missing image would otherwise be permanent — background callers discard instead.
+  bool imageHeaderDegraded_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -79,7 +89,8 @@ class Section {
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
   // then points the visitor at it. Never fails the build — see the definition.
-  void resolveInlineFootnotePreviews(BuildState& st);
+  bool beginInlineFootnotePreviewResolve(BuildState& st);
+  void finishInlineFootnotePreviewResolve(BuildState& st);
 
   // Open the section file and seek to the first paragraph LUT entry, validating the header
   // and LUT bounds against fileSize. On success, returns true with `outLutStart` set to the
@@ -98,7 +109,9 @@ class Section {
   // to skip ZIP inflation. Adapted from crosspoint-reader PR #2452 by GitHub user itsthisjustin.
   std::string getSectionHtmlCachePath() const;
   // Computes the image base path for extract images related to this specific section variant
-  std::string getImageBasePath(uint32_t propertyHash) const;
+  // Directory prefix for extracted source images. Content-keyed by the caller (see
+  // ChapterHtmlSlimParser), so one extraction serves every layout variant.
+  std::string getImageBasePath() const;
   // Garbage collection: Keep only the most recent N variants per chapter
   void evictOldVariants() const;
 
@@ -232,6 +245,13 @@ class Section {
   // True when the last build's CSS resolution hit low-heap skips (styles silently
   // missing from the cached pages). Only meaningful right after a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True when the last build's inline-footnote resolve pass failed, so some of this spine's
+  // notes are missing from the store while the cache claims previews are on. Only meaningful
+  // right after a build.
+  bool isFootnotePreviewsUnresolved() const { return footnotePreviewsUnresolved_; }
+  // True when the last build dropped an image to alt text on a heap refusal — transient, unlike
+  // an unreadable image. Only meaningful right after a build.
+  bool isImageHeaderDegraded() const { return imageHeaderDegraded_; }
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced
   // caller (Background-B) abort early instead of finishing a build it will discard. False when

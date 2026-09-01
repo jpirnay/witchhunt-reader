@@ -37,11 +37,12 @@ struct PixelCache {
   int width;
   int height;
   int bytesPerRow;
-  int originX;      // config.x - to convert screen coords to cache coords
-  int originY;      // config.y + bandStart - band-local screen-to-cache mapping
-  int bandRows;     // rows held in the band buffer
-  int bandStart;    // image-local row index of band buffer row 0
-  int flushedRows;  // image-local rows already written to file
+  int originX;       // config.x - to convert screen coords to cache coords
+  int originY;       // config.y + bandStart - band-local screen-to-cache mapping
+  int bandRows;      // rows held in the band buffer
+  int bandStart;     // image-local row index of band buffer row 0
+  int flushedRows;   // image-local rows already written to file
+  int maxBlockRows;  // tallest single decode block, from begin() -- see advanceTo()
   FsFile file;
   std::string cachePathStr;
   bool ok;
@@ -65,6 +66,7 @@ struct PixelCache {
         bandRows(0),
         bandStart(0),
         flushedRows(0),
+        maxBlockRows(1),
         ok(false) {}
   PixelCache(const PixelCache&) = delete;
   PixelCache& operator=(const PixelCache&) = delete;
@@ -112,6 +114,7 @@ struct PixelCache {
       return false;
     }
     bandRows = wantRows;
+    maxBlockRows = maxBlockDstRows > 0 ? maxBlockDstRows : 1;
 
     const size_t bufSize = (size_t)(bandRows + 1) * bytesPerRow;  // +1 spare zero row
     buffer = static_cast<uint8_t*>(malloc(bufSize));
@@ -146,18 +149,22 @@ struct PixelCache {
     return true;
   }
 
-  // Flush every output row below newTopRow (they are final in raster order) and
-  // reposition the band to start at newTopRow. Returns false if a write failed,
-  // in which case the caller must stop caching for the rest of the decode.
-  bool advanceTo(int newTopRow) {
-    if (!ok) return false;
-    if (newTopRow <= bandStart) return true;
-    if (newTopRow > height) newTopRow = height;
+  // Write rows [bandStart, newTopRow) and rebase the band. The rows still held in the band are
+  // contiguous in `buffer`, so they go out as ONE write; only rows past the band's end (gaps
+  // left by a clipped or short decode) fall back to the pre-filled spare row.
+  bool flushThrough(int newTopRow) {
+    const int pending = newTopRow - flushedRows;
+    if (pending <= 0) return true;
+    const int inBand = pending < bandRows ? pending : bandRows;
 
-    for (int r = bandStart; r < newTopRow; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : fillRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+    const size_t runBytes = (size_t)inBand * bytesPerRow;
+    if (inBand > 0 && file.write(buffer, runBytes) != runBytes) {
+      LOG_ERR("IMG", "Cache write error at row %d", flushedRows);
+      ok = false;
+      return false;
+    }
+    for (int r = flushedRows + inBand; r < newTopRow; ++r) {
+      if (file.write(fillRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         ok = false;
         return false;
@@ -169,6 +176,30 @@ struct PixelCache {
     return true;
   }
 
+  // Tell the cache that every output row below newTopRow is final. Returns false only if a
+  // write failed, in which case the caller must stop caching for the rest of the decode.
+  //
+  // Final does NOT mean written yet. The PNG decoder calls this once per destination row, and
+  // flushing on the spot meant one file.write() per row: a 464x618 cache went to disk as 618
+  // separate 116-byte writes, plus a full band memset each time. Device-measured on X4, that
+  // was ~2.3 s per cache -- roughly 40% of a decode, and the reason adding a second cache to
+  // the same pass cost 2274 ms when its dither and packing are nearly free. (Same shape as the
+  // 512-byte extract writes fixed in PR #220; small writes are simply very expensive here.)
+  //
+  // So rows accumulate in the band and go out in one call when the next block would no longer
+  // fit. Deferring is always safe -- final rows are immutable, the band is already sized to
+  // hold them, and finalize() writes whatever is still pending.
+  bool advanceTo(int newTopRow) {
+    if (!ok) return false;
+    if (newTopRow <= bandStart) return true;
+    if (newTopRow > height) newTopRow = height;
+    // Room for another whole block? Then nothing has to move yet. maxBlockRows is what makes
+    // this safe for a block-at-a-time decoder (JPEG MCU rows): the caller may write up to that
+    // many rows starting at newTopRow, and they must all still land inside the band.
+    if (newTopRow - bandStart + maxBlockRows <= bandRows) return true;
+    return flushThrough(newTopRow);
+  }
+
   // Flush the final band and fill any rows never covered (image clipped by the
   // screen, or a decode that produced fewer rows than the box), then close the file.
   bool finalize() {
@@ -176,14 +207,9 @@ struct PixelCache {
       abort();
       return false;
     }
-    for (int r = flushedRows; r < height; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : fillRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
-        LOG_ERR("IMG", "Cache write error at row %d", r);
-        abort();
-        return false;
-      }
+    if (!flushThrough(height)) {
+      abort();
+      return false;
     }
     file.close();
     LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,

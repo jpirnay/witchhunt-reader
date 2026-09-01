@@ -11,7 +11,6 @@
 #include "../../Epub.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
-#include "../converters/JpegToFramebufferConverter.h"
 #include "../converters/PixelCache.h"
 #include "../converters/PngToFramebufferConverter.h"
 
@@ -59,19 +58,6 @@ bool ImageBlock::ensureExtracted() const {
 
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
 
-namespace image_tone {
-namespace {
-uint8_t g_filterId = 0;
-adaptive_tone::Mode g_mode = adaptive_tone::Mode::Stretch;
-}  // namespace
-void setFilter(const uint8_t filterId, const adaptive_tone::Mode mode) {
-  g_filterId = filterId;
-  g_mode = mode;
-}
-uint8_t getFilterId() { return g_filterId; }
-adaptive_tone::Mode getMode() { return g_mode; }
-}  // namespace image_tone
-
 namespace image_scratch {
 namespace {
 BuildArena* g_arena = nullptr;
@@ -106,34 +92,46 @@ std::string withSuffix(const std::string& imagePath, const std::string& suffix) 
 std::string getBwCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".1bit.pxc"); }
 
 // Grayscale cache: 4-level Bayer (0–3), replayed in GRAYSCALE_LSB/MSB passes when AA is on.
-// Tone mapping IS baked into these pixels, so the filter id keys the name: switching the
-// setting must not replay pixels levelled for the old filter, and keying by name means
-// both variants survive a switch back (no invalidation hook needed). Filter 0 keeps the
-// historical unsuffixed name so existing caches stay valid.
-std::string getGrayscaleCachePath(const std::string& imagePath) {
-  const uint8_t filterId = image_tone::getFilterId();
-  const std::string toneSuffix = filterId == 0 ? std::string() : ".f" + std::to_string(filterId);
-  return withSuffix(imagePath, toneSuffix + ".bayer.pxc");
-}
+// Like the BW plane above, these pixels carry no tone correction, so one cache per image
+// serves every display setting — the name needs no key and never forks.
+std::string getGrayscaleCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".bayer.pxc"); }
 
-// Derive adaptive tone points for one image. Both analyzers return inactive points on
-// any failure (low heap, unsupported coding mode, read error), which makes the tone
-// curve an identity — a failed analysis degrades to the untoned image, never to no image.
-// GIF has no analyzer and stays untoned.
-adaptive_tone::Points analyzeImageTone(const std::string& imagePath) {
-  std::string ext;
-  const size_t dot = imagePath.rfind('.');
-  if (dot != std::string::npos) {
-    ext = imagePath.substr(dot);
-    for (auto& c : ext) c = tolower(c);
+// Decode a PNG straight out of the EPUB, with no extraction to SD first.
+//
+// Only possible when the ZIP STORES the entry (already-compressed formats usually are): the
+// bytes in the archive are then the file, and PngStreamDecoder reads forward and seeks only
+// relatively, so a handle parked at the entry's first byte is all it needs.
+//
+// Worth doing because the extract it replaces is pure copying — 857 KB measured at ~255 KB/s,
+// 3.36 s of the 14.93 s an uncached cover cost, plus 857 KB written to the card. Deflated
+// entries cannot take this path (see Epub::getStoredItemRange) and still extract.
+//
+// Returns false if anything at all is not right, leaving the caller to extract and retry: a
+// failed attempt costs one bounded seek and whatever partial decode happened, and PixelCache
+// deletes its own partial file, so the fallback starts clean.
+bool decodePngInPlace(const std::string& epubFilePath, const std::string& epubEntryPath, GfxRenderer& renderer,
+                      const RenderConfig& config) {
+  Epub epub(epubFilePath, "/.crosspoint");
+  uint32_t offset = 0;
+  uint32_t size = 0;
+  if (!epub.getStoredItemRange(epubEntryPath, &offset, &size) || size == 0) {
+    // Logged because it decides seconds: a deflated entry has to be extracted first, and
+    // otherwise the shortcut's absence is invisible in a trace (the extract itself is TRC).
+    LOG_DBG("IMG", "Not stored in the archive, extracting first: %s", epubEntryPath.c_str());
+    return false;
   }
-  if (JpegToFramebufferConverter::supportsFormat(ext)) {
-    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
+
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", epubFilePath, file)) return false;
+  if (!file.seekSet(offset)) {
+    file.close();
+    return false;
   }
-  if (PngToFramebufferConverter::supportsFormat(ext)) {
-    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
-  }
-  return {};
+  LOG_DBG("IMG", "Decoding in place from archive: %s (%u bytes at %u)", epubEntryPath.c_str(),
+          static_cast<unsigned>(size), static_cast<unsigned>(offset));
+  const bool ok = PngToFramebufferConverter::decodeOpenFile(file, epubEntryPath, renderer, config);
+  file.close();
+  return ok;
 }
 
 // srcYOffset: first source row to render (0 = top of image).
@@ -269,10 +267,30 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 }  // namespace
 
 bool ImageBlock::isLargeImage() const {
-  // width and height are always set at construction from the ZIP manifest or
-  // image header — no file read needed. The SD cache file may not exist yet
-  // (lazy extraction), so reading it here would produce spurious error logs.
-  return int32_t(width) * int32_t(height) > LARGE_IMAGE_PIXEL_THRESHOLD;
+  if (largeImageCached_ >= 0) {
+    return largeImageCached_ != 0;
+  }
+  size_t sourceBytes = 0;
+  // Cheapest source first: once the image has been extracted (a re-render, or the other cache
+  // variant decoded earlier in the same pass) the answer is a stat away.
+  FsFile file;
+  if (Storage.openFileForRead("IMG", imagePath, file)) {
+    sourceBytes = file.size();
+    file.close();
+  } else if (!epubFilePath_.empty() && !epubEntryPath_.empty()) {
+    // Not extracted yet: ask the archive. One central-directory scan, and only ever on a
+    // pixel-cache miss — the very next thing that happens is either a placeholder (cheap) or a
+    // decode that costs seconds, so the scan is noise against both.
+    Epub epub(epubFilePath_, "/.crosspoint");
+    if (!epub.getItemSize(epubEntryPath_, &sourceBytes)) {
+      sourceBytes = 0;  // unknown: treat as not-large, i.e. render it rather than hide it
+    }
+  }
+  largeImageCached_ = static_cast<int8_t>(sourceBytes > LARGE_IMAGE_SOURCE_BYTES ? 1 : 0);
+  if (largeImageCached_ != 0) {
+    LOG_DBG("IMG", "Large image (%u bytes): %s", static_cast<uint32_t>(sourceBytes), imagePath.c_str());
+  }
+  return largeImageCached_ != 0;
 }
 
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
@@ -322,7 +340,7 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 }
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
-                        const bool monochromeOutput) {
+                        const bool monochromeOutput, const bool alsoCacheOtherVariant) {
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
@@ -360,28 +378,8 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     return;
   }
 
-  // Ensure the image is extracted to SD (lazy extraction if not already present).
-  if (!ensureExtracted()) {
-    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
-    return;
-  }
-
-  // Proceed with full decode
-  FsFile file;
-  if (!Storage.openFileForRead("IMG", imagePath, file)) {
-    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
-    return;
-  }
-  size_t fileSize = file.size();
-  file.close();
-
-  if (fileSize == 0) {
-    LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
-    return;
-  }
-
-  LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
-
+  // Build the decode config before deciding HOW to reach the bytes: the in-place shortcut
+  // below needs the same config the extracted path would use.
   RenderConfig config;
   config.x = x;
   config.y = y;
@@ -393,15 +391,53 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   config.performanceMode = false;
   config.useExactDimensions = true;
   config.cachePath = cachePath;
-
-  // Adaptive tone applies only to the 4-level grayscale variant. On the BW plane the
-  // output is just 0/3, so a level stretch mostly shifts where the Atkinson threshold
-  // falls rather than adding information — and it would desync the BW frame from the
-  // grey planes layered on top of it. Only reached on a cache miss, so the analysis
-  // decode is paid once per image and amortized by the .pxc.
-  if (!monochromeOutput && image_tone::getFilterId() != 0) {
-    config.adaptiveTone = analyzeImageTone(imagePath);
+  // One inflate, both caches. Only set on a real decode, which is the only place it can pay:
+  // the cache-hit and placeholder paths above already returned.
+  if (alsoCacheOtherVariant) {
+    config.companionCachePath = monochromeOutput ? getGrayscaleCachePath(imagePath) : getBwCachePath(imagePath);
   }
+
+  // Deliberately no adaptive tone on either variant: both .pxc files are dithered straight
+  // from the raw luminance. The curve has to be derived from a completed histogram, and a
+  // PNG cannot be rewound to build one -- it costs a second full inflate of every image, on
+  // the warm pass that already gates how fast a page with pictures opens. The correction is
+  // still offered on the sleep screen, which pays it once per wake rather than once per page
+  // and keys its single cache by the filter id.
+  //
+  // Leaving both variants untoned is also what keeps them interchangeable inputs: they now
+  // differ only in ditherer (1-bit Atkinson vs 4-level Bayer) over an identical grey stream.
+
+  // Shortcut: a PNG the archive stores uncompressed needs no extraction at all — decode it
+  // where it lies (see decodePngInPlace). Only attempted while the file is genuinely absent
+  // from SD; once extracted, reading the plain file is simpler and no slower.
+  //
+  // The extension is a hint, not a guarantee (a .png that is really an AVIF is a thing that
+  // happens), but it costs nothing to be wrong: the decoder rejects the signature and we fall
+  // through to the extract exactly as before.
+  if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !Storage.exists(imagePath.c_str()) &&
+      FsHelpers::hasPngExtension(imagePath) && decodePngInPlace(epubFilePath_, epubEntryPath_, renderer, config)) {
+    return;
+  }
+
+  // Ensure the image is extracted to SD (lazy extraction if not already present).
+  if (!ensureExtracted()) {
+    LOG_ERR("IMG", "Image unavailable: %s", imagePath.c_str());
+    return;
+  }
+
+  FsFile file;
+  if (!Storage.openFileForRead("IMG", imagePath, file)) {
+    LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
+    return;
+  }
+  const size_t fileSize = file.size();
+  file.close();
+  if (fileSize == 0) {
+    LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
+    return;
+  }
+
+  LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {

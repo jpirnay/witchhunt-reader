@@ -77,12 +77,6 @@ struct JpegContext {
   PixelCache cache;
   bool caching{false};
 
-  // Adaptive-tone analysis pre-pass only (see analyzeAdaptiveTone): when histogram is
-  // non-null the decode writes no pixels and just tallies luminance. Never set on a
-  // real render.
-  uint32_t* histogram{nullptr};
-  uint64_t histogramSamples{0};
-
   // See PngContext for the rationale: monochromeOutput requests a 1-bit Atkinson dither
   // emitting only 0/3 so the BW DirectPixelWriter (`pixelValue < 3` rule) maps cleanly.
   int oneBitDitherRow{-1};
@@ -782,21 +776,6 @@ int tjpgOutput(JDEC* jd, void* bitmap, JRECT* rect) {
   return emitGrayBlock(*ctx, static_cast<const uint8_t*>(bitmap), rect->left, rect->top, validW, blockH, validW);
 }
 
-// TJpgDec output callback for the adaptive-tone pre-pass: tally luminance, write nothing.
-// Feeds the WDT like the real decode does — even at 1/8 scale a large image is many blocks.
-int tjpgHistogramOutput(JDEC* jd, void* bitmap, JRECT* rect) {
-  JpegContext* ctx = static_cast<TJpgSession*>(jd->device)->ctx;
-  if (!ctx || !ctx->histogram) return 0;
-  const int validW = rect->right - rect->left + 1;
-  const int blockH = rect->bottom - rect->top + 1;
-  const auto* px = static_cast<const uint8_t*>(bitmap);
-  const size_t count = static_cast<size_t>(validW) * static_cast<size_t>(blockH);
-  for (size_t i = 0; i < count; i++) ctx->histogram[px[i]]++;
-  ctx->histogramSamples += count;
-  esp_task_wdt_reset();
-  return 1;
-}
-
 bool progressiveOutput(void* user, uint16_t y, const uint8_t* grayscale, uint16_t width) {
   auto* ctx = static_cast<JpegContext*>(user);
   if (!ctx || width != ctx->dstWidth || y >= ctx->dstHeight) return false;
@@ -941,63 +920,6 @@ bool JpegToFramebufferConverter::getDimensionsStatic(const std::string& imagePat
   }
   LOG_TRC("JPG", "Image dimensions: %dx%d", out.width, out.height);
   return true;
-}
-
-adaptive_tone::Points JpegToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath,
-                                                                      const adaptive_tone::Mode toneMode) {
-  adaptive_tone::Points points;  // inactive by default — identity tone curve
-
-  // Only baseline JPEGs go through TJpgDec. The progressive path reconstructs a DC-only
-  // preview whose sample distribution is not the real image, so analysing it would derive
-  // the wrong points; leave those untoned.
-  JpegMode mode = JpegMode::Baseline;
-  if (!getModeFromHeader(imagePath, mode) || mode != JpegMode::Baseline) {
-    return points;
-  }
-
-  const size_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < minFreeHeapForJpeg()) {
-    LOG_DBG("JPG", "Skipping adaptive tone analysis, low heap (%u free)", static_cast<unsigned>(freeHeap));
-    return points;
-  }
-
-  FsFile file;
-  if (!Storage.openFileForRead("JPG", imagePath, file)) {
-    return points;
-  }
-
-  JpegWorkPool pool;
-  auto histogram = makeUniqueNoThrow<uint32_t[]>(256);
-  if (!pool || !histogram) {
-    file.close();
-    return points;
-  }
-  for (int i = 0; i < 256; i++) histogram[i] = 0;
-
-  // The histogram only needs the tonal distribution, not resolution: decode at TJpgDec's
-  // coarsest DCT scale (1/8) so this pre-pass costs ~1/64 of the samples of a real decode.
-  // This is the shortcut PNG cannot take, which is why its analysis is a full extra decode.
-  JpegContext histCtx;
-  histCtx.histogram = histogram.get();
-  TJpgSession session{&file, &histCtx};
-  JDEC jdec{};
-  if (jd_prepare(&jdec, tjpgInput, pool.get(), TJPG_WORK_POOL_SIZE, &session) != JDR_OK) {
-    file.close();
-    return points;
-  }
-  const JRESULT jr = jd_decomp(&jdec, tjpgHistogramOutput, 3 /* 1/8 scale */);
-  file.close();
-  if (jr != JDR_OK) {
-    LOG_DBG("JPG", "Adaptive tone analysis decode failed (jr=%d): %s", jr, imagePath.c_str());
-    return points;
-  }
-
-  if (histCtx.histogramSamples == 0) return points;
-  points = adaptive_tone::derivePoints(histogram.get(), histCtx.histogramSamples, toneMode);
-  LOG_TRC("JPG", "Adaptive tone (%s): active=%d black=%u white=%u (%llu samples): %s",
-          toneMode == adaptive_tone::Mode::Equalize ? "equalize" : "stretch", points.active ? 1 : 0, points.blackPoint,
-          points.whitePoint, static_cast<unsigned long long>(histCtx.histogramSamples), imagePath.c_str());
-  return points;
 }
 
 bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,

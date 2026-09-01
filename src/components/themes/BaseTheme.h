@@ -236,6 +236,12 @@ class BaseTheme {
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY);
 
+  // Footprint actually occupied by drawBatteryLeft(): the icon plus, when shown, the live
+  // percentage text. Anything placed to its right (the clock, the title) must reserve this rather
+  // than estimate it — a three digit percentage ("100%") is wider than any fixed guess, which is
+  // how the clock ended up drawn on top of the battery percentage (issue #214).
+  static int statusBarBatteryWidth(const GfxRenderer& renderer, const ThemeMetrics& metrics, bool showPercentage);
+
   // Hard ceiling on wrapped title lines. Past three the row stops reading as one entry in a list
   // and starts reading as a paragraph, and a single item can fill the screen.
   static constexpr int maxWrappedTitleLines = 3;
