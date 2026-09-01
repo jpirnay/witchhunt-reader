@@ -63,6 +63,10 @@ class BufferedPrint final : public Print {
     return out_.write(buf_.get(), n) == n;
   }
 
+  // Drop whatever is pending without writing it. For the error paths that close and delete the
+  // output file: without this the destructor would flush into a closed handle.
+  void discard() { fill_ = 0; }
+
  private:
   Print& out_;
   std::unique_ptr<uint8_t[]> buf_;
