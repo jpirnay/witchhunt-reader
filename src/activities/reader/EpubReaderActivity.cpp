@@ -912,18 +912,18 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
   // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
   // little heap for Section::heapAllowsEmbeddedStyle()).
   static constexpr const char* kBStateNames[] = {"probe", "waitheap", "building", "settled"};
-  LOG_INF(
-      "ERS",
-      "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d borrow=%d preempt=%u | "
-      "preReady=%d buildPct=%d free=%lu contig=%lu",
-      static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
-      static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
-      kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
-      lastRenderStats.embeddedStyle ? 1 : 0, backgroundBorrowActive_ ? 1 : 0,
-      static_cast<unsigned>(backgroundPreemptCount_),
-      (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
-      static_cast<unsigned long>(esp_get_free_heap_size()),
-      static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  LOG_INF("ERS",
+          "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu | C runs=%lu completes=%lu state=%s spine=%d "
+          "css=%d borrow=%d preempt=%u | preReady=%d buildPct=%d free=%lu contig=%lu",
+          static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
+          static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
+          static_cast<unsigned long>(bgCounters_.cRuns), static_cast<unsigned long>(bgCounters_.cCompletes),
+          kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
+          lastRenderStats.embeddedStyle ? 1 : 0, backgroundBorrowActive_ ? 1 : 0,
+          static_cast<unsigned>(backgroundPreemptCount_),
+          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("idle_5s");
 #endif
 }
@@ -1630,7 +1630,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // stepBackgroundSectionBuild for the full rationale).
   renderer.clearFontAccumulation();
 #if DEBUG_BACKGROUND_WORK
-  bgCounters_.bRuns++;
+  bgCounters_.cRuns++;
 #endif
   Section::BuildStep step;
   {
@@ -1682,7 +1682,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // Done & clean: the on-disk LUT is written and `section` is now a complete cache. Resolve the
   // navigation target now that the final page count is known, then transition to reading.
 #if DEBUG_BACKGROUND_WORK
-  bgCounters_.bCompletes++;
+  bgCounters_.cCompletes++;
 #endif
   LOG_INF("ERS", "Background-C spine=%d complete: %u pages", currentSpineIndex, section->pageCount);
   epub->persistImageManifest();
