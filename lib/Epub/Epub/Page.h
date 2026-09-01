@@ -62,7 +62,7 @@ class PageImage final : public PageElement {
       : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
-                           bool monochromeOutput = true);
+                           bool monochromeOutput = true, bool alsoCacheOtherVariant = false);
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);

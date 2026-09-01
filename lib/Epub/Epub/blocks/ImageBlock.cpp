@@ -301,7 +301,7 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 }
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
-                        const bool monochromeOutput) {
+                        const bool monochromeOutput, const bool alsoCacheOtherVariant) {
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
@@ -372,6 +372,11 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   config.performanceMode = false;
   config.useExactDimensions = true;
   config.cachePath = cachePath;
+  // One inflate, both caches. Only set on a real decode, which is the only place it can pay:
+  // the cache-hit and placeholder paths above already returned.
+  if (alsoCacheOtherVariant) {
+    config.companionCachePath = monochromeOutput ? getGrayscaleCachePath(imagePath) : getBwCachePath(imagePath);
+  }
 
   // Deliberately no adaptive tone on either variant: both .pxc files are dithered straight
   // from the raw luminance. The curve has to be derived from a completed histogram, and a

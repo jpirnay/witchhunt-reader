@@ -37,8 +37,8 @@ void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffse
 }
 
 void PageImage::renderWithForceLoad(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoad,
-                                    const bool monochromeOutput) {
-  imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad, monochromeOutput);
+                                    const bool monochromeOutput, const bool alsoCacheOtherVariant) {
+  imageBlock->render(renderer, xPos + xOffset, yPos + yOffset, forceLoad, monochromeOutput, alsoCacheOtherVariant);
 }
 
 bool PageImage::serialize(FsFile& file) {
@@ -328,13 +328,21 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
     if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
     // Check whether the appropriate cache already exists
     const bool alreadyCached = monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache();
+    // Both variants missing and both wanted: ask the decoder for them in a single inflate
+    // instead of paying two. Requires BOTH to be absent — if the BW cache is already on disk
+    // the merged pass would redo work that is already done, so the plain second pass below is
+    // the cheaper route.
+    const bool mergeVariants = alsoWarmGrayscale && monochromeOutput && !alreadyCached && !ib.hasGrayscaleCache();
     if (!alreadyCached) {
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
-                                                            monochromeOutput);
+                                                            monochromeOutput, mergeVariants);
     }
     // Second decode for the other variant when AA needs the grayscale planes on top of
     // the BW frame. Skipped when monochromeOutput is already false — that pass wrote the
-    // grayscale cache itself.
+    // grayscale cache itself — and skipped when the merged pass above already produced it.
+    // Left in place as the fallback that keeps this correct for every decoder and every
+    // failure: the companion is best-effort (JPEG and GIF ignore it, and its cache file can
+    // fail to open on its own), so the re-check is what makes it safe to ask for.
     if (alsoWarmGrayscale && monochromeOutput && !ib.hasGrayscaleCache()) {
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
                                                             /*monochromeOutput=*/false);

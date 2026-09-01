@@ -74,6 +74,19 @@ struct RenderConfig {
   // sleep screen renders three passes that must all share one set of points.
   adaptive_tone::Points adaptiveTone;
   std::string cachePath;  // If non-empty, decoder will write pixel cache to this path
+  // If non-empty, the decoder ALSO writes the other dither variant of the same decode to this
+  // path -- 4-level Bayer when monochromeOutput is set, 1-bit Atkinson when it is not. Cache
+  // only: the companion is never drawn, so the framebuffer still shows exactly the variant
+  // `monochromeOutput` selects.
+  //
+  // This is what lets the reader's BW and grayscale .pxc pair come out of ONE inflate. It is
+  // only sound because neither variant is tone-mapped (see ImageBlock::render): a tone curve
+  // has to be derived from a completed histogram, which a PNG cannot produce without a second
+  // full pass, and the two sinks would then need different source samples.
+  //
+  // Honoured by PngToFramebufferConverter. Other decoders ignore it and write only cachePath;
+  // callers must treat the companion as best-effort and check before relying on it.
+  std::string companionCachePath;
 };
 
 class ImageToFramebufferDecoder {

@@ -125,7 +125,12 @@ class ImageBlock final : public Block {
 
   // monochromeOutput=true: 1-bit Atkinson dither → BW-plane rendering (AA off)
   // monochromeOutput=false: 4-level Bayer dither → also replayed in grayscale passes (AA on)
-  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true);
+  // alsoCacheOtherVariant: on a decode (cache miss), write the OTHER dither variant's .pxc in
+  // the same pass as well. Saves the second full inflate when the caller knows it needs both --
+  // see Page::warmImageCaches. Ignored when the render is served from cache or a placeholder,
+  // and best-effort: only the PNG decoder honours it, so callers must re-check.
+  void render(GfxRenderer& renderer, int x, int y, bool forceLoad = true, bool monochromeOutput = true,
+              bool alsoCacheOtherVariant = false);
   bool serialize(FsFile& file);
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 
