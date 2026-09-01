@@ -259,12 +259,29 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
 #endif
 // Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
-// so here the sum is correct). Same value as Background-B's BG_BUILD_EXTRACT_BASE_HEAP_BYTES and
-// for the same reason — both gate an extract that runs heap-backed with the secondary framebuffer
-// resident, which is the one situation the 30 KB was measured in. Kept as its own name rather than
-// reusing B's so the two can diverge without silently retuning each other.
+// so here the sum is correct). Kept as its own name rather than reusing Background-B's
+// BG_BUILD_EXTRACT_BASE_HEAP_BYTES so the two can diverge without silently retuning each other —
+// and they have: B reaches its extract from the borrow-first path, this one from a page turn.
+//
+// 30 -> 50 KB (2026-09-01), device-measured on Small Gods spine 1 — the whole book in one
+// 583991-byte entry — which the 30 KB version admitted to a resident build that could not
+// possibly finish. The trace, from the gate to the abort ~170 ms later:
+//
+//   gate      free=71592  (floor was 67584: the CSS base, since 30720 + 32768 = 63488 lost the max)
+//   start     free=60396  -11196  activity/section/popup before the build begins
+//   setup     free=56648   -3748  CSS index load
+//   abort     free=19924  -36724  ZipFile + read buffer + the 32768 inflate ring
+//
+// So the ring is only two thirds of what the extract phase costs from here; the other ~18.9 KB is
+// fixed overhead the base is meant to cover, and on top of that the build has to stay above
+// RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES (30 KB) or it aborts anyway. 18.9 + 30 = 48.9 KB, so 50
+// with a little margin. Note what this does NOT change: with the ring capped at 32 KB the base
+// only binds for large entries — a few-KB chapter still floors at the flat 60/66 KB above and
+// still builds in place. What it changes is that a whole-book-in-one-spine entry now goes
+// straight to the released path instead of paying ~1.4 s for setup, abort, cache clear and a
+// second setup to get there.
 #ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
-#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)
+#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (50 * 1024)
 #endif
 // CSS books need more margin to build in place: the parse resolves embedded styles, which
 // self-degrade below the runtime CSS-resolve floor (CSS_MIN_FREE_HEAP_FOR_CSS ≈ 40 KB). Since
