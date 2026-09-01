@@ -1266,7 +1266,31 @@ be changed. The existing precedent in the tree is renaming the JSON key
 (`fastAntiAliasing` → `fastAntiAliasingV2`), which works for one flag and does
 not scale to twenty.
 
-### 8.14 Status
+### 8.14 A list is only tappable if its screen says so
+
+`ActivityManager::dispatchListTap()` resolves a tap to an item index from the
+band the render published, then hands it to `Activity::selectListRow()` — whose
+**base implementation returns `Rejected`**. A screen that draws through
+`GUI.drawList` but never overrides it therefore records a perfectly good band,
+resolves the right row, and does nothing, on every page.
+
+That is how `EnumSelectionActivity` — the full-screen enum picker, i.e. every
+gesture and button action row — shipped. It was reported as "cannot tap a list
+item after scrolling to the second page", which is where it was noticed rather
+than where it began: the screen had never been tappable, and the second page is
+simply where a 30-option list makes you look.
+
+The audit is mechanical — every file that calls `drawList` / `drawWrappedList` /
+`recordUniformRows` must either override `selectListRow` or inherit
+`MenuListActivity`. Two files legitimately do neither and say so:
+`ButtonRemapActivity` (a wizard, not a picker) and `RecentBooksActivity` (routes
+`listTouch()` itself, because its grid view is not a band).
+
+The `Rejected` branch now logs. A silent return there is indistinguishable from a
+tap that never arrived and from a band recorded for the wrong rows, and those
+three want completely different fixes.
+
+### 8.15 Status
 
 Builds on `default` (C3), `x4pro` and `lilygo_t5s3`; 766 host tests green,
 including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device

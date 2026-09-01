@@ -618,6 +618,13 @@ void ActivityManager::dispatchListTap() {
   // on a row this screen painted and nothing else should get to reinterpret it.
   switch (currentActivity->selectListRow(index)) {
     case ListRowTap::Result::Rejected:
+      // Logged, because a silent return here is indistinguishable from a tap that
+      // never arrived or a band recorded for the wrong rows — and a screen that
+      // draws a list but never implements selectListRow() lands in exactly this
+      // branch for every tap, on every page. That is not a hypothetical: it is
+      // how EnumSelectionActivity shipped, and the trace above showed the hit
+      // test resolving the right row while nothing happened.
+      LOG_DBG("TCH", "List tap -> row %d rejected by %s", index, currentActivity->getName().c_str());
       return;
 
     case ListRowTap::Result::Selected:
