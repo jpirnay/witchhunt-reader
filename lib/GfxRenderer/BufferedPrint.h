@@ -46,7 +46,7 @@ class BufferedPrint final : public Print {
       return out_.write(data, n);
     }
     if (fill_ + n > cap_ && !flushBuffer()) return 0;
-    memcpy(buf_.get() + fill_, data, n);
+    memcpy(bufferBase() + fill_, data, n);
     fill_ += n;
     return n;
   }
@@ -60,7 +60,7 @@ class BufferedPrint final : public Print {
     if (fill_ == 0) return true;
     const size_t n = fill_;
     fill_ = 0;  // cleared first: a failing sink must not make every later flush retry the same bytes
-    return out_.write(buf_.get(), n) == n;
+    return out_.write(bufferBase(), n) == n;
   }
 
   // Drop whatever is pending without writing it. For the error paths that close and delete the
@@ -68,6 +68,12 @@ class BufferedPrint final : public Print {
   void discard() { fill_ = 0; }
 
  private:
+  // Explicitly typed, rather than calling buf_.get() at the use sites: cppcheck does not resolve
+  // std::unique_ptr<uint8_t[]>::get() and reads arithmetic on it as void* pointer maths
+  // (arithOperationsOnVoidPointer). Same accessor pattern, for the same reason, as
+  // BufferedFileWriter::bufferBase() in Serialization/BufferedFileIO.h.
+  uint8_t* bufferBase() const { return buf_.get(); }
+
   Print& out_;
   std::unique_ptr<uint8_t[]> buf_;
   size_t cap_ = 0;
