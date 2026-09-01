@@ -114,7 +114,12 @@ bool decodePngInPlace(const std::string& epubFilePath, const std::string& epubEn
   Epub epub(epubFilePath, "/.crosspoint");
   uint32_t offset = 0;
   uint32_t size = 0;
-  if (!epub.getStoredItemRange(epubEntryPath, &offset, &size) || size == 0) return false;
+  if (!epub.getStoredItemRange(epubEntryPath, &offset, &size) || size == 0) {
+    // Logged because it decides seconds: a deflated entry has to be extracted first, and
+    // otherwise the shortcut's absence is invisible in a trace (the extract itself is TRC).
+    LOG_DBG("IMG", "Not stored in the archive, extracting first: %s", epubEntryPath.c_str());
+    return false;
+  }
 
   FsFile file;
   if (!Storage.openFileForRead("IMG", epubFilePath, file)) return false;
