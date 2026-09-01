@@ -77,18 +77,36 @@ ReaderActivity::CoverExtractSession::Status ReaderActivity::CoverExtractSession:
   if (!reader_ || !reader_->isOpen()) return Status::Error;
 
   if (!buf_ || chunkBytes_ != chunkBytes) {
+    // Halve the request rather than abandon the cover. Device-observed on X4: a 16 KB chunk
+    // failed with ~74 KB free — plenty of heap, just not that much of it contiguous after a
+    // carousel's worth of cover work — and the book silently lost its thumbnail for the whole
+    // session. A smaller chunk only costs more inflate steps, which are sliced across ticks
+    // anyway, so degrading beats failing. 1 KB is still 400+ SD writes for a 450 KB cover, which
+    // is slow but finishes; below that the extract is not worth starting.
+    constexpr size_t MIN_CHUNK_BYTES = 1024;
     free(buf_);
-    buf_ = static_cast<uint8_t*>(malloc(chunkBytes));
+    buf_ = nullptr;
+    size_t want = chunkBytes;
+    while (!buf_ && want >= MIN_CHUNK_BYTES) {
+      buf_ = static_cast<uint8_t*>(malloc(want));
+      if (!buf_) want /= 2;
+    }
     if (!buf_) {
-      LOG_ERR("CEX", "OOM allocating %zu byte chunk buffer", chunkBytes);
+      LOG_ERR("CEX", "OOM allocating chunk buffer (wanted %zu, gave up below %zu)", chunkBytes, MIN_CHUNK_BYTES);
+      chunkBytes_ = 0;
       return Status::Error;
     }
-    chunkBytes_ = chunkBytes;
+    if (want != chunkBytes) {
+      LOG_DBG("CEX", "Chunk buffer degraded %zu -> %zu bytes (heap too fragmented for the full size)", chunkBytes,
+              want);
+    }
+    chunkBytes_ = want;
   }
 
   size_t produced = 0;
   bool done = false;
-  if (!reader_->step(buf_, chunkBytes, &produced, &done)) {
+  // chunkBytes_ , not chunkBytes: the allocation above may have degraded to a smaller buffer.
+  if (!reader_->step(buf_, chunkBytes_, &produced, &done)) {
     LOG_ERR("CEX", "ZIP inflate error at %zu/%zu bytes", reader_->bytesProduced(), reader_->inflatedSize());
     dst_.close();
     Storage.remove(destPath_.c_str());

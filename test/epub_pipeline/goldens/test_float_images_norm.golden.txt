@@ -23,7 +23,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=93 s=0 z=100 t=full-width
    W x=189 s=0 z=100 t=below
    W x=237 s=0 z=100 t=it.
-  IMG y=82 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_0_c5e4922f_0.png
+  IMG y=82 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=82 x=64 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=The
    W x=35 s=0 z=100 t=quick
@@ -108,7 +108,7 @@ SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=92 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=image
    W x=54 s=0 z=100 t=height.
-  IMG y=116 x=0 w=60 h=120 src=<cache>/epub_<hash>/img_1_c5e4922f_0.png
+  IMG y=116 x=0 w=60 h=120 src=<cache>/epub_<hash>/img_457ac3ad1233ac55.png
   LINE y=116 x=64 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=Short
    W x=65 s=0 z=100 t=paragraph
@@ -140,7 +140,7 @@ SPINE 2 href=OEBPS/ch3.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=beside
    W x=53 s=0 z=100 t=image.
-  IMG y=82 x=400 w=60 h=60 src=<cache>/epub_<hash>/img_2_c5e4922f_0.png
+  IMG y=82 x=400 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=82 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=The
    W x=35 s=0 z=100 t=quick
@@ -277,7 +277,7 @@ SPINE 3 href=OEBPS/ch4.xhtml pages=1 truncated=0 cssFallback=0
    W x=225 s=0 z=100 t=the
    W x=262 s=0 z=100 t=lazy
    W x=306 s=0 z=100 t=dog.
-  IMG y=212 x=200 w=60 h=60 src=<cache>/epub_<hash>/img_3_c5e4922f_0.png
+  IMG y=212 x=200 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=Text
    W x=60 s=0 z=100 t=after
@@ -365,7 +365,7 @@ SPINE 4 href=OEBPS/ch5.xhtml pages=1 truncated=0 cssFallback=0
    W x=412 s=0 z=100 t=image
   LINE y=82 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=bottom.
-  IMG y=106 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_4_c5e4922f_0.png
+  IMG y=106 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=106 x=64 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=Paragraph
    W x=96 s=0 z=100 t=A
@@ -461,7 +461,7 @@ SPINE 5 href=OEBPS/ch6.xhtml pages=1 truncated=0 cssFallback=0
    W x=160 s=0 z=100 t=and
    W x=197 s=0 z=100 t=taller
    W x=260 s=0 z=100 t=(margin-bottom=8).
-  IMG y=116 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_5_c5e4922f_0.png
+  IMG y=116 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=116 x=64 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=The
    W x=35 s=0 z=100 t=quick
@@ -910,7 +910,7 @@ SPINE 6 href=OEBPS/ch7.xhtml pages=2 truncated=0 cssFallback=0
    W x=96 s=0 z=100 t=the
    W x=133 s=0 z=100 t=lazy
    W x=177 s=0 z=100 t=dog.
-  IMG y=192 x=0 w=60 h=100 src=<cache>/epub_<hash>/img_6_c5e4922f_0.png
+  IMG y=192 x=0 w=60 h=100 src=<cache>/epub_<hash>/img_8f6a7b869ca569cf.png
   LINE y=192 x=64 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=This
    W x=39 s=0 z=100 t=paragraph

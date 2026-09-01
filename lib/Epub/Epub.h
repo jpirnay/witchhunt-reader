@@ -210,7 +210,13 @@ class Epub {
   // Arena bytes one extractItemToFile() needs to keep its inflate ring off the heap:
   // a 1 KB read buffer plus the worst-case 32 KB ring (the entry size is not known until
   // open(), so budget the cap). Callers gate on image_scratch::canServe(this).
-  static constexpr size_t EXTRACT_ARENA_BYTES = 33 * 1024;
+  // Staging buffer for an extract's SD writes. See BufferedExtractSink in the .cpp for the
+  // device measurement behind it; 4 KB is eight sectors, which is where SdFat's multi-sector
+  // path starts paying off, and small enough to come out of the heap when there is no arena.
+  static constexpr size_t EXTRACT_WRITE_BUFFER_BYTES = 4 * 1024;
+  // Inflate ring (<=32 KB) + the reader's 1 KB chunk + the write buffer above: what an extract
+  // needs from the arena to run entirely off the heap.
+  static constexpr size_t EXTRACT_ARENA_BYTES = 33 * 1024 + EXTRACT_WRITE_BUFFER_BYTES;
 
   // Extract a ZIP entry to a local SD file. Used for lazy image extraction at render time.
   //
@@ -222,6 +228,28 @@ class Epub {
   // extraction into a failed one. See docs/memory-allocation-strategy.md §4 (class D).
   bool extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena = nullptr) const;
   bool getItemSize(const std::string& itemHref, size_t* size) const;
+  // Byte range of an item's raw data inside the EPUB, valid ONLY when the ZIP stores that entry
+  // uncompressed (method 0). Lets a decoder read the entry in place instead of extracting it to
+  // SD first -- worth ~3.4 s on an 857 KB cover, which is pure copying at ~255 KB/s.
+  //
+  // Returns false for a deflated entry, and it must: the bytes there are DEFLATE, not the file,
+  // and streaming them into a decoder that inflates again would need two 32 KB uzlib rings live
+  // at once -- more contiguous heap than this device has. Already-compressed formats (PNG, JPEG)
+  // are commonly stored, which is exactly where the copy hurts most.
+  bool getStoredItemRange(const std::string& itemHref, uint32_t* offset, uint32_t* size) const;
+
+  // Drop the loadForCover() memo (see Epub.cpp). Call when a cover-loading burst is over; the
+  // memo holds one book's metadata and is otherwise replaced as the next book is queried.
+  static void clearCoverMetadataMemo();
+
+ private:
+  // Open the cover image for decoding straight out of the EPUB, positioned at its first byte,
+  // when the ZIP stores that entry uncompressed. False for a deflated entry (or no cover), which
+  // leaves the caller extracting cover.img as before. `offset` receives the entry's position, to
+  // rewind to after sniffing the format.
+  bool openStoredCoverInPlace(FsFile& out, uint32_t* offset) const;
+
+ public:
   bool getSpineItemInflatedSize(int spineIndex, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;

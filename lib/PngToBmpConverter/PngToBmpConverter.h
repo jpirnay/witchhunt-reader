@@ -4,8 +4,10 @@
 #include <PngStreamDecoder.h>
 
 #include <cstdint>
+#include <memory>
 
 #include "BitmapHelpers.h"
+#include "BufferedPrint.h"
 
 class Print;
 
@@ -81,8 +83,9 @@ class PngDecodeSession {
   uint16_t* rowCount_ = nullptr;
   Atkinson1BitDitherer* ditherer_ = nullptr;
 
-  // Output sink (borrowed — caller keeps the FsFile alive)
-  Print* bmpOut_ = nullptr;
+  // Output sink (borrowed — caller keeps the FsFile alive), wrapped so the per-row writes
+  // coalesce (see BufferedPrint). Owned because the session spans many loop() ticks.
+  std::unique_ptr<BufferedPrint> bmpOut_;
 };
 
 class PngToBmpConverter {

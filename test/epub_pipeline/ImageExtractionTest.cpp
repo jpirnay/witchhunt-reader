@@ -13,6 +13,7 @@
 //      EntryReader itself does NOT fall back once it has been handed one.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -20,6 +21,10 @@
 
 #include "BuildArena.h"
 #include "Epub.h"
+#include "Epub/Section.h"
+#include "Epub/blocks/ImageBlock.h"
+#include "GfxRenderer.h"
+#include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
 
@@ -101,3 +106,212 @@ TEST_F(ImageExtractionFixture, TooSmallArenaFallsBackToHeapInsteadOfFailing) {
 }
 
 }  // namespace
+
+// The write buffer is reserved from the arena BEFORE the reader takes its block, because
+// BuildArena is LIFO. Get that order wrong and the release is rejected, leaking the block for
+// the rest of the pass — so assert the arena comes back empty, not just that the bytes are right.
+TEST_F(ImageExtractionFixture, ArenaWriteBufferIsReleasedInOrder) {
+  BuildArena arena(Epub::EXTRACT_ARENA_BYTES + 1024);
+  ASSERT_TRUE(arena.valid());
+  const auto bytes = extract("ordered.png", &arena);
+
+  ASSERT_EQ(bytes.size(), kEntryBytes);
+  EXPECT_EQ(arena.used(), 0u) << "write buffer and reader block must both be released";
+  EXPECT_EQ(arena.failedAllocSize(), 0u);
+  EXPECT_GT(arena.highWater(), 32u * 1024u + Epub::EXTRACT_WRITE_BUFFER_BYTES)
+      << "both the ring and the write buffer should have come from the arena";
+}
+
+// An arena with room for the reader but not the write buffer must still extract correctly — the
+// buffer falls back to the heap, and then to unbuffered pass-through. Slow is a nuisance; a
+// truncated image is a bug.
+TEST_F(ImageExtractionFixture, WriteBufferFallsBackWithoutBreakingTheExtract) {
+  const auto viaHeap = extract("reference.png", nullptr);
+  ASSERT_EQ(viaHeap.size(), kEntryBytes);
+
+  BuildArena arena(33 * 1024 + 1024);  // reader fits, write buffer does not
+  ASSERT_TRUE(arena.valid());
+  const auto bytes = extract("tight.png", &arena);
+
+  EXPECT_EQ(bytes, viaHeap);
+  EXPECT_EQ(arena.used(), 0u);
+}
+
+// --- large-image placeholder gate ------------------------------------------------------------
+//
+// This used to compare ImageBlock's width*height — the DISPLAY dimensions — against 800*600.
+// The panel is 480x800, and render() rejects anything larger than the screen, so the product
+// could never exceed 384000 and the gate was unreachable: the "show a placeholder for large
+// images" setting did nothing at all, for any book. The tests below pin both halves of the fix —
+// that the decision is made on source bytes, and that display size does not enter into it.
+
+struct LargeImageFixture : ImageExtractionFixture {
+  // A file of `bytes` at the block's imagePath, standing in for an already-extracted image.
+  std::string writeExtracted(const char* name, const size_t bytes) {
+    const std::string path = (work / name).string();
+    std::ofstream out(path, std::ios::binary);
+    const std::vector<char> chunk(1024, '\0');
+    for (size_t written = 0; written < bytes; written += chunk.size()) {
+      out.write(chunk.data(), static_cast<std::streamsize>(std::min(chunk.size(), bytes - written)));
+    }
+    return path;
+  }
+};
+
+TEST_F(LargeImageFixture, DecidesOnSourceBytesNotDisplaySize) {
+  // Tiny on screen, huge on disk: large. This is the case that matters — a full-page cover is
+  // scaled down to fit, so its display size says nothing about what it costs to get there.
+  const std::string big = writeExtracted("big.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  ImageBlock smallOnScreen(big, 32, 32, "");
+  EXPECT_TRUE(smallOnScreen.isLargeImage());
+
+  // Full screen, small file: not large. Under the old pixel test this was the only shape that
+  // could ever have qualified, and even it could not reach the threshold.
+  const std::string small = writeExtracted("small.png", 8 * 1024);
+  ImageBlock fullScreen(small, 480, 800, "");
+  EXPECT_FALSE(fullScreen.isLargeImage());
+}
+
+TEST_F(LargeImageFixture, ResolvesSizeFromTheArchiveBeforeExtraction) {
+  // Nothing extracted yet: the size has to come from the ZIP entry, which is the state the gate
+  // is actually consulted in (first view, pixel-cache miss, image not yet on SD).
+  const std::string notExtracted = (work / "never_written.png").string();
+  ASSERT_FALSE(fs::exists(notExtracted));
+
+  static_assert(kEntryBytes < LARGE_IMAGE_SOURCE_BYTES, "fixture entry must be under the threshold");
+  ImageBlock block(notExtracted, 100, 100, "", kBook, kEntry);
+  EXPECT_FALSE(block.isLargeImage()) << kEntryBytes << " bytes is under the threshold";
+  EXPECT_FALSE(fs::exists(notExtracted)) << "asking the size must not extract anything";
+
+  // The corpus has no entry above the threshold, so the archive path's TRUE case is not covered
+  // here — a failed lookup and a small entry both answer false, and there is no way to tell them
+  // apart from outside. What is pinned is that the lookup neither extracts nor throws.
+}
+
+TEST_F(LargeImageFixture, UnknownSizeRendersRatherThanHides) {
+  // No archive reference and no file on disk: nothing can be learned. Fall to "not large", so the
+  // image is attempted rather than replaced by a placeholder that would never resolve.
+  ImageBlock orphan((work / "missing.png").string(), 400, 600, "");
+  EXPECT_FALSE(orphan.isLargeImage());
+}
+
+TEST_F(LargeImageFixture, PlaceholderIsSuppressedByForceLoad) {
+  const std::string big = writeExtracted("forced.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  ImageBlock block(big, 400, 600, "");
+
+  EXPECT_TRUE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
+  EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/true, /*monochromeOutput=*/true))
+      << "the user asked for it explicitly";
+  // (The other suppressor — an existing .pxc pixel cache — is not reachable from here: the cache
+  // path is derived internally from the tone filter id and is not exposed for a test to create.)
+}
+
+// --- heap-degraded image headers -------------------------------------------------------------
+//
+// When neither the img tag nor the manifest can supply an image's dimensions, the parser reads
+// the header straight out of the ZIP — behind a heap gate. A refusal drops the image to alt text
+// and the section is then CACHED that way, under the same property hash a complete build would
+// use, so the missing image is permanent. Background-B is the caller most exposed to it: it
+// builds with the framebuffer borrowed, which is exactly when the largest free block is small.
+//
+// The distinction that matters is that the same VISIBLE outcome (alt text) has two causes. An
+// unreadable or absent image is alt text for good and caching that is right; a heap refusal is a
+// statement about one moment and must not be kept. These tests pin both sides.
+
+struct ImageHeapGateFixture : testing::Test {
+  fs::path work;
+  std::string cacheDir;
+  uint32_t savedHeap = 0;
+
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("epub_imgheap_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+    cacheDir = (work / "cache").string();
+    fs::create_directories(cacheDir);
+    savedHeap = ESP.getFreeHeap();
+  }
+  void TearDown() override {
+    ESP.setFreeHeap(savedHeap);
+    fs::remove_all(work);
+  }
+
+  // A one-chapter book whose <img> has no width/height and points at an entry that is NOT in the
+  // archive. That is the only shape which reaches the heap gate on the host: an image the
+  // manifest can resolve never gets there, and the manifest resolves anything whose header sits
+  // in the first 4 KB.
+  std::string makeBookWithUnresolvableImage() {
+    test_zip::StoredZipWriter zip;
+    zip.add("mimetype", "application/epub+zip");
+    zip.add("META-INF/container.xml",
+            "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+            "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
+            "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+    zip.add("content.opf",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+            "version=\"3.0\" unique-identifier=\"id\">\n<metadata "
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">img</dc:identifier>"
+            "<dc:title>Img</dc:title><dc:language>en</dc:language></metadata>\n<manifest>\n<item id=\"c\" "
+            "href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine><itemref "
+            "idref=\"c\"/></spine>\n</package>\n");
+    zip.add("chapter.xhtml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+            "<head><title>C</title></head><body>\n<p>Before the image.</p>\n"
+            "<img src=\"absent.png\" alt=\"alt text stands in\"/>\n<p>After the image.</p>\n</body></html>\n");
+    const std::string path = (work / "img.epub").string();
+    zip.write(path);
+    return path;
+  }
+
+  bool buildAndReportDegraded(const std::string& bookPath, const std::string& cache) {
+    auto epub = std::make_shared<Epub>(bookPath, cache);
+    EXPECT_TRUE(epub->load(true));
+    Section::BuildParams params;
+    params.viewportWidth = 480;
+    params.viewportHeight = 800;
+    params.lineCompression = 1.0f;
+    GfxRenderer renderer;
+    Section section(epub, 0, renderer);
+    EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+    return section.isImageHeaderDegraded();
+  }
+};
+
+TEST_F(ImageHeapGateFixture, HeapRefusalIsLatchedSoTheCacheCanBeDiscarded) {
+  const std::string book = makeBookWithUnresolvableImage();
+
+  // Between the text-layout hard abort (9 KB, below which the parse gives up entirely) and
+  // EHP_IMAGE_HEADER_MIN_FREE_HEAP (16 KB): the parse runs to completion, and the header read is
+  // refused before it is attempted. That ordering is the point of the ladder — an image is given
+  // up long before the chapter is.
+  ESP.setFreeHeap(12 * 1024);
+  EXPECT_TRUE(buildAndReportDegraded(book, (work / "lowheap").string()))
+      << "a heap refusal must be latched, or the alt-text page is cached forever";
+}
+
+TEST_F(ImageHeapGateFixture, AnImageThatSimplyCannotBeReadIsNotLatched) {
+  const std::string book = makeBookWithUnresolvableImage();
+
+  // Ample heap: the read is attempted and fails on its own merits (the entry does not exist).
+  // Same alt text on screen, but nothing transient about it — caching that is correct, so the
+  // build must NOT be flagged for discard or the spine would rebuild forever.
+  ESP.setFreeHeap(200 * 1024);
+  EXPECT_FALSE(buildAndReportDegraded(book, (work / "fullheap").string()))
+      << "an unreadable image is alt text for good; flagging it would cause endless rebuilds";
+}
+
+TEST_F(ImageHeapGateFixture, AResolvableImageIsNeverFlagged) {
+  ESP.setFreeHeap(200 * 1024);
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_png_images.epub", cacheDir);
+  ASSERT_TRUE(epub->load(true));
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  GfxRenderer renderer;
+  Section section(epub, 5, renderer);  // chapter with an <img> carrying no dimensions
+  ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  EXPECT_FALSE(section.isImageHeaderDegraded());
+  EXPECT_GT(section.pageCount, 0);
+}

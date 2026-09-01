@@ -121,6 +121,15 @@ class BufferedFileWriter {
     base_ = static_cast<uint32_t>(file_.position());
   }
 
+  // Caller-supplied buffer, NOT owned — for paths that already hold scratch worth reusing (the
+  // image extract carves it out of the borrowed framebuffer arena rather than asking a heap that
+  // is, at that exact moment, about to be handed to a decoder). A null buffer degrades to
+  // pass-through exactly as a failed allocation does. The buffer must outlive this writer.
+  BufferedFileWriter(FsFile& file, uint8_t* const buffer, const size_t bufferBytes)
+      : file_(file), external_(buffer), cap_(buffer ? bufferBytes : 0) {
+    base_ = static_cast<uint32_t>(file_.position());
+  }
+
   // Callers are expected to flush() at the end of a write phase (and check its result);
   // the destructor flush is a best-effort backstop only.
   ~BufferedFileWriter() { flush(); }
@@ -139,8 +148,7 @@ class BufferedFileWriter {
       return wrote == n;
     }
     if (fill_ + n > cap_ && !flush()) return false;
-    uint8_t* const base = buf_.get();
-    memcpy(base + fill_, in, n);
+    memcpy(bufferBase() + fill_, in, n);
     fill_ += n;
     return true;
   }
@@ -157,7 +165,7 @@ class BufferedFileWriter {
 
   bool flush() {
     if (fill_ == 0) return true;
-    const size_t wrote = file_.write(buf_.get(), fill_);
+    const size_t wrote = file_.write(bufferBase(), fill_);
     base_ += static_cast<uint32_t>(wrote);
     const bool ok = wrote == fill_;
     fill_ = 0;
@@ -165,8 +173,12 @@ class BufferedFileWriter {
   }
 
  private:
+  // Owned or borrowed, never both: the owning constructor leaves external_ null and vice versa.
+  uint8_t* bufferBase() const { return external_ ? external_ : buf_.get(); }
+
   FsFile& file_;
   std::unique_ptr<uint8_t[]> buf_;
+  uint8_t* external_ = nullptr;
   size_t cap_ = 0;
   size_t fill_ = 0;
   uint32_t base_ = 0;  // file offset the buffer starts at

@@ -13,6 +13,7 @@
 #include <new>
 
 #include "BitmapHelpers.h"
+#include "BufferedPrint.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
@@ -22,8 +23,10 @@ constexpr bool USE_FLOYD_STEINBERG = false;
 constexpr bool USE_PRESCALE = true;
 // ============================================================================
 
-bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight,
+bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink, int targetWidth, int targetHeight,
                                                    bool oneBit, bool crop, bool enforceSizeCap, bool eightBit) {
+  // One row per write is one file call per row (see BufferedPrint); coalesce them.
+  BufferedPrint bmpOut(sink);
   LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
           targetWidth, targetHeight);
 
@@ -300,6 +303,10 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
     }
   }
 
+  if (success && !bmpOut.flushBuffer()) {
+    LOG_ERR("PNG", "Failed to flush buffered BMP output");
+    success = false;
+  }
   if (success) {
     LOG_DBG("PNG", "Successfully converted PNG to BMP");
   }
@@ -311,7 +318,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
 // ============================================================================
 
 bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight, bool crop) {
-  bmpOut_ = &bmpFile;
+  bmpOut_ = makeUniqueNoThrow<BufferedPrint>(bmpFile);
+  if (!bmpOut_) {
+    LOG_ERR("PNG", "Session begin: output buffer alloc failed");
+    return false;
+  }
 
   PngStreamDecoder::Info info;
   if (!decoder_.begin(pngFile, info)) {
@@ -364,7 +375,7 @@ bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, 
   }
 
   // 1-bit BMP header
-  bytesPerRow_ = writeGrayscaleBmpHeader(bmpFile, finalW_, finalH_, 1);
+  bytesPerRow_ = writeGrayscaleBmpHeader(*bmpOut_, finalW_, finalH_, 1);
 
   // Allocate buffers
   grayRow_ = static_cast<uint8_t*>(malloc(width_));
@@ -476,6 +487,11 @@ PngDecodeSession::Status PngDecodeSession::continueRows(uint32_t maxSourceRows) 
     LOG_ERR("PNG", "Session: incomplete — %d/%d output rows written", currentOutY_, outHeight_);
     return Status::Error;
   }
+  // Last chance to surface a write failure: after this the caller treats the file as complete.
+  if (!bmpOut_->flushBuffer()) {
+    LOG_ERR("PNG", "Session: failed to flush buffered BMP output");
+    return Status::Error;
+  }
   LOG_DBG("PNG", "Session: decode complete (%ux%u -> %dx%d)", width_, height_, outWidth_, outHeight_);
   return Status::Done;
 }
@@ -491,6 +507,7 @@ void PngDecodeSession::cleanup() {
   rowCount_ = nullptr;
   delete ditherer_;
   ditherer_ = nullptr;
+  bmpOut_.reset();  // flushes whatever a bailed-out session had pending, then drops the buffer
   decoder_.end();
 }
 

@@ -13,10 +13,29 @@
 #include <cctype>
 
 #include "../../Epub.h"
+#include "../HashUtils.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
+
+namespace {
+// Cache filename for an image extracted out of the EPUB, keyed by the archive entry it came from.
+//
+// The entry path is the only thing that identifies these bytes. It is deliberately NOT the parse
+// order: imageCounter used to serve that role, but buildCellImage() bails before incrementing it
+// when an image's dimensions cannot be resolved, and dimension resolution depends on images.bin
+// filling in over time -- so the same document could number its images differently between runs
+// and hand a block the file belonging to a different image. Hashing the entry cannot drift.
+std::string imageCachePathFor(const std::string& imageBasePath, const std::string& resolvedPath) {
+  std::string ext;
+  const size_t extPos = resolvedPath.rfind('.');
+  if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
+  char hash[17];
+  snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(HashUtils::fnvHash64(resolvedPath)));
+  return imageBasePath + hash + ext;
+}
+}  // namespace
 
 const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
@@ -63,16 +82,28 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
 #endif
 
-// Reading an image header straight out of the ZIP (ImageDecoderFactory::getDimensionsFromZipEntry)
-// spins up a ~32 KB inflate ring. That is the ONLY allocation in image handling large enough to
-// threaten a parse, so it is the only thing gated on heap — see the image branch in startElement.
-// Sized ring + slack rather than reusing the text-layout floors, which are far too permissive for
-// a 32 KB request and were never chosen with one in mind.
+// Reading an image header straight out of the ZIP
+// (ImageDecoderFactory::getDimensionsFromZipEntry) — the only allocation in image handling big
+// enough to be worth gating, see the image branch in startElement.
+//
+// 40/34 KB -> 16/8 KB. The old numbers were sized for a ~32 KB inflate ring that this path no
+// longer takes: ZipFile::readBytesFromStat now sizes the ring to the bytes actually wanted
+// (see the comment there, and its own device measurement), which for a 4 KB header read is a
+// 4 KB ring. The gate was never retuned with it, so it went on demanding three times what the
+// operation costs.
+//
+// That was not merely conservative. A refusal drops the image to alt text, and the section is
+// then CACHED that way under an unchanged property hash — nothing ever rebuilds it. Background-B
+// builds with the framebuffer borrowed, which is exactly when the largest free block is small,
+// so on X4 the old gate refused at 50168 free / 30708 contig and baked a missing image into a
+// chapter permanently. What the read actually needs: a 4 KB header buffer, a 512 B read buffer,
+// a ring of up to 4 KB, and (unprimed) a 4 KB EOCD scan window — ~13 KB total, largest single
+// block 4 KB. 16/8 covers that with room to spare and is reachable from a borrowed-buffer build.
 #ifndef EHP_IMAGE_HEADER_MIN_FREE_HEAP
-#define EHP_IMAGE_HEADER_MIN_FREE_HEAP (40 * 1024)
+#define EHP_IMAGE_HEADER_MIN_FREE_HEAP (16 * 1024)
 #endif
 #ifndef EHP_IMAGE_HEADER_MIN_MAX_ALLOC
-#define EHP_IMAGE_HEADER_MIN_MAX_ALLOC (34 * 1024)
+#define EHP_IMAGE_HEADER_MIN_MAX_ALLOC (8 * 1024)
 #endif
 constexpr size_t MIN_FREE_HEAP_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_IMAGE_HEADER = EHP_IMAGE_HEADER_MIN_MAX_ALLOC;
@@ -1557,10 +1588,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
           if (ImageDecoderFactory::isFormatSupported(resolvedPath)) {
             // Determine SD cache path (image will be extracted here lazily at first render).
-            std::string ext;
-            size_t extPos = resolvedPath.rfind('.');
-            if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
-            std::string cachedImagePath = self->imageBasePath + std::to_string(self->imageCounter++) + ext;
+            const std::string cachedImagePath = imageCachePathFor(self->imageBasePath, resolvedPath);
 
             // Get dimensions, cheapest ring-free source first:
             //  1. explicit width/height on the tag (an SVG cover / sized <img>) — no ZIP read at all;
@@ -1584,11 +1612,20 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 dimsOk = true;
               }
             }
-            if (!dimsOk && self->heapAllowsImageHeaderRead()) {
+            if (!dimsOk) {
               // Only reached when neither the tag nor the manifest could supply dimensions. On
               // refusal dimsOk stays false and the code below already falls through to
               // handleImageFallback(), so a tight heap degrades exactly this image and no other.
-              dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
+              if (self->heapAllowsImageHeaderRead()) {
+                dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(self->epub->getPath(), resolvedPath, dims);
+              } else {
+                // Latched, because the two ways of arriving at alt text are not the same thing.
+                // An unreadable or unsupported image is alt text for good, and caching that is
+                // correct. A heap refusal is a statement about this moment only — the same image
+                // resolves fine from a build with more headroom — so the result must not be kept.
+                // Background callers discard on this; see Section::isImageHeaderDegraded().
+                self->imageHeaderSkippedForHeap = true;
+              }
             }
             if (dimsOk) {
               LOG_TRC("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
@@ -3444,10 +3481,7 @@ std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::str
   const int displayWidth = std::max(1, static_cast<int>(dims.width * scale));
   const int displayHeight = std::max(1, static_cast<int>(dims.height * scale));
 
-  std::string ext;
-  const size_t extPos = resolvedPath.rfind('.');
-  if (extPos != std::string::npos) ext = resolvedPath.substr(extPos);
-  const std::string cachedPath = imageBasePath + std::to_string(imageCounter++) + ext;
+  const std::string cachedPath = imageCachePathFor(imageBasePath, resolvedPath);
 
   return std::make_shared<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
                                       static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);

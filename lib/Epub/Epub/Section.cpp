@@ -292,11 +292,15 @@ std::string Section::sectionHtmlCachePath(const std::string& bookCachePath, cons
 
 std::string Section::getSectionHtmlCachePath() const { return sectionHtmlCachePath(epub->getCachePath(), spineIndex); }
 
-std::string Section::getImageBasePath(uint32_t propertyHash) const {
-  char buf[32];
-  snprintf(buf, sizeof(buf), "img_%d_%08x_", spineIndex, propertyHash);
-  return epub->getCachePath() + "/" + buf;
-}
+// Deliberately carries NEITHER the spine index nor the layout property hash. What gets written
+// here is the archive entry's own bytes, which do not depend on either -- only the .pxc pixel
+// caches do, because those are dithered at display dimensions.
+//
+// It used to be keyed by both, so changing font size, margins or orientation re-extracted every
+// image from scratch: 3.3 s and 857 KB of SD writes for one cover, per layout, with up to five
+// byte-identical copies alive at once (evictOldVariants keeps 5 section variants). Now one
+// extraction serves every variant, and two spines referencing the same image share it too.
+std::string Section::getImageBasePath() const { return epub->getCachePath() + "/img_"; }
 
 struct SectionVariant {
   std::string filename;
@@ -347,7 +351,13 @@ void Section::evictOldVariants() const {
       std::string hashStr = variants[i].filename.substr(underscore + 1, dot - underscore - 1);
       uint32_t parsedHash = strtoul(hashStr.c_str(), nullptr, 16);
       if (parsedHash != 0 || hashStr == "00000000") {
-        std::string imgBasePath = getImageBasePath(parsedHash);
+        // Legacy layout-keyed image caches (img_<spine>_<hash>_<n>) only. Current names are
+        // content-keyed and shared across variants, so they must NOT die with a section variant;
+        // they are reclaimed by Epub::clearCache like any other parsing artifact. This branch
+        // stays to sweep up what older firmware left behind.
+        char legacyPrefix[32];
+        snprintf(legacyPrefix, sizeof(legacyPrefix), "img_%d_%08x_", spineIndex, parsedHash);
+        std::string imgBasePath = epub->getCachePath() + "/" + legacyPrefix;
         // Find and delete matching images
         auto rootFiles = Storage.listFiles(epub->getCachePath().c_str(), 100);
         size_t lastSlash = imgBasePath.find_last_of('/');
@@ -861,6 +871,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   this->lut.clear();
   cssLowHeapDegraded_ = false;
   footnotePreviewsUnresolved_ = false;
+  imageHeaderDegraded_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -877,7 +888,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = st.localPath.find_last_of('/');
   st.contentBase = (lastSlash != std::string::npos) ? st.localPath.substr(0, lastSlash + 1) : "";
-  st.imageBasePath = getImageBasePath(st.propertyHash);
+  st.imageBasePath = getImageBasePath();
 
   st.cssParser = nullptr;
   if (p.embeddedStyle) {
@@ -1321,6 +1332,12 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
           static_cast<uint32_t>((esp_timer_get_time() - tFin) / 1000));
 #endif
   st.parserStreamOk = st.visitor->streamSucceeded();
+  // Latch a heap-degraded image before the visitor is torn down. Same contract as the CSS and
+  // footnote latches: the cache is written either way, but a background caller can throw it away
+  // and leave the spine to a build with more headroom.
+  if (st.visitor->imageHeaderDegraded()) {
+    imageHeaderDegraded_ = true;
+  }
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips

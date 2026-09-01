@@ -15,6 +15,7 @@
 #include <new>
 
 #include "BitmapHelpers.h"
+#include "BufferedPrint.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
@@ -296,8 +297,10 @@ static bool progressiveBmpOutput(void* user, uint16_t y, const uint8_t* grayscal
   return !ctx->error;
 }
 
-static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight, bool oneBit,
+static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight, bool oneBit,
                                   bool crop, const ProgressiveJpegDc::ImageInfo& image, bool eightBit) {
+  // One row per write is one file call per row (see BufferedPrint); coalesce them.
+  BufferedPrint bmpOut(sink);
   constexpr int MAX_IMAGE_WIDTH = 2048;
   constexpr int MAX_IMAGE_HEIGHT = 3072;
   if (image.width == 0 || image.height == 0 || image.width > MAX_IMAGE_WIDTH || image.height > MAX_IMAGE_HEIGHT) {
@@ -379,6 +382,12 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
     LOG_ERR("JPG", "Progressive JPEG preview failed: %s", ProgressiveJpegDc::resultName(result));
     return false;
   }
+  // Fold the final flush into the result: a write that fails here would otherwise be reported
+  // as a complete BMP, and the caller would cache a truncated file.
+  if (!bmpOut.flushBuffer()) {
+    LOG_ERR("JPG", "Failed to flush buffered BMP output");
+    return false;
+  }
   LOG_DBG("JPG", "Progressive JPEG preview decoded: %ux%u -> %dx%d", image.width, image.height, outWidth, outHeight);
   return true;
 }
@@ -386,8 +395,10 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& bmpOut, int targetWid
 }  // namespace
 
 // Internal implementation with configurable target size and bit depth
-bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
+bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
                                                      bool oneBit, bool crop, bool eightBit) {
+  // One row per write is one file call per row (see BufferedPrint); coalesce them.
+  BufferedPrint bmpOut(sink);
   LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
           targetWidth, targetHeight);
 
@@ -611,6 +622,10 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
+  if (!bmpOut.flushBuffer()) {
+    LOG_ERR("JPG", "Failed to flush buffered BMP output");
+    return false;
+  }
   LOG_DBG("JPG", "Successfully converted JPEG to BMP");
   return true;
 }

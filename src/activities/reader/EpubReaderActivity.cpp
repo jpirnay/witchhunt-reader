@@ -500,28 +500,6 @@ void EpubReaderActivity::onEnter() {
   // enforceExitFullRefresh(), consumeRefreshOverride() will honour it on the first display call.
   pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
 
-  // Publish the image tone filter for lib/Epub, which must not read settings itself.
-  // Set here rather than per-render so every path that derives a pixel-cache name agrees
-  // (renderContents, the section-index warm pass, the pre-reboot warm). Reuses the sleep
-  // screen's filter setting rather than adding a second one: it is the same tone curve,
-  // and a separate inline-image toggle is display surface the reader does not need.
-  //
-  // Only the two tone-curve values carry over. The others are sleep-screen compositing
-  // modes (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning
-  // for an image sitting inside a page of text.
-  switch (SETTINGS.sleepScreenCoverFilter) {
-    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE:
-      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE, adaptive_tone::Mode::Stretch);
-      break;
-    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE:
-      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE,
-                            adaptive_tone::Mode::Equalize);
-      break;
-    default:
-      image_tone::setFilter(0, adaptive_tone::Mode::Stretch);
-      break;
-  }
-
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.
   inputDrainGuard.arm();
@@ -1519,15 +1497,20 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
         if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
-            backgroundSection_->isFootnotePreviewsUnresolved()) {
+            backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
-          // (styles silently absent from the cached pages), or the footnote resolve could not
-          // complete (markers left plain in a cache keyed "previews on"). Don't hand any of them
-          // to the foreground: its blocking path runs with the secondary buffer released (~52 KB
-          // more headroom) and will likely build it clean.
-          const char* reason = backgroundSection_->isTruncatedCache()       ? "truncated"
-                               : backgroundSection_->isCssLowHeapDegraded() ? "css-degraded"
-                                                                            : "footnotes unresolved";
+          // (styles silently absent from the cached pages), the footnote resolve could not
+          // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
+          // to alt text because its header read was refused. Don't hand any of them to the
+          // foreground: its blocking path runs with the secondary buffer released (~52 KB more
+          // headroom) and will likely build it clean.
+          //
+          // B is the caller most exposed to the last two: it builds with the framebuffer
+          // borrowed, which is exactly when the largest free block is small.
+          const char* reason = backgroundSection_->isTruncatedCache()               ? "truncated"
+                               : backgroundSection_->isCssLowHeapDegraded()         ? "css-degraded"
+                               : backgroundSection_->isFootnotePreviewsUnresolved() ? "footnotes unresolved"
+                                                                                    : "image degraded";
           LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine, reason);
           backgroundSection_->clearCache();
           backgroundSection_.reset();
@@ -3491,11 +3474,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
             cacheHit ? 1 : 0, cssFallbackRebuild ? 1 : 0, resumeBackgroundBuild ? 1 : 0);
 
     if (incremental) {
-      // Draw the popup BEFORE any secondary-buffer release. drawPopup() overlays the box on the
-      // on-screen frame via syncWriteBufferFromDisplayed(), which copies from frameBufferActive —
-      // once the secondary buffer is released that copy is gone (the call no-ops) and the box would
-      // be composited onto the stale two-refreshes-ago write buffer, ghosting the previous page
-      // under the popup. Capture the "dramatic transition" signal first, because the popup's own
+      // Capture the "dramatic transition" signal before anything can display, because a popup's
       // refresh would otherwise consume the pending exit-full-refresh override:
       //   - cold open of this book (coldOpenHalfRefreshArmed_), or
       //   - a pending exit-full-refresh override left by a deliberate jump (chapter/percent/footnote)
@@ -3504,16 +3483,34 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       //     to a FAST diff against the popup frame and ghost its outline.
       const bool dramaticTransition = coldOpenHalfRefreshArmed_ || renderer.hasRefreshOverridePending();
       coldOpenHalfRefreshArmed_ = false;
-      // X4: the dramatic-transition HALF belongs on the first CONTENT page (forceHalfRefreshAfterPopup_
-      // below), not the popup. The popup is a transient box over the already-correct current page, so a
-      // FAST overlay is clean and instant — drop the pending HALF override here so drawPopup() doesn't
-      // spend a second ~1.7s HALF on the popup itself. On X3 the popup's own refresh IS the baseline
-      // step (its displayBuffer updates DTM1, which the following FAST content page diffs against), so
-      // leave the override for drawPopup() to consume there.
-      if (!renderer.isX3() && dramaticTransition) {
-        renderer.clearRefreshOverride();  // discard the armed HALF -> popup paints FAST
+
+      // Whether the popup has to be painted before the build starts, or can wait until the first
+      // slice proves the build is actually long enough to need one.
+      //
+      // A RELEASED build has no choice: drawPopup() composites via syncWriteBufferFromDisplayed(),
+      // which reads frameBufferActive, and the release below takes that copy away — and the
+      // released path then seeds RED RAM *from the popup frame* so its mid-build FAST refreshes
+      // have a baseline to diff against. Both depend on the popup already being on screen.
+      //
+      // A RESIDENT build keeps the buffer, so neither applies and the popup can be deferred. That
+      // matters because the kickoff slice below frequently finishes the whole section: a one-page
+      // cover measured 309 ms start-to-finish on X4, and every millisecond of the popup it painted
+      // first (a ~540 ms FAST refresh) was spent on a frame the very next render replaced. Worse,
+      // the popup is what makes the replacing page expensive — it is a dark box the content page
+      // must then diff against, which is the entire reason for the ~1.7 s HALF armed below.
+      const bool popupBeforeBuild = (mode == SectionBuildMode::IncrementalReleased);
+      if (popupBeforeBuild) {
+        // X4: the dramatic-transition HALF belongs on the first CONTENT page
+        // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
+        // already-correct current page, so a FAST overlay is clean and instant — drop the pending
+        // HALF override here so drawPopup() doesn't spend a second ~1.7s HALF on the popup itself.
+        // On X3 the popup's own refresh IS the baseline step (its displayBuffer updates DTM1, which
+        // the following FAST content page diffs against), so leave the override for drawPopup().
+        if (!renderer.isX3() && dramaticTransition) {
+          renderer.clearRefreshOverride();  // discard the armed HALF -> popup paints FAST
+        }
+        GUI.drawPopup(renderer, tr(STR_INDEXING));  // immediate feedback before the first page lands
       }
-      GUI.drawPopup(renderer, tr(STR_INDEXING));  // immediate feedback before the first page lands
 
       if (mode == SectionBuildMode::IncrementalReleased) {
         // Tight heap: free the secondary buffer (~48–52 KB) for the build. AA is off until the
@@ -3585,7 +3582,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // call already updated correctly — no host-side baseline gap to paper over, so forcing HALF
       // there is pure unnecessary cost. A routine forward-reading crossing into a still-building
       // Background-B section is NOT dramatic (neither signal is set), so it keeps the fast cadence.
-      if (!renderer.isX3() && dramaticTransition) {
+      if (!renderer.isX3() && dramaticTransition && popupBeforeBuild) {
         forceHalfRefreshAfterPopup_ = true;
       }
       renderer.clearFontAccumulation();
@@ -3595,7 +3592,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // build completes and the position is resolved, so the exact value doesn't matter there.
       section->currentPage = (navTarget.kind == NavigationTarget::Kind::Page) ? navTarget.page : 0;
       buildDisplayedPage_ = -1;
-      buildingPopupShown_ = true;
+      buildingPopupShown_ = popupBeforeBuild;
       // Kick the build off so hasActiveBuild() is true (a resumed B build already is). One slice
       // may already finish a tiny section, in which case we fall through to a normal render.
       Section::BuildStep step = Section::BuildStep::More;
@@ -3603,9 +3600,21 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         step = section->stepSectionBuild(makeSectionBuildParams(), BG_BUILD_BUDGET_MS);
       }
       if (step == Section::BuildStep::More) {
+        // The deferred case, now resolved: the build needs more slices, so a popup IS warranted.
+        // renderSectionBuildingPass() paints it on the next pass (its `if (!buildingPopupShown_)`
+        // branch), which is also where the reader would otherwise sit with no feedback. Arm the
+        // same transition handling the up-front path arms, so a popup drawn late is followed by
+        // the same clean content refresh as one drawn early.
+        if (!popupBeforeBuild && !renderer.isX3() && dramaticTransition) {
+          renderer.clearRefreshOverride();
+          forceHalfRefreshAfterPopup_ = true;
+        }
         requestUpdate();  // SectionBuilding pass + stepCurrentSectionBuild() take over
         return false;
       }
+      // Fell through: the kickoff finished the section. On the deferred path no popup was ever
+      // painted, so there is no box for the content page to ghost against and no armed HALF --
+      // the page lands on the normal refresh cadence.
       readerPhase_ = ReaderPhase::READING;
       if (step == Section::BuildStep::Failed) {
         LOG_ERR("ERS", "Background-C kickoff failed for spine %d; using blocking path", currentSpineIndex);
