@@ -468,11 +468,13 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // eighteen near-identical push_backs is exactly the kind of ladder that drifts
   // out of step with the table the input layer reads. Every row offers the same
   // action list as a button, and every one defaults to Built-in — which for a
-  // gesture means "leave this contact to the reader", so an untouched device is
-  // unaffected by the whole feature.
+  // gesture means "leave this contact to the reader" — and the label on that
+  // entry names what the reader will then do with it, the way each button row
+  // names its own default, rather than a bare "Built-in" that answers nothing.
   for (const auto& binding : TouchGestures::BINDINGS) {
     settings.push_back(
-        SettingInfo::Enum(binding.label, binding.field, makeBtnActionOptions(StrId::STR_BTN_DEF_BUILTIN), binding.key,
+        SettingInfo::Enum(binding.label, binding.field,
+                          makeBtnActionOptions(TouchGestures::builtinLabelFor(binding.gesture)), binding.key,
                           StrId::STR_CAT_CONTROLS)
             .withSubmenu(StrId::STR_MENU_GESTURE_ACTIONS)
             .withSubcategory(binding.group)

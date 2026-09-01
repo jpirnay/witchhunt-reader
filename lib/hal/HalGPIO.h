@@ -172,6 +172,15 @@ class HalGPIO {
   // Edge detection for the BUTTON_TRACE touch line, so a resting finger logs once
   // rather than every sampler pass. Bring-up scaffolding; goes with the trace.
   bool touchTraceWasHeld_ = false;
+  // Where the contact started and where it last was, so the release line can
+  // report how far the finger actually travelled. The SDK's thresholds are
+  // private and its endpoints are only filled in when it has already decided the
+  // contact WAS a swipe — which is no help when the question is why it decided
+  // it was not.
+  float touchTraceDownNx_ = 0.0f;
+  float touchTraceDownNy_ = 0.0f;
+  float touchTraceLastNx_ = 0.0f;
+  float touchTraceLastNy_ = 0.0f;
 
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);

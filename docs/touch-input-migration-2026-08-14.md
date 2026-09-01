@@ -1143,9 +1143,43 @@ Nobody is stranded by turning it off: on a board whose Back/Confirm come from th
 capacitive Home key, `HalGPIO` synthesises those as **button** edges below this
 layer.
 
-### 8.11 Status
+### 8.11 Diagnostics, and the first device attempt
+
+The first hardware attempt (2026-09-01) produced no gesture actions at all. The
+firmware under test predated §8.5, so every gesture was still `BTN_DEFAULT` and
+`consumeAction()` returned on `anyBound()` before reading the contact — which is
+correct behaviour, and from the outside indistinguishable from a broken layer.
+
+That is a bad failure mode to have twice, so the build now traces both ends of
+the path under `BUTTON_TRACE` (already on for `lilygo_t5s3`):
+
+* `[TCH] release: held=… tap=… swipe=… travel=…,… px` — printed from the
+  **sampler** task at the release edge, where the SDK's one-shot flags are still
+  fresh. Travel is measured by the trace itself in panel-native pixels, because
+  the SDK only fills in its own endpoints once it has already decided the contact
+  *was* a swipe, which is no use when the question is why it decided otherwise.
+* `[GEST] <gesture> -> action=… (claimed | unbound…)` — printed from the **loop**,
+  saying what it did about it. `no gesture is bound to an action` covers the
+  all-default case above.
+
+A gesture that appears in the first line but not the second was missed by a busy
+loop; one that appears in both as "unbound" is a settings question. Those want
+completely different fixes, which is the point of having both.
+
+Thresholds worth knowing when reading a trace (`InputManager`, private, so the
+trace states them as literals): tap slop 28 px, swipe ≥ 60 px within 700 ms, long
+press at 500 ms — all in panel-native pixels.
+
+**Two-finger swipes do nothing, by design.** The SDK routes multi-touch
+translation to its own queue, which nothing here reads; only pinch and rotation
+are wired. A two-finger swipe also sets `touchMultiContactSequence`, which
+suppresses the single-contact classifiers until full release — so it will not
+fall back to being a one-finger swipe either.
+
+### 8.12 Status
 
 Builds on `default` (C3), `x4pro` and `lilygo_t5s3`; 766 host tests green,
 including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device
-validated** — the gesture classification, the suppression handshake and the
-backlight all need hardware.
+validated** — the first attempt is written up in §8.11 and did not reach the
+code under test. The gesture classification, the suppression handshake and the
+backlight all still need hardware.

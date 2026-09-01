@@ -408,8 +408,42 @@ void HalGPIO::sampleOnce() {
   // all -- separately from the second, whether anything acts on it. Logged on
   // transition only, so a resting finger does not flood the log.
   if (BoardConfig::hasTouch()) {
+    // What the SDK made of the contact, reported from the SAMPLER task at the
+    // release edge — i.e. where the one-shot flags are still fresh. That is the
+    // point of logging it here rather than in the gesture layer: comparing this
+    // line with the [GEST] line the loop prints separates "the SDK never
+    // classified it" from "the loop was busy and missed it", which are the two
+    // failure modes and want completely different fixes.
+    //
+    // All three reads are const peeks at latched state, so tracing cannot steal
+    // the event from its real consumer.
+    if (inputMgr.wasTouchReleased()) {
+      float sxn = 0.0f, syn = 0.0f, exn = 0.0f, eyn = 0.0f;
+      const bool wasTap = inputMgr.wasTouchTap(sxn, syn);
+      const bool wasFlick = inputMgr.wasSwipe(sxn, syn, exn, eyn);
+      // Travel measured from the positions this trace sampled itself, in the
+      // panel's own pixels, because that is the frame the SDK's 60 px swipe
+      // threshold is stated in. Its own endpoints are only filled in once it has
+      // decided the contact WAS a swipe, which is no help when the question is
+      // why it decided otherwise. A contact reporting tap=0 swipe=0 has almost
+      // always moved past the 28 px tap slop but not as far as 60.
+      const int travelX =
+          static_cast<int>(fabsf(touchTraceLastNx_ - touchTraceDownNx_) * BoardConfig::ACTIVE.displayWidth);
+      const int travelY =
+          static_cast<int>(fabsf(touchTraceLastNy_ - touchTraceDownNy_) * BoardConfig::ACTIVE.displayHeight);
+      LOG_INF("TCH", "release: held=%lums tap=%d swipe=%d travel=%d,%d px (tap slop 28, swipe 60, swipe max 700ms)",
+              inputMgr.lastTouchHeldMs(), wasTap ? 1 : 0, wasFlick ? 1 : 0, travelX, travelY);
+    }
     float tnx = 0.0f, tny = 0.0f;
     const bool held = inputMgr.isTouchHeldAt(tnx, tny);
+    if (held) {
+      touchTraceLastNx_ = tnx;
+      touchTraceLastNy_ = tny;
+      if (!touchTraceWasHeld_) {
+        touchTraceDownNx_ = tnx;
+        touchTraceDownNy_ = tny;
+      }
+    }
     if (held != touchTraceWasHeld_) {
       touchTraceWasHeld_ = held;
       if (held) {

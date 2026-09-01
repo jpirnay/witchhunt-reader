@@ -106,6 +106,69 @@ inline constexpr Binding BINDINGS[] = {
 static_assert(sizeof(BINDINGS) / sizeof(BINDINGS[0]) == static_cast<size_t>(Gesture::Count),
               "every Gesture needs a settings field and a label");
 
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+// Bring-up only, and compiled out otherwise: an eighteen-entry string table is
+// not worth the flash in a shipping build. Indexed by Gesture, so it follows the
+// enum automatically.
+inline const char* nameOf(const Gesture gesture) {
+  static constexpr const char* kNames[] = {
+      "swipe-left",  "swipe-right",    "swipe-up",   "swipe-down",   "tap-left",      "tap-right",
+      "tap-centre",  "tap-top",        "tap-bottom", "longtap-left", "longtap-right", "longtap-centre",
+      "longtap-top", "longtap-bottom", "pinch-in",   "pinch-out",    "rotate-cw",     "rotate-ccw",
+  };
+  static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Gesture::Count),
+                "every Gesture needs a trace name");
+  const auto index = static_cast<size_t>(gesture);
+  return index < static_cast<size_t>(Gesture::Count) ? kNames[index] : "?";
+}
+#endif
+
+// What "Built-in" actually DOES for a gesture, named the way the per-button rows
+// name theirs — a row reading "Built-in" tells the reader nothing about whether
+// leaving it alone means a page turn or means silence.
+//
+// Mode-dependent on purpose, and that is the whole value: with Swipe reading
+// controls on, a leftward swipe IS the page turn, and with them off the same
+// gesture does nothing at all. The list is rebuilt whenever the settings screen
+// is opened, so the label follows Touch Reading Controls as the user changes it.
+//
+// Only the four gestures the reader already acts on can say anything else: this
+// mirrors ReaderUtils::detectTouchPageTurn and isTouchMenuGesture, and has to be
+// kept honest against them.
+inline StrId builtinLabelFor(const Gesture gesture) {
+  const uint8_t mode = SETTINGS.touchReaderControls;
+  const bool readerTouchOn = mode != CrossPointSettings::TOUCH_READER_OFF;
+  const bool tapTurnsPages =
+      mode == CrossPointSettings::TOUCH_READER_ON || mode == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  const bool invertedTaps = mode == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+  const bool swipeTurnsPages = mode == CrossPointSettings::TOUCH_READER_SWIPE;
+
+  switch (gesture) {
+    case Gesture::SwipeLeft:
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeRight:
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeDown:
+      // The top-edge down-swipe opens the reader menu. It needs only the reading
+      // controls to be on — unlike the centre tap, it does not consult
+      // tapForReaderMenu.
+      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::TapLeft:
+      if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
+      return invertedTaps ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_PREV_PAGE;
+    case Gesture::TapRight:
+      if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
+      return invertedTaps ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NEXT_PAGE;
+    case Gesture::TapCentre:
+      return (readerTouchOn && SETTINGS.tapForReaderMenu != 0) ? StrId::STR_BTN_DEF_READER_MENU
+                                                               : StrId::STR_BTN_DEF_NOTHING;
+    default:
+      // Everything else was dead before gestures existed, so leaving it alone
+      // genuinely does nothing.
+      return StrId::STR_BTN_DEF_NOTHING;
+  }
+}
+
 // The action bound to `gesture`, or BTN_DEFAULT when the user has left it alone.
 inline uint8_t actionFor(const Gesture gesture) { return SETTINGS.*(BINDINGS[static_cast<size_t>(gesture)].field); }
 

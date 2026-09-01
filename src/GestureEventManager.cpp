@@ -1,6 +1,7 @@
 #include "GestureEventManager.h"
 
 #include <GfxRenderer.h>
+#include <Logging.h>
 #include <TouchTransform.h>
 
 namespace {
@@ -10,6 +11,14 @@ using TouchGestures::Gesture;
 
 bool GestureEventManager::boundAction(const Gesture gesture, BA& action) {
   const uint8_t configured = TouchGestures::actionFor(gesture);
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // The other half of the pair with HalGPIO's [TCH] release line: that one says
+  // what the SDK classified, this says what the loop did about it. A gesture
+  // that appears there and not here was missed by a busy loop; one that appears
+  // here as "unbound" is a settings question, not an input one.
+  LOG_INF("GEST", "%s -> action=%u (%s)", TouchGestures::nameOf(gesture), configured,
+          configured == BA::BTN_DEFAULT ? "unbound, left to the reader" : "claimed");
+#endif
   if (configured == BA::BTN_DEFAULT) return false;
   action = static_cast<BA>(configured);
   return true;
@@ -20,7 +29,17 @@ bool GestureEventManager::consumeAction(BA& action) {
   // Nothing bound: do not so much as look at the contact. This is the guarantee
   // that an unconfigured device behaves exactly as it did before gestures
   // existed — see the class comment.
-  if (!TouchGestures::anyBound()) return false;
+  if (!TouchGestures::anyBound()) {
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+    // Logged once per contact rather than per tick: this is the state a device
+    // whose settings predate the shipped defaults comes up in, and it looks
+    // exactly like a broken gesture layer from the outside.
+    if (input.wasScreenTouchReleased()) {
+      LOG_INF("GEST", "no gesture is bound to an action; every contact is left to the reader");
+    }
+#endif
+    return false;
+  }
 
   // ONE orientation read for the whole classification. getScreenWidth() and
   // tapToLogical() both sample the LIVE draw orientation, which the themes flip
