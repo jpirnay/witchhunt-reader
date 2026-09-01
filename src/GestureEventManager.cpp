@@ -1,6 +1,7 @@
 #include "GestureEventManager.h"
 
 #include <GfxRenderer.h>
+#include <TouchTransform.h>
 
 namespace {
 using BA = CrossPointSettings::BUTTON_ACTION;
@@ -21,8 +22,19 @@ bool GestureEventManager::consumeAction(BA& action) {
   // existed — see the class comment.
   if (!TouchGestures::anyBound()) return false;
 
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
+  // ONE orientation read for the whole classification. getScreenWidth() and
+  // tapToLogical() both sample the LIVE draw orientation, which the themes flip
+  // to Portrait mid-pass to put the hint strips on the panel edge — so reading
+  // width, then height, then the tap position could resolve each against a
+  // different frame and zone a landscape tap as though it were portrait. Held
+  // rather than live for the same reason MappedInputManager's direction mapping
+  // is (see setOrientationProvider, issue #87): this runs on the loop task,
+  // outside any render pass, and must answer for the way the user is holding the
+  // device.
+  const auto orientation = renderer.getHeldOrientation();
+  const auto touchOrientation = static_cast<touchtransform::Orientation>(orientation);
+  const int width = renderer.getScreenWidth(orientation);
+  const int height = renderer.getScreenHeight(orientation);
   int x = 0;
   int y = 0;
 
@@ -49,7 +61,7 @@ bool GestureEventManager::consumeAction(BA& action) {
   // deliberately does NOT suppress — an unbound long tap then degrades to
   // whatever the tap in that zone does, which is the least surprising thing for
   // a reader who holds a finger down a little too long.
-  if (input.peekScreenLongPress(x, y)) {
+  if (input.peekScreenLongPressIn(touchOrientation, x, y)) {
     const Gesture gesture = TouchGestures::longTapGestureFor(TapZones::zoneFor(x, y, width, height));
     if (boundAction(gesture, action)) {
       input.suppressTouchContact();
@@ -59,9 +71,10 @@ bool GestureEventManager::consumeAction(BA& action) {
 
   // Swipe before tap: a swipe ends in a release like a tap does, and the SDK
   // reports both for the same contact when the travel sits near the threshold.
-  // Direction is already resolved against the live orientation.
+  // Direction is resolved in the orientation sampled above, so it is the way the
+  // page moved, not the way the panel is wired.
   Gesture swipe = Gesture::Count;
-  switch (input.wasSwipe()) {
+  switch (input.wasSwipeIn(touchOrientation)) {
     case MappedInputManager::SwipeDir::Left:
       swipe = Gesture::SwipeLeft;
       break;
@@ -82,7 +95,7 @@ bool GestureEventManager::consumeAction(BA& action) {
     return true;
   }
 
-  if (input.wasScreenTapped(x, y)) {
+  if (input.wasScreenTappedIn(touchOrientation, x, y)) {
     const Gesture gesture = TouchGestures::tapGestureFor(TapZones::zoneFor(x, y, width, height));
     if (boundAction(gesture, action)) {
       input.suppressTouchContact();

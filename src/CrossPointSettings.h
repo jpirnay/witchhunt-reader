@@ -119,6 +119,35 @@ class CrossPointSettings {
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
   // Font size options
   enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, EXTRA_LARGE = 3, TINY = 4, FONT_SIZE_COUNT };
+  // The sizes in ASCENDING VISUAL order, which the enum is not: TINY was appended
+  // as 4 rather than inserted before SMALL, so persisted values would have shifted.
+  // Anything that means "one size bigger" — a pinch, a font-size shortcut — must
+  // step through this, never through enum arithmetic.
+  static constexpr uint8_t FONT_SIZE_LADDER[] = {TINY, SMALL, MEDIUM, LARGE, EXTRA_LARGE};
+  // `size` moved `delta` steps along the ladder and clamped at both ends. Clamped
+  // rather than wrapped: a pinch that has reached the largest size should stay
+  // there, not jump to the smallest.
+  //
+  // Inline so it can be exercised on the host without dragging in the NVS half
+  // of CrossPointSettings.cpp — the ladder order is exactly the kind of thing a
+  // test should hold still.
+  static constexpr uint8_t stepFontSize(const uint8_t size, const int delta) {
+    constexpr int len = static_cast<int>(sizeof(FONT_SIZE_LADDER) / sizeof(FONT_SIZE_LADDER[0]));
+    int idx = -1;
+    for (int i = 0; i < len; ++i) {
+      if (FONT_SIZE_LADDER[i] == size) {
+        idx = i;
+        break;
+      }
+    }
+    // An unrecognised value (a hand-edited settings file) has no place on the
+    // ladder; leave it alone rather than guessing which end it belongs at.
+    if (idx < 0) return size;
+    int target = idx + delta;
+    if (target < 0) target = 0;
+    if (target > len - 1) target = len - 1;
+    return FONT_SIZE_LADDER[target];
+  }
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
@@ -171,6 +200,9 @@ class CrossPointSettings {
     TILT_ACT_PREV_PAGE = 2,
     TILT_GESTURE_ACTION_COUNT
   };
+
+  // Whether touch drives the non-reader screens at all. See touchUiControls.
+  enum TOUCH_UI_CONTROLS { TOUCH_UI_OFF = 0, TOUCH_UI_ON = 1, TOUCH_UI_CONTROLS_COUNT };
 
   // How the reading surface responds to touch. Off leaves the page inert, so a
   // thumb resting on the panel can never turn a page (P3 in
@@ -368,6 +400,18 @@ class CrossPointSettings {
   // tap zones, which is what upstream ships; the X4 Pro has no back/confirm
   // button, so leaving it off would strand the reader.
   uint8_t touchReaderControls = TOUCH_READER_ON;
+  // Whether touch does anything OUTSIDE the reader: tapping list rows, book
+  // covers, the home menu, the on-screen button-hint strip, and the back/home
+  // edge gestures. Off leaves those screens button-only, for a device carried in
+  // a bag or read one-handed where a stray brush kept selecting things.
+  //
+  // The reader is deliberately not covered — it has touchReaderControls, and one
+  // behaviour with two switches is a support question waiting to happen. On a
+  // board whose Back/Confirm come from the capacitive Home key those still work
+  // with this off: HalGPIO synthesises them as BUTTON edges below this layer, so
+  // turning touch navigation off cannot strand anyone in a menu.
+  uint8_t touchUiControls = TOUCH_UI_ON;
+
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
   // fields above, and with the same meaning for BTN_DEFAULT: leave this input
@@ -378,24 +422,39 @@ class CrossPointSettings {
   //
   // Only consulted inside the reader. Everywhere else the screen's own touch
   // targets (list rows, the home grid, the button-hint strip) own the contact.
+  // Horizontal swipes stay Built-in: in Swipe mode they ARE the page turn, and
+  // binding them would override that in every mode.
   uint8_t gestSwipeLeft = BTN_DEFAULT;
   uint8_t gestSwipeRight = BTN_DEFAULT;
-  uint8_t gestSwipeUp = BTN_DEFAULT;
-  uint8_t gestSwipeDown = BTN_DEFAULT;
+  // Vertical swipes drive brightness, as they do on Kobo and Kindle. This is the
+  // one default that takes something away: a bound Swipe down claims the
+  // top-edge down-swipe that opens the reader menu. The menu keeps its centre
+  // tap (tapForReaderMenu, on by default) and the Confirm button.
+  uint8_t gestSwipeUp = BTN_LIGHT_BRIGHTER;
+  uint8_t gestSwipeDown = BTN_LIGHT_DIMMER;
+  // Every tap zone stays Built-in, and must. The reader's own tap handling is
+  // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
+  // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look
+  // identical on a normal page and quietly bypass both. "Tap left = previous
+  // page" is already true through that path.
   uint8_t gestTapLeft = BTN_DEFAULT;
   uint8_t gestTapRight = BTN_DEFAULT;
   uint8_t gestTapCentre = BTN_DEFAULT;
   uint8_t gestTapTop = BTN_DEFAULT;
   uint8_t gestTapBottom = BTN_DEFAULT;
-  uint8_t gestLongTapLeft = BTN_DEFAULT;
-  uint8_t gestLongTapRight = BTN_DEFAULT;
-  uint8_t gestLongTapCentre = BTN_DEFAULT;
-  uint8_t gestLongTapTop = BTN_DEFAULT;
-  uint8_t gestLongTapBottom = BTN_DEFAULT;
-  uint8_t gestPinchIn = BTN_DEFAULT;
-  uint8_t gestPinchOut = BTN_DEFAULT;
-  uint8_t gestRotateCw = BTN_DEFAULT;
-  uint8_t gestRotateCcw = BTN_DEFAULT;
+  // Long taps were dead before gestures existed, so these take nothing away.
+  // Chapter skip on a long press and lookup-on-hold follow CrossInk.
+  uint8_t gestLongTapLeft = BTN_PREV_SECTION;
+  uint8_t gestLongTapRight = BTN_NEXT_SECTION;
+  uint8_t gestLongTapCentre = BTN_DICTIONARY;
+  uint8_t gestLongTapTop = BTN_LIGHT_TOGGLE;
+  uint8_t gestLongTapBottom = BTN_STAR_PAGE;
+  // Pinch resizes text and a two-finger turn turns the page: the two gestures
+  // whose meaning users already carry with them from every other device.
+  uint8_t gestPinchIn = BTN_FONT_SIZE_SMALLER;
+  uint8_t gestPinchOut = BTN_FONT_SIZE_LARGER;
+  uint8_t gestRotateCw = BTN_CYCLE_ORIENTATION;
+  uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION;
 
   // Centre-third tap opens the reader menu. Separate from touchReaderControls
   // so the page-turn style and the menu tap can be chosen independently.
@@ -492,9 +551,25 @@ class CrossPointSettings {
     BTN_QUICK_OVERRIDES,
     BTN_IGNORE,
     BTN_DICTIONARY,
-    // Frontlight/backlight control. Global (not reader-scoped): the light is
-    // just as wanted on the home screen or in a list. Inert on boards without
-    // one — HalFrontlight is a no-op there — and SettingsList hides them.
+    // Directional font sizing. BTN_CYCLE_FONT_SIZE wraps in one direction, which
+    // is fine for a button but useless for a pinch: pinching in must make the
+    // text smaller and pinching out bigger, or the gesture means nothing.
+    BTN_FONT_SIZE_SMALLER,
+    BTN_FONT_SIZE_LARGER,
+    // Flip touchUiControls. Worth a shortcut rather than a settings-screen trip
+    // only: the reason to silence touch is usually momentary (reading in bed,
+    // a book in a bag), and the reader is the one place it stays live, so a
+    // gesture bound to this can always turn it back on.
+    BTN_TOGGLE_TOUCH_UI,
+    // --- Board-gated actions MUST stay at the end of this enum ---------------
+    // SettingsList builds each button's option list positionally: index i in the
+    // list is action value i. Actions it drops on boards that cannot perform them
+    // therefore have to be the LAST entries, or dropping them renumbers every
+    // action after them and a settings file written on one board is misread on
+    // another. Add unconditional actions above this line.
+    //
+    // Frontlight/backlight control. Global rather than reader-scoped: the light
+    // is as wanted on the home screen as it is mid-page.
     BTN_LIGHT_TOGGLE,
     BTN_LIGHT_BRIGHTER,
     BTN_LIGHT_DIMMER,
@@ -565,6 +640,17 @@ class CrossPointSettings {
   void saveStartupToNvs() const;
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+
+  // Reset every button and gesture mapping that names an action this board
+  // cannot perform back to BTN_DEFAULT.
+  //
+  // Two things need it. The board-gated actions are dropped from the settings
+  // screen's option list, so a stored value naming one would render blank and
+  // could not be edited away; and an SD card moved from a board with a
+  // frontlight to one without carries exactly such values. The capability is
+  // passed in rather than queried so this stays free of the HAL and testable on
+  // the host.
+  static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight);
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.

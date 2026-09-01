@@ -2827,8 +2827,8 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
 }
 
 // Note: Internal driver treats screen in command orientation; this library exposes a logical orientation
-int GfxRenderer::getScreenWidth() const {
-  switch (getOrientation()) {
+int GfxRenderer::getScreenWidth(const Orientation orientation) const {
+  switch (orientation) {
     case Portrait:
     case PortraitInverted:
       // 480px wide in portrait logical coordinates
@@ -2841,8 +2841,8 @@ int GfxRenderer::getScreenWidth() const {
   return panelHeight;
 }
 
-int GfxRenderer::getScreenHeight() const {
-  switch (getOrientation()) {
+int GfxRenderer::getScreenHeight(const Orientation orientation) const {
+  switch (orientation) {
     case Portrait:
     case PortraitInverted:
       // 800px tall in portrait logical coordinates
@@ -2854,6 +2854,10 @@ int GfxRenderer::getScreenHeight() const {
   }
   return panelWidth;
 }
+
+int GfxRenderer::getScreenWidth() const { return getScreenWidth(getOrientation()); }
+
+int GfxRenderer::getScreenHeight() const { return getScreenHeight(getOrientation()); }
 
 // Inverse of rotateCoordinates: panel-native normalized touch -> logical px.
 // Ported from upstream/develop so the layers above stay diff-comparable. Clamp

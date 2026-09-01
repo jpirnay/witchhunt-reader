@@ -1,10 +1,12 @@
 # Touch input migration — investigation and plan
 
-Date: 2026-08-14 (last updated 2026-08-17)
+Date: 2026-08-14 (last updated 2026-09-01)
 Status: **phases 1–3 done and DEVICE-VALIDATED** on the T5S3 (touch page turns,
 centre-tap menu). **Phase 4a — the button-hint strip — done and DEVICE-VALIDATED**
 (2026-08-17); the rest of 4a (tab bar, central back/home gestures, P2 tap feedback)
 and **phase 4b (lists)** are not started. Phases 5–6 still proposal.
+**Phase 7 — bindable gestures and the reading light — code complete, NOT device
+validated** (2026-09-01); see §8, which also answers open question 7.
 
 The "nothing has run on hardware" caveat that stood here through 2026-08-16 is
 retired: the T5S3 boots, and touch is the primary way it is navigated. Phases 1–2
@@ -975,11 +977,175 @@ Phase 6 is where this could become a general-purpose touch UI framework. Stop at
    is parked (2026-08-14), so nothing needs sequencing around it. The phase 4
    decision is now purely about long-term maintainability and flash budget.
 
-7. **Multi-touch** (SDK `410d0ab`) — recommendation in §0.3 is to take the free
-   robustness and plan no feature around it. Confirm that is acceptable, or say
-   what a two-finger gesture would be *for* on a reader.
+7. ~~**Multi-touch**~~ — **ANSWERED 2026-09-01, and the §0.3 recommendation
+   reversed.** A two-finger gesture is for the two things every user already has
+   muscle memory for: pinch resizes the text, and a two-finger turn rotates the
+   page. Both needed an SDK addition (pinch was explicitly rejected there) and
+   both now ship bound by default. See §8.
 
 Phase 0 also no longer needs to add `env:x4pro` or fix the S3 build — workstream A
 did both, and the `freeink-sdk` submodule is now at **`cc89c653`** (was `76e61c4`;
 bumped when master merged in on 2026-08-16). What remains of phase 0 is the GT911
 bring-up itself and the P1 decision.
+
+---
+
+## 8. Phase 7 — bindable gestures and the reading light (2026-09-01)
+
+Not in the original plan. Open question 7 asked what a two-finger gesture would
+be *for* on a reader; this answers it, and generalises the answer.
+
+### 8.1 The model: a gesture is a button
+
+Eighteen gestures — four swipes, five tap zones, the same five as long taps,
+pinch in/out, rotation either way — each carry a `CrossPointSettings::
+BUTTON_ACTION`, chosen from the identical option list a physical key offers.
+`GestureEventManager` is the counterpart of `ButtonEventManager`: it classifies
+the contact, resolves the action, and hands it to the *same* `runAction()` ladder
+in `main.cpp` that buttons use. That ladder was extracted rather than copied, so
+a gesture bound to "Reader Menu" cannot drift from a button bound to it.
+
+`BTN_DEFAULT` keeps its usual meaning — "whatever this input already did" — and
+that is what makes the layer safe to add on top of touch handling that is already
+device-validated:
+
+* **Unbound is untouched.** `consumeAction()` peeks; it never claims a contact
+  whose gesture is `BTN_DEFAULT`. The reader then interprets that contact exactly
+  as it did before this existed.
+* **Acting claims.** When a gesture *is* bound and fires, `suppressTouchContact()`
+  stops the same contact also reaching the reader, so one tap cannot be both a
+  gesture action and a page turn.
+
+This only works because the SDK's tap and swipe reads are pure `const` peeks at
+latched state rather than consuming calls. `peekScreenLongPress()` was added to
+complete the set — `wasScreenLongPress()` suppresses as it reads, which is right
+for a caller that has already decided.
+
+### 8.2 Reader only
+
+Everywhere else the screen's own touch targets own the contact: a tap on a list
+row is that row, not a bindable "tap centre", and there is no arbitration between
+the two that a user could predict.
+
+### 8.3 The zones are a superset, not a replacement
+
+`TapZones::zoneFor()` splits the screen with the **horizontal** thirds tested
+first, because that is what the reader already did: the outer thirds have been
+the page-turn zones over their whole height, and the reader menu has been the
+centre third of the centre column. Top and Bottom are the two remaining cells of
+the centre column, which nothing had ever used. `test/tap_zones` asserts the
+Centre band point-by-point against the rectangle `isTouchMenuTap()` accepted, so
+a centre tap cannot stop opening the menu.
+
+Binding a zone to `BTN_IGNORE` is therefore how a tap zone gets switched off.
+
+### 8.4 Tap zones stay Built-in, deliberately
+
+No shipped default binds a tap zone, and this is not timidity. The reader's own
+tap handling is what implements Touch Reading Controls (Off / Tap / Swipe /
+Inverted tap) **and** the end-of-book flow, neither of which
+`dispatchButtonAction(BTN_PAGE_BACK)` goes through. A tap zone bound to
+`BTN_PAGE_BACK` would look identical on a normal page and quietly bypass both.
+"Tap left = previous page" is already true through the built-in path.
+
+### 8.5 Shipped defaults
+
+Light-forward, following Kobo/Kindle for the vertical swipes, CrossInk
+(`upstream/feature/crossink-controls-port`, Julia Nguyen) for chapter-skip and
+lookup on a hold, and universal convention for pinch and rotate:
+
+| Gesture | Default | Gesture | Default |
+|---|---|---|---|
+| Swipe up | Light Brighter | Long tap left | Previous Chapter |
+| Swipe down | Light Dimmer | Long tap right | Next Chapter |
+| Swipe left/right | Built-in | Long tap centre | Dictionary |
+| All five tap zones | Built-in | Long tap top | Toggle Reading Light |
+| Pinch in / out | Smaller / Larger Text | Long tap bottom | Star Page |
+| Rotate either way | Cycle Orientation | | |
+
+**The one thing these take away:** a bound Swipe down claims the top-edge
+down-swipe that opens the reader menu. The menu keeps its centre tap
+(`tapForReaderMenu`, on by default) and the Confirm button. Everything else that
+is bound was dead before.
+
+### 8.6 Two ordering rules that are easy to break
+
+**`BUTTON_ACTION` is positional.** `SettingsList` builds each option list by
+position — index *i* is action value *i* — and drops board-gated actions on
+boards that cannot perform them. Those actions must therefore be the **last**
+entries of the enum, or dropping them renumbers everything after them and a
+settings file written on one board is misread on another. There is an `assert`
+in `buildSettingsList()` holding the list to `BUTTON_ACTION_COUNT`, because the
+failure mode is not a crash but every stored mapping silently shifting by one.
+
+**A default must never name a board-gated action** without
+`dropUnsupportedActions()` to clean up after it. Three of the shipped defaults do
+name one (the light), so `main.cpp` calls that immediately after
+`Frontlight.begin()` — which is also what rescues an SD card moved from a board
+with a frontlight to one without, where the stored action would otherwise be both
+inert and uneditable.
+
+### 8.7 Latching, and why gestures get it when taps do not
+
+The SDK's gesture flags are one-shot and cleared by its next `update()` — a ~10 ms
+life at our sampler cadence. Buttons have been latched into a ring since the
+sampler was introduced, because the loop task can be gone for hundreds of ms
+inside an e-paper refresh. A pinch is exactly the gesture someone makes while it
+is, so `HalGPIO` latches multi-touch the same way and the loop drains it.
+
+The single-contact tap and swipe passthroughs are deliberately **left alone**.
+They have the same exposure, but they are device-validated as they stand and
+rerouting them is a change to page turning, not to gestures. Worth revisiting if
+dropped taps are ever observed.
+
+### 8.8 Orientation must be sampled once
+
+`getScreenWidth()` and `tapToLogical()` both read the **live draw** orientation,
+which the themes flip to Portrait mid-pass to put the hint strips on the panel
+edge. A loop-task caller that reads width, then height, then maps a tap can
+resolve each against a different frame and zone a landscape tap as though it were
+portrait — the same class of bug as issue #87. `GestureEventManager` reads
+`getHeldOrientation()` **once** and passes it to orientation-explicit overloads
+(`getScreenWidth(o)`, `wasSwipeIn(o)`, `wasScreenTappedIn(o)`,
+`peekScreenLongPressIn(o)`). `wasEdgeSwipe()` was fixed the same way.
+
+### 8.9 The reading light
+
+The SDK has carried `FrontlightManager` and a backlight entry in the T5S3 profile
+all along; this fork simply never linked it. `HalFrontlight` is ported verbatim
+from upstream (crosspoint-reader#2983). Upstream's `FrontlightPanelActivity` is
+**not** ported — it is built on `UiAppHost` / `fui::sheet` / `sliderRow` /
+`tileGrid`, none of which this fork has adopted (see §3). The controls are a
+Display → Reading light submenu plus three bindable actions instead.
+
+`frontlightOn` is a `DynamicToggle` because the live hardware, not the setting, is
+the authority for "is the light on" — after a wake with Restore off they
+legitimately disagree. That means `JsonSettingsIO`'s generic loop skips it (no
+`valuePtr`), so it is saved and loaded by hand, next to the `fontFamily`
+precedent.
+
+### 8.10 Silencing touch outside the reader
+
+`touchUiControls` gates every touch **event** query on `MappedInputManager` —
+taps, long presses, drags, swipes, edge gestures, multi-touch — through private
+`raw*()` wrappers, so a query added later cannot forget the gate. `hasTouch()` is
+deliberately *not* gated: screens ask it to decide layout, and a board does not
+stop having a digitiser because its owner turned touch navigation off.
+
+`main.cpp` refreshes the gate every tick from the setting and the activity on top,
+leaving the reader always enabled — it has `touchReaderControls`, and one
+behaviour with two switches is a support question waiting to happen. Reader
+*sub*-screens (contents, dictionary, the menu) are UI screens and are gated with
+the rest. `BTN_TOGGLE_TOUCH_UI` flips it from a button or gesture; because the
+reader is never gated, a gesture bound to it can always turn touch back on.
+
+Nobody is stranded by turning it off: on a board whose Back/Confirm come from the
+capacitive Home key, `HalGPIO` synthesises those as **button** edges below this
+layer.
+
+### 8.11 Status
+
+Builds on `default` (C3), `x4pro` and `lilygo_t5s3`; 766 host tests green,
+including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device
+validated** — the gesture classification, the suppression handshake and the
+backlight all need hardware.

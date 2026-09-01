@@ -1087,6 +1087,12 @@ void setup() {
   // Ported from upstream/develop (crosspoint-reader#2983).
   const bool restoreLightOn = SETTINGS.frontlightOn != 0 && (SETTINGS.frontlightRestoreOnWake != 0 || isSilentReboot);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
+  // After begin(), because a board whose light is probed rather than declared
+  // only knows whether it has one by then. Clears mappings this board cannot
+  // perform — the case that makes it necessary is an SD card moved from a board
+  // with a frontlight to one without, where the stored action would otherwise be
+  // both inert and uneditable (the settings screen does not offer it here).
+  CrossPointSettings::dropUnsupportedActions(SETTINGS, Frontlight.present());
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.
@@ -1293,6 +1299,13 @@ void loop() {
 
   gpio.update();
   buttonEventManager.update();
+  // The UI touch gate, refreshed every tick from the setting and the activity on
+  // top. The reader keeps touch whatever this says — touchReaderControls governs
+  // it there, and giving one behaviour two switches only creates a way for a
+  // device to look broken. Reader SUB-screens (contents, dictionary, the menu)
+  // are UI screens and are gated with the rest.
+  mappedInputManager.setTouchEventsEnabled(SETTINGS.touchUiControls != CrossPointSettings::TOUCH_UI_OFF ||
+                                           activityManager.isReaderActivity());
   // Must follow the drain above and precede every power consumer below.
   serviceBootPowerRelease();
   HalClock::updatePeriodic();
@@ -1598,6 +1611,8 @@ void loop() {
         case BA::BTN_TOGGLE_BIONIC_READING:
         case BA::BTN_KOREADER_SYNC:
         case BA::BTN_CYCLE_FONT_SIZE:
+        case BA::BTN_FONT_SIZE_SMALLER:
+        case BA::BTN_FONT_SIZE_LARGER:
         case BA::BTN_CYCLE_ORIENTATION:
         case BA::BTN_QUICK_OVERRIDES:
         case BA::BTN_DICTIONARY:
@@ -1687,6 +1702,21 @@ void loop() {
         case BA::BTN_CYCLE_FONT_SIZE:
           activityManager.dispatchButtonAction(BA::BTN_CYCLE_FONT_SIZE);
           break;
+        case BA::BTN_FONT_SIZE_SMALLER:
+          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_SMALLER);
+          break;
+        case BA::BTN_FONT_SIZE_LARGER:
+          activityManager.dispatchButtonAction(BA::BTN_FONT_SIZE_LARGER);
+          break;
+        case BA::BTN_TOGGLE_TOUCH_UI: {
+          const bool enabled = SETTINGS.touchUiControls == CrossPointSettings::TOUCH_UI_OFF;
+          SETTINGS.touchUiControls = enabled ? CrossPointSettings::TOUCH_UI_ON : CrossPointSettings::TOUCH_UI_OFF;
+          SETTINGS.saveToFile();
+          // The gate itself is applied at the top of the next tick, from the
+          // setting — one place decides it, so this cannot drift out of step.
+          LOG_INF("MAIN", "Touch navigation %s", enabled ? "on" : "off");
+          break;
+        }
         case BA::BTN_CYCLE_ORIENTATION:
           activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION);
           break;

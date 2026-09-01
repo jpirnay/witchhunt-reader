@@ -5423,6 +5423,22 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         requestUpdate();
       }
       break;
+    case BA::BTN_FONT_SIZE_SMALLER:
+    case BA::BTN_FONT_SIZE_LARGER:
+      if (epub) {
+        const uint8_t current =
+            (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
+        const uint8_t next = CrossPointSettings::stepFontSize(current, action == BA::BTN_FONT_SIZE_LARGER ? 1 : -1);
+        // Clamped at both ends, so at the limit this is a no-op — don't pay for a
+        // repaginate and a full repaint to show the same page again.
+        if (next != current) {
+          applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
+                                   bookSdFontFamilyOverride, static_cast<int8_t>(next), bookBionicReadingOverride,
+                                   bookParagraphAlignmentOverride);
+          requestUpdate();
+        }
+      }
+      break;
     case BA::BTN_CYCLE_ORIENTATION:
       if (epub) {
         const uint8_t nextOrientation =

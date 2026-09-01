@@ -134,6 +134,20 @@ class MappedInputManager {
   // All of these are inert on non-touch boards (the SDK's touch methods compile
   // to false), so callers need no #ifdefs.
   bool hasTouch() const;
+
+  // --- UI touch gate ----------------------------------------------------------
+  // Silences every touch EVENT query on this object: taps, long presses, drags,
+  // swipes, edge gestures and multi-touch all report "nothing happened" while it
+  // is off. main.cpp drives it from the Touch Navigation setting, leaving it on
+  // inside the reader — the reader has its own Touch Reading Controls setting,
+  // and gating it here as well would give one behaviour two switches.
+  //
+  // hasTouch() is deliberately NOT gated. Screens ask it to decide LAYOUT (the
+  // reader menu style, whether to draw a hint strip at all), and a board does not
+  // stop having a digitiser because its owner turned touch navigation off.
+  void setTouchEventsEnabled(bool enabled);
+  [[nodiscard]] bool touchEventsEnabled() const { return touchEventsEnabled_; }
+
   bool wasScreenTapped(int& x, int& y) const;
   // Same, resolved against an EXPLICIT orientation instead of the live one. For chrome that
   // is drawn in a fixed frame however the screen is rotated -- the button hint strip forces
@@ -153,6 +167,8 @@ class MappedInputManager {
   // suppressTouchContact() when the answer is yes; leave the contact alone when
   // it is no, and the lift will go on to be a tap as usual.
   bool peekScreenLongPress(int& x, int& y) const;
+  // Same, against an explicit orientation — see wasScreenTappedIn().
+  bool peekScreenLongPressIn(touchtransform::Orientation orientation, int& x, int& y) const;
   // Ignore the rest of this contact — its continued hold and its release edge.
   // For a caller that has acted on a tap or swipe and must stop the same contact
   // reaching the screen underneath as well.
@@ -193,6 +209,10 @@ class MappedInputManager {
   RowTouch listTouch(int& index) const;
 
   SwipeDir wasSwipe() const;
+  // Same, against an explicit orientation. A swipe's direction is decided by
+  // mapping both endpoints into logical pixels, so it depends on the orientation
+  // exactly as a tap position does — see wasScreenTappedIn().
+  SwipeDir wasSwipeIn(touchtransform::Orientation orientation) const;
 
   // --- Multi-touch ------------------------------------------------------------
   // A completed two-finger gesture, already resolved to what it means ON SCREEN,
@@ -257,13 +277,33 @@ class MappedInputManager {
   const GfxRenderer& renderer;
   static ScreenOrientation (*orientationProvider)();
 
+  // Every raw touch read goes through one of these, so the UI gate above cannot
+  // be forgotten by a query added later. They are the only place in this class
+  // that may call gpio's touch methods directly.
+  bool rawTap(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.wasTouchTap(nx, ny); }
+  bool rawLongPress(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.wasTouchLongPress(nx, ny); }
+  bool rawTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
+    return touchEventsEnabled_ && gpio.isTouchTapCandidate(nx, ny, heldMs);
+  }
+  bool rawHeldAt(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.isTouchHeldAt(nx, ny); }
+  bool rawReleased() const { return touchEventsEnabled_ && gpio.wasTouchReleased(); }
+  bool rawSwipeEndpoints(float& nxs, float& nys, float& nxe, float& nye) const {
+    return touchEventsEnabled_ && gpio.wasSwipe(nxs, nys, nxe, nye);
+  }
+  bool rawPopGesture(HalGPIO::TouchGesture& gesture) const {
+    return touchEventsEnabled_ && gpio.popTouchGesture(gesture);
+  }
+
+  bool touchEventsEnabled_ = true;
+
   // SDK edge classification (fui::edgeSwipe) plus the shared decode; the
   // wrappers above give each edge its board meaning.
   bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
   bool wasTopEdgeDownSwipe() const;
   bool wasBottomEdgeUpSwipe() const;
-  // Fetch the pending swipe (if any) and map both endpoints to logical coords.
-  bool decodeSwipe(int& sx, int& sy, int& ex, int& ey) const;
+  // Fetch the pending swipe (if any) and map both endpoints to logical coords
+  // in the given orientation.
+  bool decodeSwipe(touchtransform::Orientation orientation, int& sx, int& sy, int& ex, int& ey) const;
 
   // Left/Right swap when the front-button strip runs bottom-to-top on screen, so
   // "previous" always sits above "next". The side buttons (Up/Down and their

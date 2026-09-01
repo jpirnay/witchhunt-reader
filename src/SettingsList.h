@@ -6,6 +6,7 @@
 #include <I18n.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -110,19 +111,35 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                                StrId::STR_BTN_ACT_IGNORE,
                                                StrId::STR_DICTIONARY};
 
-  // The frontlight actions sit at the END of BUTTON_ACTION, so dropping them on
-  // a board with no light leaves every other option's numeric value untouched —
-  // a settings file written on a lit board still reads correctly here.
+  // Offered everywhere, so a plain continuation of btnActionOptions above. Kept
+  // separate only for legibility.
+  const std::vector<StrId> extraActionOptions = {
+      StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI};
+  // The ONLY conditional block, and correspondingly the LAST entries of
+  // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
+  // other action's numeric value untouched, so a settings file written on a lit
+  // board still reads correctly here. Anything added after these would break
+  // that — see the comment on BUTTON_ACTION.
   const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
                                                  StrId::STR_BTN_ACT_LIGHT_DIMMER};
 
   // Prepend the per-button default action to the shared options list.
+  // The option list is positional — index i is BUTTON_ACTION value i — so it must
+  // name every action exactly once. Asserted because the failure mode is not a
+  // crash but a silent misreading of every stored button and gesture mapping,
+  // which would look like the settings screen forgetting things at random.
+  assert(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() ==
+             static_cast<size_t>(CrossPointSettings::BUTTON_ACTION_COUNT) &&
+         "btnActionOptions must name every BUTTON_ACTION except BTN_DEFAULT, in enum order");
+
   const bool hasLight = Frontlight.present();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
-    result.reserve(1 + btnActionOptions.size() + (hasLight ? lightActionOptions.size() : 0));
+    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() +
+                   (hasLight ? lightActionOptions.size() : 0));
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
+    result.insert(result.end(), extraActionOptions.begin(), extraActionOptions.end());
     if (hasLight) {
       result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
     }
@@ -434,6 +451,10 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubmenu(StrId::STR_BTN_POWER));
   // Touch reading controls (touch boards only — gated on the capability, not on
   // a board name, so X4 Pro and T5S3 both get them).
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_UI_CONTROLS, &CrossPointSettings::touchUiControls,
+                                       {StrId::STR_TOUCH_UI_OFF, StrId::STR_TOUCH_UI_ON}, "touchUiControls",
+                                       StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
   settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                                        {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP,
                                         StrId::STR_TOUCH_READER_SWIPE, StrId::STR_TOUCH_READER_INVERTED},

@@ -245,6 +245,14 @@ class GfxRenderer {
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
+  // Logical screen size in an EXPLICIT orientation, for a caller that has already
+  // sampled one and must not sample it again. The no-argument versions read the
+  // LIVE draw orientation, which the themes flip to Portrait mid-pass for the
+  // hint strips — so a caller on the loop task that reads width, then height,
+  // then maps a touch, can catch a different frame in each of the three. Read
+  // getHeldOrientation() once and pass it here instead.
+  int getScreenWidth(Orientation orientation) const;
+  int getScreenHeight(Orientation orientation) const;
   // Map a touch point from normalized PANEL-NATIVE coordinates (0..1, the frame
   // InputManager reports in, per the BoardConfig touch contract) to LOGICAL
   // screen pixels under the renderer's live orientation.

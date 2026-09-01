@@ -237,10 +237,20 @@ int MappedInputManager::getPressedFrontButton() const {
 
 bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
 
+void MappedInputManager::setTouchEventsEnabled(const bool enabled) {
+  if (enabled == touchEventsEnabled_) return;
+  touchEventsEnabled_ = enabled;
+  // Going quiet drops what is already queued. The single-contact events expire
+  // on their own within a sampler pass, but a multi-touch gesture sits in the
+  // ring until something pops it — without this, turning touch back on would
+  // replay a pinch made while it was off.
+  if (!enabled) gpio.flushTouchGestures();
+}
+
 bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
-  if (!gpio.wasTouchTap(nx, ny)) return false;
+  if (!rawTap(nx, ny)) return false;
   renderer.tapToLogical(nx, ny, x, y);
   return true;
 }
@@ -248,7 +258,7 @@ bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
 bool MappedInputManager::wasScreenTappedIn(const touchtransform::Orientation orientation, int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
-  if (!gpio.wasTouchTap(nx, ny)) return false;
+  if (!rawTap(nx, ny)) return false;
   renderer.tapToLogical(static_cast<GfxRenderer::Orientation>(orientation), nx, ny, x, y);
   return true;
 }
@@ -257,7 +267,7 @@ bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
   unsigned long heldMs = 0;
-  if (!gpio.isTouchTapCandidate(nx, ny, heldMs)) return false;
+  if (!rawTapCandidate(nx, ny, heldMs)) return false;
   if (heldMs < TOUCH_DOWN_SELECT_DELAY_MS) return false;
   renderer.tapToLogical(nx, ny, x, y);
   return true;
@@ -266,7 +276,7 @@ bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
 bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
-  if (!gpio.wasTouchLongPress(nx, ny)) return false;
+  if (!rawLongPress(nx, ny)) return false;
   // Consuming the long-press implies acting on it: suppress the rest of the
   // contact so the finger lift can't also tap whatever the action opened.
   gpio.suppressTouchContact();
@@ -277,22 +287,30 @@ bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
 bool MappedInputManager::peekScreenLongPress(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
-  if (!gpio.wasTouchLongPress(nx, ny)) return false;
+  if (!rawLongPress(nx, ny)) return false;
   renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::peekScreenLongPressIn(const touchtransform::Orientation orientation, int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawLongPress(nx, ny)) return false;
+  renderer.tapToLogical(static_cast<GfxRenderer::Orientation>(orientation), nx, ny, x, y);
   return true;
 }
 
 bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
-  if (!gpio.isTouchHeldAt(nx, ny)) return false;
+  if (!rawHeldAt(nx, ny)) return false;
   renderer.tapToLogical(nx, ny, x, y);
   return true;
 }
 
 void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex) const { gpio.injectPress(rawButtonIndex); }
 
-bool MappedInputManager::wasScreenTouchReleased() const { return gpio.wasTouchReleased(); }
+bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); }
 
 unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
 
@@ -350,7 +368,7 @@ MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
 
 MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {
   HalGPIO::TouchGesture gesture;
-  if (!gpio.popTouchGesture(gesture)) return MultiTouch::None;
+  if (!rawPopGesture(gesture)) return MultiTouch::None;
   renderer.tapToLogical(gesture.nx, gesture.ny, x, y);
   switch (gesture.kind) {
     case HalGPIO::TouchGesture::Kind::Pinch:
@@ -365,23 +383,29 @@ MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y)
   return MultiTouch::None;
 }
 
-bool MappedInputManager::decodeSwipe(int& sx, int& sy, int& ex, int& ey) const {
+bool MappedInputManager::decodeSwipe(const touchtransform::Orientation orientation, int& sx, int& sy, int& ex,
+                                     int& ey) const {
   float nxs = 0.0f;
   float nys = 0.0f;
   float nxe = 0.0f;
   float nye = 0.0f;
-  if (!gpio.wasSwipe(nxs, nys, nxe, nye)) return false;
-  renderer.tapToLogical(nxs, nys, sx, sy);
-  renderer.tapToLogical(nxe, nye, ex, ey);
+  if (!rawSwipeEndpoints(nxs, nys, nxe, nye)) return false;
+  const auto rendererOrientation = static_cast<GfxRenderer::Orientation>(orientation);
+  renderer.tapToLogical(rendererOrientation, nxs, nys, sx, sy);
+  renderer.tapToLogical(rendererOrientation, nxe, nye, ex, ey);
   return true;
 }
 
 MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
+  return wasSwipeIn(static_cast<touchtransform::Orientation>(renderer.getOrientation()));
+}
+
+MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation) const {
   int sx = 0;
   int sy = 0;
   int ex = 0;
   int ey = 0;
-  if (!decodeSwipe(sx, sy, ex, ey)) return SwipeDir::None;
+  if (!decodeSwipe(orientation, sx, sy, ex, ey)) return SwipeDir::None;
   switch (fui::swipeDirection(sx, sy, ex, ey)) {
     case fui::SwipeDir::Left:
       return SwipeDir::Left;
@@ -403,8 +427,12 @@ bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const 
   int sy = 0;
   int ex = 0;
   int ey = 0;
-  if (!decodeSwipe(sx, sy, ex, ey)) return false;
-  return fui::edgeSwipe(edge, sx, sy, ex, ey, renderer.getScreenWidth(), renderer.getScreenHeight());
+  // One orientation read for the decode AND the screen size it is tested
+  // against, so the two cannot disagree about which way the screen is turned.
+  const auto orientation = renderer.getOrientation();
+  if (!decodeSwipe(static_cast<touchtransform::Orientation>(orientation), sx, sy, ex, ey)) return false;
+  return fui::edgeSwipe(edge, sx, sy, ex, ey, renderer.getScreenWidth(orientation),
+                        renderer.getScreenHeight(orientation));
 }
 
 bool MappedInputManager::wasBackGesture() const {
