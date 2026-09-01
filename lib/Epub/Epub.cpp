@@ -846,6 +846,13 @@ struct CoverMetadataMemo {
   uint32_t size = 0;
   BookMetadataCache::BookMetadata meta;
   bool valid = false;
+  // Whether the cover entry is STORED, and where. -1 = not yet asked. Memoized alongside the
+  // metadata because answering it costs a central-directory scan, and the thumbnail path asks
+  // once per size per attempt -- allocation churn immediately before the cover extract session
+  // needs a large contiguous chunk, which is the last place to be fragmenting the heap.
+  int8_t stored = -1;
+  uint32_t storedOffset = 0;
+  uint32_t storedSize = 0;
 };
 CoverMetadataMemo g_coverMemo;
 
@@ -1275,8 +1282,23 @@ void Epub::writeThumbSentinel(const std::string& thumbPath) {
 bool Epub::openStoredCoverInPlace(FsFile& out, uint32_t* offset) const {
   const std::string href = getCoverItemHref();
   if (href.empty() || !offset) return false;
+
+  // Ask the archive at most once per book (see CoverMetadataMemo::stored).
+  const bool memoUsable = g_coverMemo.valid && g_coverMemo.path == filepath;
   uint32_t size = 0;
-  if (!getStoredItemRange(href, offset, &size) || size == 0) return false;
+  if (memoUsable && g_coverMemo.stored >= 0) {
+    if (g_coverMemo.stored == 0) return false;
+    *offset = g_coverMemo.storedOffset;
+    size = g_coverMemo.storedSize;
+  } else {
+    const bool stored = getStoredItemRange(href, offset, &size) && size != 0;
+    if (memoUsable) {
+      g_coverMemo.stored = stored ? 1 : 0;
+      g_coverMemo.storedOffset = *offset;
+      g_coverMemo.storedSize = size;
+    }
+    if (!stored) return false;
+  }
   if (!Storage.openFileForRead("EBP", filepath, out)) return false;
   if (!out.seek(*offset)) {
     out.close();
