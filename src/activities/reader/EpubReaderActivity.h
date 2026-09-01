@@ -392,6 +392,10 @@ class EpubReaderActivity final : public Activity {
   // Uncompressed size of the target spine's XHTML (fetched once in the Probe step).
   // Sizes the inflate ring share of the extraction heap gate.
   size_t backgroundBuildInflatedSize_ = 0;
+  // True when the target spine's footnote links have never been scanned, so its build will run
+  // the inline-preview resolve before laying out a line. Decided once in the Probe step; costs
+  // the WaitHeap gates a settled reader and BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES of extra margin.
+  bool backgroundBuildNeedsResolve_ = false;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
   // Times a build of backgroundBuildSpineIndex_ was preempted (reader needed the borrowed

@@ -173,6 +173,17 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
+// Added to the free-heap floor (either path) for a target that still owes the inline-footnote
+// resolve. That pass allocates from the HEAP even inside a borrowed build — a SAX parser (~9 KB),
+// a 1 KB stream chunk and the store's index — because FootnotePreviews knows nothing about the
+// arena. Deliberately smaller than the ~14 KB it actually wants: the floors above already carry
+// reserve, and the reading steady state is ~51 KB free (device trace, issue #211), so a bigger
+// number would push the gate out of reach and re-lose the look-ahead it exists to protect. A
+// resolve that still cannot fit fails cleanly — the build is discarded and the foreground
+// rebuilds the spine released, where it has ~52 KB more to work with.
+#ifndef BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES
+#define BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES (8 * 1024)
+#endif
 
 // Quiet period after the last page reached the screen before B may take the buffer. B's borrow
 // costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
@@ -1094,6 +1105,7 @@ void EpubReaderActivity::resetBackgroundBuild() {
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
   backgroundBuildInflatedSize_ = 0;
+  backgroundBuildNeedsResolve_ = false;
   backgroundBuildGateCheckMs_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
@@ -1287,18 +1299,20 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // already-built runway counts toward the budget
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
-      } else if (getEffectiveInlineFootnotePreviews() &&
-                 !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine)) {
-        // This spine still owes the resolver work: its links have never been scanned, so a build
-        // of it would have to scan the document and stream every note file it points at, inside
-        // ONE loop-task slice. Look-ahead is not worth a stall the reader can feel mid-page.
-        // Leave the spine to the foreground build, which does the same work behind the "Indexing"
-        // popup, and move the cursor on. Costs the look-ahead exactly once per chapter with
-        // notes: the foreground build sets the bit, and B pre-builds it freely from then on.
-        LOG_DBG("ERS", "Background build spine=%d skipped: footnote previews not resolved yet", targetSpine);
-        backgroundSection_.reset();
-        backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
+        // Does this spine still owe the footnote resolver? Its build then runs one extra,
+        // unsliceable pass before the layout parse (Section::resolveInlineFootnotePreviews):
+        // a SAX scan of the extracted XHTML, plus a stream of any note document it points at
+        // that is not banked yet. B used to refuse such a spine outright and leave it to the
+        // foreground, on the assumption that the foreground would set the bit and B could
+        // pre-build the chapter from then on. That assumption was wrong: the bit is only ever
+        // set BY a build, and the only spine the foreground ever builds is the one the reader
+        // just entered — so every subsequent chapter stayed unresolved, B refused all of them,
+        // and look-ahead was dead for the whole book (issue #211, regression in 2.24). B builds
+        // them instead; the flag makes the extra pass wait for a settled reader and some heap
+        // margin, and a resolve that fails anyway is discarded below rather than cached.
+        backgroundBuildNeedsResolve_ =
+            getEffectiveInlineFootnotePreviews() && !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine);
         // The inflate ring is sized to the entry, so the extraction heap gate needs the
         // uncompressed size (one central-dir scan, once per target spine).
         backgroundBuildInflatedSize_ = 0;
@@ -1347,12 +1361,25 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // foreground draws mid-build pages out of C's own progress, so blocking C on a pending
       // foreground draw deadlocks: the page is never built, so the draw stays pending forever.)
       const bool inputQueued = CooperativeAbort::shouldAbortLongTask();
+      // A build that still owes the footnote resolve allocates that pass out of the heap even
+      // when everything else it does lives in the borrowed arena, so it needs the margin on top.
+      const uint32_t borrowFreeFloor =
+          BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES + (backgroundBuildNeedsResolve_ ? BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES : 0);
       if (!inputQueued && (now - lastActivityMs) >= BG_BUILD_BORROW_QUIET_MS &&
-          esp_get_free_heap_size() >= BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES &&
+          esp_get_free_heap_size() >= borrowFreeFloor &&
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
           beginBackgroundBorrow()) {
         backgroundBuildState_ = BackgroundBuildState::Building;
+        return;
+      }
+      // Resident fallback. The borrow branch above already refuses to start while the reader is
+      // moving; the resolve needs that stillness on this path too, because its pass cannot be
+      // sliced (see the Probe comment) and cannot be abandoned half-way either — an aborted
+      // resolve would leave the chapter cached with plain markers under a "previews on" property
+      // hash, which nothing ever rebuilds. So it must land in a gap between page turns, not under
+      // one.
+      if (backgroundBuildNeedsResolve_ && (inputQueued || (now - lastActivityMs) < BG_BUILD_BORROW_QUIET_MS)) {
         return;
       }
       const uint32_t ringBytes =
@@ -1360,7 +1387,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       const uint32_t freeHeap = esp_get_free_heap_size();
       const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
       const uint32_t bgFreeFloor =
-          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
+          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) +
+          (backgroundBuildNeedsResolve_ ? BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES : 0);
       const uint32_t bgContigFloor = std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024);
       if (freeHeap < bgFreeFloor || contigHeap < bgContigFloor) {
         HEAP_GATE("bgB_waitheap", false, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
@@ -1479,13 +1507,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
-        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded()) {
-          // Memory ran short mid-parse: either pages are missing (truncated) or CSS
-          // lookups were skipped (styles silently absent from the cached pages). Don't
-          // hand either to the foreground: its blocking path runs with the secondary
-          // buffer released (~52 KB more headroom) and will likely build it clean.
-          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine,
-                  backgroundSection_->isTruncatedCache() ? "truncated" : "css-degraded");
+        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
+            backgroundSection_->isFootnotePreviewsUnresolved()) {
+          // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
+          // (styles silently absent from the cached pages), or the footnote resolve could not
+          // complete (markers left plain in a cache keyed "previews on"). Don't hand any of them
+          // to the foreground: its blocking path runs with the secondary buffer released (~52 KB
+          // more headroom) and will likely build it clean.
+          const char* reason = backgroundSection_->isTruncatedCache()       ? "truncated"
+                               : backgroundSection_->isCssLowHeapDegraded() ? "css-degraded"
+                                                                            : "footnotes unresolved";
+          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine, reason);
           backgroundSection_->clearCache();
           backgroundSection_.reset();
         } else {

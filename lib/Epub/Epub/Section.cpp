@@ -773,6 +773,9 @@ void Section::resolveInlineFootnotePreviews(BuildState& st) {
     // The store is untouched, so the only cost is that some notes in THIS build stay plain
     // markers until the spine is built again. Deliberately not fatal: a chapter that renders
     // with unexpanded markers is worth far more to the reader than a chapter that fails.
+    // Latched so a background caller can throw the result away instead: nothing would ever
+    // rebuild it, since the cache is keyed "previews on" either way.
+    footnotePreviewsUnresolved_ = true;
     LOG_ERR("SCT", "Footnote previews unresolved for spine %d; markers stay plain in this build", spineIndex);
   }
   st.footnotePreviewLookup = makeUniqueNoThrow<FootnotePreviews::Lookup>();
@@ -827,6 +830,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
+  footnotePreviewsUnresolved_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;

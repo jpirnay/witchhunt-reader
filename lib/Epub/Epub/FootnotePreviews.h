@@ -56,9 +56,10 @@ bool cacheExists(const std::string& bookCachePath);
 // building it needs no resolve work at all. Costs one small read. Note the question is "is there
 // anything outstanding", NOT "does it have notes": a chapter without footnotes answers true.
 //
-// Background-B uses it to stay out of the resolver: look-ahead runs on the loop task in slices,
-// and a resolve that has documents to stream does not fit in one. B skips a spine that answers
-// false and leaves it to the foreground build, which already shows a popup while it works.
+// Background-B asks it to size its gates, NOT to decide whether to build: a resolve runs on the
+// loop task in one unsliceable pass, so B waits for a settled reader and a little extra heap
+// before starting a build that still owes one. It must never be used to skip such a spine —
+// the bit is only ever set BY a build, so skipping is self-perpetuating (issue #211).
 bool spineResolved(const std::string& bookCachePath, int spineIndex);
 
 // Most footnote-shaped links one spine may contribute in a single pass. 8 bytes each, so the
