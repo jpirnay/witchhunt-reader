@@ -48,6 +48,10 @@ enum Kind : uint8_t {
   // before restarting the device, so the reason for the restart outlives it — without it a
   // watchdog reboot is indistinguishable from the user pressing Reset.
   KindResumeStall = 3,
+  // setup() itself had not finished. Distinct from KindResumeStall because `code` means a
+  // different thing — a BootPhase rather than a WakeTrace phase — and because the two
+  // narrow the fault to different halves of the boot.
+  KindBootStall = 4,
 };
 
 /// Record::flags bits, sleep records only.

@@ -287,6 +287,16 @@ void markPhase(BootPhase phase) {
   s_phaseReached |= static_cast<uint16_t>(1u << static_cast<uint8_t>(phase));
 }
 
+BootPhase furthestPhase() {
+  uint8_t furthest = 0;
+  for (uint8_t i = 0; i < static_cast<uint8_t>(BootPhase::Count); i++) {
+    if (s_phaseReached & (1u << i)) {
+      furthest = i;
+    }
+  }
+  return static_cast<BootPhase>(furthest);
+}
+
 bool phaseReached(BootPhase phase) { return (s_phaseReached & (1u << static_cast<uint8_t>(phase))) != 0; }
 
 uint16_t phaseMs(BootPhase phase) { return s_phaseMs[static_cast<uint8_t>(phase)]; }
@@ -485,6 +495,16 @@ void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking) 
     record.code = wakePhase;
     record.msA = seconds;
     record.flags = stillTicking ? kFlagStillTicking : 0;
+    imageAppend(record);
+  });
+}
+
+void persistBootStall(uint8_t bootPhase, uint16_t seconds) {
+  updateRing([&] {
+    Record record{};
+    record.kind = KindBootStall;
+    record.code = bootPhase;
+    record.msA = seconds;
     imageAppend(record);
   });
 }

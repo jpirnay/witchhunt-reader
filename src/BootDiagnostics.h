@@ -71,6 +71,8 @@ enum class BootPhase : uint8_t {
 };
 
 void markPhase(BootPhase phase);
+/// Furthest phase stamped so far — where a boot that never finished got to.
+BootPhase furthestPhase();
 bool phaseReached(BootPhase phase);
 uint16_t phaseMs(BootPhase phase);
 /// Short label ("entry", "gate", "sd", ...).  Points at a string literal.
@@ -195,6 +197,14 @@ AbortCounts abortCounts();
 /// that a resume ran long and where, without an automatic restart destroying the evidence or
 /// giving the reporter a second unexplained reboot to account for.
 void persistResumeStall(uint8_t wakePhase, uint16_t seconds, bool stillTicking);
+
+/// Record that setup() itself had not completed after the reporter's threshold, and how far
+/// it had got.  Covers the hangs the resume marker cannot: on a wake straight back into a
+/// book, ActivityManager::replaceActivity() runs onEnter() INLINE when there is no current
+/// activity — which is exactly the reader-resume case — so the whole book open happens
+/// inside setup(), and a boot record written at the SD mount says nothing about what
+/// happened afterwards.
+void persistBootStall(uint8_t bootPhase, uint16_t seconds);
 
 /// Read the ring back, newest first.  `out` must have room for kCapacity records.
 /// Returns how many were filled.  No heap: the caller owns the storage.

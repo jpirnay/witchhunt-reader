@@ -490,10 +490,27 @@ static constexpr uint32_t RESUME_STALL_REPORT_MS = 20000;
 static constexpr uint32_t STALL_TICK_WINDOW_MS = 3000;
 static constexpr uint32_t RESUME_STALL_POLL_MS = 1000;
 
+// Set as the last statement of setup(). Read by the reporter task to tell a boot that is
+// still working through setup() from one that finished and handed over to loop().
+static volatile bool setupComplete = false;
+
 static void resumeStallReporterTask(void*) {
   bool reported = false;
+  bool bootReported = false;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(RESUME_STALL_POLL_MS));
+
+    // setup() still running long past any healthy boot. Skipped while a book open is in
+    // flight, because that case has its own marker below with a far more specific phase —
+    // and on a wake resume the open runs INSIDE setup() (replaceActivity() calls onEnter()
+    // inline when there is no current activity), so both would otherwise fire at once.
+    if (!setupComplete && !bootReported && !WakeTrace::openInFlight(/*fromWakeOnly=*/false) &&
+        millis() >= RESUME_STALL_REPORT_MS) {
+      bootReported = true;
+      const BootPhase phase = BootDiag::furthestPhase();
+      LOG_ERR("MAIN", "setup() still running after %lums, furthest phase %s", millis(), BootDiag::phaseName(phase));
+      BootDiag::persistBootStall(static_cast<uint8_t>(phase), static_cast<uint16_t>(millis() / 1000));
+    }
     // fromWakeOnly: a book opened from the library has a visible UI behind it, so a slow open
     // there is merely slow. Only the wake resume is invisible, and only it is worth a record.
     if (!WakeTrace::openInFlight(/*fromWakeOnly=*/true)) {
@@ -1045,6 +1062,17 @@ void setup() {
   // previous sleep's, so the pair "how the last sleep ended" / "how this boot started"
   // is on the card before anything later in setup() can hang or panic.
   BootDiag::persistBoot();
+  // Started HERE, not at the end of setup(). It used to be created after the activity
+  // routing, which made it useless for the one case it exists to watch: on a wake straight
+  // back into a book ActivityManager::replaceActivity() runs onEnter() inline (there is no
+  // current activity on that branch), so the entire book open — load, section build, first
+  // render — happens inside setup(), and a boot that hung there never reached the line that
+  // created the task. Field capture on issue #155 showed exactly that: a resume that stalled
+  // and left no marker, because the marker could not have been written.
+  //
+  // This is the earliest point it can run: it only reads BootDiag/WakeTrace state, but it
+  // writes to the card, so Storage.begin() has to have succeeded first.
+  xTaskCreate(&resumeStallReporterTask, "resumewd", 1024, nullptr, 1, nullptr);
   logStartupMemory("after_storage_begin");
 
   SETTINGS.loadFromFile();
@@ -1248,9 +1276,6 @@ void setup() {
   // Now that the background sampler is live, let long lib-layer tasks (cover image
   // decoders) poll for queued presses and yield so button input keeps priority.
   CooperativeAbort::setLongTaskAbortPredicate(&hasPendingButtonInput);
-  // Started here, after routing: by now WakeTrace knows whether this boot is a wake resume,
-  // and the watchdog only ever acts on that case.
-  xTaskCreate(&resumeStallReporterTask, "resumewd", 1024, nullptr, 1, nullptr);
   // Flush any pin state transitions that occurred during boot before entering the main loop
   mappedInputManager.update();
   buttonEventManager.drain();
@@ -1261,6 +1286,9 @@ void setup() {
   allowSleepAt = millis() + 2000;
   BootDiag::logSummary();
   logStartupMemory("setup_complete");
+  // Last statement: from here the reporter task stops watching for a setup() that never
+  // finished. Everything after this point is loop()'s, and has its own markers.
+  setupComplete = true;
 }
 
 void loop() {

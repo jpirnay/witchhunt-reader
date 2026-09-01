@@ -407,6 +407,10 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
         snprintf(buf, sizeof(buf), "%lu STALLED in %s after %us %s", static_cast<unsigned long>(r.seq),
                  WakeTrace::phaseName(static_cast<WakeTrace::Phase>(r.code)), r.msA,
                  (r.flags & BootDiag::kFlagStillTicking) ? "working" : "NO-TICKS");
+      } else if (r.kind == BootDiag::KindBootStall) {
+        // setup() itself never finished. `code` is a BootPhase here, not a WakeTrace phase.
+        snprintf(buf, sizeof(buf), "%lu BOOT-STALL at %s after %us", static_cast<unsigned long>(r.seq),
+                 BootDiag::phaseName(static_cast<BootDiag::BootPhase>(r.code)), r.msA);
       } else if (r.kind == BootDiag::KindAborted) {
         snprintf(buf, sizeof(buf), "%lu ABORTED x%u%s %s gate %s", static_cast<unsigned long>(r.seq), r.msA,
                  r.msA >= BootDiag::kAbortCountCap ? "+" : "",
