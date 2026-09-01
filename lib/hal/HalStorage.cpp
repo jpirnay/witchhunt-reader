@@ -77,6 +77,8 @@ bool HalStorage::begin() {
 
 bool HalStorage::ready() const { return SDCard.ready(); }
 
+void HalStorage::prepareForSleep() { SDCard.prepareForSleep(); }
+
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
 // True when the SD card really is on the SPI bus the display also uses. Native

@@ -566,6 +566,18 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   // is done, so this is the last safe moment to write. The record is amended in place on
   // the next boot when the RTC breadcrumb survived — see BootDiag::persistBoot().
   BootDiag::persistSleep();
+  // After the last write of the whole sleep sequence, and only there: this ends
+  // the card session, so anything writing afterwards would find no card. Leaves
+  // a still-powered card (the T5S3 has no SD rail to cut) idle in a state it
+  // defines instead of mid-transaction with a dirty cache.
+  Storage.prepareForSleep();
+  // Park the reading light for real. off() only writes a zero duty and leaves
+  // the pad owned by LEDC, which sleep entry then floats — what the light does
+  // after that is down to an external pull. Driven and latched at the inactive
+  // level instead, because a light left lit is the largest load a sleeping
+  // reader can carry. Done after display.deepSleep() so the panel keeps its
+  // light for the whole sleep-screen paint. No-op without a frontlight.
+  Frontlight.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep (powerBtn isPressed=%d, rawPin=%d)", gpio.isPressed(HalGPIO::BTN_POWER),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 

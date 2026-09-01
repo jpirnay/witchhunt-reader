@@ -16,6 +16,14 @@ class HalStorage {
   HalStorage();
   bool begin();
   bool ready() const;
+  // Unmount cleanly on the way into deep sleep: flushes the FAT/directory cache
+  // and ends the card session. Call it AFTER the sleep path's last write. On a
+  // board whose SD rail stays powered through sleep (the T5S3) this is what
+  // leaves the card idle in a state it defines rather than mid-transaction; on
+  // boards whose rail is cut a moment later it is still safer than yanking the
+  // power under a dirty cache. begin() re-mounts on the next boot — a deep-sleep
+  // wake is a chip reset, so nothing has to survive.
+  void prepareForSleep();
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);

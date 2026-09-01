@@ -29,6 +29,13 @@ class HalFrontlight {
   // range. Returns the resulting level.
   uint8_t setBrightnessDelta(int delta);
 
+  // Park the light for deep sleep. Not the same as setOn(false): that writes a
+  // zero duty but leaves the pad owned by LEDC, and sleep entry then floats it —
+  // what the light does after that is a board-layout question. This drives and
+  // latches the inactive level instead. begin() releases the hold on the next
+  // boot. No-op on boards without a light.
+  void prepareForDeepSleep() { manager.prepareForDeepSleep(); }
+
   uint8_t brightness() const { return lastBrightness; }
   uint8_t warmth() const { return manager.colorTemperature(); }
   bool isOn() const { return lit; }
