@@ -30,16 +30,6 @@ class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
   static bool getDimensionsFromZipEntryStreaming(const std::string& epubPath, const std::string& entryPath,
                                                  ImageDimensions& out, JpegMode* outMode = nullptr);
 
-  // Derive adaptive tone points by histogramming the image. Unlike the PNG equivalent this
-  // is cheap: the pre-pass runs at TJpgDec's 1/8 DCT scale, so it decodes ~1/64 of the
-  // samples of a full render. Returns inactive points on any failure (unsupported mode, low
-  // heap, read error), which makes the tone curve an identity — never a hard failure.
-  // Call once and reuse across render passes; the result must be shared so every pass
-  // quantizes against the same black/white points.
-  // `mode` selects the endpoint stretch or the CDF equalization; see AdaptiveTone.h.
-  static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath,
-                                                   adaptive_tone::Mode mode = adaptive_tone::Mode::Stretch);
-
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {

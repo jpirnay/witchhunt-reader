@@ -500,28 +500,6 @@ void EpubReaderActivity::onEnter() {
   // enforceExitFullRefresh(), consumeRefreshOverride() will honour it on the first display call.
   pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
 
-  // Publish the image tone filter for lib/Epub, which must not read settings itself.
-  // Set here rather than per-render so every path that derives a pixel-cache name agrees
-  // (renderContents, the section-index warm pass, the pre-reboot warm). Reuses the sleep
-  // screen's filter setting rather than adding a second one: it is the same tone curve,
-  // and a separate inline-image toggle is display surface the reader does not need.
-  //
-  // Only the two tone-curve values carry over. The others are sleep-screen compositing
-  // modes (Contrast picks the BW plane, Inverted flips the whole screen) with no meaning
-  // for an image sitting inside a page of text.
-  switch (SETTINGS.sleepScreenCoverFilter) {
-    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE:
-      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE, adaptive_tone::Mode::Stretch);
-      break;
-    case CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE:
-      image_tone::setFilter(CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE,
-                            adaptive_tone::Mode::Equalize);
-      break;
-    default:
-      image_tone::setFilter(0, adaptive_tone::Mode::Stretch);
-      break;
-  }
-
   // Drop any input events that arrived from the activity that launched us (e.g. a wake-up power
   // button hold) before they reach the page-turn handling — see ReaderUtils::InputDrainGuard.
   inputDrainGuard.arm();

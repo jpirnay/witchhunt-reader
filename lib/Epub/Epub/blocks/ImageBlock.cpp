@@ -11,9 +11,7 @@
 #include "../../Epub.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
-#include "../converters/JpegToFramebufferConverter.h"
 #include "../converters/PixelCache.h"
-#include "../converters/PngToFramebufferConverter.h"
 
 // Cache file format (see PixelCache::PXC_MAGIC):
 // - uint16_t magic/version (high bit always set, distinguishing it from the legacy
@@ -59,19 +57,6 @@ bool ImageBlock::ensureExtracted() const {
 
 bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str()); }
 
-namespace image_tone {
-namespace {
-uint8_t g_filterId = 0;
-adaptive_tone::Mode g_mode = adaptive_tone::Mode::Stretch;
-}  // namespace
-void setFilter(const uint8_t filterId, const adaptive_tone::Mode mode) {
-  g_filterId = filterId;
-  g_mode = mode;
-}
-uint8_t getFilterId() { return g_filterId; }
-adaptive_tone::Mode getMode() { return g_mode; }
-}  // namespace image_tone
-
 namespace image_scratch {
 namespace {
 BuildArena* g_arena = nullptr;
@@ -106,35 +91,9 @@ std::string withSuffix(const std::string& imagePath, const std::string& suffix) 
 std::string getBwCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".1bit.pxc"); }
 
 // Grayscale cache: 4-level Bayer (0–3), replayed in GRAYSCALE_LSB/MSB passes when AA is on.
-// Tone mapping IS baked into these pixels, so the filter id keys the name: switching the
-// setting must not replay pixels levelled for the old filter, and keying by name means
-// both variants survive a switch back (no invalidation hook needed). Filter 0 keeps the
-// historical unsuffixed name so existing caches stay valid.
-std::string getGrayscaleCachePath(const std::string& imagePath) {
-  const uint8_t filterId = image_tone::getFilterId();
-  const std::string toneSuffix = filterId == 0 ? std::string() : ".f" + std::to_string(filterId);
-  return withSuffix(imagePath, toneSuffix + ".bayer.pxc");
-}
-
-// Derive adaptive tone points for one image. Both analyzers return inactive points on
-// any failure (low heap, unsupported coding mode, read error), which makes the tone
-// curve an identity — a failed analysis degrades to the untoned image, never to no image.
-// GIF has no analyzer and stays untoned.
-adaptive_tone::Points analyzeImageTone(const std::string& imagePath) {
-  std::string ext;
-  const size_t dot = imagePath.rfind('.');
-  if (dot != std::string::npos) {
-    ext = imagePath.substr(dot);
-    for (auto& c : ext) c = tolower(c);
-  }
-  if (JpegToFramebufferConverter::supportsFormat(ext)) {
-    return JpegToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
-  }
-  if (PngToFramebufferConverter::supportsFormat(ext)) {
-    return PngToFramebufferConverter::analyzeAdaptiveTone(imagePath, image_tone::getMode());
-  }
-  return {};
-}
+// Like the BW plane above, these pixels carry no tone correction, so one cache per image
+// serves every display setting — the name needs no key and never forks.
+std::string getGrayscaleCachePath(const std::string& imagePath) { return withSuffix(imagePath, ".bayer.pxc"); }
 
 // srcYOffset: first source row to render (0 = top of image).
 // srcHeight:  number of rows to render (0 = full image from srcYOffset).
@@ -414,14 +373,15 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   config.useExactDimensions = true;
   config.cachePath = cachePath;
 
-  // Adaptive tone applies only to the 4-level grayscale variant. On the BW plane the
-  // output is just 0/3, so a level stretch mostly shifts where the Atkinson threshold
-  // falls rather than adding information — and it would desync the BW frame from the
-  // grey planes layered on top of it. Only reached on a cache miss, so the analysis
-  // decode is paid once per image and amortized by the .pxc.
-  if (!monochromeOutput && image_tone::getFilterId() != 0) {
-    config.adaptiveTone = analyzeImageTone(imagePath);
-  }
+  // Deliberately no adaptive tone on either variant: both .pxc files are dithered straight
+  // from the raw luminance. The curve has to be derived from a completed histogram, and a
+  // PNG cannot be rewound to build one -- it costs a second full inflate of every image, on
+  // the warm pass that already gates how fast a page with pictures opens. The correction is
+  // still offered on the sleep screen, which pays it once per wake rather than once per page
+  // and keys its single cache by the filter id.
+  //
+  // Leaving both variants untoned is also what keeps them interchangeable inputs: they now
+  // differ only in ditherer (1-bit Atkinson vs 4-level Bayer) over an identical grey stream.
 
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {

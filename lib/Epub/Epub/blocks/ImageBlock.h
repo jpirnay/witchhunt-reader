@@ -1,5 +1,4 @@
 #pragma once
-#include <AdaptiveTone.h>
 #include <HalStorage.h>
 #include <stdint.h>
 
@@ -30,22 +29,6 @@ class BuildArena;  // lib/Memory — optional decode scratch (see image_scratch 
 // that is the axis to add rather than moving this number.
 static constexpr uint32_t LARGE_IMAGE_SOURCE_BYTES = 256 * 1024;
 
-// Tone mapping for inline images. Set once from src/ (which owns the settings) before a
-// render pass; lib/Epub must not read settings itself. Applies to every ImageBlock: the
-// filter is a global display preference, not per-image state, and threading it through
-// every cache-query and warm signature would touch a dozen call sites to carry a constant.
-//
-// filterId keys the pixel caches, because tone mapping is baked into the cached pixels —
-// see the cache-path helpers in ImageBlock.cpp. 0 means "no filter" and keeps the
-// historical unsuffixed cache names.
-namespace image_tone {
-// filterId and mode are set together so they cannot drift apart: the id keys the cache,
-// the mode decides which curve those cached pixels were levelled with.
-void setFilter(uint8_t filterId, adaptive_tone::Mode mode);
-uint8_t getFilterId();
-adaptive_tone::Mode getMode();
-}  // namespace image_tone
-
 // Process-wide scratch arena for image decoding, installed for the duration of a multi-image
 // pass (see Section::warmAllImageCaches).
 //
@@ -58,7 +41,7 @@ adaptive_tone::Mode getMode();
 // A global rather than a parameter because the arena has to reach decoders several layers down
 // (Section -> Page -> ImageBlock -> converter -> PngStreamDecoder) through interfaces shared
 // with callers that have no arena. Decoders fall back to the heap when none is installed, so
-// this is an optimisation, never a requirement. Mirrors image_tone above.
+// this is an optimisation, never a requirement.
 namespace image_scratch {
 // The installed arena, or nullptr. Not owned.
 BuildArena* get();
