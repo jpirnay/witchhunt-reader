@@ -114,7 +114,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // Offered everywhere, so a plain continuation of btnActionOptions above. Kept
   // separate only for legibility.
   const std::vector<StrId> extraActionOptions = {
-      StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI};
+      StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
+      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit

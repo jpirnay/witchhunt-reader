@@ -5440,9 +5440,13 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       break;
     case BA::BTN_CYCLE_ORIENTATION:
+    case BA::BTN_CYCLE_ORIENTATION_BACK:
       if (epub) {
+        // + COUNT before the modulo so the reverse step stays positive: the
+        // operands are promoted to int and (0 - 1) % 4 is -1, not 3.
+        const int step = action == BA::BTN_CYCLE_ORIENTATION_BACK ? CrossPointSettings::ORIENTATION_COUNT - 1 : 1;
         const uint8_t nextOrientation =
-            static_cast<uint8_t>((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
+            static_cast<uint8_t>((SETTINGS.orientation + step) % CrossPointSettings::ORIENTATION_COUNT);
         applyOrientation(nextOrientation);
         requestUpdate();
       }

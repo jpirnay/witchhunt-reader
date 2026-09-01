@@ -1697,6 +1697,9 @@ void loop() {
         case BA::BTN_CYCLE_ORIENTATION:
           activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION);
           break;
+        case BA::BTN_CYCLE_ORIENTATION_BACK:
+          activityManager.dispatchButtonAction(BA::BTN_CYCLE_ORIENTATION_BACK);
+          break;
         case BA::BTN_QUICK_OVERRIDES:
           activityManager.dispatchButtonAction(BA::BTN_QUICK_OVERRIDES);
           break;

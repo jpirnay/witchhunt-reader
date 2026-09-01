@@ -1074,7 +1074,15 @@ lookup on a hold, and universal convention for pinch and rotate:
 | Swipe up, left half | **Toggle Reading Light** | Long tap top | Toggle Reading Light |
 | Swipe left/right | Built-in | Long tap bottom | Star Page |
 | All five tap zones | Built-in | Pinch in / out | Smaller / Larger Text |
-| Rotate either way | Cycle Orientation | | |
+| Rotate clockwise | Change Orientation | Rotate anticlockwise | Change Orientation Back |
+
+The two rotations are a **pair**, and needed `BTN_CYCLE_ORIENTATION_BACK` to be
+one: turning two fingers one way and then back must undo, not advance three more
+steps. Same reasoning as the directional font sizes — a single cycling action is
+fine on a button and useless on a reversible gesture. Which visual direction
+"forward" is depends on the `ORIENTATION` enum's order, which its names do not
+make obvious; if it reads inverted on hardware, swapping the two defaults is a
+one-line change.
 
 **The quick light on/off is swipe up on the left half**, and it has to be a swipe
 rather than a tap or a hold for two reasons: swipes are the only gestures live

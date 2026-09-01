@@ -66,6 +66,7 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
     case BTN_FONT_SIZE_SMALLER:
     case BTN_FONT_SIZE_LARGER:
     case BTN_CYCLE_ORIENTATION:
+    case BTN_CYCLE_ORIENTATION_BACK:
     case BTN_QUICK_OVERRIDES:
     case BTN_DICTIONARY:
       return true;

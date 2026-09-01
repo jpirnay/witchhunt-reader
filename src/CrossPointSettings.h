@@ -426,7 +426,10 @@ class CrossPointSettings {
   // A bump DISCARDS gesture customisation, deliberately: while the defaults are
   // still being tuned on hardware that is the useful trade. Once they settle,
   // stop bumping it and the whole mechanism goes inert.
-  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 1;
+  // 2: BTN_CYCLE_ORIENTATION_BACK was inserted before the board-gated light
+  //    block, shifting BTN_LIGHT_* up by one. Stored gesture values naming a
+  //    light action would otherwise be read as the action next to it.
+  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 2;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
   // --- Gesture actions (touch boards) ---------------------------------------
@@ -479,8 +482,12 @@ class CrossPointSettings {
   // whose meaning users already carry with them from every other device.
   uint8_t gestPinchIn = BTN_FONT_SIZE_SMALLER;
   uint8_t gestPinchOut = BTN_FONT_SIZE_LARGER;
+  // Opposite directions, so turning two fingers back the way they came undoes
+  // the rotation instead of advancing three more steps. Which visual direction
+  // "forward" is depends on the ORIENTATION enum's order, which is not obvious
+  // from its names — if it reads inverted on hardware, swap these two lines.
   uint8_t gestRotateCw = BTN_CYCLE_ORIENTATION;
-  uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION;
+  uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION_BACK;
 
   // Centre-third tap opens the reader menu. Separate from touchReaderControls
   // so the page-turn style and the menu tap can be chosen independently.
@@ -587,6 +594,11 @@ class CrossPointSettings {
     // a book in a bag), and the reader is the one place it stays live, so a
     // gesture bound to this can always turn it back on.
     BTN_TOGGLE_TOUCH_UI,
+    // The reverse of BTN_CYCLE_ORIENTATION. Same reasoning as the directional
+    // font sizes: a single cycling action is fine on a button, but the two
+    // rotation gestures are a PAIR — turning two fingers one way and then back
+    // must undo, not advance three more steps.
+    BTN_CYCLE_ORIENTATION_BACK,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them
