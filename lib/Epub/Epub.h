@@ -237,6 +237,19 @@ class Epub {
   // at once -- more contiguous heap than this device has. Already-compressed formats (PNG, JPEG)
   // are commonly stored, which is exactly where the copy hurts most.
   bool getStoredItemRange(const std::string& itemHref, uint32_t* offset, uint32_t* size) const;
+
+  // Drop the loadForCover() memo (see Epub.cpp). Call when a cover-loading burst is over; the
+  // memo holds one book's metadata and is otherwise replaced as the next book is queried.
+  static void clearCoverMetadataMemo();
+
+ private:
+  // Open the cover image for decoding straight out of the EPUB, positioned at its first byte,
+  // when the ZIP stores that entry uncompressed. False for a deflated entry (or no cover), which
+  // leaves the caller extracting cover.img as before. `offset` receives the entry's position, to
+  // rewind to after sniffing the format.
+  bool openStoredCoverInPlace(FsFile& out, uint32_t* offset) const;
+
+ public:
   bool getSpineItemInflatedSize(int spineIndex, size_t* size) const;
   BookMetadataCache::SpineEntry getSpineItem(int spineIndex) const;
   BookMetadataCache::TocEntry getTocItem(int tocIndex) const;

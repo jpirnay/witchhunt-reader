@@ -722,6 +722,8 @@ void HomeActivity::onEnter() {
 }
 
 void HomeActivity::onExit() {
+  // The cover-loading burst is over; release the one book's metadata the memo still holds.
+  Epub::clearCoverMetadataMemo();
   Activity::onExit();
   statsLoad_.reset();
   freeCoverBuffer();

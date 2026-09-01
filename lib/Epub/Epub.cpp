@@ -37,14 +37,17 @@ namespace {
 // support" becomes a PERMANENT answer rather than "the extractor hasn't got that far yet".
 constexpr uint32_t COVER_FORMAT_SNIFF_BYTES = 8;
 
-ImageFormatDetector::Format detectCoverImageFormat(FsFile& imageFile) {
-  if (!imageFile || !imageFile.seek(0)) {
+// `base` is where the image starts inside the file: 0 for an extracted cover.img, the entry's
+// data offset when the cover is being read in place out of the EPUB. The stream is left back at
+// `base` either way, ready for a decoder.
+ImageFormatDetector::Format detectCoverImageFormat(FsFile& imageFile, const uint32_t base = 0) {
+  if (!imageFile || !imageFile.seek(base)) {
     return ImageFormatDetector::Format::Unknown;
   }
 
   uint8_t header[8] = {};
   const int readBytes = imageFile.read(header, sizeof(header));
-  imageFile.seek(0);
+  imageFile.seek(base);
 
   return ImageFormatDetector::detect(header, readBytes);
 }
@@ -825,6 +828,40 @@ void Epub::applyMetadataSidecar() const {
   LOG_DBG("EBP", "Applied metadata sidecar: %s", path.c_str());
 }
 
+// One-entry memo for loadForCover().
+//
+// loadForCover() re-parses content.opf whenever book.bin is absent, and the home screen asks the
+// SAME book for cover metadata three to five times in a row: once to try the thumb, once to check
+// whether cover.img is cached, once to start the extract session, then once more per thumb size.
+// Device-measured on X4, one Cyrillic book paid 5 x 301 ms and a five-book carousel spent ~3.3 s
+// re-deriving answers it had just computed.
+//
+// One entry is all it takes, because those repeats are consecutive. Keyed by path AND file size,
+// so a book replaced under the same name cannot serve a stale cover. Cleared by
+// clearCoverMetadataMemo() when the burst ends; until then it is simply replaced as the carousel
+// moves on, so at most one book's metadata is ever held.
+namespace {
+struct CoverMetadataMemo {
+  std::string path;
+  uint32_t size = 0;
+  BookMetadataCache::BookMetadata meta;
+  bool valid = false;
+};
+CoverMetadataMemo g_coverMemo;
+
+// 0 when the book cannot be opened, which disables the memo for that call rather than risking a
+// match on an unknown size.
+uint32_t coverMemoKeySize(const std::string& path) {
+  FsFile f;
+  if (!Storage.openFileForRead("EBP", path, f)) return 0;
+  const uint32_t size = static_cast<uint32_t>(f.size());
+  f.close();
+  return size;
+}
+}  // namespace
+
+void Epub::clearCoverMetadataMemo() { g_coverMemo = CoverMetadataMemo{}; }
+
 bool Epub::loadForCover() {
   // Cover-only load: get coverItemHref WITHOUT building the spine/TOC book.bin (which, on a huge
   // book, is both slow and the site of the large manifest-index build). Used by RecentBooks / Home
@@ -838,12 +875,30 @@ bool Epub::loadForCover() {
     return true;
   }
 
+  // Second fast path: this book's OPF was parsed moments ago (see the memo note above).
+  const uint32_t memoKey = coverMemoKeySize(filepath);
+  if (memoKey != 0 && g_coverMemo.valid && g_coverMemo.size == memoKey && g_coverMemo.path == filepath) {
+    bookMetadataCache->coreMetadata = g_coverMemo.meta;
+    if (bookMetadataCache->coreMetadata.coverItemHref.empty()) return false;
+    bookMetadataCache->markCoverMetadataLoaded();
+    applyMetadataSidecar();
+    return true;
+  }
+
   // No cache: metadata-only OPF parse. OpfCacheMode::Disabled passes a null cache to ContentOpfParser,
   // so NO manifest item index / .items.bin / spine cache is built — only title/author/coverItemHref
   // are extracted. This is the whole point: a 1732-spine book contributes no giant index here.
   if (!parseContentOpf(bookMetadataCache->coreMetadata, OpfCacheMode::Disabled)) {
     LOG_INF("EBP", "loadForCover: content.opf parse failed for %s", filepath.c_str());
-    return false;
+    return false;  // deliberately not memoized: a failed parse may be transient
+  }
+  // Memoized even when there is no cover: "this book has none" is exactly the answer the next
+  // three calls would otherwise re-parse the OPF to rediscover.
+  if (memoKey != 0) {
+    g_coverMemo.path = filepath;
+    g_coverMemo.size = memoKey;
+    g_coverMemo.meta = bookMetadataCache->coreMetadata;
+    g_coverMemo.valid = true;
   }
   if (bookMetadataCache->coreMetadata.coverItemHref.empty()) {
     return false;  // no discoverable cover — caller shows a placeholder
@@ -1217,6 +1272,21 @@ void Epub::writeThumbSentinel(const std::string& thumbPath) {
   thumbBmp.close();
 }
 
+bool Epub::openStoredCoverInPlace(FsFile& out, uint32_t* offset) const {
+  const std::string href = getCoverItemHref();
+  if (href.empty() || !offset) return false;
+  uint32_t size = 0;
+  if (!getStoredItemRange(href, offset, &size) || size == 0) return false;
+  if (!Storage.openFileForRead("EBP", filepath, out)) return false;
+  if (!out.seek(*offset)) {
+    out.close();
+    return false;
+  }
+  LOG_DBG("EBP", "Cover is stored: decoding in place, no extraction (%u bytes at %u)", static_cast<unsigned>(size),
+          static_cast<unsigned>(*offset));
+  return true;
+}
+
 ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
   {
     FsFile existing;
@@ -1254,17 +1324,20 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
     return ThumbResult::StructurallyAbsent;
   }
 
-  if (!coverImageCachedAndValid(allowExtract)) {
-    // cover.img not yet extracted (or extraction failed transiently). No sentinel — let the
-    // sliced extractor produce it, or retry next pass/boot. The caller counts these.
+  // Same in-place shortcut as the (width, height) overload above: a stored cover needs no
+  // extraction at all.
+  FsFile coverImage;
+  uint32_t coverBase = 0;
+  if (coverImageCachedAndValid(allowExtract)) {
+    if (!Storage.openFileForRead("EBP", getCoverImageCachePath(), coverImage)) return ThumbResult::TransientFail;
+  } else if (!openStoredCoverInPlace(coverImage, &coverBase)) {
+    // Neither cached nor stored. No sentinel — let the sliced extractor produce it, or retry
+    // next pass/boot. The caller counts these.
     LOG_DBG("EBP", "cover.img not cached/valid for h=%d — transient, deferring", height);
     return ThumbResult::TransientFail;
   }
 
-  FsFile coverImage;
-  if (!Storage.openFileForRead("EBP", getCoverImageCachePath(), coverImage)) return ThumbResult::TransientFail;
-
-  const auto detectedFormat = detectCoverImageFormat(coverImage);
+  const auto detectedFormat = detectCoverImageFormat(coverImage, coverBase);
   if (detectedFormat == ImageFormatDetector::Format::Unknown) {
     // Cover extracted but its format is unsupported — structural, re-extraction yields the same
     // bytes. Sentinel so we stop trying.
@@ -1338,17 +1411,22 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract) con
     return ThumbResult::StructurallyAbsent;
   }
 
-  if (!coverImageCachedAndValid(allowExtract)) {
-    // cover.img not yet extracted (or extraction failed transiently). No sentinel — let the
-    // sliced extractor produce it, or retry next pass/boot. The caller counts these.
+  // Prefer the extracted cover.img when we have it; otherwise the cover can still be decoded
+  // straight out of the archive if the ZIP stores it uncompressed, which skips the extraction
+  // entirely. Measured on X4: four carousel covers spent ~6.0 s being copied to cover.img before
+  // any of them could be decoded.
+  FsFile coverImage;
+  uint32_t coverBase = 0;
+  if (coverImageCachedAndValid(allowExtract)) {
+    if (!Storage.openFileForRead("EBP", getCoverImageCachePath(), coverImage)) return ThumbResult::TransientFail;
+  } else if (!openStoredCoverInPlace(coverImage, &coverBase)) {
+    // Neither cached nor stored (a deflated entry has to be inflated first). No sentinel — let
+    // the sliced extractor produce it, or retry next pass/boot. The caller counts these.
     LOG_DBG("EBP", "cover.img not cached/valid for %dx%d — transient, deferring", width, height);
     return ThumbResult::TransientFail;
   }
 
-  FsFile coverImage;
-  if (!Storage.openFileForRead("EBP", getCoverImageCachePath(), coverImage)) return ThumbResult::TransientFail;
-
-  const auto detectedFormat = detectCoverImageFormat(coverImage);
+  const auto detectedFormat = detectCoverImageFormat(coverImage, coverBase);
   if (detectedFormat == ImageFormatDetector::Format::Unknown) {
     // Cover extracted but its format is unsupported — structural, re-extraction yields the same
     // bytes. Sentinel so we stop trying.
