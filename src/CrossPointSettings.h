@@ -412,6 +412,23 @@ class CrossPointSettings {
   // turning touch navigation off cannot strand anyone in a menu.
   uint8_t touchUiControls = TOUCH_UI_ON;
 
+  // Bumped whenever the SHIPPED gesture defaults change. A stored value below
+  // this makes the loader ignore the file's gesture keys and keep the compiled
+  // defaults instead.
+  //
+  // It exists because BTN_DEFAULT is 0, which makes "the user chose Built-in"
+  // and "this key was written before the default existed" the same byte on disk.
+  // Without the stamp a changed default reaches only devices that have never
+  // saved their settings — i.e. none — and the symptom on hardware is a gesture
+  // that silently does nothing, which looks exactly like a firmware bug. Two
+  // device sessions were spent on that.
+  //
+  // A bump DISCARDS gesture customisation, deliberately: while the defaults are
+  // still being tuned on hardware that is the useful trade. Once they settle,
+  // stop bumping it and the whole mechanism goes inert.
+  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 1;
+  uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
+
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
   // fields above, and with the same meaning for BTN_DEFAULT: leave this input

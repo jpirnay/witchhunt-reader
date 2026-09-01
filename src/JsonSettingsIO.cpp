@@ -16,6 +16,7 @@
 #include "ReadingStats.h"
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
+#include "TouchGestures.h"
 #include "WifiCredentialStore.h"
 #include "util/UrlUtils.h"
 
@@ -225,6 +226,9 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Font family uses a DynamicEnumCtx in SettingsList (no valuePtr) so the generic
   // loop above skips it. Save manually.
   doc["fontFamily"] = s.fontFamily;
+  // Stamps which generation of gesture defaults this file was written against.
+  // See CrossPointSettings::GESTURE_DEFAULTS_VERSION.
+  doc["gestureDefaultsV"] = s.gestureDefaultsVersion;
   // Same for the frontlight switch, which is a DynamicToggle because the live
   // hardware rather than this field is the authority for "is the light on".
   // Saved unconditionally, not behind the board's capability: a settings file
@@ -321,6 +325,18 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   }
 
   const auto settings = getSettingsList();
+  // Gesture keys written against an older generation of the shipped defaults are
+  // ignored below, so the compiled defaults win. Absent (0) counts as older,
+  // which is exactly the case for every file written before the stamp existed.
+  const bool staleGestureDefaults =
+      (doc["gestureDefaultsV"] | 0) < static_cast<int>(CrossPointSettings::GESTURE_DEFAULTS_VERSION);
+  const auto isGestureKey = [](const char* key) {
+    if (key == nullptr) return false;
+    for (const auto& binding : TouchGestures::BINDINGS) {
+      if (std::strcmp(key, binding.key) == 0) return true;
+    }
+    return false;
+  };
 
   for (const auto& info : settings) {
     if (!info.key) continue;
@@ -360,6 +376,16 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       destPtr[info.stringMaxLen - 1] = '\0';
     } else {
       const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
+      // A gesture key written against an older generation of the defaults is
+      // ignored, not loaded: a stored BTN_DEFAULT is indistinguishable from a
+      // key that predates the default, so honouring it would pin every device
+      // that has ever saved its settings to whatever the defaults were then.
+      // See CrossPointSettings::GESTURE_DEFAULTS_VERSION.
+      if (staleGestureDefaults && isGestureKey(info.key)) {
+        s.*(info.valuePtr) = fieldDefault;
+        if (needsResave) *needsResave = true;
+        continue;
+      }
       uint8_t v = doc[info.key] | fieldDefault;
       if (info.type == SettingType::ENUM) {
         v = clamp(v, (uint8_t)info.enumValues.size(), fieldDefault);

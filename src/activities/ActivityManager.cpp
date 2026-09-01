@@ -575,6 +575,32 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
 void ActivityManager::dispatchListTap() {
   if (!mappedInput.hasTouch()) return;
 
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // Why a tap on a row did nothing, in one line. Placed before the early-outs so
+  // it also reports the case where no band was recorded at all, and it reads the
+  // tap with a const peek so it steals nothing from the real path below.
+  //
+  // What to look for: `first` is the item index of the band's TOP row, so on a
+  // scrolled list it must equal the first item actually on screen; `rows` is the
+  // y range the band covers, which must contain the tap; `-> item` is what the
+  // hit test made of it, -1 being a miss.
+  {
+    int tx = 0;
+    int ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      ListTouchBand::Band band;
+      if (!ListTouchBand::snapshot(band)) {
+        LOG_INF("TCH", "list tap (%d,%d): no band recorded", tx, ty);
+      } else {
+        const int lastBottom = band.count > 0 ? band.top[band.count - 1] + band.height[band.count - 1] : -1;
+        LOG_INF("TCH", "list tap (%d,%d): band x=%d w=%d first=%d count=%d rows y=%d..%d sel=0x%08lX -> item %d", tx,
+                ty, band.x, band.width, band.firstIndex, band.count, band.count > 0 ? band.top[0] : -1, lastBottom,
+                static_cast<unsigned long>(band.selectable), ListTouchBand::hitTestIn(band, tx, ty));
+      }
+    }
+  }
+#endif
+
   // Nothing painted a list on this screen, so there is nothing here a tap could mean. Checked
   // before touching the tap queue: the tap belongs to whoever else wants it.
   if (!ListTouchBand::hasBand()) return;

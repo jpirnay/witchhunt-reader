@@ -1242,7 +1242,31 @@ are wired. A two-finger swipe also sets `touchMultiContactSequence`, which
 suppresses the single-contact classifiers until full release — so it will not
 fall back to being a one-finger swipe either.
 
-### 8.13 Status
+### 8.13 A changed default does not reach a device that has saved its settings
+
+`BTN_DEFAULT` is 0, which makes "the user chose Built-in" and "this key was
+written before that default existed" the same byte on disk. `fromJson()` prefers
+the stored value, so a default changed after a device has saved its settings once
+reaches nobody — and the symptom is a gesture that silently does nothing, which
+looks exactly like a firmware bug. Two device sessions went on that before it was
+understood.
+
+`CrossPointSettings::GESTURE_DEFAULTS_VERSION` fixes it: the file carries a
+`gestureDefaultsV` stamp, and when it is older than the constant the loader
+IGNORES every gesture key and keeps the compiled defaults. Absent counts as
+older, so files written before the stamp existed are covered.
+
+A bump discards gesture customisation, deliberately — while the defaults are
+still being tuned on hardware that is the useful trade. **Stop bumping it once
+they settle** and the mechanism goes inert on its own.
+
+The general lesson is not specific to gestures: any setting whose "unset" value
+is also a meaningful choice needs something like this before its default can ever
+be changed. The existing precedent in the tree is renaming the JSON key
+(`fastAntiAliasing` → `fastAntiAliasingV2`), which works for one flag and does
+not scale to twenty.
+
+### 8.14 Status
 
 Builds on `default` (C3), `x4pro` and `lilygo_t5s3`; 766 host tests green,
 including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device
