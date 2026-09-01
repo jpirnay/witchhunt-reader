@@ -33,6 +33,12 @@ class Section {
   // usable but visually degraded; background callers discard it so the foreground
   // blocking path (more headroom) rebuilds it clean.
   bool cssLowHeapDegraded_ = false;
+  // Set by the last build when its inline-footnote resolve pass could not complete (OOM, an
+  // unreadable note document). The pages are cached under a "previews on" property hash — see
+  // EpubReaderActivity::makeSectionBuildParams — but the notes this spine points at never made
+  // it into the store, so those markers stay plain and nothing would ever rebuild them.
+  // Background callers discard such a result and leave the spine to the foreground path.
+  bool footnotePreviewsUnresolved_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -79,7 +85,8 @@ class Section {
   // Runs between the parse phases, once the spine's inflated XHTML is on SD and no ZIP state is
   // live: makes sure every note this spine references has its text in the book's preview store,
   // then points the visitor at it. Never fails the build — see the definition.
-  void resolveInlineFootnotePreviews(BuildState& st);
+  bool beginInlineFootnotePreviewResolve(BuildState& st);
+  void finishInlineFootnotePreviewResolve(BuildState& st);
 
   // Open the section file and seek to the first paragraph LUT entry, validating the header
   // and LUT bounds against fileSize. On success, returns true with `outLutStart` set to the
@@ -232,6 +239,10 @@ class Section {
   // True when the last build's CSS resolution hit low-heap skips (styles silently
   // missing from the cached pages). Only meaningful right after a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True when the last build's inline-footnote resolve pass failed, so some of this spine's
+  // notes are missing from the store while the cache claims previews are on. Only meaningful
+  // right after a build.
+  bool isFootnotePreviewsUnresolved() const { return footnotePreviewsUnresolved_; }
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced
   // caller (Background-B) abort early instead of finishing a build it will discard. False when

@@ -743,6 +743,14 @@ struct Section::BuildState {
   // initialised. runBuildParse is re-entered on every slice, so without this the resolve would
   // re-scan the whole spine each time phase (b) yielded.
   bool visitorReady = false;
+  // The note-preview resolve, which is itself sliced: it survives across yields until it reports
+  // Done or Failed, and its destructor rolls back a half-written store if the build is abandoned
+  // first. `previewResolveDone` covers the case where it finished but phase (b) has not started.
+  std::unique_ptr<FootnotePreviews::Resolver> previewResolver;
+  bool previewResolveDone = false;
+  uint32_t previewResolveStartMs = 0;
+  uint32_t previewResolveMs = 0;          // CPU actually spent resolving, summed across slices
+  uint32_t previewResolveMaxSliceMs = 0;  // worst single slice — the number that says it slices
   // Parse-result flags, set by runBuildParse and consumed by runBuildFinalize.
   bool streamOk = false;
   bool finalizeOk = false;
@@ -760,20 +768,42 @@ Section::Section(const std::shared_ptr<Epub>& epub, const int spineIndex, GfxRen
     : epub(epub), spineIndex(spineIndex), renderer(renderer) {}
 Section::~Section() { abortSectionBuild(); }
 
-void Section::resolveInlineFootnotePreviews(BuildState& st) {
+// Starts this spine's note-preview resolve. False means it could not even begin (OOM) — the
+// caller treats that like a failed pass: the build goes on and the markers stay plain.
+//
+// The pass is SLICED from here on. It used to run to completion in this one call, which made its
+// cost a property of the book rather than of the slice budget: a big chapter's link scan and a
+// fat rearnotes document are both unbounded work on the loop task. Background-B ran it that way
+// and could stall input for as long as the document took. FootnotePreviews::Resolver does the
+// same work a chunk at a time so runBuildParse can spend its budget on it and yield, exactly as
+// it does on the layout parse.
+bool Section::beginInlineFootnotePreviewResolve(BuildState& st) {
+  // Cheap when there is nothing to do: a spine whose notes were resolved in an earlier session
+  // answers from its resolved bit and finishes on the first step, reading nothing.
+  //
+  // Pass A reads the XHTML this build just extracted, so it costs an SD read and a SAX walk with
+  // no inflate. Only a note document that has never been streamed needs the archive, and that
+  // one gets the build's arena when there is room — a sliced resolve would otherwise hold its
+  // inflate ring on the reading heap across every page render in between.
+  st.previewResolver = makeUniqueNoThrow<FootnotePreviews::Resolver>();
+  if (!st.previewResolver) {
+    return false;
+  }
+  const std::string banked = st.useTempExtract ? st.tempPath : std::string();
+  BuildArena* const external = (st.arena && st.arena != st.ownedArena.get()) ? st.arena : nullptr;
+  if (!st.previewResolver->begin(*epub, spineIndex, banked, external)) {
+    st.previewResolver.reset();
+    return false;
+  }
+  st.previewResolveStartMs = millis();
+  return true;
+}
+
+// Wires the visitor to the store once the resolve has finished (however it finished): even a
+// failed pass leaves earlier chapters' notes in place, and those still expand.
+void Section::finishInlineFootnotePreviewResolve(BuildState& st) {
   if (!st.params.inlineFootnotePreviews) {
     return;
-  }
-  // Cheap when there is nothing to do: a spine whose notes were resolved in an earlier session
-  // re-scans its own links from the banked XHTML — an SD read and a SAX walk, no inflate — finds
-  // every target already stored, and appends nothing.
-  const uint32_t startMs = millis();
-  const std::string banked = st.useTempExtract ? st.tempPath : std::string();
-  if (!FootnotePreviews::resolveSpine(*epub, spineIndex, banked)) {
-    // The store is untouched, so the only cost is that some notes in THIS build stay plain
-    // markers until the spine is built again. Deliberately not fatal: a chapter that renders
-    // with unexpanded markers is worth far more to the reader than a chapter that fails.
-    LOG_ERR("SCT", "Footnote previews unresolved for spine %d; markers stay plain in this build", spineIndex);
   }
   st.footnotePreviewLookup = makeUniqueNoThrow<FootnotePreviews::Lookup>();
   if (st.footnotePreviewLookup && st.footnotePreviewLookup->open(epub->getCachePath(), epub.get(), spineIndex)) {
@@ -781,9 +811,12 @@ void Section::resolveInlineFootnotePreviews(BuildState& st) {
   } else {
     st.footnotePreviewLookup.reset();  // no notes anywhere in this book yet, or store unreadable
   }
-  const uint32_t ms = millis() - startMs;
-  if (ms > 0) {
-    LOG_INF("SCT", "createSectionFile spine=%d footnote previews resolved in %ums", spineIndex, ms);
+  if (st.previewResolveMs > 0) {
+    // Both numbers, because they answer different questions: the total is what the resolve costs
+    // the build, the worst slice is whether it is actually slicing. The second is the one that
+    // regresses silently — a document that never yields shows up here and nowhere else.
+    LOG_INF("SCT", "createSectionFile spine=%d footnote previews resolved in %ums (worst slice %ums)", spineIndex,
+            st.previewResolveMs, st.previewResolveMaxSliceMs);
   }
 }
 
@@ -827,6 +860,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   pageCount = 0;
   this->lut.clear();
   cssLowHeapDegraded_ = false;
+  footnotePreviewsUnresolved_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1127,8 +1161,48 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   // is only initialised after it: ~10 KB of yxml state each, and never both at once. Guarded to
   // run a single time — phase (b) yields per slice and re-enters from the top of this function.
   if (!streamFailed && !st.visitorReady) {
+    // Resolve the note previews first, in slices. The resolver is created once and survives
+    // across yields in BuildState; `previewResolveDone` is what makes this whole block one-shot
+    // for the resolve while runBuildParse re-enters from the top on every slice.
+    if (st.params.inlineFootnotePreviews && !st.previewResolveDone) {
+      if (!st.previewResolver && !beginInlineFootnotePreviewResolve(st)) {
+        LOG_ERR("SCT", "Could not start the footnote resolve for spine %d; markers stay plain", spineIndex);
+        footnotePreviewsUnresolved_ = true;
+        st.previewResolveDone = true;
+      }
+      const uint32_t resolveSliceStart = millis();
+      while (st.previewResolver) {
+        const FootnotePreviews::Resolver::Step rs = st.previewResolver->step();
+        if (rs == FootnotePreviews::Resolver::Step::More) {
+          if (!overBudget()) {
+            continue;
+          }
+          // Out of budget mid-resolve: bank what this slice cost and hand the loop task back.
+          // The resolver keeps its position, so the next slice picks up inside the same document.
+          const uint32_t spent = millis() - resolveSliceStart;
+          st.previewResolveMs += spent;
+          st.previewResolveMaxSliceMs = std::max(st.previewResolveMaxSliceMs, spent);
+          return yieldSlice();
+        }
+        if (rs == FootnotePreviews::Resolver::Step::Failed) {
+          // The store is untouched — the resolver rolled its append back — so the only cost is
+          // that some notes in THIS build stay plain markers until the spine is built again.
+          // Deliberately not fatal: a chapter that renders with unexpanded markers is worth far
+          // more to the reader than a chapter that fails. Latched so a background caller can
+          // throw the result away instead, since nothing would ever rebuild it — the cache is
+          // keyed "previews on" either way.
+          footnotePreviewsUnresolved_ = true;
+          LOG_ERR("SCT", "Footnote previews unresolved for spine %d; markers stay plain in this build", spineIndex);
+        }
+        st.previewResolver.reset();
+        st.previewResolveDone = true;
+      }
+      const uint32_t spent = millis() - resolveSliceStart;
+      st.previewResolveMs += spent;
+      st.previewResolveMaxSliceMs = std::max(st.previewResolveMaxSliceMs, spent);
+    }
     st.visitorReady = true;
-    resolveInlineFootnotePreviews(st);
+    finishInlineFootnotePreviewResolve(st);
     if (!st.visitor->setup(st.inflatedSize)) {
       LOG_ERR("SCT", "Failed to set up chapter parser");
       file.close();

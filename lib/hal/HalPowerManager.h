@@ -35,6 +35,14 @@ class HalPowerManager {
   // resumes after exitWaveformWait() restores the clock), but not when another
   // task holds the lock and keeps running.
   TaskHandle_t lockOwnerTask_ = nullptr;
+  // Locks nest. They used to be a single slot: a second concurrent Lock logged an error and was
+  // handed back holding NOTHING, and the first one's release then cleared the flag while the
+  // second holder was still running. Two real holders overlap constantly — the render task takes
+  // one per render, the loop task takes one per build slice — so the effect was that a build
+  // slice ran unprotected, and enterWaveformWait() saw no foreign lock and downclocked the chip
+  // underneath it. Counted instead: the flag is set while any lock is held and cleared by the
+  // last release.
+  uint8_t lockCount_ = 0;
   // True while the CPU clock is dropped for an e-ink waveform wait (see
   // enterWaveformWait / exitWaveformWait). Guarded by modeMutex.
   bool waveformLowPower_ = false;

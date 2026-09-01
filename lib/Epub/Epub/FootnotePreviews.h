@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+class BuildArena;  // lib/Memory — optional scratch for a note document's inflate ring
 class Epub;
 
 // Book-level inline-footnote preview cache ("footnotes.bin" in the book's cache dir).
@@ -56,9 +57,9 @@ bool cacheExists(const std::string& bookCachePath);
 // building it needs no resolve work at all. Costs one small read. Note the question is "is there
 // anything outstanding", NOT "does it have notes": a chapter without footnotes answers true.
 //
-// Background-B uses it to stay out of the resolver: look-ahead runs on the loop task in slices,
-// and a resolve that has documents to stream does not fit in one. B skips a spine that answers
-// false and leaves it to the foreground build, which already shows a popup while it works.
+// Background-B asks it to size its gates, NOT to decide whether to build: it must never be used
+// to skip a spine, because the bit is only ever set BY a build, which makes skipping
+// self-perpetuating — that was issue #211, where look-ahead died for whole books.
 bool spineResolved(const std::string& bookCachePath, int spineIndex);
 
 // Most footnote-shaped links one spine may contribute in a single pass. 8 bytes each, so the
@@ -78,6 +79,45 @@ constexpr size_t MAX_TARGETS_PER_SPINE = 128;
 // whose anchor does not exist) is simply absent; there is no negative caching, because "not
 // found this time" and "this book has no such note" are not the same statement.
 bool resolveSpine(Epub& epub, int spineIndex, const std::string& bankedHtmlPath = {});
+
+// The same work, resumable. resolveSpine() above is this class run to completion in one call.
+//
+// The resolve runs on the loop task from inside a section build, so it cannot be allowed to take
+// however long the book feels like: a 200 KB chapter and a chapter with a hundred callers into a
+// fat rearnotes document must both stay responsive. step() therefore does AT MOST one
+// STREAM_CHUNK_BYTES chunk of one document, or one bookkeeping transition, and returns — the
+// caller decides how many to run before yielding (Section spends its slice budget on them, the
+// same way it does on the layout parse). Nothing here measures time, which also makes the
+// slicing deterministic to test.
+//
+// Preemption is safe at any point. The store is only ever written between beginAppend() and
+// commit(), and the destructor rolls a half-finished append back, so a resolver torn down
+// mid-document (the reader turned a page, Background-B handed its buffer back) leaves the store
+// exactly as complete as it found it. The spine's resolved bit is set only by a pass that ran
+// to Done, so an abandoned one simply starts again next time.
+class Resolver {
+ public:
+  enum class Step : uint8_t { More, Done, Failed };
+
+  Resolver();
+  ~Resolver();
+  Resolver(const Resolver&) = delete;
+  Resolver& operator=(const Resolver&) = delete;
+
+  // Prepares the pass. `arena`, when it has room, backs the inflate ring and read buffer of any
+  // note document that has to come out of the ZIP — worth passing from a build that owns one,
+  // since a sliced resolve would otherwise hold that ring on the heap across page renders.
+  // False means the pass could not even start (OOM); the store is untouched.
+  bool begin(Epub& epub, int spineIndex, const std::string& bankedHtmlPath = {}, BuildArena* arena = nullptr);
+
+  // One bounded unit of work. More = call again, Done = the spine is resolved and its bit set,
+  // Failed = the pass gave up and rolled back (the caller may retry later).
+  Step step();
+
+ private:
+  struct State;
+  std::unique_ptr<State> state_;
+};
 
 // Disk-backed lookup used during a section build. Holds NOTHING but an open read handle: the
 // sorted index is binary-searched in the file itself, and the text is read on a hit.

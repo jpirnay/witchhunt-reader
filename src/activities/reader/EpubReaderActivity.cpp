@@ -173,6 +173,19 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 #ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
+// Added to the free-heap floor (either path) for a target that still owes the inline-footnote
+// resolve. That pass holds a SAX parser (~9 KB), a 1 KB stream chunk and the store's index on the
+// HEAP for as long as it runs — and because it runs in slices, that is across every page render
+// in between, not for one transient moment. (Its one big allocation, the inflate ring for an
+// un-banked note document, comes out of the build's arena instead; see DocStream::open.)
+// Deliberately smaller than the ~14 KB the pass wants: the floors above already carry reserve,
+// and the reading steady state is ~51 KB free (device trace, issue #211), so a bigger number
+// would push the gate out of reach and re-lose the look-ahead it exists to protect. A resolve
+// that still cannot fit fails cleanly — the build is discarded and the foreground rebuilds the
+// spine released, where it has ~52 KB more to work with.
+#ifndef BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES
+#define BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES (8 * 1024)
+#endif
 
 // Quiet period after the last page reached the screen before B may take the buffer. B's borrow
 // costs a page's AA if the reader turns during it, and a preempted slice is wasted work — so
@@ -246,12 +259,29 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
 #endif
 // Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
-// so here the sum is correct). Same value as Background-B's BG_BUILD_EXTRACT_BASE_HEAP_BYTES and
-// for the same reason — both gate an extract that runs heap-backed with the secondary framebuffer
-// resident, which is the one situation the 30 KB was measured in. Kept as its own name rather than
-// reusing B's so the two can diverge without silently retuning each other.
+// so here the sum is correct). Kept as its own name rather than reusing Background-B's
+// BG_BUILD_EXTRACT_BASE_HEAP_BYTES so the two can diverge without silently retuning each other —
+// and they have: B reaches its extract from the borrow-first path, this one from a page turn.
+//
+// 30 -> 50 KB (2026-09-01), device-measured on Small Gods spine 1 — the whole book in one
+// 583991-byte entry — which the 30 KB version admitted to a resident build that could not
+// possibly finish. The trace, from the gate to the abort ~170 ms later:
+//
+//   gate      free=71592  (floor was 67584: the CSS base, since 30720 + 32768 = 63488 lost the max)
+//   start     free=60396  -11196  activity/section/popup before the build begins
+//   setup     free=56648   -3748  CSS index load
+//   abort     free=19924  -36724  ZipFile + read buffer + the 32768 inflate ring
+//
+// So the ring is only two thirds of what the extract phase costs from here; the other ~18.9 KB is
+// fixed overhead the base is meant to cover, and on top of that the build has to stay above
+// RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES (30 KB) or it aborts anyway. 18.9 + 30 = 48.9 KB, so 50
+// with a little margin. Note what this does NOT change: with the ring capped at 32 KB the base
+// only binds for large entries — a few-KB chapter still floors at the flat 60/66 KB above and
+// still builds in place. What it changes is that a whole-book-in-one-spine entry now goes
+// straight to the released path instead of paying ~1.4 s for setup, abort, cache clear and a
+// second setup to get there.
 #ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
-#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)
+#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (50 * 1024)
 #endif
 // CSS books need more margin to build in place: the parse resolves embedded styles, which
 // self-degrade below the runtime CSS-resolve floor (CSS_MIN_FREE_HEAP_FOR_CSS ≈ 40 KB). Since
@@ -899,18 +929,18 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
   // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
   // little heap for Section::heapAllowsEmbeddedStyle()).
   static constexpr const char* kBStateNames[] = {"probe", "waitheap", "building", "settled"};
-  LOG_INF(
-      "ERS",
-      "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu state=%s spine=%d css=%d borrow=%d preempt=%u | "
-      "preReady=%d buildPct=%d free=%lu contig=%lu",
-      static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
-      static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
-      kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
-      lastRenderStats.embeddedStyle ? 1 : 0, backgroundBorrowActive_ ? 1 : 0,
-      static_cast<unsigned>(backgroundPreemptCount_),
-      (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
-      static_cast<unsigned long>(esp_get_free_heap_size()),
-      static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  LOG_INF("ERS",
+          "BG work: A runs=%lu completes=%lu | B runs=%lu completes=%lu | C runs=%lu completes=%lu state=%s spine=%d "
+          "css=%d borrow=%d preempt=%u | preReady=%d buildPct=%d free=%lu contig=%lu",
+          static_cast<unsigned long>(bgCounters_.aRuns), static_cast<unsigned long>(bgCounters_.aCompletes),
+          static_cast<unsigned long>(bgCounters_.bRuns), static_cast<unsigned long>(bgCounters_.bCompletes),
+          static_cast<unsigned long>(bgCounters_.cRuns), static_cast<unsigned long>(bgCounters_.cCompletes),
+          kBStateNames[static_cast<uint8_t>(backgroundBuildState_)], backgroundBuildSpineIndex_,
+          lastRenderStats.embeddedStyle ? 1 : 0, backgroundBorrowActive_ ? 1 : 0,
+          static_cast<unsigned>(backgroundPreemptCount_),
+          (preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex) ? 1 : 0, backgroundBuildPercent_,
+          static_cast<unsigned long>(esp_get_free_heap_size()),
+          static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("idle_5s");
 #endif
 }
@@ -1094,6 +1124,7 @@ void EpubReaderActivity::resetBackgroundBuild() {
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
   backgroundBuildInflatedSize_ = 0;
+  backgroundBuildNeedsResolve_ = false;
   backgroundBuildGateCheckMs_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
   backgroundBuildPercent_ = -1;
@@ -1287,18 +1318,21 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         backgroundWindowPagesBuilt_ += backgroundSection_->pageCount;  // already-built runway counts toward the budget
         backgroundSection_.reset();
         backgroundBuildState_ = BackgroundBuildState::Settled;
-      } else if (getEffectiveInlineFootnotePreviews() &&
-                 !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine)) {
-        // This spine still owes the resolver work: its links have never been scanned, so a build
-        // of it would have to scan the document and stream every note file it points at, inside
-        // ONE loop-task slice. Look-ahead is not worth a stall the reader can feel mid-page.
-        // Leave the spine to the foreground build, which does the same work behind the "Indexing"
-        // popup, and move the cursor on. Costs the look-ahead exactly once per chapter with
-        // notes: the foreground build sets the bit, and B pre-builds it freely from then on.
-        LOG_DBG("ERS", "Background build spine=%d skipped: footnote previews not resolved yet", targetSpine);
-        backgroundSection_.reset();
-        backgroundBuildState_ = BackgroundBuildState::Settled;
       } else {
+        // Does this spine still owe the footnote resolver? Its build then runs one extra pass
+        // before the layout parse — a SAX scan of the extracted XHTML, plus a stream of any note
+        // document it points at that is not banked yet — which FootnotePreviews::Resolver spreads
+        // across slices like any other build work.
+        //
+        // B used to refuse such a spine outright and leave it to the foreground, back when that
+        // pass ran to completion inside one slice. The refusal was self-perpetuating: the
+        // resolved bit is only ever set BY a build, and the only spine the foreground ever builds
+        // is the one the reader just entered, so every subsequent chapter stayed unresolved, B
+        // refused all of them, and look-ahead was dead for the whole book (issue #211, regression
+        // in 2.24). The flag no longer gates the build — it only buys the pass the heap it holds
+        // across those slices, and a resolve that fails anyway is discarded below, not cached.
+        backgroundBuildNeedsResolve_ =
+            getEffectiveInlineFootnotePreviews() && !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine);
         // The inflate ring is sized to the entry, so the extraction heap gate needs the
         // uncompressed size (one central-dir scan, once per target spine).
         backgroundBuildInflatedSize_ = 0;
@@ -1347,8 +1381,12 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       // foreground draws mid-build pages out of C's own progress, so blocking C on a pending
       // foreground draw deadlocks: the page is never built, so the draw stays pending forever.)
       const bool inputQueued = CooperativeAbort::shouldAbortLongTask();
+      // A build that still owes the footnote resolve allocates that pass out of the heap even
+      // when everything else it does lives in the borrowed arena, so it needs the margin on top.
+      const uint32_t borrowFreeFloor =
+          BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES + (backgroundBuildNeedsResolve_ ? BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES : 0);
       if (!inputQueued && (now - lastActivityMs) >= BG_BUILD_BORROW_QUIET_MS &&
-          esp_get_free_heap_size() >= BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES &&
+          esp_get_free_heap_size() >= borrowFreeFloor &&
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
               BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
           beginBackgroundBorrow()) {
@@ -1360,7 +1398,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       const uint32_t freeHeap = esp_get_free_heap_size();
       const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
       const uint32_t bgFreeFloor =
-          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
+          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) +
+          (backgroundBuildNeedsResolve_ ? BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES : 0);
       const uint32_t bgContigFloor = std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024);
       if (freeHeap < bgFreeFloor || contigHeap < bgContigFloor) {
         HEAP_GATE("bgB_waitheap", false, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
@@ -1479,13 +1518,17 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
-        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded()) {
-          // Memory ran short mid-parse: either pages are missing (truncated) or CSS
-          // lookups were skipped (styles silently absent from the cached pages). Don't
-          // hand either to the foreground: its blocking path runs with the secondary
-          // buffer released (~52 KB more headroom) and will likely build it clean.
-          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine,
-                  backgroundSection_->isTruncatedCache() ? "truncated" : "css-degraded");
+        if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
+            backgroundSection_->isFootnotePreviewsUnresolved()) {
+          // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
+          // (styles silently absent from the cached pages), or the footnote resolve could not
+          // complete (markers left plain in a cache keyed "previews on"). Don't hand any of them
+          // to the foreground: its blocking path runs with the secondary buffer released (~52 KB
+          // more headroom) and will likely build it clean.
+          const char* reason = backgroundSection_->isTruncatedCache()       ? "truncated"
+                               : backgroundSection_->isCssLowHeapDegraded() ? "css-degraded"
+                                                                            : "footnotes unresolved";
+          LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine, reason);
           backgroundSection_->clearCache();
           backgroundSection_.reset();
         } else {
@@ -1604,7 +1647,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // stepBackgroundSectionBuild for the full rationale).
   renderer.clearFontAccumulation();
 #if DEBUG_BACKGROUND_WORK
-  bgCounters_.bRuns++;
+  bgCounters_.cRuns++;
 #endif
   Section::BuildStep step;
   {
@@ -1656,7 +1699,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // Done & clean: the on-disk LUT is written and `section` is now a complete cache. Resolve the
   // navigation target now that the final page count is known, then transition to reading.
 #if DEBUG_BACKGROUND_WORK
-  bgCounters_.bCompletes++;
+  bgCounters_.cCompletes++;
 #endif
   LOG_INF("ERS", "Background-C spine=%d complete: %u pages", currentSpineIndex, section->pageCount);
   epub->persistImageManifest();

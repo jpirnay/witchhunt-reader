@@ -109,8 +109,12 @@ void HalPowerManager::enterWaveformWait() {
   // concurrently — don't downclock. Our own lock (the render task's per-render
   // Lock) is fine: this task is about to sleep and only resumes after
   // exitWaveformWait() restores the clock.
-  const bool foreignLock =
-      currentLockMode.load(std::memory_order_relaxed) != None && lockOwnerTask_ != xTaskGetCurrentTaskHandle();
+  //
+  // More than one holder means at least one of them is not us, whoever lockOwnerTask_ names —
+  // that is the build-slice case, where the loop task is laying out pages while this task waits
+  // on a waveform. Treat it as foreign: never downclock on a maybe.
+  const bool foreignLock = currentLockMode.load(std::memory_order_relaxed) != None &&
+                           (lockCount_ > 1 || lockOwnerTask_ != xTaskGetCurrentTaskHandle());
   // Already at the low clock from idle power saving — leave ownership of the
   // restore with setPowerSaving(); don't double-track it here.
   if (!foreignLock && !isLowPower && setCpuFrequencyMhz(LOW_POWER_FREQ)) {
@@ -412,25 +416,31 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
 
 HalPowerManager::Lock::Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);
-  // Current limitation: only one lock at a time
-  if (powerManager.currentLockMode.load(std::memory_order_relaxed) != None) {
-    LOG_ERR("PWR", "Lock already held, ignore");
-    valid = false;
+  // Counted, not exclusive: every Lock holds. See lockCount_ for what the old single-slot version
+  // silently did to the second holder.
+  if (powerManager.lockCount_ < UINT8_MAX) {
+    powerManager.lockCount_++;
+    valid = true;
   } else {
+    LOG_ERR("PWR", "Lock count overflow; this lock holds nothing");  // cannot happen; not silent if it does
+    valid = false;
+  }
+  if (valid && powerManager.lockCount_ == 1) {
+    // First holder owns the flag and is the task enterWaveformWait() compares against.
     powerManager.currentLockMode.store(NormalSpeed, std::memory_order_relaxed);
     powerManager.lockOwnerTask_ = xTaskGetCurrentTaskHandle();
-    valid = true;
   }
   xSemaphoreGive(powerManager.modeMutex);
   if (valid) {
-    // Immediately restore normal CPU frequency if currently in low-power mode
+    // Immediately restore normal CPU frequency if currently in low-power mode. Unconditional, not
+    // just for the first holder: a nested lock wants full speed as much as the outer one does.
     powerManager.setPowerSaving(false);
   }
 }
 
 HalPowerManager::Lock::~Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);
-  if (valid) {
+  if (valid && powerManager.lockCount_ > 0 && --powerManager.lockCount_ == 0) {
     powerManager.currentLockMode.store(None, std::memory_order_relaxed);
     powerManager.lockOwnerTask_ = nullptr;
   }

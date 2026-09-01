@@ -392,6 +392,11 @@ class EpubReaderActivity final : public Activity {
   // Uncompressed size of the target spine's XHTML (fetched once in the Probe step).
   // Sizes the inflate ring share of the extraction heap gate.
   size_t backgroundBuildInflatedSize_ = 0;
+  // True when the target spine's footnote links have never been scanned, so its build will run
+  // the inline-preview resolve before laying out a line. Decided once in the Probe step; the pass
+  // is sliced like the rest of the build, so all this buys is the BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES
+  // the resolver holds on the heap while it runs.
+  bool backgroundBuildNeedsResolve_ = false;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
   // Times a build of backgroundBuildSpineIndex_ was preempted (reader needed the borrowed
@@ -465,8 +470,15 @@ class EpubReaderActivity final : public Activity {
   struct BackgroundWorkCounters {
     uint32_t aRuns = 0;       // pre-render pass entered with a page to render
     uint32_t aCompletes = 0;  // pre-render produced a ready next page
-    uint32_t bRuns = 0;       // section-build step ran a slice of work
-    uint32_t bCompletes = 0;  // section build reached Done
+    uint32_t bRuns = 0;       // Background-B (look-ahead) ran a build slice
+    uint32_t bCompletes = 0;  // Background-B build reached Done
+    // Background-C (the section the reader is waiting on) is counted SEPARATELY. It used to
+    // share B's pair, which made the debug line unreadable exactly when it mattered: a long C
+    // build over a big spine printed "B runs=211" while B's own state said probe/spine=-1, so
+    // the one counter you would check to see whether look-ahead is working was being driven by
+    // something else entirely.
+    uint32_t cRuns = 0;
+    uint32_t cCompletes = 0;
   };
   BackgroundWorkCounters bgCounters_;
   unsigned long lastBgDebugLogMs_ = 0UL;
