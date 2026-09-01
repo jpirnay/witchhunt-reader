@@ -39,6 +39,10 @@ class Section {
   // it into the store, so those markers stay plain and nothing would ever rebuild them.
   // Background callers discard such a result and leave the spine to the foreground path.
   bool footnotePreviewsUnresolved_ = false;
+  // Set by the last build when an image was dropped to alt text because the heap gate refused
+  // its header read. The pages are cached under the same property hash as a complete build, so
+  // the missing image would otherwise be permanent — background callers discard instead.
+  bool imageHeaderDegraded_ = false;
 
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
@@ -243,6 +247,9 @@ class Section {
   // notes are missing from the store while the cache claims previews are on. Only meaningful
   // right after a build.
   bool isFootnotePreviewsUnresolved() const { return footnotePreviewsUnresolved_; }
+  // True when the last build dropped an image to alt text on a heap refusal — transient, unlike
+  // an unreadable image. Only meaningful right after a build.
+  bool isImageHeaderDegraded() const { return imageHeaderDegraded_; }
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced
   // caller (Background-B) abort early instead of finishing a build it will discard. False when

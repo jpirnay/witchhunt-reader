@@ -1519,15 +1519,20 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
         if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
-            backgroundSection_->isFootnotePreviewsUnresolved()) {
+            backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
-          // (styles silently absent from the cached pages), or the footnote resolve could not
-          // complete (markers left plain in a cache keyed "previews on"). Don't hand any of them
-          // to the foreground: its blocking path runs with the secondary buffer released (~52 KB
-          // more headroom) and will likely build it clean.
-          const char* reason = backgroundSection_->isTruncatedCache()       ? "truncated"
-                               : backgroundSection_->isCssLowHeapDegraded() ? "css-degraded"
-                                                                            : "footnotes unresolved";
+          // (styles silently absent from the cached pages), the footnote resolve could not
+          // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
+          // to alt text because its header read was refused. Don't hand any of them to the
+          // foreground: its blocking path runs with the secondary buffer released (~52 KB more
+          // headroom) and will likely build it clean.
+          //
+          // B is the caller most exposed to the last two: it builds with the framebuffer
+          // borrowed, which is exactly when the largest free block is small.
+          const char* reason = backgroundSection_->isTruncatedCache()               ? "truncated"
+                               : backgroundSection_->isCssLowHeapDegraded()         ? "css-degraded"
+                               : backgroundSection_->isFootnotePreviewsUnresolved() ? "footnotes unresolved"
+                                                                                    : "image degraded";
           LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine, reason);
           backgroundSection_->clearCache();
           backgroundSection_.reset();

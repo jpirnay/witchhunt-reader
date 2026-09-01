@@ -371,6 +371,8 @@ class ChapterHtmlSlimParser final : public Print {
   int progressStepPercent = 0;
   bool progressUiEnabled = true;
   bool streamFailed = false;
+  // Set when the heap gate refused an image-header read (see imageHeaderDegraded()).
+  bool imageHeaderSkippedForHeap = false;
   uint32_t streamStartTimeMs = 0;
 
   // Footnote link tracking
@@ -529,6 +531,11 @@ class ChapterHtmlSlimParser final : public Print {
   bool setup(size_t totalInflatedSize);
   bool finalize();
   [[nodiscard]] bool streamSucceeded() const { return !streamFailed; }
+  // True when at least one image was dropped to alt text because the heap gate refused its
+  // header read — a transient condition, unlike an unreadable or unsupported image. The pages
+  // are usable but incomplete, and the caller must not keep them: see the latch site in
+  // startElement's image branch.
+  [[nodiscard]] bool imageHeaderDegraded() const { return imageHeaderSkippedForHeap; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
 
   // Print interface — fed by Epub::readItemContentsToStream.

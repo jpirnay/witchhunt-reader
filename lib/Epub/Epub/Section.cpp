@@ -861,6 +861,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   this->lut.clear();
   cssLowHeapDegraded_ = false;
   footnotePreviewsUnresolved_ = false;
+  imageHeaderDegraded_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1321,6 +1322,12 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
           static_cast<uint32_t>((esp_timer_get_time() - tFin) / 1000));
 #endif
   st.parserStreamOk = st.visitor->streamSucceeded();
+  // Latch a heap-degraded image before the visitor is torn down. Same contract as the CSS and
+  // footnote latches: the cache is written either way, but a background caller can throw it away
+  // and leave the spine to a build with more headroom.
+  if (st.visitor->imageHeaderDegraded()) {
+    imageHeaderDegraded_ = true;
+  }
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips

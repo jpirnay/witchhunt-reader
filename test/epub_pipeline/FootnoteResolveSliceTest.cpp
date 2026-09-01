@@ -26,6 +26,7 @@
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
 
@@ -45,102 +46,6 @@ std::string freshDir(const std::string& tag) {
   fs::create_directories(dir);
   return dir.string();
 }
-
-// --- minimal STORED-only zip writer -------------------------------------------------------
-
-class StoredZipWriter {
- public:
-  void add(const std::string& name, const std::string& data) { entries_.push_back({name, data, 0}); }
-
-  void write(const std::string& path) {
-    std::string out;
-    for (Entry& e : entries_) {
-      e.localOffset = static_cast<uint32_t>(out.size());
-      appendLocalHeader(out, e);
-      out += e.data;
-    }
-    const uint32_t centralStart = static_cast<uint32_t>(out.size());
-    for (const Entry& e : entries_) {
-      appendCentralHeader(out, e);
-    }
-    const uint32_t centralSize = static_cast<uint32_t>(out.size()) - centralStart;
-    appendEocd(out, centralStart, centralSize, static_cast<uint16_t>(entries_.size()));
-    std::ofstream f(path, std::ios::binary);
-    f.write(out.data(), static_cast<std::streamsize>(out.size()));
-  }
-
- private:
-  struct Entry {
-    std::string name;
-    std::string data;
-    uint32_t localOffset;
-  };
-
-  static void put16(std::string& out, const uint16_t v) {
-    out.push_back(static_cast<char>(v & 0xFF));
-    out.push_back(static_cast<char>((v >> 8) & 0xFF));
-  }
-  static void put32(std::string& out, const uint32_t v) {
-    for (int i = 0; i < 4; ++i) out.push_back(static_cast<char>((v >> (8 * i)) & 0xFF));
-  }
-  // CRC-32 is checked by nothing on the read path here, but a zero would be a lie in a file we
-  // hand to a real reader, so compute it properly.
-  static uint32_t crc32(const std::string& data) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (const unsigned char c : data) {
-      crc ^= c;
-      for (int k = 0; k < 8; ++k) crc = (crc >> 1) ^ (0xEDB88320u & (~(crc & 1u) + 1u));
-    }
-    return ~crc;
-  }
-  static void appendLocalHeader(std::string& out, const Entry& e) {
-    put32(out, 0x04034B50);
-    put16(out, 20);  // version needed
-    put16(out, 0);   // flags
-    put16(out, 0);   // method: stored
-    put16(out, 0);   // time
-    put16(out, 0);   // date
-    put32(out, crc32(e.data));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put16(out, static_cast<uint16_t>(e.name.size()));
-    put16(out, 0);
-    out += e.name;
-  }
-  static void appendCentralHeader(std::string& out, const Entry& e) {
-    put32(out, 0x02014B50);
-    put16(out, 20);  // version made by
-    put16(out, 20);  // version needed
-    put16(out, 0);
-    put16(out, 0);  // method: stored
-    put16(out, 0);
-    put16(out, 0);
-    put32(out, crc32(e.data));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put16(out, static_cast<uint16_t>(e.name.size()));
-    put16(out, 0);  // extra
-    put16(out, 0);  // comment
-    put16(out, 0);  // disk
-    put16(out, 0);  // internal attrs
-    put32(out, 0);  // external attrs
-    put32(out, e.localOffset);
-    out += e.name;
-  }
-  static void appendEocd(std::string& out, const uint32_t centralStart, const uint32_t centralSize,
-                         const uint16_t entryCount) {
-    put32(out, 0x06054B50);
-    put16(out, 0);  // disk number
-    put16(out, 0);  // disk with central dir
-    put16(out, entryCount);
-    put16(out, entryCount);
-    put32(out, centralSize);
-    put32(out, centralStart);
-    put16(out, 0);  // comment length
-  }
-
-  std::vector<Entry> entries_;
-};
 
 // --- fixture generation --------------------------------------------------------------------
 
@@ -192,7 +97,7 @@ std::string makeBook(const std::string& dir, const int noteCount, const size_t c
       "<rootfiles><rootfile full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n"
       "</container>\n";
 
-  StoredZipWriter zip;
+  test_zip::StoredZipWriter zip;
   zip.add("mimetype", "application/epub+zip");
   zip.add("META-INF/container.xml", container);
   zip.add("content.opf", opf);
@@ -220,7 +125,7 @@ struct Chapter {
 
 std::string makeSharedNotesBook(const std::string& dir, const std::vector<Chapter>& chapters) {
   const std::string notesDocName = "notes.xhtml";
-  StoredZipWriter zip;
+  test_zip::StoredZipWriter zip;
   std::string manifest;
   std::string spine;
   std::string notesBodies;

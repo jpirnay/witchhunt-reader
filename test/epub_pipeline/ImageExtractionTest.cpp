@@ -21,7 +21,10 @@
 
 #include "BuildArena.h"
 #include "Epub.h"
+#include "Epub/Section.h"
 #include "Epub/blocks/ImageBlock.h"
+#include "GfxRenderer.h"
+#include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
 
@@ -201,4 +204,114 @@ TEST_F(LargeImageFixture, PlaceholderIsSuppressedByForceLoad) {
       << "the user asked for it explicitly";
   // (The other suppressor — an existing .pxc pixel cache — is not reachable from here: the cache
   // path is derived internally from the tone filter id and is not exposed for a test to create.)
+}
+
+// --- heap-degraded image headers -------------------------------------------------------------
+//
+// When neither the img tag nor the manifest can supply an image's dimensions, the parser reads
+// the header straight out of the ZIP — behind a heap gate. A refusal drops the image to alt text
+// and the section is then CACHED that way, under the same property hash a complete build would
+// use, so the missing image is permanent. Background-B is the caller most exposed to it: it
+// builds with the framebuffer borrowed, which is exactly when the largest free block is small.
+//
+// The distinction that matters is that the same VISIBLE outcome (alt text) has two causes. An
+// unreadable or absent image is alt text for good and caching that is right; a heap refusal is a
+// statement about one moment and must not be kept. These tests pin both sides.
+
+struct ImageHeapGateFixture : testing::Test {
+  fs::path work;
+  std::string cacheDir;
+  uint32_t savedHeap = 0;
+
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("epub_imgheap_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+    cacheDir = (work / "cache").string();
+    fs::create_directories(cacheDir);
+    savedHeap = ESP.getFreeHeap();
+  }
+  void TearDown() override {
+    ESP.setFreeHeap(savedHeap);
+    fs::remove_all(work);
+  }
+
+  // A one-chapter book whose <img> has no width/height and points at an entry that is NOT in the
+  // archive. That is the only shape which reaches the heap gate on the host: an image the
+  // manifest can resolve never gets there, and the manifest resolves anything whose header sits
+  // in the first 4 KB.
+  std::string makeBookWithUnresolvableImage() {
+    test_zip::StoredZipWriter zip;
+    zip.add("mimetype", "application/epub+zip");
+    zip.add("META-INF/container.xml",
+            "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+            "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
+            "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+    zip.add("content.opf",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+            "version=\"3.0\" unique-identifier=\"id\">\n<metadata "
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">img</dc:identifier>"
+            "<dc:title>Img</dc:title><dc:language>en</dc:language></metadata>\n<manifest>\n<item id=\"c\" "
+            "href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n</manifest>\n<spine><itemref "
+            "idref=\"c\"/></spine>\n</package>\n");
+    zip.add("chapter.xhtml",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+            "<head><title>C</title></head><body>\n<p>Before the image.</p>\n"
+            "<img src=\"absent.png\" alt=\"alt text stands in\"/>\n<p>After the image.</p>\n</body></html>\n");
+    const std::string path = (work / "img.epub").string();
+    zip.write(path);
+    return path;
+  }
+
+  bool buildAndReportDegraded(const std::string& bookPath, const std::string& cache) {
+    auto epub = std::make_shared<Epub>(bookPath, cache);
+    EXPECT_TRUE(epub->load(true));
+    Section::BuildParams params;
+    params.viewportWidth = 480;
+    params.viewportHeight = 800;
+    params.lineCompression = 1.0f;
+    GfxRenderer renderer;
+    Section section(epub, 0, renderer);
+    EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+    return section.isImageHeaderDegraded();
+  }
+};
+
+TEST_F(ImageHeapGateFixture, HeapRefusalIsLatchedSoTheCacheCanBeDiscarded) {
+  const std::string book = makeBookWithUnresolvableImage();
+
+  // Between the text-layout hard abort (9 KB, below which the parse gives up entirely) and
+  // EHP_IMAGE_HEADER_MIN_FREE_HEAP (16 KB): the parse runs to completion, and the header read is
+  // refused before it is attempted. That ordering is the point of the ladder — an image is given
+  // up long before the chapter is.
+  ESP.setFreeHeap(12 * 1024);
+  EXPECT_TRUE(buildAndReportDegraded(book, (work / "lowheap").string()))
+      << "a heap refusal must be latched, or the alt-text page is cached forever";
+}
+
+TEST_F(ImageHeapGateFixture, AnImageThatSimplyCannotBeReadIsNotLatched) {
+  const std::string book = makeBookWithUnresolvableImage();
+
+  // Ample heap: the read is attempted and fails on its own merits (the entry does not exist).
+  // Same alt text on screen, but nothing transient about it — caching that is correct, so the
+  // build must NOT be flagged for discard or the spine would rebuild forever.
+  ESP.setFreeHeap(200 * 1024);
+  EXPECT_FALSE(buildAndReportDegraded(book, (work / "fullheap").string()))
+      << "an unreadable image is alt text for good; flagging it would cause endless rebuilds";
+}
+
+TEST_F(ImageHeapGateFixture, AResolvableImageIsNeverFlagged) {
+  ESP.setFreeHeap(200 * 1024);
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_png_images.epub", cacheDir);
+  ASSERT_TRUE(epub->load(true));
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  GfxRenderer renderer;
+  Section section(epub, 5, renderer);  // chapter with an <img> carrying no dimensions
+  ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  EXPECT_FALSE(section.isImageHeaderDegraded());
+  EXPECT_GT(section.pageCount, 0);
 }
