@@ -350,6 +350,13 @@ void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.
 
 void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
 
+bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFrame(); }
+
+void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.displayGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);
+}
+
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
   // Give the driver a real BW base when it actually reads one.

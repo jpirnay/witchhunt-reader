@@ -3151,6 +3151,17 @@ void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuff
 
 void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFix); }
 
+bool GfxRenderer::supportsGrayFrame() const { return display.supportsGrayFrame(); }
+
+void GfxRenderer::displayGrayscaleFrame(const HalDisplay::RefreshMode mode) const {
+  const HalDisplay::RefreshMode effectiveMode = consumeRefreshOverride(mode);
+  display.displayGrayscaleFrame(effectiveMode, fadingFix);
+  // Same contract as triggerDisplay(): the display swapped buffers, so the
+  // cached pointer must follow or every later draw writes to the frame now on
+  // the panel.
+  frameBuffer = display.getFrameBuffer();
+}
+
 void GfxRenderer::freeBwBufferChunks() {
   for (auto& bwBufferChunk : bwBufferChunks) {
     if (bwBufferChunk) {

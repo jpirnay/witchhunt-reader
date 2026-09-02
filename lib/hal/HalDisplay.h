@@ -125,6 +125,16 @@ class HalDisplay {
   void cleanupGrayscaleWithPreviousBuffer();
 
   void displayGrayBuffer(bool turnOffScreen = false);
+  // True when the panel can show a B/W base and its grayscale planes as ONE
+  // waveform. Where it can, the two-push flow (base, then a grey overlay) is
+  // not merely slower but wrong: a self-normalizing grey column expects the
+  // pixel it drives not to have been driven already.
+  bool supportsGrayFrame() const;
+  // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
+  // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
+  // a plain displayBuffer() on a panel that cannot, so callers need no branch of
+  // their own beyond deciding whether to stage planes at all.
+  void displayGrayscaleFrame(RefreshMode refreshMode, bool turnOffScreen = false);
 
   // Returns true when the device is an X3 (X4 returns false).
   bool deviceIsX3() const;

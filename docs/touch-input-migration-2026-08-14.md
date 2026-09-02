@@ -1216,6 +1216,46 @@ portrait — the same class of bug as issue #87. `GestureEventManager` reads
 switched from the live orientation to the held one: every caller of it is on the
 loop task, so it had the same exposure.
 
+### 8.9b Single-push grayscale (T5S3)
+
+SDK PR #51 gives the ED047TC2 a fast bank whose grey columns **self-normalize**:
+each grey drive saturates at the white rail, then walks down to its level. That
+is only correct when nothing has driven the pixel first — i.e. under one push.
+
+Adopting the panel without adopting that path produced a visible fault: the B/W
+base drove the anti-aliased fringes BLACK, the overlay then saturated them to
+WHITE (a flash), and they settled too light, so the anti-aliasing read as having
+vanished. Reported from hardware as "three updates instead of two".
+
+The reader now has a third AA strategy beside inline (X4) and deferred (X3),
+chosen on `renderer.supportsGrayFrame()`. Its one structural difference is
+**order**: the planes are staged BEFORE the page is rendered, not after.
+
+    warm image caches            (unchanged, and what makes this legal)
+    stage LSB plane, stage MSB   <- was after the page
+    clearScreen
+    render page + status bar
+    displayGrayscaleFrame(mode)  <- ONE waveform
+
+Both the planes and the page use the framebuffer as scratch, so whichever runs
+last is the one left in it — and `displayGrayFrame()` needs the intact B/W page
+there. The reorder costs nothing: three renders happen either way, and it removes
+the whole second refresh plus the restore write.
+
+Two consequences worth knowing:
+
+* `aaPreemptedByNavigation()` is consulted earlier than the inline path consults
+  it. `stageGrayscalePlanes()` still re-checks between planes, so a turn arriving
+  during the page render aborts the pass; it just cannot un-stage a plane already
+  written, which costs nothing — an unused staged plane is never displayed.
+* `completeDisplay()` after a single push is a no-op (`syncPendingAsync()` with
+  nothing pending), so the existing trigger/complete structure needed no change.
+
+`FreeInkDisplay::displayGrayscaleFrame()` was missing `swapBuffers()`, which
+`displayBuffer()` does. Fixed in the SDK branch: it displays the frame, so the
+buffer just shown has to become the previous one, or every consumer that tracks
+what is on the panel works from the page before this one.
+
 ### 8.10 The reading light
 
 The SDK has carried `FrontlightManager` and a backlight entry in the T5S3 profile

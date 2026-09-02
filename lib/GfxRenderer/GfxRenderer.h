@@ -492,6 +492,61 @@ class GfxRenderer {
     return t;
   }
 
+  // True when the panel can show the B/W base and its grayscale planes as ONE
+  // waveform, i.e. when stageGrayscalePlanes() + displayGrayscaleFrame() is
+  // available instead of the base-then-overlay pair.
+  bool supportsGrayFrame() const;
+  // Display the framebuffer composed with the planes staged by
+  // stageGrayscalePlanes(), in one refresh. Resyncs the cached framebuffer
+  // pointer afterwards for the same reason triggerDisplay() does: the display
+  // swaps buffers, and every later draw must target the new write buffer.
+  void displayGrayscaleFrame(HalDisplay::RefreshMode mode) const;
+
+  // Render both grayscale planes and stage them in the controller, WITHOUT
+  // displaying anything.
+  //
+  // The single-push counterpart of renderGrayscalePlanesSequential(), and it
+  // must run BEFORE the B/W page render rather than after it — which is the
+  // whole difference. Both use the framebuffer as scratch, so whichever runs
+  // last is the one left in it, and displayGrayFrame() needs to find the intact
+  // B/W page there. Rendering the planes first costs nothing extra: the same
+  // three renders happen either way.
+  //
+  // Leaves the framebuffer holding the MSB plane, so the caller must clear it
+  // before drawing the page. Returns planesMs; display/restore stay zero because
+  // neither happens here.
+  template <typename RenderFn, typename AbortFn>
+  GrayscaleTimings stageGrayscalePlanes(RenderFn renderFn, AbortFn shouldAbort) {
+    GrayscaleTimings t;
+    const unsigned long t0 = millis();
+
+    clearScreen(0x00);
+    setRenderMode(GRAYSCALE_LSB);
+    renderFn(GRAYSCALE_LSB);
+    if (shouldAbort()) {
+      setRenderMode(BW);
+      t.planesMs = millis() - t0;
+      t.aborted = true;
+      return t;
+    }
+    copyGrayscaleLsbBuffers();
+
+    clearScreen(0x00);
+    setRenderMode(GRAYSCALE_MSB);
+    renderFn(GRAYSCALE_MSB);
+    if (shouldAbort()) {
+      setRenderMode(BW);
+      t.planesMs = millis() - t0;
+      t.aborted = true;
+      return t;
+    }
+    copyGrayscaleMsbBuffers();
+
+    setRenderMode(BW);
+    t.planesMs = millis() - t0;
+    return t;
+  }
+
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
   // each plane to the controller immediately after rendering it. No extra allocation
   // needed — the BW framebuffer is the scratch pad for both passes.

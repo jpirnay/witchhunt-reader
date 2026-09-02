@@ -4331,6 +4331,18 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
           (int32_t)heapAfter - (int32_t)heapBefore);
   logReaderMemSnapshot("prewarm_end");
 
+  // Single push beats both older strategies wherever the panel offers it: the
+  // page arrives complete in one waveform, with no intermediate B/W state and no
+  // second refresh. It also has to be chosen HERE rather than at display time,
+  // because it changes what happens before the page is even drawn.
+  //
+  // aaPreemptedByNavigation() is therefore consulted earlier than the inline
+  // path consults it. A turn that arrives during the (long) page render still
+  // aborts the pass — stageGrayscalePlanes() re-checks the predicate between
+  // planes — it just cannot un-render planes already staged, which costs
+  // nothing: an unused staged plane is never displayed.
+  const bool singlePushAaThisRender = aaEnabledForThisRender && renderer.supportsGrayFrame();
+
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
@@ -4338,6 +4350,35 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   pendingHalfRefreshAfterImagePage = false;
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
+
+  // Single-push AA: the planes are rendered BEFORE the page, not after it.
+  //
+  // Both use the framebuffer as scratch, so whichever runs last is the one left
+  // in it — and displayGrayscaleFrame() needs to find the intact B/W page there.
+  // Nothing is paid for the reorder: three renders happen either way. The image
+  // caches are already warm (warmImageCaches above), which is what makes the
+  // plane render legal this early.
+  bool singlePushPlanesStaged = false;
+  GfxRenderer::GrayscaleTimings singlePushGt;
+  if (singlePushAaThisRender) {
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    const int aaFontId = getEffectiveReaderFontId();
+    const Page* pagePtr = page.get();
+    bool planeAborted = false;
+    singlePushGt = renderer.stageGrayscalePlanes(
+        [&](GfxRenderer::RenderMode) {
+          if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+            return;
+          }
+          pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); });
+    singlePushPlanesStaged = !singlePushGt.aborted;
+    // stageGrayscalePlanes leaves the MSB plane in the framebuffer; the page
+    // render below needs a blank one.
+    renderer.clearScreen();
+  }
 
   logReaderMemSnapshot("before_bw_render");
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
@@ -4438,11 +4479,18 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
   }
-  const bool inlineAaThisRender = aaEnabledForThisRender && inlineAaAvailable && !aaPreempted;
+  const bool inlineAaThisRender =
+      aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable && !aaPreempted;
   // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
-  const bool deferredAaThisRender = aaEnabledForThisRender && !inlineAaAvailable;
+  const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
-  if (inlineAaThisRender) {
+  if (singlePushPlanesStaged) {
+    // Base and greys as ONE waveform. No triggerDisplay/completeDisplay split:
+    // there is nothing to overlap with, because the plane work already happened.
+    renderer.displayGrayscaleFrame(pageRefreshMode);
+    lastRenderStats.usedGrayscale = true;
+    lastRenderStats.textAntiAliasing = true;
+  } else if (inlineAaThisRender) {
     renderer.triggerDisplayAsync(pageRefreshMode);
   } else {
     renderer.triggerDisplay(pageRefreshMode);
@@ -4465,7 +4513,18 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingHalfRefreshAfterImagePage = true;
   }
 
-  if (inlineAaThisRender) {
+  if (singlePushAaThisRender) {
+    // Nothing to schedule and nothing to restore: the planes were staged before
+    // the page render and went out with it in one waveform. No deferred pass, so
+    // no second refresh for the idle loop to run and nothing for a page turn to
+    // preempt half-way.
+    LOG_DBG("ERS", "Single-push AA%s: planes=%lums display=%lums", singlePushPlanesStaged ? "" : " ABORTED",
+            singlePushGt.planesMs, tDisplay - tBwRender);
+    lastRenderStats.usedGrayscale = singlePushPlanesStaged;
+    lastRenderStats.textAntiAliasing = singlePushPlanesStaged;
+    lastRenderStats.phases = {
+        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, singlePushGt.planesMs, 0, 0, 0, millis() - t0};
+  } else if (inlineAaThisRender) {
     // Inline AA (X4): the BW waveform is still running from triggerDisplayAsync().
     // Render the grayscale planes now — the LSB plane lands inside the waveform
     // window, so after the wait only the LSB SPI write, the MSB plane and the
