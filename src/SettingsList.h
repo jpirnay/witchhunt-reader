@@ -123,23 +123,30 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // that — see the comment on BUTTON_ACTION.
   const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
                                                  StrId::STR_BTN_ACT_LIGHT_DIMMER};
+  // Narrower still, and correspondingly last: a warm/cool pair is a subset of
+  // the lit boards. Dropping these on a single-channel light leaves every value
+  // above untouched.
+  const std::vector<StrId> warmActionOptions = {StrId::STR_BTN_ACT_LIGHT_WARMER, StrId::STR_BTN_ACT_LIGHT_COOLER};
 
   // Prepend the per-button default action to the shared options list.
   // The option list is positional — index i is BUTTON_ACTION value i — so it must
   // name every action exactly once. Asserted because the failure mode is not a
   // crash but a silent misreading of every stored button and gesture mapping,
   // which would look like the settings screen forgetting things at random.
-  assert(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() ==
+  assert(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
+                 warmActionOptions.size() ==
              static_cast<size_t>(CrossPointSettings::BUTTON_ACTION_COUNT) &&
          "btnActionOptions must name every BUTTON_ACTION except BTN_DEFAULT, in enum order");
 
   const bool hasLight = Frontlight.present();
+  const bool hasWarmLight = hasLight && Frontlight.hasColorTemperature();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
     // Reserves for the light options whether or not this board has them: a hint
     // does not need to be exact, and three spare pointers cost less than a
     // condition that reads as dead code on every build without a frontlight.
-    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size());
+    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
+                   warmActionOptions.size());
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
     result.insert(result.end(), extraActionOptions.begin(), extraActionOptions.end());
@@ -148,6 +155,10 @@ inline std::vector<SettingInfo> buildSettingsList() {
     // It is a genuine runtime question on every board that has a light.
     if (hasLight) {
       result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
+    }
+    // cppcheck-suppress knownConditionTrueFalse ; see the hasLight check above.
+    if (hasWarmLight) {
+      result.insert(result.end(), warmActionOptions.begin(), warmActionOptions.end());
     }
     return result;
   };

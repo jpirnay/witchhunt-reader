@@ -608,9 +608,20 @@ class CrossPointSettings {
     //
     // Frontlight/backlight control. Global rather than reader-scoped: the light
     // is as wanted on the home screen as it is mid-page.
+    //
+    // TWO gated blocks, in NARROWING order — the warm pair needs a second LED
+    // channel that most lit boards do not have, so it is a strict subset of the
+    // block above and must come after it. Dropping the narrower block on a
+    // single-channel board then leaves the wider one's values untouched, which
+    // is the whole reason the gated actions sit at the end.
     BTN_LIGHT_TOGGLE,
     BTN_LIGHT_BRIGHTER,
     BTN_LIGHT_DIMMER,
+    // Colour temperature, on a warm/cool board only (X4 Pro). Brightness is the
+    // TOTAL light and warmth splits it between the two strings, so these shift
+    // the mix without changing how bright the page looks.
+    BTN_LIGHT_WARMER,
+    BTN_LIGHT_COOLER,
     BUTTON_ACTION_COUNT
   };
 
@@ -685,10 +696,11 @@ class CrossPointSettings {
   // Two things need it. The board-gated actions are dropped from the settings
   // screen's option list, so a stored value naming one would render blank and
   // could not be edited away; and an SD card moved from a board with a
-  // frontlight to one without carries exactly such values. The capability is
+  // frontlight to one without carries exactly such values. The capabilities are
   // passed in rather than queried so this stays free of the HAL and testable on
-  // the host.
-  static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight);
+  // the host. hasWarmLight is the narrower of the two: a board can have a light
+  // and no second warm channel, and then only the warmth pair goes.
+  static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight, bool hasWarmLight);
 
   // True for an action only the reader can carry out. Such an action must NOT be
   // consumed on another screen: doing so would swallow the input and shadow that

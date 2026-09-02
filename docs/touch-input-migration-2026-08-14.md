@@ -1142,6 +1142,13 @@ the rows that supersede it.
 
 ### 8.7 Two ordering rules that are easy to break
 
+**Board-gated actions come in NARROWING order.** There are two gated blocks now:
+the light (`BTN_LIGHT_TOGGLE/BRIGHTER/DIMMER`) and, after it, the warm/cool pair
+(`BTN_LIGHT_WARMER/COOLER`) which needs a second LED channel most lit boards do
+not have. Warm is a strict subset of lit, so it must come last — dropping it on a
+single-channel light then leaves the wider block's values untouched.
+`dropUnsupportedActions()` takes both capabilities for the same reason.
+
 **`BUTTON_ACTION` is positional.** `SettingsList` builds each option list by
 position — index *i* is action value *i* — and drops board-gated actions on
 boards that cannot perform them. Those actions must therefore be the **last**

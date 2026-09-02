@@ -231,7 +231,7 @@ The Settings screen allows you to configure the device's behavior.
 #### 3.7.3 Controls
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
-- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, star page, footnotes, next/previous chapter, exit reader, open reader menu, toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer.
+- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, star page, footnotes, next/previous chapter, exit reader, open reader menu, toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer — plus light warmer and light cooler on a device with a warm/cool light.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
 - **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
 - **Touch Reading Controls** *(touch devices only)*: How the reading page responds to touch — "Off", "Tap zones", "Swipe", "Inverted tap zones".
@@ -549,7 +549,10 @@ Under **Settings → Display → Reading light**:
 - **Brightness** — 1–100%. The scale is perceptual, so the low end has as many
   usable steps as the top; there is deliberately no 0%, because that is what the
   on/off switch is for
-- **Warmth** — only on devices with a second warm channel
+- **Warmth** — 0 (fully cool) to 100 (fully warm). Only on devices with a second
+  warm channel; brightness is the *total* light and the warmth splits it between
+  the two LED strings, so changing it shifts the colour without changing how
+  bright the page looks
 - **Restore Light on Wake** — whether waking brings the light back. Brightness
   and warmth are always remembered; this only controls the on/off state
 
@@ -561,8 +564,11 @@ you can find a book in the dark.
 Adjusting brightness while the light is off turns it on — a brightness gesture
 always means "I want light".
 
-Three actions are also bindable to any button or gesture: **Toggle Reading
-Light**, **Light Brighter**, **Light Dimmer**.
+These actions are bindable to any button or gesture: **Toggle Reading Light**,
+**Light Brighter**, **Light Dimmer**, and — on a warm/cool device — **Light
+Warmer** and **Light Cooler**. The warmth pair ships unbound: a warmth is
+something you set once and leave, unlike brightness, which follows the light in
+the room.
 
 ---
 

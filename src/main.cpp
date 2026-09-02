@@ -1104,7 +1104,7 @@ void setup() {
   // perform — the case that makes it necessary is an SD card moved from a board
   // with a frontlight to one without, where the stored action would otherwise be
   // both inert and uneditable (the settings screen does not offer it here).
-  CrossPointSettings::dropUnsupportedActions(SETTINGS, Frontlight.present());
+  CrossPointSettings::dropUnsupportedActions(SETTINGS, Frontlight.present(), Frontlight.hasColorTemperature());
   // Navigation follows the screen, not the panel: rotating the device rotates which physical
   // button means "up". The input layer sits below the renderer and so cannot ask it directly —
   // this bridges the two, and is queried live so it can never go stale.
@@ -1739,6 +1739,17 @@ void loop() {
             Frontlight.setOn(true);
             SETTINGS.frontlightOn = 1;
           }
+          SETTINGS.saveToFile();
+          break;
+        }
+        case BA::BTN_LIGHT_WARMER:
+        case BA::BTN_LIGHT_COOLER: {
+          const int delta =
+              (static_cast<BA>(action) == BA::BTN_LIGHT_WARMER) ? LIGHT_STEP_PERCENT : -LIGHT_STEP_PERCENT;
+          SETTINGS.frontlightWarmth = Frontlight.setWarmthDelta(delta);
+          // No "turn the light on" inference here, unlike the brightness steps:
+          // changing the colour of a light that is off says nothing about
+          // wanting it lit, and it would be a surprising way to blind someone.
           SETTINGS.saveToFile();
           break;
         }

@@ -826,6 +826,8 @@ STR_MENU_DISP_LIGHT: "Reading light"
 STR_BTN_ACT_LIGHT_TOGGLE: "Toggle Reading Light"
 STR_BTN_ACT_LIGHT_BRIGHTER: "Light Brighter"
 STR_BTN_ACT_LIGHT_DIMMER: "Light Dimmer"
+STR_BTN_ACT_LIGHT_WARMER: "Light Warmer"
+STR_BTN_ACT_LIGHT_COOLER: "Light Cooler"
 
 STR_MENU_GESTURE_ACTIONS: "Gesture actions"
 STR_GEST_SWIPE_LEFT: "Swipe left"

@@ -29,6 +29,12 @@ class HalFrontlight {
   // range. Returns the resulting level.
   uint8_t setBrightnessDelta(int delta);
 
+  // Step the warm/cool mix by `delta` percent, clamped to [0, 100]. Unlike
+  // brightness this DOES reach both ends: 0 is fully cool and 100 fully warm,
+  // and both are levels a reader may actually want. Returns the resulting mix.
+  // Inert on a single-channel light.
+  uint8_t setWarmthDelta(int delta);
+
   // Park the light for deep sleep. Not the same as setOn(false): that writes a
   // zero duty but leaves the pad owned by LEDC, and sleep entry then floats it —
   // what the light does after that is a board-layout question. This drives and

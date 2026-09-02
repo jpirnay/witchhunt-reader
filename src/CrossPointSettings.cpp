@@ -77,8 +77,9 @@ bool CrossPointSettings::isReaderScopedAction(const uint8_t action) {
   }
 }
 
-void CrossPointSettings::dropUnsupportedActions(CrossPointSettings& settings, const bool hasFrontlight) {
-  if (hasFrontlight) return;
+void CrossPointSettings::dropUnsupportedActions(CrossPointSettings& settings, const bool hasFrontlight,
+                                                const bool hasWarmLight) {
+  if (hasFrontlight && hasWarmLight) return;
 
   // Every field that stores a BUTTON_ACTION. Listed once, here, so a sweep over
   // them cannot quietly miss one the way scattered per-field checks would.
@@ -108,7 +109,9 @@ void CrossPointSettings::dropUnsupportedActions(CrossPointSettings& settings, co
 
   for (const auto field : ACTION_FIELDS) {
     const uint8_t action = settings.*field;
-    if (action == BTN_LIGHT_TOGGLE || action == BTN_LIGHT_BRIGHTER || action == BTN_LIGHT_DIMMER) {
+    const bool needsLight = action == BTN_LIGHT_TOGGLE || action == BTN_LIGHT_BRIGHTER || action == BTN_LIGHT_DIMMER;
+    const bool needsWarm = action == BTN_LIGHT_WARMER || action == BTN_LIGHT_COOLER;
+    if ((needsLight && !hasFrontlight) || (needsWarm && !hasWarmLight)) {
       settings.*field = BTN_DEFAULT;
     }
   }

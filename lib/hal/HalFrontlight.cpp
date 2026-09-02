@@ -32,6 +32,13 @@ void HalFrontlight::setOn(const bool on) {
   manager.setBrightness(lit ? lastBrightness : 0);
 }
 
+uint8_t HalFrontlight::setWarmthDelta(const int delta) {
+  if (!hasColorTemperature()) return warmth();
+  const int next = std::clamp(static_cast<int>(warmth()) + delta, 0, 100);
+  setWarmth(static_cast<uint8_t>(next));
+  return warmth();
+}
+
 uint8_t HalFrontlight::setBrightnessDelta(const int delta) {
   const int next = std::clamp(static_cast<int>(lastBrightness) + delta, static_cast<int>(MIN_BRIGHTNESS), 100);
   setBrightness(static_cast<uint8_t>(next));
