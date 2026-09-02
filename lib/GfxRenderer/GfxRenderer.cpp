@@ -1168,6 +1168,62 @@ static inline void emitScaledGlyphPixels(const uint8_t* const bitmap, const bool
 // anti-aliased and keep the body font's visual weight instead of the jagged, over-bold look
 // nearest-neighbor produced. Downscaling (scale < 1.0) keeps crisp nearest-neighbor point-
 // sampling.
+// Emit one scaled glyph into a full-panel 1-bpp anti-aliasing plane.
+//
+// The unscaled fast path captures the planes at its 2-bit dispatch (see the
+// `case 0x0E:` block). Without the same hook here, every glyph drawn at a scale
+// != 1.0 -- which the scaled-glyph mask cache above notes is "every word of any
+// book whose stylesheet puts a font-size on body text, which is most of them" --
+// reached the panel with no entry in either plane. Single-push pages therefore
+// carried strictly less anti-aliasing than the staged passes they replaced,
+// which DID grey scaled text: renderCharAtScale takes renderMode and derives its
+// own drawMask, so a GRAYSCALE_MSB/LSB re-render greyed these glyphs.
+//
+// Mirrors the cached/uncached split of the framebuffer path but never consults
+// the strip: the planes are always whole-panel, so there is no band to translate
+// into. Downscaling never reaches here -- it thresholds against minRaw2Bit and
+// has no AA levels to lift in any path, staged or captured.
+static void captureScaledGlyphPlane(const GfxRenderer& renderer, uint8_t* const plane, const uint8_t drawMask,
+                                    const uint8_t* const bitmap, const bool is2Bit, const int srcW, const int srcH,
+                                    const int dstW, const int dstH, const float scale, const uint8_t minRaw2Bit,
+                                    const int baseX, const int baseY, const EpdFontData* const fontData,
+                                    const uint32_t cp) {
+  if (plane == nullptr || drawMask == 0) return;  // 0x00 == "Maximum" darkness: no grayscale at all
+
+  const uint8_t* mask = renderer.findScaledGlyphMask(fontData, cp, scale, drawMask, dstW, dstH);
+  if (!mask) {
+    if (uint8_t* slot = renderer.allocScaledGlyphMask(fontData, cp, scale, drawMask, dstW, dstH)) {
+      emitScaledGlyphPixels(bitmap, is2Bit, srcW, srcH, dstW, dstH, scale, minRaw2Bit, drawMask,
+                            [slot, dstW](const int dstX, const int dstY) {
+                              const int bit = dstY * dstW + dstX;
+                              slot[bit >> 3] |= static_cast<uint8_t>(0x80 >> (bit & 7));
+                            });
+      mask = slot;
+    }
+  }
+  if (mask) {
+    // pixelState=false makes writeRowBits OR the bits in, which is how a plane
+    // marks a pixel -- the same convention the staged grayscale passes used.
+    renderGlyphFastBW(plane, mask, dstW, dstH, baseX, baseY, false, renderer.getOrientation(),
+                      renderer.getDisplayWidth(), renderer.getDisplayHeight(), renderer.getDisplayWidthBytes());
+    return;
+  }
+
+  // Mask arena exhausted: write the plane bits directly, with the same rotation
+  // and clipping drawPixel() applies to the framebuffer.
+  emitScaledGlyphPixels(bitmap, is2Bit, srcW, srcH, dstW, dstH, scale, minRaw2Bit, drawMask,
+                        [&renderer, plane, baseX, baseY](const int dstX, const int dstY) {
+                          int phyX = 0;
+                          int phyY = 0;
+                          const int w = renderer.getDisplayWidth();
+                          const int h = renderer.getDisplayHeight();
+                          rotateCoordinates(renderer.getOrientation(), baseX + dstX, baseY + dstY, &phyX, &phyY, w, h);
+                          if (phyX < 0 || phyX >= w || phyY < 0 || phyY >= h) return;
+                          plane[static_cast<uint32_t>(phyY) * renderer.getDisplayWidthBytes() + (phyX / 8)] |=
+                              static_cast<uint8_t>(1u << (7 - (phyX % 8)));
+                        });
+}
+
 static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                               const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
                               const bool pixelState, const EpdFontFamily::Style style, const float scale,
@@ -1203,6 +1259,18 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
     writeState = (drawMask == 0x0E) ? pixelState : false;
   }
   const uint8_t sel = (scale < 1.0f) ? minRaw2Bit : drawMask;
+
+  // Capture BEFORE the framebuffer draw below: the cached path returns straight
+  // out of it, so anything placed after that return runs only on the fallback.
+  if (renderMode == GfxRenderer::BW && scale >= 1.0f && renderer.grayCaptureActive()) {
+    const uint8_t darkness = renderer.getTextDarkness();
+    captureScaledGlyphPlane(renderer, renderer.grayCaptureMsb(),
+                            drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
+                            dstH, scale, minRaw2Bit, baseX, baseY, fontData, cp);
+    captureScaledGlyphPlane(renderer, renderer.grayCaptureLsb(),
+                            drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
+                            dstH, scale, minRaw2Bit, baseX, baseY, fontData, cp);
+  }
 
   // Cached path: resample once per distinct (glyph, scale, sel), then draw every
   // occurrence with the same 8-pixel-chunk blitter unscaled text uses. renderGlyphFastBW
