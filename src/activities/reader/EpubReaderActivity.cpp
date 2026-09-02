@@ -4214,7 +4214,15 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 // grey columns reach a level by sitting at the WHITE rail for L[15] frames and
 // then descending, which is a two-stage transition by construction.
 //
-// Building with -DAA_FORCE_CLEAN_BANK=1 routes graded pushes onto the GC16-style
+// The stock build only takes the clean bank on the periodic scrub page (1 in
+// getRefreshFrequency(), so 1 in 15 by default), which is also the book-open
+// page -- too rare, and too busy, to judge a perceptual difference against.
+// Build every page onto it with:
+//
+//   PLATFORMIO_BUILD_FLAGS="-DAA_FORCE_CLEAN_BANK=1" pio run -e lilygo_t5s3 -t upload
+//
+// (an env var rather than a separate env, so the existing lib deps are reused;
+// re-run without it to go back). It routes graded pushes onto the GC16-style
 // clean bank instead. Page turns get slower (~2.5s vs ~1.4s), so this is a
 // diagnostic, not a shipping default: if the flicker goes, the diff bank's grey
 // columns are the cause; if it stays, the bank is exonerated and the next suspect
