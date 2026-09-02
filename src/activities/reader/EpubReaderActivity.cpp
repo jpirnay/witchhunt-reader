@@ -2196,6 +2196,7 @@ void EpubReaderActivity::stopAutomaticPageTurn() {
   pendingPreRender = false;
   usePreRenderedBuffer = false;
   preRenderedPage.ready = false;
+  preRenderedPlanesStaged_ = false;
   pendingGrayscale_ = {};
   section.reset();
 }
@@ -2781,6 +2782,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
       sessionPagesAdvanced++;
       globalReadingSessionTracker().onPageTurn();
       preRenderedPage.ready = false;
+      preRenderedPlanesStaged_ = false;
       pendingPreRender = false;
       requestUpdate();
       return;
@@ -2804,6 +2806,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // behind on the page the section was entered at.
     anchorNavTargetToCurrentPage();
     preRenderedPage.ready = false;
+    preRenderedPlanesStaged_ = false;
     usePreRenderedBuffer = true;
     sessionPagesAdvanced++;
     globalReadingSessionTracker().onPageTurn();
@@ -2833,6 +2836,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // previous (now stale) frame on screen. (This is the classic last-page case:
   // turning onto the final page would otherwise show the penultimate page.)
   preRenderedPage.ready = false;
+  preRenderedPlanesStaged_ = false;
   pendingPreRender = false;
   requestUpdate();
 }
@@ -4055,6 +4059,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // waveform wait. The BufferDisplay/PreRender passes manage ready themselves.
   if (pass != RenderPass::PreRender && pass != RenderPass::BufferDisplay && preRenderedPage.ready) {
     preRenderedPage.ready = false;
+    preRenderedPlanesStaged_ = false;
   }
 
   switch (pass) {
@@ -4736,9 +4741,33 @@ void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orien
   page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
   scope.endScanAndPrewarm();
 
+  // On a single-push panel the pre-render owes the SAME thing a fresh render
+  // produces, or a pre-rendered page would look different from one rendered on
+  // the spot — and page turns hit the pre-render almost every time, so that
+  // difference would be the normal case rather than the exception.
+  //
+  // The planes have to be staged HERE and not at display time: both they and the
+  // page use the framebuffer as scratch, so whichever runs last owns it, and the
+  // page has to be the survivor. At display time the pre-rendered page is already
+  // in that buffer and staging would destroy it.
+  preRenderedPlanesStaged_ = false;
+  if (renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing()) {
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    bool planeAborted = false;
+    const auto gt = renderer.stageGrayscalePlanes(
+        [&](GfxRenderer::RenderMode) {
+          planeAborted = !page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
+                                              /*abortable=*/true);
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); });
+    preRenderedPlanesStaged_ = !gt.aborted;
+  }
+
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
   // Status bar intentionally omitted — superimposed at display time with live values.
+  // It therefore carries no anti-aliasing, exactly as on the freshly rendered
+  // path, where the plane lambda is also page content only.
 }
 
 bool EpubReaderActivity::usesDeferredAa() const {
@@ -4793,9 +4822,24 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // doesn't skip it.
   const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
+  // Single push when the pre-render staged this page's planes: base and greys go
+  // out as one waveform, exactly as a freshly rendered page does. Anything else
+  // falls through to the B/W display plus the two-push AA replay below.
+  const bool singlePushThisPage = preRenderedPlanesStaged_ && !secondaryBufferDegraded_;
+  preRenderedPlanesStaged_ = false;
   if (secondaryBufferDegraded_) {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+  } else if (singlePushThisPage) {
+    HalDisplay::RefreshMode mode;
+    if (forceHalfRefreshThisPage) {
+      mode = HalDisplay::HALF_REFRESH;
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      mode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
+    }
+    renderer.displayGrayscaleFrame(mode);
+    LOG_DBG("ERS", "Single-push AA (pre-rendered)");
   } else if (forceHalfRefreshThisPage) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
@@ -4824,7 +4868,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   if (aaPreempted) {
     LOG_DBG("ERS", "AA replay skipped: page preempted by navigation");
   }
-  if (!aaPreempted && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
+  if (!singlePushThisPage && !aaPreempted && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
+      !secondaryBufferDegraded_) {
     const int fontId = getEffectiveReaderFontId();
     // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
     // them, but background work since may have dropped or re-wired the cache (B's
@@ -4876,6 +4921,7 @@ void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
   }
   renderPageContentOnly(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
   preRenderedPage.ready = false;
+  preRenderedPlanesStaged_ = false;
   pendingPreRender = false;
   usePreRenderedBuffer = false;
 }
@@ -5527,6 +5573,7 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       pendingPreRender = false;
       usePreRenderedBuffer = false;
       preRenderedPage.ready = false;
+      preRenderedPlanesStaged_ = false;
       forceRefreshModeNextRender_ = static_cast<int8_t>(
           action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
       requestUpdate();

@@ -366,6 +366,12 @@ class EpubReaderActivity final : public Activity {
     unsigned long completedAtMs = 0UL;
   };
   PreRenderedPage preRenderedPage;
+  // The pre-render staged this page's grayscale planes, so displaying it can go
+  // out as one waveform like a fresh render. Consumed (and cleared) by the
+  // display; cleared with preRenderedPage.ready wherever the buffer is dropped,
+  // because a stale plane pair belongs to a page that is no longer in the
+  // framebuffer.
+  bool preRenderedPlanesStaged_ = false;
   // Debug-only Background B (section pre-analysis) progress, surfaced as a small
   // status-bar overlay when DEBUG_BACKGROUND_WORK is enabled. Background A's state is
   // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a

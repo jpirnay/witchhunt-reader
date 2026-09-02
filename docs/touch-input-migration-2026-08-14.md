@@ -1242,6 +1242,23 @@ last is the one left in it — and `displayGrayFrame()` needs the intact B/W pag
 there. The reorder costs nothing: three renders happen either way, and it removes
 the whole second refresh plus the restore write.
 
+**The pre-rendered path had to follow.** Background-A pre-renders the next page's
+B/W into the back framebuffer, and a page turn hits it almost every time — so
+leaving that path on the old two-push AA replay meant the single push was the
+exception, not the rule, and a pre-rendered page looked different from a freshly
+rendered one. It now stages the planes during the pre-render and displays in one
+push too.
+
+The planes must be staged during the PRE-RENDER, not at display time, for the
+same reason the order flipped above: both they and the page use the framebuffer
+as scratch, and the page has to be the survivor. At display time the pre-rendered
+page is already sitting in that buffer and staging would destroy it.
+
+`preRenderedPlanesStaged_` is therefore cleared everywhere `preRenderedPage.ready`
+is — a stale plane pair belongs to a page no longer in the framebuffer. The
+status bar carries no anti-aliasing on either path, because it is superimposed at
+display time and the plane lambda is page content only.
+
 Two consequences worth knowing:
 
 * `aaPreemptedByNavigation()` is consulted earlier than the inline path consults
