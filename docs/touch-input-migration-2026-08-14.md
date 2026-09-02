@@ -1242,6 +1242,28 @@ last is the one left in it — and `displayGrayFrame()` needs the intact B/W pag
 there. The reorder costs nothing: three renders happen either way, and it removes
 the whole second refresh plus the restore write.
 
+**The planes are captured by the page render, not rendered separately.** Adopted
+from jetaudio's crosspoint-aurora (`GfxRenderer::beginGrayCapture` / `captureGray`),
+which is the reference consumer of this waveform.
+
+Aurora hooks a per-pixel callback in its glyph loop. This fork's 2-bit path is a
+fused gather+threshold that builds a row/column mask per 8-pixel chunk, so a
+per-pixel callback would undo the thing it was optimised for. Same effect is had
+one level up: while capture is armed, the BW dispatch runs the glyph blit twice
+more with each plane's own draw mask, into caller-owned panel-native planes. The
+page walk, the layout and the glyph decode — where the cost actually is — still
+happen exactly once.
+
+What that removed: two full page renders per page (~80 ms), the plane-before-page
+reorder, and the abort predicate (there is no separate pass left to abort). Costs
+two full-page plane buffers, ~130 KB together here, allocated per render with
+`makeUniqueNoThrow` and falling back to the staged path on OOM.
+
+Two guards come from aurora as well: image pages stay on the staged path, because
+the capture rides the GLYPH blit and an image's own greys would simply not be in
+the planes; and night mode falls back, since inverted output inverts the planes'
+meaning (the SDK's `displayGrayscaleFrame` already checks `_inverted`).
+
 **The pre-rendered path had to follow.** Background-A pre-renders the next page's
 B/W into the back framebuffer, and a page turn hits it almost every time — so
 leaving that path on the old two-push AA replay meant the single push was the
@@ -1272,6 +1294,23 @@ Two consequences worth knowing:
 `displayBuffer()` does. Fixed in the SDK branch: it displays the frame, so the
 buffer just shown has to become the previous one, or every consumer that tracks
 what is on the panel works from the page before this one.
+
+### 8.9c Leaving the reader needs a clean baseline
+
+Every other reader (Txt, Md, Xtc, the BMP viewer) calls
+`ReaderUtils::enforceExitFullRefresh()` on the way out. The EPUB reader never did,
+and got away with it because the two-push AA ended by reseeding the differential
+baseline (`cleanupGrayscaleWithPreviousBuffer`).
+
+The single push deliberately does no such cleanup — aurora's comment says why:
+*"the panel's canvas holding the finished page IS the baseline the next push diffs
+against"*. So the greys are still on the glass when the reader closes, and the
+home screen's FAST diff drives them from a level the differential bank's columns
+do not start from. That showed on device as heavy ghosting across Home and
+Settings.
+
+Armed only when anti-aliasing actually ran: a plain B/W page leaves the panel on
+its rails already, and a clean-bank refresh costs about a second and a half.
 
 ### 8.10 The reading light
 

@@ -456,8 +456,17 @@ class GfxRenderer {
   // GfxRenderer.cpp for the per-level pixel breakdown and a worked example.
   void setTextDarkness(const uint8_t d) { textDarkness.store(d, std::memory_order_relaxed); }
   uint8_t getTextDarkness() const { return static_cast<uint8_t>(textDarkness.load(std::memory_order_relaxed)); }
+
+  // Armed by beginGrayCapture(); mutable because the whole render path is const.
+  mutable uint8_t* grayCapLsb_ = nullptr;
+  mutable uint8_t* grayCapMsb_ = nullptr;
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
+  // Same, from a caller-owned panel-native plane rather than the framebuffer —
+  // what the inline capture fills. The framebuffer overloads above are the
+  // staged path, where each plane IS the framebuffer in turn.
+  void copyGrayscaleLsbBuffers(const uint8_t* plane) const;
+  void copyGrayscaleMsbBuffers(const uint8_t* plane) const;
   void displayGrayBuffer() const;
 
   // Timing breakdown returned by renderGrayscalePlanesSequential().
@@ -493,59 +502,14 @@ class GfxRenderer {
   }
 
   // True when the panel can show the B/W base and its grayscale planes as ONE
-  // waveform, i.e. when stageGrayscalePlanes() + displayGrayscaleFrame() is
+  // waveform, i.e. when beginGrayCapture() + displayGrayscaleFrame() is
   // available instead of the base-then-overlay pair.
   bool supportsGrayFrame() const;
-  // Display the framebuffer composed with the planes staged by
-  // stageGrayscalePlanes(), in one refresh. Resyncs the cached framebuffer
+  // Display the framebuffer composed with the planes handed to
+  // copyGrayscale*Buffers(), in one refresh. Resyncs the cached framebuffer
   // pointer afterwards for the same reason triggerDisplay() does: the display
   // swaps buffers, and every later draw must target the new write buffer.
   void displayGrayscaleFrame(HalDisplay::RefreshMode mode) const;
-
-  // Render both grayscale planes and stage them in the controller, WITHOUT
-  // displaying anything.
-  //
-  // The single-push counterpart of renderGrayscalePlanesSequential(), and it
-  // must run BEFORE the B/W page render rather than after it — which is the
-  // whole difference. Both use the framebuffer as scratch, so whichever runs
-  // last is the one left in it, and displayGrayFrame() needs to find the intact
-  // B/W page there. Rendering the planes first costs nothing extra: the same
-  // three renders happen either way.
-  //
-  // Leaves the framebuffer holding the MSB plane, so the caller must clear it
-  // before drawing the page. Returns planesMs; display/restore stay zero because
-  // neither happens here.
-  template <typename RenderFn, typename AbortFn>
-  GrayscaleTimings stageGrayscalePlanes(RenderFn renderFn, AbortFn shouldAbort) {
-    GrayscaleTimings t;
-    const unsigned long t0 = millis();
-
-    clearScreen(0x00);
-    setRenderMode(GRAYSCALE_LSB);
-    renderFn(GRAYSCALE_LSB);
-    if (shouldAbort()) {
-      setRenderMode(BW);
-      t.planesMs = millis() - t0;
-      t.aborted = true;
-      return t;
-    }
-    copyGrayscaleLsbBuffers();
-
-    clearScreen(0x00);
-    setRenderMode(GRAYSCALE_MSB);
-    renderFn(GRAYSCALE_MSB);
-    if (shouldAbort()) {
-      setRenderMode(BW);
-      t.planesMs = millis() - t0;
-      t.aborted = true;
-      return t;
-    }
-    copyGrayscaleMsbBuffers();
-
-    setRenderMode(BW);
-    t.planesMs = millis() - t0;
-    return t;
-  }
 
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
   // each plane to the controller immediately after rendering it. No extra allocation
@@ -675,6 +639,32 @@ class GfxRenderer {
 
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
   // Returns the full framebuffer and its extent ([0, panelHeight)).
+  // --- Inline grayscale capture -----------------------------------------------
+  // While armed, the 2-bit glyph path ALSO writes the two anti-aliasing planes
+  // as it draws the B/W page, so one walk over the page produces base and greys
+  // together. The alternative — and what this replaces — is rendering the whole
+  // page twice more, once per plane, purely to re-derive pixels the B/W pass
+  // already had in its hand.
+  //
+  // Idea adopted from jetaudio's crosspoint-aurora (GfxRenderer::beginGrayCapture
+  // / captureGray, used by its single-push reader path). Aurora hooks a per-pixel
+  // callback; this fork's 2-bit path is a fused gather+threshold that builds a
+  // row/column mask per 8-pixel chunk, so the same effect is had by running that
+  // blit once more per plane with the plane's own draw mask — the page walk,
+  // layout and glyph decode still happen exactly once, which is where the cost is.
+  //
+  // Planes are PANEL-NATIVE (panelWidthBytes * panelHeight), the same geometry
+  // copyGrayscale*Buffers expects, and the caller clears them. Only meaningful
+  // during a BW pass; the grayscale passes ignore it.
+  void beginGrayCapture(uint8_t* lsbPlane, uint8_t* msbPlane) const {
+    grayCapLsb_ = lsbPlane;
+    grayCapMsb_ = msbPlane;
+  }
+  void endGrayCapture() const { grayCapLsb_ = grayCapMsb_ = nullptr; }
+  [[nodiscard]] bool grayCaptureActive() const { return grayCapLsb_ != nullptr && grayCapMsb_ != nullptr; }
+  [[nodiscard]] uint8_t* grayCaptureLsb() const { return grayCapLsb_; }
+  [[nodiscard]] uint8_t* grayCaptureMsb() const { return grayCapMsb_; }
+
   uint8_t* getWriteTarget() const { return frameBuffer; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return static_cast<int>(panelHeight); }

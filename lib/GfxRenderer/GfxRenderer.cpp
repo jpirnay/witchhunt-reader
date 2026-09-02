@@ -920,6 +920,42 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             renderGlyphFast2Bit<0x0E>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
                                       renderer.getOrientation(), renderer.getDisplayWidth(),
                                       renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), fbOriginY, fbRows);
+            // Inline grayscale capture: the same glyph, blitted again into each
+            // anti-aliasing plane with that plane's own draw mask. This is the
+            // whole point of the capture — the page walk, the layout and the
+            // glyph decode above happened ONCE, and re-running only the blit is
+            // what makes a second and third full page render unnecessary.
+            //
+            // Masks come from drawMaskFor2BitMode() so the planes honour the
+            // darkness setting exactly as the staged passes did. Darkness
+            // "Maximum" yields 0x00 for both, which the guards below skip — the
+            // BW pass has already drawn every AA pixel solid black there, which
+            // is what that setting means.
+            if (renderer.grayCaptureActive()) {
+              const uint8_t msbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, renderer.getTextDarkness());
+              const uint8_t lsbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, renderer.getTextDarkness());
+              const int planeRows = static_cast<int>(renderer.getDisplayHeight());
+              // Planes are full-panel, so origin 0 / full height regardless of
+              // any band the framebuffer write is using.
+              if (msbMask == 0x06) {
+                renderGlyphFast2Bit<0x06>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              } else if (msbMask == 0x02) {
+                renderGlyphFast2Bit<0x02>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              }
+              if (lsbMask == 0x06) {
+                renderGlyphFast2Bit<0x06>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              } else if (lsbMask == 0x04) {
+                renderGlyphFast2Bit<0x04>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              }
+            }
             break;
           case 0x06:  // raw {1,2}
             renderGlyphFast2Bit<0x06>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
@@ -3146,6 +3182,10 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 // void GfxRenderer::grayscaleRevert() const { display.grayscaleRevert(); }
 
 void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuffers(frameBuffer); }
+
+void GfxRenderer::copyGrayscaleLsbBuffers(const uint8_t* plane) const { display.copyGrayscaleLsbBuffers(plane); }
+
+void GfxRenderer::copyGrayscaleMsbBuffers(const uint8_t* plane) const { display.copyGrayscaleMsbBuffers(plane); }
 
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 

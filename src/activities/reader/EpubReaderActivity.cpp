@@ -625,6 +625,23 @@ void EpubReaderActivity::onExit() {
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
 
+  // Leave the panel a clean baseline for whatever screen comes next.
+  //
+  // Every other reader (Txt, Md, Xtc, the BMP viewer) has always done this; the
+  // EPUB reader did not, and got away with it because the two-push AA ended by
+  // reseeding the differential baseline (cleanupGrayscaleWithPreviousBuffer).
+  // The single push deliberately does no such cleanup — the panel canvas holding
+  // the finished page IS the next baseline — so the greys are still on the glass
+  // when the reader closes, and the home screen's FAST diff drives them from a
+  // level the differential bank's columns do not start from. That showed as
+  // heavy ghosting across Home and Settings.
+  //
+  // Only when anti-aliasing actually ran: a plain B/W page leaves the panel on
+  // its rails already, and a clean-bank refresh costs about a second and a half.
+  if (getEffectiveTextAntiAliasing()) {
+    ReaderUtils::enforceExitFullRefresh(renderer);
+  }
+
   // Flush the reading-stats session before tearing down the epub: end() needs
   // no live epub reference and persists the JSON. Sleep paths that bypass
   // onExit() still end up here on resume because the activity is recreated.
@@ -4345,11 +4362,9 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // second refresh. It also has to be chosen HERE rather than at display time,
   // because it changes what happens before the page is even drawn.
   //
-  // aaPreemptedByNavigation() is therefore consulted earlier than the inline
-  // path consults it. A turn that arrives during the (long) page render still
-  // aborts the pass — stageGrayscalePlanes() re-checks the predicate between
-  // planes — it just cannot un-render planes already staged, which costs
-  // nothing: an unused staged plane is never displayed.
+  // Nothing here is preemptible any more, and nothing needs to be: the planes
+  // are a by-product of the page render rather than ~1 s of extra work, so
+  // there is no pass for a page turn to abort.
   const bool singlePushAaThisRender = aaEnabledForThisRender && renderer.supportsGrayFrame();
 
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
@@ -4360,41 +4375,28 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
-  // Single-push AA: the planes are rendered BEFORE the page, not after it.
+  // Single-push AA: the planes are captured BY the page render below, not by two
+  // extra renders of their own. Idea from jetaudio's crosspoint-aurora; see
+  // GfxRenderer::beginGrayCapture for how it is done here.
   //
-  // Both use the framebuffer as scratch, so whichever runs last is the one left
-  // in it — and displayGrayscaleFrame() needs to find the intact B/W page there.
-  // Nothing is paid for the reorder: three renders happen either way. The image
-  // caches are already warm (warmImageCaches above), which is what makes the
-  // plane render legal this early.
-  bool singlePushPlanesStaged = false;
-  GfxRenderer::GrayscaleTimings singlePushGt;
+  // The buffers are panel-native full-page planes, allocated per render and
+  // freed with this scope — together ~130 KB on this panel, which is the whole
+  // cost of the approach and why it is gated on supportsGrayFrame(). A board
+  // that cannot use them keeps the staged path and never allocates; an
+  // allocation failure falls back the same way.
+  const size_t capPlaneBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
+  std::unique_ptr<uint8_t[]> capLsb, capMsb;
   if (singlePushAaThisRender) {
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-    const int aaFontId = getEffectiveReaderFontId();
-    const Page* pagePtr = page.get();
-    bool planeAborted = false;
-    singlePushGt = renderer.stageGrayscalePlanes(
-        [&](GfxRenderer::RenderMode) {
-          if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
-            planeAborted = true;
-            return;
-          }
-          pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
-        },
-        // Navigation preemption is deliberately NOT consulted here, unlike the
-        // inline and deferred paths. It exists to avoid ~1 s of AA work on a page
-        // about to be replaced; under a single push the planes cost ~80 ms, and
-        // aborting costs far more than it saves — the page then falls back to a
-        // full B/W push (2743 ms on device, because book entry arms a HALF) and
-        // is rendered again from scratch immediately afterwards. Only a plane
-        // that genuinely failed still aborts, because a half-drawn plane must
-        // never reach the panel.
-        [&] { return planeAborted; });
-    singlePushPlanesStaged = !singlePushGt.aborted;
-    // stageGrayscalePlanes leaves the MSB plane in the framebuffer; the page
-    // render below needs a blank one.
-    renderer.clearScreen();
+    capLsb = makeUniqueNoThrow<uint8_t[]>(capPlaneBytes);
+    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(capPlaneBytes) : nullptr;
+    if (capMsb) {
+      memset(capLsb.get(), 0, capPlaneBytes);
+      memset(capMsb.get(), 0, capPlaneBytes);
+      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
+    } else {
+      capLsb.reset();  // OOM: the staged path below runs unchanged
+    }
   }
 
   logReaderMemSnapshot("before_bw_render");
@@ -4427,6 +4429,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.drawText(UI_10_FONT_ID, hintX, hintY1, line1.c_str(), true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, hintX, hintY2, line2.c_str(), true);
   }
+  // Everything the capture was meant to see is drawn. The status bar is inside
+  // the window on purpose and costs nothing: UI chrome is 1-bit, so it produces
+  // no anti-aliased pixels for the capture to record.
+  renderer.endGrayCapture();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
   logReaderMemSnapshot("after_bw_render");
@@ -4501,7 +4507,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
   const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
-  if (singlePushPlanesStaged) {
+  if (capLsb) {
+    // Hand the captured planes to the controller, then base + greys go out as
+    // one waveform. Cheap: the planes were filled by the page render that just
+    // ran, so nothing is walked twice.
+    renderer.copyGrayscaleLsbBuffers(capLsb.get());
+    renderer.copyGrayscaleMsbBuffers(capMsb.get());
     // Base and greys as ONE waveform. No triggerDisplay/completeDisplay split:
     // there is nothing to overlap with, because the plane work already happened.
     renderer.displayGrayscaleFrame(pageRefreshMode);
@@ -4535,12 +4546,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // the page render and went out with it in one waveform. No deferred pass, so
     // no second refresh for the idle loop to run and nothing for a page turn to
     // preempt half-way.
-    LOG_DBG("ERS", "Single-push AA%s: planes=%lums display=%lums", singlePushPlanesStaged ? "" : " ABORTED",
-            singlePushGt.planesMs, tDisplay - tBwRender);
-    lastRenderStats.usedGrayscale = singlePushPlanesStaged;
-    lastRenderStats.textAntiAliasing = singlePushPlanesStaged;
-    lastRenderStats.phases = {
-        tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, singlePushGt.planesMs, 0, 0, 0, millis() - t0};
+    LOG_DBG("ERS", "Single-push AA (captured): render=%lums display=%lums", tBwRender - tPrewarm, tDisplay - tBwRender);
+    lastRenderStats.usedGrayscale = true;
+    lastRenderStats.textAntiAliasing = true;
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, millis() - t0};
   } else if (inlineAaThisRender) {
     // Inline AA (X4): the BW waveform is still running from triggerDisplayAsync().
     // Render the grayscale planes now — the LSB plane lands inside the waveform
@@ -4762,28 +4771,38 @@ void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orien
   // page use the framebuffer as scratch, so whichever runs last owns it, and the
   // page has to be the survivor. At display time the pre-rendered page is already
   // in that buffer and staging would destroy it.
+  // Same capture the foreground render uses, so a pre-rendered page and a fresh
+  // one are produced identically — see the single-push block in render().
+  // Buffers live only for this function; the planes are handed to the controller
+  // before it returns and the display consumes them at the page turn.
   preRenderedPlanesStaged_ = false;
-  if (renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing()) {
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
-    bool planeAborted = false;
-    const auto gt = renderer.stageGrayscalePlanes(
-        [&](GfxRenderer::RenderMode) {
-          planeAborted = !page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
-                                              /*abortable=*/true);
-        },
-        // Same reasoning as the foreground path: 80 ms of background plane work
-        // is not worth preempting, and a pre-render that skips it leaves the page
-        // to display as B/W plus a two-push replay — the inconsistency this path
-        // exists to remove.
-        [&] { return planeAborted; });
-    preRenderedPlanesStaged_ = !gt.aborted;
+  std::unique_ptr<uint8_t[]> capLsb, capMsb;
+  const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !page.hasImages();
+  if (wantCapture) {
+    const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
+    capLsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
+    capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(planeBytes) : nullptr;
+    if (capMsb) {
+      memset(capLsb.get(), 0, planeBytes);
+      memset(capMsb.get(), 0, planeBytes);
+      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+      renderer.beginGrayCapture(capLsb.get(), capMsb.get());
+    } else {
+      capLsb.reset();
+    }
   }
 
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
-  // Status bar intentionally omitted — superimposed at display time with live values.
-  // It therefore carries no anti-aliasing, exactly as on the freshly rendered
-  // path, where the plane lambda is also page content only.
+  renderer.endGrayCapture();
+  if (capLsb) {
+    renderer.copyGrayscaleLsbBuffers(capLsb.get());
+    renderer.copyGrayscaleMsbBuffers(capMsb.get());
+    preRenderedPlanesStaged_ = true;
+  }
+  // Status bar intentionally omitted — superimposed at display time with live
+  // values, and so outside the capture. It carries no anti-aliasing either way:
+  // UI chrome is 1-bit and produces no AA pixels at all.
 }
 
 bool EpubReaderActivity::usesDeferredAa() const {
