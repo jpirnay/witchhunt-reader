@@ -2805,8 +2805,12 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // anchor update too — otherwise every pre-rendered turn (the common case) leaves navTarget
     // behind on the page the section was entered at.
     anchorNavTargetToCurrentPage();
+    // ready=false here means CONSUMED, not invalidated: usePreRenderedBuffer
+    // below hands this very page to the display. So the staged planes must
+    // SURVIVE — they belong to the page about to be shown, and the display is
+    // what clears them. Every other site that clears ready is discarding the
+    // buffer, and there the planes must go with it.
     preRenderedPage.ready = false;
-    preRenderedPlanesStaged_ = false;
     usePreRenderedBuffer = true;
     sessionPagesAdvanced++;
     globalReadingSessionTracker().onPageTurn();
