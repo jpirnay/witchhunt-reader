@@ -4382,7 +4382,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
           }
           pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
         },
-        [&] { return planeAborted || aaPreemptedByNavigation(); });
+        // Navigation preemption is deliberately NOT consulted here, unlike the
+        // inline and deferred paths. It exists to avoid ~1 s of AA work on a page
+        // about to be replaced; under a single push the planes cost ~80 ms, and
+        // aborting costs far more than it saves — the page then falls back to a
+        // full B/W push (2743 ms on device, because book entry arms a HALF) and
+        // is rendered again from scratch immediately afterwards. Only a plane
+        // that genuinely failed still aborts, because a half-drawn plane must
+        // never reach the panel.
+        [&] { return planeAborted; });
     singlePushPlanesStaged = !singlePushGt.aborted;
     // stageGrayscalePlanes leaves the MSB plane in the framebuffer; the page
     // render below needs a blank one.
@@ -4763,7 +4771,11 @@ void EpubReaderActivity::renderPageContentOnly(const Page& page, const int orien
           planeAborted = !page.renderTextOnly(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
                                               /*abortable=*/true);
         },
-        [&] { return planeAborted || aaPreemptedByNavigation(); });
+        // Same reasoning as the foreground path: 80 ms of background plane work
+        // is not worth preempting, and a pre-render that skips it leaves the page
+        // to display as B/W plus a two-push replay — the inconsistency this path
+        // exists to remove.
+        [&] { return planeAborted; });
     preRenderedPlanesStaged_ = !gt.aborted;
   }
 

@@ -355,6 +355,12 @@ bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFram
 void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
   einkDisplay.displayGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);
+  // Record it like every other display path does. Without this the reader's page
+  // summary reports whatever mode the last B/W push used — which on a device log
+  // read "refresh=half" for pages the driver had just traced as going out on the
+  // fast bank, and cost a round of chasing the wrong thing.
+  lastRefreshMode = refreshMode;
+  lastDisplayModeByte = refreshModeToByte(refreshMode);
 }
 
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
