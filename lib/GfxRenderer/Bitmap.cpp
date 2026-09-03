@@ -268,7 +268,7 @@ bool Bitmap::analyzeAdaptiveTone() {
 
   if (sampled == 0) return false;
 
-  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping));
+  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping), eqBlendNum);
   if (!adaptiveTonePoints.active) {
     LOG_DBG("BMP", "Adaptive tone (%s) declined: line art or range too narrow",
             toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch");
@@ -282,7 +282,7 @@ bool Bitmap::analyzeAdaptiveTone() {
 }
 
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
-BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
+BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer, uint8_t* gray8Row) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
   if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
 
@@ -296,6 +296,14 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   // Helper lambda to pack 2bpp color into the output stream
   auto packPixel = [&](const uint8_t rawLum) {
     const uint8_t lum = applyAdaptiveTone(rawLum);
+    // Capture the sample BEFORE any quantiser sees it. Deliberately computed
+    // alongside rather than shared with the branches below: they each reach
+    // adjustPixel() by their own route, and rewiring that to hand one value to
+    // both outputs would change the 2-bit rendition every existing panel shows.
+    if (gray8Row) {
+      const int adjusted = adjustPixel(lum);
+      gray8Row[currentX] = static_cast<uint8_t>(adjusted < 0 ? 0 : (adjusted > 255 ? 255 : adjusted));
+    }
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);

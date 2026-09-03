@@ -190,7 +190,8 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
 }
 
 adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::string& imagePath,
-                                                                     const adaptive_tone::Mode mode) {
+                                                                     const adaptive_tone::Mode mode,
+                                                                     const int eqBlendNum) {
   adaptive_tone::Points points;
 
   const size_t freeHeap = ESP.getFreeHeap();
@@ -242,7 +243,7 @@ adaptive_tone::Points PngToFramebufferConverter::analyzeAdaptiveTone(const std::
   file.close();
   if (!ok || sampled == 0) return points;
 
-  points = adaptive_tone::derivePoints(histogram.get(), sampled, mode);
+  points = adaptive_tone::derivePoints(histogram.get(), sampled, mode, eqBlendNum);
   if (points.active) {
     LOG_TRC("PNG", "Adaptive tone (%s) enabled: black=%u white=%u",
             mode == adaptive_tone::Mode::Equalize ? "equalize" : "stretch", (unsigned)points.blackPoint,
@@ -320,9 +321,16 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
     return false;
   }
 
+  // Native grayscale short-circuits most of the machinery below: no ditherer, no
+  // pixel cache, no companion rendition. All three exist to make 2 bits per pixel
+  // carry as much as they can, and this path is not spending 2 bits per pixel.
+  const bool gray8Out = config.gray8 != nullptr;
+
   DitherState dither;
   dither.config = &config;
-  if (config.monochromeOutput) {
+  if (gray8Out) {
+    // no ditherer
+  } else if (config.monochromeOutput) {
     dither.atkinson1Bit.reset(new (std::nothrow) Atkinson1BitDitherer(dstWidth));
   }
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION
@@ -342,7 +350,7 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
 
   // Stream the 2-bit pixel cache to disk one row band at a time.
   PixelCache cache;
-  bool caching = !config.cachePath.empty();
+  bool caching = !config.cachePath.empty() && !gray8Out;
   if (caching && !cache.begin(config.cachePath, dstWidth, dstHeight, config.x, config.y, 1)) {
     LOG_ERR("PNG", "Failed to start cache stream, continuing without caching");
     caching = false;
@@ -352,7 +360,7 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
   // independent of the primary's: losing the companion costs a later second decode, which is
   // exactly the status quo, so it must never take the primary cache or the render down with it.
   CompanionSink companion;
-  if (!config.companionCachePath.empty()) {
+  if (!config.companionCachePath.empty() && !gray8Out) {
     if (!config.monochromeOutput) {
       companion.atkinson1Bit.reset(new (std::nothrow) Atkinson1BitDitherer(dstWidth));
     }
@@ -399,6 +407,7 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
     if (!ok) break;
 
     pw.beginRow(outY);
+    if (gray8Out) config.gray8->beginRow(outY);
 
     DirectCacheWriter cw;
     bool rowCaching = caching;
@@ -434,14 +443,21 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
       // differ only in dither, never in the tone they were dithered from. Identity when the
       // caller supplied no points (every reader image; only the sleep screen supplies any).
       const uint8_t gray = adaptive_tone::apply(config.adaptiveTone, grayLine[srcX]);
-      const uint8_t value = ditherGray(dither, gray, dstX, outX, outY);
-      // Both ditherers see every destination column, on-screen or not, so their diffusion state
-      // stays in step across the row; only the writes below are bounds-guarded.
-      const uint8_t companionValue = companion.caching ? companion.dither(gray, dstX, outX, outY) : 0;
-      if (outX >= 0 && outX < screenWidth) {
-        pw.writePixel(outX, value);
-        if (rowCaching) cw.writePixel(outX, value);
-        if (companion.rowCaching) companion.writer.writePixel(outX, companionValue);
+      if (gray8Out) {
+        // The tone-mapped sample IS the output; the panel quantises it later at its
+        // own depth. No ditherer runs, so unlike the branch below there is no
+        // diffusion state that has to be advanced across off-screen columns.
+        if (outX >= 0 && outX < screenWidth) config.gray8->writePixel(outX, gray);
+      } else {
+        const uint8_t value = ditherGray(dither, gray, dstX, outX, outY);
+        // Both ditherers see every destination column, on-screen or not, so their diffusion state
+        // stays in step across the row; only the writes below are bounds-guarded.
+        const uint8_t companionValue = companion.caching ? companion.dither(gray, dstX, outX, outY) : 0;
+        if (outX >= 0 && outX < screenWidth) {
+          pw.writePixel(outX, value);
+          if (rowCaching) cw.writePixel(outX, value);
+          if (companion.rowCaching) companion.writer.writePixel(outX, companionValue);
+        }
       }
       error += srcWidth;
       while (error >= dstWidth) {

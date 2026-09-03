@@ -8,6 +8,7 @@
 #include "ImageDimensionsGuard.h"
 
 class GfxRenderer;
+struct DirectGray8Writer;
 
 struct ImageDimensions {
   int16_t width;
@@ -87,6 +88,18 @@ struct RenderConfig {
   // Honoured by PngToFramebufferConverter. Other decoders ignore it and write only cachePath;
   // callers must treat the companion as best-effort and check before relying on it.
   std::string companionCachePath;
+  // Native-grayscale sink, for panels that resolve more than four levels
+  // (HalDisplay::getGrayLevels() > 4). When set, the decoder stores the
+  // tone-mapped 8-bit sample here and writes NEITHER the framebuffer nor any
+  // cache: dithering to 2 bits is precisely the loss this path exists to avoid,
+  // and a 2-bit .pxc could not replay a 16-level frame anyway.
+  //
+  // One decode, one output. The three-pass BW/LSB/MSB dance the plane pipeline
+  // needs has no counterpart here — there are no planes to fill.
+  //
+  // Honoured by PngToFramebufferConverter. Other decoders ignore it, so callers
+  // must check getGrayLevels() AND the format before relying on it.
+  DirectGray8Writer* gray8 = nullptr;
 };
 
 class ImageToFramebufferDecoder {

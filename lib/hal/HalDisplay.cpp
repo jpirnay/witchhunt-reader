@@ -363,6 +363,25 @@ void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool
   lastDisplayModeByte = refreshModeToByte(refreshMode);
 }
 
+uint8_t HalDisplay::getGrayLevels() const { return einkDisplay.grayLevels(); }
+
+uint8_t* HalDisplay::borrowGray8Canvas(uint16_t* stride) {
+  HalSpiBus::Lock spiLock;
+  return einkDisplay.borrowGray8Canvas(stride);
+}
+
+void HalDisplay::displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  LOG_DBG("DISP", "#%lu displayGray8Canvas levels=%u", static_cast<unsigned long>(++panelSeq),
+          static_cast<unsigned>(einkDisplay.grayLevels()));
+  einkDisplay.displayGray8Canvas(convertRefreshMode(refreshMode), turnOffScreen);
+  // Record it like every other display path: the driver substitutes a clean-bank
+  // refresh, so the page summary must not claim whatever mode the caller asked
+  // for. See the note on displayGrayscaleFrame().
+  lastRefreshMode = RefreshMode::FULL_REFRESH;
+  lastDisplayModeByte = refreshModeToByte(RefreshMode::FULL_REFRESH);
+}
+
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
   // Give the driver a real BW base when it actually reads one.

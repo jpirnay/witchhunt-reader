@@ -136,6 +136,27 @@ class HalDisplay {
   // their own beyond deciding whether to stage planes at all.
   void displayGrayscaleFrame(RefreshMode refreshMode, bool turnOffScreen = false);
 
+  // Grey levels this panel resolves in one refresh. 4 on every dual-plane
+  // controller (X3, X4, X4 Pro, M5 Paper Mono) — two selector bits per pixel is
+  // the whole state space, so it is a hard ceiling, not a setting — and 16 on a
+  // panel whose driver keeps a multi-bit buffer of its own (T5S3). Callers that
+  // can render either way branch on this; everyone else keeps the plane path.
+  uint8_t getGrayLevels() const;
+  // Borrow the driver's composition buffer and paint 8-bit grey straight into
+  // it: one byte per pixel (0x00 black, 0xFF white), `stride` bytes per row,
+  // getDisplayHeight() rows, PHYSICAL panel orientation. Costs no heap — the
+  // buffer is the driver's own and already allocated — and returns nullptr
+  // wherever that is not on offer, which is every 4-level panel.
+  //
+  // The loan ends at displayGray8Canvas() or at the next ordinary refresh; a
+  // caller that borrows and then abandons the frame corrupts nothing, because
+  // every normal push rebuilds the buffer from the 1-bpp framebuffer.
+  uint8_t* borrowGray8Canvas(uint16_t* stride);
+  // Quantise the borrowed canvas to the panel's native depth and show it as one
+  // waveform. The driver picks a bank that can land every level, so this may
+  // refresh more thoroughly (and more slowly) than `refreshMode` asked for.
+  void displayGray8Canvas(RefreshMode refreshMode, bool turnOffScreen = false);
+
   // Returns true when the device is an X3 (X4 returns false).
   bool deviceIsX3() const;
 

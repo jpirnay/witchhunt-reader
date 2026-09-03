@@ -242,3 +242,53 @@ struct DirectCacheWriter {
     rowPtr[byteIdx] = (rowPtr[byteIdx] & ~(0x03 << bitShift)) | ((value & 0x03) << bitShift);
   }
 };
+
+// Direct 8-bit grayscale writer, for panels that resolve more levels than the
+// dual-plane pipeline can express (HalDisplay::getGrayLevels() > 4).
+//
+// The 2-bit path exists because a KW controller selects its waveform from an
+// (old, new) bit pair, so four levels is the entire state space — see
+// Uc8279X4Driver::displayGray. A panel that keeps its own multi-bit frame buffer
+// has no such ceiling, and there the decoder's tone-mapped sample can be stored
+// whole rather than crushed to a quarter of its range on the way out. The panel's
+// own quantiser then runs last, at its native depth, instead of the host dithering
+// to four levels and the panel re-dithering what is left.
+//
+// Coordinates, orientation and clipping come from an embedded DirectPixelWriter:
+// this stores bytes exactly where that stores bits, so the two stay in step by
+// construction rather than by a second copy of the transform. Its framebuffer is
+// never written — only the transform fields are read.
+struct DirectGray8Writer {
+  uint8_t* canvas;
+  int stride;  // bytes per canvas row; may exceed canvasWidth
+  int canvasWidth;
+  int canvasHeight;
+  DirectPixelWriter xf;
+
+  // `gray8Canvas` is the PHYSICAL panel buffer (HalDisplay::borrowGray8Canvas),
+  // so its extent is the panel's, not the oriented screen's.
+  void init(const GfxRenderer& renderer, uint8_t* gray8Canvas, int gray8Stride) {
+    canvas = gray8Canvas;
+    stride = gray8Stride;
+    canvasWidth = renderer.getDisplayWidth();
+    canvasHeight = renderer.getDisplayHeight();
+    xf.init(renderer);
+  }
+
+  inline void beginRow(int logicalY) { xf.beginRow(logicalY); }
+
+  inline void bandColRange(int xBase, int width, int& colStart, int& colEnd) const {
+    xf.bandColRange(xBase, width, colStart, colEnd);
+  }
+
+  // Store one 8-bit sample (0 = black, 255 = white). Must follow beginRow().
+  inline void writePixel(int logicalX, uint8_t gray) const {
+    const int phyX = xf.rowPhyXBase + logicalX * xf.phyXStepX;
+    const int phyY = xf.rowPhyYBase + logicalX * xf.phyYStepX;
+    // One unsigned compare per axis rejects negatives and overruns together —
+    // an image placed at a negative offset, or wider than the panel.
+    if (static_cast<unsigned>(phyX) >= static_cast<unsigned>(canvasWidth)) return;
+    if (static_cast<unsigned>(phyY) >= static_cast<unsigned>(canvasHeight)) return;
+    canvas[static_cast<uint32_t>(phyY) * stride + phyX] = gray;
+  }
+};

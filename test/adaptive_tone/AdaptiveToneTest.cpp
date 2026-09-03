@@ -341,3 +341,94 @@ TEST(Gray4Quantization, IsMonotonicInBothModes) {
 }
 
 }  // namespace
+
+// --- Equalize strength -------------------------------------------------------
+//
+// The blend was a fixed 1/4, chosen against four-level panels where a flattened
+// gradient breaks into dither banding. A panel resolving eleven levels wants a
+// stronger curve, so the strength became a parameter. These pin the properties
+// the two call sites depend on: that it does something, that it does more of it
+// as it rises, and that leaving it alone still produces the old curve exactly.
+namespace {
+
+// A bimodal cover: most of the mass in a dark band, a bright sliver of title text.
+// Exactly the shape Mode::Stretch cannot help and Equalize exists for.
+Histogram bimodal() {
+  Histogram h{};
+  for (int i = 30; i <= 70; i++) h[static_cast<size_t>(i)] = 900;
+  for (int i = 240; i <= 252; i++) h[static_cast<size_t>(i)] = 60;
+  return h;
+}
+
+// Mean absolute output separation between neighbouring input levels across the
+// band that carries the image -- a stand-in for how much tonal detail survives.
+double spreadAcrossBand(const Points& points, const int lo, const int hi) {
+  double sum = 0;
+  for (int i = lo; i < hi; i++) {
+    sum += std::abs(static_cast<int>(adaptive_tone::apply(points, static_cast<uint8_t>(i + 1))) -
+                    static_cast<int>(adaptive_tone::apply(points, static_cast<uint8_t>(i))));
+  }
+  return sum / (hi - lo);
+}
+
+}  // namespace
+
+TEST(AdaptiveToneEqualizeStrength, DefaultMatchesTheShippedFourLevelBlend) {
+  const Histogram h = bimodal();
+  const Points defaulted = adaptive_tone::derivePoints(h.data(), total(h), Mode::Equalize);
+  std::array<uint8_t, 256> viaDefault{};
+  for (int i = 0; i < 256; i++)
+    viaDefault[static_cast<size_t>(i)] = adaptive_tone::apply(defaulted, static_cast<uint8_t>(i));
+
+  const Points explicitly =
+      adaptive_tone::derivePoints(h.data(), total(h), Mode::Equalize, adaptive_tone::EQ_BLEND_NUM);
+  for (int i = 0; i < 256; i++) {
+    EXPECT_EQ(adaptive_tone::apply(explicitly, static_cast<uint8_t>(i)), viaDefault[static_cast<size_t>(i)])
+        << "omitting the strength must reproduce the four-level curve, at level " << i;
+  }
+}
+
+TEST(AdaptiveToneEqualizeStrength, DeeperBlendSpreadsTheDominantBandFurther) {
+  const Histogram h = bimodal();
+  const Points weak = adaptive_tone::derivePoints(h.data(), total(h), Mode::Equalize, adaptive_tone::EQ_BLEND_NUM);
+  const double weakSpread = spreadAcrossBand(weak, 30, 70);
+  const Points strong =
+      adaptive_tone::derivePoints(h.data(), total(h), Mode::Equalize, adaptive_tone::EQ_BLEND_NUM_DEEP);
+  const double strongSpread = spreadAcrossBand(strong, 30, 70);
+
+  ASSERT_TRUE(weak.active);
+  ASSERT_TRUE(strong.active);
+  // The whole reason for the parameter: the band the image actually occupies must
+  // be given more output range, or a deeper panel has nothing extra to show.
+  EXPECT_GT(strongSpread, weakSpread * 1.5) << "deep blend spread " << strongSpread << " vs shallow " << weakSpread;
+}
+
+TEST(AdaptiveToneEqualizeStrength, StaysMonotonicAndInRangeAtEveryStrength) {
+  const Histogram h = bimodal();
+  for (int num = 0; num <= adaptive_tone::EQ_BLEND_DEN; num++) {
+    const Points p = adaptive_tone::derivePoints(h.data(), total(h), Mode::Equalize, num);
+    int previous = -1;
+    for (int i = 0; i < 256; i++) {
+      const int mapped = adaptive_tone::apply(p, static_cast<uint8_t>(i));
+      EXPECT_GE(mapped, previous) << "curve went backwards at level " << i << ", strength " << num;
+      EXPECT_GE(mapped, 0);
+      EXPECT_LE(mapped, 255);
+      previous = mapped;
+    }
+  }
+}
+
+TEST(AdaptiveToneEqualizeStrength, StrengthDoesNotDisturbStretch) {
+  // Mode::Stretch ignores the parameter; a caller passing the deep value for its
+  // Equalize path must not change what Stretch does on the same histogram.
+  const Histogram h = band(20, 200);
+  const Points shallow = adaptive_tone::derivePoints(h.data(), total(h), Mode::Stretch, adaptive_tone::EQ_BLEND_NUM);
+  const Points deep = adaptive_tone::derivePoints(h.data(), total(h), Mode::Stretch, adaptive_tone::EQ_BLEND_NUM_DEEP);
+  ASSERT_TRUE(deep.active);
+  EXPECT_EQ(shallow.blackPoint, deep.blackPoint);
+  EXPECT_EQ(shallow.whitePoint, deep.whitePoint);
+  for (int i = 0; i < 256; i++) {
+    EXPECT_EQ(adaptive_tone::apply(deep, static_cast<uint8_t>(i)), referenceStretch(deep, static_cast<uint8_t>(i)))
+        << "at level " << i;
+  }
+}

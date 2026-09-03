@@ -397,8 +397,25 @@ class GfxRenderer {
   void drawImage(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIcon(const uint8_t bitmap[], int x, int y, int width, int height) const;
   void drawIconInverted(const uint8_t bitmap[], int x, int y, int width, int height) const;
-  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
-                  float cropY = 0) const;
+  // A borrowed 8-bit grayscale canvas (see borrowGray8Canvas): where drawing
+  // routines accept one, they paint bytes into it instead of bits into the
+  // framebuffer, so the panel quantises rather than the host.
+  struct Gray8Target {
+    uint8_t* canvas;
+    uint16_t stride;
+  };
+
+  // When `gray8` is set the bitmap's 8-bit samples are painted there and the
+  // framebuffer is left untouched — the 2-bit dither is skipped entirely rather
+  // than done and discarded. Ignored for 1-bit bitmaps, which have no levels to
+  // preserve. Default nullptr keeps every existing caller on the 2-bit path.
+  void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0, float cropY = 0,
+                  const Gray8Target* gray8 = nullptr) const;
+  // One 8-bit sample at LOGICAL (x, y), rotated onto the canvas exactly as
+  // drawPixel() rotates onto the framebuffer. Silently drops out-of-panel
+  // coordinates, where drawPixel() logs — a scaled image legitimately walks off
+  // the edge, and one log line per pixel would be its own failure.
+  void drawGray8Pixel(const Gray8Target& gray8, int x, int y, uint8_t gray) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
   void fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state = true) const;
 
@@ -468,6 +485,35 @@ class GfxRenderer {
   void copyGrayscaleLsbBuffers(const uint8_t* plane) const;
   void copyGrayscaleMsbBuffers(const uint8_t* plane) const;
   void displayGrayBuffer() const;
+
+  // --- native grayscale (panels resolving more than the plane pipeline's 4 levels) ---
+  //
+  // Everything above encodes grey as two selector bits per pixel, because that is
+  // all a KW controller can act on. Where the panel keeps a deeper buffer of its
+  // own, a caller can skip the encoding: borrow that buffer, paint 8-bit grey into
+  // it, and let the panel quantise at its native depth. See HalDisplay.
+
+  // 4 on every dual-plane panel, more where the borrow below is backed.
+  uint8_t getGrayLevels() const;
+  // Physical panel layout, one byte per pixel, 0x00 black .. 0xFF white. nullptr
+  // when the panel has no such buffer. Allocates nothing.
+  uint8_t* borrowGray8Canvas(uint16_t* stride) const;
+  // Stamp the framebuffer's BLACK pixels onto a borrowed canvas, leaving every
+  // other canvas byte as painted. This is how 1-bit content — text drawn by the
+  // normal render path — is composited over a grey image without being dithered
+  // down with it. Both buffers are in physical layout, so no orientation applies.
+  void stampBwOntoGray8Canvas(uint8_t* canvas, uint16_t stride) const;
+  // Copy a LOGICAL rectangle of the framebuffer onto a borrowed canvas as solid
+  // black and white, replacing whatever was painted there.
+  //
+  // The difference from stampBwOntoGray8Canvas() is opacity, and it decides which
+  // one a caller wants. Stamping paints only the black pixels, so an image shows
+  // through everywhere else — right for bare text. Content with a BACKGROUND, such
+  // as a filled overlay panel or inverted white-on-black text, needs its whole
+  // rectangle to land or the fill is dropped and the light pixels of the text with
+  // it. Both buffers are 1-bit-derived, so nothing here is dithered.
+  void compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, int x, int y, int width, int height) const;
+  void displayGray8Canvas() const;
 
   // Timing breakdown returned by renderGrayscalePlanesSequential().
   struct GrayscaleTimings {

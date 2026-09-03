@@ -112,6 +112,25 @@ inline constexpr uint64_t EQ_CLIP_MULTIPLE = 2;
 inline constexpr int EQ_BLEND_NUM = 1;
 inline constexpr int EQ_BLEND_DEN = 4;
 
+// ...but "visible dither banding" is a statement about a FOUR-level panel, where
+// every tone the curve separates has to be faked out of two rails and two greys.
+// A panel that resolves eleven has far more room before a flattened gradient
+// breaks up, and correspondingly more to gain: the whole point of equalization is
+// to spend output range where the pixels are, and there is only range to spend if
+// the panel has levels to spend it on.
+//
+// Measured on two covers through the T5S3's clean-bank response (11 levels, gamma
+// 2.2), raising the blend improves brightness AND local contrast monotonically --
+// 1/4 -> 3/4 takes a bimodal cover from 54.5%/0.653 to 58.6%/0.726, where the
+// no-filter baseline is 52.4%/0.611. At 1/4 the same cover was reported on
+// hardware as "barely different" from no filter at all.
+//
+// This is a property of the RENDER PATH, not of the device: a deep panel still
+// draws in-book images and covers through the dual-plane path, and those want the
+// conservative value. So it is a parameter, passed by whoever knows which way the
+// image is going out, and not a global set once from the panel.
+inline constexpr int EQ_BLEND_NUM_DEEP = 3;
+
 // --- Where the curve lives -------------------------------------------------------
 // Both modes bake into a 256-entry lookup table rather than being recomputed per pixel:
 // apply() sits in the dither inner loop, so a table read replaces a multiply and a
@@ -156,7 +175,11 @@ struct Points {
 // Returns an inactive result when the image is line art, or (Stretch only) when the
 // useful range is too narrow to be worth stretching. Callers should treat an inactive
 // result as "render exactly as before".
-inline Points derivePoints(const uint32_t* histogram, uint64_t sampleCount, Mode mode = Mode::Stretch) {
+// `eqBlendNum` is the equalization strength out of EQ_BLEND_DEN, for Mode::Equalize
+// only: EQ_BLEND_NUM for a dual-plane target, EQ_BLEND_NUM_DEEP where the output
+// resolves more levels than that. Ignored by Mode::Stretch.
+inline Points derivePoints(const uint32_t* histogram, uint64_t sampleCount, Mode mode = Mode::Stretch,
+                           int eqBlendNum = EQ_BLEND_NUM) {
   Points points;
   if (!histogram || sampleCount == 0) return points;
 
@@ -243,7 +266,7 @@ inline Points derivePoints(const uint32_t* histogram, uint64_t sampleCount, Mode
   for (int i = 0; i < 256; i++) {
     running += (histogram[i] < clipLimit ? histogram[i] : clipLimit) + shared;
     const int equalized = static_cast<int>((running * 255u) / clippedTotal);
-    int adjusted = (i * (EQ_BLEND_DEN - EQ_BLEND_NUM) + equalized * EQ_BLEND_NUM) / EQ_BLEND_DEN;
+    int adjusted = (i * (EQ_BLEND_DEN - eqBlendNum) + equalized * eqBlendNum) / EQ_BLEND_DEN;
     if (i > HIGHLIGHT_FLOOR && adjusted < i) adjusted = i;
     if (adjusted < 0) adjusted = 0;
     if (adjusted > 255) adjusted = 255;
