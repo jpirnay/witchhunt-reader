@@ -176,6 +176,9 @@ void OtaUpdateActivity::render(RenderLock&&) {
       case OtaUpdater::VALIDATE_FAILED:
         reason = "Bootloader incompatible - reflash via USB with PlatformIO";
         break;
+      case OtaUpdater::WRONG_DEVICE_ERROR:
+        reason = tr(STR_FIRMWARE_WRONG_DEVICE);
+        break;
       default:
         break;
     }

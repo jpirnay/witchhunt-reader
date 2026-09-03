@@ -11,6 +11,10 @@
 //
 // Both the SD update activity and the OTA path land here. OTA first
 // downloads the firmware to an SD-card cache file, then calls this.
+//
+// The wrong-device guards (BAD_CHIP / WRONG_BOARD and runningPartitionChipId)
+// are ported from crosspoint-reader/crosspoint-reader (MIT), PR #2880 by Uri
+// Tauber (chip_id) and PR #2983 by Justin Mitchell (board tag).
 
 namespace firmware_flash {
 
@@ -20,6 +24,8 @@ enum class Result {
   TOO_SMALL,
   TOO_LARGE,
   BAD_MAGIC,
+  BAD_CHIP,      // image chip_id doesn't match the running MCU family
+  WRONG_BOARD,   // image carries a board tag naming a different board
   BAD_SEGMENTS,  // segment table malformed or runs past EOF
   BAD_CHECKSUM,  // ESP image XOR checksum mismatch
   BAD_SHA,       // SHA256 trailer mismatch (hash_appended images)
@@ -53,7 +59,17 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
 //
 // `partitionSize` is the size of the destination OTA partition; pass 0 to
 // skip the size-fits-partition check. Streams the file in CHUNK-sized reads.
+//
+// Also rejects an image built for another device: chip_id against the running
+// partition's own (BAD_CHIP), and the embedded board tag against this build's
+// (WRONG_BOARD). See FirmwareBoardTag.h — an untagged image still passes.
 Result validateImageFile(const char* sdPath, size_t partitionSize);
+
+// Returns the chip_id (esp_image_header_t offset 12) of the currently-running
+// app partition, or 0xFFFF if it cannot be read. The running image booted
+// successfully, so its chip_id is authoritative for the current CPU — no chip
+// enumeration needed. Cached after the first call.
+uint16_t runningPartitionChipId();
 
 const char* resultName(Result r);
 

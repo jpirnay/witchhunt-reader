@@ -30,6 +30,9 @@ class OtaUpdater {
     UPDATE_CANCELLED,
     UPDATE_IN_PROGRESS,
     VALIDATE_FAILED,
+    // Release asset was built for another board: chip_id or the embedded board
+    // tag disagreed with this build. See FirmwareBoardTag.h.
+    WRONG_DEVICE_ERROR,
   };
 
   size_t getOtaSize() const { return otaSize; }
