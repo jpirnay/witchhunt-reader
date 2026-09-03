@@ -196,17 +196,24 @@ def inject_version(env):
 
     # Release candidate builds use the CI-provided RC tag when available, but
     # keep local gh_release_rc builds identifiable instead of leaving the
-    # firmware version empty.
-    if env['PIOENV'] == 'gh_release_rc':
+    # firmware version empty. Every board has its own RC env named
+    # <board>_gh_release_rc (plain gh_release_rc is the C3 X3/X4 one); the
+    # board prefix becomes the version suffix, matching how the non-RC release
+    # envs stamp themselves in platformio.ini.
+    pioenv = env['PIOENV']
+    if pioenv.endswith('gh_release_rc'):
         base_version = normalize_semver_patch(get_base_version(project_dir))
         version_string = os.environ.get('CROSSPOINT_RC_VERSION') or f'{base_version}-rc.0+local'
+        board_suffix = pioenv[: -len('gh_release_rc')].strip('_-')
+        if board_suffix:
+            version_string = f'{version_string}-{board_suffix}'
         env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
         print(f'CrossPoint build version: {version_string}')
         return
 
     # Only applies to the dev (default) environment; release envs set the
     # version via build_flags in platformio.ini and are unaffected.
-    if env['PIOENV'] != 'default':
+    if pioenv != 'default':
         return
 
     base_version = get_base_version(project_dir)
