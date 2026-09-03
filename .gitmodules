@@ -1,4 +1,22 @@
+# The SDK is pinned to OUR FORK, not to Free-Ink/freeink-sdk.
+#
+# The firmware needs work that is not on upstream main: the LilyGo T5 S3 board
+# support of Free-Ink/freeink-sdk#51 (still open), our fixes on top of it, the
+# pinch classifier (#75), and USB-MSC on the SPI SD path (#74). A build against
+# upstream main does not compile.
+#
+# This used to name the upstream URL, and it resolved anyway: GitHub shares an
+# object store across a fork network, so fetching our fork-only commit by its
+# exact SHA succeeds even through the upstream URL. That is grace, not
+# configuration -- it would end the day the fork left the network, and the
+# failure would surface as an unexplained CI break. Naming the fork makes the
+# pin say what it means.
+#
+# `branch` is our fork branch on purpose. It only matters to
+# `git submodule update --remote`, which is NOT what a normal checkout runs --
+# but when it was `main`, that command silently reset the submodule to upstream
+# and the firmware then failed to build. It now moves to the branch we track.
 [submodule "freeink-sdk"]
 	path = freeink-sdk
-	url = https://github.com/Free-Ink/freeink-sdk.git
-	branch = main
+	url = https://github.com/jpirnay/freeink-sdk.git
+	branch = feat/t5s3-pro-and-pinch
