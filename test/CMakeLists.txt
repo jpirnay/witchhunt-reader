@@ -69,6 +69,7 @@ add_subdirectory(${REPO_ROOT}/lib/SaxParser ${CMAKE_CURRENT_BINARY_DIR}/SaxParse
 
 add_subdirectory(buffered_io)
 add_subdirectory(natural_sort)
+add_subdirectory(firmware_board_tag)
 add_subdirectory(list_layout)
 add_subdirectory(cover_grid_layout)
 add_subdirectory(differential_rounding)

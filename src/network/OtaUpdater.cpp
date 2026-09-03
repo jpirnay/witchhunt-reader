@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -13,6 +14,8 @@
 // friends transitively include lwip). Pin this order; clang-format would
 // otherwise sort the local headers last and break the build.
 #include "CrossPointSettings.h"
+#include "FirmwareBoardTag.h"
+#include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
 #include <bootloader_common.h>
 #include <esp_flash_partitions.h>
@@ -64,8 +67,20 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // Adapted from crosspoint-reader/crosspoint-reader (MIT),
   // PR #1810 by znelson and contributors.
   LOG_DBG("OTA", "Checking for %s update at %s", SETTINGS.includeBetaUpdates ? "beta" : "stable", releaseApiUrl);
+  // Each board updates from its own release asset: plain firmware.bin for the
+  // combined C3 X3/X4 binary (the name pre-existing releases already use), and
+  // firmware-<board>.bin for every other board. The board name comes from the
+  // build's own tag, so a new env is named correctly without touching this.
+  const bool isX4 = board_tag::boardNameLen() == 2 && memcmp(board_tag::boardName(), "x4", 2) == 0;
+  char assetName[48] = "firmware.bin";
+  if (!isX4) {
+    snprintf(assetName, sizeof(assetName), "firmware-%.*s.bin", static_cast<int>(board_tag::boardNameLen()),
+             board_tag::boardName());
+  }
+
   for (int attempt = 1; attempt <= otaHttpMaxAttempts; ++attempt) {
     ReleaseJsonParser releaseParser;
+    releaseParser.setFirmwareAssetName(assetName);
     size_t bytesSeen = 0;
     // Fail closed like the firmware download itself: this response names the URL
     // installUpdate() then fetches, so an unverified answer chooses the binary.
@@ -77,7 +92,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
             return false;
           }
           releaseParser.feed(reinterpret_cast<const char*>(data), len);
-          // For OTA metadata we only need tag_name and firmware.bin fields.
+          // For OTA metadata we only need tag_name and the asset fields.
           // Stop early once both are found to avoid fragile tail reads.
           if (releaseParser.foundTag() && releaseParser.foundFirmware()) {
             return false;
@@ -106,7 +121,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
     }
 
     if (!releaseParser.foundFirmware()) {
-      LOG_ERR("OTA", "No firmware.bin asset found");
+      LOG_ERR("OTA", "No %s asset found in latest release", assetName);
       return NO_UPDATE;
     }
 
@@ -348,6 +363,18 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
   const esp_ota_handle_t handle = reinterpret_cast<esp_ota_handle_t>(otaWriteHandle);
   bool writeOk = true;
   bool userCancelled = false;
+  // The image streams in chunks; only the first bytes carry the header. Buffer
+  // the first 14 bytes so chip_id (esp_image_header_t offset 12) can be read
+  // and a wrong-MCU image rejected before it overwrites the OTA partition.
+  uint8_t hdr[14];
+  size_t hdrLen = 0;
+  bool wrongChip = false;
+  // All S3 boards share a chip_id, so also scan the stream for the embedded
+  // board tag (FirmwareBoardTag.h). An untagged image passes; a tag naming a
+  // different board aborts the download. The wrong image may partially land in
+  // the inactive OTA slot, but cleanupUpdate() below means it never becomes the
+  // boot target.
+  board_tag::Scanner tagScanner;
 
   // Verify-only (fail closed): a MITM must not be able to downgrade the firmware
   // download to an unverified connection by presenting a bad cert.
@@ -357,6 +384,27 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
         if (cancelRequested) {
           userCancelled = true;
           return false;
+        }
+        if (hdrLen < sizeof(hdr)) {
+          const size_t take = std::min(len, sizeof(hdr) - hdrLen);
+          memcpy(hdr + hdrLen, data, take);
+          hdrLen += take;
+          if (hdrLen == sizeof(hdr)) {
+            uint16_t imageChip;
+            memcpy(&imageChip, hdr + 12, sizeof(imageChip));
+            const uint16_t deviceChip = firmware_flash::runningPartitionChipId();
+            if (deviceChip != 0xFFFF && imageChip != deviceChip) {
+              LOG_ERR("OTA", "wrong chip: image=0x%04X device=0x%04X", imageChip, deviceChip);
+              wrongChip = true;
+              return false;  // abort the transfer
+            }
+          }
+        }
+        tagScanner.feed(data, len);
+        if (tagScanner.mismatch()) {
+          LOG_ERR("OTA", "wrong board: image=%s device=%.*s", tagScanner.foundName(),
+                  static_cast<int>(board_tag::boardNameLen()), board_tag::boardName());
+          return false;  // abort the transfer
         }
         if (esp_ota_write(handle, data, len) != ESP_OK) {
           writeOk = false;
@@ -380,6 +428,12 @@ OtaUpdater::OtaUpdaterError OtaUpdater::performInstallUpdateStep() {
     LOG_INF("OTA", "Install cancelled by user");
     cleanupUpdate();
     installResult = UPDATE_CANCELLED;
+    return installResult;
+  }
+  if (wrongChip || tagScanner.mismatch()) {
+    LOG_ERR("OTA", "firmware is for a different device - aborting install");
+    cleanupUpdate();
+    installResult = WRONG_DEVICE_ERROR;
     return installResult;
   }
   if (!writeOk) {

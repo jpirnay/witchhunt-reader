@@ -7,12 +7,18 @@
 
 // Ported from crosspoint-reader/crosspoint-reader (MIT),
 // initially authored in PR #1810 by znelson and contributors.
+// The configurable firmware asset name comes from PR #2983 by Justin Mitchell.
 class ReleaseJsonParser {
  public:
   ReleaseJsonParser();
 
   ReleaseJsonParser(const ReleaseJsonParser&) = delete;
   ReleaseJsonParser& operator=(const ReleaseJsonParser&) = delete;
+
+  // Release asset this parser accepts as the firmware image, matched exactly.
+  // Defaults to "firmware.bin" (the X3/X4 asset); other boards set their own
+  // "firmware-<board>.bin". Survives reset() so a retry keeps the choice.
+  void setFirmwareAssetName(const char* name);
 
   void reset();
   void feed(const char* data, size_t len);
@@ -66,6 +72,7 @@ class ReleaseJsonParser {
   bool tagFound;
   bool firmwareFound;
 
+  char firmwareAssetName[32];
   char currentAssetName[32];
   char currentAssetUrl[512];
   bool topLevelArray;

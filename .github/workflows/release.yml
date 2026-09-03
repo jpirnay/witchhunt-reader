@@ -1,4 +1,12 @@
 name: Compile Release
+
+# One binary per board, each named exactly as the firmware's own OTA check asks
+# GitHub for (see src/network/FirmwareBoardTag.h): plain firmware.bin for the
+# combined C3 X3/X4 binary — the name pre-existing releases already use, so
+# devices in the field keep updating — and firmware-<board>.bin for every other
+# board. The legs build in parallel and a single publish job attaches them, so
+# two jobs never race on the same release.
+
 on:
   release:
     types: [published]
@@ -8,7 +16,18 @@ permissions:
 
 jobs:
   build-release:
+    name: Build (${{ matrix.label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: gh_release
+            label: X3/X4
+            asset: firmware.bin
+          - env: lilygo_gh_release
+            label: LilyGo T5S3
+            asset: firmware-lilygo.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -39,24 +58,53 @@ jobs:
       - name: Install PlatformIO Core
         run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
 
+      # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
+      # a shared key would have the two legs overwriting each other's cache.
       - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
       - name: Build CrossPoint
-        run: pio run -e gh_release
+        run: pio run -e ${{ matrix.env }}
 
       - name: Patch min_chip_rev_full to 0
-        run: python3 scripts/patch_min_chip_rev.py .pio/build/gh_release/firmware.bin
+        run: python3 scripts/patch_min_chip_rev.py .pio/build/${{ matrix.env }}/firmware.bin
+
+      # Every env builds a file called firmware.bin; copy it to the board's
+      # asset name. The X3/X4 leg's asset IS firmware.bin, so it needs no copy.
+      - name: Name the release asset
+        run: |
+          if [ "${{ matrix.asset }}" != "firmware.bin" ]; then
+            cp ".pio/build/${{ matrix.env }}/firmware.bin" \
+               ".pio/build/${{ matrix.env }}/${{ matrix.asset }}"
+          fi
+
+      - name: Upload ${{ matrix.asset }} artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.asset }}
+          path: .pio/build/${{ matrix.env }}/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      # merge-multiple flattens every leg's artifact into one directory, so the
+      # upload below attaches all boards' binaries in a single API call.
+      - name: Download board binaries
+        uses: actions/download-artifact@v6
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Upload release assets
         if: ${{ env.ACT != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
-          files: |
-            .pio/build/gh_release/firmware.bin
+          files: release-assets/*.bin
           fail_on_unmatched_files: true

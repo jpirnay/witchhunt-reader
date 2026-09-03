@@ -1,5 +1,13 @@
 name: Publish Release Candidate
 
+# Same asset naming as release.yml: plain firmware.bin for the combined C3
+# X3/X4 binary, firmware-<board>.bin for every other board — the names the
+# firmware's own OTA check asks GitHub for (src/network/FirmwareBoardTag.h).
+#
+# Three jobs, because the RC tag has to exist before the builds (it is compiled
+# into the firmware as CROSSPOINT_VERSION) and the prerelease must be created
+# exactly once: prepare -> build (one leg per board) -> publish.
+
 on:
   push:
     branches:
@@ -9,46 +17,21 @@ permissions:
   contents: write
 
 jobs:
-  build-release-candidate:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      rc_tag: ${{ steps.rc.outputs.rc_tag }}
     steps:
       - uses: actions/checkout@v6
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-          enable-cache: false
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-
-      # terser minifies the inline JS in the embedded web pages (see
-      # scripts/build_html.py). Without it the build still succeeds, but the
-      # generated pages are ~17% larger - so CI installs it to match a release.
-      - name: Install web asset tooling
-        run: npm ci
-
-      - name: Install PlatformIO Core
-        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
-
-      - name: Cache PlatformIO packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: pio-${{ runner.os }}-
-
-      - name: Extract env
+      - name: Determine next RC tag
+        id: rc
         run: |
           VERSION="$(python3 - <<'PY'
           import configparser
@@ -84,23 +67,114 @@ jobs:
           PY
           )"
 
-          echo "RC_TAG=${VERSION}-rc.${NEXT_RC}" >> $GITHUB_ENV
-          echo "RELEASE_NOTES_PATH=${RUNNER_TEMP}/release-notes.md" >> $GITHUB_ENV
+          echo "rc_tag=${VERSION}-rc.${NEXT_RC}" >> "$GITHUB_OUTPUT"
+
+  build-release-candidate:
+    name: Build (${{ matrix.label }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: gh_release_rc
+            label: X3/X4
+            asset: firmware.bin
+          - env: lilygo_gh_release_rc
+            label: LilyGo T5S3
+            asset: firmware-lilygo.bin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # terser minifies the inline JS in the embedded web pages (see
+      # scripts/build_html.py). Without it the build still succeeds, but the
+      # generated pages are ~17% larger - so CI installs it to match a release.
+      - name: Install web asset tooling
+        run: npm ci
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
+      # a shared key would have the two legs overwriting each other's cache.
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-${{ matrix.env }}-
 
       - name: Build Witch(hunt) Reader Release Candidate
         env:
-          CROSSPOINT_RC_VERSION: ${{ env.RC_TAG }}
-        run: pio run -e gh_release_rc
+          CROSSPOINT_RC_VERSION: ${{ needs.prepare.outputs.rc_tag }}
+        run: pio run -e ${{ matrix.env }}
 
       - name: Patch min_chip_rev_full to 0
-        run: python3 scripts/patch_min_chip_rev.py .pio/build/gh_release_rc/firmware.bin
+        run: python3 scripts/patch_min_chip_rev.py .pio/build/${{ matrix.env }}/firmware.bin
+
+      # Every env builds a file called firmware.bin; copy it to the board's
+      # asset name. The X3/X4 leg's asset IS firmware.bin, so it needs no copy.
+      - name: Name the release asset
+        run: |
+          if [ "${{ matrix.asset }}" != "firmware.bin" ]; then
+            cp ".pio/build/${{ matrix.env }}/firmware.bin" \
+               ".pio/build/${{ matrix.env }}/${{ matrix.asset }}"
+          fi
+
+      - name: Upload ${{ matrix.asset }} artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.asset }}
+          path: .pio/build/${{ matrix.env }}/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish-release-candidate:
+    needs: [prepare, build-release-candidate]
+    runs-on: ubuntu-latest
+    env:
+      RC_TAG: ${{ needs.prepare.outputs.rc_tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      # merge-multiple flattens every leg's artifact into one directory, so the
+      # upload below attaches all boards' binaries in a single API call.
+      - name: Download board binaries
+        uses: actions/download-artifact@v6
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Generate release notes
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          echo "RELEASE_NOTES_PATH=${RUNNER_TEMP}/release-notes.md" >> "$GITHUB_ENV"
           python3 scripts/generate_release_notes.py \
-            --output "${RELEASE_NOTES_PATH}" \
+            --output "${RUNNER_TEMP}/release-notes.md" \
             --target-sha "${GITHUB_SHA}" \
             --current-label "${RC_TAG}" \
             --release-scope any \
@@ -115,6 +189,5 @@ jobs:
           name: CrossPoint ${{ env.RC_TAG }}
           body_path: ${{ env.RELEASE_NOTES_PATH }}
           prerelease: true
-          files: |
-            .pio/build/gh_release_rc/firmware.bin
+          files: release-assets/*.bin
           fail_on_unmatched_files: true
