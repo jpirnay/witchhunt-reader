@@ -29,12 +29,25 @@
 // scrolled path draw a contiguous run, so nothing needs a per-row index.
 namespace ListTouchBand {
 
-// Deliberately equal to ListLayout::kMaxRows, which owns the argument for the number: the
-// shortest theme row is 30 px and the tallest content area is well under 600 px, so a
-// screenful cannot exceed this. Stated here rather than included so this header stays free of
-// everything (it is hit-tested on the host); the static_assert in ListTouchBand.cpp's test
-// keeps the two honest.
-inline constexpr int kMaxRows = 24;
+// How many rows one screenful can publish. This is a CAPACITY, not a layout rule: it has to be
+// larger than any screenful a draw can paint, because a painted row past it is recorded by
+// nothing and answers to no tap. It was 24 -- sized for the 800 px panels, where a full-height
+// list of the shortest theme row (30 px) comes to 22 -- and the T5S3's 540x960 frame overran it
+// by four rows in the reader menu, which is what put the tail of that menu out of reach.
+//
+// Sized from the geometry instead of from a guess: tallest content area / shortest row. Today
+// that is 920 px (960 less the button-hint strip) over 30 px = 30 rows, and 64 leaves room for
+// a taller panel or a shorter row without this needing to be thought about again. The cost is
+// one static Band -- 260-odd bytes of .bss -- and nothing on the heap or on any stack that
+// scales with it.
+//
+// The draws still clamp what they paint to this number, but as a backstop that current geometry
+// cannot reach rather than as something that shapes a layout: past it a list would leave blank
+// space at its foot, which is a visible mistake rather than a silently dead row.
+//
+// Stated here rather than included so this header stays free of everything (it is hit-tested on
+// the host); ListTouchBandTest's static_assert keeps it at or above ListLayout's window.
+inline constexpr int kMaxRows = 64;
 
 struct Band {
   int16_t x = 0;      // left edge of the tappable band
@@ -46,10 +59,10 @@ struct Band {
   // Bit r set = row r is a real, activatable item. Separator rows are drawn but are not
   // selectable -- the draw loop skips them and the navigation skips over them -- so a finger
   // landing on one must do nothing rather than select the heading.
-  uint32_t selectable = 0;
+  uint64_t selectable = 0;
 };
 
-static_assert(kMaxRows <= 32, "selectable is a uint32_t bitmask");
+static_assert(kMaxRows <= 64, "selectable is a uint64_t bitmask");
 
 // Published across tasks: drawList() runs on the render task, the hit test on the loop task.
 // A seqlock rather than a bare valid flag, because a half-written Band would be hit-tested
@@ -107,7 +120,7 @@ inline int hitTestIn(const Band& b, const int px, const int py) {
   if (b.width <= 0 || b.count <= 0) return -1;
   if (px < b.x || px >= b.x + b.width) return -1;
   for (int r = 0; r < b.count && r < kMaxRows; ++r) {
-    if ((b.selectable & (1u << r)) == 0) continue;
+    if ((b.selectable & (1ull << r)) == 0) continue;
     if (py >= b.top[r] && py < b.top[r] + b.height[r]) return b.firstIndex + r;
   }
   return -1;
@@ -141,11 +154,11 @@ struct Builder {
   }
 
   void addRow(const int top, const int height, const bool selectable) {
-    if (band.count >= kMaxRows) return;  // see kMaxRows: unreachable in practice
+    if (band.count >= kMaxRows) return;  // see kMaxRows: the draws clamp to this, so this is a backstop
     const auto r = static_cast<int>(band.count);
     band.top[r] = static_cast<int16_t>(top);
     band.height[r] = static_cast<int16_t>(height);
-    if (selectable) band.selectable |= (1u << r);
+    if (selectable) band.selectable |= (1ull << r);
     band.count = static_cast<int16_t>(r + 1);
   }
 

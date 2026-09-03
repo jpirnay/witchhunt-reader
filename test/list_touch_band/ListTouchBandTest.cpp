@@ -8,10 +8,11 @@ namespace {
 using ListTouchBand::Band;
 using ListTouchBand::Builder;
 
-// The band header states its row cap independently so it stays free of every include. If
-// ListLayout ever grows its window, a wrapped list would silently lose its tail rows here.
-static_assert(ListTouchBand::kMaxRows == ListLayout::kMaxRows,
-              "ListTouchBand::kMaxRows must track ListLayout::kMaxRows");
+// The band header states its row cap independently so it stays free of every include, so the
+// two have to be checked against each other somewhere. The direction matters: the band is a
+// CAPACITY and may be larger, but it must never be smaller than the window a wrapped list can
+// paint, or that list would draw rows the band cannot record and they would answer no tap.
+static_assert(ListLayout::kMaxRows <= ListTouchBand::kMaxRows, "ListLayout's window must fit in a ListTouchBand::Band");
 
 // What BaseTheme::drawList records on a plain X4 settings page: 30px rows filling a 480px
 // content band that starts 60px down, first item on the page is index 0.
@@ -131,6 +132,50 @@ TEST(ListTouchBand, RecordAndSnapshotRoundTrip) {
   ListTouchBand::invalidate();
   EXPECT_FALSE(ListTouchBand::hasBand());
   EXPECT_EQ(-1, ListTouchBand::hitTest(240, 60 + 15));
+}
+
+// Rows in the top half of the mask must stay distinguishable from rows in the bottom half.
+// A 32-bit shift silently wraps (row 32 lands on row 0's bit), which would make a separator in
+// the second half read as selectable and a real row read as a heading.
+TEST(ListTouchBand, SelectabilityIsTrackedAboveTheThirtySecondRow) {
+  ASSERT_GT(ListTouchBand::kMaxRows, 32) << "this test is about the high half of the mask";
+  Builder b;
+  b.begin(0, 480, 0);
+  for (int r = 0; r < ListTouchBand::kMaxRows; ++r) {
+    // Row 0 selectable, row 32 a separator: the pair that collides under a 32-bit shift.
+    b.addRow(r * 20, 20, /*selectable=*/r != 32);
+  }
+  EXPECT_EQ(0, ListTouchBand::hitTestIn(b.band, 240, 10));
+  EXPECT_EQ(-1, ListTouchBand::hitTestIn(b.band, 240, 32 * 20 + 10)) << "separator row 32";
+  EXPECT_EQ(33, ListTouchBand::hitTestIn(b.band, 240, 33 * 20 + 10));
+  EXPECT_EQ(ListTouchBand::kMaxRows - 1,
+            ListTouchBand::hitTestIn(b.band, 240, (ListTouchBand::kMaxRows - 1) * 20 + 10));
+}
+
+// The screenful that overran the old cap of 24: the EPUB reader menu on the LilyGo T5S3.
+// Its portrait frame is 540x960, getContentRect() takes the 40 px hint strip off the bottom and
+// the menu starts its list 75 px down, so BaseTheme::drawList paints (960 - 40 - 75) / 30 = 28
+// rows. Every one of them has to be recordable, or the rows past the cap are painted rows that
+// answer to no tap -- which is exactly how the menu's bottom four rows went dead on that board.
+TEST(ListTouchBand, RecordsAFullReaderMenuScreenfulOnA960PxPanel) {
+  constexpr int kListTop = 75;
+  constexpr int kRowHeight = 30;
+  constexpr int kRows = (960 - 40 - kListTop) / kRowHeight;
+  static_assert(kRows == 28, "T5S3 reader-menu geometry");
+  ASSERT_LE(kRows, ListTouchBand::kMaxRows);
+
+  Builder b;
+  b.begin(/*rectX=*/0, /*rectWidth=*/540, /*firstIndex=*/0);
+  for (int r = 0; r < kRows; ++r) b.addRow(kListTop + r * kRowHeight, kRowHeight, /*selectable=*/true);
+  EXPECT_EQ(kRows, b.band.count);
+
+  // The last row is the one that used to be dead, so name it rather than trusting the loop.
+  EXPECT_EQ(kRows - 1, ListTouchBand::hitTestIn(b.band, 270, kListTop + (kRows - 1) * kRowHeight + 15));
+  for (int r = 0; r < kRows; ++r) {
+    EXPECT_EQ(r, ListTouchBand::hitTestIn(b.band, 270, kListTop + r * kRowHeight + 15)) << "row " << r;
+  }
+  // Below the last row is the gap above the hint strip, and belongs to no row.
+  EXPECT_EQ(-1, ListTouchBand::hitTestIn(b.band, 270, kListTop + kRows * kRowHeight + 5));
 }
 
 TEST(ListTouchBand, ABandOfOnlySeparatorsDoesNotCountAsALiveList) {

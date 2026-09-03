@@ -481,6 +481,12 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
+  // Never paint more rows than the touch band can register: a painted row past the cap is drawn
+  // but recorded by nothing, so it answers to no tap. That is not hypothetical -- the reader
+  // menu on the T5S3's 540x960 portrait frame fits 28 rows against a cap of 24, and its bottom
+  // four rows were dead. Clamping here costs blank space at the foot of an over-tall list
+  // instead, and keeps "every painted row is a tappable row" true on any future panel.
+  pageItems = std::min(pageItems, ListTouchBand::kMaxRows);
   // A fixed-height list still reports its page size, so Left/Right page by what is really on
   // screen rather than by a guess.
   if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
