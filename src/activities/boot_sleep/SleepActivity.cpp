@@ -17,6 +17,7 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -175,10 +176,16 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   config.performanceMode = false;
   config.useExactDimensions = false;
 
+  // A panel that resolves more than four levels renders this image natively below,
+  // in one decode with no plane encoding. The .pxc cache is 2 bits per pixel by
+  // construction, so it has nothing to offer that path and is not consulted for it.
+  const bool nativeGray = renderer.getGrayLevels() > 4;
+
   // Mirror the decoder's own output sizing so the cache can be validated against the
   // geometry a fresh decode would produce (see PngToFramebufferConverter: fit to the
   // config box, never upscale).
-  const std::string cachePath = sleepPixelCachePath(filename, SETTINGS.sleepScreenCoverFilter);
+  const std::string cachePath =
+      nativeGray ? std::string() : sleepPixelCachePath(filename, SETTINGS.sleepScreenCoverFilter);
   int cacheW = 0, cacheH = 0, cacheX = 0, cacheY = 0;
   ImageDimensions srcDims{};
   if (!cachePath.empty() && PngToFramebufferConverter::getDimensionsStatic(filename, srcDims) && srcDims.width > 0 &&
@@ -274,6 +281,48 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   };
 
   PngToFramebufferConverter decoder;
+
+  // Native grayscale: one decode, one push, every level the panel has.
+  //
+  // The three passes below exist only to fill three 1-bit planes. Here the panel
+  // keeps its own deeper buffer, so the decoder's tone-mapped sample is stored
+  // whole and quantised once, by the panel, at its native depth -- no Bayer
+  // dither to four levels on the way out, and no BW carrier for greys to be
+  // layered onto. Falling through costs nothing: every ordinary refresh rebuilds
+  // the canvas from the framebuffer, so a half-painted canvas cannot outlive the
+  // failure that abandoned it.
+  if (nativeGray) {
+    uint16_t canvasStride = 0;
+    if (uint8_t* canvas = renderer.borrowGray8Canvas(&canvasStride)) {
+      // White ground: the image is fitted to the box, not stretched to it, so
+      // whatever it does not cover has to be something rather than stale pixels.
+      for (int row = 0; row < renderer.getDisplayHeight(); row++) {
+        memset(canvas + static_cast<uint32_t>(row) * canvasStride, 0xFF, renderer.getDisplayWidth());
+      }
+
+      DirectGray8Writer gray8;
+      gray8.init(renderer, canvas, canvasStride);
+      RenderConfig nativeConfig = config;
+      nativeConfig.gray8 = &gray8;
+      nativeConfig.cachePath.clear();
+      nativeConfig.companionCachePath.clear();
+
+      renderer.setRenderMode(GfxRenderer::BW);
+      if (decoder.decodeToFramebuffer(filename, renderer, nativeConfig)) {
+        // The overlay is 1-bit text and wants to stay that way: drawn through the
+        // normal render path into a cleared framebuffer, then stamped onto the
+        // canvas as solid black. Dithering it with the image would only soften it.
+        renderer.clearScreen();
+        drawOverlay();
+        renderer.stampBwOntoGray8Canvas(canvas, canvasStride);
+        renderer.displayGray8Canvas();
+        LOG_INF("SLP", "Sleep image rendered at %u levels: %s", static_cast<unsigned>(renderer.getGrayLevels()),
+                filename.c_str());
+        return true;
+      }
+      LOG_DBG("SLP", "Native grayscale sleep decode failed, falling back: %s", filename.c_str());
+    }
+  }
 
   // Pass 1: BW plane — mirrors SleepActivity::renderBitmapSleepScreen so the BW carrier
   // matches the 4-level quantization layered on top via the LSB/MSB planes.
@@ -696,13 +745,32 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
        SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::ADAPTIVE_TONE ||
        SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::EQUALIZE_TONE);
 
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+  // On a panel that resolves more than four levels the image is painted straight
+  // into the panel's own canvas at full depth further down, and this 2-bit pass
+  // would be a whole extra read of the BMP off the SD card for a rendition that is
+  // then discarded. The framebuffer is still wanted -- cleared, carrying the
+  // overlay alone -- so the overlay can be composited over the grey image.
+  //
+  // hasGreyscale gates it for the same reason it gates the plane path below: the
+  // 1-bit and inverted filters have no levels to preserve, and the inversion
+  // immediately below works on the framebuffer this path does not display.
+  const bool nativeGray = hasGreyscale && renderer.getGrayLevels() > 4;
 
-  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
-    renderer.invertScreen();
+  if (!nativeGray) {
+    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+
+    if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
+      renderer.invertScreen();
+    }
   }
 
   const uint8_t overlayMode = SETTINGS.sleepCoverOverlay;
+  // Set by drawOverlay() to the block it actually drew, and left at zero height
+  // when it draws nothing. The native path below composites this rectangle rather
+  // than stamping black pixels, because the block is opaque and its text may be
+  // white -- neither survives a stamp. See compositeBwRectOntoGray8Canvas.
+  int overlayRectY = 0;
+  int overlayRectHeight = 0;
   const auto drawOverlay = [&]() {
     const bool hasTitle = !overlayInfo.title.empty();
     const bool hasProgress = !overlayInfo.progressText.empty();
@@ -732,6 +800,8 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     const int bottomPadding = lineHeight10 * 2 / 3;
     const int overlayHeight = textBlockHeight + topPadding + bottomPadding;
     const int overlayY = pageHeight - overlayHeight;
+    overlayRectY = overlayY;
+    overlayRectHeight = overlayHeight;
 
     if (overlayMode == 2) {
       renderer.fillRectDither(0, overlayY, pageWidth, overlayHeight, Color::LightGray);
@@ -769,6 +839,30 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   };
 
   drawOverlay();
+
+  // Native grayscale: the image goes into the panel's own canvas at full depth,
+  // and the framebuffer -- cleared above, and holding nothing but the overlay
+  // drawOverlay() just drew -- is composited on top of it.
+  if (nativeGray) {
+    uint16_t canvasStride = 0;
+    if (uint8_t* canvas = renderer.borrowGray8Canvas(&canvasStride)) {
+      for (int row = 0; row < renderer.getDisplayHeight(); row++) {
+        memset(canvas + static_cast<uint32_t>(row) * canvasStride, 0xFF, renderer.getDisplayWidth());
+      }
+      const GfxRenderer::Gray8Target target{canvas, canvasStride};
+      bitmap.rewindToData();
+      renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY, &target);
+      // Composite the overlay's whole block rather than stamping its dark pixels:
+      // the block is opaque, and in mode 3 it is black with WHITE text, so a
+      // stamp would drop the fill and the text with it.
+      if (overlayRectHeight > 0) {
+        renderer.compositeBwRectOntoGray8Canvas(target, 0, overlayRectY, pageWidth, overlayRectHeight);
+      }
+      renderer.displayGray8Canvas();
+      LOG_INF("SLP", "Sleep bitmap rendered at %u levels", static_cast<unsigned>(renderer.getGrayLevels()));
+      return;
+    }
+  }
 
   if (!hasGreyscale) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);

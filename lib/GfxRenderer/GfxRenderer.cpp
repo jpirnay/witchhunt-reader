@@ -2362,8 +2362,18 @@ static void bitmapFastRow(uint8_t* const frameBuffer, const uint8_t* const outpu
   }
 }
 
+void GfxRenderer::drawGray8Pixel(const Gray8Target& gray8, const int x, const int y, const uint8_t gray) const {
+  int phyX = 0;
+  int phyY = 0;
+  const int displayWidth = getDisplayWidth();
+  const int displayHeight = getDisplayHeight();
+  rotateCoordinates(getOrientation(), x, y, &phyX, &phyY, displayWidth, displayHeight);
+  if (phyX < 0 || phyX >= displayWidth || phyY < 0 || phyY >= displayHeight) return;
+  gray8.canvas[static_cast<uint32_t>(phyY) * gray8.stride + phyX] = gray;
+}
+
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
-                             const float cropX, const float cropY) const {
+                             const float cropX, const float cropY, const Gray8Target* gray8) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   // For 1-bit bitmaps, use optimized 1-bit rendering path (no crop support for 1-bit)
   if (bitmap.is1Bit() && cropX == 0.0f && cropY == 0.0f) {
@@ -2402,11 +2412,16 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
   const int outputRowSize = (bitmap.getWidth() + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+  // One row of 8-bit samples, only when a canvas is actually being painted.
+  // Stack allocation is not an option: a row is one image width, thousands of
+  // bytes, and the ESP32-C3 stack budget for a call frame is 256.
+  auto* gray8Row = gray8 ? static_cast<uint8_t*>(malloc(bitmap.getWidth())) : nullptr;
 
-  if (!outputRow || !rowBytes) {
+  if (!outputRow || !rowBytes || (gray8 && !gray8Row)) {
     LOG_ERR("GFX", "!! Failed to allocate BMP row buffers");
     free(outputRow);
     free(rowBytes);
+    free(gray8Row);
     return;
   }
 
@@ -2451,10 +2466,11 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       break;
     }
 
-    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+    if (bitmap.readNextRow(outputRow, rowBytes, gray8Row) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       free(outputRow);
       free(rowBytes);
+      free(gray8Row);
       return;
     }
 
@@ -2467,7 +2483,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       continue;
     }
 
-    if (!isScaled && drawMask != 0x00) {
+    if (!gray8 && !isScaled && drawMask != 0x00) {
       // Fast path: write up to 8 pixels per call directly to the framebuffer.
       switch (drawMask) {
         case 0x07:
@@ -2507,6 +2523,12 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
         continue;
       }
 
+      if (gray8) {
+        // The whole point of this path: store the sample, let the panel quantise.
+        drawGray8Pixel(*gray8, screenX, screenY, gray8Row[bmpX]);
+        continue;
+      }
+
       const uint8_t val = outputRow[bmpX / 4] >> (6 - ((bmpX * 2) % 8)) & 0x3;
 
       if (renderModeSnapshot == BW && val < 3) {
@@ -2521,6 +2543,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
   free(outputRow);
   free(rowBytes);
+  free(gray8Row);
 }
 
 void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
@@ -3258,6 +3281,49 @@ void GfxRenderer::copyGrayscaleMsbBuffers(const uint8_t* plane) const { display.
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
 void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFix); }
+
+uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }
+
+uint8_t* GfxRenderer::borrowGray8Canvas(uint16_t* stride) const { return display.borrowGray8Canvas(stride); }
+
+void GfxRenderer::displayGray8Canvas() const { display.displayGray8Canvas(HalDisplay::FULL_REFRESH, fadingFix); }
+
+// Bit clear = black is the framebuffer's own convention (see DirectPixelWriter's
+// BW branch, which draws by clearing), and the driver expands it the same way.
+void GfxRenderer::stampBwOntoGray8Canvas(uint8_t* canvas, const uint16_t stride) const {
+  if (!canvas || !frameBuffer) return;
+  const int width = getDisplayWidth();
+  const int height = getDisplayHeight();
+  const int widthBytes = getDisplayWidthBytes();
+  for (int y = 0; y < height; y++) {
+    const uint8_t* src = frameBuffer + static_cast<uint32_t>(y) * widthBytes;
+    uint8_t* dst = canvas + static_cast<uint32_t>(y) * stride;
+    for (int bx = 0; bx < widthBytes; bx++) {
+      const uint8_t bits = src[bx];
+      // The overwhelmingly common case on a text overlay: a fully white byte has
+      // nothing to stamp, so skip the eight-bit unpack entirely.
+      if (bits == 0xFF) continue;
+      const int x0 = bx * 8;
+      for (int bit = 0; bit < 8; bit++) {
+        const int x = x0 + bit;
+        if (x >= width) break;
+        if (!(bits & (0x80 >> bit))) dst[x] = 0x00;
+      }
+    }
+  }
+}
+
+void GfxRenderer::compositeBwRectOntoGray8Canvas(const Gray8Target& gray8, const int x, const int y, const int width,
+                                                 const int height) const {
+  if (!gray8.canvas || !frameBuffer || width <= 0 || height <= 0) return;
+  const int xEnd = std::min(x + width, getScreenWidth());
+  const int yEnd = std::min(y + height, getScreenHeight());
+  for (int row = std::max(0, y); row < yEnd; row++) {
+    for (int col = std::max(0, x); col < xEnd; col++) {
+      drawGray8Pixel(gray8, col, row, getPixel(col, row) ? 0x00 : 0xFF);
+    }
+  }
+}
 
 bool GfxRenderer::supportsGrayFrame() const { return display.supportsGrayFrame(); }
 
