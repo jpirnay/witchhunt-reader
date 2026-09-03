@@ -97,7 +97,7 @@ struct ThemeMetrics {
   int keyboardKeyCornerRadius = 0;
 };
 
-enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Weather };
+enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Weather, Usb };
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Reveal, Space, Del, Ok, Disabled };
 

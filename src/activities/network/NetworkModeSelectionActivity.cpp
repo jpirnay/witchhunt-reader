@@ -1,5 +1,6 @@
 #include "NetworkModeSelectionActivity.h"
 
+#include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -9,6 +10,21 @@
 
 namespace {
 constexpr int MENU_ITEM_COUNT = 4;
+
+// The fourth row is the USB transfer method this board actually has. Boards
+// that can act as a USB mass-storage device (FREEINK_CAP_USB_MSC) show "USB
+// Drive"; the rest keep the serial protocol.
+#if FREEINK_CAP_USB_MSC
+constexpr NetworkMode USB_MODE = NetworkMode::USB_DRIVE;
+constexpr StrId USB_MODE_LABEL = StrId::STR_USB_DRIVE;
+constexpr StrId USB_MODE_DESC = StrId::STR_USB_DRIVE_DESC;
+constexpr UIIcon USB_MODE_ICON = UIIcon::Usb;
+#else
+constexpr NetworkMode USB_MODE = NetworkMode::USB_SERIAL;
+constexpr StrId USB_MODE_LABEL = StrId::STR_USB_TRANSFER;
+constexpr StrId USB_MODE_DESC = StrId::STR_USB_TRANSFER_DESC;
+constexpr UIIcon USB_MODE_ICON = UIIcon::Transfer;
+#endif
 }  // namespace
 
 void NetworkModeSelectionActivity::onEnter() {
@@ -38,14 +54,18 @@ void NetworkModeSelectionActivity::loop() {
     } else if (selectedIndex == 2) {
       mode = NetworkMode::CREATE_HOTSPOT;
     } else if (selectedIndex == 3) {
-      mode = NetworkMode::USB_SERIAL;
+      mode = USB_MODE;
     }
 
-    // USB serial transfer needs neither WiFi nor the web server, so hand off
-    // directly here instead of routing the result back through the WiFi-centric
+    // Neither USB mode needs WiFi or the web server, so hand off directly here
+    // instead of routing the result back through the WiFi-centric
     // CrossPointWebServerActivity. The WiFi modes still return to that owner.
     if (mode == NetworkMode::USB_SERIAL) {
       activityManager.goToSerialTransfer();
+      return;
+    }
+    if (mode == NetworkMode::USB_DRIVE) {
+      activityManager.goToUsbDrive();
       return;
     }
 
@@ -71,11 +91,10 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing * 2;
   // Menu items and descriptions
   static constexpr StrId menuItems[MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
-                                                       StrId::STR_CREATE_HOTSPOT, StrId::STR_USB_TRANSFER};
+                                                       StrId::STR_CREATE_HOTSPOT, USB_MODE_LABEL};
   static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
-                                                       StrId::STR_HOTSPOT_DESC, StrId::STR_USB_TRANSFER_DESC};
-  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
-                                                        UIIcon::Transfer};
+                                                       StrId::STR_HOTSPOT_DESC, USB_MODE_DESC};
+  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot, USB_MODE_ICON};
 
   GUI.drawList(
       renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(MENU_ITEM_COUNT),

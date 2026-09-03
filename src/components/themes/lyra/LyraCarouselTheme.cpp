@@ -30,6 +30,7 @@
 #include "components/icons/settings2.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
+#include "components/icons/usb.h"
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
 #include "components/themes/ListTouchBand.h"
@@ -112,6 +113,8 @@ const uint8_t* iconBitmapFor(UIIcon icon) {
       return WifiIcon;
     case UIIcon::Hotspot:
       return HotspotIcon;
+    case UIIcon::Usb:
+      return UsbIcon;
     default:
       return nullptr;
   }

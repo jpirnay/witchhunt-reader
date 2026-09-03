@@ -5,7 +5,11 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
-enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_SERIAL };
+// USB_SERIAL and USB_DRIVE are mutually exclusive in the menu: a board that can
+// present itself as a USB mass-storage device has no use for the serial
+// file-transfer protocol, so it offers the drive instead (see the menu tables
+// in the .cpp). Both enumerators exist in every build; only the listing differs.
+enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, USB_SERIAL, USB_DRIVE };
 
 /**
  * NetworkModeSelectionActivity presents the user with a choice:

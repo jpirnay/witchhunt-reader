@@ -1,9 +1,11 @@
 #include "ActivityManager.h"
 
 #include <Arduino.h>
+#include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
+#include <Memory.h>  // makeUniqueNoThrow
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
@@ -24,6 +26,7 @@
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/SerialTransferActivity.h"
+#include "network/UsbDriveActivity.h"
 #include "reader/KOReaderSyncActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/ClockSettingsActivity.h"
@@ -195,6 +198,23 @@ void ActivityManager::renderTaskLoop() {
 }
 
 void ActivityManager::loop() {
+  if (currentActivity && currentActivity->requiresExclusiveStorageLoop()) {
+    // The raw SD card belongs to a USB host right now. Run the activity and
+    // flush its renders, and NOTHING else: no list/hint taps, no minute-tick
+    // clock repaint (it reads settings and would race the detached volume), and
+    // above all no pending-action processing — a transition would construct the
+    // next activity, which reads the filesystem that no longer exists. Such an
+    // activity leaves by rebooting, so nothing here needs a transition path.
+    currentActivity->loop();
+    if (requestedUpdate) {
+      taskENTER_CRITICAL(&activityStateMux);
+      requestedUpdate = false;
+      taskEXIT_CRITICAL(&activityStateMux);
+      if (renderTaskHandle) xTaskNotify(renderTaskHandle, 1, eIncrement);
+    }
+    return;
+  }
+
   // Drain leftover input after an activity transition so that the button press/release
   // used to leave one activity cannot bleed into the next.  We consume events until
   // every button is released and no press/release edges remain.
@@ -399,6 +419,19 @@ void ActivityManager::goToSerialTransfer() {
   replaceActivity(std::make_unique<SerialTransferActivity>(renderer, mappedInput));
 }
 
+void ActivityManager::goToUsbDrive() {
+#if FREEINK_CAP_USB_MSC
+  auto activity = makeUniqueNoThrow<UsbDriveActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: USB Drive activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+#else
+  LOG_ERR("ACT", "USB Drive requested in a build without the USB Drive capability");
+#endif
+}
+
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToClockSettings() {
@@ -550,6 +583,10 @@ void ActivityManager::popActivity() {
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+
+bool ActivityManager::requiresExclusiveStorageLoop() const {
+  return currentActivity && currentActivity->requiresExclusiveStorageLoop();
+}
 
 bool ActivityManager::isReaderActivity() const {
   if (currentActivity && currentActivity->isReaderActivity()) return true;

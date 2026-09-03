@@ -17,6 +17,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [3.6 File Transfer Screen](#36-file-transfer-screen)
       - [3.6.1 Calibre Wireless Transfers](#361-calibre-wireless-transfers)
       - [3.6.2 USB Transfer (over the cable)](#362-usb-transfer-over-the-cable)
+      - [3.6.3 USB Drive (X4 Pro and LilyGo T5 S3)](#363-usb-drive-x4-pro-and-lilygo-t5-s3)
     - [3.7 Settings](#37-settings)
       - [3.7.1 Display](#371-display)
       - [3.7.2 Reader](#372-reader)
@@ -150,6 +151,18 @@ A **Total Commander / Double Commander file-system plugin (WFX)** that works wit
 Full credit to CidVonHighwind for the original protocol and tooling. While a transfer is in progress the device pauses on-screen redraws and on-wire logging so the binary stream stays clean.
 
 **Open this screen first, then connect.** Opening the USB port from a computer briefly resets the device (a hardware quirk of the ESP32-C3's USB port). As long as you've opened the **USB Transfer** screen first, the device automatically returns to this screen after that reset, so the transfer just works — press **Back** when you're done. (If you connect while on another screen, the device will simply reboot to Home; open USB Transfer and reconnect.)
+
+### 3.6.3 USB Drive (X4 Pro and LilyGo T5 S3)
+
+On the **Xteink X4 Pro** and the **LilyGo T5 S3**, *File Transfer* offers **USB Drive** in place of USB Transfer. The reader appears on your computer as an ordinary USB stick, so you can copy books on and off — and reorganise folders, or clear caches — with your normal file manager. No plugin, no protocol, no WiFi.
+
+Choose **File Transfer → USB Drive**, then connect the cable. The screen says *USB Drive Connected* once your computer has it mounted; give it up to half a minute the first time.
+
+**When you're done, eject the drive on your computer** (or just unplug the cable). The reader then restarts by itself and returns to Home — that restart is deliberate, because your computer may have changed anything on the card and the reader has to re-read it. Nothing is lost: your reading position is saved before the drive starts.
+
+While the drive is connected the reader is a disk and nothing else — buttons, sleep and the page you were reading are all suspended until you eject.
+
+> These two boards can do this because their USB-C port is wired straight to the processor's own USB hardware. The X3 and X4 cannot: their ESP32-C3 has no USB device controller for it.
 
 ### 3.7 Settings
 
