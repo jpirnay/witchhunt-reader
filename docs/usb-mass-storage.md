@@ -146,9 +146,33 @@ Relative to upstream #3203:
 - **The UI is rewritten** for this fork's `GUI`/`UITheme` layer — upstream's
   version is built on the FreeInkUI `UiAppHost`/`UiScreen` widget layer, which
   this fork does not use.
-- **No dedicated USB icon.** The row reuses `UIIcon::Transfer`, which is the icon
-  it replaces, so nothing changes visually. Drawing a USB trident that sits well
-  next to the existing hand-drawn 32×32/24×24 icons is open if anyone wants it.
+- **A `UIIcon::Usb` row icon**, generated from Lucide's `usb` glyph. Boards
+  without the capability keep `UIIcon::Transfer` on that row.
+
+## The row icon
+
+`src/components/icons/usb.h` / `usb24.h` are generated from **Lucide**'s `usb`
+glyph — the same source the rest of this icon set comes from (`radio_tower`,
+`library`, `bookmark`, `moon`). Lucide is already vendored as a submodule inside
+the SDK, so regenerating uses the in-tree copy rather than the network:
+
+```sh
+cd scripts
+python3 convert_icon.py ../freeink-sdk/libs/assets/Icons/lucide/icons/usb.svg usb   32 32
+python3 convert_icon.py ../freeink-sdk/libs/assets/Icons/lucide/icons/usb.svg usb24 24 24
+```
+
+One source SVG, two canvases — the output name is what selects the header and the
+array (`usb.h`/`UsbIcon`, `usb24.h`/`Usb24Icon`), matching the `book`/`book24`
+pairs already in the directory. `convert_icon.py` rotates 90° on the way out,
+which is why the stored bitmaps look sideways when dumped; every icon here is
+stored that way to match the panel's native scan orientation.
+
+Lucide is ISC-licensed (`freeink-sdk/libs/assets/Icons/lucide/LICENSE`,
+Copyright (c) Lucide Icons and Contributors).
+
+Cost on a board that never shows it: ~366 bytes of flash, since `iconForName()`
+cannot be proven unreachable. Same arrangement as the weather icons.
 
 ## Concurrency notes
 

@@ -18,10 +18,12 @@ constexpr int MENU_ITEM_COUNT = 4;
 constexpr NetworkMode USB_MODE = NetworkMode::USB_DRIVE;
 constexpr StrId USB_MODE_LABEL = StrId::STR_USB_DRIVE;
 constexpr StrId USB_MODE_DESC = StrId::STR_USB_DRIVE_DESC;
+constexpr UIIcon USB_MODE_ICON = UIIcon::Usb;
 #else
 constexpr NetworkMode USB_MODE = NetworkMode::USB_SERIAL;
 constexpr StrId USB_MODE_LABEL = StrId::STR_USB_TRANSFER;
 constexpr StrId USB_MODE_DESC = StrId::STR_USB_TRANSFER_DESC;
+constexpr UIIcon USB_MODE_ICON = UIIcon::Transfer;
 #endif
 }  // namespace
 
@@ -92,10 +94,7 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
                                                        StrId::STR_CREATE_HOTSPOT, USB_MODE_LABEL};
   static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
                                                        StrId::STR_HOTSPOT_DESC, USB_MODE_DESC};
-  // Both USB modes share the transfer icon: the USB Drive row REPLACES the USB
-  // Transfer row rather than joining it, so the icon users see here is unchanged.
-  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
-                                                        UIIcon::Transfer};
+  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot, USB_MODE_ICON};
 
   GUI.drawList(
       renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(MENU_ITEM_COUNT),

@@ -28,6 +28,8 @@
 #include "components/icons/settings2.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
+#include "components/icons/usb.h"
+#include "components/icons/usb24.h"
 #include "components/icons/weather24.h"
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
@@ -92,6 +94,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return File24Icon;
       case UIIcon::Weather:
         return Weather24Icon;
+      case UIIcon::Usb:
+        return Usb24Icon;
       default:
         return nullptr;
     }
@@ -115,6 +119,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return HotspotIcon;
       case UIIcon::Weather:
         return Weather32Icon;
+      case UIIcon::Usb:
+        return UsbIcon;
       default:
         return nullptr;
     }
