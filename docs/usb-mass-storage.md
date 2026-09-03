@@ -236,26 +236,27 @@ published by those callbacks, so it cannot deadlock against them.
 
 ## Device validation
 
-**Not yet validated on hardware.** Builds clean for `x4pro`, `lilygo_t5s3` and
-`default` (C3, unaffected), and the 779-test host suite passes. What still needs
-a device:
+**Validated on the LilyGo T5 S3** (2026-09-03): the host mounts the card,
+transfers work over the SPI raw-block-device path, and pulling the cable now
+ends the session and returns the reader to Home.
 
-- X4 Pro: does the host enumerate the card, and does the port come back as a
-  working serial console after the exit reboot?
-- LilyGo T5 S3: the SPI raw-access path is new code and has never run. Read
-  throughput over SPI-MSC is also unmeasured.
-- The `AfterUSBPower` wake change — MSC boards now stay awake on a USB-powered
-  cold boot instead of sleeping, so that the post-session reboot lands on a live
-  console. Confirm it does not introduce a replug/battery-drain regression.
-- I/O-error handling: the forced-disconnect path has no natural trigger to test
-  against short of pulling the card mid-session.
+Still open:
 
-Validated so far:
-
-- **LilyGo T5 S3, 2026-09-03** — transfers work over the SPI raw-block-device
-  path. Unplug did NOT end the session; that is what the section above fixes,
-  and the fix itself is not yet re-tested on device. Worth watching when it is:
-  that no spurious end occurs while the drive sits mounted and idle, and that
-  the reader is genuinely back on Home a second or so after the cable is pulled.
-- **X4 Pro** — untested. Its exit depends entirely on the 8 s suspend path,
-  since the CW2017 cannot read the input rail.
+- **X4 Pro — untested.** Nothing about it has run on hardware: neither the
+  SDMMC path (which is upstream's, so it is the better-trodden half) nor the
+  exit, which there depends entirely on the 8 s bus-suspend fallback since the
+  CW2017 gauge cannot read the input rail. Worth confirming specifically that
+  the USB Serial/JTAG console comes back after the exit reboot — that is what
+  `handoffUsbOtgToSerialJtag()` exists for.
+- **No spurious exit while mounted and idle.** The suspend fallback is the
+  ambiguous signal; a host that selective-suspends an idle bus for over 8 s
+  would end the session under a mounted volume. Not observed on the LilyGo,
+  which never reaches that path because its VBUS reading answers first — but the
+  X4 Pro has only that path.
+- **The `AfterUSBPower` wake change.** MSC boards now stay awake on a
+  USB-powered cold boot instead of sleeping, so the post-session reboot lands on
+  a live console. Confirm it introduces no replug loop or battery-drain
+  regression.
+- **I/O-error handling.** The forced-disconnect path has no natural trigger
+  short of pulling the card mid-session, so it remains unexercised.
+- **Throughput.** Read/write speed over SPI-MSC on the LilyGo is unmeasured.
