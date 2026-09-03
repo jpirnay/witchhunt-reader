@@ -8,6 +8,7 @@
 #include <SDCardManager.h>
 #include <SdFat.h>
 #if FREEINK_CAP_USB_MSC
+#include <BatteryMonitor.h>
 #include <UsbMassStorage.h>
 #endif
 
@@ -16,6 +17,7 @@
 #include <new>
 #include <optional>
 
+#include "HalI2cBus.h"
 #include "HalSpiBus.h"
 
 #define SDCard SDCardManager::getInstance()
@@ -193,6 +195,34 @@ UsbDriveState HalStorage::usbDriveState() const {
   }
 #endif
   return UsbDriveState::Unsupported;
+}
+
+bool HalStorage::usbDriveHostSuspended() const {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  return usbMassStorage.hostSuspended();
+#else
+  return false;
+#endif
+}
+
+bool HalStorage::usbDriveExternalPower(bool& known) const {
+#if FREEINK_CAP_USB_MSC
+  // No StorageLock: this reads the charger IC, not the card, and holding the
+  // storage mutex across a ~1 ms I2C transaction would serialize it against the
+  // MSC callbacks for no reason.
+  //
+  // It DOES need the I2C lock. BatteryMonitor talks to Wire directly, and on a
+  // touch board the bus is shared across tasks — GT911 from the input sampler,
+  // and on the LilyGo the panel's PCA9535/TPS65185 power sequence from the
+  // render task. Two concurrent transactions corrupt each other.
+  HalI2cBus::Lock i2cLock;
+  static const BatteryMonitor battery;
+  return battery.isExternalPowerPresent(&known);
+#else
+  known = false;
+  return false;
+#endif
 }
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \

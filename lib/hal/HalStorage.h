@@ -50,6 +50,16 @@ class HalStorage {
   bool disconnectUsbDriveHost();
   void endUsbDrive();
   UsbDriveState usbDriveState() const;
+  // Cable-liveness signals for a running session. usbDriveState() alone cannot
+  // report an unplug on the ESP32-S3 — see UsbMassStorage::hostSuspended() —
+  // so the owner has to corroborate with these.
+  //
+  // usbDriveHostSuspended(): the bus has gone idle. True on unplug, but also
+  // while a host suspends an idle bus, so require persistence before acting.
+  // usbDriveExternalPower(): a physical VBUS reading, unambiguous but not
+  // available on every board — `known` is false when the board cannot tell.
+  bool usbDriveHostSuspended() const;
+  bool usbDriveExternalPower(bool& known) const;
 
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.

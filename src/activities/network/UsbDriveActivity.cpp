@@ -93,6 +93,15 @@ void UsbDriveActivity::loop() {
     return;
   }
 
+  // The cable may be long gone without TinyUSB noticing — see cableLooksGone().
+  // Only meaningful once a host has actually been seen; before that the
+  // host-wait timeout owns the exit, and on a battery-powered reader sitting
+  // unplugged at the "connect me" screen VBUS is legitimately absent.
+  if (state == UsbDriveState::Connected && cableLooksGone()) {
+    restartToHome();
+    return;
+  }
+
   // Buttons are only live while nothing is mounted: leaving under a host that
   // still has the volume open is what corrupts cards, so once it is Connected
   // the way out is to eject or unplug.
@@ -106,6 +115,45 @@ void UsbDriveActivity::loop() {
   if (state == UsbDriveState::Ejected || state == UsbDriveState::Disconnected || state == UsbDriveState::Unsupported) {
     restartToHome();
   }
+}
+
+bool UsbDriveActivity::cableLooksGone() {
+  const unsigned long now = millis();
+
+  // 1. Physical VBUS, where the board can read it. Throttled: I2C, not free.
+  if (now - lastPowerPollAt >= POWER_POLL_INTERVAL_MS) {
+    lastPowerPollAt = now;
+    bool known = false;
+    const bool present = Storage.usbDriveExternalPower(known);
+    if (!known) {
+      // The board cannot see the input rail. Stay silent rather than let a
+      // permanent "false" masquerade as a permanent unplug.
+      powerAbsentSince = 0;
+    } else if (present) {
+      powerAbsentSince = 0;
+    } else if (powerAbsentSince == 0) {
+      powerAbsentSince = now;
+    }
+  }
+  if (powerAbsentSince != 0 && now - powerAbsentSince >= POWER_GONE_CONFIRM_MS) {
+    LOG_INF("USB", "USB Drive: external power gone; ending session");
+    return true;
+  }
+
+  // 2. Bus suspend, for boards with no VBUS reading. Ambiguous, so it needs to
+  //    persist far longer before it is believed.
+  if (Storage.usbDriveHostSuspended()) {
+    if (suspendedSince == 0) suspendedSince = now;
+    if (now - suspendedSince >= SUSPEND_GONE_CONFIRM_MS) {
+      LOG_INF("USB", "USB Drive: bus suspended for %lums; assuming the cable is gone",
+              static_cast<unsigned long>(now - suspendedSince));
+      return true;
+    }
+  } else {
+    suspendedSince = 0;
+  }
+
+  return false;
 }
 
 void UsbDriveActivity::render(RenderLock&&) {

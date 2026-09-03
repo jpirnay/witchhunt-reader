@@ -174,6 +174,54 @@ Copyright (c) Lucide Icons and Contributors).
 Cost on a board that never shows it: ~366 bytes of flash, since `iconForName()`
 cannot be proven unreachable. Same arrangement as the weather icons.
 
+## Ending the session: the S3 cannot see the cable leave
+
+Device-tested on a LilyGo T5 S3: transfers work, but pulling the cable left the
+reader sitting on the *Connected* screen forever.
+
+The cause is not in this firmware. Arduino's TinyUSB init passes
+`otg_io_conf = NULL` (`cores/esp32/esp32-hal-tinyusb.c:140`), so no VBUS line is
+routed to the OTG core through the GPIO matrix, and IDF forces B-session-valid
+permanently on. The core never detects session end, no `DCD_EVENT_UNPLUGGED` is
+raised, and **`tud_mounted()` stays true after the cable is gone** — so
+`UsbMassStorageState::Disconnected` is unreachable and the session cannot end
+itself. Eject still works (that is a SCSI `START STOP UNIT`, not a bus event),
+and so do the timeouts; only unplug was affected.
+
+So `UsbDriveActivity::cableLooksGone()` watches for it directly, using whichever
+signal the board can offer:
+
+| Signal | Source | Boards | Ambiguous? | Hold before acting |
+| --- | --- | --- | --- | --- |
+| VBUS present | BQ25896 `REG0B` — `VBUS_STAT[7:5]` + `PG_STAT[2]` | LilyGo T5 S3 | No — a physical reading of the input rail | 750 ms (debounce only) |
+| Bus suspend | `tud_suspended()` — core-detected bus idle, unaffected by the forced B-valid | any | **Yes** — a host suspending an idle bus is identical | 8 s |
+
+Notes on the choices:
+
+- **VBUS, not charging state.** A full battery stops charging with the cable
+  still attached, so `isCharging()` reports "unplugged" while plugged in.
+  `BatteryMonitor::isExternalPowerPresent()` reads the input rail instead and
+  stays true at 100%. (Upstream's #3223 uses `isCharging()` for its own,
+  less failure-sensitive purpose and documents the same caveat.)
+- **`known` is not optional.** A board with a gauge but no charger IC — the X4
+  Pro's CW2017 — genuinely cannot see the input rail, and there is deliberately
+  no gauge fallback, because the BQ27220 measures the battery rather than the
+  input. It reports `known = false` and the activity ignores the reading rather
+  than letting a permanent `false` masquerade as a permanent unplug. The X4 Pro
+  therefore leans on the suspend path.
+- **Why 8 s for suspend.** Acting on a false positive means rebooting out from
+  under a mounted volume and losing whatever the host had cached — the exact
+  thing "eject before unplugging" exists to prevent. An unplug is permanent, so
+  waiting only costs latency; being wrong costs a corrupt card.
+- **Only while `Connected`.** Before a host has been seen, the host-wait timeout
+  owns the exit — and a battery-powered reader sitting unplugged at the "connect
+  me" screen legitimately has no VBUS.
+
+The charger read takes `HalI2cBus::Lock`: `BatteryMonitor` talks to `Wire`
+directly, and on a touch board the bus is shared across tasks (GT911 from the
+input sampler, and on the LilyGo the panel's PCA9535/TPS65185 power sequence
+from the render task).
+
 ## Concurrency notes
 
 While a session is live the MSC read/write callbacks run in the TinyUSB task and
@@ -201,3 +249,13 @@ a device:
   console. Confirm it does not introduce a replug/battery-drain regression.
 - I/O-error handling: the forced-disconnect path has no natural trigger to test
   against short of pulling the card mid-session.
+
+Validated so far:
+
+- **LilyGo T5 S3, 2026-09-03** — transfers work over the SPI raw-block-device
+  path. Unplug did NOT end the session; that is what the section above fixes,
+  and the fix itself is not yet re-tested on device. Worth watching when it is:
+  that no spurious end occurs while the drive sits mounted and idle, and that
+  the reader is genuinely back on Home a second or so after the cable is pulled.
+- **X4 Pro** — untested. Its exit depends entirely on the 8 s suspend path,
+  since the CW2017 cannot read the input rail.
