@@ -24,19 +24,40 @@ Fork-local additions are called out under [What is new here](#what-is-new-here).
 
 ## Which boards, and why
 
-USB-MSC needs two things: a USB-OTG-capable MCU wired to the physical port, and
-storage that exposes a 512-byte-sector block device.
+USB-MSC needs an MCU with a USB-OTG peripheral **whose native D+/D- pins reach
+the physical connector**, plus storage that exposes a 512-byte-sector block
+device. The second requirement is the one that catches people out.
 
 | Board | MCU | USB at the connector | SD transport | USB Drive |
 | --- | --- | --- | --- | --- |
 | Xteink X3 / X4 | ESP32-C3 | USB Serial/JTAG only — **the C3 has no OTG peripheral** | SPI | ✗ |
 | Xteink X4 Pro | ESP32-S3 | native OTG | SDMMC 1-bit | ✓ |
-| LilyGo T5 S3 | ESP32-S3 | native OTG | SPI | ✓ |
+| LilyGo T5 S3 | ESP32-S3 | native OTG (GPIO19/20 → connector) | SPI | ✓ |
+| Seeed reTerminal Sticky | ESP32-S3 | **CH343P USB-UART bridge** | SPI | ✗ |
 
 The C3 is a hard no: `SOC_USB_OTG_SUPPORTED` is 0, so `USBMSC` does not even
 compile there. (This repo carries a separate, currently commented-out answer for
 that case — `SwitchToUsbDriveActivity`, which reboots into a dedicated MSC
 firmware in the `app1` OTA partition. Unrelated to this feature and untouched.)
+
+The **Sticky** is a hard no for a different and more interesting reason: it has
+the right MCU, and now that SPI-attached cards can serve MSC its storage would
+qualify too — but its USB-C never reaches the S3. Per the vendor schematic
+(sheet `USB&POGONPIN&MicroSD`), the connector's only D+/D- pair goes to a
+**CH343P USB-to-UART bridge**, whose TXD/RXD land on UART0; and GPIO19/20, which
+would have been the native pair, are spent on the **PDM microphone**
+(`PDM_CLK` / `PDM_DATA`). There is one USB connector and no pogo-pin USB path.
+So the host enumerates the bridge — a fixed-function serial converter — and the
+ESP32 is never a USB device at all. No firmware change can reach around that.
+The SDK already knew the half of this that mattered to it: *"Sticky's on-board
+WCH bridge is wired to UART0 instead of native USB CDC"* (`BoardConfig.h`).
+
+This fork builds no Sticky env in any case, so nothing here is gated on it —
+but `FREEINK_CAP_USB_MSC` carries the rule now, so enabling it there would be a
+mistake someone could otherwise make. Rule of thumb: **if the board needs a
+driver on the host to show up as a COM port, it cannot be a USB drive.** For
+such a board the USB Transfer (serial protocol) row remains the right answer,
+which is exactly what it still gets.
 
 ### The LilyGo answer
 
