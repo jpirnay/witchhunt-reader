@@ -594,9 +594,12 @@ void ActivityManager::dispatchListTap() {
         LOG_INF("TCH", "list tap (%d,%d): no band recorded", tx, ty);
       } else {
         const int lastBottom = band.count > 0 ? band.top[band.count - 1] + band.height[band.count - 1] : -1;
-        LOG_INF("TCH", "list tap (%d,%d): band x=%d w=%d first=%d count=%d rows y=%d..%d sel=0x%08lX -> item %d", tx,
-                ty, band.x, band.width, band.firstIndex, band.count, band.count > 0 ? band.top[0] : -1, lastBottom,
-                static_cast<unsigned long>(band.selectable), ListTouchBand::hitTestIn(band, tx, ty));
+        // The selectable mask is 64 bits and printed as two 32-bit halves, high first: the
+        // log's printf is the newlib-nano one, which does not carry the `ll` length modifier.
+        LOG_INF("TCH", "list tap (%d,%d): band x=%d w=%d first=%d count=%d rows y=%d..%d sel=0x%08lX%08lX -> item %d",
+                tx, ty, band.x, band.width, band.firstIndex, band.count, band.count > 0 ? band.top[0] : -1, lastBottom,
+                static_cast<unsigned long>(band.selectable >> 32), static_cast<unsigned long>(band.selectable),
+                ListTouchBand::hitTestIn(band, tx, ty));
       }
     }
   }

@@ -16,10 +16,19 @@
 // keep the selection on screen. Cost per frame is O(visible rows), independent of list length.
 namespace ListLayout {
 
-// Cap on rows drawn in one screenful. The shortest theme row is 30 px and the tallest content
-// area is well under 600 px, so this cannot be reached in practice; it exists so a Window is a
-// fixed 100-byte stack object instead of a per-frame heap allocation.
-inline constexpr int kMaxRows = 24;
+// Cap on rows drawn in one screenful. It exists so a Window is a fixed ~132-byte stack object
+// instead of a per-frame heap allocation, which is why this number is kept tight rather than
+// generous: unlike ListTouchBand's capacity it is paid on the render task's stack, twice over
+// (the Window plus ListLayout.cpp's height cache).
+//
+// The bound is the shortest theme row (30 px) into the tallest content area: the LilyGo T5S3's
+// 540x960 portrait frame less the 40 px button-hint strip is 920 px, so 30 rows. 24 was sized
+// for the 800 px panels, where the same sum is 22, and a wrapped list on the T5S3 would stop
+// six rows short of the foot of the screen.
+//
+// Must not exceed ListTouchBand::kMaxRows, or a wrapped list would paint rows the band cannot
+// record and they would answer no tap. ListTouchBandTest asserts that direction.
+inline constexpr int kMaxRows = 32;
 
 struct Window {
   int first = 0;               // index of the first drawn item
