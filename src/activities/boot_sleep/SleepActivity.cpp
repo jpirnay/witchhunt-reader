@@ -153,6 +153,14 @@ BitmapToneMapping sleepImageToneMapping() {
   }
 }
 
+// Equalization strength for a sleep image, chosen by how the image will actually
+// reach the panel. The conservative default exists because a four-level target
+// breaks a flattened gradient into dither banding; a target that resolves more
+// has the range to use a stronger curve, and measurably wants one.
+int sleepEqualizeBlend(const GfxRenderer& renderer) {
+  return renderer.getGrayLevels() > 4 ? adaptive_tone::EQ_BLEND_NUM_DEEP : adaptive_tone::EQ_BLEND_NUM;
+}
+
 bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, const BookOverlayInfo& overlayInfo) {
   constexpr size_t MIN_FREE_HEAP = 60 * 1024;  // PNG decoder ~42 KB + overhead
   if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
@@ -216,7 +224,8 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
   // the grey planes layered on top. Skipped entirely on a cache hit.
   const BitmapToneMapping pngToneMapping = sleepImageToneMapping();
   if (!useCache && pngToneMapping != BitmapToneMapping::None) {
-    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename, toneAnalysisMode(pngToneMapping));
+    config.adaptiveTone = PngToFramebufferConverter::analyzeAdaptiveTone(filename, toneAnalysisMode(pngToneMapping),
+                                                                         sleepEqualizeBlend(renderer));
   }
   // Write the cache on the decoding pass only; the filter is already part of the
   // cache filename, so no separate invalidation is needed.
@@ -498,7 +507,7 @@ void SleepActivity::renderCustomSleepScreen() const {
   // An explicitly selected custom sleep image should override random images from /.sleep or /sleep.
   FsFile explicitSleepFile;
   if (Storage.openFileForRead("SLP", "/sleep.bmp", explicitSleepFile)) {
-    Bitmap bitmap(explicitSleepFile, true, sleepImageToneMapping());
+    Bitmap bitmap(explicitSleepFile, true, sleepImageToneMapping(), sleepEqualizeBlend(renderer));
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading explicit custom sleep image: /sleep.bmp");
       const BookOverlayInfo resolvedOverlayInfo =
@@ -538,7 +547,7 @@ void SleepActivity::renderCustomSleepScreen() const {
       FsFile file;
       if (Storage.openFileForRead("SLP", filename, file)) {
         delay(100);
-        Bitmap bitmap(file, true, sleepImageToneMapping());
+        Bitmap bitmap(file, true, sleepImageToneMapping(), sleepEqualizeBlend(renderer));
         if (bitmap.parseHeaders() == BmpReaderError::Ok) {
           renderBitmapSleepScreen(bitmap, resolvedOverlayInfo);
           file.close();
@@ -950,7 +959,7 @@ void SleepActivity::renderCoverSleepScreen() const {
     // than at generation time, and the adaptive filter has real tonal data to work
     // with. Covers still cached as 2-bit (or TXT/XTC covers) take the native-palette
     // path inside Bitmap and are unaffected by either flag.
-    Bitmap bitmap(file, /*dithering=*/true, sleepImageToneMapping());
+    Bitmap bitmap(file, /*dithering=*/true, sleepImageToneMapping(), sleepEqualizeBlend(renderer));
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
       const uint8_t overlayMode = SETTINGS.sleepCoverOverlay;

@@ -27,8 +27,11 @@ class PngToFramebufferConverter final : public ImageToFramebufferDecoder {
   // cheap pre-pass -- inflate must run over every row. Call this once and reuse the
   // result across render passes; do not call it per pass.
   // `mode` selects the endpoint stretch or the CDF equalization; see AdaptiveTone.h.
+  // `eqBlendNum` is the Equalize strength; see adaptive_tone::EQ_BLEND_NUM_DEEP for
+  // when a caller should raise it.
   static adaptive_tone::Points analyzeAdaptiveTone(const std::string& imagePath,
-                                                   adaptive_tone::Mode mode = adaptive_tone::Mode::Stretch);
+                                                   adaptive_tone::Mode mode = adaptive_tone::Mode::Stretch,
+                                                   int eqBlendNum = adaptive_tone::EQ_BLEND_NUM);
 
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {
     return getDimensionsStatic(imagePath, dims);

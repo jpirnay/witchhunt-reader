@@ -78,8 +78,12 @@ class Bitmap {
  public:
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(FsFile& file, bool dithering = false, BitmapToneMapping toneMapping = BitmapToneMapping::None)
-      : file(file), dithering(dithering), toneMapping(toneMapping) {}
+  // `eqBlendNum` reaches adaptive_tone::derivePoints for Equalize analysis; leave
+  // it defaulted unless the image is bound for a panel that resolves more than the
+  // dual-plane four levels. See EQ_BLEND_NUM_DEEP.
+  explicit Bitmap(FsFile& file, bool dithering = false, BitmapToneMapping toneMapping = BitmapToneMapping::None,
+                  int eqBlendNum = adaptive_tone::EQ_BLEND_NUM)
+      : file(file), dithering(dithering), toneMapping(toneMapping), eqBlendNum(eqBlendNum) {}
   ~Bitmap();
   BmpReaderError parseHeaders();
   // `data` receives the row packed at 2 bits per pixel, as always.
@@ -116,6 +120,7 @@ class Bitmap {
   FsFile& file;
   bool dithering = false;
   BitmapToneMapping toneMapping = BitmapToneMapping::None;
+  int eqBlendNum = adaptive_tone::EQ_BLEND_NUM;
   adaptive_tone::Points adaptiveTonePoints;
   int width = 0;
   int height = 0;

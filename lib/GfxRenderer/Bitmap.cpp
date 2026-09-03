@@ -268,7 +268,7 @@ bool Bitmap::analyzeAdaptiveTone() {
 
   if (sampled == 0) return false;
 
-  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping));
+  adaptiveTonePoints = adaptive_tone::derivePoints(histogram.get(), sampled, toneAnalysisMode(toneMapping), eqBlendNum);
   if (!adaptiveTonePoints.active) {
     LOG_DBG("BMP", "Adaptive tone (%s) declined: line art or range too narrow",
             toneMapping == BitmapToneMapping::Equalize ? "equalize" : "stretch");
