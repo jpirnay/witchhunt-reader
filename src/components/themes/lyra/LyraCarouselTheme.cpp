@@ -32,6 +32,7 @@
 #include "components/icons/transfer.h"
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
+#include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
@@ -678,9 +679,13 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
 
   const int rowHeight = (rowSubtitle != nullptr) ? LyraCarouselMetrics::values.listWithSubtitleRowHeight
                                                  : LyraCarouselMetrics::values.listRowHeight;
-  const int pageItems = rect.height / rowHeight;
+  // Never paint more rows than the touch band can register — see BaseTheme::drawList.
+  const int pageItems = std::min(rect.height / rowHeight, ListTouchBand::kMaxRows);
   if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
-  if (pageItems <= 0 || itemCount <= 0) return;
+  if (pageItems <= 0 || itemCount <= 0 || rowTitle == nullptr) {
+    ListTouchBand::invalidate();
+    return;
+  }
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
 
   if (totalPages > 1) {
@@ -720,6 +725,12 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
   }
 
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  // Rows published for touch as they are painted — see BaseTheme::drawList. This theme is the
+  // third fixed-height list draw, and the one that shipped without this: every screen drawn
+  // through GUI.drawList was painted correctly and answered no tap at all.
+  ListTouchBand::Builder touchBand;
+  touchBand.begin(rect.x, rect.width, pageStartIndex);
+
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
     const bool sel = (i == selectedIndex);
@@ -735,7 +746,9 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
     }
 
     auto itemName = rowTitle(i);
-    if (UITheme::isSeparatorTitle(itemName)) {
+    const bool isSeparator = UITheme::isSeparatorTitle(itemName);
+    touchBand.addRow(itemY, rowHeight, !isSeparator);
+    if (isSeparator) {
       itemName = UITheme::stripSeparatorTitle(itemName);
       drawListSeparator(renderer,
                         Rect{rect.x + LyraCarouselMetrics::values.contentSidePadding, itemY,
@@ -774,6 +787,8 @@ void LyraCarouselTheme::drawList(const GfxRenderer& renderer, Rect rect, int ite
                         valueText.c_str(), !sel);
     }
   }
+
+  touchBand.commit();
 }
 
 // ---------------------------------------------------------------------------
