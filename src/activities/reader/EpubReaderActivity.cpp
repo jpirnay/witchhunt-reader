@@ -4203,38 +4203,6 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   }
   LOG_DBG("ERS", "Progress saved: Chapter %d, Page %d (%d%%)", spineIndex, currentPage, percent);
 }
-// Diagnostic knob for the AA->BW degradation on the T5S3.
-//
-// Everything checkable statically now matches jetaudio's crosspoint-aurora, which
-// is flicker-free on this panel: identical waveform table, identical LGFX driver,
-// identical FAST-unless-refresh-cycle mode policy, one push per page (the
-// LGFX_EPD_PUSH_TRACE log shows no second refresh), and correctly mapped planes
-// (MSB marks raw {1,2}, LSB marks raw 2, black stays off both planes and so stays
-// on the rail). What remains untested is the differential bank itself: kFastLut's
-// grey columns reach a level by sitting at the WHITE rail for L[15] frames and
-// then descending, which is a two-stage transition by construction.
-//
-// The stock build only takes the clean bank on the periodic scrub page (1 in
-// getRefreshFrequency(), so 1 in 15 by default), which is also the book-open
-// page -- too rare, and too busy, to judge a perceptual difference against.
-// Build every page onto it with:
-//
-//   PLATFORMIO_BUILD_FLAGS="-DAA_FORCE_CLEAN_BANK=1" pio run -e lilygo_t5s3 -t upload
-//
-// (an env var rather than a separate env, so the existing lib deps are reused;
-// re-run without it to go back). It routes graded pushes onto the GC16-style
-// clean bank instead. Page turns get slower (~2.5s vs ~1.4s), so this is a
-// diagnostic, not a shipping default: if the flicker goes, the diff bank's grey
-// columns are the cause; if it stays, the bank is exonerated and the next suspect
-// is the panel's diff baseline between pushes.
-static inline HalDisplay::RefreshMode gradedPushMode(const HalDisplay::RefreshMode mode) {
-#if defined(AA_FORCE_CLEAN_BANK) && AA_FORCE_CLEAN_BANK
-  (void)mode;
-  return HalDisplay::HALF_REFRESH;
-#else
-  return mode;
-#endif
-}
 
 void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
@@ -4548,7 +4516,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.copyGrayscaleMsbBuffers(capMsb.get());
     // Base and greys as ONE waveform. No triggerDisplay/completeDisplay split:
     // there is nothing to overlap with, because the plane work already happened.
-    renderer.displayGrayscaleFrame(gradedPushMode(pageRefreshMode));
+    renderer.displayGrayscaleFrame(pageRefreshMode);
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.textAntiAliasing = true;
   } else if (inlineAaThisRender) {
@@ -4906,7 +4874,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     } else {
       mode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
     }
-    renderer.displayGrayscaleFrame(gradedPushMode(mode));
+    renderer.displayGrayscaleFrame(mode);
     LOG_DBG("ERS", "Single-push AA (pre-rendered)");
   } else if (forceHalfRefreshThisPage) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
