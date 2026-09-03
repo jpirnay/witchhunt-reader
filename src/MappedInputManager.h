@@ -1,10 +1,19 @@
 #pragma once
 
 #include <HalGPIO.h>
+#include <TouchTransform.h>
+
+class GfxRenderer;
+namespace freeink {
+namespace ui {
+enum class ScreenEdge : uint8_t;
+}
+}  // namespace freeink
 
 class MappedInputManager {
  public:
   enum class Button { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward };
+  enum class SwipeDir { None, Left, Right, Up, Down };
 
   // Screen orientation as the input layer sees it. Mirrors GfxRenderer::Orientation value for
   // value; it is duplicated rather than included because the input layer sits below the renderer
@@ -35,7 +44,11 @@ class MappedInputManager {
     SideLabels side;
   };
 
-  explicit MappedInputManager(HalGPIO& gpio) : gpio(gpio) {}
+  // The renderer is held for LIVE orientation: the touch transform must follow
+  // what is actually on screen, not the persisted reader setting, or taps land
+  // rotated whenever the reader is open. Same discipline as
+  // setOrientationProvider below, and for the same reason.
+  MappedInputManager(HalGPIO& gpio, const GfxRenderer& renderer) : gpio(gpio), renderer(renderer) {}
 
   // Landscape CCW renders the front-button strip bottom-to-top, so the button that is
   // physically *above* the other is the one portrait treats as "next/down". Without a
@@ -109,6 +122,133 @@ class MappedInputManager {
   bool hasPendingInput() const { return gpio.hasPendingInput(); }
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
+  const GfxRenderer& getRenderer() const { return renderer; }
+
+  // --- Touch ----------------------------------------------------------------
+  // Everything here reports LOGICAL screen pixels, already mapped through the
+  // renderer's live orientation — the layer above never sees panel-native
+  // coordinates. Names and signatures are verbatim from upstream/develop so
+  // screens stay diff-comparable when they convert; see
+  // docs/touch-input-migration-2026-08-14.md §1.
+  //
+  // All of these are inert on non-touch boards (the SDK's touch methods compile
+  // to false), so callers need no #ifdefs.
+  bool hasTouch() const;
+
+  // --- UI touch gate ----------------------------------------------------------
+  // Silences every touch EVENT query on this object: taps, long presses, drags,
+  // swipes, edge gestures and multi-touch all report "nothing happened" while it
+  // is off. main.cpp drives it from the Touch Navigation setting, leaving it on
+  // inside the reader — the reader has its own Touch Reading Controls setting,
+  // and gating it here as well would give one behaviour two switches.
+  //
+  // hasTouch() is deliberately NOT gated. Screens ask it to decide LAYOUT (the
+  // reader menu style, whether to draw a hint strip at all), and a board does not
+  // stop having a digitiser because its owner turned touch navigation off.
+  void setTouchEventsEnabled(bool enabled);
+  [[nodiscard]] bool touchEventsEnabled() const { return touchEventsEnabled_; }
+
+  bool wasScreenTapped(int& x, int& y) const;
+  // Same, resolved against an EXPLICIT orientation instead of the live one. For chrome that
+  // is drawn in a fixed frame however the screen is rotated -- the button hint strip forces
+  // Portrait for its draw, so hit-testing it means asking for the tap in Portrait too.
+  // Consumes the tap exactly as wasScreenTapped() does. Takes touchtransform::Orientation
+  // rather than GfxRenderer::Orientation so this header keeps its forward declaration; the
+  // two enums are static_asserted to agree in GfxRenderer.cpp.
+  bool wasScreenTappedIn(touchtransform::Orientation orientation, int& x, int& y) const;
+  bool wasScreenTouchDown(int& x, int& y) const;
+  // One-shot long-press from the SDK classifier, fired WHILE the finger is
+  // still down. Consuming it suppresses the rest of the contact — its continued
+  // hold and its release edge — so the ensuing lift can't also tap-dismiss
+  // whatever the long-press opened. The SDK owns that latch and self-clears it.
+  bool wasScreenLongPress(int& x, int& y) const;
+  // Same event, WITHOUT the suppression — for a caller that must decide whether
+  // the long press is one it wants before claiming the contact. Pair it with
+  // suppressTouchContact() when the answer is yes; leave the contact alone when
+  // it is no, and the lift will go on to be a tap as usual.
+  bool peekScreenLongPress(int& x, int& y) const;
+  // Same, against an explicit orientation — see wasScreenTappedIn().
+  bool peekScreenLongPressIn(touchtransform::Orientation orientation, int& x, int& y) const;
+  // Ignore the rest of this contact — its continued hold and its release edge.
+  // For a caller that has acted on a tap or swipe and must stop the same contact
+  // reaching the screen underneath as well.
+  void suppressTouchContact() const { gpio.suppressTouchContact(); }
+  // Live contact position while the finger is down, with no tap-slop gate —
+  // drag tracking.
+  bool isScreenTouchHeld(int& x, int& y) const;
+  // Raw release edge, also true when the contact ended in a swipe or drag-off
+  // (which wasScreenTapped never reports).
+  bool wasScreenTouchReleased() const;
+  // Duration of the contact just ended, latched at release. Readers use it to
+  // tell a tap from a deliberate hold on the same zone.
+  unsigned long lastTouchHeldMs() const;
+  bool wasTapInRect(int x, int y, int width, int height) const;
+
+  // Combined touch interaction for a band of equal rows with caller-supplied
+  // geometry — the shared hit-test for lists the theme helpers do not cover
+  // (custom row heights, option prompts, menus). Down = a held tap-candidate is
+  // on a row (move the selection highlight); Tap = a tap released on one
+  // (activate). rowHeight limits the hit to the top rowHeight px of each step
+  // (0 = the full step, no gap band).
+  enum class RowTouch : uint8_t { None, Down, Tap };
+  RowTouch rowTouch(int& row, int top, int rowStep, int rowCount, int xStart = 0, int xEnd = INT32_MAX,
+                    int rowHeight = 0) const;
+  // Horizontal variant for side-by-side button pairs (confirmation prompts).
+  RowTouch colTouch(int& col, int left, int colStep, int colCount, int yStart, int yEnd, int colWidth = 0) const;
+
+  // The same interaction against the list the themes actually painted, rather than against
+  // geometry the caller re-derives. `index` is an ITEM index, already resolved through the
+  // page or scroll offset, so a caller assigns it straight to its selection.
+  //
+  // Prefer this to rowTouch() for anything drawn by GUI.drawList: rowTouch cannot express a
+  // wrapped list (its rows differ in height), and a screen computing its own band is a second
+  // copy of the theme's layout rule. rowTouch stays for the bands no theme draws — option
+  // prompts, custom row heights, menus.
+  //
+  // Returns None when no list was recorded, so it is inert on every screen that draws none.
+  RowTouch listTouch(int& index) const;
+
+  SwipeDir wasSwipe() const;
+  // Same, against an explicit orientation. A swipe's direction is decided by
+  // mapping both endpoints into logical pixels, so it depends on the orientation
+  // exactly as a tap position does — see wasScreenTappedIn().
+  SwipeDir wasSwipeIn(touchtransform::Orientation orientation) const;
+  // Same, and also reports where the swipe STARTED, in logical pixels. The start
+  // point is what decides which half of the screen a swipe belongs to — the same
+  // question a phone asks to tell the notification shade from quick settings —
+  // and TouchGestures splits the vertical swipes on it.
+  SwipeDir wasSwipeIn(touchtransform::Orientation orientation, int& startX, int& startY) const;
+
+  // --- Multi-touch ------------------------------------------------------------
+  // A completed two-finger gesture, already resolved to what it means ON SCREEN,
+  // with the centre in logical pixels. Rotation direction and pinch direction
+  // both survive a screen rotation unchanged — none of the four orientations
+  // mirrors the panel, so a clockwise turn of the fingers is a clockwise turn of
+  // the picture whichever way the device is held — so only the centre point
+  // needs the orientation transform.
+  //
+  // These come off HalGPIO's latched queue rather than a live flag, so one made
+  // during an e-paper refresh still arrives. Pops at most one per call; call
+  // until None to drain. Inert on boards without multi-touch (only the GT911
+  // reports more than one contact), so callers need no ifdefs.
+  enum class MultiTouch : uint8_t { None, PinchIn, PinchOut, RotateClockwise, RotateCounterClockwise };
+  MultiTouch popMultiTouch(int& x, int& y) const;
+  // Drop every latched touch event — taps, swipes, long presses and multi-touch
+  // gestures alike. For activity transitions, so a contact made on the screen
+  // being left cannot act on the one being entered; that matters more now that
+  // these outlive the tick they happened in.
+  void flushTouchEvents() const { gpio.flushTouchEvents(); }
+  // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
+  // page turns (reader) can exclude it from a plain SwipeDir::Right.
+  bool wasBackGesture() const;
+  // Home-key boards (X4 Pro) exit with a short Home-key tap; their bottom-edge
+  // swipe is intentionally unused. Other touch boards keep the bottom-edge
+  // gesture.
+  bool wasHomeGesture() const;
+  // A Home-key hold runs the configured long-press action in the reader.
+  bool wasHomeKeyHold() const;
+  bool wasMenuGesture() const;
+
   // Front-strip hints for a screen that labels only the front buttons. `previous`/`next` name the
   // movement the strip performs — which physical pair that is, and in which order, follows the
   // orientation.
@@ -127,6 +267,11 @@ class MappedInputManager {
   // raw edge from the sampler queue to the logical button(s) it drives.
   uint8_t rawIndex(Button button) const;
 
+  // Synthesize a press of a RAW hardware button. For inputs that stand in for a button
+  // without being one -- a tap on the on-screen hint strip. Raw rather than logical so
+  // the user's button remapping still applies, exactly as for the physical key.
+  void injectRawPress(uint8_t rawButtonIndex) const;
+
   // Drain one queued raw button edge from the background sampler (FIFO). Returns
   // false when empty. Used by ButtonEventManager to drive its press-type FSM.
   bool popRawEdge(HalGPIO::ButtonEdge& out) const { return gpio.popButtonEdge(out); }
@@ -135,7 +280,37 @@ class MappedInputManager {
 
  private:
   HalGPIO& gpio;
+  // Live orientation authority for the touch transform — see the constructor.
+  const GfxRenderer& renderer;
   static ScreenOrientation (*orientationProvider)();
+
+  // Every raw touch read goes through one of these, so the UI gate above cannot
+  // be forgotten by a query added later. They are the only place in this class
+  // that may call gpio's touch methods directly.
+  bool rawTap(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.wasTouchTap(nx, ny); }
+  bool rawLongPress(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.wasTouchLongPress(nx, ny); }
+  bool rawTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
+    return touchEventsEnabled_ && gpio.isTouchTapCandidate(nx, ny, heldMs);
+  }
+  bool rawHeldAt(float& nx, float& ny) const { return touchEventsEnabled_ && gpio.isTouchHeldAt(nx, ny); }
+  bool rawReleased() const { return touchEventsEnabled_ && gpio.wasTouchReleased(); }
+  bool rawSwipeEndpoints(float& nxs, float& nys, float& nxe, float& nye) const {
+    return touchEventsEnabled_ && gpio.wasSwipe(nxs, nys, nxe, nye);
+  }
+  bool rawPopGesture(HalGPIO::TouchGesture& gesture) const {
+    return touchEventsEnabled_ && gpio.popTouchGesture(gesture);
+  }
+
+  bool touchEventsEnabled_ = true;
+
+  // SDK edge classification (fui::edgeSwipe) plus the shared decode; the
+  // wrappers above give each edge its board meaning.
+  bool wasEdgeSwipe(freeink::ui::ScreenEdge edge) const;
+  bool wasTopEdgeDownSwipe() const;
+  bool wasBottomEdgeUpSwipe() const;
+  // Fetch the pending swipe (if any) and map both endpoints to logical coords
+  // in the given orientation.
+  bool decodeSwipe(touchtransform::Orientation orientation, int& sx, int& sy, int& ex, int& ey) const;
 
   // Left/Right swap when the front-button strip runs bottom-to-top on screen, so
   // "previous" always sits above "next". The side buttons (Up/Down and their

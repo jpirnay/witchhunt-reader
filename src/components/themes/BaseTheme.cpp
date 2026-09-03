@@ -16,6 +16,9 @@
 #include "RecentBooksStore.h"
 #include "components/ListLayout.h"
 #include "components/UITheme.h"
+#include "components/themes/ButtonHintLayout.h"
+#include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -187,15 +190,29 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
   constexpr int buttonY = BaseMetrics::values.buttonHintsHeight;  // Distance from bottom
   constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
-  // X3 has wider screen in portrait (528 vs 480), use more spacing
+  // Hand-tuned for the widths named in ButtonHintLayout; other panels spread evenly.
   constexpr int x4ButtonPositions[] = {25, 130, 245, 350};
   constexpr int x3ButtonPositions[] = {38, 154, 268, 384};
-  const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
+  int buttonPositions[4];
+  ButtonHintLayout::positions(renderer.getScreenWidth(), buttonWidth, x4ButtonPositions, x3ButtonPositions,
+                              buttonPositions);
   const char* labels[] = {btn1, btn2, btn3, btn4};
   // Inverted flips both axes, so the strip's panel-bottom band becomes the top one and each slot
   // mirrors across the width. Labels keep their hardware index — the mirroring is what carries
   // each box back to its own button.
   const int stripY = inverted ? 0 : pageHeight - buttonY;
+
+  // Publish the geometry for touch. Recorded from the same values the draw uses, so the
+  // tap target cannot drift from the painted box.
+  ButtonHintStrip::Strip strip;
+  strip.y = pageHeight - buttonY;
+  strip.height = buttonHeight;
+  strip.width = buttonWidth;
+  for (int i = 0; i < 4; i++) {
+    strip.x[i] = buttonPositions[i];
+    strip.active[i] = labels[i] != nullptr && labels[i][0] != '\0';
+  }
+  ButtonHintStrip::record(strip);
 
   for (int i = 0; i < 4; i++) {
     // Only draw if the label is non-empty
@@ -337,6 +354,7 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
   const int baseRowHeight = metrics.listRowHeight;
   if (itemCount <= 0 || rect.height < baseRowHeight || rowTitle == nullptr) {
     view.visibleRows = 0;
+    ListTouchBand::invalidate();
     return;
   }
 
@@ -352,6 +370,7 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
   const int textWidth = contentWidth - metrics.contentSidePadding * 2 - style.hPadding * 2 - iconGap;
   if (textWidth <= 0) {
     view.visibleRows = 0;
+    ListTouchBand::invalidate();
     return;
   }
 
@@ -366,7 +385,10 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
   const ListLayout::Window window =
       ListLayout::computeWindow(itemCount, selectedIndex, rect.height, view.firstVisible, rowHeightFor);
   view.visibleRows = window.count;
-  if (window.count <= 0) return;
+  if (window.count <= 0) {
+    ListTouchBand::invalidate();
+    return;
+  }
 
   // Scroll position: how far the window's top row is through the rows that can be a top row.
   if (window.count < itemCount) {
@@ -381,6 +403,13 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
     }
   }
 
+  // Publish the rows for touch as they are painted. Recorded from the same values the draw
+  // uses, so a tap target cannot drift from the row it is under; built up here rather than in
+  // a second pass because deciding selectability needs rowTitle(index), which on an SD-backed
+  // list reads from the card.
+  ListTouchBand::Builder touchBand;
+  touchBand.begin(rect.x, rect.width, window.first);
+
   for (int row = 0; row < window.count; row++) {
     const int index = window.first + row;
     const int rowY = rect.y + window.top[row];
@@ -388,6 +417,7 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
 
     std::string title = rowTitle(index);
     if (UITheme::isSeparatorTitle(title)) {
+      touchBand.addRow(rowY, rowHeight, /*selectable=*/false);
       title = UITheme::stripSeparatorTitle(title);
       drawListSeparator(
           renderer,
@@ -395,6 +425,8 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
           textX, textWidth, title);
       continue;
     }
+
+    touchBand.addRow(rowY, rowHeight, /*selectable=*/true);
 
     const bool selected = (index == selectedIndex);
     if (selected) {
@@ -430,6 +462,8 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
       }
     }
   }
+
+  touchBand.commit();
 }
 
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
@@ -450,6 +484,10 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   // A fixed-height list still reports its page size, so Left/Right page by what is really on
   // screen rather than by a guess.
   if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
+  if (pageItems <= 0 || itemCount <= 0 || rowTitle == nullptr) {
+    ListTouchBand::invalidate();
+    return;
+  }
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
@@ -468,6 +506,13 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   }
   // Draw all items
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  // See drawWrappedList: the rows are published for touch as they are painted, from the same
+  // values the draw uses. The row rect is the full `rect.width` rather than `contentWidth`,
+  // which stops 5 px short for the scroll strip -- the selection fill already spans the full
+  // width here, so that is what a finger sees as the row.
+  ListTouchBand::Builder touchBand;
+  touchBand.begin(rect.x, rect.width, pageStartIndex);
+
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
     int textWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2 - (rowValue != nullptr ? 60 : 0);
@@ -475,6 +520,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     // Draw name
     auto itemName = rowTitle(i);
     const bool isSeparator = UITheme::isSeparatorTitle(itemName);
+    touchBand.addRow(itemY, rowHeight, !isSeparator);
     if (isSeparator) {
       itemName = UITheme::stripSeparatorTitle(itemName);
       drawListSeparator(renderer,
@@ -508,6 +554,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                         itemY, valueText.c_str(), i != selectedIndex);
     }
   }
+
+  touchBand.commit();
 }
 
 void BaseTheme::drawListSeparator(const GfxRenderer& renderer, Rect rowRect, int textX, int textWidth,
@@ -587,9 +635,20 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
 
   int currentX = rect.x + BaseMetrics::values.contentSidePadding;
 
+  // Published for touch as they are painted, from the same currentX the labels
+  // use — the three themes pad and space their tabs differently, so re-deriving
+  // this in the activity would be a second copy of the layout rule.
+  TapTargets::Recorder::Builder touchTabs;
+  int tabIndex = 0;
+
   for (const auto& tab : tabs) {
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    // Each target spans the whole advance to the next tab, so the gap between
+    // two labels belongs to the one on its left rather than being a dead strip.
+    // Full band height, because a tab is a small target and the bar is thin.
+    const int advance = textWidth + BaseMetrics::values.tabSpacing;
+    touchTabs.add(currentX, rect.y, advance, rect.height, tabIndex++);
 
     // Draw underline for selected tab
     if (tab.selected) {
@@ -604,8 +663,9 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
     renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
                       tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
 
-    currentX += textWidth + BaseMetrics::values.tabSpacing;
+    currentX += advance;
   }
+  TapTargets::tabBar().record(touchTabs);
 }
 
 // Draw the "Recent Book" cover card on the home screen
@@ -666,6 +726,16 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   bookX = rect.x + (rect.width - bookWidth) / 2;
   const int bookY = rect.y;
   const int bookHeight = baseHeight;
+
+  // Publish the tile for touch. Recorded here rather than inside the draw below, because that
+  // half is skipped on a cached repaint (coverRendered) while the geometry above is recomputed
+  // every call -- so this is the one point that is true on both paths. Value 0: this theme shows
+  // only the most recent book, and HomeActivity's selector numbers the covers from 0.
+  {
+    TapTargets::Recorder::Builder coverTargets;
+    if (hasContinueReading) coverTargets.add(bookX, bookY, bookWidth, bookHeight, 0);
+    TapTargets::homeCovers().record(coverTargets);
+  }
 
   // Bookmark dimensions (used in multiple places)
   const int bookmarkWidth = bookWidth / 8;
@@ -883,8 +953,15 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
   }
 
+  // Publish the rows for touch from the same geometry the draw uses. Values are MENU-LOCAL
+  // indices; HomeActivity adds the cover offset, since a theme drawing the menu has no idea how
+  // many covers sit above it.
+  TapTargets::Recorder::Builder menuTargets;
+
   for (int i = 0; i < buttonCount; ++i) {
     const int tileY = rect.y + static_cast<int>(i) * (rowHeight + rowSpacing);
+    menuTargets.add(rect.x + BaseMetrics::values.contentSidePadding, tileY,
+                    rect.width - BaseMetrics::values.contentSidePadding * 2, rowHeight, i);
 
     const bool selected = selectedIndex == i;
 
@@ -905,6 +982,8 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
   }
+
+  TapTargets::homeMenu().record(menuTargets);
 }
 
 Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame) const {

@@ -44,6 +44,13 @@ void EnumSelectionActivity::loop() {
   buttonNavigator.onPreviousList(selectedIndex, count, [this] { requestUpdate(); });
 }
 
+ListRowTap::Result EnumSelectionActivity::selectListRow(const int index) {
+  // Point-then-confirm: the first tap moves the highlight, a tap on the row
+  // already highlighted lets ActivityManager synthesize Confirm, which runs
+  // loop()'s own handleSelection() rather than a parallel copy of it.
+  return ListRowTap::apply(index, static_cast<int>(optionCount()), selectedIndex);
+}
+
 void EnumSelectionActivity::handleSelection() {
   setting.setEnumSelectedIndex(static_cast<uint8_t>(selectedIndex));
   finish();

@@ -30,6 +30,9 @@
 #include "components/icons/weather24.h"
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
+#include "components/themes/ButtonHintLayout.h"
+#include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 // Internal constants
@@ -238,8 +241,14 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
+  // Published for touch as they are painted — see BaseTheme::drawTabBar.
+  TapTargets::Recorder::Builder touchTabs;
+  int tabIndex = 0;
+
   for (const auto& tab : tabs) {
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
+    const int advance = textWidth + LyraMetrics::values.tabSpacing + 2 * hPaddingInSelection;
+    touchTabs.add(currentX, rect.y, advance, rect.height, tabIndex++);
 
     if (tab.selected) {
       if (selected) {
@@ -256,8 +265,9 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label, !(tab.selected && selected),
                       EpdFontFamily::REGULAR);
 
-    currentX += textWidth + LyraMetrics::values.tabSpacing + 2 * hPaddingInSelection;
+    currentX += advance;
   }
+  TapTargets::tabBar().record(touchTabs);
 
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }
@@ -289,6 +299,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       (rowSubtitle != nullptr) ? LyraMetrics::values.listWithSubtitleRowHeight : LyraMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
   if (view != nullptr) view->visibleRows = std::min(pageItems, itemCount);
+  if (pageItems <= 0 || itemCount <= 0 || rowTitle == nullptr) {
+    ListTouchBand::invalidate();
+    return;
+  }
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
@@ -332,6 +346,12 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
   // Draw all items
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  // Rows published for touch as they are painted — see BaseTheme::drawList for why this is
+  // recorded from the draw rather than re-derived by each screen. Full rect.width, matching
+  // where the row's own selection fill reads as a target.
+  ListTouchBand::Builder touchBand;
+  touchBand.begin(rect.x, rect.width, pageStartIndex);
+
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
     int rowTextWidth = textWidth;
@@ -348,6 +368,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     auto itemName = rowTitle(i);
     const bool isSeparator = UITheme::isSeparatorTitle(itemName);
+    touchBand.addRow(itemY, rowHeight, !isSeparator);
     if (isSeparator) {
       itemName = UITheme::stripSeparatorTitle(itemName);
       drawListSeparator(renderer,
@@ -401,6 +422,8 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                         itemY + 6, valueText.c_str(), !(i == selectedIndex && highlightValue));
     }
   }
+
+  touchBand.commit();
 }
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
@@ -419,10 +442,12 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   constexpr int buttonHeight = LyraMetrics::values.buttonHintsHeight;
   constexpr int buttonY = LyraMetrics::values.buttonHintsHeight;  // Distance from bottom
   constexpr int textYOffset = 7;                                  // Distance from top of button to text baseline
-  // X3 has wider screen in portrait (528 vs 480), use more spacing
+  // Hand-tuned for the widths named in ButtonHintLayout; other panels spread evenly.
   constexpr int x4ButtonPositions[] = {58, 146, 254, 342};
   constexpr int x3ButtonPositions[] = {65, 157, 291, 383};
-  const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
+  int buttonPositions[4];
+  ButtonHintLayout::positions(renderer.getScreenWidth(), buttonWidth, x4ButtonPositions, x3ButtonPositions,
+                              buttonPositions);
   const char* labels[] = {btn1, btn2, btn3, btn4};
 
   // Inverted flips both axes: the strip's panel-bottom band becomes the top one and each slot
@@ -435,6 +460,26 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
   // side of the box unpainted.
   const bool roundTop = !inverted;
   const bool roundBottom = inverted;
+
+  // Publish the geometry for touch, in PORTRAIT coordinates — the frame ButtonHintStrip
+  // documents and the hit test resolves into. The un-mirrored values are correct for
+  // inverted too, and not by accident: drawing a box at (pageWidth - pos - width, 0) in the
+  // PortraitInverted frame puts it on the same panel spot as (pos, pageHeight - buttonY) in
+  // the Portrait frame, so the two mirrors cancel. Recording the mirrored values instead
+  // would hit-test inverted taps against the opposite button.
+  //
+  // Only the full-size boxes are tappable: an empty label still paints here, but as a
+  // decorative stub of smallButtonHeight with no meaning behind it, so a finger landing on
+  // one must do nothing.
+  ButtonHintStrip::Strip strip;
+  strip.y = pageHeight - buttonY;
+  strip.height = buttonHeight;
+  strip.width = buttonWidth;
+  for (int i = 0; i < 4; i++) {
+    strip.x[i] = buttonPositions[i];
+    strip.active[i] = labels[i] != nullptr && labels[i][0] != '\0';
+  }
+  ButtonHintStrip::record(strip);
 
   for (int i = 0; i < 4; i++) {
     const int x = inverted ? pageWidth - buttonPositions[i] - buttonWidth : buttonPositions[i];
@@ -536,6 +581,16 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   const bool hasContinueReading = !recentBooks.empty();
   if (coverWidth == 0) {
     coverWidth = static_cast<int>(coverHeight * 0.6f);
+  }
+
+  // Tile published for touch, ahead of the draw so a cached repaint (coverRendered) records it
+  // too — see BaseTheme::drawRecentBookCover. One cover, so value 0.
+  {
+    TapTargets::Recorder::Builder coverTargets;
+    if (hasContinueReading) {
+      coverTargets.add(rect.x + LyraMetrics::values.contentSidePadding, tileY, tileWidth, tileHeight, 0);
+    }
+    TapTargets::homeCovers().record(coverTargets);
   }
 
   // Draw book card regardless, fill with message based on `hasContinueReading`
@@ -692,10 +747,14 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     }
   }
 
+  // Rows published for touch — see BaseTheme::drawButtonMenu. Values are MENU-LOCAL indices.
+  TapTargets::Recorder::Builder menuTargets;
+
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
     Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding, rect.y + i * (rowHeight + rowSpacing),
                          tileWidth, rowHeight};
+    menuTargets.add(tileRect.x, tileRect.y, tileRect.width, tileRect.height, i);
 
     const bool selected = selectedIndex == i;
 
@@ -726,6 +785,8 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
     renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
   }
+
+  TapTargets::homeMenu().record(menuTargets);
 }
 
 Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame) const {

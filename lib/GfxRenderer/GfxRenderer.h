@@ -170,10 +170,10 @@ class GfxRenderer {
         textDarkness(1) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
 
-  static constexpr int VIEWABLE_MARGIN_TOP = 9;
-  static constexpr int VIEWABLE_MARGIN_RIGHT = 3;
-  static constexpr int VIEWABLE_MARGIN_BOTTOM = 3;
-  static constexpr int VIEWABLE_MARGIN_LEFT = 3;
+  // Bezel insets live in BoardProfile::viewableInsets and are read by
+  // getOrientedViewableTRBL(). The constants that used to sit here duplicated the
+  // profile's own defaults, which is how every board ended up with the X4's bezel
+  // geometry; keeping them would leave two sources of truth for one measurement.
 
   // Setup
   void begin();  // must be called right after display.begin()
@@ -245,6 +245,34 @@ class GfxRenderer {
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
+  // Logical screen size in an EXPLICIT orientation, for a caller that has already
+  // sampled one and must not sample it again. The no-argument versions read the
+  // LIVE draw orientation, which the themes flip to Portrait mid-pass for the
+  // hint strips — so a caller on the loop task that reads width, then height,
+  // then maps a touch, can catch a different frame in each of the three. Read
+  // getHeldOrientation() once and pass it here instead.
+  int getScreenWidth(Orientation orientation) const;
+  int getScreenHeight(Orientation orientation) const;
+  // Map a touch point from normalized PANEL-NATIVE coordinates (0..1, the frame
+  // InputManager reports in, per the BoardConfig touch contract) to LOGICAL
+  // screen pixels under the renderer's live orientation.
+  //
+  // The renderer is the only authority on the orientation actually on screen —
+  // the reader rotates it and restores portrait on exit — so the touch
+  // transform is read from it rather than from the persisted setting. This is
+  // the same discipline setStripReversedPredicate already applies to the front
+  // buttons, and it is why MappedInputManager holds a renderer reference.
+  //
+  // Output is clamped to the panel, so a caller always gets an on-screen point.
+  // Ported verbatim from upstream/develop; see
+  // docs/touch-input-migration-2026-08-14.md phase 2.
+  void tapToLogical(float nx, float ny, int& outX, int& outY) const;
+  // Same, but into an EXPLICIT orientation's frame rather than the live one. For geometry
+  // that was drawn in a fixed frame regardless of how the screen is rotated -- the button
+  // hint strip, which forces Portrait for the duration of its draw. Asking for the tap in
+  // the frame the boxes were recorded in is what makes the hit test orientation-independent
+  // instead of only correct while the screen happens to be portrait.
+  void tapToLogical(Orientation orientation, float nx, float ny, int& outX, int& outY) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —
@@ -281,6 +309,11 @@ class GfxRenderer {
   // against the controller's retained baseline. See HalDisplay::setSingleBufferFastDiff.
   void setSingleBufferFastDiff(bool enabled) const { display.setSingleBufferFastDiff(enabled); }
   bool isX3() const { return display.deviceIsX3(); }
+
+  // True when triggerDisplayAsync() genuinely overlaps the waveform on this
+  // panel. Ask this before spending the async gap on work; see
+  // HalDisplay::supportsAsyncRefresh.
+  bool supportsAsyncRefresh() const { return display.supportsAsyncRefresh(); }
 
   // Non-blocking display split.
   // triggerDisplay() sends pixels, issues the refresh command and returns
@@ -423,8 +456,17 @@ class GfxRenderer {
   // GfxRenderer.cpp for the per-level pixel breakdown and a worked example.
   void setTextDarkness(const uint8_t d) { textDarkness.store(d, std::memory_order_relaxed); }
   uint8_t getTextDarkness() const { return static_cast<uint8_t>(textDarkness.load(std::memory_order_relaxed)); }
+
+  // Armed by beginGrayCapture(); mutable because the whole render path is const.
+  mutable uint8_t* grayCapLsb_ = nullptr;
+  mutable uint8_t* grayCapMsb_ = nullptr;
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
+  // Same, from a caller-owned panel-native plane rather than the framebuffer —
+  // what the inline capture fills. The framebuffer overloads above are the
+  // staged path, where each plane IS the framebuffer in turn.
+  void copyGrayscaleLsbBuffers(const uint8_t* plane) const;
+  void copyGrayscaleMsbBuffers(const uint8_t* plane) const;
   void displayGrayBuffer() const;
 
   // Timing breakdown returned by renderGrayscalePlanesSequential().
@@ -458,6 +500,16 @@ class GfxRenderer {
     t.aborted = true;
     return t;
   }
+
+  // True when the panel can show the B/W base and its grayscale planes as ONE
+  // waveform, i.e. when beginGrayCapture() + displayGrayscaleFrame() is
+  // available instead of the base-then-overlay pair.
+  bool supportsGrayFrame() const;
+  // Display the framebuffer composed with the planes handed to
+  // copyGrayscale*Buffers(), in one refresh. Resyncs the cached framebuffer
+  // pointer afterwards for the same reason triggerDisplay() does: the display
+  // swaps buffers, and every later draw must target the new write buffer.
+  void displayGrayscaleFrame(HalDisplay::RefreshMode mode) const;
 
   // Render both grayscale planes sequentially into the BW framebuffer, streaming
   // each plane to the controller immediately after rendering it. No extra allocation
@@ -587,6 +639,32 @@ class GfxRenderer {
 
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
   // Returns the full framebuffer and its extent ([0, panelHeight)).
+  // --- Inline grayscale capture -----------------------------------------------
+  // While armed, the 2-bit glyph path ALSO writes the two anti-aliasing planes
+  // as it draws the B/W page, so one walk over the page produces base and greys
+  // together. The alternative — and what this replaces — is rendering the whole
+  // page twice more, once per plane, purely to re-derive pixels the B/W pass
+  // already had in its hand.
+  //
+  // Idea adopted from jetaudio's crosspoint-aurora (GfxRenderer::beginGrayCapture
+  // / captureGray, used by its single-push reader path). Aurora hooks a per-pixel
+  // callback; this fork's 2-bit path is a fused gather+threshold that builds a
+  // row/column mask per 8-pixel chunk, so the same effect is had by running that
+  // blit once more per plane with the plane's own draw mask — the page walk,
+  // layout and glyph decode still happen exactly once, which is where the cost is.
+  //
+  // Planes are PANEL-NATIVE (panelWidthBytes * panelHeight), the same geometry
+  // copyGrayscale*Buffers expects, and the caller clears them. Only meaningful
+  // during a BW pass; the grayscale passes ignore it.
+  void beginGrayCapture(uint8_t* lsbPlane, uint8_t* msbPlane) const {
+    grayCapLsb_ = lsbPlane;
+    grayCapMsb_ = msbPlane;
+  }
+  void endGrayCapture() const { grayCapLsb_ = grayCapMsb_ = nullptr; }
+  [[nodiscard]] bool grayCaptureActive() const { return grayCapLsb_ != nullptr && grayCapMsb_ != nullptr; }
+  [[nodiscard]] uint8_t* grayCaptureLsb() const { return grayCapLsb_; }
+  [[nodiscard]] uint8_t* grayCaptureMsb() const { return grayCapMsb_; }
+
   uint8_t* getWriteTarget() const { return frameBuffer; }
   int getWriteOriginY() const { return 0; }
   int getWriteRows() const { return static_cast<int>(panelHeight); }

@@ -21,6 +21,7 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "activities/ListRowTap.h"
 #include "activities/reader/ReaderActivity.h"
 #include "components/CoverGridLayout.h"
 #include "components/UITheme.h"
@@ -41,6 +42,31 @@ struct GridLayout {
   CoverGridLayout::Layout cells;
 };
 
+// Whether the recents grid draws its one-line gesture hint below the last row.
+//
+// ONE question, asked in one place, because it drives two things that must agree: the
+// hint itself and the vertical space reserved for it (bottomReserve below). They were
+// separate `gpio.deviceIsX3()` tests until this was extracted, which is a latent bug —
+// a board answering differently in the two spots either reserves a strip it never
+// paints, or paints the hint over the bottom row of covers.
+//
+// It is still spelled by board name, and that is NOT right. The real question is
+// whether a hint line fits under the grid; the original comment ("On X4 (taller
+// screen) there is room") is not even self-consistent, since in portrait the X3 is the
+// taller panel at 792x528 against the X4's 800x480. Resolving it means deriving the
+// answer from the leftover height CoverGridLayout actually leaves, which changes what
+// the C3 renders and therefore wants a device in hand.
+//
+// One thing it must NOT be converted to, having been tried: "does the board have Left
+// and Right buttons", on the theory that the hint names Up/Left/Right combos and a
+// board without those keys should not advertise them. Both X3 and X4 carry
+// `left = right = PIN_UNASSIGNED` — they are XteinkAdcLadder boards whose Left/Right
+// come off a resistor ladder, not GPIOs — so a pin-presence predicate reads false on
+// the very boards that do draw the hint.
+//
+// Until then it is at least wrong in exactly one place instead of three.
+bool gridShowsGestureHint() { return !gpio.deviceIsX3(); }
+
 GridLayout computeGridLayout(const GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -49,11 +75,12 @@ GridLayout computeGridLayout(const GfxRenderer& renderer) {
   l.contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   l.contentHeight = l.content.height - l.contentTop - metrics.verticalSpacing;
 
-  // The gesture-hint line sits at the bottom of the content area on X4; keep the last row's
-  // labels clear of it (the scroll arrows share that strip).
+  // Reserve the strip the gesture-hint line occupies, on the boards that draw one; the
+  // scroll arrows share it either way, hence the 12 px floor. Same predicate as the draw,
+  // so the two cannot drift apart.
   l.cells = CoverGridLayout::compute({.contentWidth = l.content.width,
                                       .contentHeight = l.contentHeight,
-                                      .bottomReserve = gpio.deviceIsX3() ? 12 : 24,
+                                      .bottomReserve = gridShowsGestureHint() ? 24 : 12,
                                       .maxCellHeight = RecentBooksActivity::GRID_MAX_CELL_HEIGHT});
   return l;
 }
@@ -290,32 +317,107 @@ void RecentBooksActivity::showSelectedBookInfo() {
   }
 }
 
+// Open the book under the selection. Shared by the Confirm button and by a tap on a cover or a
+// row, so the two cannot drift: a long Confirm additionally arms a KOReader pull, a tap never
+// does (touch has no press-type distinction here and a sync is not something to trigger by
+// accident).
+void RecentBooksActivity::openSelectedBook(const bool longPress) {
+  if (recentBooks.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(recentBooks.size())) return;
+  const bool wantsSync = longPress && KOREADER_STORE.hasCredentials();
+  const std::string& selectedPath = recentBooks[selectorIndex].path;
+  const bool isEpubBook = FsHelpers::hasEpubExtension(selectedPath);
+  LOG_DBG("RBA", "Selected recent book: %s (sync=%d epub=%d)", selectedPath.c_str(), wantsSync ? 1 : 0,
+          isEpubBook ? 1 : 0);
+  if (wantsSync && isEpubBook) {
+    auto& sync = APP_STATE.koReaderSyncSession;
+    sync.autoPullEpubPath = selectedPath;
+    sync.postAction = KOReaderSyncPostAction::Reader;
+    APP_STATE.saveToFile();
+  }
+  openingBook = true;
+  ReturnHint hint;
+  hint.target = ReturnTo::RecentBooks;
+  hint.selectIndex = selectorIndex;
+  activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
+}
+
+// A tap on a cover (grid) or a row (list).
+//
+// Point-then-confirm, the same rule ActivityManager::dispatchListTap() applies to every other
+// list: the first tap on a cover moves the selection to it, and only a tap on the cover that is
+// already selected opens the book. The highlight moving IS the confirmation step -- opening a
+// book on a single mis-tap costs a page load and a navigation back, which is the most expensive
+// thing a stray finger can do on this screen.
+//
+// The two views resolve the hit differently, and neither re-derives geometry. The list view
+// draws through GUI.drawList, so its rows are already published in ListTouchBand and
+// mappedInput.listTouch() matches against what was painted. The grid draws its own cells, but
+// their geometry comes from computeGridLayout() -- the same function the render calls -- so the
+// inverse runs here against a fresh copy rather than against a recorded snapshot. That is
+// strictly better for the grid: pageStartRow follows selectorIndex, which this task owns, so
+// there is no render-task staleness to reason about at all.
+bool RecentBooksActivity::handleBookTouch() {
+  if (recentBooks.empty()) return false;
+
+  int index = -1;
+  MappedInputManager::RowTouch touch = MappedInputManager::RowTouch::None;
+
+  if (APP_STATE.recentBooksGridView) {
+    const GridLayout layout = computeGridLayout(renderer);
+    const int cols = std::max(1, layout.cells.cols);
+    const int visibleRows = std::max(1, layout.cells.rows);
+    const int pageStartRow = (selectorIndex / cols / visibleRows) * visibleRows;
+    const int itemCount = static_cast<int>(recentBooks.size());
+    const auto hit = [&](const int x, const int y) {
+      const int cell =
+          CoverGridLayout::hitTest(layout.cells, layout.content.x, layout.contentTop, pageStartRow, itemCount, x, y);
+      if (cell < 0) return false;
+      index = cell;
+      return true;
+    };
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasScreenTouchDown(x, y) && hit(x, y)) {
+      touch = MappedInputManager::RowTouch::Down;
+    } else if (mappedInput.wasScreenTapped(x, y) && hit(x, y)) {
+      touch = MappedInputManager::RowTouch::Tap;
+    }
+  } else {
+    touch = mappedInput.listTouch(index);
+  }
+
+  if (touch == MappedInputManager::RowTouch::None) return false;
+  // Down is claimed but not acted on, so the same contact cannot also be read by anything else.
+  // Acting on it would move the selection mid-contact and defeat the two-step below.
+  if (touch == MappedInputManager::RowTouch::Down) return true;
+
+  switch (ListRowTap::apply(index, static_cast<int>(recentBooks.size()), selectorIndex)) {
+    case ListRowTap::Result::Rejected:
+      return true;
+    case ListRowTap::Result::Selected:
+      requestUpdate();
+      return true;
+    case ListRowTap::Result::Activate:
+      openSelectedBook(/*longPress=*/false);
+      return true;
+  }
+  return true;
+}
+
 void RecentBooksActivity::loop() {
   const bool gridView = APP_STATE.recentBooksGridView;
   const int listSize = static_cast<int>(recentBooks.size());
+
+  // Ahead of the button queue: a tap that opens a book replaces this activity, and draining
+  // queued button events into a screen that is going away serves nobody.
+  if (handleBookTouch()) return;
 
   ButtonEventManager::ButtonEvent ev;
   while (buttonEvents.consumeEvent(ev)) {
     // Confirm short/long: open book (long = KOReader sync for EPUBs)
     if (ev.button == MappedInputManager::Button::Confirm &&
         (ev.type == ButtonEventManager::PressType::Short || ev.type == ButtonEventManager::PressType::Long)) {
-      if (recentBooks.empty() || selectorIndex >= static_cast<int>(recentBooks.size())) return;
-      const bool longPress = (ev.type == ButtonEventManager::PressType::Long) && KOREADER_STORE.hasCredentials();
-      const std::string& selectedPath = recentBooks[selectorIndex].path;
-      const bool isEpubBook = FsHelpers::hasEpubExtension(selectedPath);
-      LOG_DBG("RBA", "Selected recent book: %s (sync=%d epub=%d)", selectedPath.c_str(), longPress ? 1 : 0,
-              isEpubBook ? 1 : 0);
-      if (longPress && isEpubBook) {
-        auto& sync = APP_STATE.koReaderSyncSession;
-        sync.autoPullEpubPath = selectedPath;
-        sync.postAction = KOReaderSyncPostAction::Reader;
-        APP_STATE.saveToFile();
-      }
-      openingBook = true;
-      ReturnHint hint;
-      hint.target = ReturnTo::RecentBooks;
-      hint.selectIndex = selectorIndex;
-      activityManager.replaceWithReader(recentBooks[selectorIndex].path, std::move(hint));
+      openSelectedBook(ev.type == ButtonEventManager::PressType::Long);
       return;
     }
 
@@ -485,7 +587,7 @@ void RecentBooksActivity::renderListView(RenderLock&&) {
         [this](int index) { return UITheme::getFileIcon(recentBooks[index].path); });
   }
 
-  if (!gpio.deviceIsX3()) {
+  if (gridShowsGestureHint()) {
     const int hintY = contentRect.y + contentRect.height - metrics.verticalSpacing - 14;
     const std::string hint = std::string(tr(STR_DIR_UP)) + "+L: " + tr(STR_VIEW_GRID) + "/" + tr(STR_VIEW_LIST) +
                              "   " + tr(STR_DIR_LEFT) + "+L: " + tr(STR_REMOVE) + "   " + tr(STR_DIR_RIGHT) +
@@ -672,8 +774,7 @@ void RecentBooksActivity::renderGridView(RenderLock&&) {
     }
   }
 
-  // On X4 (taller screen) there is room for a one-line gesture hint below the grid.
-  if (!gpio.deviceIsX3()) {
+  if (gridShowsGestureHint()) {
     const int hintY = contentRect.y + contentRect.height - metrics.verticalSpacing - 14;
     const std::string hint = std::string(tr(STR_DIR_UP)) + "+L: " + tr(STR_VIEW_GRID) + "/" + tr(STR_VIEW_LIST) +
                              "   " + tr(STR_DIR_LEFT) + "+L: " + tr(STR_REMOVE) + "   " + tr(STR_DIR_RIGHT) +

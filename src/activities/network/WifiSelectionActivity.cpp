@@ -1179,3 +1179,7 @@ void WifiSelectionActivity::onComplete(const bool connected) {
   setResult(std::move(result));
   finish();
 }
+
+ListRowTap::Result WifiSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(networks.size()), selectedNetworkIndex);
+}

@@ -366,6 +366,12 @@ class EpubReaderActivity final : public Activity {
     unsigned long completedAtMs = 0UL;
   };
   PreRenderedPage preRenderedPage;
+  // The pre-render staged this page's grayscale planes, so displaying it can go
+  // out as one waveform like a fresh render. Consumed (and cleared) by the
+  // display; cleared with preRenderedPage.ready wherever the buffer is dropped,
+  // because a stale plane pair belongs to a page that is no longer in the
+  // framebuffer.
+  bool preRenderedPlanesStaged_ = false;
   // Debug-only Background B (section pre-analysis) progress, surfaced as a small
   // status-bar overlay when DEBUG_BACKGROUND_WORK is enabled. Background A's state is
   // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a
@@ -723,6 +729,18 @@ class EpubReaderActivity final : public Activity {
   // Advisory — call it from the render task as late as possible, and never gate anything
   // the next frame depends on it.
   bool aaPreemptedByNavigation() const;
+
+  // True when this panel runs the AA pass deferred (from the idle loop) rather
+  // than inline (hidden inside a running waveform). Inline needs a panel that can
+  // genuinely overlap -- see GfxRenderer::supportsAsyncRefresh -- and the X3
+  // defers even though it can, for the scheduling reasons the pre-render guards
+  // below describe.
+  //
+  // Every deferred-AA user needs those guards: the pass is cancelled by a queued
+  // update, so a pre-render armed before it runs preempts it *every time* and the
+  // AA is never applied. That is not an X3 property, it is a property of
+  // deferring, which is why this is one predicate and not a board name.
+  bool usesDeferredAa() const;
   // If the frame buffer currently holds a pre-rendered next page, redraw the current page
   // into it (no status bar, no flush). Restores the invariant other activities — notably
   // SleepActivity's OVERLAY mode — rely on when transitioning out of the reader.

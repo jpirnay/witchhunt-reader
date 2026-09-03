@@ -21,6 +21,8 @@ class XtcReaderChapterSelectionActivity final : public Activity {
       : Activity("XtcReaderChapterSelection", renderer, mappedInput), xtc(xtc), currentPage(currentPage) {}
   void onEnter() override;
   void onExit() override;
+  // Tap on a chapter row -> move the selection there; ActivityManager synthesizes Confirm.
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 };

@@ -7,6 +7,7 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 int XtcReaderChapterSelectionActivity::getPageItems() const {
@@ -100,6 +101,9 @@ void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
   }
 
   const auto pageStartIndex = selectorIndex / pageItems * pageItems;
+  // Rows published for touch — same numbers as the fill below, band top at the fill's y.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, contentRect.y + 60 - 2, 30, pageStartIndex,
+                                   std::min(pageItems, static_cast<int>(chapters.size()) - pageStartIndex));
   renderer.fillRect(contentRect.x, contentRect.y + 60 + (selectorIndex % pageItems) * 30 - 2, contentRect.width - 1,
                     30);
   for (int i = pageStartIndex; i < static_cast<int>(chapters.size()) && i < pageStartIndex + pageItems; i++) {
@@ -121,4 +125,9 @@ void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
+}
+
+ListRowTap::Result XtcReaderChapterSelectionActivity::selectListRow(const int index) {
+  if (xtc == nullptr) return ListRowTap::Result::Rejected;
+  return ListRowTap::apply(index, static_cast<int>(xtc->getChapters().size()), selectorIndex);
 }

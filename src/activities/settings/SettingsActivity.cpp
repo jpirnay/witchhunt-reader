@@ -17,6 +17,7 @@
 #include "SliderSettingPicker.h"
 #include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
@@ -213,6 +214,37 @@ void SettingsActivity::onExit() {
 void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
+  // A tap on the tab bar switches category directly. Handled here rather than
+  // through selectListRow(): the tabs are not list rows — they are a horizontal
+  // strip of variable-width targets recorded by the theme that painted them, and
+  // the list band starts below the bar, so the two can never claim the same tap.
+  //
+  // Single-tap, unlike the rows below. Point-then-confirm exists because
+  // activating the wrong row can be expensive to undo; switching to the wrong
+  // category costs one more tap on the right one, and demanding two taps to
+  // reach a tab that is already visible is exactly the awkwardness this removes.
+  if (mappedInput.hasTouch() && TapTargets::tabBar().hasTargets()) {
+    int tx = 0;
+    int ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const int tab = TapTargets::tabBar().hitTest(tx, ty);
+      if (tab >= 0 && tab < categoryCount) {
+        if (tab != selectedCategoryIndex) {
+          selectedCategoryIndex = tab;
+          hasChangedCategory = true;
+        }
+        // Land ON the tab strip, so the hint labels and the next Confirm read as
+        // "you are on the tabs" rather than leaving the highlight on a row of the
+        // category just left.
+        selectedSettingIndex = 0;
+        requestUpdate();
+        // Deliberately no early return: the hasChangedCategory block at the end
+        // of loop() is what swaps currentSettings, and it has to be reached. The
+        // button checks in between all read false for a tap.
+      }
+    }
+  }
+
   // Handle actions with early return
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     if (selectedSettingIndex == 0) {
@@ -395,4 +427,19 @@ void SettingsActivity::render(RenderLock&&) {
   const bool halfRefresh = gpio.deviceIsX3() && needsHalfRefresh;
   needsHalfRefresh = false;
   renderer.displayBuffer(halfRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+}
+
+ListRowTap::Result SettingsActivity::selectListRow(const int index) {
+  // The list drawn by render() starts at selectedSettingIndex 1: index 0 is the category tab
+  // row, which the list does not paint (render() passes `selectedSettingIndex - 1`). So band
+  // row i is setting i, reached by setting selectedSettingIndex to i + 1 -- and a tap can never
+  // land on the tab row, which is correct, since the tab bar is a separate target.
+  //
+  // apply() therefore compares in the SAME frame the band uses, not in selectedSettingIndex's:
+  // a shifted comparison would make the first tap on a row look like a second tap on its
+  // neighbour and activate without ever showing the highlight move.
+  int selection = selectedSettingIndex - 1;
+  const auto result = ListRowTap::apply(index, settingsCount, selection);
+  if (result != ListRowTap::Result::Rejected) selectedSettingIndex = selection + 1;
+  return result;
 }

@@ -235,3 +235,7 @@ void OpdsSettingsActivity::render(RenderLock&&) {
     renderer.displayBuffer();
   }
 }
+
+ListRowTap::Result OpdsSettingsActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getMenuItemCount(), selectedIndex);
+}

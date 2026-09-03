@@ -100,3 +100,7 @@ void NetworkModeSelectionActivity::onCancel() {
   setResult(std::move(result));
   finish();
 }
+
+ListRowTap::Result NetworkModeSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(MENU_ITEM_COUNT), selectedIndex);
+}

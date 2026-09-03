@@ -77,3 +77,7 @@ void LanguageSelectActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+ListRowTap::Result LanguageSelectActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, totalItems, selectedIndex);
+}

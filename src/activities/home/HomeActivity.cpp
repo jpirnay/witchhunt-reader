@@ -30,6 +30,7 @@
 #include "RecentBooksStore.h"
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 namespace {
@@ -775,6 +776,10 @@ void HomeActivity::loop() {
     rebuildMenuEntries();
   }
 
+  // Ahead of the button handling: a tap that opens a book or a menu entry replaces or stacks on
+  // this activity, and running the rest against a screen that is going away serves nobody.
+  if (handleHomeTouch()) return;
+
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);
 
   // A press may be in EITHER place: hasPendingInput() reads the live sampler accumulator
@@ -894,10 +899,9 @@ void HomeActivity::render(RenderLock&&) {
         [this](int index) { return menuEntries[index].icon; }, carouselLabels.btn1, carouselLabels.btn2,
         carouselLabels.btn3, carouselLabels.btn4);
     if (handled) {
-      if (!firstRenderDone) {
-        firstRenderDone = true;
-        requestUpdate();
-      }
+      // Opens the cover-loading gate in loop(); see the note at the end of render() for
+      // why this deliberately does NOT also request a second render.
+      firstRenderDone = true;
       return;
     }
     // Fast path failed (e.g. frame cache malloc failed). Force cover re-render
@@ -945,10 +949,90 @@ void HomeActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 
-  if (!firstRenderDone) {
-    firstRenderDone = true;
-    requestUpdate();
+  // Opens the cover-loading gate in loop() (which requires firstRenderDone, so that covers are
+  // read off SD only after something is already on screen).
+  //
+  // No requestUpdate() here. It used to post a second full render unconditionally, before
+  // anything knew whether the cover pass would change a pixel; the render task serialises
+  // behind that pass on the RenderLock, so it landed after it and repainted the same screen.
+  // On a device whose thumbs are all cached -- the steady state -- that was a whole extra panel
+  // update per Home entry for nothing (measured: 643 ms on the 960x540 S3, on top of the 1573 ms
+  // first paint).
+  //
+  // Nothing is lost by dropping it:
+  //   - a cover that IS decoded already repaints itself; every path in loadRecentCovers() that
+  //     writes a BMP ends in yieldAfterDecode(), which calls requestUpdate(). The remaining early
+  //     returns are all "produced nothing, retry later" and need no repaint.
+  //   - cover loading still starts: ActivityManager calls loop() every tick regardless of whether
+  //     an update is pending, and the gate lives in loop().
+  //   - the _redBaselineAuthoritative one-shot armed by reallocSecondaryBuffer() is state, not a
+  //     timer: it survives until whatever paints next, which then diffs against the controller's
+  //     retained RED plane exactly as it would have here.
+  firstRenderDone = true;
+}
+
+// A tap on a cover or a menu entry. Both sets of targets were published by whichever theme
+// painted them, so this knows nothing about where a cover or a row physically sits -- which is
+// the point, given four themes that lay the home screen out four different ways (one cover,
+// three covers, a carousel, and a menu that is a vertical row list in two themes and a
+// horizontal icon strip in the carousel).
+//
+// Point-then-confirm, the same rule ActivityManager::dispatchListTap() applies to every list:
+// the first tap moves the selection to the cover or menu entry under the finger, and only a tap
+// on the one already selected acts. Home is where that matters most — its entries open books and
+// launch whole activities, so a mis-tap is the most expensive thing a stray finger can do here.
+bool HomeActivity::handleHomeTouch() {
+  if (!mappedInput.hasTouch()) return false;
+  if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
+
+  const int recentsCount = static_cast<int>(recentBooks.size());
+  const int menuCount = static_cast<int>(menuEntries.size());
+
+  // Covers first: in the carousel theme the side covers slide behind the centre one, and the
+  // recorder orders them so the visible one wins. The two sets never overlap each other.
+  // Both are bounds-checked against the CURRENT data, not the data the render saw: the targets
+  // are published on the render task and recentBooks/menuEntries can change under a tap.
+  int selector = -1;
+  bool isBook = false;
+  const auto resolve = [&](const int x, const int y) {
+    const int book = TapTargets::homeCovers().hitTest(x, y);
+    if (book >= 0 && book < recentsCount) {
+      selector = book;
+      isBook = true;
+      return true;
+    }
+    const int menu = TapTargets::homeMenu().hitTest(x, y);
+    if (menu >= 0 && menu < menuCount) {
+      selector = recentsCount + menu;
+      isBook = false;
+      return true;
+    }
+    return false;
+  };
+
+  int x = 0;
+  int y = 0;
+  // Claimed but not acted on: moving the selection mid-contact would defeat the two-step below.
+  if (mappedInput.wasScreenTouchDown(x, y) && resolve(x, y)) return true;
+  if (!mappedInput.wasScreenTapped(x, y) || !resolve(x, y)) return false;
+
+  // The whole selector is one range (covers then menu), so the comparison happens in that frame
+  // and a tap on the menu correctly counts as "new" while a cover is selected, and vice versa.
+  switch (ListRowTap::apply(selector, recentsCount + menuCount, selectorIndex)) {
+    case ListRowTap::Result::Rejected:
+      return true;
+    case ListRowTap::Result::Selected:
+      requestUpdate();
+      return true;
+    case ListRowTap::Result::Activate:
+      if (isBook) {
+        onSelectBook(recentBooks[selector].path);
+      } else {
+        dispatchMenuAction(menuEntries[selector - recentsCount].action);
+      }
+      return true;
   }
+  return true;
 }
 
 void HomeActivity::onSelectBook(const std::string& path) {

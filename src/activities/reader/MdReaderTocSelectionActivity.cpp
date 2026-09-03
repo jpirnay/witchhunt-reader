@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 int MdReaderTocSelectionActivity::getTotalItems() const { return static_cast<int>(headings.size()); }
@@ -79,6 +80,10 @@ void MdReaderTocSelectionActivity::render(RenderLock&&) {
   renderer.fillRect(contentRect.x, 60 + contentRect.y + (selectorIndex % pageItems) * 30 - 2, contentRect.width - 1,
                     30);
 
+  // Rows published for touch — same numbers as the fill above, band top at the fill's y.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, 60 + contentRect.y - 2, 30, pageStartIndex,
+                                   std::min(pageItems, totalItems - pageStartIndex));
+
   for (int i = 0; i < pageItems; i++) {
     int itemIndex = pageStartIndex + i;
     if (itemIndex >= totalItems) break;
@@ -105,4 +110,8 @@ void MdReaderTocSelectionActivity::render(RenderLock&&) {
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
   renderer.displayBuffer();
+}
+
+ListRowTap::Result MdReaderTocSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getTotalItems(), selectorIndex);
 }

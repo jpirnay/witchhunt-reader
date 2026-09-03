@@ -147,6 +147,13 @@ void XtcReaderActivity::loop() {
   }
 
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
+  // Touch page turns join tilt here rather than in the button event queue: both
+  // are gesture sources the queue does not carry, and both must lose to an
+  // explicit button press. Inert on non-touch boards and when the user has set
+  // touchReaderControls to Off.
+  const ReaderUtils::TouchPageTurn touchTurn = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  prevTriggered = prevTriggered || touchTurn.prev;
+  nextTriggered = nextTriggered || touchTurn.next;
   if (!prevTriggered && !nextTriggered) {
     if (!buttonPrevTurn && !buttonNextTurn) {
       return;

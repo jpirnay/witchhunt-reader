@@ -42,8 +42,18 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
     panicStack[i].sp = 0;
   }
 
-  // Copied from components/esp_system/port/arch/riscv/panic_arch.c
+  // The exception frame is architecture-specific and keeps the stack pointer in a
+  // different field: RISC-V in `sp`, Xtensa in `a1` ("stack pointer before
+  // interrupt"). Only that extraction differs — the raw stack walk below is
+  // architecture-neutral, since it just dumps words upward from the frame.
+  // Frame layouts per components/esp_system/port/arch/{riscv,xtensa}/panic_arch.c.
+#if defined(__riscv)
   uint32_t sp = (uint32_t)((RvExcFrame*)frame)->sp;
+#elif defined(__XTENSA__)
+  uint32_t sp = (uint32_t)((XtExcFrame*)frame)->a1;
+#else
+#error "Unknown architecture: no exception-frame stack pointer mapping."
+#endif
   const int per_line = 8;
   int depth = 0;
   for (int x = 0; x < 1024; x += per_line * sizeof(uint32_t)) {

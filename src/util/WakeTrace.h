@@ -18,7 +18,7 @@
 // the first page is on the panel. Stamps are absolute millis() so they share a time origin
 // with the boot trace and the two lines can be read as one timeline.
 //
-// Cost: 2 bytes per phase of .bss plus one log line per reader open. No heap, no allocation.
+// Cost: 4 bytes per phase of .bss plus one log line per reader open. No heap, no allocation.
 // Always compiled in — unlike DEBUG_MEMORY_CONSUMPTION this is a handful of stores on a path
 // that runs once per book open, and the whole point is to have the number available from a
 // field device (`CMD:BOOTLOG`-style) rather than only from an instrumented build.
@@ -40,9 +40,12 @@ enum class Phase : uint8_t {
   Count,
 };
 
-// Stamp a phase with the current millis(). Re-stamping a phase overwrites it; the reader is
-// re-entered on orientation changes and setting edits, so `begin()` resets the whole trace
-// rather than letting a second open interleave with the first.
+// Stamp a phase with the current millis(). FIRST WRITE WINS -- a second mark() of the same
+// phase is ignored, because several call sites re-run within one open (render() is re-entered
+// for the pre-render pass, the section build, and status-bar updates) and a later overwrite
+// would retime the phase and invalidate every delta before it. The reader is also re-entered
+// on orientation changes and setting edits, so `begin()` resets the whole trace rather than
+// letting a second open interleave with the first.
 void mark(Phase phase);
 
 // Arm the "this open is a deep-sleep resume" flag. Called from setup() on the one branch that

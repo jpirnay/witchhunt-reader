@@ -1,11 +1,13 @@
 #include "GfxRenderer.h"
 
+#include <BoardConfig.h>
 #include <FontDecompressor.h>
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SdCardFont.h>
 #include <SmallCaps.h>
+#include <TouchTransform.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 
@@ -918,6 +920,42 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
             renderGlyphFast2Bit<0x0E>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
                                       renderer.getOrientation(), renderer.getDisplayWidth(),
                                       renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), fbOriginY, fbRows);
+            // Inline grayscale capture: the same glyph, blitted again into each
+            // anti-aliasing plane with that plane's own draw mask. This is the
+            // whole point of the capture — the page walk, the layout and the
+            // glyph decode above happened ONCE, and re-running only the blit is
+            // what makes a second and third full page render unnecessary.
+            //
+            // Masks come from drawMaskFor2BitMode() so the planes honour the
+            // darkness setting exactly as the staged passes did. Darkness
+            // "Maximum" yields 0x00 for both, which the guards below skip — the
+            // BW pass has already drawn every AA pixel solid black there, which
+            // is what that setting means.
+            if (renderer.grayCaptureActive()) {
+              const uint8_t msbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, renderer.getTextDarkness());
+              const uint8_t lsbMask = drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, renderer.getTextDarkness());
+              const int planeRows = static_cast<int>(renderer.getDisplayHeight());
+              // Planes are full-panel, so origin 0 / full height regardless of
+              // any band the framebuffer write is using.
+              if (msbMask == 0x06) {
+                renderGlyphFast2Bit<0x06>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              } else if (msbMask == 0x02) {
+                renderGlyphFast2Bit<0x02>(renderer.grayCaptureMsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              }
+              if (lsbMask == 0x06) {
+                renderGlyphFast2Bit<0x06>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              } else if (lsbMask == 0x04) {
+                renderGlyphFast2Bit<0x04>(renderer.grayCaptureLsb(), bitmap, width, height, innerBase, outerBase,
+                                          pixelState, renderer.getOrientation(), renderer.getDisplayWidth(),
+                                          renderer.getDisplayHeight(), renderer.getDisplayWidthBytes(), 0, planeRows);
+              }
+            }
             break;
           case 0x06:  // raw {1,2}
             renderGlyphFast2Bit<0x06>(fb, bitmap, width, height, innerBase, outerBase, pixelState,
@@ -1130,6 +1168,62 @@ static inline void emitScaledGlyphPixels(const uint8_t* const bitmap, const bool
 // anti-aliased and keep the body font's visual weight instead of the jagged, over-bold look
 // nearest-neighbor produced. Downscaling (scale < 1.0) keeps crisp nearest-neighbor point-
 // sampling.
+// Emit one scaled glyph into a full-panel 1-bpp anti-aliasing plane.
+//
+// The unscaled fast path captures the planes at its 2-bit dispatch (see the
+// `case 0x0E:` block). Without the same hook here, every glyph drawn at a scale
+// != 1.0 -- which the scaled-glyph mask cache above notes is "every word of any
+// book whose stylesheet puts a font-size on body text, which is most of them" --
+// reached the panel with no entry in either plane. Single-push pages therefore
+// carried strictly less anti-aliasing than the staged passes they replaced,
+// which DID grey scaled text: renderCharAtScale takes renderMode and derives its
+// own drawMask, so a GRAYSCALE_MSB/LSB re-render greyed these glyphs.
+//
+// Mirrors the cached/uncached split of the framebuffer path but never consults
+// the strip: the planes are always whole-panel, so there is no band to translate
+// into. Downscaling never reaches here -- it thresholds against minRaw2Bit and
+// has no AA levels to lift in any path, staged or captured.
+static void captureScaledGlyphPlane(const GfxRenderer& renderer, uint8_t* const plane, const uint8_t drawMask,
+                                    const uint8_t* const bitmap, const bool is2Bit, const int srcW, const int srcH,
+                                    const int dstW, const int dstH, const float scale, const uint8_t minRaw2Bit,
+                                    const int baseX, const int baseY, const EpdFontData* const fontData,
+                                    const uint32_t cp) {
+  if (plane == nullptr || drawMask == 0) return;  // 0x00 == "Maximum" darkness: no grayscale at all
+
+  const uint8_t* mask = renderer.findScaledGlyphMask(fontData, cp, scale, drawMask, dstW, dstH);
+  if (!mask) {
+    if (uint8_t* slot = renderer.allocScaledGlyphMask(fontData, cp, scale, drawMask, dstW, dstH)) {
+      emitScaledGlyphPixels(bitmap, is2Bit, srcW, srcH, dstW, dstH, scale, minRaw2Bit, drawMask,
+                            [slot, dstW](const int dstX, const int dstY) {
+                              const int bit = dstY * dstW + dstX;
+                              slot[bit >> 3] |= static_cast<uint8_t>(0x80 >> (bit & 7));
+                            });
+      mask = slot;
+    }
+  }
+  if (mask) {
+    // pixelState=false makes writeRowBits OR the bits in, which is how a plane
+    // marks a pixel -- the same convention the staged grayscale passes used.
+    renderGlyphFastBW(plane, mask, dstW, dstH, baseX, baseY, false, renderer.getOrientation(),
+                      renderer.getDisplayWidth(), renderer.getDisplayHeight(), renderer.getDisplayWidthBytes());
+    return;
+  }
+
+  // Mask arena exhausted: write the plane bits directly, with the same rotation
+  // and clipping drawPixel() applies to the framebuffer.
+  emitScaledGlyphPixels(bitmap, is2Bit, srcW, srcH, dstW, dstH, scale, minRaw2Bit, drawMask,
+                        [&renderer, plane, baseX, baseY](const int dstX, const int dstY) {
+                          int phyX = 0;
+                          int phyY = 0;
+                          const int w = renderer.getDisplayWidth();
+                          const int h = renderer.getDisplayHeight();
+                          rotateCoordinates(renderer.getOrientation(), baseX + dstX, baseY + dstY, &phyX, &phyY, w, h);
+                          if (phyX < 0 || phyX >= w || phyY < 0 || phyY >= h) return;
+                          plane[static_cast<uint32_t>(phyY) * renderer.getDisplayWidthBytes() + (phyX / 8)] |=
+                              static_cast<uint8_t>(1u << (7 - (phyX % 8)));
+                        });
+}
+
 static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                               const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
                               const bool pixelState, const EpdFontFamily::Style style, const float scale,
@@ -1165,6 +1259,18 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
     writeState = (drawMask == 0x0E) ? pixelState : false;
   }
   const uint8_t sel = (scale < 1.0f) ? minRaw2Bit : drawMask;
+
+  // Capture BEFORE the framebuffer draw below: the cached path returns straight
+  // out of it, so anything placed after that return runs only on the fallback.
+  if (renderMode == GfxRenderer::BW && scale >= 1.0f && renderer.grayCaptureActive()) {
+    const uint8_t darkness = renderer.getTextDarkness();
+    captureScaledGlyphPlane(renderer, renderer.grayCaptureMsb(),
+                            drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
+                            dstH, scale, minRaw2Bit, baseX, baseY, fontData, cp);
+    captureScaledGlyphPlane(renderer, renderer.grayCaptureLsb(),
+                            drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
+                            dstH, scale, minRaw2Bit, baseX, baseY, fontData, cp);
+  }
 
   // Cached path: resample once per distinct (glyph, scale, sel), then draw every
   // occurrence with the same 8-pixel-chunk blitter unscaled text uses. renderGlyphFastBW
@@ -2825,8 +2931,8 @@ std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* 
 }
 
 // Note: Internal driver treats screen in command orientation; this library exposes a logical orientation
-int GfxRenderer::getScreenWidth() const {
-  switch (getOrientation()) {
+int GfxRenderer::getScreenWidth(const Orientation orientation) const {
+  switch (orientation) {
     case Portrait:
     case PortraitInverted:
       // 480px wide in portrait logical coordinates
@@ -2839,8 +2945,8 @@ int GfxRenderer::getScreenWidth() const {
   return panelHeight;
 }
 
-int GfxRenderer::getScreenHeight() const {
-  switch (getOrientation()) {
+int GfxRenderer::getScreenHeight(const Orientation orientation) const {
+  switch (orientation) {
     case Portrait:
     case PortraitInverted:
       // 800px tall in portrait logical coordinates
@@ -2851,6 +2957,38 @@ int GfxRenderer::getScreenHeight() const {
       return panelHeight;
   }
   return panelWidth;
+}
+
+int GfxRenderer::getScreenWidth() const { return getScreenWidth(getOrientation()); }
+
+int GfxRenderer::getScreenHeight() const { return getScreenHeight(getOrientation()); }
+
+// Inverse of rotateCoordinates: panel-native normalized touch -> logical px.
+// Ported from upstream/develop so the layers above stay diff-comparable. Clamp
+// first, then rotate, so an out-of-range report from the controller can never
+// produce an off-screen logical point.
+//
+// One deliberate difference from upstream: our `orientation` member is a
+// std::atomic<int>, not a plain enum, so this reads it once through
+// getOrientation() instead of switching on the member directly. Reading it once
+// also keeps the transform self-consistent if the reader rotates mid-call.
+// The transform itself lives in TouchTransform.h so it can be host-tested
+// without Arduino; keep the two orientation orders in lockstep.
+static_assert(static_cast<int>(GfxRenderer::Portrait) == touchtransform::Portrait &&
+                  static_cast<int>(GfxRenderer::LandscapeClockwise) == touchtransform::LandscapeClockwise &&
+                  static_cast<int>(GfxRenderer::PortraitInverted) == touchtransform::PortraitInverted &&
+                  static_cast<int>(GfxRenderer::LandscapeCounterClockwise) == touchtransform::LandscapeCounterClockwise,
+              "touchtransform::Orientation must mirror GfxRenderer::Orientation");
+
+void GfxRenderer::tapToLogical(const float nx, const float ny, int& outX, int& outY) const {
+  // Read the atomic orientation once so the transform stays self-consistent
+  // even if the reader rotates the screen mid-call.
+  tapToLogical(getOrientation(), nx, ny, outX, outY);
+}
+
+void GfxRenderer::tapToLogical(const Orientation orientation, const float nx, const float ny, int& outX,
+                               int& outY) const {
+  touchtransform::tapToLogical(static_cast<int>(orientation), panelWidth, panelHeight, nx, ny, outX, outY);
 }
 
 static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, int lx, int ly, int lw, int lh,
@@ -3113,9 +3251,24 @@ size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 
 void GfxRenderer::copyGrayscaleLsbBuffers() const { display.copyGrayscaleLsbBuffers(frameBuffer); }
 
+void GfxRenderer::copyGrayscaleLsbBuffers(const uint8_t* plane) const { display.copyGrayscaleLsbBuffers(plane); }
+
+void GfxRenderer::copyGrayscaleMsbBuffers(const uint8_t* plane) const { display.copyGrayscaleMsbBuffers(plane); }
+
 void GfxRenderer::copyGrayscaleMsbBuffers() const { display.copyGrayscaleMsbBuffers(frameBuffer); }
 
 void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFix); }
+
+bool GfxRenderer::supportsGrayFrame() const { return display.supportsGrayFrame(); }
+
+void GfxRenderer::displayGrayscaleFrame(const HalDisplay::RefreshMode mode) const {
+  const HalDisplay::RefreshMode effectiveMode = consumeRefreshOverride(mode);
+  display.displayGrayscaleFrame(effectiveMode, fadingFix);
+  // Same contract as triggerDisplay(): the display swapped buffers, so the
+  // cached pointer must follow or every later draw writes to the frame now on
+  // the panel.
+  frameBuffer = display.getFrameBuffer();
+}
 
 void GfxRenderer::freeBwBufferChunks() {
   for (auto& bwBufferChunk : bwBufferChunks) {
@@ -3345,30 +3498,53 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
 }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
+  // Bezel overlap comes from the board profile, not from constants here.
+  //
+  // BoardProfile::viewableInsets exists precisely for this and documents itself
+  // as "the value CrossPoint historically hardcoded for every board (tuned on the
+  // X4 bezel) — override per profile as boards are measured". We were still using
+  // the hardcoded copy, so every board inherited the X4's bezel geometry however
+  // differently its own case sits over the glass. The profile defaults are the
+  // same {9,3,3,3}, so this is behaviour-identical until a profile says otherwise.
+  const BoardConfig::ViewableInsets& in = BoardConfig::ACTIVE.viewableInsets;
+  const int top = in.top, right = in.right, bottom = in.bottom, left = in.left;
   switch (getOrientation()) {
     case Portrait:
-      *outTop = VIEWABLE_MARGIN_TOP;
-      *outRight = VIEWABLE_MARGIN_RIGHT;
-      *outBottom = VIEWABLE_MARGIN_BOTTOM;
-      *outLeft = VIEWABLE_MARGIN_LEFT;
+      *outTop = top;
+      *outRight = right;
+      *outBottom = bottom;
+      *outLeft = left;
       break;
     case LandscapeClockwise:
-      *outTop = VIEWABLE_MARGIN_LEFT;
-      *outRight = VIEWABLE_MARGIN_TOP;
-      *outBottom = VIEWABLE_MARGIN_RIGHT;
-      *outLeft = VIEWABLE_MARGIN_BOTTOM;
+      *outTop = left;
+      *outRight = top;
+      *outBottom = right;
+      *outLeft = bottom;
       break;
     case PortraitInverted:
-      *outTop = VIEWABLE_MARGIN_BOTTOM;
-      *outRight = VIEWABLE_MARGIN_LEFT;
-      *outBottom = VIEWABLE_MARGIN_TOP;
-      *outLeft = VIEWABLE_MARGIN_RIGHT;
+      *outTop = bottom;
+      *outRight = left;
+      *outBottom = top;
+      *outLeft = right;
       break;
     case LandscapeCounterClockwise:
-      *outTop = VIEWABLE_MARGIN_RIGHT;
-      *outRight = VIEWABLE_MARGIN_BOTTOM;
-      *outBottom = VIEWABLE_MARGIN_LEFT;
-      *outLeft = VIEWABLE_MARGIN_TOP;
+      *outTop = right;
+      *outRight = bottom;
+      *outBottom = left;
+      *outLeft = top;
       break;
+  }
+
+  // One-shot per (orientation, insets) combination. The profile values are in the
+  // panel's NATIVE PORTRAIT frame and are rotated above, so a change to `left`
+  // does not necessarily move the screen's left edge -- in landscape it moves the
+  // top. This logs both halves so the mapping can be checked against the device
+  // instead of inferred.
+  static int lastKey = -1;
+  const int key = (static_cast<int>(getOrientation()) << 24) | (top << 16) | (right << 8) | left;
+  if (key != lastKey) {
+    lastKey = key;
+    LOG_INF("GFX", "Viewable insets: profile T%d R%d B%d L%d, orientation=%d -> screen T%d R%d B%d L%d", top, right,
+            bottom, left, static_cast<int>(getOrientation()), *outTop, *outRight, *outBottom, *outLeft);
   }
 }

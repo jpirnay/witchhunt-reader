@@ -175,6 +175,23 @@ single prewarm call, which is a runtime change with no flash cost and no permane
 
 ---
 
+### Cross-reference: the AA / pre-render ordering has a heap dimension (2026-08-17)
+
+Raised by S3 bring-up, but the constraint is a C3 one, so it is flagged here.
+
+Background-A re-arms the next-page pre-render only *after* the deferred AA frees
+its planes, because the two compete for heap. On a panel with a slow AA pass that
+ordering costs every quick page turn (measurements in
+[background-rendering.md](background-rendering.md) → "A — next-page pre-render"),
+and the obvious fix is to pre-render first and run the AA after.
+
+**That reordering is a heap question before it is a scheduling one.** It would
+have a pre-rendered page resident while the AA then allocates its planes — the
+exact pairing the current order avoids. On the C3 the pre-render gate is
+`PRE_RENDER_MIN_FREE_HEAP_BYTES` = 56 KB of ~380 KB, so whoever picks this up
+should measure the combined high-water on an X3 with a large section before
+changing the order. Not attempted.
+
 ## Eliminated — do not re-attempt
 
 Each was investigated and disproved. Re-proposing one costs the same time again.

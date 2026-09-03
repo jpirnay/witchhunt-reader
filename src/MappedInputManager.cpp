@@ -1,6 +1,21 @@
 #include "MappedInputManager.h"
 
+#include <FreeInkUICore.h>
+#include <GfxRenderer.h>
+#include <TouchTransform.h>
+
 #include "CrossPointSettings.h"
+#include "components/themes/ListTouchBand.h"
+
+namespace fui = freeink::ui;
+
+namespace {
+// A touch-down only moves a list selection once the finger has rested briefly.
+// Without the delay every glancing contact drags the highlight across rows on
+// the way to its target, and each move costs an e-paper refresh. Upstream's
+// value, kept verbatim.
+constexpr unsigned long TOUCH_DOWN_SELECT_DELAY_MS = 90;
+}  // namespace
 
 MappedInputManager::ScreenOrientation (*MappedInputManager::orientationProvider)() = nullptr;
 
@@ -214,3 +229,244 @@ int MappedInputManager::getPressedFrontButton() const {
   }
   return -1;
 }
+// --- Touch -------------------------------------------------------------------
+// Thin interpretation layer over HalGPIO's raw passthrough: map panel-native
+// normalized coordinates into logical pixels via the renderer's live
+// orientation, then give the result app meaning. Ported from upstream/develop;
+// see docs/touch-input-migration-2026-08-14.md §1.
+
+bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
+
+void MappedInputManager::setTouchEventsEnabled(const bool enabled) {
+  if (enabled == touchEventsEnabled_) return;
+  touchEventsEnabled_ = enabled;
+  // Going quiet drops what is already queued: every touch event now sits in a
+  // ring until something drains it, so without this, turning touch back on would
+  // replay whatever was done while it was off.
+  if (!enabled) gpio.flushTouchEvents();
+}
+
+bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawTap(nx, ny)) return false;
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::wasScreenTappedIn(const touchtransform::Orientation orientation, int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawTap(nx, ny)) return false;
+  renderer.tapToLogical(static_cast<GfxRenderer::Orientation>(orientation), nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  unsigned long heldMs = 0;
+  if (!rawTapCandidate(nx, ny, heldMs)) return false;
+  if (heldMs < TOUCH_DOWN_SELECT_DELAY_MS) return false;
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawLongPress(nx, ny)) return false;
+  // Consuming the long-press implies acting on it: suppress the rest of the
+  // contact so the finger lift can't also tap whatever the action opened.
+  gpio.suppressTouchContact();
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::peekScreenLongPress(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawLongPress(nx, ny)) return false;
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::peekScreenLongPressIn(const touchtransform::Orientation orientation, int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawLongPress(nx, ny)) return false;
+  renderer.tapToLogical(static_cast<GfxRenderer::Orientation>(orientation), nx, ny, x, y);
+  return true;
+}
+
+bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
+  float nx = 0.0f;
+  float ny = 0.0f;
+  if (!rawHeldAt(nx, ny)) return false;
+  renderer.tapToLogical(nx, ny, x, y);
+  return true;
+}
+
+void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex) const { gpio.injectPress(rawButtonIndex); }
+
+bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); }
+
+unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
+
+bool MappedInputManager::wasTapInRect(const int x, const int y, const int width, const int height) const {
+  int tx = 0;
+  int ty = 0;
+  return wasScreenTapped(tx, ty) && tx >= x && tx < x + width && ty >= y && ty < y + height;
+}
+
+MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int top, const int rowStep,
+                                                          const int rowCount, const int xStart, const int xEnd,
+                                                          const int rowHeight) const {
+  // Rows band along y, bounded on x. Arithmetic lives in touchtransform so it
+  // can be host-tested (see test/touch_transform).
+  const auto hit = [&](const int x, const int y) {
+    return touchtransform::bandHit(y, x, top, rowStep, rowCount, xStart, xEnd, rowHeight, row);
+  };
+  int x = 0;
+  int y = 0;
+  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
+  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
+  return RowTouch::None;
+}
+
+MappedInputManager::RowTouch MappedInputManager::colTouch(int& col, const int left, const int colStep,
+                                                          const int colCount, const int yStart, const int yEnd,
+                                                          const int colWidth) const {
+  // Columns are the same test with the axes swapped: band along x, bounded on y.
+  const auto hit = [&](const int x, const int y) {
+    return touchtransform::bandHit(x, y, left, colStep, colCount, yStart, yEnd, colWidth, col);
+  };
+  int x = 0;
+  int y = 0;
+  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
+  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
+  return RowTouch::None;
+}
+
+MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
+  // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
+  // orientation the renderer is in rather than forcing Portrait, so that is the frame its rows
+  // were recorded in. See ListTouchBand.h.
+  const auto hit = [&](const int x, const int y) {
+    const int item = ListTouchBand::hitTest(x, y);
+    if (item < 0) return false;
+    index = item;
+    return true;
+  };
+  int x = 0;
+  int y = 0;
+  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
+  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
+  return RowTouch::None;
+}
+
+MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {
+  HalGPIO::TouchGesture gesture;
+  if (!rawPopGesture(gesture)) return MultiTouch::None;
+  renderer.tapToLogical(gesture.nx, gesture.ny, x, y);
+  switch (gesture.kind) {
+    case HalGPIO::TouchGesture::Kind::Pinch:
+      // magnitude is end separation over start separation, and the SDK rejects
+      // anything inside 0.8..1.2, so it is never ambiguously 1.
+      return gesture.magnitude < 1.0f ? MultiTouch::PinchIn : MultiTouch::PinchOut;
+    case HalGPIO::TouchGesture::Kind::Rotate:
+      // Positive degrees is clockwise: the panel's Y axis points down, so a
+      // positive cross product is a clockwise turn as seen by the reader.
+      return gesture.magnitude > 0.0f ? MultiTouch::RotateClockwise : MultiTouch::RotateCounterClockwise;
+  }
+  return MultiTouch::None;
+}
+
+bool MappedInputManager::decodeSwipe(const touchtransform::Orientation orientation, int& sx, int& sy, int& ex,
+                                     int& ey) const {
+  float nxs = 0.0f;
+  float nys = 0.0f;
+  float nxe = 0.0f;
+  float nye = 0.0f;
+  if (!rawSwipeEndpoints(nxs, nys, nxe, nye)) return false;
+  const auto rendererOrientation = static_cast<GfxRenderer::Orientation>(orientation);
+  renderer.tapToLogical(rendererOrientation, nxs, nys, sx, sy);
+  renderer.tapToLogical(rendererOrientation, nxe, nye, ex, ey);
+  return true;
+}
+
+MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
+  return wasSwipeIn(static_cast<touchtransform::Orientation>(renderer.getOrientation()));
+}
+
+MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation) const {
+  int startX = 0;
+  int startY = 0;
+  return wasSwipeIn(orientation, startX, startY);
+}
+
+MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation, int& startX,
+                                                            int& startY) const {
+  int sx = 0;
+  int sy = 0;
+  int ex = 0;
+  int ey = 0;
+  if (!decodeSwipe(orientation, sx, sy, ex, ey)) return SwipeDir::None;
+  startX = sx;
+  startY = sy;
+  switch (fui::swipeDirection(sx, sy, ex, ey)) {
+    case fui::SwipeDir::Left:
+      return SwipeDir::Left;
+    case fui::SwipeDir::Right:
+      return SwipeDir::Right;
+    case fui::SwipeDir::Up:
+      return SwipeDir::Up;
+    case fui::SwipeDir::Down:
+      return SwipeDir::Down;
+    default:
+      return SwipeDir::None;
+  }
+}
+
+// Edge classification (which swipe counts as an edge gesture) lives in the SDK;
+// only the MEANING of each edge — back, menu, home — is decided here.
+bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const {
+  int sx = 0;
+  int sy = 0;
+  int ex = 0;
+  int ey = 0;
+  // One orientation read for the decode AND the screen size it is tested
+  // against, so the two cannot disagree about which way the screen is turned.
+  // HELD, not the live draw orientation: every caller of this is on the loop
+  // task, outside any render pass, and the themes flip the renderer to Portrait
+  // mid-pass for the hint strips. Same reasoning as GestureEventManager and as
+  // setOrientationProvider (issue #87).
+  const auto orientation = renderer.getHeldOrientation();
+  if (!decodeSwipe(static_cast<touchtransform::Orientation>(orientation), sx, sy, ex, ey)) return false;
+  return fui::edgeSwipe(edge, sx, sy, ex, ey, renderer.getScreenWidth(orientation),
+                        renderer.getScreenHeight(orientation));
+}
+
+bool MappedInputManager::wasBackGesture() const {
+  // Edge-anchored so mid-screen horizontal swipes stay available to activities
+  // that consume SwipeDir::Left/Right (percent selection, image viewer).
+  return wasEdgeSwipe(fui::ScreenEdge::Left);
+}
+
+bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
+
+bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
+
+// Stays on the top edge, on every board. An earlier revision moved it to the
+// bottom on boards with a light, because the shipped defaults then bound BOTH
+// vertical directions to brightness and the top edge was contended. Splitting
+// the vertical swipes by screen half removed that contention entirely — the menu
+// and the light now share the downward swipe, one half each — so the menu stays
+// where it has always been.
+bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
+
+bool MappedInputManager::wasHomeGesture() const {
+  return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
+}
+
+bool MappedInputManager::wasHomeKeyHold() const { return gpio.hasHomeKey() && gpio.wasHomeKeyLongPressed(); }

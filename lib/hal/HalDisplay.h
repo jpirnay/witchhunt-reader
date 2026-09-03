@@ -51,6 +51,14 @@ class HalDisplay {
   // CPU/RAM-only work — no display or SPI-bus access, same task as trigger.
   // On X3 the trigger falls back to triggerDisplay() and finish is a no-op.
   void triggerDisplayAsync(RefreshMode mode = RefreshMode::FAST_REFRESH, bool turnOffScreen = false);
+
+  // Whether triggerDisplayAsync() actually returns while the waveform runs on
+  // this panel, rather than falling back to a blocking refresh. False on drivers
+  // that cannot overlap (PanelDriver's default, e.g. LgfxEpd and Paper Mono) and
+  // while an inversion is pending. Callers that spend the gap on real work --
+  // the reader's inline AA -- must ask this rather than infer it from the board,
+  // or they pay the plane/gray/restore cost with no overlap to hide it in.
+  bool supportsAsyncRefresh() const;
   void finishDisplayAsync();
   bool isRefreshPending() const;
   bool isRedRamSynced() const;
@@ -117,6 +125,16 @@ class HalDisplay {
   void cleanupGrayscaleWithPreviousBuffer();
 
   void displayGrayBuffer(bool turnOffScreen = false);
+  // True when the panel can show a B/W base and its grayscale planes as ONE
+  // waveform. Where it can, the two-push flow (base, then a grey overlay) is
+  // not merely slower but wrong: a self-normalizing grey column expects the
+  // pixel it drives not to have been driven already.
+  bool supportsGrayFrame() const;
+  // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
+  // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
+  // a plain displayBuffer() on a panel that cannot, so callers need no branch of
+  // their own beyond deciding whether to stage planes at all.
+  void displayGrayscaleFrame(RefreshMode refreshMode, bool turnOffScreen = false);
 
   // Returns true when the device is an X3 (X4 returns false).
   bool deviceIsX3() const;

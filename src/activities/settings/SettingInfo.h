@@ -11,7 +11,44 @@
 
 enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
-enum class SettingDeviceTarget { BOTH, X3, X4 };
+// What a setting NEEDS from the hardware, so the list can ask "can this board
+// do it" instead of "which board is this".
+//
+// The old form was SettingDeviceTarget{BOTH, X3, X4} and resolved through
+// gpio.deviceIsX3(). That conflates unrelated questions and does not survive a
+// third board: on X4 Pro deviceIsX3() is false, so every X4-targeted setting
+// would silently appear there whether or not the hardware supports it, and
+// every X3-targeted one would silently vanish. Widening the enum to name four
+// boards multiplies the problem rather than fixing it. See the B0
+// capability-predicate section of
+// docs/multiboard-bringup-handover-2026-08-15.md.
+//
+// Each value below names one capability, answered from the HAL or the active
+// board profile in getSettingsList(). Add a value when a setting needs
+// something no existing one covers — never a board name.
+enum class SettingRequires : uint8_t {
+  Nothing,     // always visible
+  TouchPanel,  // a touch controller (BoardConfig touch.controller != None)
+  TiltSensor,  // an IMU for tilt page turning (sensors.imuType != None)
+  // The panel builds grayscale from a swappable LUT, so the fast/OEM waveform
+  // trade-off is a real choice. Controllers with a factory grayscale waveform
+  // (SSD1677) have nothing to swap. This is a genuine silicon difference, which
+  // B0 allows keying on the display controller — with a comment saying why,
+  // which is this one.
+  SelectableGrayscaleLut,
+  // A PWM frontlight/backlight the firmware can drive (BoardConfig frontlight
+  // config, or the PM1 PWM path). Answered through HalFrontlight so a board
+  // whose light is probed at runtime reports honestly. Named ReadingLight, not
+  // Frontlight: HalFrontlight.h defines `Frontlight` as a singleton macro, and
+  // a macro does not respect the enum's scope.
+  ReadingLight,
+  // A second (warm) light channel, so colour temperature is a real control.
+  // Sub-capability of Frontlight — the T5S3's single backlight channel has none.
+  WarmLight,
+  // A touch controller that reports more than one contact (GT911). Pinch and
+  // rotation can never fire without it. Sub-capability of TouchPanel.
+  MultiTouchPanel,
+};
 
 enum class SettingAction {
   None,
@@ -37,6 +74,8 @@ enum class SettingAction {
   SleepTimeoutPicker,
   RefreshFrequencyPicker,
   KOSyncMinPagesPicker,
+  FrontlightBrightnessPicker,
+  FrontlightWarmthPicker,
   SwitchToUsbDrive,
   Submenu,
 };
@@ -65,7 +104,7 @@ struct SettingInfo {
   const char* key = nullptr;             // JSON API key (nullptr for ACTION types)
   StrId category = StrId::STR_NONE_OPT;  // Category for web UI grouping
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
-  SettingDeviceTarget deviceTarget = SettingDeviceTarget::BOTH;
+  SettingRequires requiredCapability = SettingRequires::Nothing;
 
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
@@ -184,6 +223,22 @@ struct SettingInfo {
     return s;
   }
 
+  // Stateless variant of Toggle — for a flag whose authority is not a
+  // CrossPointSettings field alone. The frontlight's on/off is one: the setter
+  // must reach the hardware as well as the setting, or the light would only
+  // follow the switch after a reboot.
+  static SettingInfo DynamicToggle(StrId nameId, ValueGetterFn getter, ValueSetterFn setter, const char* key = nullptr,
+                                   StrId category = StrId::STR_NONE_OPT) {
+    SettingInfo s;
+    s.nameId = nameId;
+    s.type = SettingType::TOGGLE;
+    s.valueGetter = getter;
+    s.valueSetter = setter;
+    s.key = key;
+    s.category = category;
+    return s;
+  }
+
   // Stateless variant — getter/setter are free/static functions with no captured state.
   static SettingInfo DynamicEnum(StrId nameId, std::vector<StrId> values, ValueGetterFn getter, ValueSetterFn setter,
                                  const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
@@ -266,10 +321,10 @@ struct SettingInfo {
     return *this;
   }
 
-  // Restrict visibility of this setting to a specific hardware target.
-  // Default is BOTH when this method is not used.
-  SettingInfo& withDeviceTarget(SettingDeviceTarget target) {
-    deviceTarget = target;
+  // Hide this setting on hardware that cannot do the thing it controls.
+  // Default is SettingRequires::Nothing (always visible).
+  SettingInfo& requiring(SettingRequires capability) {
+    requiredCapability = capability;
     return *this;
   }
 

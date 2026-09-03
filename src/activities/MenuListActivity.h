@@ -112,5 +112,8 @@ class MenuListActivity : public Activity {
   using Activity::Activity;
 
   void onEnter() override;
+  // Tap on a menu row -> move the selection there; ActivityManager synthesizes Confirm,
+  // which loop() turns into toggleCurrentItem(). Separators decline.
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
 };

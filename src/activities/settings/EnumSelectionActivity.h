@@ -46,6 +46,16 @@ class EnumSelectionActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // This screen draws through GUI.drawList, so its rows are published in
+  // ListTouchBand and a tap arrives here already resolved to an option index —
+  // in the same frame selectedIndex uses, since drawList() is handed
+  // selectedIndex directly with no offset.
+  //
+  // Without this override Activity's default Rejected applies and the list is
+  // simply not tappable, which is what it was: the band was recorded and the hit
+  // test resolved, and the tap died one call later. Silent, and indistinguishable
+  // on hardware from the geometry being wrong.
+  ListRowTap::Result selectListRow(int index) override;
 
  private:
   [[nodiscard]] uint8_t optionCount() const;

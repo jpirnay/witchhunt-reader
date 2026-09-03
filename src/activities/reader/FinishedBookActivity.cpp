@@ -828,3 +828,11 @@ void FinishedBookActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }
+
+ListRowTap::Result FinishedBookActivity::selectListRow(const int index) {
+  // buildRowModel() allocates, which is why loop() builds it exactly once per pass rather than
+  // per event. Building it again here is affordable because this runs only when a tap actually
+  // landed on a row -- not on every loop -- and the alternative is worse: accepting an index
+  // without a bound would let loop()'s own clamp silently move it to a different row.
+  return ListRowTap::apply(index, buildRowModel().count(), selectedIndex_);
+}

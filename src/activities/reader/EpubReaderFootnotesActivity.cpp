@@ -7,6 +7,7 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
 void EpubReaderFootnotesActivity::onEnter() {
@@ -92,6 +93,12 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
   if (selectedIndex >= scrollOffset + visibleCount) scrollOffset = selectedIndex - visibleCount + 1;
 
+  // Rows published for touch. This list SCROLLS rather than pages, so the top row is
+  // scrollOffset, and its fill sits exactly at the row y (no -2 nudge, unlike the chapter
+  // selectors) -- so the band top is that same y.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width, contentRect.y + startY, lineHeight, scrollOffset,
+                                   std::min(visibleCount, static_cast<int>(footnotes.size()) - scrollOffset));
+
   for (int i = scrollOffset; i < static_cast<int>(footnotes.size()) && i < scrollOffset + visibleCount; i++) {
     const int y = contentRect.y + startY + (i - scrollOffset) * lineHeight;
     const bool isSelected = (i == selectedIndex);
@@ -118,4 +125,8 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();
+}
+
+ListRowTap::Result EpubReaderFootnotesActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(footnotes.size()), selectedIndex);
 }

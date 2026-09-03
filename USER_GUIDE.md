@@ -31,9 +31,15 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [Chapter Navigation](#chapter-navigation)
     - [System Navigation](#system-navigation)
     - [Supported Languages](#supported-languages)
-  - [5. Chapter Selection Screen](#5-chapter-selection-screen)
-  - [6. Current Limitations \& Roadmap](#6-current-limitations--roadmap)
-  - [7. Troubleshooting Issues \& Escaping Bootloop](#7-troubleshooting-issues--escaping-bootloop)
+  - [5. Touch Controls](#5-touch-controls)
+    - [5.1 The two master switches](#51-the-two-master-switches)
+    - [5.2 Menus, lists and settings](#52-menus-lists-and-settings)
+    - [5.3 Reading](#53-reading)
+    - [5.4 Gestures](#54-gestures)
+    - [5.5 Reading light](#55-reading-light)
+  - [6. Chapter Selection Screen](#6-chapter-selection-screen)
+  - [7. Current Limitations \& Roadmap](#7-current-limitations--roadmap)
+  - [8. Troubleshooting Issues \& Escaping Bootloop](#8-troubleshooting-issues--escaping-bootloop)
 
 
 ## 1. Hardware Overview
@@ -47,6 +53,8 @@ The device utilises the standard buttons on the Xteink X4 (in the same layout as
 | **Right Side**  | **Power**, **Volume Up**, **Volume Down**, **Reset** |
 
 Button layout can be customized in the **[Controls Settings](#373-controls)**.
+
+Devices with a touch screen (LilyGo T5 S3, Xteink X4 Pro) can also be driven by finger — see **[Touch Controls](#5-touch-controls)**.
 
 ### Taking a Screenshot
 When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
@@ -149,6 +157,7 @@ The Settings screen allows you to configure the device's behavior.
 
 #### 3.7.1 Display
 
+- **Reading light** *(devices with a frontlight or backlight only)*: On/off, brightness, warmth (two-channel devices) and whether waking restores the light. See **[Reading light](#55-reading-light)**.
 - **Time to Sleep**: Slider from 0 (Never) to 60 minutes; sets the inactivity period before the device sleeps.
 - **Sleep Screen**: Which sleep screen to display when the device sleeps:
   - "Dark" (default) - The Witch Reader logo on a dark background
@@ -222,8 +231,12 @@ The Settings screen allows you to configure the device's behavior.
 #### 3.7.3 Controls
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
-- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, star page, footnotes, next/previous chapter, exit reader, open reader menu, toggle bionic reading, KOReader sync, cycle font size, cycle orientation, quick overrides, and ignore.
+- **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, star page, footnotes, next/previous chapter, exit reader, open reader menu, toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer — plus light warmer and light cooler on a device with a warm/cool light.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
+- **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
+- **Touch Reading Controls** *(touch devices only)*: How the reading page responds to touch — "Off", "Tap zones", "Swipe", "Inverted tap zones".
+- **Tap for Reader Menu** *(touch devices only)*: Whether a tap in the middle of the page opens the reader menu. "ON" / "OFF"
+- **Gesture actions** *(touch devices only)*: One entry per gesture — swipes (split by screen half), the five tap zones, the same five as long taps, pinch and rotation — each assigned an action from the same list the buttons offer. See **[Gestures](#54-gestures)**.
 - **Tilt Page Turn** *(X3 only)*: Use the tilt sensor to turn pages by tilting the device. Sub-settings:
   - **Enable Tilt Page Turn**: "ON" / "OFF"
   - **Tilt Right action**: "None", "Next Page", "Prev Page"
@@ -416,7 +429,7 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 ### System Navigation
 * **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
 * **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
-* **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#5-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more.
+* **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more.
 
 ### Supported Languages
 
@@ -429,7 +442,137 @@ What is not supported: Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Gr
 
 ---
 
-## 5. Chapter Selection Screen
+## 5. Touch Controls
+
+*Applies to touch devices only (LilyGo T5 S3, Xteink X4 Pro). On button-only
+devices such as the X4 and X3, nothing in this section appears in Settings.*
+
+Touch is an addition to the buttons, never a replacement: every button still does
+exactly what it did, and any touch behaviour described here can be switched off.
+
+### 5.1 The two master switches
+
+Touch is governed by two independent settings, both under
+**[Settings → Controls](#373-controls)**:
+
+| Setting | Governs | Default |
+| --- | --- | --- |
+| **Touch Navigation** | Everything **outside** the reader: list rows, book covers, the home menu, the settings tabs, the on-screen button hints | On |
+| **Touch Reading Controls** | The **reading page** itself: tap zones or swipes for page turns | Tap zones |
+
+They are separate on purpose. Turning off page-turn taps so a resting thumb
+cannot flip a page should not also stop you tapping a book in the library, and
+vice versa.
+
+Turning **Touch Navigation** off leaves the menus button-only. You are not
+stranded by that: on devices whose Back and Confirm come from the capacitive Home
+key, those still work — the firmware feeds them in as button presses, below the
+level this setting acts on.
+
+### 5.2 Menus, lists and settings
+
+**Lists use point-then-confirm.** The first tap on a row *moves the highlight*
+there and stops. A second tap on the row that is already highlighted *activates*
+it. A mis-tap therefore costs one more tap instead of an action to undo, and on
+e-paper the highlight moving is the only feedback available.
+
+**Settings tabs are a single tap.** Tapping Display / Reader / Controls / System
+switches category immediately — you can already see which tab you are choosing,
+so there is nothing to confirm.
+
+**The on-screen button hints are tappable.** The labelled boxes along the bottom
+edge do exactly what the physical button under each label does, including any
+remapping you have configured.
+
+### 5.3 Reading
+
+**Touch Reading Controls** offers four modes:
+
+| Mode | What the page does |
+| --- | --- |
+| **Tap zones** *(default)* | Tap the left third for the previous page, the right third for the next |
+| **Inverted tap zones** | The same, mirrored |
+| **Swipe** | Horizontal swipes turn pages; taps stay free |
+| **Off** | The page ignores touch entirely |
+
+**The reader menu** opens on a tap in the middle of the page (a separate
+**Tap for Reader Menu** switch), on a downward swipe starting at the **top edge**,
+or with the **Confirm** button.
+
+### 5.4 Gestures
+
+Gestures are treated exactly like buttons: each one carries an *action*, chosen
+from the same list a physical button offers, under **Settings → Controls →
+Gesture actions**.
+
+**Where they work.** In the reader, all of them. On other screens, only swipes
+and two-finger gestures — taps and long taps belong to the list rows and buttons
+on those screens. A gesture whose action only makes sense in the reader (page
+turn, chapter skip, dictionary…) simply does nothing elsewhere and leaves the tap
+to the screen underneath.
+
+**Vertical swipes are split by which half of the screen they start in**, the way
+a phone separates the notification shade from quick settings:
+
+| Gesture | Default action |
+| --- | --- |
+| Swipe **down**, left half | Reader Menu |
+| Swipe **down**, right half | Light dimmer |
+| Swipe **up**, left half | **Toggle reading light** |
+| Swipe **up**, right half | Light brighter |
+| Swipe left / right | *Built-in* — page turns in Swipe mode |
+| Tap (left, right, centre, top, bottom) | *Built-in* — see 5.3 |
+| Long tap left / right | Previous / next chapter |
+| Long tap centre | Dictionary |
+| Long tap top | Toggle reading light |
+| Long tap bottom | Star page |
+| Pinch in / out | Smaller / larger text |
+| Rotate clockwise / anticlockwise | Change orientation, one step each way |
+
+**What "Built-in" means.** It is the default for every gesture the firmware
+already had a use for, and it means *leave this to the screen*. Each row names
+what that will actually do — "Swipe left" reads **Next Page** while you are in
+Swipe mode and **Nothing** when you are not — so the setting tells you what you
+get before you change it.
+
+**To switch a gesture off**, set it to **Ignore**. That is different from
+Built-in: Ignore actively swallows the gesture, so it is how you disable a tap
+zone you keep hitting by accident.
+
+### 5.5 Reading light
+
+*Devices with a frontlight or backlight only.*
+
+Under **Settings → Display → Reading light**:
+
+- **Reading Light** — on / off
+- **Brightness** — 1–100%. The scale is perceptual, so the low end has as many
+  usable steps as the top; there is deliberately no 0%, because that is what the
+  on/off switch is for
+- **Warmth** — 0 (fully cool) to 100 (fully warm). Only on devices with a second
+  warm channel; brightness is the *total* light and the warmth splits it between
+  the two LED strings, so changing it shifts the colour without changing how
+  bright the page looks
+- **Restore Light on Wake** — whether waking brings the light back. Brightness
+  and warmth are always remembered; this only controls the on/off state
+
+The quickest way to it is a gesture: **swipe up on the left half** toggles the
+light, and swiping **up or down on the right half** brightens or dims it in 5%
+steps. These work on the home screen and in menus as well as in the reader, so
+you can find a book in the dark.
+
+Adjusting brightness while the light is off turns it on — a brightness gesture
+always means "I want light".
+
+These actions are bindable to any button or gesture: **Toggle Reading Light**,
+**Light Brighter**, **Light Dimmer**, and — on a warm/cool device — **Light
+Warmer** and **Light Cooler**. The warmth pair ships unbound: a warmth is
+something you set once and leave, unlike brightness, which follows the light in
+the room.
+
+---
+
+## 6. Chapter Selection Screen
 
 Accessible by pressing **Confirm** while inside a book and selecting **Table of Contents**.
 
@@ -439,7 +582,7 @@ Accessible by pressing **Confirm** while inside a book and selecting **Table of 
 
 ---
 
-## 6. Current Limitations & Roadmap
+## 7. Current Limitations & Roadmap
 
 Please note that this firmware is currently in active development. The following features have known limitations:
 
@@ -449,7 +592,7 @@ Please note that this firmware is currently in active development. The following
 
 ---
 
-## 7. Troubleshooting Issues & Escaping Bootloop
+## 8. Troubleshooting Issues & Escaping Bootloop
 
 If an issue or crash is encountered while using Witch Reader, feel free to raise an issue ticket and attach the serial monitor logs. The logs can be obtained by connecting the device to a computer and starting a serial monitor. Either [Serial Monitor](https://www.serialmonitor.org/) or the following command can be used:
 

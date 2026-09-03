@@ -1,4 +1,6 @@
+#include <BoardConfig.h>
 #include <BootHeapProbe.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -12,9 +14,36 @@ static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
 static BootHeapProbe s_probePostDisplay(1);
 
-#define SD_SPI_MISO 7
+// Display pins come from the board profile rather than the C3 macros in
+// HalGPIO.h. Verified identical for the C3 before converting: X3, X3-UC8279 and
+// X4 all specify {8, 10, 21, 4, 5, 6} = {sclk, mosi, cs, dc, rst, busy}.
+//
+// SUBTLETY, and the reason for the static_assert below. `display` is a GLOBAL,
+// so this constructor runs during static init — long before gpio.begin() calls
+// BoardConfig::selectDevice(). At that point BoardConfig::ACTIVE still holds
+// DEFAULT_DEVICE (for the dual C3 binary, the X4 profile), not the
+// runtime-detected board.
+//
+// That is safe here only because every profile that can share one binary agrees
+// on the display pins. Reading ACTIVE is itself sound at this point — it is an
+// inline variable with a constexpr initialiser, so it is constant-initialised
+// and immune to static-init order — but its VALUE is the default, not the
+// detection result. Anything that differs per board within a binary must be
+// read in begin(), not here.
+#if FREEINK_DEVICE_X3 && FREEINK_DEVICE_X4
+static_assert(BoardConfig::XTEINK_X3.display.sclk == BoardConfig::XTEINK_X4.display.sclk &&
+                  BoardConfig::XTEINK_X3.display.mosi == BoardConfig::XTEINK_X4.display.mosi &&
+                  BoardConfig::XTEINK_X3.display.cs == BoardConfig::XTEINK_X4.display.cs &&
+                  BoardConfig::XTEINK_X3.display.dc == BoardConfig::XTEINK_X4.display.dc &&
+                  BoardConfig::XTEINK_X3.display.rst == BoardConfig::XTEINK_X4.display.rst &&
+                  BoardConfig::XTEINK_X3.display.busy == BoardConfig::XTEINK_X4.display.busy,
+              "X3 and X4 ship in one binary but disagree on display pins; HalDisplay's constructor "
+              "runs before selectDevice() and would latch the wrong ones");
+#endif
 
-HalDisplay::HalDisplay() : einkDisplay(EPD_SCLK, EPD_MOSI, EPD_CS, EPD_DC, EPD_RST, EPD_BUSY) {}
+HalDisplay::HalDisplay()
+    : einkDisplay(BoardConfig::ACTIVE.display.sclk, BoardConfig::ACTIVE.display.mosi, BoardConfig::ACTIVE.display.cs,
+                  BoardConfig::ACTIVE.display.dc, BoardConfig::ACTIVE.display.rst, BoardConfig::ACTIVE.display.busy) {}
 
 HalDisplay::~HalDisplay() {}
 
@@ -84,10 +113,18 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
 }
 
 void HalDisplay::requestResync(uint8_t settlePasses) {
-  if (gpio.deviceIsX3() && settlePasses > pendingX3SettlePasses) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && settlePasses > pendingX3SettlePasses) {
     pendingX3SettlePasses = settlePasses;
   }
 }
+
+// Every path that reaches the panel logs one line with a shared sequence number.
+// Only displayBuffer() used to log, so a second refresh arriving through
+// refreshDisplay / triggerDisplay / displayWindow was invisible -- and an
+// invisible extra refresh is exactly what "the menu update appeared twice" and a
+// doubled displayBuffer time look like from the outside. Cheap: one counter and a
+// DBG line per refresh, not per pixel.
+static uint32_t panelSeq = 0;
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
@@ -95,7 +132,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
     einkDisplay.requestResync(pendingX3SettlePasses);
@@ -112,6 +149,7 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   const unsigned long refreshMs = millis() - refreshStart;
   const char* const modeName =
       mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL");
+  const unsigned long seq = ++panelSeq;
 
   // The X4 differential keeps its previous-frame baseline in the host-managed secondary buffer,
   // so a FAST requested without one is promoted to HALF inside the driver
@@ -124,12 +162,18 @@ void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen)
   // internal to the driver, and re-deriving its verdict here would be a second copy of the rule
   // that can drift from the first. These are the inputs it decides on, which is enough to explain
   // the duration without asserting what the driver did.
-  if (mode == RefreshMode::FAST_REFRESH && gpio.deviceIsX4() && !einkDisplay.hasSecondaryBuffer() &&
+  //
+  // Gated on the panel keeping its baseline in a host buffer rather than on deviceIsX4(): that
+  // question is about the display path, and asking it by board name answers "no" on every S3
+  // board by construction, so an X4 Pro promoted to the same driver would log the misleading
+  // line this exists to prevent.
+  if (mode == RefreshMode::FAST_REFRESH && !deviceIsX3() && !einkDisplay.hasSecondaryBuffer() &&
       !einkDisplay.singleBufferFastDiff()) {
-    LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms (no diff baseline: secondary=0 fastDiff=0 -> driver runs HALF)",
-            modeName, refreshMs);
+    LOG_DBG("DISP",
+            "#%lu displayBuffer mode=%s took %lu ms (no diff baseline: secondary=0 fastDiff=0 -> driver runs HALF)",
+            seq, modeName, refreshMs);
   } else {
-    LOG_DBG("DISP", "displayBuffer mode=%s took %lu ms", modeName, refreshMs);
+    LOG_DBG("DISP", "#%lu displayBuffer mode=%s took %lu ms", seq, modeName, refreshMs);
   }
 }
 
@@ -139,14 +183,18 @@ void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen
   lastRefreshMode = mode;
   lastDisplayModeByte = refreshModeToByte(mode);
 
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
+  if (HalCapabilities::panelNeedsHalfRefreshSettle() && mode == RefreshMode::HALF_REFRESH) {
     einkDisplay.requestResync(pendingX3SettlePasses > 1 ? pendingX3SettlePasses : 1);
   } else if (pendingX3SettlePasses > 0) {
     einkDisplay.requestResync(pendingX3SettlePasses);
   }
   pendingX3SettlePasses = 0;
 
+  const unsigned long refreshStart = millis();
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
+  LOG_DBG("DISP", "#%lu refreshDisplay mode=%s took %lu ms", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"),
+          millis() - refreshStart);
 }
 
 void HalDisplay::deepSleep() {
@@ -234,6 +282,16 @@ void HalDisplay::setSingleBufferFastDiff(bool enabled) {
 
 void HalDisplay::triggerDisplay(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+
+  // Record here too, not just in displayBuffer/refreshDisplay. The reader fires full
+  // page renders through this path (triggerWithRefreshCycle), so without this
+  // getLastRefreshMode() reports whatever the previous displayBuffer() did and the
+  // "Page summary: refresh=..." line describes the wrong paint entirely.
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
+  LOG_DBG("DISP", "#%lu triggerDisplay mode=%s", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplay(static_cast<EInkDisplay::RefreshMode>(mode), turnOffScreen);
 }
 
@@ -251,8 +309,16 @@ void HalDisplay::completeDisplay() {
 // driving SPI.
 void HalDisplay::triggerDisplayAsync(RefreshMode mode, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+
+  lastRefreshMode = mode;
+  lastDisplayModeByte = refreshModeToByte(mode);
+
+  LOG_DBG("DISP", "#%lu triggerDisplayAsync mode=%s", static_cast<unsigned long>(++panelSeq),
+          mode == RefreshMode::FAST_REFRESH ? "FAST" : (mode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
   einkDisplay.triggerDisplayAsync(convertRefreshMode(mode), turnOffScreen);
 }
+
+bool HalDisplay::supportsAsyncRefresh() const { return einkDisplay.supportsAsyncRefresh(); }
 
 void HalDisplay::finishDisplayAsync() {
   HalSpiBus::Lock spiLock;
@@ -284,13 +350,60 @@ void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.
 
 void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
 
+bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFrame(); }
+
+void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.displayGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);
+  // Record it like every other display path does. Without this the reader's page
+  // summary reports whatever mode the last B/W push used — which on a device log
+  // read "refresh=half" for pages the driver had just traced as going out on the
+  // fast bank, and cost a round of chasing the wrong thing.
+  lastRefreshMode = refreshMode;
+  lastDisplayModeByte = refreshModeToByte(refreshMode);
+}
+
 void HalDisplay::displayGrayBuffer(bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  // Give the driver a real BW base when it actually reads one.
+  //
+  // displayGrayBuffer() hands the driver `frameBuffer`, and the plane dance in
+  // GfxRenderer::renderGrayscalePlanesSequential() leaves the LAST PLANE there:
+  // it clears to 0x00, renders text-only, copies the plane out, and calls this.
+  // Ssd1677Driver::displayGray() opens with `(void)fb` -- the planes are already
+  // in controller RAM and the BW page is retained by the panel -- so nothing ever
+  // noticed that the buffer holds a plane rather than a page.
+  //
+  // LgfxEpdDriver USED TO have no controller-side image to fall back on:
+  // fillCanvasGray() rebuilt every pixel from the base, mapping a clear base bit to
+  // kGrayBlack, so a text-only plane painted the whole background black and left
+  // only the AA marks standing -- the inversion first seen on the T5S3.
+  //
+  // Reseed the write buffer from the on-screen frame first, so the base is the BW
+  // page the panel is actually showing. Gated on the controller so the panels that
+  // ignore the argument do not pay a full-buffer copy per AA pass.
+  //
+  // NOTE (Free-Ink/freeink-sdk#47, merged): the driver no longer reads `fb` at all
+  // -- displayGray() is now `(void)fb; overlayCanvasGray();`, composing onto LGFX's
+  // live canvas. So this reseed no longer serves the purpose it was written for and
+  // is a candidate for deletion.
+  //
+  // Kept for now deliberately, not by oversight. The reseed touches the HOST write
+  // framebuffer, which is a different object from the LGFX canvas the overlay
+  // composes onto, and whether the plane-restore step in
+  // GfxRenderer::renderGrayscalePlanesSequential() leans on it cannot be settled
+  // without the panel. The cost is one buffer copy per AA pass on one board; the
+  // downside if the reasoning is wrong is the inversion bug coming back. Remove it
+  // behind a device test, not behind an argument.
+  if (BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::LgfxEpd) {
+    einkDisplay.syncWriteBufferFromActive();
+  }
   einkDisplay.displayGrayBuffer(turnOffScreen);
 }
 
 void HalDisplay::displayWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h, bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
+  LOG_DBG("DISP", "#%lu displayWindow x=%u y=%u w=%u h=%u", static_cast<unsigned long>(++panelSeq), x, y, w, h);
   einkDisplay.displayWindow(x, y, w, h, turnOffScreen);
 }
 

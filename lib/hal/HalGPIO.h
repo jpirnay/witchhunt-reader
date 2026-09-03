@@ -102,6 +102,27 @@ class HalGPIO {
     uint32_t timeMs = 0;
   };
 
+  // A completed multi-touch gesture, as the SDK classified it. Panel-native
+  // normalized centre, no orientation applied — MappedInputManager gives these
+  // screen meaning, exactly as it does for taps and swipes.
+  //
+  // Unlike the single-contact events above these are LATCHED on the sampler
+  // task and queued, because they are one-shot flags the SDK clears on its next
+  // update() — a ~10 ms life. A pinch is precisely the gesture a reader makes
+  // while the loop task is inside an e-paper refresh, so passing them straight
+  // through would drop most of them. Buttons have been latched for this reason
+  // since the sampler was introduced; these follow the same rule.
+  struct TouchGesture {
+    enum class Kind : uint8_t { Pinch, Rotate };
+    Kind kind = Kind::Pinch;
+    // Pinch: end separation over start separation, so < 1 is a pinch in and > 1
+    // a spread. Rotate: signed degrees, positive = clockwise on screen.
+    float magnitude = 0.0f;
+    float nx = 0.0f;
+    float ny = 0.0f;
+    uint32_t timeMs = 0;
+  };
+
  private:
   DeviceType _deviceType = DeviceType::X4;
 
@@ -125,14 +146,90 @@ class HalGPIO {
   ButtonEdge edgeBuf_[EDGE_BUF] = {};
   int edgeHead_ = 0;
   int edgeTail_ = 0;
+  // A discrete single-contact touch event, latched by the sampler so it survives
+  // a loop tick that took longer than the SDK's flags live.
+  //
+  // The SDK reports tap / swipe / long-press as one-shot flags cleared by its
+  // next update(), i.e. a ~10 ms life at our sampler cadence. That is shorter
+  // than an e-paper refresh and — measured on device — shorter than the gap
+  // between polls once the idle governor starts light-sleeping at
+  // IDLE_LIGHT_SLEEP_MS, which is exactly when someone is sitting on a menu
+  // deciding what to tap. One tap in fifteen was being dropped that way.
+  //
+  // Buttons have been latched into a ring for this reason since the sampler
+  // existed; this is the same model. update() moves ONE event into the loop-side
+  // snapshot, where it stays visible for that whole cycle — which matters,
+  // because the accessors are non-consuming peeks that several layers read in
+  // turn (the gesture classifier decides before the reader sees the same tap).
+  struct TouchEvent {
+    enum class Kind : uint8_t { None, Tap, Swipe, LongPress };
+    Kind kind = Kind::None;
+    // Tap and LongPress: the touch-down point. Swipe: where it started.
+    float nx = 0.0f;
+    float ny = 0.0f;
+    float nxEnd = 0.0f;  // Swipe only.
+    float nyEnd = 0.0f;
+    uint16_t heldMs = 0;  // contact duration, latched at release (0 for LongPress)
+  };
+  // Four is deliberately small. A multi-touch gesture ends when the fingers
+  // leave the glass, so they cannot arrive faster than a person can lift and
+  // replace two fingers; a backlog deeper than this means the loop has been gone
+  // long enough that acting on the oldest entry would surprise the user more
+  // than dropping it.
+  static constexpr int GESTURE_BUF = 4;
+  TouchGesture gestureBuf_[GESTURE_BUF] = {};
+  int gestureHead_ = 0;
+  int gestureTail_ = 0;
+  // Same size and the same argument as GESTURE_BUF: contacts end when a finger
+  // leaves the glass, so they cannot queue faster than someone can tap, and a
+  // deeper backlog means acting on the oldest would surprise more than dropping
+  // it.
+  static constexpr int TOUCH_EVENT_BUF = 4;
+  TouchEvent touchEventBuf_[TOUCH_EVENT_BUF] = {};
+  int touchEventHead_ = 0;
+  int touchEventTail_ = 0;
+  bool touchReleasedPending_ = false;  // release edges seen since the last drain
 
   // Loop-side snapshot refreshed by update(); only the loop task reads/writes these.
   uint8_t snapState_ = 0;
   uint8_t snapPressed_ = 0;
   uint8_t snapReleased_ = 0;
+  TouchEvent snapTouchEvent_{};
+  bool snapTouchReleased_ = false;
+
+  // Capacitive home key -> the nav buttons the board physically lacks: tap emits
+  // CONFIRM, hold emits BACK. Each is enabled independently in begin(), so a
+  // board owning one of those pins keeps it (see the synthesis in sampleOnce).
+  // homeKeyHeld_ marks a gesture in progress, whose role is not yet known.
+  bool homeKeyDrivesConfirm_ = false;
+  bool homeKeyDrivesBack_ = false;
+  bool homeKeyHeld_ = false;
+
+  // Edge detection for the BUTTON_TRACE touch line, so a resting finger logs once
+  // rather than every sampler pass. Bring-up scaffolding; goes with the trace.
+  bool touchTraceWasHeld_ = false;
+  // Where the contact started and where it last was, so the release line can
+  // report how far the finger actually travelled. The SDK's thresholds are
+  // private and its endpoints are only filled in when it has already decided the
+  // contact WAS a swipe — which is no help when the question is why it decided
+  // it was not.
+  float touchTraceDownNx_ = 0.0f;
+  float touchTraceDownNy_ = 0.0f;
+  float touchTraceLastNx_ = 0.0f;
+  float touchTraceLastNy_ = 0.0f;
 
   void sampleOnce();
   void pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs);
+  // Drain the SDK's one-shot multi-touch flags into gestureBuf_. Called from
+  // sampleOnce() with inputMux_ NOT held: it reads the SDK, which the critical
+  // section must not do.
+  void latchTouchGestures(uint32_t timeMs);
+  // Drain the SDK's one-shot single-contact flags into touchEventBuf_. Runs
+  // beside latchTouchGestures() and under the same rule: reads the SDK outside
+  // inputMux_, takes the lock only to push.
+  void latchTouchEvents();
+  // Drop every latched and snapshotted touch event, gestures included.
+  void clearTouchEventState();
   static void samplerTask(void* arg);
 
  public:
@@ -155,6 +252,17 @@ class HalGPIO {
 
   // Button input methods
   void update();
+  // Synthesize a complete press+release of a raw button from something that is not a
+  // button -- currently a tap on the on-screen hint strip, which is the only way to
+  // reach Back/Confirm on a board whose nav cluster is PIN_UNASSIGNED.
+  //
+  // Same mechanism the capacitive home key uses inside update() (accumulators plus a
+  // matching edge pair, so both the wasPressed()/wasReleased() bitmask consumers and
+  // ButtonEventManager's press-type FSM see it), lifted to a public entry point for
+  // callers outside this class. Takes a RAW index, not a logical Button: remapping is
+  // applied downstream, so an injected BTN_BACK follows the user's button mapping
+  // exactly as the physical key would.
+  void injectPress(uint8_t buttonIndex);
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;
@@ -170,6 +278,60 @@ class HalGPIO {
   // otherwise appear in a single sample and never commit (dropped press).
   bool isDebouncePending() const;
   unsigned long getHeldTime() const;
+
+  // --- Touch passthrough ----------------------------------------------------
+  // Raw passthrough to the SDK's touch machine: normalized 0..1 coordinates in
+  // the PANEL's native frame, with no orientation applied. Interpretation
+  // (orientation mapping, logical pixels, gesture semantics, hit tests) belongs
+  // to MappedInputManager, not here — this layer only exposes the SDK
+  // capability, per the repo's HAL rule.
+  //
+  // Names and signatures are copied verbatim from upstream/develop's HalGPIO so
+  // the layers above stay diff-comparable; see
+  // docs/touch-input-migration-2026-08-14.md §1.
+  //
+  // No FREEINK_CAP_TOUCH guards are needed: every InputManager touch method is
+  // already guarded inside the SDK and compiles to an inert false/0 on non-touch
+  // boards, so the C3 pays nothing for these.
+  bool hasTouch() const;
+  // True only on a controller that reports more than one contact (GT911). Gates
+  // the two-finger gestures out of the settings screen on single-contact panels,
+  // where they could never fire.
+  bool supportsMultiTouch() const;
+  // Capacitive Home key reported by the touch controller (X4 Pro). The tap
+  // event fires on release and excludes a long hold.
+  bool hasHomeKey() const;
+  bool wasHomeKeyTapped() const;
+  bool wasHomeKeyLongPressed() const;
+  bool wasTouchTap(float& nx, float& ny) const;
+  bool wasTouchDown(float& nx, float& ny) const;
+  // Raw release edge, reported even when the contact was not a tap (swipe end,
+  // drag-off). Snapshot builders forward it so interaction routing can clear
+  // pressed state.
+  bool wasTouchReleased() const;
+  bool isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const;
+  bool isTouchHeldAt(float& nx, float& ny) const;
+  // One-shot long-press, fired by the SDK classifier while the finger is still
+  // down (stationary contact held past its threshold). Position = touch-down
+  // point. Callers that act on it should suppressTouchContact() so the lift
+  // cannot also tap.
+  bool wasTouchLongPress(float& nx, float& ny) const;
+  // Ignore the remainder of the current contact (its continued hold and its
+  // release edge). Self-clears once the contact ends.
+  void suppressTouchContact();
+  unsigned long lastTouchHeldMs() const;
+  bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
+  // Drain one queued multi-touch gesture (FIFO). Returns false when empty.
+  bool popTouchGesture(TouchGesture& out);
+  // Drop every queued touch event — gestures AND single-contact taps, swipes and
+  // long presses, latched and snapshotted alike. For activity transitions, so a
+  // tap made on the screen being left cannot act on the one being entered, which
+  // matters more now that these outlive the tick they happened in.
+  void flushTouchEvents();
+  // Coarse "the user touched the screen" signal — the touch analogue of
+  // wasAnyPressed(). Feed this into the idle/sleep timer so touch counts as
+  // activity (phase 3).
+  bool wasTouchActivity() const;
 
   // Start/stop the background sampler. startInputSampler() must be called once
   // input handling is wanted (end of setup, after the boot-time power-button

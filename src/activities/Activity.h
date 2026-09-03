@@ -10,6 +10,7 @@
 #include "ActivityResult.h"
 #include "ButtonEventManager.h"
 #include "GfxRenderer.h"
+#include "ListRowTap.h"
 #include "MappedInputManager.h"
 #include "RenderLock.h"
 
@@ -51,6 +52,21 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+
+  // What a tap on the row at `index` should do, moving this screen's selection if it lands on a
+  // new row. See ListRowTap.h for the rule; most implementations are one call to
+  // ListRowTap::apply().
+  //
+  // Point-then-confirm: `Selected` means the highlight moved and the dispatcher only repaints,
+  // `Activate` means the finger landed on the row that was already selected and the dispatcher
+  // synthesizes a Confirm press on the screen's behalf. Synthesizing is the point -- a tap then
+  // runs the SAME handler the button does rather than a second copy of it that can drift, which
+  // is why this is a one-line hook and not a per-screen touch handler.
+  //
+  // Screens whose list is not a plain recorded row band -- Home's covers and menu, RecentBooks'
+  // cover grid -- consume the tap in their own loop() instead and leave this alone. They follow
+  // the same two-step rule there.
+  virtual ListRowTap::Result selectListRow(int /*index*/) { return ListRowTap::Result::Rejected; }
 
   // Return true while this activity owns the raw serial input stream (e.g. the
   // USB serial file-transfer activity reading a binary protocol). When true,

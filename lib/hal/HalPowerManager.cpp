@@ -1,6 +1,7 @@
 #include "HalPowerManager.h"
 
 #include <BoardConfig.h>
+#include <HalCapabilities.h>
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
@@ -18,14 +19,25 @@ HalPowerManager powerManager;  // Singleton instance
 static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
 
 void HalPowerManager::begin() {
-  if (gpio.deviceIsX3()) {
-    // X3 uses an I2C fuel gauge for battery monitoring.
-    // I2C init must come AFTER gpio.begin() so early hardware detection/probes are finished.
-    Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
-    Wire.setTimeOut(4);
+  if (HalCapabilities::hasI2cFuelGauge()) {
+    // Boards with an I2C fuel gauge read charge over the bus rather than from an
+    // ADC divider (X3 has a BQ27220 at 0x55, X4 Pro a CW2017 at 0x63, T5S3 a
+    // BQ27220 at 0x55; X4 has none and uses its ADC pin).
+    //
+    // We do NOT start the bus here. That is HalI2cBus::ensureBusStarted()'s job:
+    // the gauge is one peripheral on a shared bus, not its owner, and on a touch
+    // board the SDK's InputManager has already started it. main.cpp calls the
+    // owner after gpio.begin() so the touch driver gets first claim.
+    //
+    // NOTE the gauge PROTOCOL is still BQ27220-specific (I2C_ADDR_BQ27220 and
+    // the BQ27220_*_REG offsets below). X4 Pro's CW2017 answers at a different
+    // address with different registers, so it needs its own read path -- taking
+    // the address from the profile alone would talk BQ27220 registers to a
+    // CW2017, the same trap as DS3231-vs-BM8563 in HalClock. T5S3's gauge is a
+    // BQ27220, so this path suits it as-is.
     _batteryUseI2C = true;
-  } else {
-    pinMode(BAT_GPIO0, INPUT);
+  } else if (HalCapabilities::hasAdcBattery()) {
+    pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
   }
   normalFreq = getCpuFrequencyMhz();
   modeMutex = xSemaphoreCreateMutex();
@@ -47,6 +59,28 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // that just won the race will re-call setPowerSaving anyway), but we want
   // defined semantics rather than relying on compiler behavior for a plain int.
   const LockMode mode = currentLockMode.load(std::memory_order_relaxed);
+
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+  // CPU frequency scaling is disabled on PSRAM boards.
+  //
+  // On the ESP32-S3 the PSRAM clock is derived from the CPU/APB clock, so
+  // changing the CPU frequency while anything is touching PSRAM corrupts those
+  // accesses. On the T5S3 that is not a corner case: the 960x540 framebuffer
+  // lives in PSRAM, so the render path is in it more or less continuously.
+  //
+  // Observed on hardware as a TG1WDT_SYS_RST immediately after the
+  // "Going to low-power mode" line, on four consecutive boots and then
+  // intermittently -- intermittent because it depends on what is mid-access when
+  // the switch happens, which is exactly the signature of this hazard rather
+  // than of a logic bug.
+  //
+  // The cost is idle power on a board that has 8 MB of PSRAM and a wired USB
+  // port; the alternative is random resets. Revisit if ESP-IDF's dynamic
+  // frequency scaling is ever configured properly for this build (it needs the
+  // PSRAM-aware DFS path, not a bare setCpuFrequencyMhz()).
+  (void)enabled;
+  return;
+#endif
 
   if (mode == None && enabled && !isLowPower) {
     LOG_DBG("PWR", "Going to low-power mode");
@@ -350,6 +384,39 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
       gpio_hold_dis(GPIO_NUM_13);
     }
     gpio_deep_sleep_hold_dis();
+
+    // Hold every configured power-latch pin HIGH through deep sleep. These are keep-alive
+    // enables — the X4 Pro's master peripheral rail on GPIO1 — and
+    // esp_sleep_config_gpio_isolate() below strips the output driver off any pad without an
+    // armed hold. holdPowerRails() asserts the latches at boot but arms no sleep hold, so
+    // the X4 Pro's latch drops the moment external power leaves and the next power-button
+    // press cold-boots (~8-15 s) instead of fast-waking (~1-2 s).
+    //
+    // Ported from crosspoint-reader PR #3215 ("fix(x4pro): hold power-latch pins HIGH
+    // through deep sleep", Antoine Aflalo / @Belphemur), filed against upstream issue #2863.
+    //
+    // ORDER OF OPERATIONS, and it is not optional: holding the rail up means the panel keeps
+    // its VCC through sleep, so the panel MUST actually be parked or its charge pump stays
+    // biased and draws mA — the exact regression #3215 exposed. The driver-side half is
+    // freeink-sdk 7f541f3, which makes deepSleep() always emit POF before DSLP instead of
+    // gating it on an _isScreenOn flag that an AA pass desynchronises. Both halves are in
+    // this tree as of the SDK bump to 1be4233; do NOT bring this loop forward past that.
+    //
+    // The loop is unreachable on the C3 anyway (gpio13IsBatteryLatch takes the branch above
+    // on X4, and on X3 latch0 is unassigned), but skip GPIO13 explicitly rather than rely on
+    // that: it IS power.latch0 on the C3 Xteink boards, where LOW is a deliberate battery
+    // power-off and driving it HIGH here would be the opposite of what the caller asked for.
+    for (const int8_t latchPin : {BoardConfig::ACTIVE.power.latch0, BoardConfig::ACTIVE.power.latch1}) {
+      if (latchPin < 0 || static_cast<gpio_num_t>(latchPin) == GPIO_BATTERY_LATCH) continue;
+      const auto latch = static_cast<gpio_num_t>(latchPin);
+      // Release any surviving pad hold first: a held pad silently ignores the drive below,
+      // the same trap the GPIO13 branch above documents.
+      gpio_hold_dis(latch);
+      gpio_set_level(latch, 1);
+      gpio_set_direction(latch, GPIO_MODE_OUTPUT);
+      gpio_hold_en(latch);
+    }
+
     freeink::PowerManager::powerDownRailsForSleep();
     esp_sleep_config_gpio_isolate();
     gpio_deep_sleep_hold_en();
@@ -371,7 +438,20 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, bool keepClockAlive) const {
   // completely powered off, so the power button is hard-wired to briefly provide power to the MCU, waking it up
   // regardless of the wakeup source configuration.
   // When keepClockAlive is true, this is the actual wakeup mechanism since the MCU stays powered.
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
+  //
+  // The wake source itself is chip-family specific, so this branches on SoC
+  // capability rather than on a board or device name: the C3 has no RTC IO mux
+  // and uses the dedicated deep-sleep GPIO path, while the S3 wakes from EXT1
+  // over its RTC GPIOs (the X4 Pro power key is GPIO3, which is RTC-capable).
+  // Both boards' power keys are active-LOW, matching the level used here.
+  constexpr uint64_t powerPinMask = 1ULL << InputManager::POWER_BUTTON_PIN;
+#if SOC_PM_SUPPORT_EXT1_WAKEUP
+  esp_sleep_enable_ext1_wakeup_io(powerPinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+#elif SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
+  esp_deep_sleep_enable_gpio_wakeup(powerPinMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+#else
+#error "No deep-sleep wake source available for this target — add one before enabling this board."
+#endif
   if (sleepStepHook_) sleepStepHook_(SleepStep::WakeArmed, releaseWaitMs, releaseTimedOut, gpio13IsBatteryLatch);
   // Enter Deep Sleep
   esp_deep_sleep_start();
@@ -381,7 +461,7 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   // Guard against an X3 board mistakenly taking the ADC path: BAT_GPIO0 is
   // reused as X3_I2C_SCL on X3, so reading it as ADC would collide with the
   // fuel-gauge bus. _batteryUseI2C must match the detected device type.
-  assert(_batteryUseI2C == gpio.deviceIsX3());
+  assert(_batteryUseI2C == HalCapabilities::hasI2cFuelGauge());
   if (_batteryUseI2C) {
     const unsigned long now = millis();
     if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
@@ -398,7 +478,10 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
     _batteryLastPollMs = now;
     return _batteryCachedPercent;
   }
-  static const BatteryMonitor battery = BatteryMonitor(BAT_GPIO0);
+  // ADC pin from the profile. Only reached when hasI2cFuelGauge() was false, so
+  // hasAdcBattery() holds and batteryAdc is a real pin -- the same gate that
+  // decides whether gpio.begin() configures it as an input.
+  static const BatteryMonitor battery = BatteryMonitor(BoardConfig::ACTIVE.batteryAdc);
 
   // Smooth the battery % with a 1/10-weight IIR. The cache stores the value
   // scaled ×10 so integer math keeps enough precision. Seed explicitly on the

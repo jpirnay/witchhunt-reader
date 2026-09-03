@@ -156,3 +156,7 @@ void StarredPagesActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+ListRowTap::Result StarredPagesActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(bookmarkStore.getAll().size()), selectorIndex);
+}

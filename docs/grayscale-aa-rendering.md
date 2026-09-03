@@ -247,3 +247,13 @@ The BW framebuffer is trashed between steps 1 and 11. This is safe because:
 | `displayGrayBuffer()` | `GfxRenderer` → `HalDisplay` → `EInkDisplay` | Trigger grayscale waveform refresh |
 | `cleanupGrayscaleWithPreviousBuffer()` | `GfxRenderer` → `EInkDisplay` | Reseed controller planes from `frameBufferActive` (just-displayed BW page); clear `inGrayscaleMode` |
 | `setFastGrayscaleLut(bool)` | `GfxRenderer` | X3-only: switch between OEM (slow/accurate) and community (fast/darker) LUT |
+
+## Scheduling: the AA pass delays the next-page pre-render
+
+The deferred AA runs *before* Background-A re-arms, because the AA planes and a pre-rendered page
+compete for the same heap. On a panel where the pass is slow this is felt directly: on the T5S3 the
+AA costs ~605 ms (`planes 80 + gray 473 + restore 52`), and for that whole window the reader has no
+pre-rendered next page, so a quick turn pays a full render instead of a buffer swap.
+
+Measurements, the candidate reordering (pre-render first), and why it has not been done are in
+[background-rendering.md](background-rendering.md) under "A — next-page pre-render".

@@ -15,6 +15,9 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "components/themes/ButtonHintStrip.h"
+#include "components/themes/ListTouchBand.h"
+#include "components/themes/TapTargets.h"
 #include "home/FileBrowserActivity.h"
 #include "home/GlobalBookmarksActivity.h"
 #include "home/HomeActivity.h"
@@ -29,6 +32,22 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "weather/WeatherActivity.h"
+
+// Guards ActivityManager's cross-task state (requestedUpdate, waitingTaskHandle),
+// which the loop task and the render task both touch.
+//
+// This used to pass a null mux. That is a latent bug that only
+// bites on a dual-core part: on the single-core ESP32-C3 the port ignores the
+// mux and just disables interrupts, so a null pointer is harmless — but on the
+// dual-core ESP32-S3 the same macro performs a real spinlock_acquire() and
+// asserts the lock is non-null. It boot-looped the X4 Pro with
+// "assert failed: spinlock_acquire spinlock.h:84 (lock)".
+//
+// One mux for all four sections is deliberate: they are short, they guard the
+// same handful of fields, and sharing one preserves the mutual exclusion the
+// nullptr form gave them (a global interrupt disable made every section
+// exclusive with every other).
+static portMUX_TYPE activityStateMux = portMUX_INITIALIZER_UNLOCKED;
 
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
@@ -47,12 +66,24 @@ void ActivityManager::begin() {
   // documented hazard in EpubReaderActivity). Field high-water dipped to ~1.7 KB free of the
   // former 8 KB on a parse-on-render-task pass; +2 KB restores a safer margin. renderTaskLoop()
   // also warns (RENDER_STACK_WARN_BYTES) if the live margin ever gets thin again.
-  xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
-              10240,             // Stack size (bytes)
-              this,              // Parameters
-              1,                 // Priority
-              &renderTaskHandle  // Task handle
-  );
+  // Pin the render task to CPU 1 on dual-core parts (S3), CPU 0 on single-core
+  // (C3, where this is the only choice and the call is equivalent to
+  // xTaskCreate). Ported from upstream/develop, whose comment gives the reason:
+  // keep long renders and cover decodes off CPU 0's idle watchdog. CPU 0 also
+  // runs the Arduino loop task and the system/WiFi tasks, so a multi-second page
+  // build or JPEG decode landing there can starve the idle task and trip the
+  // watchdog. On the C3 this changes nothing.
+#if defined(configNUM_CORES) && configNUM_CORES > 1
+  constexpr BaseType_t renderTaskCore = 1;
+#else
+  constexpr BaseType_t renderTaskCore = 0;
+#endif
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
+                          10240,              // Stack size (bytes)
+                          this,               // Parameters
+                          1,                  // Priority
+                          &renderTaskHandle,  // Task handle
+                          renderTaskCore);
   assert(renderTaskHandle != nullptr && "Failed to create render task");
 }
 
@@ -98,6 +129,18 @@ void ActivityManager::renderTaskLoop() {
       // window where render() drops the mutex (renderContents' pre-waveform unlock), which is
       // exactly the window a plain RenderLock cannot see — see RenderLock(ExclusiveActivityAccess).
       renderPassActive.store(true, std::memory_order_release);
+      // Every touch recorder starts each pass empty, so what they hold afterwards is exactly
+      // what THIS frame painted. Clearing on activity transitions alone is not enough: a screen
+      // can stop drawing its list without changing activity (WifiSelection swaps the network
+      // list for a "no networks" message; FontDownload for a progress screen), and the band
+      // recorded before that would keep answering taps against rows nothing paints any more.
+      // Cleared here rather than in each conditional screen because "the recorders describe the
+      // last frame" is a property of the render pass, not something 26 screens should each
+      // remember.
+      ListTouchBand::invalidate();
+      TapTargets::homeCovers().invalidate();
+      TapTargets::homeMenu().invalidate();
+      TapTargets::tabBar().invalidate();
       currentActivity->render(std::move(lock));
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
@@ -141,10 +184,10 @@ void ActivityManager::renderTaskLoop() {
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
-    taskENTER_CRITICAL(nullptr);
+    taskENTER_CRITICAL(&activityStateMux);
     waiter = waitingTaskHandle;
     waitingTaskHandle = nullptr;
-    taskEXIT_CRITICAL(nullptr);
+    taskEXIT_CRITICAL(&activityStateMux);
     if (waiter) {
       xTaskNotify(waiter, 1, eIncrement);
     }
@@ -174,6 +217,8 @@ void ActivityManager::loop() {
   if (!drainInput && currentActivity) {
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     currentActivity->loop();
+    dispatchListTap();
+    dispatchHintStripTap();
   }
 
   if (SETTINGS.useClock && HalClock::isSynced()) {
@@ -309,9 +354,9 @@ void ActivityManager::loop() {
   }
 
   if (requestedUpdate) {
-    taskENTER_CRITICAL(nullptr);
+    taskENTER_CRITICAL(&activityStateMux);
     requestedUpdate = false;
-    taskEXIT_CRITICAL(nullptr);
+    taskEXIT_CRITICAL(&activityStateMux);
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
     if (renderTaskHandle) {
@@ -528,6 +573,117 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
   }
 }
 
+void ActivityManager::dispatchListTap() {
+  if (!mappedInput.hasTouch()) return;
+
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // Why a tap on a row did nothing, in one line. Placed before the early-outs so
+  // it also reports the case where no band was recorded at all, and it reads the
+  // tap with a const peek so it steals nothing from the real path below.
+  //
+  // What to look for: `first` is the item index of the band's TOP row, so on a
+  // scrolled list it must equal the first item actually on screen; `rows` is the
+  // y range the band covers, which must contain the tap; `-> item` is what the
+  // hit test made of it, -1 being a miss.
+  {
+    int tx = 0;
+    int ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      ListTouchBand::Band band;
+      if (!ListTouchBand::snapshot(band)) {
+        LOG_INF("TCH", "list tap (%d,%d): no band recorded", tx, ty);
+      } else {
+        const int lastBottom = band.count > 0 ? band.top[band.count - 1] + band.height[band.count - 1] : -1;
+        LOG_INF("TCH", "list tap (%d,%d): band x=%d w=%d first=%d count=%d rows y=%d..%d sel=0x%08lX -> item %d", tx,
+                ty, band.x, band.width, band.firstIndex, band.count, band.count > 0 ? band.top[0] : -1, lastBottom,
+                static_cast<unsigned long>(band.selectable), ListTouchBand::hitTestIn(band, tx, ty));
+      }
+    }
+  }
+#endif
+
+  // Nothing painted a list on this screen, so there is nothing here a tap could mean. Checked
+  // before touching the tap queue: the tap belongs to whoever else wants it.
+  if (!ListTouchBand::hasBand()) return;
+
+  // Like the hint strip, this runs AFTER currentActivity->loop(), which makes it a strict
+  // fallback: a screen that handles its own taps (Home's covers and menu, RecentBooks' cover
+  // grid) has already consumed the tap and this finds nothing.
+  int index = -1;
+  if (mappedInput.listTouch(index) != MappedInputManager::RowTouch::Tap) return;
+
+  if (currentActivity == nullptr) return;
+
+  // Point-then-confirm. The screen decides what the tap means given where its selection already
+  // is; declining leaves the tap consumed but inert, which is correct, because the finger landed
+  // on a row this screen painted and nothing else should get to reinterpret it.
+  switch (currentActivity->selectListRow(index)) {
+    case ListRowTap::Result::Rejected:
+      // Logged, because a silent return here is indistinguishable from a tap that
+      // never arrived or a band recorded for the wrong rows — and a screen that
+      // draws a list but never implements selectListRow() lands in exactly this
+      // branch for every tap, on every page. That is not a hypothetical: it is
+      // how EnumSelectionActivity shipped, and the trace above showed the hit
+      // test resolving the right row while nothing happened.
+      LOG_DBG("TCH", "List tap -> row %d rejected by %s", index, currentActivity->getName().c_str());
+      return;
+
+    case ListRowTap::Result::Selected:
+      // First tap on a row: move the highlight and stop. This repaint IS the feedback -- the
+      // reader sees the selection land on their choice before anything happens, and a mis-tap
+      // costs one more tap instead of an action to undo. On e-paper it is the only feedback
+      // available until a localised tap-flash exists (P2).
+      currentActivity->requestUpdate();
+      LOG_DBG("TCH", "List tap -> row %d selected", index);
+      return;
+
+    case ListRowTap::Result::Activate:
+      // Second tap, on the row already selected. Let the screen's OWN Confirm handler do the
+      // rest: every one of these screens already has a Confirm path, often several branches deep
+      // (a category row that cycles, an entry that opens, a value that toggles), and a tap must
+      // run that exact code rather than a parallel copy of it. Raw rather than logical so the
+      // user's button remapping still applies, exactly as the hint strip does it. Both the
+      // wasPressed() bitmask consumers and ButtonEventManager's press-type FSM see an ordinary
+      // Short press, one tick from now.
+      mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Confirm));
+      LOG_DBG("TCH", "List tap -> row %d already selected, Confirm synthesized", index);
+      return;
+  }
+}
+
+void ActivityManager::dispatchHintStripTap() {
+  if (!mappedInput.hasTouch()) return;
+
+  // Nothing painted a strip on this screen, so there is nothing here a tap could mean.
+  // Checked before touching the tap queue: the tap belongs to whoever else wants it.
+  if (!ButtonHintStrip::hasStrip()) return;
+
+  // Deliberately runs AFTER currentActivity->loop(). wasScreenTapped() consumes, so giving
+  // the activity first refusal makes the strip a strict fallback: a screen that handles the
+  // tap itself (reader page turns, and the list rows of phase 4b) has already claimed it and
+  // this call finds nothing. The flip side is that on a hint-drawing screen a tap no one
+  // claimed is consumed here even when it misses every box -- which is correct, since by
+  // this point nothing else wanted it.
+  // Ask for the tap in the PORTRAIT frame, not the live one. Both drawButtonHints()
+  // implementations force Portrait for the duration of their draw, so that is the frame the
+  // recorded boxes live in; resolving the tap the same way makes the hit test correct in all
+  // four orientations rather than only while the screen happens to be portrait. The
+  // underlying transform has always taken orientation as a parameter -- only GfxRenderer's
+  // convenience wrapper pinned it to the live value.
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTappedIn(touchtransform::Portrait, x, y)) return;
+
+  const int hint = ButtonHintStrip::hitTest(x, y);
+  if (hint < 0) return;
+
+  // hitTest returns the raw hardware button index directly: mapLabels() emits the four
+  // labels in {BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT} order and permutes only the text,
+  // so box i is button i on every board and under every remapping.
+  mappedInput.injectRawPress(static_cast<uint8_t>(hint));
+  LOG_DBG("TCH", "Hint strip tap at (%d,%d) -> raw button %d", x, y, hint);
+}
+
 void ActivityManager::requestUpdate(bool immediate) {
   if (immediate) {
     if (renderTaskHandle) {
@@ -536,9 +692,9 @@ void ActivityManager::requestUpdate(bool immediate) {
   } else {
     // Deferring the update until current loop is finished
     // This is to avoid multiple updates being requested in the same loop
-    taskENTER_CRITICAL(nullptr);
+    taskENTER_CRITICAL(&activityStateMux);
     requestedUpdate = true;
-    taskEXIT_CRITICAL(nullptr);
+    taskEXIT_CRITICAL(&activityStateMux);
   }
 }
 void ActivityManager::requestUpdateAndWait() {
@@ -547,7 +703,7 @@ void ActivityManager::requestUpdateAndWait() {
   }
 
   // Atomic section to perform checks
-  taskENTER_CRITICAL(nullptr);
+  taskENTER_CRITICAL(&activityStateMux);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
   auto mutexHolder = xSemaphoreGetMutexHolder(renderingMutex);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
@@ -556,7 +712,7 @@ void ActivityManager::requestUpdateAndWait() {
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
     waitingTaskHandle = currTaskHandler;
   }
-  taskEXIT_CRITICAL(nullptr);
+  taskEXIT_CRITICAL(&activityStateMux);
 
   // Render task cannot call requestUpdateAndWait() or it will cause a deadlock
   assert(!isRenderTask && "Render task cannot call requestUpdateAndWait()");

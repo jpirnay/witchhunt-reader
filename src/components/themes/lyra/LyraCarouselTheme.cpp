@@ -32,6 +32,7 @@
 #include "components/icons/transfer.h"
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
+#include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
 namespace {
@@ -42,6 +43,35 @@ constexpr int kSideCoverMaxW = LyraCarouselTheme::kSideCoverW;
 constexpr int kSideCoverMaxH = LyraCarouselTheme::kSideCoverH;
 constexpr int kOverlap = 60;
 constexpr int kCoverTopPad = 10;
+
+// Publish the three carousel slots for touch. Factored out because the covers are painted on
+// two different paths -- the full drawRecentBookCover() and tryFastHomeRender(), which restores
+// them from a cached region and never calls it -- and a tap has to work on both. Geometry here
+// is the same arithmetic drawRecentBookCover() lays the covers out with.
+//
+// Centre is recorded FIRST because the side covers slide kOverlap px BEHIND it: the draw order
+// puts the centre on top, and TapTargets::hitTestIn returns the first rect containing the point,
+// so recording the centre first makes the overlap resolve to what the reader can actually see.
+void recordCarouselCoverTargets(const int screenW, const int rectY, const int centerIdx, const int bookCount) {
+  TapTargets::Recorder::Builder targets;
+  if (bookCount > 0) {
+    const int centerTileY = rectY + kCoverTopPad;
+    const int sideTileY = centerTileY + (kCenterCoverMaxH - kSideCoverMaxH) / 2;
+    const int centerX = (screenW - kCenterCoverMaxW) / 2;
+    const int leftX = centerX - kSideCoverMaxW + kOverlap;
+    const int rightX = centerX + kCenterCoverMaxW - kOverlap;
+
+    targets.add(centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH, centerIdx);
+    // The neighbours exist only when there is a book to be at; no wrap-around, matching the draw.
+    if (centerIdx - 1 >= 0) {
+      targets.add(leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, centerIdx - 1);
+    }
+    if (centerIdx + 1 < bookCount) {
+      targets.add(rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, centerIdx + 1);
+    }
+  }
+  TapTargets::homeCovers().record(targets);
+}
 
 constexpr int kTitleFontId = UI_12_FONT_ID;
 constexpr int kDotSize = 8;  // px square dot
@@ -292,6 +322,10 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   UITheme::getInstance().getTheme().drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding},
                                                nullptr);
 
+  // The covers came back from the cache rather than from drawRecentBookCover(), so record their
+  // targets here or the carousel would be the one home screen whose covers ignore a tap.
+  recordCarouselCoverTargets(renderer.getScreenWidth(), metrics.homeTopPadding, centerIdx, bookCount);
+
   // Overlay the selection border when carousel row is active
   if (inCarouselRow) {
     const int screenW = renderer.getScreenWidth();
@@ -351,6 +385,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
   }
 
   const int screenW = renderer.getScreenWidth();
+  recordCarouselCoverTargets(screenW, rect.y, centerIdx, bookCount);
   const int centerTileY = rect.y + kCoverTopPad;
   const int sideTileY = centerTileY + (kCenterCoverMaxH - kSideCoverMaxH) / 2;
 
@@ -565,6 +600,13 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
     renderer.drawText(UI_12_FONT_ID, labelX, labelY, label.c_str(), true, EpdFontFamily::BOLD);
   }
 
+  // Rows published for touch — see BaseTheme::drawButtonMenu. This theme's menu is a HORIZONTAL
+  // icon strip, which is why these are free rects rather than a ListTouchBand: no y-band model
+  // describes both this and the vertical menus. The whole tile is the target, not just the icon,
+  // so a finger does not have to land on a 32 px glyph. Values are MENU-LOCAL indices, and the
+  // sliding window means slot != index whenever the icons overflow.
+  TapTargets::Recorder::Builder menuTargets;
+
   for (int slot = 0; slot < visibleCount; ++slot) {
     const int i = firstVisible + slot;
     if (i >= buttonCount) break;
@@ -572,6 +614,7 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
     const int tileX = slot * tileW;
     const int iconX = tileX + (tileW - kMenuIconSize) / 2;
     const int iconY = rowY + kMenuIconPad;
+    menuTargets.add(tileX, rowY, tileW, tileH, i);
 
     const bool selected = (selectedIndex == i);
     if (selected) {
@@ -601,6 +644,8 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
         renderer.fillRect(screenW - 2 - kArrowDotR * 2, arrowY - kArrowDotR, kArrowDotR * 2, kArrowDotR * 2, true);
     }
   }
+
+  TapTargets::homeMenu().record(menuTargets);
 }
 
 // ---------------------------------------------------------------------------
@@ -739,8 +784,14 @@ void LyraCarouselTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const
   constexpr int hPad = 8;
   int currentX = rect.x + LyraCarouselMetrics::values.contentSidePadding;
 
+  // Published for touch as they are painted — see BaseTheme::drawTabBar.
+  TapTargets::Recorder::Builder touchTabs;
+  int tabIndex = 0;
+
   for (const auto& tab : tabs) {
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
+    const int advance = textWidth + LyraCarouselMetrics::values.tabSpacing + 2 * hPad;
+    touchTabs.add(currentX, rect.y, advance, rect.height, tabIndex++);
 
     if (tab.selected) {
       if (selected) {
@@ -754,8 +805,9 @@ void LyraCarouselTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const
     renderer.drawText(UI_10_FONT_ID, currentX + hPad, rect.y + 6, tab.label, !(tab.selected && selected),
                       EpdFontFamily::REGULAR);
 
-    currentX += textWidth + LyraCarouselMetrics::values.tabSpacing + 2 * hPad;
+    currentX += advance;
   }
+  TapTargets::tabBar().record(touchTabs);
 
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }

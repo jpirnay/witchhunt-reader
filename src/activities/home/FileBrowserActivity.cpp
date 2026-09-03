@@ -898,3 +898,7 @@ void FileBrowserActivity::doFlashFirmware(const std::string& fullPath) {
   startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput, fullPath),
                          [this](const ActivityResult&) { requestUpdate(); });
 }
+
+ListRowTap::Result FileBrowserActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(entryCount()), selectorIndex);
+}

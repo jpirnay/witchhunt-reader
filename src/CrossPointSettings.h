@@ -119,6 +119,35 @@ class CrossPointSettings {
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
   // Font size options
   enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, EXTRA_LARGE = 3, TINY = 4, FONT_SIZE_COUNT };
+  // The sizes in ASCENDING VISUAL order, which the enum is not: TINY was appended
+  // as 4 rather than inserted before SMALL, so persisted values would have shifted.
+  // Anything that means "one size bigger" — a pinch, a font-size shortcut — must
+  // step through this, never through enum arithmetic.
+  static constexpr uint8_t FONT_SIZE_LADDER[] = {TINY, SMALL, MEDIUM, LARGE, EXTRA_LARGE};
+  // `size` moved `delta` steps along the ladder and clamped at both ends. Clamped
+  // rather than wrapped: a pinch that has reached the largest size should stay
+  // there, not jump to the smallest.
+  //
+  // Inline so it can be exercised on the host without dragging in the NVS half
+  // of CrossPointSettings.cpp — the ladder order is exactly the kind of thing a
+  // test should hold still.
+  static constexpr uint8_t stepFontSize(const uint8_t size, const int delta) {
+    constexpr int len = static_cast<int>(sizeof(FONT_SIZE_LADDER) / sizeof(FONT_SIZE_LADDER[0]));
+    int idx = -1;
+    for (int i = 0; i < len; ++i) {
+      if (FONT_SIZE_LADDER[i] == size) {
+        idx = i;
+        break;
+      }
+    }
+    // An unrecognised value (a hand-edited settings file) has no place on the
+    // ladder; leave it alone rather than guessing which end it belongs at.
+    if (idx < 0) return size;
+    int target = idx + delta;
+    if (target < 0) target = 0;
+    if (target > len - 1) target = len - 1;
+    return FONT_SIZE_LADDER[target];
+  }
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
@@ -170,6 +199,20 @@ class CrossPointSettings {
     TILT_ACT_NEXT_PAGE = 1,
     TILT_ACT_PREV_PAGE = 2,
     TILT_GESTURE_ACTION_COUNT
+  };
+
+  // Whether touch drives the non-reader screens at all. See touchUiControls.
+  enum TOUCH_UI_CONTROLS { TOUCH_UI_OFF = 0, TOUCH_UI_ON = 1, TOUCH_UI_CONTROLS_COUNT };
+
+  // How the reading surface responds to touch. Off leaves the page inert, so a
+  // thumb resting on the panel can never turn a page (P3 in
+  // docs/touch-input-migration-2026-08-14.md).
+  enum TOUCH_READER_CONTROLS {
+    TOUCH_READER_OFF = 0,
+    TOUCH_READER_ON = 1,            // tap the outer thirds: left = back, right = forward
+    TOUCH_READER_SWIPE = 2,         // horizontal swipes turn pages; taps stay free
+    TOUCH_READER_INVERTED_TAP = 3,  // mirrored tap zones
+    TOUCH_READER_CONTROLS_COUNT
   };
 
   // Text darkness for AA glyph rendering (forwarded to GfxRenderer::setTextDarkness)
@@ -322,6 +365,18 @@ class CrossPointSettings {
   uint8_t uiTheme = LYRA;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
+  // --- Frontlight / backlight (boards with FrontlightConfig; T5S3, X4 Pro) ---
+  // Brightness is a 0-100 percentage the SDK maps through a perceptual gamma
+  // curve. The floor the UI offers is HalFrontlight::MIN_BRIGHTNESS, not 0:
+  // "off" is frontlightOn, not a zero level.
+  uint8_t frontlightBrightness = 60;
+  // Warm/cool mix, 0 = fully cool .. 100 = fully warm. Only meaningful on a
+  // two-channel board (X4 Pro); inert on the T5S3's single backlight channel.
+  uint8_t frontlightWarmth = 50;
+  uint8_t frontlightOn = 0;
+  // Whether waking restores the light. Off by default so a device that wakes in
+  // a dark bag does not light up; brightness/warmth are always restored.
+  uint8_t frontlightRestoreOnWake = 1;
   // Use book's embedded CSS styles for EPUB rendering (1 = enabled, 0 = disabled)
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
@@ -341,6 +396,102 @@ class CrossPointSettings {
   uint8_t tiltPositiveAction = TILT_ACT_NEXT_PAGE;
   // Action when the computed tilt value crosses the negative threshold.
   uint8_t tiltNegativeAction = TILT_ACT_PREV_PAGE;
+  // Touch page turning on the reading surface (touch boards only). Defaults to
+  // tap zones, which is what upstream ships; the X4 Pro has no back/confirm
+  // button, so leaving it off would strand the reader.
+  uint8_t touchReaderControls = TOUCH_READER_ON;
+  // Whether touch does anything OUTSIDE the reader: tapping list rows, book
+  // covers, the home menu, the on-screen button-hint strip, and the back/home
+  // edge gestures. Off leaves those screens button-only, for a device carried in
+  // a bag or read one-handed where a stray brush kept selecting things.
+  //
+  // The reader is deliberately not covered — it has touchReaderControls, and one
+  // behaviour with two switches is a support question waiting to happen. On a
+  // board whose Back/Confirm come from the capacitive Home key those still work
+  // with this off: HalGPIO synthesises them as BUTTON edges below this layer, so
+  // turning touch navigation off cannot strand anyone in a menu.
+  uint8_t touchUiControls = TOUCH_UI_ON;
+
+  // Bumped whenever the SHIPPED gesture defaults change. A stored value below
+  // this makes the loader ignore the file's gesture keys and keep the compiled
+  // defaults instead.
+  //
+  // It exists because BTN_DEFAULT is 0, which makes "the user chose Built-in"
+  // and "this key was written before the default existed" the same byte on disk.
+  // Without the stamp a changed default reaches only devices that have never
+  // saved their settings — i.e. none — and the symptom on hardware is a gesture
+  // that silently does nothing, which looks exactly like a firmware bug. Two
+  // device sessions were spent on that.
+  //
+  // A bump DISCARDS gesture customisation, deliberately: while the defaults are
+  // still being tuned on hardware that is the useful trade. Once they settle,
+  // stop bumping it and the whole mechanism goes inert.
+  // 2: BTN_CYCLE_ORIENTATION_BACK was inserted before the board-gated light
+  //    block, shifting BTN_LIGHT_* up by one. Stored gesture values naming a
+  //    light action would otherwise be read as the action next to it.
+  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 2;
+  uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
+
+  // --- Gesture actions (touch boards) ---------------------------------------
+  // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
+  // fields above, and with the same meaning for BTN_DEFAULT: leave this input
+  // alone and let the reader interpret it as it always has. That is why every
+  // one of these defaults to BTN_DEFAULT rather than to the behaviour it would
+  // replace — an unconfigured device must behave as though gestures were never
+  // added. See src/TouchGestures.h for the zone geometry and the field table.
+  //
+  // Only consulted inside the reader. Everywhere else the screen's own touch
+  // targets (list rows, the home grid, the button-hint strip) own the contact.
+  // Horizontal swipes stay Built-in: in Swipe mode they ARE the page turn, and
+  // binding them would override that in every mode.
+  uint8_t gestSwipeLeft = BTN_DEFAULT;
+  uint8_t gestSwipeRight = BTN_DEFAULT;
+  // Vertical swipes are split by the half of the screen they start in, the way a
+  // phone splits the notification shade from quick settings: the left half is
+  // where you reach the menu, the right half is where you reach the light. That
+  // split is what lets both live on the same gesture without either losing it.
+  //
+  // Swipe up on the left is the quick on/off. It has to be a SWIPE rather than a
+  // tap or a hold, because swipes are the only gestures live outside the reader
+  // — and reaching the light from the home screen in the dark is most of the
+  // point of having a quick toggle at all. It also has to exist: dimming clamps
+  // at MIN_BRIGHTNESS, so there is deliberately no way to reach "off" by
+  // swiping down.
+  uint8_t gestSwipeUpLeft = BTN_LIGHT_TOGGLE;
+  uint8_t gestSwipeUpRight = BTN_LIGHT_BRIGHTER;
+  uint8_t gestSwipeDownLeft = BTN_READER_MENU;
+  uint8_t gestSwipeDownRight = BTN_LIGHT_DIMMER;
+  // Every tap zone stays Built-in, and must. The reader's own tap handling is
+  // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
+  // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look
+  // identical on a normal page and quietly bypass both. "Tap left = previous
+  // page" is already true through that path.
+  uint8_t gestTapLeft = BTN_DEFAULT;
+  uint8_t gestTapRight = BTN_DEFAULT;
+  uint8_t gestTapCentre = BTN_DEFAULT;
+  uint8_t gestTapTop = BTN_DEFAULT;
+  uint8_t gestTapBottom = BTN_DEFAULT;
+  // Long taps were dead before gestures existed, so these take nothing away.
+  // Chapter skip on a long press and lookup-on-hold follow CrossInk.
+  uint8_t gestLongTapLeft = BTN_PREV_SECTION;
+  uint8_t gestLongTapRight = BTN_NEXT_SECTION;
+  uint8_t gestLongTapCentre = BTN_DICTIONARY;
+  uint8_t gestLongTapTop = BTN_LIGHT_TOGGLE;
+  uint8_t gestLongTapBottom = BTN_STAR_PAGE;
+  // Pinch resizes text and a two-finger turn turns the page: the two gestures
+  // whose meaning users already carry with them from every other device.
+  uint8_t gestPinchIn = BTN_FONT_SIZE_SMALLER;
+  uint8_t gestPinchOut = BTN_FONT_SIZE_LARGER;
+  // Opposite directions, so turning two fingers back the way they came undoes
+  // the rotation instead of advancing three more steps. Which visual direction
+  // "forward" is depends on the ORIENTATION enum's order, which is not obvious
+  // from its names — if it reads inverted on hardware, swap these two lines.
+  uint8_t gestRotateCw = BTN_CYCLE_ORIENTATION;
+  uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION_BACK;
+
+  // Centre-third tap opens the reader menu. Separate from touchReaderControls
+  // so the page-turn style and the menu tap can be chosen independently.
+  uint8_t tapForReaderMenu = 1;
   // Enable synthetic TOC fallback for malformed/sparse TOC books (1 = enabled, 0 = disabled)
   uint8_t syntheticTocFallback = 1;
   // Default bionic reading in EPUB pages when no per-book override is set (1 = enabled, 0 = disabled)
@@ -433,6 +584,44 @@ class CrossPointSettings {
     BTN_QUICK_OVERRIDES,
     BTN_IGNORE,
     BTN_DICTIONARY,
+    // Directional font sizing. BTN_CYCLE_FONT_SIZE wraps in one direction, which
+    // is fine for a button but useless for a pinch: pinching in must make the
+    // text smaller and pinching out bigger, or the gesture means nothing.
+    BTN_FONT_SIZE_SMALLER,
+    BTN_FONT_SIZE_LARGER,
+    // Flip touchUiControls. Worth a shortcut rather than a settings-screen trip
+    // only: the reason to silence touch is usually momentary (reading in bed,
+    // a book in a bag), and the reader is the one place it stays live, so a
+    // gesture bound to this can always turn it back on.
+    BTN_TOGGLE_TOUCH_UI,
+    // The reverse of BTN_CYCLE_ORIENTATION. Same reasoning as the directional
+    // font sizes: a single cycling action is fine on a button, but the two
+    // rotation gestures are a PAIR — turning two fingers one way and then back
+    // must undo, not advance three more steps.
+    BTN_CYCLE_ORIENTATION_BACK,
+    // --- Board-gated actions MUST stay at the end of this enum ---------------
+    // SettingsList builds each button's option list positionally: index i in the
+    // list is action value i. Actions it drops on boards that cannot perform them
+    // therefore have to be the LAST entries, or dropping them renumbers every
+    // action after them and a settings file written on one board is misread on
+    // another. Add unconditional actions above this line.
+    //
+    // Frontlight/backlight control. Global rather than reader-scoped: the light
+    // is as wanted on the home screen as it is mid-page.
+    //
+    // TWO gated blocks, in NARROWING order — the warm pair needs a second LED
+    // channel that most lit boards do not have, so it is a strict subset of the
+    // block above and must come after it. Dropping the narrower block on a
+    // single-channel board then leaves the wider one's values untouched, which
+    // is the whole reason the gated actions sit at the end.
+    BTN_LIGHT_TOGGLE,
+    BTN_LIGHT_BRIGHTER,
+    BTN_LIGHT_DIMMER,
+    // Colour temperature, on a warm/cool board only (X4 Pro). Brightness is the
+    // TOTAL light and warmth splits it between the two strings, so these shift
+    // the mix without changing how bright the page looks.
+    BTN_LIGHT_WARMER,
+    BTN_LIGHT_COOLER,
     BUTTON_ACTION_COUNT
   };
 
@@ -500,6 +689,28 @@ class CrossPointSettings {
   void saveStartupToNvs() const;
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+
+  // Reset every button and gesture mapping that names an action this board
+  // cannot perform back to BTN_DEFAULT.
+  //
+  // Two things need it. The board-gated actions are dropped from the settings
+  // screen's option list, so a stored value naming one would render blank and
+  // could not be edited away; and an SD card moved from a board with a
+  // frontlight to one without carries exactly such values. The capabilities are
+  // passed in rather than queried so this stays free of the HAL and testable on
+  // the host. hasWarmLight is the narrower of the two: a board can have a light
+  // and no second warm channel, and then only the warmth pair goes.
+  static void dropUnsupportedActions(CrossPointSettings& settings, bool hasFrontlight, bool hasWarmLight);
+
+  // True for an action only the reader can carry out. Such an action must NOT be
+  // consumed on another screen: doing so would swallow the input and shadow that
+  // screen's own handling of it. Buttons let the event fall through to the
+  // activity; gestures decline to claim the contact at all.
+  //
+  // Everything not named here is global — go home, sleep, the refreshes,
+  // bookmarks, the reading light, the touch-navigation switch — and works
+  // wherever it is triggered.
+  static bool isReaderScopedAction(uint8_t action);
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.

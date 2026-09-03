@@ -7,7 +7,16 @@
 namespace WakeTrace {
 namespace {
 
-uint16_t phaseMs[static_cast<uint8_t>(Phase::Count)] = {};
+// uint32, not uint16. These are absolute millis() stamps, so they overflow 16 bits after
+// 65.5 s of uptime -- and the old saturating cast turned that into silent nonsense rather
+// than a visible wrap: every phase past the 65 s mark pinned to 65535, so the deltas between
+// them all collapsed to 0 and `open` (the one number this trace exists to produce) read 0.
+// Observed on a T5S3 opening a book at 82.9 s uptime: "rdr+65535 ... page=65535 | open=0".
+//
+// It hid because the case the trace was BUILT for is the one case that works: a deep-sleep
+// resume restarts millis() near zero, so resume traces land well inside 16 bits. Only plain
+// opens later in a session -- the common case -- saturate.
+uint32_t phaseMs[static_cast<uint8_t>(Phase::Count)] = {};
 // A stamp of 0 is a legal millis() value, so "was this phase reached" cannot be inferred
 // from the stamp itself — same reasoning as bootPhaseReached in main.cpp.
 uint16_t phaseReached = 0;
@@ -52,8 +61,7 @@ void mark(Phase phase) {
   if (phaseReached & bit) {
     return;
   }
-  const unsigned long ms = millis();
-  phaseMs[index] = static_cast<uint16_t>(ms > UINT16_MAX ? UINT16_MAX : ms);
+  phaseMs[index] = static_cast<uint32_t>(millis());
   phaseReached |= bit;
 }
 
@@ -74,7 +82,7 @@ void logSummary() {
   // trace, and lining the two up is the whole reason this trace exists.
   char line[160];
   size_t used = 0;
-  uint16_t previous = 0;
+  uint32_t previous = 0;
   for (uint8_t i = 0; i < static_cast<uint8_t>(Phase::Count); i++) {
     if ((phaseReached & (1u << i)) == 0) continue;
     const int written = snprintf(line + used, sizeof(line) - used, "%s%s+%u", used ? " " : "", PHASE_NAMES[i],
@@ -103,7 +111,7 @@ void logSummary() {
     sectionState = sectionCacheHit ? "cached" : (sectionFinished ? "rebuilt" : "building");
   }
   LOG_INF("WAKE", "%s phase cost ms: %s | open=%u page=%u section=%s", traceFromWake ? "resume" : "open", line, open,
-          hasPage ? phaseMs[pageIndex] : 0, sectionState);
+          hasPage ? static_cast<unsigned>(phaseMs[pageIndex]) : 0u, sectionState);
 }
 
 }  // namespace WakeTrace

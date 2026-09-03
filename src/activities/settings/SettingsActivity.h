@@ -36,6 +36,10 @@ class SettingsActivity final : public Activity {
       : Activity("Settings", renderer, mappedInput) {}
   void onEnter() override;
   void onExit() override;
+  // Tap on a settings row. NOTE the +1: index 0 of selectedSettingIndex is the category
+  // tab, and render() hands drawList `selectedSettingIndex - 1`, so band row i is row i+1
+  // here. Tapping cannot reach the tab row -- that is what the tab bar is for.
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 };

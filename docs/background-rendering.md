@@ -65,6 +65,41 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
 - **Note on X3:** a page turn is *waveform-bound* (~0.5 s), so A only saves the ~90 ms of
   prewarm+BW compute. Its benefit is modest on X3; the panel, not the CPU, sets page-turn speed.
 
+### Ordering: deferred AA runs BEFORE the pre-render (open, 2026-08-17)
+
+Re-arming A only *after* the deferred AA has freed its memory is deliberate — the AA planes and
+the pre-rendered page compete for the same heap. But on a panel where the AA pass is slow, that
+ordering makes A miss exactly when it is most wanted.
+
+Measured on the T5S3 (540x960, deferred AA), per page:
+
+```
+display → Deferred AA (planes 80 + gray 473 + restore 52 ≈ 605 ms) → pre-render (≈53 ms)
+```
+
+So for roughly **600 ms after every page the reader has nothing pre-rendered**. A turn inside that
+window logs `pendingPreRender=1 hit=0` and pays a full render (~670 ms) instead of a buffer swap
+(~580 ms). From a device log, tapping at a normal reading-fast cadence:
+
+| turn | idleSlackMs | result |
+|---|---|---|
+| 1 | 251 | `hit=1` |
+| 2-6 | < 605 | `hit=0`, `pendingPreRender=1` each time |
+
+Window ended `2/6`. An earlier session on the same build reached `7/7` purely because the taps were
+slower — the hit rate is a function of tap cadence against the AA duration, not of the code changing.
+
+**Candidate fix: run the pre-render first, then the deferred AA.** The pre-render is
+latency-critical and cheap (~53 ms); the grayscale pass is a nicety that is already deferred and
+would only start ~53 ms later. On X3/X4 this changes little (AA there is inline or fast, and page
+turns are waveform-bound anyway); on the S3 panels it is the difference between hitting and missing
+every quick turn.
+
+**Not done.** It reorders reader work on every board, and the heap argument above is real — the
+pre-render would hold its page while the AA then allocates its planes, which is the pairing the
+current order exists to avoid. It needs a heap check on the C3 (where `PRE_RENDER_MIN_FREE_HEAP_BYTES`
+is 56 KB of ~380 KB) and a device test, not an inference from one log.
+
 ## B — next-section pre-build (look-ahead)
 
 Builds the **next consecutive** sections' caches during idle so crossing a chapter boundary is a

@@ -1,15 +1,20 @@
 #pragma once
 
+#include <BoardConfig.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "SdCardFontGlobals.h"
+#include "TouchGestures.h"
 #include "activities/settings/SettingInfo.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -28,7 +33,10 @@
 //                 works inside a submenu exactly as it does in the parent tab.
 //                 Add with .withSubmenu(StrId::STR_MY_SUBMENU).
 //   key         — JSON property name used by the web settings API (nullptr = device-only).
-//   deviceTarget — hardware visibility (BOTH by default; override with .withDeviceTarget()).
+//   requiredCapability — hardware visibility. Default is "always visible";
+//     override with .requiring(SettingRequires::X) to hide the setting on boards
+//     that physically cannot do the thing it controls. Ask for a CAPABILITY,
+//     never a board name — see SettingInfo.h.
 //
 // ACTION-type entries and entries without a key are device-only and are added directly
 // in SettingsActivity::onEnter(), not here.
@@ -73,6 +81,10 @@ inline std::string getKoSyncMinPagesDisplay(void*) {
   return std::to_string(v) + tr(STR_PAGES_SUFFIX);
 }
 
+inline std::string getFrontlightBrightnessDisplay(void*) { return std::to_string(SETTINGS.frontlightBrightness) + "%"; }
+
+inline std::string getFrontlightWarmthDisplay(void*) { return std::to_string(SETTINGS.frontlightWarmth) + "%"; }
+
 inline std::vector<SettingInfo> buildSettingsList() {
   // Shared button action options used by all button enum entries.
   const std::vector<StrId> btnActionOptions = {StrId::STR_BTN_ACT_PAGE_FORWARD,
@@ -99,17 +111,60 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                                StrId::STR_BTN_ACT_IGNORE,
                                                StrId::STR_DICTIONARY};
 
+  // Offered everywhere, so a plain continuation of btnActionOptions above. Kept
+  // separate only for legibility.
+  const std::vector<StrId> extraActionOptions = {
+      StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
+      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK};
+  // The ONLY conditional block, and correspondingly the LAST entries of
+  // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
+  // other action's numeric value untouched, so a settings file written on a lit
+  // board still reads correctly here. Anything added after these would break
+  // that — see the comment on BUTTON_ACTION.
+  const std::vector<StrId> lightActionOptions = {StrId::STR_BTN_ACT_LIGHT_TOGGLE, StrId::STR_BTN_ACT_LIGHT_BRIGHTER,
+                                                 StrId::STR_BTN_ACT_LIGHT_DIMMER};
+  // Narrower still, and correspondingly last: a warm/cool pair is a subset of
+  // the lit boards. Dropping these on a single-channel light leaves every value
+  // above untouched.
+  const std::vector<StrId> warmActionOptions = {StrId::STR_BTN_ACT_LIGHT_WARMER, StrId::STR_BTN_ACT_LIGHT_COOLER};
+
   // Prepend the per-button default action to the shared options list.
+  // The option list is positional — index i is BUTTON_ACTION value i — so it must
+  // name every action exactly once. Asserted because the failure mode is not a
+  // crash but a silent misreading of every stored button and gesture mapping,
+  // which would look like the settings screen forgetting things at random.
+  assert(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
+                 warmActionOptions.size() ==
+             static_cast<size_t>(CrossPointSettings::BUTTON_ACTION_COUNT) &&
+         "btnActionOptions must name every BUTTON_ACTION except BTN_DEFAULT, in enum order");
+
+  const bool hasLight = Frontlight.present();
+  const bool hasWarmLight = hasLight && Frontlight.hasColorTemperature();
   auto makeBtnActionOptions = [&](StrId defaultAction) {
     std::vector<StrId> result;
-    result.reserve(1 + btnActionOptions.size());
+    // Reserves for the light options whether or not this board has them: a hint
+    // does not need to be exact, and three spare pointers cost less than a
+    // condition that reads as dead code on every build without a frontlight.
+    result.reserve(1 + btnActionOptions.size() + extraActionOptions.size() + lightActionOptions.size() +
+                   warmActionOptions.size());
     result.push_back(defaultAction);
     result.insert(result.end(), btnActionOptions.begin(), btnActionOptions.end());
+    result.insert(result.end(), extraActionOptions.begin(), extraActionOptions.end());
+    // cppcheck-suppress knownConditionTrueFalse ; hasLight is a compile-time false
+    // on a build with FREEINK_CAP_FRONTLIGHT off, where present() returns a literal.
+    // It is a genuine runtime question on every board that has a light.
+    if (hasLight) {
+      result.insert(result.end(), lightActionOptions.begin(), lightActionOptions.end());
+    }
+    // cppcheck-suppress knownConditionTrueFalse ; see the hasLight check above.
+    if (hasWarmLight) {
+      result.insert(result.end(), warmActionOptions.begin(), warmActionOptions.end());
+    }
     return result;
   };
 
   std::vector<SettingInfo> settings;
-  settings.reserve(77);
+  settings.reserve(100);
 
   // --- Display ---
   settings.push_back(SettingInfo::Action(StrId::STR_TIME_TO_SLEEP, SettingAction::SleepTimeoutPicker)
@@ -156,6 +211,38 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubcategory(StrId::STR_MENU_DISP_REFRESH));
   settings.push_back(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                                          StrId::STR_CAT_DISPLAY));
+
+  // --- Reading light (boards with a PWM frontlight/backlight) ---
+  // Grouped in a submenu so the Display tab stays one screen on boards that
+  // have one, and disappears entirely on boards that do not.
+  settings.push_back(SettingInfo::DynamicToggle(
+                         StrId::STR_READING_LIGHT, [](const void*) -> uint8_t { return Frontlight.isOn() ? 1 : 0; },
+                         [](void*, const uint8_t v) {
+                           // The hardware, not SETTINGS, is the authority for
+                           // "is the light on" (a wake with Restore off leaves
+                           // them legitimately apart), so read it back rather
+                           // than mirroring the requested value.
+                           Frontlight.setOn(v != 0);
+                           SETTINGS.frontlightOn = Frontlight.isOn() ? 1 : 0;
+                         },
+                         "frontlightOn", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .withSubcategory(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
+  settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_BRIGHTNESS, SettingAction::FrontlightBrightnessPicker)
+                         .withDisplayGetter(getFrontlightBrightnessDisplay)
+                         .withCategory(StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
+  settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_WARMTH, SettingAction::FrontlightWarmthPicker)
+                         .withDisplayGetter(getFrontlightWarmthDisplay)
+                         .withCategory(StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::WarmLight));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_RESTORE_LIGHT_ON_WAKE, &CrossPointSettings::frontlightRestoreOnWake,
+                                         "frontlightRestoreOnWake", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
+                         .requiring(SettingRequires::ReadingLight));
   settings.push_back(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                                        {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                                         StrId::STR_THEME_LYRA_CAROUSEL},
@@ -196,7 +283,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Toggle(StrId::STR_FAST_AA, &CrossPointSettings::fastAntiAliasing,
                                          "fastAntiAliasingV2", StrId::STR_CAT_READER)
                          .withSubmenu(StrId::STR_MENU_READER_FONT)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::SelectableGrayscaleLut));
   settings.push_back(SettingInfo::Enum(StrId::STR_TEXT_DARKNESS, &CrossPointSettings::textDarkness,
                                        {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK},
                                        "textDarkness", StrId::STR_CAT_READER)
@@ -379,21 +466,56 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPower,
                                        {StrId::STR_BTN_DEF_SLEEP}, "btnLongPower", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_BTN_POWER));
+  // Touch reading controls (touch boards only — gated on the capability, not on
+  // a board name, so X4 Pro and T5S3 both get them).
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_UI_CONTROLS, &CrossPointSettings::touchUiControls,
+                                       {StrId::STR_TOUCH_UI_OFF, StrId::STR_TOUCH_UI_ON}, "touchUiControls",
+                                       StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
+                                       {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP,
+                                        StrId::STR_TOUCH_READER_SWIPE, StrId::STR_TOUCH_READER_INVERTED},
+                                       "touchReaderCtl", StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_TAP_FOR_READER_MENU, &CrossPointSettings::tapForReaderMenu,
+                                         "tapReaderMenu", StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
+  // --- Gesture actions (reader only) ---
+  // Generated from TouchGestures::BINDINGS rather than written out row by row:
+  // eighteen near-identical push_backs is exactly the kind of ladder that drifts
+  // out of step with the table the input layer reads. Every row offers the same
+  // action list as a button, and every one defaults to Built-in — which for a
+  // gesture means "leave this contact to the reader" — and the label on that
+  // entry names what the reader will then do with it, the way each button row
+  // names its own default, rather than a bare "Built-in" that answers nothing.
+  for (const auto& binding : TouchGestures::BINDINGS) {
+    // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
+    // whole chained builder in a lambda and append through a back_inserter, which
+    // is longer and reads worse than the loop.
+    settings.push_back(
+        SettingInfo::Enum(binding.label, binding.field,
+                          makeBtnActionOptions(TouchGestures::builtinLabelFor(binding.gesture)), binding.key,
+                          StrId::STR_CAT_CONTROLS)
+            .withSubmenu(StrId::STR_MENU_GESTURE_ACTIONS)
+            .withSubcategory(binding.group)
+            .withSelectorActivity()
+            .requiring(binding.needsMultiTouch ? SettingRequires::MultiTouchPanel : SettingRequires::TouchPanel));
+  }
   // Tilt page turn (X3-only)
   settings.push_back(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                                          StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   settings.push_back(SettingInfo::Enum(StrId::STR_DIR_RIGHT, &CrossPointSettings::tiltPositiveAction,
                                        {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE},
                                        "tiltPositiveAction", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   settings.push_back(SettingInfo::Enum(StrId::STR_DIR_LEFT, &CrossPointSettings::tiltNegativeAction,
                                        {StrId::STR_NONE_OPT, StrId::STR_NEXT_PAGE, StrId::STR_PREV_PAGE},
                                        "tiltNegativeAction", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_TILT_PAGE_TURN)
-                         .withDeviceTarget(SettingDeviceTarget::X3));
+                         .requiring(SettingRequires::TiltSensor));
   // --- System ---
   settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles,
                                          "showHiddenFiles", StrId::STR_CAT_SYSTEM)
@@ -533,17 +655,36 @@ inline std::vector<SettingInfo> buildSettingsList() {
 
 inline std::vector<SettingInfo> getSettingsList() {
   std::vector<SettingInfo> settings = SettingsListDetail::buildSettingsList();
-  const bool isX3 = gpio.deviceIsX3();
-  settings.erase(std::remove_if(settings.begin(), settings.end(),
-                                [isX3](const SettingInfo& setting) {
-                                  if (setting.deviceTarget == SettingDeviceTarget::BOTH) {
-                                    return false;
-                                  }
-                                  if (setting.deviceTarget == SettingDeviceTarget::X3) {
-                                    return !isX3;
-                                  }
-                                  return isX3;
-                                }),
-                 settings.end());
+  // Answer each capability ONCE here, from the HAL or the active board profile,
+  // so the rest of the codebase never has to ask "which board is this" to decide
+  // whether a setting is meaningful.
+  const auto boardHas = [](const SettingRequires capability) {
+    switch (capability) {
+      case SettingRequires::Nothing:
+        return true;
+      case SettingRequires::TouchPanel:
+        return gpio.hasTouch();
+      case SettingRequires::TiltSensor:
+        return BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::None;
+      case SettingRequires::SelectableGrayscaleLut:
+        // SSD1677 develops grayscale from a factory waveform, so there is no
+        // LUT to swap and the fast/OEM trade-off does not exist there.
+        return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+      case SettingRequires::ReadingLight:
+        // Asked of the HAL rather than the board profile: the EEGO A4's I2C
+        // light is only present after begin() gets an ACK, so the profile alone
+        // would over-report.
+        return Frontlight.present();
+      case SettingRequires::WarmLight:
+        return Frontlight.present() && Frontlight.hasColorTemperature();
+      case SettingRequires::MultiTouchPanel:
+        return gpio.hasTouch() && gpio.supportsMultiTouch();
+    }
+    return true;
+  };
+  settings.erase(
+      std::remove_if(settings.begin(), settings.end(),
+                     [&boardHas](const SettingInfo& setting) { return !boardHas(setting.requiredCapability); }),
+      settings.end());
   return settings;
 }

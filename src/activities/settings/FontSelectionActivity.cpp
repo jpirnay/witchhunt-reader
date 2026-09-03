@@ -67,3 +67,7 @@ void FontSelectionActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+ListRowTap::Result FontSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, fontCount, selectedIndex);
+}

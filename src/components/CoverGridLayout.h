@@ -37,4 +37,16 @@ struct Layout {
 
 Layout compute(const Input& in);
 
+// Which cell a point falls in, as an absolute item index, or -1 for a miss.
+//
+// The inverse of the caller's cell placement, and deliberately expressed in the same terms so
+// the two cannot drift: `originX`/`originY` are the grid's top-left BEFORE the margin (i.e. the
+// content rect's x and the content top, exactly what the render passes), `pageStartRow` is the
+// first row on the visible page, and `itemCount` bounds the last partial row.
+//
+// The tappable cell is the cover box plus the label block under it -- what a reader sees as one
+// entry -- but not the kMargin gutter after it, so a tap between two covers is a miss rather
+// than a coin flip. Pure arithmetic, exercised on the host.
+int hitTest(const Layout& l, int originX, int originY, int pageStartRow, int itemCount, int px, int py);
+
 }  // namespace CoverGridLayout

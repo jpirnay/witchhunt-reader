@@ -1,5 +1,6 @@
 #include "SliderSettingPicker.h"
 
+#include <HalFrontlight.h>
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
@@ -39,6 +40,29 @@ bool configFor(const SettingAction action, SliderPickerActivity::Config& cfg) {
              .suffix = tr(STR_PAGES_SUFFIX),
              .zeroLabel = tr(STR_ALWAYS)};
       return true;
+    case SettingAction::FrontlightBrightnessPicker:
+      // The floor is MIN_BRIGHTNESS, not 0: turning the light off is the
+      // separate on/off switch, so a 0% "on" level would only be a second,
+      // worse way to reach the same place. No zeroLabel for the same reason.
+      cfg = {.titleId = StrId::STR_LIGHT_BRIGHTNESS,
+             .hintId = StrId::STR_SLIDER_STEP_HINT,
+             .minValue = HalFrontlight::MIN_BRIGHTNESS,
+             .maxValue = 100,
+             .initialValue = SETTINGS.frontlightBrightness,
+             .suffix = "%",
+             .zeroLabel = ""};
+      return true;
+    case SettingAction::FrontlightWarmthPicker:
+      // 0 = fully cool, 100 = fully warm. Total brightness is held constant
+      // across the mix by FrontlightManager, so this is a pure colour control.
+      cfg = {.titleId = StrId::STR_LIGHT_WARMTH,
+             .hintId = StrId::STR_SLIDER_STEP_HINT,
+             .minValue = 0,
+             .maxValue = 100,
+             .initialValue = SETTINGS.frontlightWarmth,
+             .suffix = "%",
+             .zeroLabel = ""};
+      return true;
     default:
       return false;
   }
@@ -54,6 +78,17 @@ void apply(const SettingAction action, const uint8_t value) {
       break;
     case SettingAction::KOSyncMinPagesPicker:
       SETTINGS.koSyncMinSessionPages = value;
+      break;
+    // Both light sliders drive the hardware as well as the setting: the picker
+    // is the only place the level is chosen, so waiting for a reboot to see it
+    // would make the control unusable.
+    case SettingAction::FrontlightBrightnessPicker:
+      SETTINGS.frontlightBrightness = value;
+      Frontlight.setBrightness(value);
+      break;
+    case SettingAction::FrontlightWarmthPicker:
+      SETTINGS.frontlightWarmth = value;
+      Frontlight.setWarmth(value);
       break;
     default:
       break;

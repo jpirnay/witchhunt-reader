@@ -1,5 +1,7 @@
 #include <BoardConfig.h>
+#include <HalCapabilities.h>
 #include <HalGPIO.h>
+#include <HalI2cBus.h>
 #include <Logging.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -14,6 +16,10 @@ HalGPIO gpio;
 namespace X3GPIO {
 
 bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
+  // Held across the whole repeated-start transaction: a touch read interleaving
+  // between endTransmission(false) and requestFrom() would break it. Runs on the
+  // loop task; touch runs on the sampler. No-op on non-touch boards.
+  HalI2cBus::Lock i2cLock;
   Wire.beginTransmission(addr);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) {
@@ -143,15 +149,66 @@ void HalGPIO::begin() {
     }
   }
 
-  // inputMgr.begin() is board-generic (it reads BoardConfig::ACTIVE.input). The
-  // rest below is still hardcoded to C3 Xteink pin macros — bringing up another
-  // board means sourcing these from BoardConfig::ACTIVE.display too.
+  // All board-generic now: inputMgr.begin() already read BoardConfig::ACTIVE.input,
+  // and the bus/pin setup below reads the active profile rather than the C3
+  // Xteink macros in HalGPIO.h. Verified pin-for-pin against the X3/X4 profiles
+  // before converting, so the C3 drives exactly the pins it always did:
+  //   EPD_SCLK 8 = display.sclk, EPD_MOSI 10 = display.mosi, EPD_CS 21 =
+  //   display.cs, SPI_MISO 7 = sd.miso, BAT_GPIO0 0 = batteryAdc,
+  //   UART0_RXD 20 = usbDetect.
   inputMgr.begin();
-  SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
 
-  if (deviceIsX4()) {
-    pinMode(BAT_GPIO0, INPUT);
-    pinMode(UART0_RXD, INPUT);
+  // Pre-claim the shared SPI bus with the C3's display + SD pins.
+  //
+  // C3 ONLY, and the reason is subtle: SPIClass::begin() early-returns once the
+  // bus is started, so whoever calls first wins the pin assignment. On the C3
+  // the panel and the card share one bus and nothing else claims it, so this
+  // pre-claim is correct and load-bearing. On every other board someone better
+  // informed gets there first -- the SDK's display driver, SDCardManager, or a
+  // board-support layer (the T5S3's BoardT5S3::begin(), which also deselects the
+  // LoRa radio sharing that bus before starting it). Pre-claiming here would
+  // stick on the wrong pins and undo those deselects.
+  //
+  // Pins come from the active profile rather than the EPD_* macros; verified
+  // equal on the C3 (display.sclk 8 / mosi 10 / cs 21, sd.miso 7).
+#if FREEINK_MCU_C3
+  const BoardConfig::DisplayPins& display = BoardConfig::ACTIVE.display;
+  SPI.begin(display.sclk, BoardConfig::ACTIVE.sd.miso, display.mosi, BoardConfig::ACTIVE.sd.cs);
+#endif
+
+  // ADC battery sense. Gated on the board actually reading its battery that way:
+  // on a fuel-gauge board the same GPIO is the gauge's I2C bus (on X3, BAT_GPIO0
+  // is X3_I2C_SCL), so configuring it as an ADC input would break the bus. This
+  // replaces a deviceIsX4() test that would have been TRUE on X4 Pro — whose
+  // batteryAdc is PIN_UNASSIGNED — and driven pinMode(-1).
+  if (HalCapabilities::hasAdcBattery()) {
+    pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
+  }
+
+  // Route the capacitive home key to the nav buttons this board physically
+  // lacks: tap -> CONFIRM, hold -> BACK. Each role is resolved separately rather
+  // than from HalCapabilities::hasBackAndConfirmButtons(), which is false when
+  // EITHER pin is missing: a board with a real Back pin but no Confirm pin must
+  // keep its real Back and gain only the synthetic Confirm. A board with no home
+  // key has nothing to route at all. Evaluated once here, after the board profile
+  // is final (including any runtime corrections).
+  if (BoardConfig::hasHomeKey()) {
+    homeKeyDrivesConfirm_ = BoardConfig::ACTIVE.input.confirm == BoardConfig::PIN_UNASSIGNED;
+    homeKeyDrivesBack_ = BoardConfig::ACTIVE.input.back == BoardConfig::PIN_UNASSIGNED;
+  }
+  if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
+    LOG_INF("HW", "Capacitive home key routed: tap->%s hold->%s", homeKeyDrivesConfirm_ ? "CONFIRM" : "(has pin)",
+            homeKeyDrivesBack_ ? "BACK" : "(has pin)");
+  }
+
+  // USB-presence detect. The pin must exist AND not be shared with the fuel-gauge
+  // I2C bus: X3 lists usbDetect = GPIO20, which is also its gauge SDA, so it must
+  // stay an I2C line. X4 has no gauge and owns GPIO20 outright; X4 Pro leaves
+  // usbDetect unassigned because the pin has not been identified yet.
+  const int8_t usbDetect = BoardConfig::ACTIVE.usbDetect;
+  const BoardConfig::BatteryGaugeConfig& gauge = BoardConfig::ACTIVE.batteryGauge;
+  if (usbDetect != BoardConfig::PIN_UNASSIGNED && usbDetect != gauge.i2cSda && usbDetect != gauge.i2cScl) {
+    pinMode(usbDetect, INPUT);
   }
 }
 
@@ -176,13 +233,127 @@ void HalGPIO::pushEdgeLocked(uint8_t button, bool pressed, uint32_t timeMs) {
   edgeTail_ = next;
 }
 
+// Reads the SDK's one-shot multi-touch flags and queues whatever it classified.
+// Runs on the sampler task, outside inputMux_ — the SDK reads must not happen
+// with interrupts disabled — and takes the lock only to push. Drops the newest
+// gesture when the ring is full, matching pushEdgeLocked's policy.
+void HalGPIO::latchTouchGestures(const uint32_t timeMs) {
+  const auto push = [&](const TouchGesture::Kind kind, const float magnitude, const float nx, const float ny) {
+    portENTER_CRITICAL(&inputMux_);
+    const int next = (gestureTail_ + 1) % GESTURE_BUF;
+    if (next != gestureHead_) {
+      gestureBuf_[gestureTail_] = {kind, magnitude, nx, ny, timeMs};
+      gestureTail_ = next;
+    }
+    portEXIT_CRITICAL(&inputMux_);
+  };
+
+  float nx = 0.0f;
+  float ny = 0.0f;
+  unsigned long durationMs = 0;
+  float degrees = 0.0f;
+  if (inputMgr.wasMultiTouchRotation(degrees, nx, ny, durationMs)) {
+    push(TouchGesture::Kind::Rotate, degrees, nx, ny);
+  }
+  float scale = 1.0f;
+  if (inputMgr.wasMultiTouchPinch(scale, nx, ny, durationMs)) {
+    push(TouchGesture::Kind::Pinch, scale, nx, ny);
+  }
+}
+
+// Latches the SDK's one-shot single-contact events. See TouchEvent for why they
+// cannot simply be read from the loop task. Drops the newest on a full ring,
+// matching pushEdgeLocked.
+void HalGPIO::latchTouchEvents() {
+  const auto push = [&](const TouchEvent& event) {
+    portENTER_CRITICAL(&inputMux_);
+    const int next = (touchEventTail_ + 1) % TOUCH_EVENT_BUF;
+    if (next != touchEventHead_) {
+      touchEventBuf_[touchEventTail_] = event;
+      touchEventTail_ = next;
+    }
+    portEXIT_CRITICAL(&inputMux_);
+  };
+
+  TouchEvent event;
+  // Long press first: it fires WHILE the finger is down, so it precedes anything
+  // the same contact produces on release. heldMs stays 0 — the SDK's latched
+  // duration belongs to the previous contact until this one ends.
+  if (inputMgr.wasTouchLongPress(event.nx, event.ny)) {
+    event.kind = TouchEvent::Kind::LongPress;
+    push(event);
+  }
+
+  // Tap and swipe are mutually exclusive by construction: a tap needs the travel
+  // at or under TOUCH_TAP_RELEASE_SLOP_PX and a swipe needs it at or over
+  // TOUCH_SWIPE_MIN_PX, and the former is defined as the latter minus one. Both
+  // are still asked independently rather than as an if/else, so this reports
+  // exactly what the SDK classified rather than a rule restated here.
+  const auto heldMs = static_cast<uint16_t>(inputMgr.lastTouchHeldMs());
+  TouchEvent swipe;
+  if (inputMgr.wasSwipe(swipe.nx, swipe.ny, swipe.nxEnd, swipe.nyEnd)) {
+    swipe.kind = TouchEvent::Kind::Swipe;
+    swipe.heldMs = heldMs;
+    push(swipe);
+  }
+  TouchEvent tap;
+  if (inputMgr.wasTouchTap(tap.nx, tap.ny)) {
+    tap.kind = TouchEvent::Kind::Tap;
+    tap.heldMs = heldMs;
+    push(tap);
+  }
+
+  if (inputMgr.wasTouchReleased()) {
+    portENTER_CRITICAL(&inputMux_);
+    touchReleasedPending_ = true;
+    portEXIT_CRITICAL(&inputMux_);
+  }
+}
+
 // One sampling pass: read + debounce the buttons, then latch any edges. Runs on
 // the sampler task once started; also called synchronously from update() before
 // the sampler is up. inputMgr.update() does the ADC read and must run OUTSIDE the
 // critical section (analogRead may take the ADC driver mutex). Only the latching
 // of the results into the shared accumulators/queue is done under inputMux_.
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+// Names for the raw BTN_* indices, for the bring-up trace below. Raw hardware
+// indices, NOT the user's remapped logical roles — the point is to see what the
+// hardware reported before any mapping.
+static const char* buttonTraceName(uint8_t idx) {
+  switch (idx) {
+    case HalGPIO::BTN_BACK:
+      return "BACK";
+    case HalGPIO::BTN_CONFIRM:
+      return "CONFIRM";
+    case HalGPIO::BTN_LEFT:
+      return "LEFT";
+    case HalGPIO::BTN_RIGHT:
+      return "RIGHT";
+    case HalGPIO::BTN_UP:
+      return "UP";
+    case HalGPIO::BTN_DOWN:
+      return "DOWN";
+    case HalGPIO::BTN_POWER:
+      return "POWER";
+    default:
+      return "?";
+  }
+}
+#endif
+
 void HalGPIO::sampleOnce() {
-  inputMgr.update();
+  {
+    // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
+    // transaction, and this runs on the btnsample task while HalClock and the
+    // fuel gauge drive the same bus from the loop task. Serialize them (P1 in
+    // docs/touch-input-migration-2026-08-14.md §5). No-op on non-touch boards.
+    //
+    // Scoped so the lock is released before the critical section below: the
+    // I2C mutex must never be held inside portENTER_CRITICAL(&inputMux_), which
+    // disables interrupts and cannot block on a semaphore.
+    HalI2cBus::Lock i2cLock;
+    inputMgr.update();
+  }
 
   uint8_t live = 0;
   uint8_t pressed = 0;
@@ -194,6 +365,75 @@ void HalGPIO::sampleOnce() {
   }
   const uint32_t now = millis();
   const unsigned long held = inputMgr.getHeldTime();
+
+  // Before the critical section: these read the SDK, and the queue push inside
+  // takes inputMux_ itself. Inert on non-touch boards.
+  latchTouchGestures(now);
+  latchTouchEvents();
+
+  // Capacitive home key -> synthetic CONFIRM button.
+  //
+  // Boards with a GT911 home key (T5S3, X4 Pro) leave input.confirm unassigned:
+  // their whole nav cluster is PIN_UNASSIGNED and confirm was meant to come from
+  // touch. That leaves the home key as the only spare input on a board that has
+  // barely any, so feed it in as BTN_CONFIRM rather than inventing a new logical
+  // button.
+  //
+  // Injected here, into the level/edge accumulators BEFORE they are latched,
+  // rather than as a bare edge-queue push. The firmware has two input paths and
+  // a key that drives only one of them is half-dead:
+  //   - the edge queue, which ButtonEventManager turns into press types
+  //     (RecentBooksActivity, SliderPickerActivity, BmpViewerActivity, ...)
+  //   - the wasPressed()/isPressed() bitmask, polled directly by ~15 activities
+  //     including MenuListActivity, i.e. the entire settings tree
+  // Setting the bits here feeds both: the loop below derives the edges from
+  // pressed/released for free, exactly as it does for a real button.
+  //
+  // One key, two roles: TAP -> CONFIRM, HOLD -> BACK. The board has no Back
+  // button at all, so without this an activity cannot be exited -- the single
+  // worst usability gap on it.
+  //
+  // This mirrors the SDK's own InputManager::updateConfirmBackHold() (the
+  // InputStyle::DigitalConfirmBackHold layout, used by the M5 PaperColor):
+  // a hold asserts BACK, and CONFIRM is emitted on release ONLY if the hold did
+  // not happen. That layout cannot simply be selected here -- it drives
+  // BoardConfig::ACTIVE.input.confirm, a real GPIO this board does not have,
+  // and it runs inside InputManager, below the point where our synthetic key
+  // enters -- but its semantics are the right ones and are reproduced exactly.
+  //
+  // Both roles are emitted as a complete press+release in a single pass. That is
+  // deliberate: InputManager gives us discrete one-shot events, not a level, and
+  // "the gesture finished" is the only moment we can identify with certainty.
+  // A Back click and a Confirm click are what activities consume, so a momentary
+  // pair is sufficient and avoids inventing a hold the hardware never reports.
+  //
+  // Event vocabulary, given InputManager keeps touchHomeKeyDown private:
+  //   wasHomeKeyPressed()     -> gesture started (role still unknown)
+  //   wasHomeKeyTapped()      -> short release  => CONFIRM
+  //   wasHomeKeyLongPressed() -> fires WHILE still held, ~700 ms, and no tap
+  //                              follows it                => BACK
+  // Because the long event arrives mid-hold and is never followed by a tap, BACK
+  // is emitted at that instant and the gesture is then closed out; a stray tap
+  // afterwards finds no open press and is ignored.
+  if (homeKeyDrivesConfirm_ || homeKeyDrivesBack_) {
+    if (inputMgr.wasHomeKeyPressed()) {
+      homeKeyHeld_ = true;
+    }
+    if (homeKeyHeld_ && inputMgr.wasHomeKeyLongPressed()) {
+      homeKeyHeld_ = false;
+      if (homeKeyDrivesBack_) {
+        pressed |= (1u << BTN_BACK);
+        released |= (1u << BTN_BACK);
+      }
+    }
+    if (homeKeyHeld_ && inputMgr.wasHomeKeyTapped()) {
+      homeKeyHeld_ = false;
+      if (homeKeyDrivesConfirm_) {
+        pressed |= (1u << BTN_CONFIRM);
+        released |= (1u << BTN_CONFIRM);
+      }
+    }
+  }
 
   portENTER_CRITICAL(&inputMux_);
   liveState_ = live;
@@ -207,6 +447,102 @@ void HalGPIO::sampleOnce() {
     if (released & (1u << i)) pushEdgeLocked(i, false, now);
   }
   portEXIT_CRITICAL(&inputMux_);
+
+#if defined(BUTTON_TRACE) && BUTTON_TRACE
+  // Raw touch trace, same purpose as the button trace below and the same
+  // reasoning about placement. Uses isTouchHeldAt(), which is const and does NOT
+  // consume: the tap/long-press events are one-shot and belong to their real
+  // consumers, so observing them here would steal them.
+  //
+  // This answers the first bring-up question -- is the panel reporting contact at
+  // all -- separately from the second, whether anything acts on it. Logged on
+  // transition only, so a resting finger does not flood the log.
+  if (BoardConfig::hasTouch()) {
+    // What the SDK made of the contact, reported from the SAMPLER task at the
+    // release edge — i.e. where the one-shot flags are still fresh. That is the
+    // point of logging it here rather than in the gesture layer: comparing this
+    // line with the [GEST] line the loop prints separates "the SDK never
+    // classified it" from "the loop was busy and missed it", which are the two
+    // failure modes and want completely different fixes.
+    //
+    // All three reads are const peeks at latched state, so tracing cannot steal
+    // the event from its real consumer.
+    if (inputMgr.wasTouchReleased()) {
+      float sxn = 0.0f, syn = 0.0f, exn = 0.0f, eyn = 0.0f;
+      const bool wasTap = inputMgr.wasTouchTap(sxn, syn);
+      const bool wasFlick = inputMgr.wasSwipe(sxn, syn, exn, eyn);
+      // Travel measured from the positions this trace sampled itself, in the
+      // panel's own pixels, because that is the frame the SDK's 60 px swipe
+      // threshold is stated in. Its own endpoints are only filled in once it has
+      // decided the contact WAS a swipe, which is no help when the question is
+      // why it decided otherwise. A contact reporting tap=0 swipe=0 has almost
+      // always moved past the 28 px tap slop but not as far as 60.
+      const int travelX =
+          static_cast<int>(fabsf(touchTraceLastNx_ - touchTraceDownNx_) * BoardConfig::ACTIVE.displayWidth);
+      const int travelY =
+          static_cast<int>(fabsf(touchTraceLastNy_ - touchTraceDownNy_) * BoardConfig::ACTIVE.displayHeight);
+      LOG_INF("TCH", "release: held=%lums tap=%d swipe=%d travel=%d,%d px (tap slop 28, swipe 60, swipe max 700ms)",
+              inputMgr.lastTouchHeldMs(), wasTap ? 1 : 0, wasFlick ? 1 : 0, travelX, travelY);
+    }
+    float tnx = 0.0f, tny = 0.0f;
+    const bool held = inputMgr.isTouchHeldAt(tnx, tny);
+    if (held) {
+      touchTraceLastNx_ = tnx;
+      touchTraceLastNy_ = tny;
+      if (!touchTraceWasHeld_) {
+        touchTraceDownNx_ = tnx;
+        touchTraceDownNy_ = tny;
+      }
+    }
+    if (held != touchTraceWasHeld_) {
+      touchTraceWasHeld_ = held;
+      if (held) {
+        LOG_INF("TCH", "contact DOWN at nx=%.3f ny=%.3f t=%lums", tnx, tny, static_cast<unsigned long>(now));
+      } else {
+        LOG_INF("TCH", "contact UP t=%lums", static_cast<unsigned long>(now));
+      }
+    }
+  }
+
+  // Raw button trace for board bring-up. Deliberately placed AFTER the critical
+  // section: logging inside portENTER_CRITICAL would run with interrupts
+  // disabled and can trip the interrupt watchdog, which is exactly the failure
+  // this kind of tracing is meant to help diagnose.
+  //
+  // This is the LOWEST level our firmware sees — straight off InputManager,
+  // before ButtonEventManager's press-type FSM and before any activity. So a
+  // press that appears here but produces no UI response is being consumed
+  // higher up, while a press that never appears here never reached us at all.
+  // That distinction is the whole point.
+  //
+  // Covers every source InputManager reports, including buttons behind an I2C
+  // expander via setButtonHook() (the T5S3's user button arrives as BTN_DOWN),
+  // which the SDK's own readButtonAdc() diagnostic cannot see — that one is
+  // specific to the Xteink ADC ladder and reports raw = -1 elsewhere.
+  // GT911 capacitive home key. Traced separately because it is NOT a BTN_* index
+  // -- InputManager surfaces it through wasHomeKeyPressed()/Tapped()/LongPressed()
+  // -- and because the SDK reads its status bit (0x10) UNCONDITIONALLY, without
+  // consulting BoardConfig's touch.hasHomeKey. So detection works on any board
+  // with a GT911 even when the profile claims no key, and this trace can settle
+  // by experiment whether a given board actually has one.
+  if (inputMgr.wasHomeKeyPressed() || inputMgr.wasHomeKeyTapped() || inputMgr.wasHomeKeyLongPressed()) {
+    LOG_INF("BTN", "HOMEKEY press=%d tap=%d long=%d | hasHomeKey=%d confirmPin=%d route=%d held=%d t=%lums",
+            inputMgr.wasHomeKeyPressed() ? 1 : 0, inputMgr.wasHomeKeyTapped() ? 1 : 0,
+            inputMgr.wasHomeKeyLongPressed() ? 1 : 0, BoardConfig::hasHomeKey() ? 1 : 0,
+            static_cast<int>(BoardConfig::ACTIVE.input.confirm), homeKeyDrivesConfirm_ ? 1 : 0, homeKeyHeld_ ? 1 : 0,
+            static_cast<unsigned long>(now));
+  }
+
+  if (pressed != 0 || released != 0) {
+    for (uint8_t i = 0; i <= BTN_POWER; i++) {
+      const bool down = (pressed & (1u << i)) != 0;
+      const bool up = (released & (1u << i)) != 0;
+      if (!down && !up) continue;
+      LOG_INF("BTN", "%s idx=%u (%s) live=0x%02X t=%lums", down ? "DOWN  " : "UP    ", i, buttonTraceName(i), live,
+              static_cast<unsigned long>(now));
+    }
+  }
+#endif
 }
 
 void HalGPIO::samplerTask(void* arg) {
@@ -226,11 +562,22 @@ void HalGPIO::startInputSampler() {
   samplerRunning_ = true;
   sampleOnce();  // prime so the first loop iteration sees current state
   // Priority above the Arduino loop task (1) so the 10ms cadence holds even while
-  // the loop task is busy in a long build slice. 2 KB stack: the sampler's deepest
-  // path (inputMgr.update → analogRead) was measured at ~380 bytes peak on device,
-  // so this leaves >4x headroom while staying small (this codebase is sensitive to
-  // stack-into-heap spills). Watch the btnSampler high-water [MEM] line if changed.
-  xTaskCreate(&HalGPIO::samplerTask, "btnsample", 2048, this, 2, &samplerTaskHandle_);
+  // the loop task is busy in a long build slice.
+  //
+  // Stack: 2 KB on a button-only board — the deepest path there
+  // (inputMgr.update → analogRead) was measured at ~380 bytes peak on device, so
+  // that leaves >4x headroom while staying small (this codebase is sensitive to
+  // stack-into-heap spills).
+  //
+  // On a touch board inputMgr.update() also walks serviceTouch() → the GT911 I2C
+  // read path, which is considerably deeper than analogRead and has NOT been
+  // measured here. 4 KB is the SDK's own figure for a task that calls update()
+  // (InputManager::beginAsync creates "fi_input" with a 4096 stack), so we match
+  // it rather than guess. Re-measure with samplerStackHighWater() once the GT911
+  // runs on real hardware — see docs/touch-input-migration-2026-08-14.md §5.
+  // Watch the btnSampler high-water [MEM] line if changed.
+  constexpr uint32_t SAMPLER_STACK_BYTES = FREEINK_CAP_TOUCH ? 4096 : 2048;
+  xTaskCreate(&HalGPIO::samplerTask, "btnsample", SAMPLER_STACK_BYTES, this, 2, &samplerTaskHandle_);
 }
 
 void HalGPIO::stopInputSampler() {
@@ -263,6 +610,20 @@ bool HalGPIO::popButtonEdge(ButtonEdge& out) {
   return got;
 }
 
+bool HalGPIO::popTouchGesture(TouchGesture& out) {
+  bool got = false;
+  portENTER_CRITICAL(&inputMux_);
+  if (gestureHead_ != gestureTail_) {
+    out = gestureBuf_[gestureHead_];
+    gestureHead_ = (gestureHead_ + 1) % GESTURE_BUF;
+    got = true;
+  }
+  portEXIT_CRITICAL(&inputMux_);
+  return got;
+}
+
+void HalGPIO::flushTouchEvents() { clearTouchEventState(); }
+
 void HalGPIO::flushButtonEdges() {
   portENTER_CRITICAL(&inputMux_);
   edgeHead_ = 0;
@@ -275,28 +636,33 @@ void HalGPIO::flushButtonEdges() {
 }
 
 void HalGPIO::update() {
-  if (samplerRunning_) {
-    // Drain the sampler's accumulated edges + latest state into the loop-side
-    // snapshot. No edge seen since the last drain is ever lost, regardless of how
-    // long this loop iteration took.
-    portENTER_CRITICAL(&inputMux_);
-    snapState_ = liveState_;
-    snapPressed_ = accumPressed_;
-    snapReleased_ = accumReleased_;
-    accumPressed_ = 0;
-    accumReleased_ = 0;
-    portEXIT_CRITICAL(&inputMux_);
-  } else {
+  if (!samplerRunning_) {
     // Pre-sampler (early boot): sample synchronously on the calling task.
     sampleOnce();
-    portENTER_CRITICAL(&inputMux_);
-    snapState_ = liveState_;
-    snapPressed_ = accumPressed_;
-    snapReleased_ = accumReleased_;
-    accumPressed_ = 0;
-    accumReleased_ = 0;
-    portEXIT_CRITICAL(&inputMux_);
   }
+  // Drain the sampler's accumulated edges + latest state into the loop-side
+  // snapshot. No edge seen since the last drain is ever lost, regardless of how
+  // long this loop iteration took.
+  portENTER_CRITICAL(&inputMux_);
+  snapState_ = liveState_;
+  snapPressed_ = accumPressed_;
+  snapReleased_ = accumReleased_;
+  accumPressed_ = 0;
+  accumReleased_ = 0;
+  // One discrete touch event per drain, and the snapshot is REPLACED (not
+  // merged) so each is visible for exactly one cycle — the same contract
+  // snapPressed_ has. Within that cycle it is a non-consuming peek, which is
+  // what lets the gesture classifier look at a tap, decide, and only then
+  // suppress it before the screen underneath reads the same tap.
+  if (touchEventHead_ != touchEventTail_) {
+    snapTouchEvent_ = touchEventBuf_[touchEventHead_];
+    touchEventHead_ = (touchEventHead_ + 1) % TOUCH_EVENT_BUF;
+  } else {
+    snapTouchEvent_ = TouchEvent{};
+  }
+  snapTouchReleased_ = touchReleasedPending_;
+  touchReleasedPending_ = false;
+  portEXIT_CRITICAL(&inputMux_);
   updateUsbState(millis());
 }
 
@@ -322,6 +688,20 @@ void HalGPIO::updateUsbState(const unsigned long now) {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
+void HalGPIO::injectPress(const uint8_t buttonIndex) {
+  if (buttonIndex > BTN_POWER) return;
+  // Press and release share a timestamp, so ButtonEventManager classifies this as a
+  // Short press -- the right reading of a tap. A hold cannot be expressed this way and
+  // is not meant to be: the strip shows one label per button, not two.
+  const uint32_t now = millis();
+  portENTER_CRITICAL(&inputMux_);
+  accumPressed_ |= (1u << buttonIndex);
+  accumReleased_ |= (1u << buttonIndex);
+  pushEdgeLocked(buttonIndex, true, now);
+  pushEdgeLocked(buttonIndex, false, now);
+  portEXIT_CRITICAL(&inputMux_);
+}
+
 bool HalGPIO::isPressed(uint8_t buttonIndex) const { return (snapState_ & (1u << buttonIndex)) != 0; }
 
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return (snapPressed_ & (1u << buttonIndex)) != 0; }
@@ -337,6 +717,107 @@ bool HalGPIO::isAnyPressed() const { return snapState_ != 0; }
 bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
 unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
+
+// --- Touch passthrough ------------------------------------------------------
+// Deliberately dumb one-liners: no orientation, no logical pixels, no gesture
+// naming. See the header for why, and MappedInputManager for the layer that
+// interprets these. Every underlying SDK method is already #if FREEINK_CAP_TOUCH
+// guarded and inert on non-touch boards.
+//
+// NOTE (P1, docs/touch-input-migration-2026-08-14.md §5): these are all pure
+// reads of state the SDK latched during inputMgr.update(). They do NOT touch
+// the I2C bus themselves — the GT911 transaction happens inside
+// serviceTouch(), which update() calls, i.e. on the btnsample task. The bus
+// mutex belongs there, not here.
+
+bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
+
+bool HalGPIO::supportsMultiTouch() const { return inputMgr.supportsMultiTouch(); }
+
+bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
+
+bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
+
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
+// The four discrete events answer from the loop-side snapshot, not from the SDK:
+// see TouchEvent. The level states below (candidate, held-at) stay live reads,
+// because "where is the finger now" has no meaning latched.
+
+bool HalGPIO::wasTouchTap(float& nx, float& ny) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::Tap) return false;
+  nx = snapTouchEvent_.nx;
+  ny = snapTouchEvent_.ny;
+  return true;
+}
+
+bool HalGPIO::wasTouchDown(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
+
+bool HalGPIO::wasTouchReleased() const { return snapTouchReleased_; }
+
+bool HalGPIO::isTouchTapCandidate(float& nx, float& ny, unsigned long& heldMs) const {
+  return inputMgr.isTouchTapCandidate(nx, ny, heldMs);
+}
+
+bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
+
+bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::LongPress) return false;
+  nx = snapTouchEvent_.nx;
+  ny = snapTouchEvent_.ny;
+  return true;
+}
+
+void HalGPIO::suppressTouchContact() {
+  inputMgr.suppressTouchContact();
+  // The SDK latch can only stop events it has not produced yet. Now that events
+  // are latched, the tap that follows a long press may ALREADY be queued by the
+  // time the long press is acted on — so drop what is held as well, or "ignore
+  // the rest of this contact" would not.
+  clearTouchEventState();
+}
+
+// Everything touch this class holds on the loop side or in its rings. Not
+// exposed: the two callers want it for different reasons (suppression, activity
+// transitions) and say so themselves.
+void HalGPIO::clearTouchEventState() {
+  portENTER_CRITICAL(&inputMux_);
+  touchEventHead_ = 0;
+  touchEventTail_ = 0;
+  touchReleasedPending_ = false;
+  gestureHead_ = 0;
+  gestureTail_ = 0;
+  portEXIT_CRITICAL(&inputMux_);
+  snapTouchEvent_ = TouchEvent{};
+  snapTouchReleased_ = false;
+}
+
+unsigned long HalGPIO::lastTouchHeldMs() const {
+  // The duration that belongs to the event being reported this cycle, so it
+  // cannot describe a different contact than the tap beside it. Falls back to
+  // the SDK's latched value when no event is in the snapshot.
+  if (snapTouchEvent_.kind == TouchEvent::Kind::Tap || snapTouchEvent_.kind == TouchEvent::Kind::Swipe) {
+    return snapTouchEvent_.heldMs;
+  }
+  return inputMgr.lastTouchHeldMs();
+}
+
+bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
+  if (snapTouchEvent_.kind != TouchEvent::Kind::Swipe) return false;
+  nxStart = snapTouchEvent_.nx;
+  nyStart = snapTouchEvent_.ny;
+  nxEnd = snapTouchEvent_.nxEnd;
+  nyEnd = snapTouchEvent_.nyEnd;
+  return true;
+}
+
+bool HalGPIO::wasTouchActivity() const {
+  // The latched half matters most here: this feeds the idle timer, and a tap
+  // completed while the loop was light-sleeping is exactly the activity that
+  // must stop it sleeping. The live read stays OR'd in so a press-DOWN, which is
+  // not a latched event, still counts.
+  return snapTouchEvent_.kind != TouchEvent::Kind::None || snapTouchReleased_ || inputMgr.wasTouchActivity();
+}
 
 unsigned long HalGPIO::waitForStablePowerRelease(unsigned long timeoutMs) {
   // Wait until the raw power-button pin reads HIGH (released) for RELEASE_STABLE_MS
@@ -577,8 +1058,13 @@ bool HalGPIO::isUsbElectricalConnected() const {
     }
     return false;
   }
-  // X4: U0RXD/GPIO20 reads HIGH when USB is connected
-  return digitalRead(UART0_RXD) == HIGH;
+  // Boards without a gauge read a plain GPIO instead: it goes HIGH when USB is
+  // connected (X4: U0RXD/GPIO20). Pin from the profile. Unassigned means the
+  // board has no electrical detect, so report not-connected and let the SOF path
+  // in updateUsbState() be the sole source of truth (X4 Pro today).
+  const int8_t usbDetect = BoardConfig::ACTIVE.usbDetect;
+  if (usbDetect == BoardConfig::PIN_UNASSIGNED) return false;
+  return digitalRead(usbDetect) == HIGH;
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
@@ -614,7 +1100,28 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   // matched nothing and fell through to Other, so setup() skipped the hold verification entirely
   // and any tap woke the device. Plugging USB does not pull this pin low, so the AfterUSBPower
   // case below (POWERON + USB) is unaffected.
-  if ((wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected) ||
+  // The POWERON arm below infers "the user pressed power" from "we booted with
+  // no USB". That inference needs BOTH of the things it assumes:
+  //
+  //  - a power path the button actually gates, so that being powered at all
+  //    implies a press (the C3's GPIO13 battery latch), and
+  //  - a trustworthy USB-detect signal, since the whole test is !usbConnected.
+  //
+  // The T5S3 has neither. Its profile leaves usbDetect PIN_UNASSIGNED, so
+  // isUsbConnected() reports false even on USB power, and its power path is the
+  // PMIC/PWR button rather than the BOOT button the profile maps as `power`. The
+  // result was that pressing the hardware RST button -- a POWERON-class reset
+  // with usbConnected forced false -- was classified as a power-button wake,
+  // failed the wake gate (the button is not held during a reset), and sent the
+  // device straight back to deep sleep in setup(). It looked like RST bricking
+  // the board; it was RST being mistaken for a spurious power press.
+  //
+  // So require a usable USB-detect signal before trusting the inference. A GPIO
+  // deep-sleep wake needs no such caveat: the pin was physically pulled low, so
+  // it is a press by definition on any board.
+  const bool canTrustUsbDetect = BoardConfig::ACTIVE.usbDetect != BoardConfig::PIN_UNASSIGNED;
+  if ((wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected &&
+       canTrustUsbDetect) ||
       (wakeupCause == ESP_SLEEP_WAKEUP_GPIO && resetReason == ESP_RST_DEEPSLEEP)) {
     return WakeupReason::PowerButton;
   }

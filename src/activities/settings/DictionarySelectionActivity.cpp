@@ -84,3 +84,7 @@ void DictionarySelectionActivity::render(RenderLock&&) {
 
   renderer.displayBuffer();
 }
+
+ListRowTap::Result DictionarySelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(optionCount()), selectedIndex);
+}
