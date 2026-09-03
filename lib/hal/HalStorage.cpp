@@ -7,6 +7,9 @@
 #include <Logging.h>
 #include <SDCardManager.h>
 #include <SdFat.h>
+#if FREEINK_CAP_USB_MSC
+#include <UsbMassStorage.h>
+#endif
 
 #include <cassert>
 #include <ctime>
@@ -16,6 +19,15 @@
 #include "HalSpiBus.h"
 
 #define SDCard SDCardManager::getInstance()
+
+#if FREEINK_CAP_USB_MSC
+namespace {
+// One session at a time, and it outlives any single activity object: the MSC
+// callbacks fire from the TinyUSB task and must not chase a pointer into an
+// activity that has already been torn down.
+freeink::UsbMassStorage usbMassStorage;
+}  // namespace
+#endif
 
 HalStorage HalStorage::instance;
 
@@ -111,6 +123,77 @@ class HalStorage::StorageLock {
   // display and SD genuinely share one bus on the C3.
   std::optional<HalSpiBus::Lock> spiLock;
 };
+
+// --- USB Drive -------------------------------------------------------------
+//
+// beginUsbDrive() unmounts the filesystem and hands the bare block device to
+// TinyUSB. Everything below takes the StorageLock so a session cannot be
+// started, queried or ended while another task is mid-operation on the card;
+// the MSC read/write callbacks themselves run lock-free by design, because by
+// then the filesystem is gone and the host is the only owner.
+
+bool HalStorage::beginUsbDrive() {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
+  if (!blockDevice) {
+    LOG_ERR("USB", "USB Drive needs a mounted SD card");
+    return false;
+  }
+
+  if (!usbMassStorage.begin(blockDevice)) {
+    LOG_ERR("USB", "USB Drive MSC initialization failed");
+    // The volume is already unmounted at this point, so put it back rather than
+    // leaving the caller on a filesystem-less device.
+    if (!SDCard.begin()) LOG_ERR("USB", "Unable to remount SD card after the failed start");
+    return false;
+  }
+  LOG_INF("USB", "USB Drive started; SD card handed to the host");
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool HalStorage::disconnectUsbDriveHost() {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  return usbMassStorage.disconnectHost();
+#else
+  return false;
+#endif
+}
+
+void HalStorage::endUsbDrive() {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  usbMassStorage.end();
+#endif
+}
+
+UsbDriveState HalStorage::usbDriveState() const {
+#if FREEINK_CAP_USB_MSC
+  StorageLock lock;
+  switch (usbMassStorage.state()) {
+    case freeink::UsbMassStorageState::WaitingForHost:
+      return UsbDriveState::WaitingForHost;
+    // Accessed only tells us the host has started reading sectors; there is
+    // nothing different to show for it, so it collapses into Connected.
+    case freeink::UsbMassStorageState::Connected:
+    case freeink::UsbMassStorageState::Accessed:
+      return UsbDriveState::Connected;
+    case freeink::UsbMassStorageState::Ejected:
+      return UsbDriveState::Ejected;
+    case freeink::UsbMassStorageState::Disconnected:
+      return UsbDriveState::Disconnected;
+    case freeink::UsbMassStorageState::IoError:
+      return UsbDriveState::IoError;
+    case freeink::UsbMassStorageState::Idle:
+      break;
+  }
+#endif
+  return UsbDriveState::Unsupported;
+}
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
   HalStorage::StorageLock lock;               \

@@ -126,6 +126,7 @@ class ActivityManager {
   // goTo... functions are convenient wrapper for replaceActivity()
   void goToFileTransfer();
   void goToSerialTransfer();  // direct entry (also used by the boot-into-transfer path)
+  void goToUsbDrive();        // no-op logging an error on boards without FREEINK_CAP_USB_MSC
   void goToSettings();
   void goToClockSettings();
   void goToKOReaderSettings();
@@ -177,6 +178,9 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  // True while the current activity owns the raw SD card (USB Drive). main.cpp
+  // consults this to suspend its own loop work — see Activity::requiresExclusiveStorageLoop().
+  bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool skipLoopDelay() const;
 

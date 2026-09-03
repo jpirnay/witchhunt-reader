@@ -53,6 +53,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 #include "util/WakeTrace.h"
@@ -277,6 +278,20 @@ static void silentRestartToSleep(bool fromTimeout) {
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_INF("MAIN", "Silent restart (target=sleep, framebuffers released, fromTimeout=%d)", fromTimeout ? 1 : 0);
   delay(50);
+  ESP.restart();
+}
+
+void restartToHomeAfterStorageHandoff() {
+  if (deepSleepInProgress) return;  // sleeping supersedes the storage-handoff reboot
+  globalReadingSessionTracker().end();
+  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Restart after storage handoff (target=home)");
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  delay(50);
+  // Give the shared USB PHY back to Serial/JTAG before resetting, or the host
+  // is left enumerating an OTG device that the reboot destroys.
+  handoffUsbOtgToSerialJtag();
   ESP.restart();
 }
 
@@ -939,6 +954,13 @@ void setup() {
   const auto wakeupReason = gpio.getWakeupReason();
 
   if (wakeupReason == HalGPIO::WakeupReason::AfterUSBPower) {
+#if FREEINK_CAP_USB_MSC
+    // Boards that can act as a USB drive must stay awake here. Leaving USB Drive
+    // reboots the device with the cable still plugged in, so this wake reason is
+    // the normal way back — sleeping through it would strand the reader in a
+    // replug loop with no USB Serial/JTAG console to see it happen.
+    LOG_DBG("MAIN", "Wakeup reason: After USB Power => staying awake (USB Drive board)");
+#else
     // If USB power caused a cold boot, go back to sleep immediately without initializing subsystems
     LOG_DBG("MAIN", "Wakeup reason: After USB Power => Deep sleep");
     halTiltSensor.deepSleep();
@@ -954,6 +976,7 @@ void setup() {
     HalClock::saveBeforeSleep(keepLpAlive);
     powerManager.startDeepSleep(gpio, keepLpAlive);
     return;
+#endif  // FREEINK_CAP_USB_MSC
   }
 
 #ifdef ENABLE_SERIAL_LOG
@@ -1311,6 +1334,28 @@ void loop() {
 
   gpio.update();
   buttonEventManager.update();
+
+  if (activityManager.requiresExclusiveStorageLoop()) {
+    // USB Drive has handed the raw SD card to a host and the filesystem is
+    // unmounted. Everything below this point reads settings, writes progress,
+    // takes screenshots or navigates — all of which need that filesystem — so
+    // run the activity and nothing else. It leaves by rebooting, never by
+    // transitioning, so there is no path out of here that we need to service.
+    mappedInputManager.update();
+    activityManager.loop();
+    if (activityManager.preventAutoSleep()) {
+      // A host is attached: keep the clock up so MSC callbacks stay responsive.
+      powerManager.setPowerSaving(false);
+      delay(10);
+    } else {
+      // Nobody is attached; the activity times the wait out itself rather than
+      // sleeping with the card detached, so a slower poll is safe here.
+      powerManager.setPowerSaving(true);
+      delay(50);
+    }
+    return;
+  }
+
   // The UI touch gate, refreshed every tick from the setting and the activity on
   // top. The reader keeps touch whatever this says — touchReaderControls governs
   // it there, and giving one behaviour two switches only creates a way for a

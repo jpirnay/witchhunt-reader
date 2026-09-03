@@ -11,6 +11,19 @@
 
 class HalFile;
 
+// Lifecycle of a USB Drive session, as the activity driving it sees it.
+// Mirrors freeink::UsbMassStorageState but keeps the SDK type out of every
+// translation unit that includes HalStorage, and collapses Connected/Accessed
+// (the UI has nothing different to say about a host that has started reading).
+enum class UsbDriveState : uint8_t {
+  Unsupported,     // build without FREEINK_CAP_USB_MSC, or no session running
+  WaitingForHost,  // MSC is up, no host has enumerated us yet
+  Connected,       // a host has the drive mounted
+  Ejected,         // the host ejected the volume
+  Disconnected,    // the cable went away after a host had been seen
+  IoError,         // a sector read/write failed; the session is not trustworthy
+};
+
 class HalStorage {
  public:
   HalStorage();
@@ -24,6 +37,20 @@ class HalStorage {
   // power under a dirty cache. begin() re-mounts on the next boot — a deep-sleep
   // wake is a chip reset, so nothing has to survive.
   void prepareForSleep();
+
+  // USB Drive ("act as a USB stick"): hands the raw SD card to a USB host as a
+  // removable disk. While a session is live the filesystem is UNMOUNTED and the
+  // host owns every sector, so the caller must have stopped all filesystem work
+  // before beginUsbDrive() and must reboot after endUsbDrive() rather than
+  // resume — nothing in the firmware's caches survives a host writing behind
+  // its back. Returns false on boards without the capability.
+  bool beginUsbDrive();
+  // Ask the host to let go (soft USB disconnect). Application/task context only,
+  // never from an MSC callback. endUsbDrive() still owns the final teardown.
+  bool disconnectUsbDriveHost();
+  void endUsbDrive();
+  UsbDriveState usbDriveState() const;
+
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);

@@ -51,6 +51,13 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // True while the activity has handed the raw SD card to something outside the
+  // firmware (USB Drive). The filesystem is unmounted for the duration, so both
+  // main.cpp's loop and ActivityManager's stand down: no screenshots, no sleep,
+  // no button shortcuts, no navigation. Such an activity leaves by rebooting,
+  // never by transitioning — a transition would let filesystem users back in
+  // while the host still owns the sectors.
+  virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
 
   // What a tap on the row at `index` should do, moving this screen's selection if it lands on a
