@@ -210,10 +210,12 @@ void BookInfoActivity::loop() {
     DescBand band;
     uint32_t before = 0;
     bool consistent = false;
+    // cppcheck-suppress knownConditionTrueFalse ; render task mutates the sequence concurrently
     if (descBandSeq.beginRead(before)) {
       band = descBand;
       consistent = descBandSeq.endRead(before);
     }
+    // cppcheck-suppress knownConditionTrueFalse ; set above, under a sequence cppcheck cannot model
     if (consistent && descTotalPages > 1) {
       switch (TapZones::halfOfBand(tapX, tapY, band.x, band.y, band.width, band.height)) {
         case TapZones::Half::Previous:

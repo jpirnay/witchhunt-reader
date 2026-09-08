@@ -202,6 +202,7 @@ bool KeyboardEntryActivity::handleKeyboardTouch() {
   // Copy both blocks under the seqlock, then hit-test the copies: see the header for why a torn
   // read here would type a key the finger was not on.
   uint32_t before = 0;
+  // cppcheck-suppress knownConditionTrueFalse ; render task mutates the sequence concurrently
   if (!keyGridSeq.beginRead(before)) return false;
   const KeyboardGrid::Rows content = contentKeyGrid;
   const KeyboardGrid::Rows bottom = bottomKeyGrid;
