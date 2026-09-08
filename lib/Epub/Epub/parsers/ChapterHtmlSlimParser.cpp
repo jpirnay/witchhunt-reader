@@ -60,6 +60,17 @@ constexpr size_t PARSE_BUFFER_SIZE = 1024;
 // chapter. A runaway count usually means a converter injected machine-generated IDs on
 // every text fragment (e.g. Kobo KePub spans). The cap prevents unbounded heap growth
 // on resource-constrained devices. TOC anchors bypass this cap.
+// What bounds this is no longer the heap. Anchors stream to SD (see setAnchorSpillPath), so a
+// chapter with ten thousand of them would cost the same RAM as one with ten. Two costs remain,
+// and both are why the cap is still here rather than raised to the uint16_t the format allows:
+// every anchor adds ~14 bytes to the section cache, and getPageForAnchor is a LINEAR scan that
+// reads entries one at a time off the card, so the cap is also the worst-case cost of a single
+// footnote jump. Raising it trades navigation latency for reach.
+//
+// 1024 covers the books measured: the heaviest real chapters seen here are an endnotes document
+// at 545 and an index chapter at 675, and converters that split notes across many small files
+// keep per-chapter counts lower still. Raise it when a real book is found that needs it -- and
+// give getPageForAnchor an index first if the number goes far past this.
 constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 // Write buffer for the anchor spill; see the emplace site in setup().
 constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
@@ -1272,9 +1283,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   //
   // Skip IDs on non-navigable inline elements (e.g. <span>): these are never link targets
   // in epub content, but reading-system converters can inject tens of thousands of them per
-  // chapter, exhausting the heap. The MAX_ANCHORS_PER_CHAPTER cap is a fallback against
-  // unknown future ID-injection patterns on other elements. TOC anchors bypass both the
-  // span filter and the cap, since they drive page breaks and core navigation.
+  // chapter. That used to exhaust the heap; now that anchors stream it costs cache size and
+  // anchor-lookup time instead, which is what MAX_ANCHORS_PER_CHAPTER bounds -- see its
+  // definition. TOC anchors bypass both the span filter and the cap, since they drive page
+  // breaks and core navigation.
   if (!isPageBreakMarker && !idAttr.empty()) {
     const bool isTocAnchor =
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
