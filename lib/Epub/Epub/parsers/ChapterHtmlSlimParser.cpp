@@ -60,7 +60,20 @@ constexpr size_t PARSE_BUFFER_SIZE = 1024;
 // chapter. A runaway count usually means a converter injected machine-generated IDs on
 // every text fragment (e.g. Kobo KePub spans). The cap prevents unbounded heap growth
 // on resource-constrained devices. TOC anchors bypass this cap.
+// What bounds this is no longer the heap. Anchors stream to SD (see setAnchorSpillPath), so a
+// chapter with ten thousand of them would cost the same RAM as one with ten. Two costs remain,
+// and both are why the cap is still here rather than raised to the uint16_t the format allows:
+// every anchor adds ~14 bytes to the section cache, and getPageForAnchor is a LINEAR scan that
+// reads entries one at a time off the card, so the cap is also the worst-case cost of a single
+// footnote jump. Raising it trades navigation latency for reach.
+//
+// 1024 covers the books measured: the heaviest real chapters seen here are an endnotes document
+// at 545 and an index chapter at 675, and converters that split notes across many small files
+// keep per-chapter counts lower still. Raise it when a real book is found that needs it -- and
+// give getPageForAnchor an index first if the number goes far past this.
 constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
+// Write buffer for the anchor spill; see the emplace site in setup().
+constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
 
 // Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
 // No heap guard needed at parse time — only a ZIP header read (~4 KB buffer on stack in
@@ -1139,7 +1152,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
             emitPage(lastBodyChildByteOffset);
           }
         }
-        anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+        recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount));
         pendingAnchorId.clear();
       }
       wordsExtractedInBlock = 0;
@@ -1164,7 +1177,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   }
   // Record deferred anchor after previous block is flushed (and any TOC page break)
   if (!pendingAnchorId.empty()) {
-    anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+    recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount));
     pendingAnchorId.clear();
   }
   // Apply pending inline image: attach float zone and place image on current page.
@@ -1260,7 +1273,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
     self->recordPageBreakLabel(label);
     if (!idAttr.empty()) {
-      self->anchorData.emplace_back(idAttr, static_cast<uint16_t>(self->completedPageCount));
+      self->recordAnchor(idAttr, static_cast<uint16_t>(self->completedPageCount));
       self->pendingAnchorId = idAttr;
     }
   }
@@ -1270,13 +1283,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   //
   // Skip IDs on non-navigable inline elements (e.g. <span>): these are never link targets
   // in epub content, but reading-system converters can inject tens of thousands of them per
-  // chapter, exhausting the heap. The MAX_ANCHORS_PER_CHAPTER cap is a fallback against
-  // unknown future ID-injection patterns on other elements. TOC anchors bypass both the
-  // span filter and the cap, since they drive page breaks and core navigation.
+  // chapter. That used to exhaust the heap; now that anchors stream it costs cache size and
+  // anchor-lookup time instead, which is what MAX_ANCHORS_PER_CHAPTER bounds -- see its
+  // definition. TOC anchors bypass both the span filter and the cap, since they drive page
+  // breaks and core navigation.
   if (!isPageBreakMarker && !idAttr.empty()) {
     const bool isTocAnchor =
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
-    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
+    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount < MAX_ANCHORS_PER_CHAPTER)) {
       self->pendingAnchorId = idAttr;
     }
   }
@@ -2906,6 +2920,40 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
 
+void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
+  // The on-disk anchor map counts with a uint16_t, so that is the hard ceiling whatever
+  // MAX_ANCHORS_PER_CHAPTER says. Silently dropping past it is the same degradation as the cap:
+  // the anchor is not navigable, the chapter still reads.
+  if (anchorCount == UINT16_MAX) {
+    return;
+  }
+  if (anchorSpillWriter.has_value()) {
+    // Exactly the section cache's anchor-map encoding (u32 length, bytes, u16 page), so
+    // Section's finalizer copies these bytes in without re-encoding them.
+    if (!anchorSpillWriter->writeString(id) || !anchorSpillWriter->writePod(page)) {
+      // A failed write leaves the spill truncated mid-record, which would corrupt every anchor
+      // after it. Give up on the map entirely rather than write a map that lies: drop the
+      // writer, and let the count go to zero so the finalizer emits an empty map.
+      LOG_ERR("EHP", "Anchor spill write failed after %u anchors; dropping the anchor map", anchorCount);
+      anchorSpillWriter.reset();
+      anchorSpillFile.close();
+      anchorSpillFailed = true;
+      anchorCount = 0;
+      return;
+    }
+    anchorCount++;
+    return;
+  }
+  if (anchorSpillFailed || anchorCount >= MAX_ANCHORS_PER_CHAPTER) {
+    return;
+  }
+  // Counts UP rather than being assigned anchorData.size(), so that a resident anchor recorded
+  // after some were already spilled adds to them instead of replacing the total. Section writes
+  // the spill first and these after, which is the order they were recorded in.
+  anchorData.emplace_back(std::move(id), page);
+  anchorCount++;
+}
+
 bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   initializeFontSizeBaseline();
 
@@ -2941,12 +2989,26 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   // docs/memory-allocation-strategy.md §9.6). The blocks are individually small, so this is
   // an allocation-COUNT fix; it is not expected to move contig on its own.
   paragraphLutPerPage.reserve(estimatePagesForSpine(totalInflatedSize));
-  // Anchors are unbounded in principle (capped at MAX_ANCHORS_PER_CHAPTER) but a few dozen in
-  // practice, and each entry is ~28 B plus a heap string for ids over the SSO limit. Reserve
-  // for the common case only: reserving for the cap would cost ~28 KB up front on every
-  // chapter to save reallocations that the rare anchor-heavy chapter alone would pay.
-  constexpr size_t TYPICAL_ANCHORS_PER_CHAPTER = 32;
-  anchorData.reserve(TYPICAL_ANCHORS_PER_CHAPTER);
+  // Anchors stream to a spill file (see setAnchorSpillPath), so nothing here scales with how
+  // many a chapter has. Opened at setup rather than lazily so a chapter that cannot spill finds
+  // out before it has recorded anything, and takes the resident fallback for all of them or for
+  // none -- which keeps the finalizer's two cases from ever both being non-empty.
+  if (!anchorSpillPath.empty()) {
+    if (Storage.openFileForWrite("EHP", anchorSpillPath, anchorSpillFile)) {
+      // 512 B rather than the writer's 4 KB default. An anchor record is ~10-15 bytes, so this
+      // still batches ~40 of them per SD write, and the point of the exercise is to stop holding
+      // kilobytes for the whole parse -- spending 4 KB to save 28 would be a poor trade.
+      anchorSpillWriter.emplace(anchorSpillFile, ANCHOR_SPILL_BUFFER_BYTES);
+    } else {
+      LOG_ERR("EHP", "Could not open anchor spill %s; holding anchors in RAM", anchorSpillPath.c_str());
+    }
+  }
+  if (!anchorSpillWriter.has_value()) {
+    // Fallback only. Reserve for the common case: reserving for the cap would cost ~28 KB up
+    // front to save reallocations that only an anchor-heavy chapter would ever pay.
+    constexpr size_t TYPICAL_ANCHORS_PER_CHAPTER = 32;
+    anchorData.reserve(TYPICAL_ANCHORS_PER_CHAPTER);
+  }
 
   // Choose progress granularity by chapter size. Each callback drives a full-screen
   // e-ink refresh (~640ms), so smaller chapters skip mid-parse ticks entirely.
@@ -3048,7 +3110,7 @@ bool ChapterHtmlSlimParser::finalize() {
         if (!hasFinalPageContent && completedPageCount > 0) {
           anchorPage = static_cast<uint16_t>(completedPageCount - 1);
         }
-        anchorData.push_back({std::move(pendingAnchorId), anchorPage});
+        recordAnchor(std::move(pendingAnchorId), anchorPage);
         pendingAnchorId.clear();
       }
       if (hasFinalPageContent) {
@@ -3057,6 +3119,24 @@ bool ChapterHtmlSlimParser::finalize() {
     }
     currentPage.reset();
     currentTextBlock.reset();
+  }
+
+  // Close the anchor spill LAST. The trailing-anchor recording just above is the final call into
+  // recordAnchor, and closing before it would send that one anchor down the resident fallback --
+  // which is how the whole map was lost once: the fallback took over for that single anchor and
+  // Section wrote its count instead of the 544 already on disk.
+  if (anchorSpillWriter.has_value()) {
+    // The writer's buffered tail has to reach disk before Section copies the file; a flush that
+    // fails leaves it short of what anchorCount promises, which would make the copied map run
+    // off its own end into the printed-page map that follows it.
+    const bool flushed = anchorSpillWriter->flush();
+    anchorSpillWriter.reset();
+    anchorSpillFile.close();
+    if (!flushed) {
+      LOG_ERR("EHP", "Anchor spill flush failed; dropping the anchor map");
+      anchorSpillFailed = true;
+      anchorCount = 0;
+    }
   }
 
   return success;

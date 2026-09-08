@@ -292,6 +292,45 @@ std::string Section::sectionHtmlCachePath(const std::string& bookCachePath, cons
 
 std::string Section::getSectionHtmlCachePath() const { return sectionHtmlCachePath(epub->getCachePath(), spineIndex); }
 
+// Scratch, not a cache: written during the parse and consumed by the finalizer a moment later.
+// Keyed on the spine alone because only one build runs at a time, and removed on both the
+// success and the abort path -- a leftover is harmless (the next build truncates it on open)
+// but there is no reason to leave one.
+std::string Section::getAnchorSpillPath() const {
+  return epub->getCachePath() + "/sections/anchors_" + std::to_string(spineIndex) + ".tmp";
+}
+
+// Appends the spill's bytes to the open section file. The parser wrote them in the anchor map's
+// own encoding, so this is a copy, not a re-serialisation -- which is the point: re-encoding
+// would mean reading the records back into memory, the exact cost the spill exists to avoid.
+//
+// The chunk is a fixed 512 B stack buffer: an anchor map is a few KB and this runs once per
+// build, so a bigger buffer would buy nothing, and asking the heap for one here -- at the end of
+// a parse, which is where contig is at its lowest -- is the last thing this path should do.
+bool Section::copyAnchorSpill(FsFile& out, const std::string& spillPath) {
+  FsFile in;
+  if (!Storage.openFileForRead("SCT", spillPath, in)) {
+    return false;
+  }
+  uint8_t chunk[512];
+  size_t remaining = in.size();
+  while (remaining > 0) {
+    const size_t want = std::min(remaining, sizeof(chunk));
+    const int got = in.read(chunk, want);
+    if (got <= 0 || static_cast<size_t>(got) != want) {
+      in.close();
+      return false;
+    }
+    if (out.write(chunk, want) != want) {
+      in.close();
+      return false;
+    }
+    remaining -= want;
+  }
+  in.close();
+  return true;
+}
+
 // Deliberately carries NEITHER the spine index nor the layout property hash. What gets written
 // here is the archive entry's own bytes, which do not depend on either -- only the .pxc pixel
 // caches do, because those are dithered at display dimensions.
@@ -971,6 +1010,10 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
       st.cssParser, epub->getImageManifest());
   st.visitor->setExternalPageBreakAnchors(std::move(externalPageBreakAnchors));
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
+  // Anchors stream to SD as they are found rather than accumulating in the parser; the
+  // finalizer below copies the spill into the section file's anchor map. Set before setup(),
+  // which is where the parser opens it.
+  st.visitor->setAnchorSpillPath(getAnchorSpillPath());
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
   // Inline footnote previews are NOT wired up here: the note text this spine needs may not be
@@ -1433,18 +1476,36 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   // chapter rather than with the page being laid out; sizes are logged once, at the only point
   // where all of them are still alive. Temporary, same lifetime as SCT_HEAP_TRACE.
   {
-    const size_t anchorBytes = anchors.size() * sizeof(std::pair<std::string, uint16_t>);
+    // anchors is empty on the normal path now that they spill to SD -- which is the answer to
+    // the question this trace was added to ask. Reported via getAnchorCount() so the line still
+    // says how many the chapter had, next to the bytes they would have cost resident.
+    const size_t anchorBytes = visitor.getAnchorCount() * sizeof(std::pair<std::string, uint16_t>);
     const size_t labelBytes = visitor.getPageBreakLabels().size() * sizeof(std::pair<uint16_t, std::string>);
     const size_t lutBytes = visitor.getParagraphLutPerPage().size() * 8;
-    LOG_INF("HEAP", "spine=%d retained: anchors=%u (~%uB) pageBreakLabels=%u (~%uB) paraLut=%u (~%uB) lut=%u (~%uB)",
-            spineIndex, static_cast<unsigned>(anchors.size()), static_cast<unsigned>(anchorBytes),
+    LOG_INF("HEAP",
+            "spine=%d retained: anchors=%u (~%uB, spilled) pageBreakLabels=%u (~%uB) paraLut=%u (~%uB) lut=%u (~%uB)",
+            spineIndex, static_cast<unsigned>(visitor.getAnchorCount()), static_cast<unsigned>(anchorBytes),
             static_cast<unsigned>(visitor.getPageBreakLabels().size()), static_cast<unsigned>(labelBytes),
             static_cast<unsigned>(visitor.getParagraphLutPerPage().size()), static_cast<unsigned>(lutBytes),
             static_cast<unsigned>(lut.size()), static_cast<unsigned>(lut.size() * sizeof(uint32_t)));
   }
 #endif
 
-  serialization::writePod(file, static_cast<uint16_t>(anchors.size()));
+  // Spilled records first, then any the parser held resident, which is the order they were
+  // recorded in. Normally one of the two is empty -- everything spills, or (if the spill would
+  // not open) everything is resident -- but writing both unconditionally means the map is right
+  // even if a build ever splits between them, rather than silently dropping one side.
+  serialization::writePod(file, visitor.getAnchorCount());
+  const uint16_t spilled = static_cast<uint16_t>(visitor.getAnchorCount() - anchors.size());
+  if (spilled > 0 && !copyAnchorSpill(file, visitor.getAnchorSpillPath())) {
+    // The records the count promises are not there. Anything downstream would read the printed
+    // page map that follows as anchor entries, so fail the build rather than cache a file whose
+    // anchor map runs off its own end.
+    LOG_ERR("SCT", "Failed to copy anchor spill into the section cache");
+    file.close();
+    Storage.remove(filePath.c_str());
+    return BuildPhaseResult::Failed;
+  }
   for (const auto& [anchor, page] : anchors) {
     serialization::writeString(file, anchor);
     serialization::writePod(file, page);
@@ -1520,6 +1581,9 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   }
 
   file.close();
+
+  // The spill has been copied into the cache; it is scratch and nothing reads it again.
+  Storage.remove(getAnchorSpillPath().c_str());
 
   // Cache the LUT in memory and open the file for reading so that
   // subsequent loadPageFromSectionFile() calls can seek directly without re-opening.
@@ -1768,6 +1832,9 @@ void Section::abortSectionBuild() {
   // closing an unopened handle asserts.
   if (file) file.close();
   Storage.remove(filePath.c_str());
+  // Unlike the extraction temp above, the anchor spill is worth nothing to a retry: it belongs to
+  // the parse that just died, and the next attempt rewrites it from the first anchor.
+  Storage.remove(getAnchorSpillPath().c_str());
   if (buildState_->cssParser) {
     buildState_->cssParser->clear();
   }
@@ -2264,6 +2331,17 @@ bool Section::readParagraphLutHeader(FsFile& outFile, uint16_t& outCount, uint32
 }
 
 std::optional<uint16_t> Section::getPageForParagraphIndex(const uint16_t pIndex) const {
+  // 0 is not a paragraph. Paragraph indices are 1-based, so 0 is what the LUT holds for a page
+  // that no <p> start tag had been seen on or before -- which is EVERY page of a chapter whose
+  // paragraphs are wrapped (`<body><div><p>`), the shape Calibre produces and most real books
+  // have. Without this guard the search below answers page 0 for it (`pagePIdx >= 0` is
+  // vacuously true on the first entry), so every caller anchored on such a page -- a footnote
+  // return, a relayout after a font change, a KOReader paragraph XPath -- was thrown to the
+  // start of the chapter. Same guard, same reason, as getPageForListItemIndex below.
+  if (pIndex == 0) {
+    return std::nullopt;
+  }
+
   FsFile f;
   uint16_t count = 0;
   uint32_t lutStart = 0;
@@ -2321,6 +2399,12 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
   serialization::readPod(f, pIdx);
 
   f.close();
+  // 0 means no <p> had been opened by the time this page broke, so this page has no paragraph
+  // to be anchored on -- report that rather than the index, which getPageForParagraphIndex
+  // cannot map back to anything but page 0. Callers all have a page-number fallback.
+  if (pIdx == 0) {
+    return std::nullopt;
+  }
   return pIdx;
 }
 
