@@ -133,6 +133,28 @@ class DictionaryWordSelectActivity final : public Activity {
   const std::vector<DictionaryEntry>& installedDictionaries();
   int closestInRow(uint16_t row, int centerX) const;
   void moveVertical(int direction);
+
+  // The word under a point in logical pixels, or -1 for a miss.
+  //
+  // Walks the fragments rather than matching a recorded set of rectangles: a page carries
+  // hundreds of selectable words, far past what TapTargets holds, and the boxes are already
+  // here -- the same argument that has the RecentBooks grid invert its own layout instead of
+  // recording cells. Per word, per fragment, once per tap; nothing runs per frame.
+  //
+  // The box tested is the fragment's exact advance box, which is the highlight's box before it
+  // is grown by 2px for air. Tapping is therefore very slightly tighter than what lights up,
+  // and neighbouring words can never claim each other's pixels.
+  int wordAt(int px, int py) const;
+
+  // What a tap did to the selection this pass, so loop() can keep its one copy of the
+  // move-then-speculate bookkeeping instead of the touch path growing a second one.
+  enum class WordTouch : uint8_t {
+    None,      // nothing here for touch; the buttons get their turn
+    Consumed,  // claimed but deliberately inert (a contact still down)
+    Moved,     // the cursor is now on the tapped word
+    Activate,  // the tap landed on the word already selected
+  };
+  WordTouch consumeWordTouch();
   void performLookup();
   bool drawHighlightWithSnapshot();
   void drawHints() const;

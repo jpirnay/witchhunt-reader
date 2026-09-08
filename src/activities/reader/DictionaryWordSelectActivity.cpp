@@ -343,6 +343,44 @@ int DictionaryWordSelectActivity::closestInRow(const uint16_t row, const int cen
   return best;
 }
 
+int DictionaryWordSelectActivity::wordAt(const int px, const int py) const {
+  for (int index = 0; index < static_cast<int>(words.size()); index++) {
+    const Word& word = words[index];
+    for (uint8_t f = 0; f < word.fragmentCount; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      if (px < piece.x || px >= piece.x + piece.width) continue;
+      if (py >= piece.y && py < piece.y + drawStyleOf(piece).height) return index;
+    }
+  }
+  return -1;
+}
+
+DictionaryWordSelectActivity::WordTouch DictionaryWordSelectActivity::consumeWordTouch() {
+  if (!mappedInput.hasTouch() || words.empty()) return WordTouch::None;
+
+  int x = 0;
+  int y = 0;
+  int index = -1;
+  const auto hit = [&](const int px, const int py) {
+    index = wordAt(px, py);
+    return index >= 0;
+  };
+
+  // Claimed but not acted on: moving the cursor mid-contact would defeat the two-step below.
+  if (mappedInput.wasScreenTouchDown(x, y) && hit(x, y)) return WordTouch::Consumed;
+  if (!mappedInput.wasScreenTapped(x, y) || !hit(x, y)) return WordTouch::None;
+
+  switch (ListRowTap::apply(index, static_cast<int>(words.size()), selected)) {
+    case ListRowTap::Result::Rejected:
+      return WordTouch::Consumed;
+    case ListRowTap::Result::Selected:
+      return WordTouch::Moved;
+    case ListRowTap::Result::Activate:
+      return WordTouch::Activate;
+  }
+  return WordTouch::Consumed;
+}
+
 void DictionaryWordSelectActivity::moveVertical(const int direction) {
   const Word& current = words[selected];
   const int centerX = current.x + current.width / 2;
@@ -598,20 +636,42 @@ void DictionaryWordSelectActivity::loop() {
 
   const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
   const int before = selected;
-  // The cursor travels over the page as the reader sees it, so it follows the logical directions:
-  // whichever button pair lies across the screen picks the neighbouring word, and whichever runs
-  // up and down it changes line.
-  if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left) && selected > 0) {
-    selected--;
-    requestUpdate();
-  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right) && hasNextWord) {
-    selected++;
-    requestUpdate();
-  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
-    moveVertical(-1);
-  } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down)) {
-    moveVertical(1);
+
+  // A tap moves the cursor onto the word under the finger; a second tap on the word it is
+  // already on looks that word up. Point-then-confirm, as everywhere else, and it earns its keep
+  // here more than most: a lookup searches the dictionary index off the SD card and opens a
+  // whole activity, while a mis-tap on a page of small print costs one more tap.
+  //
+  // Resolved before the buttons and, when it moves the cursor, deliberately falls THROUGH to the
+  // shared tail below -- the debounce restart and speculateForSelection() are the same for a
+  // cursor moved by a finger as for one moved by a button.
+  const WordTouch touch = consumeWordTouch();
+  if (touch == WordTouch::Activate) {
+    performLookup();
+    return;
   }
+  if (touch == WordTouch::Moved) {
+    requestUpdate();
+  } else if (touch == WordTouch::None) {
+    // The cursor travels over the page as the reader sees it, so it follows the logical
+    // directions: whichever button pair lies across the screen picks the neighbouring word, and
+    // whichever runs up and down it changes line.
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left) && selected > 0) {
+      selected--;
+      requestUpdate();
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right) && hasNextWord) {
+      selected++;
+      requestUpdate();
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
+      moveVertical(-1);
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down)) {
+      moveVertical(1);
+    }
+  }
+  // WordTouch::Consumed lands here having changed nothing, which is the point: a contact still
+  // down claims the tap so nothing else reads it, and the tail is a no-op when the cursor has
+  // not moved.
+  //
   // Restart the debounce on every move, so holding a direction down resolves
   // once at the end instead of at every word passed through.
   if (selected != before) lastMoveMs = millis();
