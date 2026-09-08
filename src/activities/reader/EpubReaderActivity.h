@@ -574,7 +574,10 @@ class EpubReaderActivity final : public Activity {
   // the caller's paragraph rather than its page number: any repagination between the jump and the
   // return — a font change made from inside the note, a background rebuild — moves page numbers,
   // and landing a page or two off is exactly the disorientation the return is meant to prevent.
-  // pageNumber/pageCount stay as the proportional fallback for a spine with no paragraph LUT.
+  // pageNumber/pageCount stay as the proportional fallback for a spine with no paragraph LUT --
+  // and for the far more common case of a book whose <p>s are not direct children of <body>
+  // (`<body><div><p>`, what Calibre emits), where no page has an anchorable paragraph at all and
+  // getParagraphIndexForPage answers nullopt for every one of them.
   struct SavedPosition {
     int spineIndex = 0;
     int pageNumber = 0;

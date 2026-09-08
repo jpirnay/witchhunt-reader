@@ -2264,6 +2264,17 @@ bool Section::readParagraphLutHeader(FsFile& outFile, uint16_t& outCount, uint32
 }
 
 std::optional<uint16_t> Section::getPageForParagraphIndex(const uint16_t pIndex) const {
+  // 0 is not a paragraph. Paragraph indices are 1-based, so 0 is what the LUT holds for a page
+  // that no <p> start tag had been seen on or before -- which is EVERY page of a chapter whose
+  // paragraphs are wrapped (`<body><div><p>`), the shape Calibre produces and most real books
+  // have. Without this guard the search below answers page 0 for it (`pagePIdx >= 0` is
+  // vacuously true on the first entry), so every caller anchored on such a page -- a footnote
+  // return, a relayout after a font change, a KOReader paragraph XPath -- was thrown to the
+  // start of the chapter. Same guard, same reason, as getPageForListItemIndex below.
+  if (pIndex == 0) {
+    return std::nullopt;
+  }
+
   FsFile f;
   uint16_t count = 0;
   uint32_t lutStart = 0;
@@ -2321,6 +2332,12 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
   serialization::readPod(f, pIdx);
 
   f.close();
+  // 0 means no <p> had been opened by the time this page broke, so this page has no paragraph
+  // to be anchored on -- report that rather than the index, which getPageForParagraphIndex
+  // cannot map back to anything but page 0. Callers all have a page-number fallback.
+  if (pIdx == 0) {
+    return std::nullopt;
+  }
   return pIdx;
 }
 

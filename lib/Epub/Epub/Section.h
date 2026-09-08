@@ -293,7 +293,8 @@ class Section {
 
   // Look up the page number for a paragraph index (1-based, from XPath p[N]).
   // Uses the per-page paragraph LUT stored in the section cache.
-  // Returns nullopt if the paragraph LUT is not available (old cache format).
+  // Returns nullopt if the paragraph LUT is not available (old cache format) or pIndex is 0,
+  // which is not a paragraph but the LUT's "no <p> seen yet" value.
   std::optional<uint16_t> getPageForParagraphIndex(uint16_t pIndex) const;
 
   // Look up the page number for a running <li> index (1-based, the Nth <li> at any depth
@@ -304,7 +305,11 @@ class Section {
 
   // Look up the paragraph index for a given page number.
   // Returns the 1-based paragraph index of the last <p> element on or before the page.
-  // Returns nullopt if the paragraph LUT is not available (old cache format).
+  // Returns nullopt if the paragraph LUT is not available (old cache format) or the page has no
+  // such <p> at all -- which is every page of a chapter whose paragraphs are not direct children
+  // of <body> (`<body><div><p>`, what Calibre emits), since only body-child <p>s are counted.
+  // Callers must treat that as "this page cannot be anchored on a paragraph" and fall back to
+  // the page number; it is NOT an anchor on paragraph 0.
   std::optional<uint16_t> getParagraphIndexForPage(uint16_t page) const;
 
   // Look up the XHTML byte offset recorded at the page break that started the given page.
