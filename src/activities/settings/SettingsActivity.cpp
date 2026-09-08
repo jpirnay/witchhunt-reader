@@ -158,6 +158,9 @@ void SettingsActivity::onEnter() {
   addToMoved(systemSettings, lastSystemSub,
              std::move(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache)
                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings, lastSystemSub,
+             std::move(SettingInfo::Action(StrId::STR_SCREEN_REPAIR, SettingAction::ScreenRepair)
+                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
   addToMoved(systemSettings, lastSystemSub,
              std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE1).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
