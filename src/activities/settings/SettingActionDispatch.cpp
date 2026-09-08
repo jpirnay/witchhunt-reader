@@ -15,6 +15,7 @@
 #include "OpdsServerListActivity.h"
 #include "OtaUpdateActivity.h"
 #include "ReadingStatsActivity.h"
+#include "ScreenRepairActivity.h"
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "StatusBarSettingsActivity.h"
@@ -45,6 +46,8 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false);
     case SettingAction::ClearCache:
       return std::make_unique<ClearCacheActivity>(renderer, mappedInput);
+    case SettingAction::ScreenRepair:
+      return std::make_unique<ScreenRepairActivity>(renderer, mappedInput);
     case SettingAction::CheckForUpdates:
       return std::make_unique<OtaUpdateActivity>(renderer, mappedInput);
     case SettingAction::SdFirmwareUpdate:

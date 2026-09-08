@@ -262,7 +262,18 @@ class HalGPIO {
   // callers outside this class. Takes a RAW index, not a logical Button: remapping is
   // applied downstream, so an injected BTN_BACK follows the user's button mapping
   // exactly as the physical key would.
-  void injectPress(uint8_t buttonIndex);
+  //
+  // `longPress` backdates the press edge past ButtonEventManager's long threshold, so the FSM
+  // classifies it Long. Without it a whole class of actions is unreachable on a touch-only
+  // board: X4 Pro has no Back or Confirm pin and its capacitive home key emits press and
+  // release in the same pass, so NOTHING there can produce a hold -- and the file browser's
+  // context menu, the recents view toggle, remove and book info all sit on one.
+  void injectPress(uint8_t buttonIndex, bool longPress = false);
+
+  // How far back an injected long press dates its press edge. Must stay above
+  // ButtonEventManager::LONG_PRESS_MS, which lives in src/ and cannot be included from the HAL;
+  // ActivityManager static_asserts the relationship where both are visible.
+  static constexpr uint32_t INJECTED_LONG_PRESS_MS = 1500;
   bool isPressed(uint8_t buttonIndex) const;
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;

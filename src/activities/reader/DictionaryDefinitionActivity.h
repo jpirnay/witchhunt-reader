@@ -57,8 +57,12 @@ class DictionaryDefinitionActivity final : public Activity {
     uint16_t len;
   };
 
-  // Usable body-text area between the header and the button hints.
+  // Usable body-text rectangle between the header and the button hints. Carries its origin as
+  // well as its size because the tap-to-page split has to land on exactly the rectangle the text
+  // was drawn in -- one statement of it, read by both.
   struct BodyArea {
+    int x;
+    int y;
     int width;
     int height;
   };

@@ -65,6 +65,7 @@
 #include "activities/home/BookInfoActivity.h"
 #include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
+#include "components/LinkMarkerMatch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
@@ -638,7 +639,15 @@ void EpubReaderActivity::onExit() {
   //
   // Only when anti-aliasing actually ran: a plain B/W page leaves the panel on
   // its rails already, and a clean-bank refresh costs about a second and a half.
-  if (getEffectiveTextAntiAliasing()) {
+  //
+  // ...except where that premise does not hold. It is a statement about the X3/X4
+  // controllers, whose B/W path drives to the rails. On the LGFX panels -- the ones that
+  // answer supportsGrayFrame(), i.e. the T5 S3 -- EVERY push goes through the same graded
+  // canvas, and FAST maps to a differential bank that deliberately skips the eraser
+  // (LgfxEpdDriver::epdModeFor). So a B/W page leaves the canvas holding the page just as a
+  // grey one does, and the home screen's FAST diff runs against it. Reported from hardware
+  // as the last reader page and the home screen superimposed, settling a refresh later.
+  if (getEffectiveTextAntiAliasing() || renderer.supportsGrayFrame()) {
     ReaderUtils::enforceExitFullRefresh(renderer);
   }
 
@@ -836,6 +845,13 @@ void EpubReaderActivity::loop() {
         continue;
       }
     }
+  }
+
+  // A tap on a footnote marker or cross-reference follows the link. Tested before the page-turn
+  // zones and the menu tap: a marker can sit anywhere on the page, including inside one of them,
+  // and it is the more specific target.
+  if (handleLinkTouch()) {
+    return;
   }
 
   // A centre-third tap, or the top-edge menu swipe, opens the reader menu.
@@ -3857,6 +3873,7 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
       // the reader can still navigate out with the section left intact.
       LOG_ERR("ERS", "Page %d unreadable after rebuild (spine %d); giving up on this page", section->currentPage,
               currentSpineIndex);
+      TapTargets::readerLinks().invalidate();
       renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
       renderStatusBar();
       renderer.displayBuffer();
@@ -3977,6 +3994,9 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
   // Requested page not built yet (or it's an image page / non-Page target): show the indexing
   // popup once, leaving any already-displayed page underneath it.
   if (!buildingPopupShown_) {
+    // The popup covers the page, so the links under it must stop answering taps -- following a
+    // marker nobody can see would be the phantom-target bug with an extra step.
+    TapTargets::readerLinks().invalidate();
     GUI.drawPopup(renderer, tr(STR_INDEXING));
     buildingPopupShown_ = true;
   }
@@ -4412,6 +4432,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // pre-render). Mark the overlay as a miss before the status bar draws it.
   backgroundAGlyph_ = '-';
 #endif
+  publishPageLinkTargets(*page, orientedMarginLeft, contentTop);
   renderStatusBar();
   if (showTruncatedSectionHintThisRender) {
     const int hintX = orientedMarginLeft + 4;
@@ -4701,6 +4722,7 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
               /*monochromeOutput=*/true);
+  publishPageLinkTargets(page, layout.marginLeft, contentTop);
   renderStatusBar();
   if (forceHalfRefreshAfterPopup_) {
     // First real page after the indexing popup: establish a clean baseline (see
@@ -4850,6 +4872,9 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // background rendering produced this page.
   backgroundAGlyph_ = 'x';
 #endif
+  // The pixels came from the pre-render, but the Page is in hand here and the links have to
+  // describe what is going on screen NOW — the pre-render measured the page AFTER this one.
+  publishPageLinkTargets(page, orientedMarginLeft, contentTop);
   renderStatusBar();
 
   // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
@@ -5080,6 +5105,147 @@ bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
     const int minute = now > 0 ? static_cast<int>(now / 60) : -1;
     if (minute != lastStatusBarClockMinute) return false;
   }
+  return true;
+}
+
+namespace {
+// Grown a little around the glyphs, and floored, because a footnote marker is often a single
+// superscript digit a few pixels wide -- an exact box would be a target no finger can hit. Kept
+// modest on purpose: these rects are tested BEFORE the page-turn zones, so an over-generous
+// marker would eat page turns from the text around it.
+constexpr int kLinkTargetPad = 6;
+constexpr int kLinkTargetMin = 30;
+}  // namespace
+
+void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marginLeft, const int contentTop) const {
+  TapTargets::Recorder::Builder targets;
+  if (currentPageFootnotes.empty()) {
+    TapTargets::readerLinks().record(targets);
+    return;
+  }
+
+  const int fontId = getEffectiveReaderFontId();
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+
+  // The links arrive in page order, so one forward walk resolves them all: whichever word first
+  // completes the text of the link we are looking for IS that link. Matching in order rather than
+  // by text alone is what keeps a marker "1" from being claimed by an unrelated "1" earlier in
+  // the paragraph.
+  size_t nextLink = 0;
+  size_t markerPos = 0;  // how much of that link's text the run in progress has accounted for
+  bool runOpen = false;
+  int runLeft = 0, runTop = 0, runRight = 0, runBottom = 0;
+
+  for (const auto& element : page.elements) {
+    if (nextLink >= currentPageFootnotes.size()) break;
+    if (element->getTag() != TAG_PageLine) continue;
+    const auto* line = static_cast<const PageLine*>(element.get());
+    const auto& block = line->getBlock();
+    if (!block || !block->valid()) continue;
+
+    for (uint16_t i = 0; i < block->wordCount() && nextLink < currentPageFootnotes.size(); i++) {
+      // A link no word can ever match -- an image marker, whose display text is empty, or text
+      // that is nothing but brackets -- would otherwise sit at the head of the queue forever and
+      // cost every link behind it its target. Step over it here; the footnote list off the reader
+      // menu still reaches it.
+      //
+      // Anything else keeps its place: matching strictly in page order is what stops a marker "1"
+      // being claimed by an unrelated "1" earlier in the paragraph, so a link whose text simply
+      // is not on the page does still block the rest. That is the safe way to be wrong -- no
+      // target beats a target on the wrong words.
+      size_t markerCoreStart = 0;
+      size_t markerCoreEnd = 0;
+      while (nextLink < currentPageFootnotes.size() &&
+             !LinkMarkerMatch::core(currentPageFootnotes[nextLink].number,
+                                    strlen(currentPageFootnotes[nextLink].number), markerCoreStart, markerCoreEnd)) {
+        nextLink++;
+        markerPos = 0;
+        runOpen = false;
+      }
+      if (nextLink >= currentPageFootnotes.size()) break;
+
+      const char* marker = currentPageFootnotes[nextLink].number;
+      const size_t markerLen = strlen(marker);
+      const char* text = block->wordText(i);
+      const size_t textLen = block->wordTextLen(i);
+
+      bool matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen);
+      if (!matched && markerPos != 0) {
+        // A multi-word run that started earlier and then diverged. Drop it and give this word a
+        // fresh chance at being the first token, rather than losing the link to a false start.
+        markerPos = 0;
+        runOpen = false;
+        matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen);
+      }
+      if (!matched) continue;
+
+      const TextBlock::WordBox box =
+          block->wordBox(renderer, i, fontId, line->xPos + marginLeft, line->yPos + contentTop);
+      if (box.width <= 0 || box.height <= 0) {
+        markerPos = 0;
+        runOpen = false;
+        continue;
+      }
+      if (runOpen) {
+        runLeft = std::min(runLeft, static_cast<int>(box.x));
+        runTop = std::min(runTop, static_cast<int>(box.y));
+        runRight = std::max(runRight, box.x + box.width);
+        runBottom = std::max(runBottom, box.y + box.height);
+      } else {
+        runLeft = box.x;
+        runTop = box.y;
+        runRight = box.x + box.width;
+        runBottom = box.y + box.height;
+        runOpen = true;
+      }
+
+      if (!LinkMarkerMatch::complete(marker, markerLen, markerPos)) continue;
+
+      int x = runLeft - kLinkTargetPad;
+      int y = runTop - kLinkTargetPad;
+      int w = std::max(runRight - runLeft + 2 * kLinkTargetPad, kLinkTargetMin);
+      int h = std::max(runBottom - runTop + 2 * kLinkTargetPad, kLinkTargetMin);
+      // Centre the floor on the glyphs rather than growing right/down only, and keep the rect on
+      // the panel so a marker in a margin is still reachable.
+      x -= std::max(0, (w - (runRight - runLeft + 2 * kLinkTargetPad)) / 2);
+      y -= std::max(0, (h - (runBottom - runTop + 2 * kLinkTargetPad)) / 2);
+      if (x < 0) x = 0;
+      if (y < 0) y = 0;
+      if (x + w > screenW) w = screenW - x;
+      if (y + h > screenH) h = screenH - y;
+      if (w > 0 && h > 0) targets.add(x, y, w, h, static_cast<int>(nextLink));
+
+      nextLink++;
+      markerPos = 0;
+      runOpen = false;
+    }
+  }
+  TapTargets::readerLinks().record(targets);
+}
+
+// A tap on a footnote marker or cross-reference follows it, exactly as picking it out of the
+// footnote list does -- navigateToHref with savePosition, so page-back returns to where the
+// reader was.
+//
+// Single tap, not point-then-confirm. Two taps would need somewhere to show the highlight, which
+// on a full page of text there is not; and the jump is the cheapest action in the reader to undo,
+// because coming back is already a first-class gesture.
+bool EpubReaderActivity::handleLinkTouch() {
+  if (!mappedInput.hasTouch() || !SETTINGS.touchReaderControls) return false;
+  if (!TapTargets::readerLinks().hasTargets()) return false;
+
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTapped(x, y)) return false;
+  const int link = TapTargets::readerLinks().hitTest(x, y);
+  // Bounds-checked against the CURRENT list, not the one the render saw: the targets are
+  // published on the render task and the page can turn under a tap.
+  if (link < 0 || link >= static_cast<int>(currentPageFootnotes.size())) return false;
+
+  mappedInput.suppressTouchContact();
+  LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
+  navigateToHref(currentPageFootnotes[link].href, true);
   return true;
 }
 
@@ -5388,18 +5554,23 @@ void EpubReaderActivity::openReaderMenu() {
         // the page it was computed for.
         pendingGrayscale_ = {};
 
-        // And repaint. Every other sub-activity handler here already requests an
-        // update (book info, reading stats, chapter selection); the menu's did not,
-        // so a plain Back left the menu on screen until something else happened to
-        // trigger a render.
+        // Arm a HALF for the resumed page, then repaint. Every other sub-activity handler
+        // here already requests an update (book info, reading stats, chapter selection);
+        // the menu's did not, so a plain Back left the menu on screen until something
+        // else happened to trigger a render.
         //
-        // Note this repaint goes out on the normal refresh cycle, usually FAST. The
-        // enforceExitFullRefresh() above does NOT cover it: that override is one-shot
-        // and the menu's own first paint consumes it on the way in, which is what it
-        // is there for. Coming back from a full-screen menu to text on a fast LUT is
-        // the ghosting-prone direction, so arming a second HALF here is defensible --
-        // held off because a HALF costs ~1.5 s on the 960x540 panel and no ghosting
-        // has actually been reported on this transition.
+        // The enforceExitFullRefresh() before the launch does NOT cover this: the override
+        // is one-shot and the menu's own first paint consumes it on the way IN, which is
+        // what it is there for. So the return repaint went out on the normal cycle, usually
+        // FAST -- and a full-screen menu back to text is the worst case for a differential
+        // bank, which cannot drive every changed pixel in one fast pass.
+        //
+        // This was left out on the argument that a HALF costs ~1.5 s and no ghosting had
+        // been reported here. It has now: on the T5 S3 the transition shows the menu and the
+        // page superimposed, then settles a refresh later. That is not even a saving -- the
+        // reader was paying for a bad differential plus whatever repaired it. The chapter
+        // selection handler below arms exactly this, for exactly this reason.
+        ReaderUtils::enforceExitFullRefresh(renderer);
         requestUpdate();
       });
 }

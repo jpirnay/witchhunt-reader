@@ -3601,16 +3601,33 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
       break;
   }
 
-  // One-shot per (orientation, insets) combination. The profile values are in the
+  // The reader's own clearance, on top of the profile's. Uniform, so it is added after the
+  // rotation rather than before -- the four edges would come out the same either way, and doing
+  // it here keeps the switch above a statement of the BOARD's geometry alone.
+  const int pad = viewablePadding.load(std::memory_order_relaxed);
+  if (pad > 0) {
+    // Clamped to a quarter of each axis so a future option, or a bad settings file, cannot
+    // inset the viewport out of existence.
+    const int maxH = getScreenWidth() / 4;
+    const int maxV = getScreenHeight() / 4;
+    const int padH = pad < maxH ? pad : maxH;
+    const int padV = pad < maxV ? pad : maxV;
+    *outTop += padV;
+    *outBottom += padV;
+    *outLeft += padH;
+    *outRight += padH;
+  }
+
+  // One-shot per (orientation, insets, padding) combination. The profile values are in the
   // panel's NATIVE PORTRAIT frame and are rotated above, so a change to `left`
   // does not necessarily move the screen's left edge -- in landscape it moves the
   // top. This logs both halves so the mapping can be checked against the device
   // instead of inferred.
   static int lastKey = -1;
-  const int key = (static_cast<int>(getOrientation()) << 24) | (top << 16) | (right << 8) | left;
+  const int key = (static_cast<int>(getOrientation()) << 24) | (pad << 20) | (top << 16) | (right << 8) | left;
   if (key != lastKey) {
     lastKey = key;
-    LOG_INF("GFX", "Viewable insets: profile T%d R%d B%d L%d, orientation=%d -> screen T%d R%d B%d L%d", top, right,
-            bottom, left, static_cast<int>(getOrientation()), *outTop, *outRight, *outBottom, *outLeft);
+    LOG_INF("GFX", "Viewable insets: profile T%d R%d B%d L%d +pad %d, orientation=%d -> screen T%d R%d B%d L%d", top,
+            right, bottom, left, pad, static_cast<int>(getOrientation()), *outTop, *outRight, *outBottom, *outLeft);
   }
 }

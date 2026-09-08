@@ -147,4 +147,18 @@ inline Recorder& tabBar() {
   return r;
 }
 
+// The internal links on the reader's current page -- footnote markers and cross-references
+// alike, which the parser collects into one list (every internal <a href> becomes a
+// FootnoteEntry). Values are indices into EpubReaderActivity::currentPageFootnotes.
+//
+// Capacity is the reason this is worth a note: a page may carry up to
+// Page::MAX_FOOTNOTES_PER_PAGE (16) links and only the first kMaxTargets of them become
+// tappable. Raising the shared capacity would cost every recorder the extra bytes for a case
+// that barely occurs, and the footnote list off the reader menu still reaches all of them --
+// so the tap is a shortcut to the common case, not the only way in.
+inline Recorder& readerLinks() {
+  static Recorder r;
+  return r;
+}
+
 }  // namespace TapTargets

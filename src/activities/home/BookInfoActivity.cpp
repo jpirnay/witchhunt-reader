@@ -15,6 +15,7 @@
 #include <ctime>
 
 #include "ReadingStats.h"
+#include "components/TapZones.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -179,18 +180,62 @@ void BookInfoActivity::onEnter() {
 // whichever way the device is held — only which of the two comes first on screen moves, and
 // frontStripPrevious/Next answer that exactly the way mapLabels() does.
 void BookInfoActivity::loop() {
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
-  } else if (mappedInput.wasReleased(MappedInputManager::frontStripPrevious())) {
+  const auto goPrev = [this] {
     if (descPage > 0) {
       descPage--;
       requestUpdate(true);
     }
-  } else if (mappedInput.wasReleased(MappedInputManager::frontStripNext())) {
+  };
+  const auto goNext = [this] {
     if (descPage + 1 < descTotalPages) {
       descPage++;
       requestUpdate(true);
     }
+  };
+
+  // A description too long for one screen turns by tapping its two halves, the way a book page
+  // does. Bounded to the description band rather than using the reader's full-height zones: this
+  // screen draws a hint strip, and full-height zones would claim the taps meant for it.
+  //
+  // Only while there is somewhere to go. With a one-page description the band means nothing, and
+  // consuming taps over it would be a hole in the screen for no benefit.
+  int tapX = 0;
+  int tapY = 0;
+  if (mappedInput.hasTouch() && mappedInput.wasScreenTapped(tapX, tapY)) {
+    // Copy the band under the seqlock before deciding anything with it. A torn read answers
+    // "nothing here" and the tap falls through to the hint strip -- the safe way to be wrong.
+    //
+    // descTotalPages is read plainly: a single aligned int is atomic on this part, and the worst
+    // a one-frame-stale count can do is let a tap through to goNext()/goPrev(), which guard.
+    DescBand band;
+    uint32_t before = 0;
+    bool consistent = false;
+    // cppcheck-suppress knownConditionTrueFalse ; render task mutates the sequence concurrently
+    if (descBandSeq.beginRead(before)) {
+      band = descBand;
+      consistent = descBandSeq.endRead(before);
+    }
+    // cppcheck-suppress knownConditionTrueFalse ; set above, under a sequence cppcheck cannot model
+    if (consistent && descTotalPages > 1) {
+      switch (TapZones::halfOfBand(tapX, tapY, band.x, band.y, band.width, band.height)) {
+        case TapZones::Half::Previous:
+          goPrev();
+          return;
+        case TapZones::Half::Next:
+          goNext();
+          return;
+        case TapZones::Half::None:
+          break;
+      }
+    }
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    finish();
+  } else if (mappedInput.wasReleased(MappedInputManager::frontStripPrevious())) {
+    goPrev();
+  } else if (mappedInput.wasReleased(MappedInputManager::frontStripNext())) {
+    goNext();
   }
 }
 
@@ -212,8 +257,11 @@ void BookInfoActivity::render(RenderLock&&) {
     // patching just the description/hints bands; without this the stale top section (cover or
     // "Loading") ships back to the panel and the cover appears to flip in and out.
     renderer.syncWriteBufferFromDisplayed();
-    renderer.fillRect(descBandX, descBandY, descBandWidth, descBandHeight, false);
+    renderer.fillRect(descBand.x, descBand.y, descBand.width, descBand.height, false);
     renderer.fillRect(0, hintsBandY, renderer.getScreenWidth(), hintsBandHeight, false);
+    // No seqlock bracket here: renderDescriptionAndHints() only READS descBand (it writes the
+    // page count and the wrapped lines). Bumping the counter around it would make a concurrent
+    // tap see a torn read and drop itself for no reason.
     renderDescriptionAndHints();
     ++partialRenderCount;
     renderer.displayBuffer();
@@ -367,12 +415,16 @@ void BookInfoActivity::render(RenderLock&&) {
   topSectionBottom = std::max(topSectionBottom, metaY);
 
   // --- Description: full width below the top section, paged via Left/Right ---
+  // Bracketed because loop() reads this band to resolve a tap, and it runs on the other task:
+  // a half-written rectangle would page the description the wrong way, or page one that is not
+  // on screen. Same bar the touch recorders set for the same reason.
+  descBandSeq.beginWrite();
   descTotalPages = 0;
   descLinesPerPage = 0;
-  descBandX = textX;
-  descBandWidth = textWidth;
-  descBandY = contentBottom;
-  descBandHeight = 0;
+  descBand.x = textX;
+  descBand.width = textWidth;
+  descBand.y = contentBottom;
+  descBand.height = 0;
   if (!description.empty()) {
     int y = topSectionBottom + metrics.verticalSpacing;
     if (y + lineHeightSmall + 4 < contentBottom) {
@@ -380,8 +432,8 @@ void BookInfoActivity::render(RenderLock&&) {
       y += 4;
 
       // Record the description band (below the separator) for partial redraws.
-      descBandY = y;
-      descBandHeight = contentBottom - y;
+      descBand.y = y;
+      descBand.height = contentBottom - y;
     }
   }
 
@@ -390,6 +442,7 @@ void BookInfoActivity::render(RenderLock&&) {
   hintsBandHeight = renderer.getScreenHeight() - hintsBandY;
 
   renderDescriptionAndHints();
+  descBandSeq.endWrite();
 
   fullRenderDone = true;
   renderer.displayBuffer();
@@ -401,12 +454,12 @@ void BookInfoActivity::renderDescriptionAndHints() {
   descTotalPages = 0;
   descLinesPerPage = 0;
 
-  if (!description.empty() && descBandHeight > 0) {
-    descLinesPerPage = descBandHeight / lineHeightSmall;
+  if (!description.empty() && descBand.height > 0) {
+    descLinesPerPage = descBand.height / lineHeightSmall;
     if (descLinesPerPage > 0) {
-      if (descLines.empty() || descWrappedWidth != descBandWidth) {
-        descLines = renderer.wrappedText(UI_10_FONT_ID, description.c_str(), descBandWidth, 1000);
-        descWrappedWidth = descBandWidth;
+      if (descLines.empty() || descWrappedWidth != descBand.width) {
+        descLines = renderer.wrappedText(UI_10_FONT_ID, description.c_str(), descBand.width, 1000);
+        descWrappedWidth = descBand.width;
       }
       const int totalLines = static_cast<int>(descLines.size());
       descTotalPages = (totalLines + descLinesPerPage - 1) / descLinesPerPage;
@@ -414,11 +467,11 @@ void BookInfoActivity::renderDescriptionAndHints() {
 
       const int startLine = descPage * descLinesPerPage;
       const int endLine = std::min(totalLines, startLine + descLinesPerPage);
-      int y = descBandY;
-      const int bandBottom = descBandY + descBandHeight;
+      int y = descBand.y;
+      const int bandBottom = descBand.y + descBand.height;
       for (int i = startLine; i < endLine; ++i) {
         if (y + lineHeightSmall > bandBottom) break;
-        renderer.drawText(UI_10_FONT_ID, descBandX, y, descLines[i].c_str());
+        renderer.drawText(UI_10_FONT_ID, descBand.x, y, descLines[i].c_str());
         y += lineHeightSmall;
       }
     }

@@ -688,16 +688,22 @@ void HalGPIO::updateUsbState(const unsigned long now) {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
-void HalGPIO::injectPress(const uint8_t buttonIndex) {
+void HalGPIO::injectPress(const uint8_t buttonIndex, const bool longPress) {
   if (buttonIndex > BTN_POWER) return;
-  // Press and release share a timestamp, so ButtonEventManager classifies this as a
-  // Short press -- the right reading of a tap. A hold cannot be expressed this way and
-  // is not meant to be: the strip shows one label per button, not two.
+  // A tap shares one timestamp between press and release, so ButtonEventManager reads it as a
+  // Short press. A long tap backdates the press edge past the FSM's threshold instead, so the
+  // same code path reads it as a Long one -- the classifier is never told this came from a
+  // finger, and the injected hold is indistinguishable from a held key.
+  //
+  // The backdate is saturated because millis() is small for the first second after boot, and an
+  // underflowed press edge would sit ~49 days in the future and never classify at all.
   const uint32_t now = millis();
+  const uint32_t holdMs = longPress ? INJECTED_LONG_PRESS_MS : 0;
+  const uint32_t pressAt = now > holdMs ? now - holdMs : 0;
   portENTER_CRITICAL(&inputMux_);
   accumPressed_ |= (1u << buttonIndex);
   accumReleased_ |= (1u << buttonIndex);
-  pushEdgeLocked(buttonIndex, true, now);
+  pushEdgeLocked(buttonIndex, true, pressAt);
   pushEdgeLocked(buttonIndex, false, now);
   portEXIT_CRITICAL(&inputMux_);
 }

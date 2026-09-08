@@ -68,3 +68,39 @@ TEST(TapZones, DegenerateSizesFallThroughToCentre) {
 }
 
 }  // namespace
+
+// --- Bounded band split -------------------------------------------------------
+// The paged text views that are not the reading surface (a book description, a dictionary
+// entry) turn pages by tapping the halves of the text itself. Bounded, because those screens
+// draw a button-hint strip that must keep receiving its own taps.
+
+TEST(TapZones, BandSplitsIntoTwoHalves) {
+  // A 300x400 band at (40, 100): x < 190 is back, x >= 190 is forward.
+  EXPECT_EQ(TapZones::halfOfBand(40, 100, 40, 100, 300, 400), TapZones::Half::Previous);
+  EXPECT_EQ(TapZones::halfOfBand(189, 300, 40, 100, 300, 400), TapZones::Half::Previous);
+  EXPECT_EQ(TapZones::halfOfBand(190, 300, 40, 100, 300, 400), TapZones::Half::Next);
+  EXPECT_EQ(TapZones::halfOfBand(339, 499, 40, 100, 300, 400), TapZones::Half::Next);
+}
+
+// The regression this bounding exists to prevent: a tap below the band is the hint strip's, and
+// must not be read as a page turn.
+TEST(TapZones, OutsideTheBandIsNobodys) {
+  EXPECT_EQ(TapZones::halfOfBand(200, 501, 40, 100, 300, 400), TapZones::Half::None);  // below
+  EXPECT_EQ(TapZones::halfOfBand(200, 99, 40, 100, 300, 400), TapZones::Half::None);   // above
+  EXPECT_EQ(TapZones::halfOfBand(39, 300, 40, 100, 300, 400), TapZones::Half::None);   // left of
+  EXPECT_EQ(TapZones::halfOfBand(340, 300, 40, 100, 300, 400), TapZones::Half::None);  // right of
+}
+
+// A band that was never laid out answers nothing rather than dividing by zero or claiming the
+// whole screen.
+TEST(TapZones, DegenerateBandIsInert) {
+  EXPECT_EQ(TapZones::halfOfBand(10, 10, 0, 0, 0, 400), TapZones::Half::None);
+  EXPECT_EQ(TapZones::halfOfBand(10, 10, 0, 0, 300, 0), TapZones::Half::None);
+  EXPECT_EQ(TapZones::halfOfBand(10, 10, 0, 0, -5, -5), TapZones::Half::None);
+}
+
+// A one-pixel band still resolves, and to the forward half: `px < x + width / 2` with width 1 is
+// `px < x`, which the bounds check already excluded.
+TEST(TapZones, SinglePixelBandGoesForward) {
+  EXPECT_EQ(TapZones::halfOfBand(50, 50, 50, 50, 1, 1), TapZones::Half::Next);
+}

@@ -144,6 +144,13 @@ void ActivityManager::renderTaskLoop() {
       TapTargets::homeCovers().invalidate();
       TapTargets::homeMenu().invalidate();
       TapTargets::tabBar().invalidate();
+      // readerLinks is deliberately NOT cleared here. The reader has render passes that do not
+      // put a page on screen -- above all the pre-render, which draws the NEXT page into the
+      // frame buffer while the current one is still displayed -- and clearing per pass would
+      // make the visible page's links dead until something forced a full render. It is cleared
+      // on activity transitions like the rest, and every path that displays a page republishes
+      // it (with an empty set when the page has no links), so a displayed page always describes
+      // itself.
       currentActivity->render(std::move(lock));
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
@@ -237,6 +244,11 @@ void ActivityManager::loop() {
   if (!drainInput && currentActivity) {
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     currentActivity->loop();
+    // Swipe before tap: a swipe ends in a release like a tap does, and the SDK reports both for
+    // the same contact when the travel sits near the threshold. Resolving the swipe first (it
+    // suppresses the contact when it claims one) stops a marginal drag from BOTH moving the
+    // selection and paging the list. Same ordering, and the same reason, as GestureEventManager.
+    dispatchListSwipe();
     dispatchListTap();
     dispatchHintStripTap();
   }
@@ -691,6 +703,48 @@ void ActivityManager::dispatchListTap() {
   }
 }
 
+// A vertical swipe over a list scrolls it by a screenful.
+//
+// The gap this closes: a tap reaches only the rows currently painted, because that is all
+// ListTouchBand records. Everything below the fold was behind the hint strip's Left/Right boxes
+// and nothing else -- workable, but the one obviously missing gesture on a device navigated by
+// finger.
+//
+// Synthesized rather than handled, like every other touch path here. Logical Left/Right are
+// already the list PAGE buttons across the firmware (ButtonNavigator::onListPageNav, which
+// MenuListActivity's eight subclasses inherit and the browser and chapter selectors implement
+// themselves), so injecting one is a screenful in exactly the screens that have one and a step
+// in the rest -- and no screen has to learn a new verb.
+//
+// Direction follows the content, not the finger: dragging the page UP brings the rows BELOW into
+// view, which is the next page.
+//
+// Runs after the activity's own loop(), so a screen handling its own touch has already had its
+// turn, and after main.cpp's gesture dispatch, which suppresses the contact when the user has
+// BOUND this swipe to something -- so a bound gesture wins and this never doubles up with it.
+void ActivityManager::dispatchListSwipe() {
+  if (!mappedInput.hasTouch()) return;
+  // No list painted on this screen, so a swipe here means nothing. Checked first: the swipe
+  // belongs to whoever else wants it.
+  if (!ListTouchBand::hasBand()) return;
+
+  const MappedInputManager::SwipeDir dir = mappedInput.wasSwipe();
+  if (dir != MappedInputManager::SwipeDir::Up && dir != MappedInputManager::SwipeDir::Down) return;
+
+  const auto direction = dir == MappedInputManager::SwipeDir::Up ? MappedInputManager::Direction::Right
+                                                                 : MappedInputManager::Direction::Left;
+  mappedInput.suppressTouchContact();
+  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::buttonFor(direction)));
+  LOG_DBG("TCH", "List swipe %s -> page %s", dir == MappedInputManager::SwipeDir::Up ? "up" : "down",
+          dir == MappedInputManager::SwipeDir::Up ? "next" : "prev");
+}
+
+// The HAL backdates an injected hold by its own constant, because it cannot see the FSM's
+// threshold from lib/. Checked here, where both are in scope, so the two can never drift into a
+// "long" press that classifies Short.
+static_assert(HalGPIO::INJECTED_LONG_PRESS_MS > ButtonEventManager::LONG_PRESS_MS,
+              "an injected long press must outlast the long-press threshold");
+
 void ActivityManager::dispatchHintStripTap() {
   if (!mappedInput.hasTouch()) return;
 
@@ -712,6 +766,29 @@ void ActivityManager::dispatchHintStripTap() {
   // convenience wrapper pinned it to the live value.
   int x = 0;
   int y = 0;
+
+  // A long tap on a box is a HOLD of the button it depicts, and it has to be tested before the
+  // tap: the long press fires while the finger is still down, and the lift that follows would
+  // otherwise also read as a tap and run the short action on top of the long one.
+  //
+  // Without this a whole class of actions is unreachable by touch, and on X4 Pro unreachable
+  // full stop -- that board has no Back or Confirm pin and its capacitive home key emits press
+  // and release in one pass, so nothing on it can produce a hold. The file browser's context
+  // menu, the recents view toggle, remove-book and book-info all sit on one.
+  //
+  // peek + suppress rather than the consuming wasScreenLongPress(): the contact is only claimed
+  // once the hold is known to be over a box, so a long press anywhere else still degrades into
+  // the tap it would have been.
+  if (mappedInput.peekScreenLongPressIn(touchtransform::Portrait, x, y)) {
+    const int held = ButtonHintStrip::hitTest(x, y);
+    if (held >= 0) {
+      mappedInput.suppressTouchContact();
+      mappedInput.injectRawPress(static_cast<uint8_t>(held), /*longPress=*/true);
+      LOG_DBG("TCH", "Hint strip long tap at (%d,%d) -> raw button %d held", x, y, held);
+      return;
+    }
+  }
+
   if (!mappedInput.wasScreenTappedIn(touchtransform::Portrait, x, y)) return;
 
   const int hint = ButtonHintStrip::hitTest(x, y);

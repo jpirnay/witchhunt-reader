@@ -35,6 +35,7 @@
 #include "components/icons/wifi.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
+#include "components/themes/lyra/CarouselCoverLayout.h"
 #include "fontIds.h"
 
 namespace {
@@ -46,31 +47,26 @@ constexpr int kSideCoverMaxH = LyraCarouselTheme::kSideCoverH;
 constexpr int kOverlap = 60;
 constexpr int kCoverTopPad = 10;
 
+// The one statement of the carousel's tile geometry. Both the draw and the tap targets read it
+// through CarouselCoverLayout::compute(), so a slot cannot be painted at one place and made
+// tappable at another -- which is exactly how the left neighbour came to be drawn but dead.
+constexpr CarouselCoverLayout::Dimensions kCoverDims{kCenterCoverMaxW, kCenterCoverMaxH, kSideCoverMaxW,
+                                                     kSideCoverMaxH,   kOverlap,         kCoverTopPad};
+
 // Publish the three carousel slots for touch. Factored out because the covers are painted on
 // two different paths -- the full drawRecentBookCover() and tryFastHomeRender(), which restores
-// them from a cached region and never calls it -- and a tap has to work on both. Geometry here
-// is the same arithmetic drawRecentBookCover() lays the covers out with.
+// them from a cached region and never calls it -- and a tap has to work on both.
 //
 // Centre is recorded FIRST because the side covers slide kOverlap px BEHIND it: the draw order
 // puts the centre on top, and TapTargets::hitTestIn returns the first rect containing the point,
 // so recording the centre first makes the overlap resolve to what the reader can actually see.
 void recordCarouselCoverTargets(const int screenW, const int rectY, const int centerIdx, const int bookCount) {
+  const CarouselCoverLayout::Slots slots =
+      CarouselCoverLayout::compute(kCoverDims, screenW, rectY, centerIdx, bookCount);
   TapTargets::Recorder::Builder targets;
-  if (bookCount > 0) {
-    const int centerTileY = rectY + kCoverTopPad;
-    const int sideTileY = centerTileY + (kCenterCoverMaxH - kSideCoverMaxH) / 2;
-    const int centerX = (screenW - kCenterCoverMaxW) / 2;
-    const int leftX = centerX - kSideCoverMaxW + kOverlap;
-    const int rightX = centerX + kCenterCoverMaxW - kOverlap;
-
-    targets.add(centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH, centerIdx);
-    // The neighbours exist only when there is a book to be at; no wrap-around, matching the draw.
-    if (centerIdx - 1 >= 0) {
-      targets.add(leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, centerIdx - 1);
-    }
-    if (centerIdx + 1 < bookCount) {
-      targets.add(rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, centerIdx + 1);
-    }
+  for (const CarouselCoverLayout::Slot* slot : {&slots.centre, &slots.left, &slots.right}) {
+    if (slot->bookIndex < 0) continue;
+    targets.add(slot->x, slot->y, slot->w, slot->h, slot->bookIndex);
   }
   TapTargets::homeCovers().record(targets);
 }
@@ -390,12 +386,16 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
   const int screenW = renderer.getScreenWidth();
   recordCarouselCoverTargets(screenW, rect.y, centerIdx, bookCount);
-  const int centerTileY = rect.y + kCoverTopPad;
-  const int sideTileY = centerTileY + (kCenterCoverMaxH - kSideCoverMaxH) / 2;
+  // Same slots the targets were just recorded from, so what is painted and what answers a tap
+  // are one decision rather than two that agree by inspection.
+  const CarouselCoverLayout::Slots slots =
+      CarouselCoverLayout::compute(kCoverDims, screenW, rect.y, centerIdx, bookCount);
+  const int centerTileY = slots.centre.y;
+  const int sideTileY = slots.left.y;
 
-  const int centerX = (screenW - kCenterCoverMaxW) / 2;
-  const int leftX = centerX - kSideCoverMaxW + kOverlap;
-  const int rightX = centerX + kCenterCoverMaxW - kOverlap;
+  const int centerX = slots.centre.x;
+  const int leftX = slots.left.x;
+  const int rightX = slots.right.x;
 
   // Returns true if a book exists at bookIdx (cover image or placeholder drawn).
   // Returns false only when the slot has no book — caller skips the border too.
@@ -501,21 +501,17 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     // Sides first so centre renders on top.
     // Left side only when there are 3+ books; right side when there are 2+ books.
     // Border only drawn if a cover image was actually rendered (no placeholders).
-    const int prevIdx = (centerIdx + bookCount - 1) % bookCount;
-    const int nextIdx = (centerIdx + 1) % bookCount;
-    if (bookCount >= 3) {
-      if (drawCover(prevIdx, leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH)) {
-        const bool rl = (leftX >= 0), rr = (leftX + kSideCoverMaxW <= screenW);
-        renderer.drawRoundedRect(leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, 1, kCornerRadius, rl, rr, rl, rr,
-                                 true);
-      }
+    // bookIndex is -1 for a slot the carousel does not show at this position, and drawCover
+    // rejects that -- the same test the recorder made, from the same computation.
+    if (drawCover(slots.left.bookIndex, leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH)) {
+      const bool rl = (leftX >= 0), rr = (leftX + kSideCoverMaxW <= screenW);
+      renderer.drawRoundedRect(leftX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, 1, kCornerRadius, rl, rr, rl, rr,
+                               true);
     }
-    if (bookCount >= 2) {
-      if (drawCover(nextIdx, rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH)) {
-        const bool rl = (rightX >= 0), rr = (rightX + kSideCoverMaxW <= screenW);
-        renderer.drawRoundedRect(rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, 1, kCornerRadius, rl, rr, rl, rr,
-                                 true);
-      }
+    if (drawCover(slots.right.bookIndex, rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH)) {
+      const bool rl = (rightX >= 0), rr = (rightX + kSideCoverMaxW <= screenW);
+      renderer.drawRoundedRect(rightX, sideTileY, kSideCoverMaxW, kSideCoverMaxH, 1, kCornerRadius, rl, rr, rl, rr,
+                               true);
     }
 
     // Clear a white outline ring around the centre cover, then draw the cover

@@ -815,13 +815,34 @@ void HomeActivity::loop() {
     const bool rowToggle = mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
                            mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down);
 
-    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
+    // A horizontal swipe scrolls the carousel, which is the gesture the shape of this screen
+    // invites: a strip of covers with one in front and its neighbours peeking out either side.
+    //
+    // Direction follows the reader's own mapping (ReaderUtils::detectTouchPageTurn) rather than
+    // being invented here -- a swipe that travels right-to-left brings the NEXT item, the way
+    // content follows the finger. Reusing the mapping matters because the two screens sit one
+    // gesture apart: swiping to the next book and then swiping to the next page must not mean
+    // opposite things.
+    //
+    // Folded into the same else-if chain as the buttons, not handled separately, so it inherits
+    // the one-action-per-tick rule that chain exists for. Two directions resolved in one drained
+    // input batch is exactly what once stranded the selector in the menu row.
+    //
+    // GestureEventManager has already run in main.cpp and consumes the contact when the user has
+    // BOUND that swipe to an action, so a bound gesture still wins; only an unbound swipe -- the
+    // default -- reaches this. wasSwipe() is silent on non-touch boards and while Touch
+    // Navigation is off, so neither needs a guard of its own.
+    const auto swipe = mappedInput.wasSwipe();
+    const bool swipeNext = swipe == MappedInputManager::SwipeDir::Left;
+    const bool swipePrev = swipe == MappedInputManager::SwipeDir::Right;
+
+    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right) || swipeNext) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + 1) % bookCount;
       else if (!inCarouselRow)
         selectorIndex = bookCount + (menuIdx + 1) % menuItemCount;
       requestUpdate();
-    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
+    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left) || swipePrev) {
       if (inCarouselRow && bookCount > 0)
         selectorIndex = (selectorIndex + bookCount - 1) % bookCount;
       else if (!inCarouselRow)

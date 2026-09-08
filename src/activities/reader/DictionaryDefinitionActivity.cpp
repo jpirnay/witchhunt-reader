@@ -11,6 +11,7 @@
 
 #include "CrossPointSettings.h"
 #include "activities/ActivityResult.h"
+#include "components/TapZones.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictHtmlPages.h"
@@ -51,7 +52,8 @@ DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() 
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   const int topArea = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int bottomArea = metrics.verticalSpacing;
-  return {contentRect.width - 2 * SIDE_PADDING, contentRect.height - topArea - bottomArea};
+  return {contentRect.x + SIDE_PADDING, topArea, contentRect.width - 2 * SIDE_PADDING,
+          contentRect.height - topArea - bottomArea};
 }
 
 // Styled path: lay the HTML definition out through the EPUB chapter parser into
@@ -201,19 +203,42 @@ void DictionaryDefinitionActivity::loop() {
     return;
   }
 
-  buttonNavigator.onNext([this] {
+  const auto nextPage = [this] {
     if (currentPage + 1 < totalPages) {
       currentPage++;
       requestUpdate();
     }
-  });
-
-  buttonNavigator.onPrevious([this] {
+  };
+  const auto prevPage = [this] {
     if (currentPage > 0) {
       currentPage--;
       requestUpdate();
     }
-  });
+  };
+
+  // A definition long enough to page turns by tapping the two halves of its text, the way a book
+  // page does. Bounded to the body rectangle rather than the reader's full-height zones: this
+  // screen draws a hint strip, and full-height zones would claim the taps meant for it.
+  //
+  // Only while there is somewhere to go, so a one-page entry leaves every tap to the strip.
+  int tapX = 0;
+  int tapY = 0;
+  if (totalPages > 1 && mappedInput.hasTouch() && mappedInput.wasScreenTapped(tapX, tapY)) {
+    const BodyArea body = bodyArea();
+    switch (TapZones::halfOfBand(tapX, tapY, body.x, body.y, body.width, body.height)) {
+      case TapZones::Half::Previous:
+        prevPage();
+        return;
+      case TapZones::Half::Next:
+        nextPage();
+        return;
+      case TapZones::Half::None:
+        break;
+    }
+  }
+
+  buttonNavigator.onNext(nextPage);
+  buttonNavigator.onPrevious(prevPage);
 }
 
 // Draws the current page: a styled Page when the HTML layout succeeded,
@@ -276,12 +301,14 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   // page render uses) so SD-card font glyphs load from the card in one batch
   // instead of one on-demand read per character on every page turn.
   const int fontId = DICTIONARY_FONT_ID;
-  const int bodyStartY = headerY + metrics.headerHeight + metrics.verticalSpacing;
+  // The same rectangle the tap-to-page split is resolved against, so what is drawn and what
+  // answers a finger cannot drift apart.
+  const BodyArea body = bodyArea();
   auto* fcm = renderer.getFontCacheManager();
   auto scope = fcm->createPrewarmScope();
-  drawBody(fontId, contentRect.x + SIDE_PADDING, bodyStartY);  // scan pass: records codepoints only
+  drawBody(fontId, body.x, body.y);  // scan pass: records codepoints only
   scope.endScanAndPrewarm();
-  drawBody(fontId, contentRect.x + SIDE_PADDING, bodyStartY);
+  drawBody(fontId, body.x, body.y);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), canSwitchDictionary() ? tr(STR_DICTIONARY) : "",
                                             (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));

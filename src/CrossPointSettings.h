@@ -347,6 +347,24 @@ class CrossPointSettings {
 
   // Reader screen margin settings
   uint8_t screenMargin = 5;
+
+  // Extra clearance from the panel edge, on TOP of the board profile's own viewableInsets --
+  // see GfxRenderer::setViewablePaddingProvider. The profile says where the case covers the
+  // glass; this says how much further in the reader wants content to sit, because on some
+  // boards (the T5 S3) the plastic cover comes near enough to the live pixels that text at the
+  // profile inset is hard to read.
+  //
+  // 0 = Narrow, i.e. exactly what the board declares and what every device did before this
+  // existed, so the default changes nothing anywhere.
+  enum EDGE_MARGIN : uint8_t { EDGE_MARGIN_NARROW = 0, EDGE_MARGIN_MEDIUM, EDGE_MARGIN_LARGE };
+  uint8_t edgeMargin = EDGE_MARGIN_NARROW;
+  static constexpr int EDGE_MARGIN_STEP_PX = 5;
+  // Pixels to inset each edge by. Clamped against a corrupt settings file rather than trusted:
+  // this reaches a renderer that has no other opinion about it.
+  int getEdgeMarginPadding() const {
+    const uint8_t step = edgeMargin <= EDGE_MARGIN_LARGE ? edgeMargin : EDGE_MARGIN_NARROW;
+    return step * EDGE_MARGIN_STEP_PX;
+  }
   // OPDS browser settings
   char opdsServerUrl[128] = "";
   char opdsUsername[64] = "";

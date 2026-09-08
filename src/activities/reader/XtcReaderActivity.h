@@ -22,6 +22,10 @@ class XtcReaderActivity final : public Activity {
   void renderPage();
   void saveProgress() const;
   void loadProgress();
+  // Open the chapter list. False when the book has none, so the caller can let the input that
+  // asked for it go on to mean something else. Shared by Confirm and the touch menu gesture --
+  // one entry point, so the two can never open different things.
+  bool openChapterSelection();
 
  public:
   explicit XtcReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Xtc> xtc)

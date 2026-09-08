@@ -114,6 +114,15 @@ void LineReaderActivity::loop() {
     }
   }
 
+  // A centre-third tap, or the top-edge menu swipe, opens this reader's own overlay: the heading
+  // list in MD, and nothing at all in plain TXT, which has none -- exactly what its Confirm
+  // does, reached through the same call so the two cannot diverge. The EPUB reader answers the
+  // same gesture with its reader menu; each reader offers the navigation it has.
+  //
+  // Kept next to the page-turn zones as it is there, and for the same reason: the zones do not
+  // overlap (outer thirds vs centre), so the order is not load-bearing.
+  if (ReaderUtils::isTouchMenuGesture(renderer, mappedInput) && onConfirmShortPress()) return;
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectTiltPageTurn();
   // Touch page turns join tilt here rather than in the button event queue: both
   // are gesture sources the queue does not carry, and both must lose to an
@@ -126,6 +135,55 @@ void LineReaderActivity::loop() {
     goToPreviousPage();
   } else if (nextTriggered) {
     goToNextPage();
+  }
+}
+
+void LineReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
+  using BA = CrossPointSettings::BUTTON_ACTION;
+  switch (action) {
+    // Routed through the same helpers the buttons use, so the end-of-book handoff to the
+    // finished-book flow and the session bookkeeping happen for a gesture too.
+    case BA::BTN_PAGE_FORWARD:
+      goToNextPage();
+      break;
+    case BA::BTN_PAGE_BACK:
+      goToPreviousPage();
+      break;
+    case BA::BTN_PAGE_FORWARD_10: {
+      // max(0, ...) because totalPages is 0 for an empty file (MdReaderActivity::buildPageIndex
+      // returns early on a zero-byte document), and the naive clamp to totalPages - 1 would
+      // land currentPage on -1 and render off the end of pageOffsets.
+      const int target = std::min(currentPage + 10, std::max(0, totalPages - 1));
+      if (target != currentPage) {
+        currentPage = target;
+        onPageChanged();
+        globalReadingSessionTracker().onPageTurn();
+        requestUpdate();
+      }
+      break;
+    }
+    case BA::BTN_PAGE_BACK_10: {
+      const int target = std::max(currentPage - 10, 0);
+      if (target != currentPage) {
+        currentPage = target;
+        onPageChanged();
+        globalReadingSessionTracker().onPageTurn();
+        requestUpdate();
+      }
+      break;
+    }
+    // Whatever overlay this reader has -- MD's heading list, TXT's starred pages -- under both
+    // names, so neither binding is silently inert here. A reader with none simply ignores it.
+    case BA::BTN_OPEN_TOC:
+    case BA::BTN_READER_MENU:
+      onConfirmShortPress();
+      break;
+    case BA::BTN_EXIT_READER:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      finish();
+      break;
+    default:
+      break;
   }
 }
 

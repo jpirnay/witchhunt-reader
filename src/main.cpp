@@ -1372,6 +1372,9 @@ void loop() {
 
   renderer.setFadingFix(SETTINGS.fadingFix);
   renderer.setTextDarkness(SETTINGS.textDarkness);
+  // Extra clearance from the panel edge, on top of the board profile's own inset. Pushed here
+  // rather than once at boot so the Settings screen takes effect on the next render.
+  renderer.setViewablePadding(SETTINGS.getEdgeMarginPadding());
 
   // Re-emit the boot summary when the serial link comes up. A power-up from deep sleep
   // re-enumerates USB, so a monitor attached across the wake misses everything setup()

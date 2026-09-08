@@ -107,4 +107,9 @@ class LineReaderActivity : public Activity {
   void loop() override;
   bool isReaderActivity() const override { return true; }
   bool shouldSkipPeriodicUpdate() const override;
+  // A configured action arriving from a button or a bound gesture. Without this the TXT and MD
+  // readers reported themselves as readers -- so main.cpp routed every reader-scoped action to
+  // them -- and then dropped the lot: a swipe bound to "Next page" or "Exit reader" did nothing
+  // here while working in the EPUB reader.
+  void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
 };

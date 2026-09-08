@@ -20,6 +20,7 @@
 #include "EpubReaderMenuActivity.h"
 #include "ReaderUtils.h"
 #include "activities/Activity.h"
+#include "components/themes/TapTargets.h"
 
 class EpubReaderActivity final : public Activity {
   // Reader can launch sync in several UX modes:
@@ -863,6 +864,29 @@ class EpubReaderActivity final : public Activity {
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
+
+  // Find the internal links of `page` among the words it draws and publish a tap target for each.
+  // Values are indices into currentPageFootnotes, which must already hold this page's links.
+  //
+  // Called from all three places a page reaches the panel -- the full render, the pre-rendered
+  // fast display, and a page drawn from an in-progress build -- because the targets must
+  // describe what is on screen and each of those paths shows a different Page object. Publishing
+  // from only one of them is the carousel bug again.
+  //
+  // The parser attaches a link to a page by word COUNT and keeps only its display text and href
+  // — where the text landed on screen is never recorded, and the Page object does not outlive the
+  // render (renderContents takes it by value), so this cannot be deferred to the tap. Hence a
+  // scan here, at each moment a page goes on screen.
+  //
+  // Cheap by construction: the walk compares stored word text, and only a word that MATCHES
+  // costs a wordBox() — which itself reads a precomputed x from the block rather than laying
+  // anything out. Nothing is allocated.
+  void publishPageLinkTargets(const Page& page, int marginLeft, int contentTop) const;
+
+  // A tap on one of those targets, resolved in loop(). Returns true when it claimed the tap, so
+  // the reader stops before the page-turn zones -- a marker can sit anywhere on the page,
+  // including inside one.
+  bool handleLinkTouch();
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
