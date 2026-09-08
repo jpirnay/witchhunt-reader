@@ -639,7 +639,15 @@ void EpubReaderActivity::onExit() {
   //
   // Only when anti-aliasing actually ran: a plain B/W page leaves the panel on
   // its rails already, and a clean-bank refresh costs about a second and a half.
-  if (getEffectiveTextAntiAliasing()) {
+  //
+  // ...except where that premise does not hold. It is a statement about the X3/X4
+  // controllers, whose B/W path drives to the rails. On the LGFX panels -- the ones that
+  // answer supportsGrayFrame(), i.e. the T5 S3 -- EVERY push goes through the same graded
+  // canvas, and FAST maps to a differential bank that deliberately skips the eraser
+  // (LgfxEpdDriver::epdModeFor). So a B/W page leaves the canvas holding the page just as a
+  // grey one does, and the home screen's FAST diff runs against it. Reported from hardware
+  // as the last reader page and the home screen superimposed, settling a refresh later.
+  if (getEffectiveTextAntiAliasing() || renderer.supportsGrayFrame()) {
     ReaderUtils::enforceExitFullRefresh(renderer);
   }
 
@@ -5546,18 +5554,23 @@ void EpubReaderActivity::openReaderMenu() {
         // the page it was computed for.
         pendingGrayscale_ = {};
 
-        // And repaint. Every other sub-activity handler here already requests an
-        // update (book info, reading stats, chapter selection); the menu's did not,
-        // so a plain Back left the menu on screen until something else happened to
-        // trigger a render.
+        // Arm a HALF for the resumed page, then repaint. Every other sub-activity handler
+        // here already requests an update (book info, reading stats, chapter selection);
+        // the menu's did not, so a plain Back left the menu on screen until something
+        // else happened to trigger a render.
         //
-        // Note this repaint goes out on the normal refresh cycle, usually FAST. The
-        // enforceExitFullRefresh() above does NOT cover it: that override is one-shot
-        // and the menu's own first paint consumes it on the way in, which is what it
-        // is there for. Coming back from a full-screen menu to text on a fast LUT is
-        // the ghosting-prone direction, so arming a second HALF here is defensible --
-        // held off because a HALF costs ~1.5 s on the 960x540 panel and no ghosting
-        // has actually been reported on this transition.
+        // The enforceExitFullRefresh() before the launch does NOT cover this: the override
+        // is one-shot and the menu's own first paint consumes it on the way IN, which is
+        // what it is there for. So the return repaint went out on the normal cycle, usually
+        // FAST -- and a full-screen menu back to text is the worst case for a differential
+        // bank, which cannot drive every changed pixel in one fast pass.
+        //
+        // This was left out on the argument that a HALF costs ~1.5 s and no ghosting had
+        // been reported here. It has now: on the T5 S3 the transition shows the menu and the
+        // page superimposed, then settles a refresh later. That is not even a saving -- the
+        // reader was paying for a bad differential plus whatever repaired it. The chapter
+        // selection handler below arms exactly this, for exactly this reason.
+        ReaderUtils::enforceExitFullRefresh(renderer);
         requestUpdate();
       });
 }
