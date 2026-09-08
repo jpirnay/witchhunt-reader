@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Epub/FootnoteEntry.h>  // FOOTNOTE_HREF_LEN, the bound on the memo below
 #include <HalStorage.h>
 
 #include <cstdint>
@@ -135,6 +136,17 @@ class Lookup {
   bool isOpen() const { return entryCount_ > 0; }
 
  private:
+  // Resolves the file part of a cross-file href to a spine index, remembering the last answer.
+  // `pathLen` is the length of the href up to its '#'.
+  int resolveTargetSpine(const char* href, size_t pathLen);
+
+  // The one-slot memo behind it. Sized from FootnoteEntry::href, which is the real bound on what
+  // reaches find(); a longer path skips the memo rather than growing it, so this costs a fixed
+  // 96 bytes wherever a Lookup lives and never touches the heap.
+  char lastPath_[FOOTNOTE_HREF_LEN] = {};
+  size_t lastPathLen_ = 0;  // 0 = nothing memoised yet
+  int lastPathSpine_ = -1;
+
   // The index used to be read into a heap array of entryCount_ entries — up to 4 KB contiguous,
   // allocated at build SETUP and held for the whole section build, which is the tightest the heap
   // ever gets. Searching it in place costs ~log2(count) eight-byte reads per lookup (nine at the

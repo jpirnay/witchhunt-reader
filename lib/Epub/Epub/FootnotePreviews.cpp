@@ -964,7 +964,36 @@ bool Lookup::open(const std::string& bookCachePath, const Epub* epub, const int 
   // No allocation: find() searches the index where it lies.
   indexOffset_ = indexOffset;
   entryCount_ = count;
+  lastPathLen_ = 0;  // the memo below is keyed within one open store
+  lastPathSpine_ = -1;
   return true;
+}
+
+int Lookup::resolveTargetSpine(const char* href, const size_t pathLen) {
+  // Every caller in a chapter points at the same one or two note documents -- the whole point of
+  // a rearnotes file -- so the same path is resolved over and over. Epub::resolveHrefToSpineIndex
+  // answers it by walking the ENTIRE spine and reading each entry out of book.bin (two seeks, two
+  // reads and a std::string per item), which is why the repetition is worth avoiding rather than
+  // merely inelegant: a chapter of a heavily annotated history with 162 callers over a 40-item
+  // spine spent ~6,500 book.bin entry reads and ~13,000 short-lived string allocations on one
+  // question with one answer. That runs inside the section build, where the heap is at its
+  // tightest, and again on the loop task every time the footnote list is opened.
+  //
+  // One slot is enough for that access pattern, and it is a fixed buffer rather than a
+  // std::string so the saving does not itself land on the heap. A path too long to memo (or an
+  // empty one, which cannot occur for a href with a '#' after position 0) simply resolves the
+  // long way, as before.
+  const bool memoable = pathLen > 0 && pathLen < sizeof(lastPath_);
+  if (memoable && lastPathLen_ == pathLen && memcmp(lastPath_, href, pathLen) == 0) {
+    return lastPathSpine_;
+  }
+  const int spine = epub_->resolveHrefToSpineIndex(href);
+  if (memoable) {
+    memcpy(lastPath_, href, pathLen);
+    lastPathLen_ = pathLen;
+    lastPathSpine_ = spine;
+  }
+  return spine;
 }
 
 bool Lookup::find(const char* href, std::string& outText) {
@@ -974,7 +1003,7 @@ bool Lookup::find(const char* href, std::string& outText) {
   int targetSpine = currentSpineIndex_;
   if (href[0] != '#') {
     if (!epub_) return false;
-    targetSpine = epub_->resolveHrefToSpineIndex(href);
+    targetSpine = resolveTargetSpine(href, static_cast<size_t>(hash - href));
     if (targetSpine < 0) return false;
   }
   const uint32_t keyHash = makeKeyHash(targetSpine, hash + 1);
