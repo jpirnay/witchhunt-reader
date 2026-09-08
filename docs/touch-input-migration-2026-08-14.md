@@ -1434,3 +1434,240 @@ including the new `test/tap_zones` and `test/font_size_ladder`. **Not yet device
 validated** — the first attempt is written up in §8.12 and did not reach the
 code under test. The gesture classification, the suppression handshake and the
 backlight all still need hardware.
+
+---
+
+## 9. Phase 8 — closing the remaining gaps (2026-09-07)
+
+An audit of every activity against the three recorders and the reader gesture path
+found six things touch could not do; tappable footnote markers (§9.10) were asked for
+on top of them. All seven are now closed. **Code complete, not device validated.**
+
+### 9.1 The carousel drew a cover you could not tap
+
+`LyraCarouselTheme`'s side covers **wrap** — the slot left of the first book shows
+the last one, the way Left/Right wrap — and are gated on the book count (`>= 3`
+for a left neighbour, `>= 2` for a right one). `recordCarouselCoverTargets` did
+neither: it clamped at `centerIdx - 1 >= 0` / `centerIdx + 1 < bookCount`. Three
+consequences, the first of them on the position the home screen opens at:
+
+| Case | Drawn | Recorded |
+|---|---|---|
+| `centre == 0`, 3+ books | left cover = last book | nothing — **dead tap** |
+| `centre == n-1`, 3+ books | right cover = book 0 | nothing — **dead tap** |
+| exactly 2 books, `centre == 1` | no left cover; right cover = book 0 | a LEFT target for book 0 — **phantom** |
+
+The comment above the recorder claimed "no wrap-around, matching the draw", which
+was simply false about the code below it.
+
+Fixed by giving both sides one source: `CarouselCoverLayout::compute()` returns the
+three slots with their geometry and the book each one shows (`-1` when a slot is not
+drawn), and the draw and the recorder both read it. Header-only and dependency-free,
+so `test/carousel_cover_layout` round-trips it — compute a slot, hit-test the pixel
+it was drawn at, assert the book that comes back is the one painted there — across
+every centre position for 3..12 books. That is the gate `test/cover_grid_layout` and
+`test/slider_geometry` already apply, and the one this code did not have because the
+arithmetic lived in an anonymous namespace inside the theme.
+
+### 9.2 The on-screen keyboard was untappable
+
+Every WiFi password, OPDS URL and KOReader login was typed by walking a cursor over
+forty-odd keys — the last screen in the firmware with a selection and no touch. The
+grid is uniform arithmetic, so it needs a hit test rather than a recorder
+(`TapTargets` holds ten; the keyboard has ~45): `KeyboardGrid::hitTest()` in
+`src/components/`, next to the other layout inverses, with `test/keyboard_grid`
+round-tripping every key on a spaced and a tight theme.
+
+Two decisions worth keeping:
+
+- **Single tap types.** Point-then-confirm exists because activating the wrong row
+  can be expensive to undo; a mistyped letter costs one Del, and two taps per letter
+  would make the keyboard slower by finger than by the cursor it replaces. Same
+  argument as the settings tab bar.
+- **The grids are published by the draw**, not recomputed on the loop task. The
+  character block is bottom-aligned on all four shipped themes, but a theme that is
+  not derives its origin from the wrapped height of the entered text — and that wrap
+  only happens inside `render()`.
+
+### 9.3 `DictionaryWordSelectActivity` hit-tests its own words
+
+Hundreds of selectable words per page, far past `TapTargets`' capacity, and the
+boxes are already there — so it walks its own fragments, as the RecentBooks grid
+inverts its own layout. Point-then-confirm here earns its keep: a lookup searches
+the index off the SD card and opens an activity.
+
+The touch path deliberately falls THROUGH to the existing tail (`lastMoveMs`,
+`speculateForSelection()`) rather than growing a second copy of it.
+
+### 9.4 Long presses were unreachable by touch — on X4 Pro, unreachable at all
+
+`injectPress()` shared one timestamp between its press and release edges, so
+everything the hint strip synthesized classified Short. On X4 Pro that closed the
+door completely: no Back or Confirm pin, and the capacitive home key also emits
+press and release in the same pass, so **nothing on that board could produce a
+hold**. Unreachable: the file browser's context menu (long Right, in any folder big
+enough to page), the recents view toggle (long Up), remove-book (long Left) and
+book-info (long Right).
+
+`injectPress(index, longPress)` now backdates the press edge by
+`HalGPIO::INJECTED_LONG_PRESS_MS`, and a **long tap on a hint box** produces it.
+The classifier is never told the press came from a finger. Notes:
+
+- The backdate is saturated: `millis()` is small for the first second after boot and
+  an underflowed edge would sit ~49 days in the future and never classify.
+- `INJECTED_LONG_PRESS_MS` lives in the HAL, which cannot include
+  `ButtonEventManager.h`; `ActivityManager` `static_assert`s it against
+  `LONG_PRESS_MS` where both are visible.
+- peek + `suppressTouchContact()` rather than the consuming `wasScreenLongPress()`,
+  so a long press that misses every box still degrades into the tap it would have
+  been.
+
+### 9.5 A vertical swipe pages a list
+
+A tap reaches only the rows `ListTouchBand` recorded, i.e. the ones on screen;
+everything below the fold was behind the hint strip's Left/Right boxes and nothing
+else. `dispatchListSwipe()` injects the list PAGE button — logical Left/Right, which
+`ButtonNavigator::onListPageNav` already implements for `MenuListActivity`'s eight
+subclasses, and which the browser and the chapter selectors implement themselves —
+so no screen learns a new verb and no `BUTTON_ACTION` is added.
+
+Ordering matters twice, and both are load-bearing:
+
+- **Before `dispatchListTap()`**, because the SDK reports a tap *and* a swipe for the
+  same contact when the travel sits near the threshold; the swipe suppresses the
+  contact when it claims one. Same ordering, same reason, as `GestureEventManager`.
+- **After main.cpp's gesture dispatch**, so a swipe the user has BOUND to an action
+  wins and this never doubles up with it.
+
+Direction follows the content, not the finger: dragging the page up brings the rows
+below into view.
+
+### 9.6 The non-EPUB readers had no touch route to their own navigation
+
+`detectTouchPageTurn` was wired in all four readers but `isTouchMenuGesture` only in
+`EpubReaderActivity`, and the readers draw no hint strip — so in TXT, MD and XTC you
+could page and nothing else. Worse, `LineReaderActivity` had **no `onButtonAction`
+at all** while reporting `isReaderActivity() == true`, so main.cpp routed every
+reader-scoped action to it and it dropped the lot: a gesture bound to "Next page"
+worked in EPUB and did nothing in MD.
+
+Both are fixed. The centre-third tap and the top-edge swipe now open whatever
+navigation the reader has — MD's heading list, XTC's chapter list, nothing in plain
+TXT — reached through the screen's own Confirm path so the two cannot diverge. That
+also retires a small lie in `TouchGestures::builtinLabelFor`, which told the settings
+screen a centre tap meant "Reader menu" on screens where it meant nothing.
+
+### 9.7 Tap-to-page on the paged text views
+
+`BookInfoActivity`'s description and `DictionaryDefinitionActivity`'s entry both page
+with Left/Right and had no gesture. They now split their text band in half —
+`TapZones::halfOfBand()`, tested in `test/tap_zones`.
+
+**Bounded to the band, deliberately.** The reader's zones run the full height of the
+panel, which is right for the reader (it draws no chrome) and wrong for these: they
+draw a hint strip, and full-height zones would swallow the taps meant for it and
+break Back. The split is also live only while there is more than one page, so a
+short description leaves every tap alone.
+
+### 9.8 Tapping a footnote marker or cross-reference
+
+A tap on a marker in the reading text now follows the link, exactly as picking it out of the
+footnote list does (`navigateToHref` with `savePosition`, so page-back returns to the caller).
+
+**The scope is wider than "footnotes", and for free.** `ChapterHtmlSlimParser` collects EVERY
+internal `<a href>` into `FootnoteEntry` — its own comment says "footnotes, cross-references" —
+so `currentPageFootnotes` was already the page's link list. Nothing in the parser or the page
+cache format had to change.
+
+**Why the boxes have to be found again.** The parser attaches a link to a page by word COUNT and
+keeps only its display text and href; where that text landed on screen is never recorded. Nor can
+the reader defer the question to the tap: `renderContents()` takes the `Page` **by value** and
+destroys it when the render ends, which is why `currentPageFootnotes` is `std::move`d out of the
+page in the first place. So the markers are located during the render, by scanning the words the
+page is about to draw.
+
+The scan is cheap by construction: it compares stored word text (plain memory reads) and calls
+`wordBox()` only for a word that matched — and `wordBox` reads a precomputed x from the block
+rather than laying anything out. Nothing is allocated.
+
+**Matching is a token walk, not `strcmp`** (`LinkMarkerMatch`, host-tested in
+`test/link_marker_match`). Two reasons, both from how the text is stored:
+
+- the parser NORMALISES a noteref on the way in — `"[12]"` is stored as `"12"` while the page
+  still paints the brackets, so the page word has to be normalised by the same rule or every
+  bracketed marker in the corpus misses;
+- link text is not always one word (`"turn to 256"`), so the run spans several page words and
+  their boxes are unioned.
+
+Links are matched **in page order**, which is the invariant that keeps a marker `"1"` from being
+claimed by an unrelated `"1"` earlier in the paragraph.
+
+**Published from all three paths that put a page on screen** — the full render, the pre-rendered
+fast display, and a page drawn from an in-progress Background-C build. Each shows a different
+`Page` object; publishing from only one of them would be §9.1 over again.
+
+**`readerLinks` is the one recorder NOT cleared per render pass.** The reader has passes that draw
+without displaying — above all the pre-render, which fills the frame buffer with the NEXT page
+while the current one is still on the panel — and a per-pass clear would leave the visible page's
+links dead. It is cleared on activity transitions like the rest, every display path republishes
+it (with an empty set when the page has no links), and the two passes that COVER the page (the
+indexing popup, the empty-chapter message) clear it explicitly.
+
+Three smaller decisions:
+
+- **Single tap, not point-then-confirm.** Two steps would need somewhere to show the highlight,
+  which a full page of text does not have; and the jump is the cheapest action in the reader to
+  undo, because coming back is already a first-class gesture.
+- **Tested before the page-turn zones and the centre-tap menu**, because a marker can sit
+  anywhere on the page including inside one of them, and it is the more specific target.
+- **The rect is padded and floored to 30 px.** A marker is often a single superscript digit a few
+  pixels wide. Kept modest deliberately: these rects win over the page-turn zones, so an
+  over-generous marker would make page turns unreliable in the text around it.
+
+Gated on `touchReaderControls` like the reader's other touch paths, so turning touch reading
+controls off still silences the reading surface completely.
+
+### 9.9 Screen edge margin (per device, user-settable)
+
+Not a touch gap, but it arrived with the same board: on the T5 S3 the plastic cover comes close
+enough to the live pixels that text at the board profile's own inset is hard to read.
+
+`BoardProfile::viewableInsets` already describes where the CASE sits over the glass, measured per
+board. What it cannot describe is how much clearance a given reader wants beyond that. So a new
+Display setting, **Screen Edge Margin: Narrow / Medium / Large**, adds 0 / 5 / 10 px uniformly on
+top of whatever the profile declares. Narrow is the default and is exactly today's behaviour, so
+no shipped device moves until someone asks it to.
+
+Applied in `GfxRenderer::getOrientedViewableTRBL()`, which is the one place the profile insets are
+read and rotated — so the reader's page margins (EPUB, TXT, MD) and the status bar all follow from
+one change. Pushed from main.cpp's loop beside `setTextDarkness()`, the existing precedent, so a
+change in Settings takes effect on the next render rather than at the next reboot.
+
+Two things fall out for free and are worth stating:
+
+- **Pagination re-flows by itself.** `layout.viewportWidth/Height` are derived from these margins
+  and are part of the section cache key, so widening the inset rebuilds the section rather than
+  showing stale page breaks.
+- **It is inherently per device**, because settings live in the device's own SPIFFS. The X3/X4
+  keep Narrow; only the board that needs it gets widened.
+
+General UI chrome is unaffected: `UITheme::getContentRect()` does not consult the viewable insets
+at all today, so only the reading surface and the status bar respect the bezel. Whether the rest
+of the chrome should is a separate question this does not answer.
+
+Cost: **+410 bytes flash, +24 bytes RAM.**
+
+### 9.10 What is still open
+
+- **P2, the localised tap flash.** Still the highest-value remaining item: the first
+  tap of a two-step still costs a full-screen repaint, which is the only feedback
+  e-paper affords. `grep` finds no `setFlash`/`clearTapFlash` in the tree.
+- **Discoverability of the long press.** It is now reachable, but nothing on screen
+  says a hint box can be held — and `FileBrowserActivity` drops its "Options" label
+  entirely in a folder large enough to page, which was already true for buttons.
+- **Device validation.** None of §9 has run on hardware.
+
+### 9.11 Corrections to earlier sections
+
+- §4 lists the settings **tab bar** as still open under 4a. It shipped:
+  `SettingsActivity::loop()` hit-tests `TapTargets::tabBar()`, single-tap by design.
