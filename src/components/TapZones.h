@@ -40,4 +40,21 @@ inline Zone zoneFor(const int x, const int y, const int width, const int height)
   return Zone::Centre;
 }
 
+// Which half of a BOUNDED band a tap fell in: the page-turn split for the paged text views that
+// are not the reading surface -- a book's description, a dictionary entry.
+//
+// Bounded, and that is the whole point. The zones above run the full height of the panel, which
+// is right for the reader (it draws no chrome) and wrong for these, which draw a button-hint
+// strip along the bottom: full-height zones would claim the taps meant for it and Back would
+// stop working. Restricting the split to the rectangle the text occupies leaves every pixel
+// outside it to whoever else wants it.
+enum class Half : uint8_t { None, Previous, Next };
+
+inline Half halfOfBand(const int px, const int py, const int x, const int y, const int width, const int height) {
+  if (width <= 0 || height <= 0) return Half::None;
+  if (px < x || px >= x + width) return Half::None;
+  if (py < y || py >= y + height) return Half::None;
+  return px < x + width / 2 ? Half::Previous : Half::Next;
+}
+
 }  // namespace TapZones

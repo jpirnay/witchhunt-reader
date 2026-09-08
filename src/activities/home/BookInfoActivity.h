@@ -7,6 +7,7 @@
 
 #include "../Activity.h"
 #include "ReadingStats.h"
+#include "components/SeqPublish.h"
 
 class BookInfoActivity final : public Activity {
   // findBook() below needs the history; hold it for this screen only.
@@ -41,10 +42,18 @@ class BookInfoActivity final : public Activity {
   // Partial-render caches: set on the first full render, reused when only the
   // description page changes.
   bool fullRenderDone = false;
-  int descBandX = 0;
-  int descBandY = 0;
-  int descBandWidth = 0;
-  int descBandHeight = 0;
+  // The rectangle the description is drawn in. One struct rather than four loose ints because
+  // it is PUBLISHED: render() writes it and loop() reads it to resolve a tap, on different
+  // tasks, and only the four together mean anything -- a mix of two frames' values is a tap
+  // answered against a rectangle that was never on screen.
+  struct DescBand {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+  };
+  DescBand descBand;
+  SeqPublish descBandSeq;
   int hintsBandY = 0;
   int hintsBandHeight = 0;
   int partialRenderCount = 0;
