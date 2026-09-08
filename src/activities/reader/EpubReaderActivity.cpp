@@ -2915,6 +2915,17 @@ std::vector<std::string> EpubReaderActivity::footnotePreviewsForCurrentPage() {
   if (!epub) {
     return previews;
   }
+  // Under the render lock because resolving a cross-file note href walks the spine through
+  // BookMetadataCache, which seeks and reads a book.bin handle whose position is SHARED with
+  // renderStatusBar() on the render task (calculateProgress -> getSpineItem -> getSpineEntry).
+  // This runs from the reader-menu result handler, which the ActivityManager dispatches with
+  // the lock released, so without this the two interleave on one file position and a spine
+  // entry comes back as whatever the other task had seeked to. Cheap to hold: Lookup memoises
+  // the path, so a page's notes cost one spine walk, not one per note.
+  //
+  // Taken here rather than by the callers because both of them (the menu item and the
+  // BTN_FOOTNOTES button action) reach this on the loop task with no lock held.
+  RenderLock lock(*this);
   // Purely a read. Whatever the reader has walked through has already resolved its notes at
   // build time, so the entries for this page are in the store; a link the store does not know
   // renders as its plain marker and stays navigable.
