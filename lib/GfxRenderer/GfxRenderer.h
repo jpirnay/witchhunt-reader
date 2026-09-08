@@ -41,6 +41,9 @@ class GfxRenderer {
   // Mirrors `orientation` except across the themes' transient hint-strip flips. See setOrientation.
   std::atomic<int> heldOrientation;
   std::atomic<bool> fadingFix;
+  // Extra pixels inset from every panel edge, on top of the board profile's viewableInsets.
+  // See setViewablePadding().
+  std::atomic<int> viewablePadding;
   // Text darkness for 2-bit grayscale glyph rendering.
   std::atomic<uint8_t> textDarkness;
   //   0 = Normal     — true 4-level AA (raw=1 → light gray, raw=2 → dark gray)
@@ -167,6 +170,7 @@ class GfxRenderer {
         orientation(static_cast<int>(Portrait)),
         heldOrientation(static_cast<int>(Portrait)),
         fadingFix(false),
+        viewablePadding(0),
         textDarkness(1) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
 
@@ -351,6 +355,20 @@ class GfxRenderer {
   void invertScreen() const;
   void clearScreen(uint8_t color = 0xFF) const;
   void getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const;
+
+  // Extra bezel inset the reader has asked for, on top of whatever the board profile declares.
+  //
+  // The profile's viewableInsets describe where the CASE sits over the glass, measured per
+  // board. They cannot describe how close is too close for a given pair of eyes, and on the
+  // T5 S3 the plastic cover comes near enough to the live pixels that text at the profile inset
+  // is genuinely hard to read. So the board says what is hidden and the reader says how much
+  // clearance they want beyond it.
+  //
+  // Extra pixels, applied uniformly to all four edges. Pushed from main.cpp's loop alongside
+  // setTextDarkness(), so a change in Settings takes effect on the next render without anything
+  // having to remember to forward it; zero until something does, so a board nobody has
+  // configured behaves exactly as before.
+  void setViewablePadding(const int px) { viewablePadding.store(px, std::memory_order_relaxed); }
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;

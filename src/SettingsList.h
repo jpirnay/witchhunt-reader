@@ -177,6 +177,12 @@ inline std::vector<SettingInfo> buildSettingsList() {
                         "sleepScreen", StrId::STR_CAT_DISPLAY)
           .withSubcategory(StrId::STR_MENU_DISP_SLEEP)
           .withSelectorActivity());
+  // Extra clearance from the panel edge, on top of what the board profile declares. Display
+  // rather than Reader because it moves the status bar too, and because it is a property of the
+  // device's case rather than of how one likes text laid out -- see CrossPointSettings::edgeMargin.
+  settings.push_back(SettingInfo::Enum(StrId::STR_EDGE_MARGIN, &CrossPointSettings::edgeMargin,
+                                       {StrId::STR_NARROW, StrId::STR_MEDIUM, StrId::STR_LARGE}, "edgeMargin",
+                                       StrId::STR_CAT_DISPLAY));
   settings.push_back(SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                                        {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode",
                                        StrId::STR_CAT_DISPLAY));
