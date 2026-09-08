@@ -108,6 +108,12 @@ class Section {
   // spine alone (NOT on render properties), so it is reused across settings changes and rebuilds
   // to skip ZIP inflation. Adapted from crosspoint-reader PR #2452 by GitHub user itsthisjustin.
   std::string getSectionHtmlCachePath() const;
+  // Path of the per-build anchor spill: where the parser streams the anchor map as it finds it,
+  // instead of holding every anchor in RAM until finalize. See
+  // ChapterHtmlSlimParser::setAnchorSpillPath for why.
+  std::string getAnchorSpillPath() const;
+  // Appends the anchor spill at `spillPath` to the open section file `out`, verbatim.
+  static bool copyAnchorSpill(FsFile& out, const std::string& spillPath);
   // Computes the image base path for extract images related to this specific section variant
   // Directory prefix for extracted source images. Content-keyed by the caller (see
   // ChapterHtmlSlimParser), so one extraction serves every layout variant.

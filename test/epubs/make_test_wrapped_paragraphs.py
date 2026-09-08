@@ -57,6 +57,13 @@ def paragraphs_html(indent):
     return "\n".join(out)
 
 
+# An empty anchored element after the last paragraph. Calibre emits these by the hundred as index
+# targets, and they matter here because an id that opens no text block stays PENDING to the end of
+# the document: it is recorded during finalize, after the parse has stopped, which is the one
+# anchor a lifecycle mistake in the anchor-spill machinery singles out. Without it the corpus
+# cannot reach that path at all.
+TRAILING_ANCHOR = '<a id="ind_tail"></a>'
+
 WRAPPED = f"""<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
   <head><title>Wrapped Chapter</title></head>
@@ -64,6 +71,7 @@ WRAPPED = f"""<?xml version="1.0" encoding="utf-8"?>
 <div id="ch01" class="chapter">
 <h1>Wrapped Chapter</h1>
 {paragraphs_html("")}
+{TRAILING_ANCHOR}
 </div>
   </body>
 </html>

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <BufferedFileIO.h>
+#include <HalStorage.h>
 #include <Print.h>
 #include <SaxParser/SaxParser.h>
 
@@ -7,6 +9,7 @@
 #include <climits>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -316,7 +319,20 @@ class ChapterHtmlSlimParser final : public Print {
 
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
   int completedPageCount = 0;
+  // Resident anchors. Empty on the normal path -- see setAnchorSpillPath -- and used only as
+  // the fallback when the spill file could not be opened.
   std::vector<std::pair<std::string, uint16_t>> anchorData;
+  std::string anchorSpillPath;
+  FsFile anchorSpillFile;
+  std::optional<serialization::BufferedFileWriter> anchorSpillWriter;
+  uint16_t anchorCount = 0;
+  // Latched when a spill write or flush failed. The spill is then a truncated record stream that
+  // cannot be trusted, so the map is abandoned rather than half-written -- and this stops the
+  // resident fallback from picking up the remaining anchors and producing a map that silently
+  // begins in the middle of the chapter.
+  bool anchorSpillFailed = false;
+  // Appends one anchor, to the spill file when it is open and to anchorData otherwise.
+  void recordAnchor(std::string id, uint16_t page);
   std::string pendingAnchorId;  // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;
 
@@ -543,7 +559,28 @@ class ChapterHtmlSlimParser final : public Print {
 
   ParsedText::LineProcessResult addLineToPage(std::shared_ptr<TextBlock> line, bool lineEndsWithHyphenatedWord,
                                               bool suppressHyphenationRetry);
+  // Anchors reach the section cache through the spill file, not through this vector: see
+  // setAnchorSpillPath. Non-empty only when the spill could not be opened, in which case these
+  // are all the anchors there are and the finalizer writes them itself.
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  // Total anchors recorded, spilled and resident together. This is the count the section
+  // cache's anchor map is written with.
+  uint16_t getAnchorCount() const { return anchorCount; }
+  // Where to stream anchors as they are found. Must be set before setup(); an empty path (or a
+  // file that will not open) falls the parser back to holding them in `anchorData`.
+  //
+  // Anchors are append-only during the parse and read exactly once at the end, in document
+  // order, so nothing needs them resident -- and holding them was the single largest
+  // chapter-scaled allocation in the build. A 549-anchor chapter (an ordinary endnotes
+  // document) grew this vector to a 1024-entry capacity: 28.7 KB held for the whole parse,
+  // reached through a 43 KB contiguous peak while the doubling had both blocks live. That is
+  // more than the entire ~20 KB the build's heap gates budget for the parse working set, and a
+  // plain push_back has no way to fail softly -- under -fno-exceptions it aborts.
+  //
+  // Streaming makes the cost O(1) in the number of anchors. The bytes written here are exactly
+  // the section cache's anchor-map encoding, so the finalizer copies them in verbatim.
+  void setAnchorSpillPath(std::string path) { anchorSpillPath = std::move(path); }
+  const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   const std::vector<std::pair<uint16_t, std::string>>& getPageBreakLabels() const { return pageBreakLabels; }
   const std::vector<ParagraphLutEntry>& getParagraphLutPerPage() const { return paragraphLutPerPage; }
 
