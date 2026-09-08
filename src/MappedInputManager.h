@@ -270,7 +270,10 @@ class MappedInputManager {
   // Synthesize a press of a RAW hardware button. For inputs that stand in for a button
   // without being one -- a tap on the on-screen hint strip. Raw rather than logical so
   // the user's button remapping still applies, exactly as for the physical key.
-  void injectRawPress(uint8_t rawButtonIndex) const;
+  //
+  // `longPress` makes it a HOLD rather than a click, for a long tap on the strip. Without it
+  // every long-press-only action is out of reach on a board with no nav buttons.
+  void injectRawPress(uint8_t rawButtonIndex, bool longPress = false) const;
 
   // Drain one queued raw button edge from the background sampler (FIFO). Returns
   // false when empty. Used by ButtonEventManager to drive its press-type FSM.

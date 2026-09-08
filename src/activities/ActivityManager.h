@@ -203,6 +203,9 @@ class ActivityManager {
   // after the current activity's loop() so screens that handle touch themselves win; see
   // the definition for why that ordering matters.
   void dispatchListTap();
+  // A vertical swipe over a painted list pages it, by injecting the list page button. See the
+  // definition for why this is a synthesis rather than a per-screen handler.
+  void dispatchListSwipe();
   void dispatchHintStripTap();
 
   // If immediate is true, the update will be triggered immediately.

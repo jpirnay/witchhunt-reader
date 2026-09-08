@@ -307,7 +307,9 @@ bool MappedInputManager::isScreenTouchHeld(int& x, int& y) const {
   return true;
 }
 
-void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex) const { gpio.injectPress(rawButtonIndex); }
+void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex, const bool longPress) const {
+  gpio.injectPress(rawButtonIndex, longPress);
+}
 
 bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); }
 
