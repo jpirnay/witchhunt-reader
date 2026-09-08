@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "../Activity.h"
+#include "components/KeyboardGrid.h"
+#include "components/SeqPublish.h"
 #include "util/ButtonNavigator.h"
 
 struct KeyDef {
@@ -223,4 +225,25 @@ class KeyboardEntryActivity : public Activity {
   bool insertChar(char c);
   void insertString(const std::string& str);
   void mapColContentBottom(int& col, bool goingUp) const;
+
+  // A tap on a key. Returns true when the tap was consumed, so loop() stops before the button
+  // handling and the hint strip below never sees it.
+  bool handleKeyboardTouch();
+
+  // Where render() last painted the two key blocks, so the tap can be resolved against what is
+  // actually on screen.
+  //
+  // Published by the draw rather than recomputed on the loop task because the character block's
+  // origin is bottom-aligned off the panel on every shipped theme but is derived from the
+  // wrapped height of the entered text when a theme is not -- and that wrap only happens inside
+  // render().
+  //
+  // Sequenced, like every other piece of geometry that crosses from the render task to the input
+  // side. Two blocks of seven ints are not written atomically, and a reader that caught half of
+  // a mode change (the 10-column character grid becoming the 3-column URL one) would resolve a
+  // tap to a key that is not under the finger -- and then TYPE it. A torn read answers "no key
+  // here" instead, and the tap falls through to the hint strip.
+  KeyboardGrid::Rows contentKeyGrid;
+  KeyboardGrid::Rows bottomKeyGrid;
+  SeqPublish keyGridSeq;
 };

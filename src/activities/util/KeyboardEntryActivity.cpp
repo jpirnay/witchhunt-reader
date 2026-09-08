@@ -184,7 +184,63 @@ void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
   }
 }
 
+// A tap on a key types it. Single-tap, unlike a list row, and for the reason the settings tab
+// bar is single-tap too: point-then-confirm exists because activating the wrong row can be
+// expensive to undo, and here the cost of a mis-tap is one Del. Two taps per letter would make
+// the keyboard slower by touch than by the cursor it replaces.
+//
+// The tap MOVES the selection first and then runs handleKeyPress(), which is the screen's own
+// Confirm body -- the same synthesize-don't-duplicate rule the list dispatcher follows. Shift,
+// mode, URL and Ok therefore behave identically however they were reached, and a button press
+// after a tap continues from the key the finger left off on.
+bool KeyboardEntryActivity::handleKeyboardTouch() {
+  if (!mappedInput.hasTouch()) return false;
+  // Cursor mode moves a caret through the entered text; the keys are drawn but inert, exactly as
+  // they are for Confirm. Leaving the tap unclaimed lets the hint strip have it.
+  if (cursorMode) return false;
+
+  // Copy both blocks under the seqlock, then hit-test the copies: see the header for why a torn
+  // read here would type a key the finger was not on.
+  uint32_t before = 0;
+  if (!keyGridSeq.beginRead(before)) return false;
+  const KeyboardGrid::Rows content = contentKeyGrid;
+  const KeyboardGrid::Rows bottom = bottomKeyGrid;
+  if (!keyGridSeq.endRead(before)) return false;
+
+  int x = 0;
+  int y = 0;
+  int row = -1;
+  int col = -1;
+  const auto hit = [&](const int px, const int py) {
+    if (KeyboardGrid::hitTest(content, px, py, row, col)) return true;
+    if (KeyboardGrid::hitTest(bottom, px, py, row, col)) {
+      row = getContentRowCount();  // the bottom row's index in the selection's frame
+      return true;
+    }
+    return false;
+  };
+
+  // Claimed but not acted on, so the release that follows cannot also be read as something else.
+  if (mappedInput.wasScreenTouchDown(x, y) && hit(x, y)) return true;
+  if (!mappedInput.wasScreenTapped(x, y) || !hit(x, y)) return false;
+
+  // urlMode paints a 3x3 block for nine snippets, so every cell in it is a key. Guarded anyway:
+  // the grid is published by the render task and the mode can change under a tap.
+  if (!isBottomRow(row) && (row >= getContentRowCount() || col >= getContentColCount())) return true;
+
+  selectedRow = row;
+  selectedCol = col;
+  if (handleKeyPress()) {
+    requestUpdate();
+  }
+  return true;
+}
+
 void KeyboardEntryActivity::loop() {
+  // Ahead of the button handling: Ok finishes this activity, and running the rest against a
+  // screen that is going away serves nobody.
+  if (handleKeyboardTouch()) return;
+
   const int totalRows = getTotalRowCount();
 
   if (!cursorMode && mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
@@ -629,6 +685,15 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   const KeyDef(*layout)[COLS] = symMode ? symLayout : (inputType == InputType::Url ? urlLayout : abcLayout);
   const int contentRows = getContentRowCount();
+  const int bottomRowY = keyboardStartY + contentRows * (keyHeight + keySpacing) + bottomRowGap;
+
+  // Publish both blocks for the tap handler, from the same values the loops below draw with.
+  keyGridSeq.beginWrite();
+  contentKeyGrid = {
+      urlMode ? urlLeftMargin : leftMargin, keyboardStartY, keyWidth, keyHeight, keySpacing, contentCols, contentRows};
+  bottomKeyGrid = {bottomLeftMargin, bottomRowY,       bottomKeyWidth, bottomKeyHeight,
+                   bkSpacing,        BOTTOM_KEY_COUNT, /*rows=*/1};
+  keyGridSeq.endWrite();
 
   for (int row = 0; row < contentRows; row++) {
     const int rowY = keyboardStartY + row * (keyHeight + keySpacing);
@@ -665,7 +730,6 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  const int bottomRowY = keyboardStartY + contentRows * (keyHeight + keySpacing) + bottomRowGap;
   const bool bottomSelected = isBottomRow(selectedRow);
 
   struct BottomKeyInfo {
