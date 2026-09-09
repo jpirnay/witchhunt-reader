@@ -6,7 +6,10 @@
 // A missing cacheDir uses a fresh temp dir (cold build). Passing the same
 // cacheDir twice exercises the warm path. --bench adds per-spine timing,
 // whole-run peak heap, and the on-disk cache footprint to stderr.
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <dlfcn.h>  // dladdr, for symbolising alloc sites; MinGW has no dlfcn
 #endif
 
@@ -93,6 +96,10 @@ int main(const int argc, char** argv) {
         if (info.dli_sname != nullptr) sym = info.dli_sname;
         if (info.dli_fbase != nullptr) rel = sites[i].pc - reinterpret_cast<uintptr_t>(info.dli_fbase);
       }
+#else
+      // No dladdr here, so print the offset from the image base instead: addr2line on the
+      // .exe resolves it. Without this the profiler's site list is a column of raw pointers.
+      rel = sites[i].pc - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
 #endif
       std::fprintf(stderr, "\nBENCHMARK alloc_site count=%zu bytes=%zu off=0x%llx sym=%s", sites[i].count,
                    sites[i].bytes, rel, sym);

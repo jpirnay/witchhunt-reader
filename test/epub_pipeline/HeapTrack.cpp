@@ -20,6 +20,18 @@ extern "C" void __libc_free(void*) __attribute__((weak));
 
 namespace {
 
+// One stack walk, two platforms. glibc's backtrace() is not in MinGW; the Windows runtime has
+// RtlCaptureStackBackTrace, which needs no unwind tables and does not allocate. Without this the
+// whole heap-profiling tool simply did not build on Windows, which is why the memory questions in
+// this codebase have been answered from device logs rather than from a profile.
+int captureFrames(void** frames, const int count) {
+#if defined(_WIN32)
+  return static_cast<int>(RtlCaptureStackBackTrace(0, static_cast<ULONG>(count), frames, nullptr));
+#else
+  return backtrace(frames, count);
+#endif
+}
+
 std::atomic<size_t> g_liveBytes{0};
 std::atomic<size_t> g_peakBytes{0};
 std::atomic<size_t> g_allocCount{0};
@@ -77,7 +89,7 @@ void trackAlloc(size_t sz) {
   // info instead. It can allocate internally, so the hook guard must be held across the call.
   g_inHook = true;
   void* frames[6] = {};
-  const int depth = backtrace(frames, 6);
+  const int depth = captureFrames(frames, 6);
   // 0 = trackAlloc, 1 = the malloc/new override, 2 = libstdc++ operator new for C++ allocations.
   // Take the first frame that lies outside this translation unit's address range by preferring
   // the deepest available, which is the application for both C and C++ paths.
@@ -174,7 +186,7 @@ void heapTrackBegin() {
   // backtrace() lazily initialises (and allocates) on first use; do it before the
   // hook is live so that initialisation is not itself profiled or recursed into.
   void* warm[4];
-  (void)backtrace(warm, 4);
+  (void)captureFrames(warm, 4);
   g_liveBytes.store(0);
   g_peakBytes.store(0);
   g_allocCount.store(0);
