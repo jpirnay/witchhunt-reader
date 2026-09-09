@@ -452,14 +452,10 @@ inline void SettingInfo::prepareSubmenus(std::vector<SettingInfo>& items,
     // that leads to all twenty gestures, and left the other three headings behind in the parent
     // tab with nothing under them once their rows had moved into the submenu. The grouping
     // describes the children, so it belongs to the submenu, not to the row that opens it.
-    StrId shared = submenu.items.empty() ? StrId::STR_NONE_OPT : submenu.items.front().subcategory;
-    for (const auto& child : submenu.items) {
-      if (child.subcategory != shared) {
-        shared = StrId::STR_NONE_OPT;
-        break;
-      }
-    }
-    items[placeholderAt[s]].subcategory = shared;
+    const StrId first = submenu.items.empty() ? StrId::STR_NONE_OPT : submenu.items.front().subcategory;
+    const bool allAgree = std::all_of(submenu.items.begin(), submenu.items.end(),
+                                      [first](const SettingInfo& child) { return child.subcategory == first; });
+    items[placeholderAt[s]].subcategory = allAgree ? first : StrId::STR_NONE_OPT;
 
     auto it = std::find_if(submenuData.begin(), submenuData.end(),
                            [&submenu](const SubmenuData& d) { return d.id == submenu.id; });

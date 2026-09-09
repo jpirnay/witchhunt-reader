@@ -4,6 +4,8 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#include <algorithm>
+
 #include "CrossPointSettings.h"
 #include "SettingsList.h"
 
@@ -79,14 +81,14 @@ void apply(const SettingAction action, const uint8_t value) {
   //
   // Now a row that forgets to declare its field does not save AND does not apply, which is a
   // report on the first use rather than one after a power cycle.
-  const SettingInfo* row = nullptr;
-  for (const auto& info : getSettingsList()) {
-    if (info.type == SettingType::ACTION && info.action == action && info.persistPtr) {
-      row = &info;
-      break;
-    }
-  }
-  if (!row) {
+  // Bound to a named local, NOT iterated straight out of the call: getSettingsList() returns the
+  // vector BY VALUE, so a range-for over the call alone destroys it at the end of the loop and
+  // anything still pointing into it dangles. Same form JsonSettingsIO uses.
+  const auto settings = getSettingsList();
+  const auto row = std::find_if(settings.begin(), settings.end(), [action](const SettingInfo& info) {
+    return info.type == SettingType::ACTION && info.action == action && info.persistPtr;
+  });
+  if (row == settings.end()) {
     LOG_ERR("SET", "Slider action %d edits no declared field; see SettingInfo::persisting", static_cast<int>(action));
     return;
   }
