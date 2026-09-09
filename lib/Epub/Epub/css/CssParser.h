@@ -77,7 +77,14 @@ class CssParser {
   // v15: rules with no renderer-supported declarations are omitted from the cache.
   // v16: img width/height record an explicit `auto` (and honour !important), so a later
   //      `height: auto` in the cascade clears an earlier length instead of being dropped.
-  static constexpr uint8_t CSS_CACHE_VERSION = 16;
+  // v17: a flags byte after the header counters, carrying hasIdSelectors. Without it the
+  //      "does any rule match on #id" question can only be answered while PARSING the CSS, and
+  //      the normal path loads a compiled cache instead — so every id-bearing element paid two
+  //      guaranteed-miss rule lookups on every book.
+  static constexpr uint8_t CSS_CACHE_VERSION = 17;
+  // Bytes before the sorted offset index: version(1) + ruleCount(2) + totalSelectorCandidates(4)
+  // + unsupportedSelectorSkips(4) + flags(1).
+  static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 12;
 
   // Retained RAM per rule in disk-backed lookup mode (the sorted SelectorEntry index).
   // Heap gates (Section::heapAllowsEmbeddedStyle) size their contiguous-block floor
@@ -108,6 +115,12 @@ class CssParser {
    * @param idAttr The id attribute value (empty string if absent)
    * @return Combined style with all applicable rules merged
    */
+  // True when at least one selector in the sheet matches on an element id (#id or tag#id). When
+  // it is false an element's id cannot affect its style, so callers may ignore the id entirely --
+  // which lets them share one cached style across every element with the same tag and class
+  // instead of one per id. Persisted in the rule cache; see CSS_CACHE_VERSION v17.
+  [[nodiscard]] bool hasIdSelectors() const { return hasIdSelectors_; }
+
   [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
                                       const std::string& idAttr = {}) const;
 
@@ -282,6 +295,9 @@ class CssParser {
   mutable std::unordered_map<std::string, std::pair<CssStyle, std::list<std::string>::iterator>> hotRuleCache_;
   mutable std::unordered_set<std::string> negativeRuleCache_;
   mutable ResolveStats resolveStats_;
+  // Set while parsing when a selector matches on an id, and restored from the cache header
+  // otherwise. Conservative default: assume ids matter until something says they do not.
+  mutable bool hasIdSelectors_ = true;  // mutable: restored by the const cache-index load
 
   bool compileModeActive_ = false;
   bool compileModeFailed_ = false;

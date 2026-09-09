@@ -1326,7 +1326,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       //
       // Skipping the cache costs nothing it was buying: unique keys never hit. Elements without
       // an id are unaffected and still share entries by tag|class, which is where the hits are.
-      if (!idAttr.empty()) {
+      // An id only affects the answer when some rule matches on one. When none does -- neither of
+      // this book's stylesheets has a single # selector, nor the other edition's -- the id is
+      // dropped from the key entirely and the element shares the tag|class entry, so a chapter of
+      // uniquely-id'd notes gets cache HITS instead of a re-resolve (and its SD reads) per note.
+      if (!idAttr.empty() && self->cssParser->hasIdSelectors()) {
         cssStyle = self->cssParser->resolveStyle(name, classAttr, idAttr);
       } else {
         std::string cacheKey(name);

@@ -748,6 +748,13 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
       continue;
     }
 
+    // Record whether ANY usable rule matches on an id. resolveStyle does two extra lookups per
+    // id-bearing element ("#id" and "tag#id"); in a sheet with no id selectors both are
+    // guaranteed to miss, and the caller can ignore the element's id entirely -- which lets one
+    // cached style serve every element of the same tag and class instead of one per id. Checked
+    // here, on the normalized selector, so it costs one character scan per rule at parse time.
+    if (key.find('#') != std::string::npos) hasIdSelectors_ = true;
+
     // Skip if this would exceed the rule limit
     const size_t ruleCount = compileModeActive_ ? compileSelectorOffsets_.size() : rulesBySelector_.size();
     if (ruleCount >= MAX_RULES) {
@@ -1029,7 +1036,8 @@ bool CssParser::endCacheCompile() {
   outFile.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   outFile.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   outFile.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  // v10: index immediately after the 11-byte header — write zeroed placeholder, patch below.
+  outFile.write(static_cast<uint8_t>(hasIdSelectors_ ? 1 : 0));  // v17 flags byte
+  // v10: index immediately after the header — write zeroed placeholder, patch below.
 
   FsFile tempFile;
   if (!Storage.openFileForRead("CSS", compileTempPath_, tempFile)) {
@@ -1081,7 +1089,7 @@ bool CssParser::endCacheCompile() {
   // Sort and patch the index placeholder at position 11.
   std::sort(indexEntries.begin(), indexEntries.end(),
             [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
-  outFile.seek(11);
+  outFile.seek(CssParser::CSS_CACHE_HEADER_BYTES);
   for (const auto& entry : indexEntries) {
     outFile.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
   }
@@ -1166,6 +1174,9 @@ void CssParser::clear() {
   compileSelectorOffsets_.clear();
   totalSelectorCandidates_ = 0;
   unsupportedSelectorSkips_ = 0;
+  // Cleared to FALSE, unlike its conservative default: what follows is either a parse, which
+  // sets it from the selectors it sees, or a cache load, which restores it from the header.
+  hasIdSelectors_ = false;
   // Reset Phase-2 arena config: clear() ends a build, so the shared per-epub parser must not
   // carry the lean flag or a now-dangling arena pointer into the next (possibly heap-backed) one.
   indexArena_ = nullptr;
@@ -1540,11 +1551,14 @@ bool CssParser::ensureCacheIndexLoaded() const {
 
   uint32_t totalCandidates = 0;
   uint32_t unsupportedSkips = 0;
+  uint8_t flags = 0;
   if (file.read(reinterpret_cast<uint8_t*>(&totalCandidates), sizeof(totalCandidates)) != sizeof(totalCandidates) ||
-      file.read(reinterpret_cast<uint8_t*>(&unsupportedSkips), sizeof(unsupportedSkips)) != sizeof(unsupportedSkips)) {
+      file.read(reinterpret_cast<uint8_t*>(&unsupportedSkips), sizeof(unsupportedSkips)) != sizeof(unsupportedSkips) ||
+      file.read(&flags, 1) != 1) {
     file.close();
     return false;
   }
+  hasIdSelectors_ = (flags & 0x01) != 0;
 
   // v10: index is immediately after the 11-byte header — read sequentially, no seek.
   dropIndex();  // clears the heap vector and any arena view; resets cachedRuleCount_
@@ -1565,7 +1579,7 @@ bool CssParser::ensureCacheIndexLoaded() const {
     const size_t indexBytes = static_cast<size_t>(ruleCount) * sizeof(SelectorEntry);
     if (ruleCount > 0) {
       auto* idx = static_cast<SelectorEntry*>(indexArena_->alloc(indexBytes, alignof(SelectorEntry)));
-      if (!idx || !file.seek(11) ||
+      if (!idx || !file.seek(CssParser::CSS_CACHE_HEADER_BYTES) ||
           file.read(reinterpret_cast<uint8_t*>(idx), indexBytes) != static_cast<int>(indexBytes)) {
         file.close();
         return false;  // arena exhausted or short read — caller falls back to a released build
@@ -1779,7 +1793,8 @@ bool CssParser::loadArenaResident(FsFile& file, const uint16_t ruleCount, const 
   if (ruleCount > 0) {
     // Skip the sorted offset index (11-byte header + ruleCount * 8) to reach the payload block,
     // then stream it in one sequential pass (fixed-size payloads → no per-record seeking).
-    if (!file.seek(static_cast<uint32_t>(11 + static_cast<size_t>(ruleCount) * sizeof(SelectorEntry)))) {
+    if (!file.seek(static_cast<uint32_t>(CssParser::CSS_CACHE_HEADER_BYTES +
+                                         static_cast<size_t>(ruleCount) * sizeof(SelectorEntry)))) {
       indexArena_->release(block);
       return false;
     }
@@ -1948,8 +1963,11 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     });
   }
 
-  // 3. Apply ID styles (highest priority: #id < tag#id)
-  if (!idAttr.empty()) {
+  // 3. Apply ID styles (highest priority: #id < tag#id). Skipped outright when the sheet has no
+  // id selector at all, which is the common case: both lookups below would build a key, hash it,
+  // probe the index and come back empty, twice per id-bearing element. On a converted endnotes
+  // chapter with one generated id per note that was ~700 guaranteed misses per chapter.
+  if (!idAttr.empty() && hasIdSelectors_) {
     std::string idKey;
     idKey.reserve(1 + idAttr.size());
     idKey.push_back('#');
@@ -2012,7 +2030,8 @@ bool CssParser::saveToCache() const {
   file.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   file.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   file.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  // v10: index lives immediately after the 11-byte header (before rule payloads).
+  file.write(static_cast<uint8_t>(hasIdSelectors_ ? 1 : 0));  // v17 flags byte
+  // v10: index lives immediately after the header (before rule payloads).
   // Write zeroed placeholder entries now; patch with sorted data below.
   // ensureCacheIndexLoaded() reads header + index sequentially — no seek over payloads.
   std::vector<SelectorEntry> indexEntries;
@@ -2038,7 +2057,7 @@ bool CssParser::saveToCache() const {
   // Sort and patch the index placeholder at position 11.
   std::sort(indexEntries.begin(), indexEntries.end(),
             [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
-  file.seek(11);
+  file.seek(CssParser::CSS_CACHE_HEADER_BYTES);
   for (const auto& entry : indexEntries) {
     file.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
   }
