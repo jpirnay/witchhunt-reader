@@ -601,6 +601,10 @@ class EpubReaderActivity final : public Activity {
   // where the store has no entry). A pure read: note text is resolved by the section build that
   // needs it, never by opening the list.
   std::vector<std::string> footnotePreviewsForCurrentPage();
+  // True when this link is a real footnote rather than navigation (a contents link, a
+  // cross-reference). Decides whether following it pushes a position to return to. Answers TRUE
+  // whenever it cannot tell, so nothing regresses on a book with no preview store.
+  bool hrefIsFootnote(const char* href);
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.

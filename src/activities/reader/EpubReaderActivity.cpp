@@ -1914,7 +1914,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                              [this](const ActivityResult& result) {
                                if (!result.isCancelled) {
                                  const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                                 navigateToHref(footnoteResult.href, true);
+                                 // Only a note is a detour worth returning from; see hrefIsFootnote.
+                                 navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
                                }
                                requestUpdate();
                              });
@@ -2908,6 +2909,30 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
     return true;
   }
   return false;
+}
+
+bool EpubReaderActivity::hrefIsFootnote(const char* href) {
+  // A page's internal links are not all footnotes. A chapter heading that links back to the
+  // contents, a cross-reference, an index entry -- the parser records every internal link with
+  // text, and a marker-shaped one ("1", "1599") is indistinguishable from a note caller by its
+  // markup: the same book uses <sup> for its notes and a bare digit for its TOC links, and
+  // another book (yesteryear) writes ALL 445 of its note callers as bare digits with no <sup>
+  // and no epub:type. There is no reliable answer in the markup.
+  //
+  // There is one in the preview store, which is the only thing here that has actually followed
+  // the link: it holds a note's text keyed by the caller's href, and since the resolver stopped
+  // capturing caller anchors as if they were notes, a target that is itself a link (a TOC entry,
+  // a back-link) never lands in it. So "the store knows this href" IS "this is a note".
+  //
+  // Defaults to TRUE wherever the store cannot answer -- absent, or this spine not scanned yet --
+  // so a book with no preview store behaves exactly as it did before this existed. The
+  // classification only ever demotes a link the store has positively looked at and rejected.
+  if (!epub || !href || *href == '\0') return true;
+  if (!FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex)) return true;
+  FootnotePreviews::Lookup lookup;
+  if (!lookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) return true;
+  std::string text;
+  return lookup.find(href, text);
 }
 
 std::vector<std::string> EpubReaderActivity::footnotePreviewsForCurrentPage() {
@@ -5256,7 +5281,7 @@ bool EpubReaderActivity::handleLinkTouch() {
 
   mappedInput.suppressTouchContact();
   LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
-  navigateToHref(currentPageFootnotes[link].href, true);
+  navigateToHref(currentPageFootnotes[link].href, hrefIsFootnote(currentPageFootnotes[link].href));
   return true;
 }
 
@@ -5619,14 +5644,14 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {
         if (currentPageFootnotes.size() == 1) {
-          navigateToHref(currentPageFootnotes[0].href, true);
+          navigateToHref(currentPageFootnotes[0].href, hrefIsFootnote(currentPageFootnotes[0].href));
         } else {
           startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(
                                      renderer, mappedInput, currentPageFootnotes, footnotePreviewsForCurrentPage()),
                                  [this](const ActivityResult& result) {
                                    if (!result.isCancelled) {
                                      const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                                     navigateToHref(footnoteResult.href, true);
+                                     navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
                                    }
                                  });
         }
