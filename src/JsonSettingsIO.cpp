@@ -234,6 +234,14 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Saved unconditionally, not behind the board's capability: a settings file
   // carried to a board with no light must come back with the preference intact.
   doc["frontlightOn"] = s.frontlightOn;
+  // Brightness and warmth are chosen through slider ACTIONS, which carry neither a field pointer
+  // nor a key, so the generic loop above cannot see them either. Without these two lines the
+  // level was live for the session and gone at the next boot: the slider drove the hardware and
+  // updated the setting, saveToFile() wrote a document that did not contain it, and begin()
+  // restored the compiled default. Saved unconditionally, for the same reason frontlightOn is —
+  // a settings file carried to a board without a light must come back with the preference intact.
+  doc["frontlightBrightness"] = s.frontlightBrightness;
+  doc["frontlightWarmth"] = s.frontlightWarmth;
   if (s.dictionaryName[0] != '\0') {
     doc["dictionaryName"] = s.dictionaryName;
   }
@@ -419,6 +427,11 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                        CrossPointSettings::BUILTIN_FONT_COUNT, CrossPointSettings::BOOKERLY);
   // Frontlight switch: dynamic in SettingsList, so it needs loading manually too.
   s.frontlightOn = (doc["frontlightOn"] | 0) ? 1 : 0;
+  // Both levels are percentages, so the valid range is 0..100 inclusive — hence 101 as the
+  // exclusive bound clamp() takes. An out-of-range value falls back to the compiled default
+  // rather than to a dark or blinding panel.
+  s.frontlightBrightness = clamp(doc["frontlightBrightness"] | s.frontlightBrightness, 101, s.frontlightBrightness);
+  s.frontlightWarmth = clamp(doc["frontlightWarmth"] | s.frontlightWarmth, 101, s.frontlightWarmth);
   const char* dictName = doc["dictionaryName"] | "";
   strncpy(s.dictionaryName, dictName, sizeof(s.dictionaryName) - 1);
   s.dictionaryName[sizeof(s.dictionaryName) - 1] = '\0';
