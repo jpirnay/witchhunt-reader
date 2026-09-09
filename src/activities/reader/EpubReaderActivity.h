@@ -608,10 +608,6 @@ class EpubReaderActivity final : public Activity {
     std::vector<uint8_t> isNote;        // 1 = footnote, 0 = navigation
   };
   PageLinkInfo pageLinkInfoForCurrentPage();
-  // True when this link is a real footnote rather than navigation (a contents link, a
-  // cross-reference). Decides whether following it pushes a position to return to. Answers TRUE
-  // whenever it cannot tell, so nothing regresses on a book with no preview store.
-  bool hrefIsFootnote(const char* href);
   // Clamp currentSpineIndex into [0, spineCount]. spineCount itself is the finished-book sentinel.
   void clampSpineIndex(int spineCount);
   // Compute oriented + padded margins and the derived viewport for this render.
@@ -875,7 +871,18 @@ class EpubReaderActivity final : public Activity {
                                          unsigned long backwardMs) const;
 #endif  // ENABLE_BENCHMARKS
 
-  // Footnote navigation
+  // Footnote navigation.
+  //
+  // savePosition is TRUE for every link the reader follows, footnote or not. It was briefly
+  // conditional on the link being a real note -- the reasoning being that a contents link is
+  // navigation rather than a detour, so it should not push a position to return to. That is
+  // wrong about the consequence: the saved position is the ONLY thing Back has to return to, so
+  // a link that saves nothing leaves footnoteDepth at 0 and Back closes the book. Device log
+  // 2026-09-09: a note reference jumped to the notes chapter and Back went to the home screen.
+  //
+  // The two kinds are still told apart, but only where the distinction is harmless -- the
+  // footnote list groups them (see pageLinkInfoForCurrentPage). Following one always leaves a
+  // way back.
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
 

@@ -2175,6 +2175,10 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
     }
   }
 
+  // Say how big the map WAS on a miss. A miss can mean the id is simply not in this document, or
+  // that the chapter had more anchors than MAX_ANCHORS_PER_CHAPTER and this one fell off the end
+  // -- and those want opposite fixes. The count tells them apart: at the cap, suspect the cap.
+  LOG_DBG("SCT", "Anchor '%s' not in spine %d's map (%u entries)", anchor.c_str(), spineIndex, count);
   f.close();
   return std::nullopt;
 }
