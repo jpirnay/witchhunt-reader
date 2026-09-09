@@ -322,6 +322,25 @@ class ChapterHtmlSlimParser final : public Print {
   // Resident anchors. Empty on the normal path -- see setAnchorSpillPath -- and used only as
   // the fallback when the spill file could not be opened.
   std::vector<std::pair<std::string, uint16_t>> anchorData;
+  // Anchors whose element has been opened but whose first line has not been placed yet. The page
+  // an anchor names has to be the page its content lands on, and that is not known when the block
+  // STARTS: if the block's first line does not fit on the page in progress, addLineToPage emits
+  // that page first and the content goes to the next one. Recording at block start therefore put
+  // anything beginning exactly at a page boundary one page early -- the reader arrived at the page
+  // BEFORE the note. Held until addLineToPage has placed a line, then recorded against the page
+  // that line actually went on.
+  //
+  // Small by construction: an entry lives only from an element's start tag to its first line, so
+  // it holds more than one only for id'd elements that produce no text at all. Past
+  // MAX_ANCHORS_AWAITING_LINE the queue is flushed at the current page rather than grown, which
+  // is exactly the old behaviour and no worse.
+  std::vector<std::string> anchorsAwaitingLine_;
+  // Records every queued anchor against `completedPageCount`. Called once a line has been placed
+  // (the page is then known) and again at end of parse for anchors that never got one.
+  void flushAnchorsAwaitingLine();
+  // Holds an anchor until a line settles its page; see anchorsAwaitingLine_.
+  void queueAnchorForNextLine(std::string id);
+
   std::string anchorSpillPath;
   FsFile anchorSpillFile;
   std::optional<serialization::BufferedFileWriter> anchorSpillWriter;

@@ -94,6 +94,7 @@ add_executable(EpubPipelineTest
   FootnoteResolveSliceTest.cpp
   ParagraphAnchorTest.cpp
   AnchorMapTest.cpp
+  AnchorPageAccuracyTest.cpp
   ImageExtractionTest.cpp
   CompanionCacheTest.cpp
   StoredEntryDecodeTest.cpp

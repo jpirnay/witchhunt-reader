@@ -81,6 +81,10 @@ constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
 constexpr size_t MAX_RESIDENT_ANCHORS = 256;
 // Write buffer for the anchor spill; see the emplace site in setup().
 constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
+// Anchors that may wait for their first line at once. One per id'd element that has produced no
+// text yet; more than a couple means a run of empty anchored elements, and the excess is recorded
+// at the current page rather than held.
+constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 
 // Image extraction is now deferred to render time (ImageBlock::ensureExtracted).
 // No heap guard needed at parse time — only a ZIP header read (~4 KB buffer on stack in
@@ -1159,7 +1163,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
             emitPage(lastBodyChildByteOffset);
           }
         }
-        recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount));
+        queueAnchorForNextLine(std::move(pendingAnchorId));
         pendingAnchorId.clear();
       }
       wordsExtractedInBlock = 0;
@@ -1182,9 +1186,10 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       emitPage(lastBodyChildByteOffset);
     }
   }
-  // Record deferred anchor after previous block is flushed (and any TOC page break)
+  // Queue the deferred anchor now that the previous block is flushed (and any TOC page break has
+  // happened); its PAGE is settled by addLineToPage, once this block's first line is placed.
   if (!pendingAnchorId.empty()) {
-    recordAnchor(std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount));
+    queueAnchorForNextLine(std::move(pendingAnchorId));
     pendingAnchorId.clear();
   }
   // Apply pending inline image: attach float zone and place image on current page.
@@ -2948,6 +2953,26 @@ size_t ChapterHtmlSlimParser::anchorLimit() const {
   return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
 }
 
+void ChapterHtmlSlimParser::flushAnchorsAwaitingLine() {
+  if (anchorsAwaitingLine_.empty()) return;
+  for (auto& id : anchorsAwaitingLine_) {
+    recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
+  }
+  anchorsAwaitingLine_.clear();
+}
+
+void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
+  if (id.empty()) return;
+  // Bounded: an id'd element that never produces a line leaves its entry queued, so a run of them
+  // would grow this. Past the cap they are recorded at the current page instead -- the behaviour
+  // this replaced, applied only where holding on would cost memory.
+  if (anchorsAwaitingLine_.size() >= MAX_ANCHORS_AWAITING_LINE) {
+    recordAnchor(std::move(id), static_cast<uint16_t>(completedPageCount));
+    return;
+  }
+  anchorsAwaitingLine_.push_back(std::move(id));
+}
+
 void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
   // The on-disk anchor map counts with a uint16_t, so that is the hard ceiling whatever
   // MAX_ANCHORS_PER_CHAPTER says. Silently dropping past it is the same degradation as the cap:
@@ -3149,6 +3174,10 @@ bool ChapterHtmlSlimParser::finalize() {
     currentTextBlock.reset();
   }
 
+  // Anything still waiting on a line never got one -- an id'd element with no text of its own.
+  // Record those at the last page reached, which is where they sit, before the spill closes.
+  flushAnchorsAwaitingLine();
+
   // Close the anchor spill LAST. The trailing-anchor recording just above is the final call into
   // recordAnchor, and closing before it would send that one anchor down the resident fallback --
   // which is how the whole map was lost once: the fallback took over for that single anchor and
@@ -3228,6 +3257,10 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
             linePreview.c_str());
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
   }
+
+  // Every emitPage() that this line could trigger is above, so completedPageCount is now the page
+  // the line is going on: the page any anchor waiting on it should name.
+  flushAnchorsAwaitingLine();
 
   // Capture first-line flag before incrementing wordsExtractedInBlock.
   const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
@@ -3550,6 +3583,13 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   tr.cells = std::move(lr.cells);
   t.packer.rows.push_back(std::move(tr));
   t.packer.height += rowContrib;
+
+  // A grid row never reaches addLineToPage, so this is the table path's equivalent: the row is
+  // now committed and every emitPage() it could have forced is above, making completedPageCount
+  // the page it lands on. Without this an anchor on a <table> or a <tr> whose rows all lay out as
+  // a grid waited for the next ordinary paragraph instead -- measured ten pages later on a book
+  // whose notes are one long table.
+  flushAnchorsAwaitingLine();
 
   // Free the row's words. Everything above exists to make this possible one row at a time.
   t.pendingRow.cells.clear();
