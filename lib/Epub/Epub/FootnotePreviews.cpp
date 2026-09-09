@@ -315,7 +315,7 @@ class NoteCapturer {
   static bool isCallerAnchor(const char* name, const char** atts) {
     if (strcmp(name, "a") != 0) return false;
     const char* href = getAttribute(atts, "href");
-    return href != nullptr && *href != ' ';
+    return href != nullptr && *href != '\0';
   }
 
   void beginCapture(const size_t targetIdx, const int idDepth) {

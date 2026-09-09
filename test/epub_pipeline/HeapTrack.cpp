@@ -78,6 +78,10 @@ int trackSite(const uintptr_t pc, const size_t sz) {
       return static_cast<int>(slot);
     }
   }
+  // Every probe collided: this allocation goes unattributed, as the comment above says. It still
+  // has to say so -- falling off the end of an int function is undefined, and the caller stores
+  // whatever it gets in the allocation header and hands it back to free().
+  return -1;
 }
 
 int trackAlloc(size_t sz) {
