@@ -481,10 +481,8 @@ TEST(FootnotePreviewStore, ANoteBackLinkIsNotItselfANote) {
   FootnotePreviews::Lookup lookup;
   ASSERT_TRUE(lookup.open(epub->getCachePath(), epub.get(), kNotesDocSpine));
   std::string text;
-  EXPECT_FALSE(lookup.find("chapter0.xhtml#ft1", text))
-      << "the caller anchor resolved to a preview: '" << text << "'";
-  EXPECT_FALSE(lookup.find("chapter1.xhtml#ft9", text))
-      << "the caller anchor resolved to a preview: '" << text << "'";
+  EXPECT_FALSE(lookup.find("chapter0.xhtml#ft1", text)) << "the caller anchor resolved to a preview: '" << text << "'";
+  EXPECT_FALSE(lookup.find("chapter1.xhtml#ft9", text)) << "the caller anchor resolved to a preview: '" << text << "'";
 
   // The real notes are untouched by the fix.
   ASSERT_TRUE(lookup.open(epub->getCachePath(), epub.get(), /*currentSpineIndex=*/0));
