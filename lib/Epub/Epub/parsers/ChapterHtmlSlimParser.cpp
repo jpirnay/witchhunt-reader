@@ -1311,24 +1311,37 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   CssStyle cssStyle;
   if (self->cssParser) {
     {
-      // ID-bearing elements are uncommon; only include idAttr in the cache key when
-      // present, so the common case (no id) stays as the minimal "tag|class" key.
-      std::string cacheKey(name);
-      cacheKey += '|';
-      cacheKey += classAttr;
+      // An element with an id is resolved but NOT cached. The key would have to carry the id --
+      // the style can legitimately differ per id, that is what a #id selector is for -- and an id
+      // is unique in a document, so such an entry can never be hit again. It is pure cost.
+      //
+      // "ID-bearing elements are uncommon" was the assumption here, and it is wrong of exactly
+      // the documents that can least afford it. A converted book's endnotes chapter carries one
+      // generated id per note: 349 of them in the chapter this was measured on, each adding a
+      // ~40-char key plus a 116-byte CssStyle plus a map node to a cache that is unbounded and
+      // never evicted. That is ~70 KB held for the whole build, with a zero percent hit rate,
+      // and it was the single largest thing in a build that then ran out of heap and truncated
+      // the chapter at page 31 of 90 -- which silently cost the anchor map, and with it every
+      // footnote jump into the second half of the chapter.
+      //
+      // Skipping the cache costs nothing it was buying: unique keys never hit. Elements without
+      // an id are unaffected and still share entries by tag|class, which is where the hits are.
       if (!idAttr.empty()) {
-        cacheKey += '|';
-        cacheKey += idAttr;
-      }
-      auto it = self->cssStyleCache_.find(cacheKey);
-      if (it != self->cssStyleCache_.end()) {
-        cssStyle = it->second;
+        cssStyle = self->cssParser->resolveStyle(name, classAttr, idAttr);
       } else {
-        CssStyle resolved = self->cssParser->resolveStyle(name, classAttr, idAttr);
-        if (resolved.defined.anySet())
-          cssStyle = self->cssStyleCache_.emplace(cacheKey, resolved).first->second;
-        else
-          cssStyle = resolved;  // transient fallback: skip cache so future calls can re-resolve
+        std::string cacheKey(name);
+        cacheKey += '|';
+        cacheKey += classAttr;
+        auto it = self->cssStyleCache_.find(cacheKey);
+        if (it != self->cssStyleCache_.end()) {
+          cssStyle = it->second;
+        } else {
+          CssStyle resolved = self->cssParser->resolveStyle(name, classAttr, idAttr);
+          if (resolved.defined.anySet())
+            cssStyle = self->cssStyleCache_.emplace(cacheKey, resolved).first->second;
+          else
+            cssStyle = resolved;  // transient fallback: skip cache so future calls can re-resolve
+        }
       }
     }
     if (!styleAttr.empty()) {

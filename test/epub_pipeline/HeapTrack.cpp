@@ -4,6 +4,7 @@
 #include "HeapTrack.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -97,12 +98,23 @@ int trackAlloc(size_t sz) {
   // documented as unreliable without frame pointers and segfaulted here; backtrace() uses unwind
   // info instead. It can allocate internally, so the hook guard must be held across the call.
   g_inHook = true;
-  void* frames[6] = {};
-  const int depth = captureFrames(frames, 6);
+  void* frames[12] = {};
+  const int depth = captureFrames(frames, 12);
   // 0 = trackAlloc, 1 = the malloc/new override, 2 = libstdc++ operator new for C++ allocations.
   // Take the first frame that lies outside this translation unit's address range by preferring
   // the deepest available, which is the application for both C and C++ paths.
-  const int pick = depth > 3 ? 3 : depth - 1;
+  // Which frame is the application depends on how much of the allocator got inlined and on the
+  // stack walker: the 3 that suited glibc backtrace() lands inside the CRT under
+  // RtlCaptureStackBackTrace. Overridable so the right depth can be found by sweeping rather than
+  // guessed -- attributed bytes summing to a fraction of the peak is the symptom of a wrong pick.
+  static const int kPick = [] {
+    if (const char* e = getenv("HEAPTRACK_FRAME")) {
+      const int v = atoi(e);
+      if (v > 0 && v < 12) return v;
+    }
+    return 3;
+  }();
+  const int pick = depth > kPick ? kPick : depth - 1;
   const uintptr_t pc = pick >= 0 ? reinterpret_cast<uintptr_t>(frames[pick]) : 0;
   g_inHook = false;
   const int slot = trackSite(pc, sz);
