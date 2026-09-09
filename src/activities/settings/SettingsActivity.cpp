@@ -45,25 +45,17 @@ void SettingsActivity::onEnter() {
   systemSettings.reserve(20);
   submenuData.reserve(4);
 
-  StrId lastDisplaySub = StrId::STR_NONE_OPT;
-  StrId lastReaderSub = StrId::STR_NONE_OPT;
-  StrId lastControlsSub = StrId::STR_NONE_OPT;
-  StrId lastSystemSub = StrId::STR_NONE_OPT;
-
-  auto addTo = [](std::vector<SettingInfo>& vec, StrId& lastSub, const SettingInfo& s) {
-    if (s.subcategory != StrId::STR_NONE_OPT && s.subcategory != lastSub) {
-      vec.push_back(SettingInfo::Separator(s.subcategory));
-      lastSub = s.subcategory;
-    }
-    vec.push_back(s);
-  };
-  auto addToMoved = [](std::vector<SettingInfo>& vec, StrId& lastSub, SettingInfo s) {
-    if (s.subcategory != StrId::STR_NONE_OPT && s.subcategory != lastSub) {
-      vec.push_back(SettingInfo::Separator(s.subcategory));
-      lastSub = s.subcategory;
-    }
-    vec.push_back(std::move(s));
-  };
+  // Rows go in plain; the subcategory separators are inserted at the END, once prepareSubmenus
+  // has moved whatever it is going to move into submenus.
+  //
+  // Inserting them here instead put headings in front of rows that were about to leave. The
+  // gesture rows are the case that showed it: four groups' worth of headings went into the
+  // Controls tab, then all twenty rows moved into the Gesture actions submenu, and three of the
+  // four headings stayed behind with nothing underneath them. Separators describe a list, so
+  // they can only be computed once the list has stopped changing -- which is the order
+  // MenuListActivity has always used.
+  auto addTo = [](std::vector<SettingInfo>& vec, const SettingInfo& s) { vec.push_back(s); };
+  auto addToMoved = [](std::vector<SettingInfo>& vec, SettingInfo s) { vec.push_back(std::move(s)); };
 
   bool sawReaderFontSection = false;
   bool insertedFontDownload = false;
@@ -73,7 +65,7 @@ void SettingsActivity::onEnter() {
   auto insertFontDownloadBelowFontSection = [&]() {
     auto fontDownload = SettingInfo::Action(StrId::STR_FONT_MANAGER, SettingAction::DownloadFonts);
     fontDownload.withSubcategory(StrId::STR_MENU_READER_FONT);
-    addToMoved(readerSettings, lastReaderSub, std::move(fontDownload));
+    addToMoved(readerSettings, std::move(fontDownload));
     insertedFontDownload = true;
   };
 
@@ -108,13 +100,13 @@ void SettingsActivity::onEnter() {
     }
 
     if (enriched.category == StrId::STR_CAT_DISPLAY) {
-      addTo(displaySettings, lastDisplaySub, enriched);
+      addTo(displaySettings, enriched);
     } else if (enriched.category == StrId::STR_CAT_READER) {
-      addTo(readerSettings, lastReaderSub, enriched);
+      addTo(readerSettings, enriched);
     } else if (enriched.category == StrId::STR_CAT_CONTROLS) {
-      addTo(controlsSettings, lastControlsSub, enriched);
+      addTo(controlsSettings, enriched);
     } else if (enriched.category == StrId::STR_CAT_SYSTEM) {
-      addTo(systemSettings, lastSystemSub, enriched);
+      addTo(systemSettings, enriched);
     }
     if (isReaderFontEntry) sawReaderFontSection = true;
 
@@ -132,69 +124,63 @@ void SettingsActivity::onEnter() {
 
   // Button Actions overview lives at the end of the Button Actions section (same subcategory as
   // the per-button submenus, so no new separator is inserted).
-  addToMoved(controlsSettings, lastControlsSub,
+  addToMoved(controlsSettings,
              std::move(SettingInfo::Action(StrId::STR_BTN_ACTIONS_OVERVIEW, SettingAction::ButtonActionsOverview)
                            .withSubcategory(StrId::STR_MENU_BTN_ACTIONS)));
 
-  addToMoved(readerSettings, lastReaderSub,
-             SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
+  addToMoved(readerSettings, SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
 
-  addToMoved(systemSettings, lastSystemSub, SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network)
-                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync)
-                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser)
-                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_CLOCK_SETTINGS, SettingAction::ClockSettings)
-                           .withSubcategory(StrId::STR_MENU_SYS_TOOLS)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_WEATHER_SETTINGS, SettingAction::Weather)
-                           .withSubcategory(StrId::STR_MENU_SYS_TOOLS)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache)
-                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_SCREEN_REPAIR, SettingAction::ScreenRepair)
-                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings, SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network)
+                                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync)
+                                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser)
+                                           .withSubcategory(StrId::STR_MENU_SYS_NETWORK)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_CLOCK_SETTINGS, SettingAction::ClockSettings)
+                                           .withSubcategory(StrId::STR_MENU_SYS_TOOLS)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_WEATHER_SETTINGS, SettingAction::Weather)
+                                           .withSubcategory(StrId::STR_MENU_SYS_TOOLS)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache)
+                                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_SCREEN_REPAIR, SettingAction::ScreenRepair)
+                                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
-  addToMoved(systemSettings, lastSystemSub,
+  addToMoved(systemSettings,
              std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE1).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates)
-                           .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates)
+                                           .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
   if (sawIncludeBetaUpdates) {
-    addToMoved(systemSettings, lastSystemSub,
-               std::move(includeBetaUpdatesSetting.withSubmenu(StrId::STR_SYSTEM_UPDATE)));
+    addToMoved(systemSettings, std::move(includeBetaUpdatesSetting.withSubmenu(StrId::STR_SYSTEM_UPDATE)));
   }
-  addToMoved(systemSettings, lastSystemSub,
+  addToMoved(systemSettings,
              std::move(SettingInfo::Separator(StrId::STR_SYSTEM_UPDATE_TYPE2).withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStats)
-                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
-  addToMoved(systemSettings, lastSystemSub,
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_READING_STATS, SettingAction::ReadingStats)
+                                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings,
              std::move(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate)
                            .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  // addToMoved(systemSettings, lastSystemSub,
+  // addToMoved(systemSettings,
   //            std::move(SettingInfo::Action(StrId::STR_SWITCH_TO_USB_DRIVE, SettingAction::SwitchToUsbDrive)
   //                          .withSubmenu(StrId::STR_SYSTEM_UPDATE)));
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_SYSTEM_INFO, SettingAction::SystemInfo)
-                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_SYSTEM_INFO, SettingAction::SystemInfo)
+                                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
   // Next to System Information, which is where anyone chasing a "the power button did
   // nothing" report already looks.
-  addToMoved(systemSettings, lastSystemSub,
-             std::move(SettingInfo::Action(StrId::STR_BOOT_DIAGNOSTICS, SettingAction::BootDiagnostics)
-                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
+  addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_BOOT_DIAGNOSTICS, SettingAction::BootDiagnostics)
+                                           .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
   SettingInfo::prepareSubmenus(displaySettings, submenuData);
   SettingInfo::prepareSubmenus(readerSettings, submenuData);
   SettingInfo::prepareSubmenus(controlsSettings, submenuData);
   SettingInfo::prepareSubmenus(systemSettings, submenuData);
+
+  // Now that the tabs hold exactly the rows they will show, group them. prepareSubmenus has done
+  // the same for each submenu's own rows.
+  SettingInfo::insertSubcategorySeparators(displaySettings);
+  SettingInfo::insertSubcategorySeparators(readerSettings);
+  SettingInfo::insertSubcategorySeparators(controlsSettings);
+  SettingInfo::insertSubcategorySeparators(systemSettings);
 
   // Reset selection to first category
   selectedCategoryIndex = 0;
