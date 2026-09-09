@@ -327,6 +327,16 @@ class NoteCapturer {
     truncated_ = false;
   }
 
+  // Drops the capture in progress without emitting: what we were standing on turned out not to
+  // be a note.
+  void abandonCapture() {
+    captureDepth_ = -1;
+    skipDepth_ = -1;
+    tailMode_ = false;
+    textLen_ = 0;
+    truncated_ = false;
+  }
+
   void finishCapture() {
     while (textLen_ > 0 && text_[textLen_ - 1] == ' ') --textLen_;
     if (truncated_ && textLen_ >= 3) {
@@ -353,6 +363,25 @@ class NoteCapturer {
         self->beginCapture(static_cast<size_t>(wantedIdx), self->depth_);
       }
     } else if (self->captureDepth_ >= 0 && self->skipDepth_ < 0 && isChrome(name)) {
+      // A LINK as the very first thing in a tail capture means the id we are standing on is a
+      // caller, not a note -- the other half of isCallerAnchor, for converters that put the id
+      // on a separate empty element instead of on the link itself:
+      //
+      //   <span id="Px9r_...10561"></span><a href="notes.xhtml#Px9r_...10845">158</a>
+      //
+      // The span is empty, so the capture falls into tail mode looking for the Calibre filepos
+      // pattern, and then swallows the chapter's own prose after the marker. That pattern is
+      // "<a id=...></a>Note text" -- PROSE follows the anchor, not a link. So a link arriving
+      // first says this is the wrong end of the reference.
+      //
+      // Costs a preview for a note whose text genuinely opens with a link, which is rare and
+      // merely cosmetic; the alternative is chapter prose stored and displayed as a note, and
+      // 101 of them injected into one chapter of the book this was found on.
+      if (self->tailMode_ && self->textLen_ == 0 && isCallerAnchor(name, atts)) {
+        self->abandonCapture();
+        ++self->depth_;
+        return;
+      }
       self->skipDepth_ = self->depth_;
     }
     ++self->depth_;

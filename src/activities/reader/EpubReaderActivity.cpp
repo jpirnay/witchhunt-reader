@@ -1,4 +1,4 @@
-﻿#define DEBUG_MEMORY_CONSUMPTION 1
+#define DEBUG_MEMORY_CONSUMPTION 1
 #define DEBUG_BACKGROUND_WORK 1
 #define DEBUG_BACKGROUND_OVERLAY 0
 
@@ -2536,6 +2536,17 @@ void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIn
       if (const auto p = sec.getPageForAnchor(anchorStr)) {
         sec.currentPage = *p;
         LOG_DBG("ERS", "Resolved anchor '%s' -> page %d", anchorStr.c_str(), *p);
+      } else if (sec.isTruncatedCache()) {
+        // The chapter did not finish building, so its anchor map stops where the parse stopped and
+        // a miss says nothing about whether the id exists. Distinct log level because the two
+        // cases want opposite fixes: a genuine miss is a bad href in the book, this one is the
+        // build running out of heap -- and the destination below is then meaningless rather than
+        // merely approximate. Device 2026-09-09: a note 46% into a 90-page notes chapter that had
+        // built 31 pages landed the reader on page 0.
+        LOG_ERR("ERS", "Anchor '%s' missing from a TRUNCATED spine cache (%u pages built); the jump is a guess",
+                anchorStr.c_str(), static_cast<uint32_t>(sec.pageCount));
+        sec.currentPage = fallbackPage;
+        isEstimate = true;
       } else {
         LOG_DBG("ERS", "Anchor '%s' not found; using fallback page %d", anchorStr.c_str(), fallbackPage);
         sec.currentPage = fallbackPage;
