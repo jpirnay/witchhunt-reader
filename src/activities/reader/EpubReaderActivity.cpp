@@ -1909,16 +1909,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
       // Show each entry's note text when the book-level cache can supply it — see
       // footnotePreviewsForCurrentPage() for when opening the list may gather it.
-      startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes,
-                                                                           footnotePreviewsForCurrentPage()),
-                             [this](const ActivityResult& result) {
-                               if (!result.isCancelled) {
-                                 const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                                 // Only a note is a detour worth returning from; see hrefIsFootnote.
-                                 navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
-                               }
-                               requestUpdate();
-                             });
+      auto linkInfo = pageLinkInfoForCurrentPage();
+      startActivityForResult(
+          std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes,
+                                                        std::move(linkInfo.previews), std::move(linkInfo.isNote)),
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              const auto& footnoteResult = std::get<FootnoteResult>(result.data);
+              // Only a note is a detour worth returning from; see hrefIsFootnote.
+              navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
+            }
+            requestUpdate();
+          });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PERCENT: {
@@ -2935,10 +2937,14 @@ bool EpubReaderActivity::hrefIsFootnote(const char* href) {
   return lookup.find(href, text);
 }
 
-std::vector<std::string> EpubReaderActivity::footnotePreviewsForCurrentPage() {
-  std::vector<std::string> previews(currentPageFootnotes.size());
+EpubReaderActivity::PageLinkInfo EpubReaderActivity::pageLinkInfoForCurrentPage() {
+  PageLinkInfo info;
+  info.previews.resize(currentPageFootnotes.size());
+  // Everything is a note until the store says otherwise -- the same default hrefIsFootnote takes,
+  // for the same reason: a book with no store must look exactly as it did before any of this.
+  info.isNote.assign(currentPageFootnotes.size(), 1);
   if (!epub) {
-    return previews;
+    return info;
   }
   // Under the render lock because resolving a cross-file note href walks the spine through
   // BookMetadataCache, which seeks and reads a book.bin handle whose position is SHARED with
@@ -2954,13 +2960,22 @@ std::vector<std::string> EpubReaderActivity::footnotePreviewsForCurrentPage() {
   // Purely a read. Whatever the reader has walked through has already resolved its notes at
   // build time, so the entries for this page are in the store; a link the store does not know
   // renders as its plain marker and stays navigable.
-  FootnotePreviews::Lookup previewLookup;
-  if (previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
-    for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
-      previewLookup.find(currentPageFootnotes[i].href, previews[i]);
-    }
+  //
+  // The same lookup answers both questions, because they are the same question: the store holds
+  // a note's text keyed by its caller's href, so a hit IS "this is a note" (see hrefIsFootnote)
+  // and the text is the preview. A miss on a spine the store HAS scanned means the link is
+  // navigation -- a contents link, a cross-reference -- and the list groups it separately.
+  if (!FootnotePreviews::spineResolved(epub->getCachePath(), currentSpineIndex)) {
+    return info;
   }
-  return previews;
+  FootnotePreviews::Lookup previewLookup;
+  if (!previewLookup.open(epub->getCachePath(), epub.get(), currentSpineIndex)) {
+    return info;
+  }
+  for (size_t i = 0; i < currentPageFootnotes.size(); ++i) {
+    info.isNote[i] = previewLookup.find(currentPageFootnotes[i].href, info.previews[i]) ? 1 : 0;
+  }
+  return info;
 }
 
 void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
@@ -5646,14 +5661,16 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
         if (currentPageFootnotes.size() == 1) {
           navigateToHref(currentPageFootnotes[0].href, hrefIsFootnote(currentPageFootnotes[0].href));
         } else {
-          startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(
-                                     renderer, mappedInput, currentPageFootnotes, footnotePreviewsForCurrentPage()),
-                                 [this](const ActivityResult& result) {
-                                   if (!result.isCancelled) {
-                                     const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                                     navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
-                                   }
-                                 });
+          auto linkInfo = pageLinkInfoForCurrentPage();
+          startActivityForResult(
+              std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes,
+                                                            std::move(linkInfo.previews), std::move(linkInfo.isNote)),
+              [this](const ActivityResult& result) {
+                if (!result.isCancelled) {
+                  const auto& footnoteResult = std::get<FootnoteResult>(result.data);
+                  navigateToHref(footnoteResult.href, hrefIsFootnote(footnoteResult.href.c_str()));
+                }
+              });
         }
       }
       break;

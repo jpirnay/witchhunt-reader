@@ -600,7 +600,14 @@ class EpubReaderActivity final : public Activity {
   // Note text for each of currentPageFootnotes, for the footnote list activity (empty strings
   // where the store has no entry). A pure read: note text is resolved by the section build that
   // needs it, never by opening the list.
-  std::vector<std::string> footnotePreviewsForCurrentPage();
+  // Note text and kind for each of currentPageFootnotes, for the footnote list. One pass over one
+  // open store: a hit gives the preview AND says the link is a note, a miss on a scanned spine
+  // says it is navigation.
+  struct PageLinkInfo {
+    std::vector<std::string> previews;  // empty where the store has no text
+    std::vector<uint8_t> isNote;        // 1 = footnote, 0 = navigation
+  };
+  PageLinkInfo pageLinkInfoForCurrentPage();
   // True when this link is a real footnote rather than navigation (a contents link, a
   // cross-reference). Decides whether following it pushes a position to return to. Answers TRUE
   // whenever it cannot tell, so nothing regresses on a book with no preview store.

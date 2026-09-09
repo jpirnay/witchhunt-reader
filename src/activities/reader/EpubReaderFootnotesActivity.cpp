@@ -13,6 +13,24 @@
 void EpubReaderFootnotesActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = 0;
+  scrollOffset = 0;
+
+  // Notes first, then navigation, each in page order. Built once here rather than at every
+  // render: the list cannot change while it is open.
+  order.clear();
+  order.reserve(footnotes.size());
+  for (size_t i = 0; i < footnotes.size(); ++i) {
+    if (entryIsNote(i)) order.push_back(static_cast<uint16_t>(i));
+  }
+  firstLinkRow = -1;
+  for (size_t i = 0; i < footnotes.size(); ++i) {
+    if (!entryIsNote(i)) {
+      if (firstLinkRow < 0) firstLinkRow = static_cast<int>(order.size());
+      order.push_back(static_cast<uint16_t>(i));
+    }
+  }
+  // A page of only links needs no divider — there is nothing above it to divide from.
+  if (firstLinkRow == 0) firstLinkRow = -1;
   requestUpdate();
 }
 
@@ -34,8 +52,8 @@ void EpubReaderFootnotesActivity::loop() {
     // open, alongside the navigation bindings below.
     if ((ev.button == MappedInputManager::Button::Confirm || ev.button == MappedInputManager::Button::Power) &&
         ev.type == ButtonEventManager::PressType::Short) {
-      if (selectedIndex >= 0 && selectedIndex < static_cast<int>(footnotes.size())) {
-        setResult(FootnoteResult{footnotes[selectedIndex].href});
+      if (selectedIndex >= 0 && selectedIndex < static_cast<int>(order.size())) {
+        setResult(FootnoteResult{footnotes[order[selectedIndex]].href});
         finish();
       }
       return;
@@ -63,10 +81,10 @@ void EpubReaderFootnotesActivity::loop() {
 }
 
 void EpubReaderFootnotesActivity::advanceSelection(int delta) {
-  if (footnotes.empty()) {
+  if (order.empty()) {
     return;
   }
-  const int n = static_cast<int>(footnotes.size());
+  const int n = static_cast<int>(order.size());
   selectedIndex = ((selectedIndex + delta) % n + n) % n;
   requestUpdate();
 }
@@ -76,7 +94,7 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
 
   renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_FOOTNOTES), true, EpdFontFamily::BOLD);
 
-  if (footnotes.empty()) {
+  if (order.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, 90, tr(STR_NO_FOOTNOTES));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -97,27 +115,40 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   // scrollOffset, and its fill sits exactly at the row y (no -2 nudge, unlike the chapter
   // selectors) -- so the band top is that same y.
   ListTouchBand::recordUniformRows(contentRect.x, contentRect.width, contentRect.y + startY, lineHeight, scrollOffset,
-                                   std::min(visibleCount, static_cast<int>(footnotes.size()) - scrollOffset));
+                                   std::min(visibleCount, static_cast<int>(order.size()) - scrollOffset));
 
-  for (int i = scrollOffset; i < static_cast<int>(footnotes.size()) && i < scrollOffset + visibleCount; i++) {
+  for (int i = scrollOffset; i < static_cast<int>(order.size()) && i < scrollOffset + visibleCount; i++) {
     const int y = contentRect.y + startY + (i - scrollOffset) * lineHeight;
     const bool isSelected = (i == selectedIndex);
+    const size_t entry = order[i];
 
     if (isSelected) {
       renderer.fillRect(contentRect.x, y, contentRect.width, lineHeight, true);
     }
 
-    // Show footnote marker, plus the note text when the book-level preview cache
-    // resolved it (see FootnotePreviews) — truncated to the row.
-    std::string label = footnotes[i].number;
+    // The line between the notes and the links. Drawn INSIDE the top of the first link row rather
+    // than as a row of its own, so the rows stay uniform: nothing to skip when moving the
+    // selection, and the touch band stays one contiguous run of activatable rows.
+    if (i == firstLinkRow) {
+      renderer.fillRect(contentRect.x + marginLeft, y, contentRect.width - 2 * marginLeft, 1, !isSelected);
+    }
+
+    // Footnote marker, plus the note text when the preview store resolved it — truncated to the
+    // row. A navigation link has no note text by definition, so it is named for what it is; a
+    // marker-less one was already shown that way.
+    std::string label = footnotes[entry].number;
+    const bool note = entryIsNote(entry);
     if (label.empty()) {
       label = tr(STR_LINK);
+    } else if (!note) {
+      label += "  ";
+      label += tr(STR_LINK);
     }
-    if (i < static_cast<int>(previews.size()) && !previews[i].empty()) {
+    if (note && entry < previews.size() && !previews[entry].empty()) {
       label += ": ";
-      label += previews[i];
-      label = renderer.truncatedText(UI_10_FONT_ID, label.c_str(), contentRect.width - 2 * marginLeft);
+      label += previews[entry];
     }
+    label = renderer.truncatedText(UI_10_FONT_ID, label.c_str(), contentRect.width - 2 * marginLeft);
     renderer.drawText(UI_10_FONT_ID, contentRect.x + marginLeft, y + 4, label.c_str(), !isSelected);
   }
 
@@ -128,5 +159,5 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
 }
 
 ListRowTap::Result EpubReaderFootnotesActivity::selectListRow(const int index) {
-  return ListRowTap::apply(index, static_cast<int>(footnotes.size()), selectedIndex);
+  return ListRowTap::apply(index, static_cast<int>(order.size()), selectedIndex);
 }
