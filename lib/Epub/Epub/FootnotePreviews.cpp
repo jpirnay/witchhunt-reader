@@ -130,6 +130,36 @@ struct IndexRow {
   bool operator<(const IndexRow& other) const { return keyHash < other.keyHash; }
 };
 
+// Binary search of the on-disk index, shared by the two sides that ask the same question of the
+// same bytes: Lookup::find ("what is this note's text?") and Store::contains ("do I already have
+// this note?"). They used to answer it differently -- Lookup searched the file, the Store held
+// every row in RAM and scanned them linearly -- which is how the store's index became the thing
+// that bounded MAX_ENTRIES. One implementation, one format assumption, no rows resident.
+//
+// `file` must be open for reading and stays open; `count` rows sit at `indexOffset`, sorted by
+// keyHash. Returns false when the key is absent or the file cannot be read.
+bool findIndexRow(FsFile& file, const uint32_t indexOffset, const uint16_t count, const uint32_t keyHash,
+                  uint32_t& outBlobOffset) {
+  int lo = 0;
+  int hi = static_cast<int>(count) - 1;
+  while (lo <= hi) {
+    const int mid = lo + (hi - lo) / 2;
+    uint32_t row[2] = {0, 0};
+    if (!file.seekSet(indexOffset + static_cast<uint32_t>(mid) * INDEX_ROW_BYTES)) return false;
+    if (file.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) return false;
+    if (row[0] == keyHash) {
+      outBlobOffset = row[1];
+      return true;
+    }
+    if (row[0] < keyHash) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return false;
+}
+
 // Pass A: SAX scan of one spine document collecting footnote-shaped link targets.
 class LinkScanner {
   SaxParser parser_;
@@ -511,27 +541,67 @@ bool spineResolved(const std::string& bookCachePath, const int spineIndex) {
 
 namespace {
 
-// The store's on-disk shape is unchanged from the one-shot design: a header, a blob of
-// length-prefixed texts, then the hash index sorted by key. What is new is that it GROWS —
-// each resolve pass writes its blobs over the old index and then writes a merged index after
-// them. That keeps lookups exactly as cheap as before (binary search in the file, nothing
-// resident) at the cost of holding the index — 8 bytes per entry, 4 KB at the cap — for the
-// length of one append.
+// The store's on-disk shape: a header, the resolved-spine bitmap, a blob of length-prefixed
+// texts, then the hash index sorted by key. It GROWS -- each resolve pass writes its blobs over
+// the old index and then writes a merged index after them.
+//
+// NOTHING about it is resident in proportion to how much it holds. The index used to be: open()
+// read all of it into a NoThrowArray, contains() scanned that linearly, and commit() sorted and
+// rewrote it. At 8 bytes a row that made MAX_ENTRIES a RAM budget -- which is why it was 512, and
+// why a book with more notes than that silently lost the feature partway through (an 1,100-note
+// history stopped expanding notes five chapters in, measured).
+//
+// Now the index stays on disk end to end. contains() binary-searches it in place; a pass spills
+// it aside before its blobs overwrite it, and commit() merges that spill with the pass's own rows
+// -- at most MAX_TARGETS_PER_SPINE of them, ~1 KB -- straight back out to the file. The cap is
+// now a question about SD space and lookup depth, both cheap (8 bytes a row, log2 reads a
+// lookup), rather than about heap. Same shape as BookMetadataCache's spine.bin.tmp pass and the
+// section cache's anchor spill.
 class Store {
   std::string path_;
   FsFile file_;
-  NoThrowArray<IndexRow> index_;
   uint8_t resolved_[RESOLVED_BITMAP_BYTES] = {};
-  uint32_t blobEnd_ = BLOB_START;  // where the next blob record goes
-  size_t existing_ = 0;            // rows present before this pass
+  uint32_t blobEnd_ = BLOB_START;      // where the next blob record goes
+  uint32_t indexOffset_ = BLOB_START;  // where the index sat when this pass began
+  uint16_t existing_ = 0;              // rows present before this pass
+  // Only THIS pass's rows. A pass resolves at most one spine's outstanding targets, so this is
+  // bounded by MAX_TARGETS_PER_SPINE (~1 KB) whatever MAX_ENTRIES is.
+  NoThrowArray<IndexRow> newRows_;
+  bool spilled_ = false;
+
+  // Where the pre-pass index is parked while the pass writes over it. Keyed on the store rather
+  // than the spine: only one resolve runs at a time, stepped from the build that owns it.
+  std::string spillPath() const { return path_ + ".idx"; }
+
+  // HalFile::close() on a handle that was never opened aborts on device, and this class has
+  // several paths that reach a close without knowing whether the last one opened anything.
+  void closeIfOpen() {
+    if (file_) file_.close();
+  }
+
+  // Writes header + bitmap at the current position. The caller positions and closes.
+  void writeHeader(const uint16_t count, const uint32_t indexOffset) {
+    serialization::writePod(file_, CACHE_MAGIC);
+    serialization::writePod(file_, CACHE_VERSION);
+    serialization::writePod(file_, count);
+    serialization::writePod(file_, indexOffset);
+    file_.write(resolved_, RESOLVED_BITMAP_BYTES);
+  }
 
  public:
-  // Reads an existing store, or starts an empty one. False means "cannot work with this store"
-  // — the caller leaves the file alone.
+  ~Store() { closeIfOpen(); }
+
+  // Reads an existing store's header, or starts an empty one. False means "cannot work with this
+  // store" -- the caller leaves the file alone. The index is NOT read: contains() searches it
+  // where it lies, which is why the handle is left open here.
   bool open(const std::string& path) {
     path_ = path;
+    newRows_.clear();
+    spilled_ = false;
     if (!Storage.exists(path.c_str())) {
-      return index_.reserve(32);
+      indexOffset_ = blobEnd_ = BLOB_START;
+      existing_ = 0;
+      return true;
     }
     if (!Storage.openFileForRead("FNP", path, file_)) {
       return false;
@@ -549,39 +619,33 @@ class Store {
               static_cast<unsigned long>(magic), version, count);
       file_.close();
       Storage.remove(path.c_str());
-      return index_.reserve(32);
+      indexOffset_ = blobEnd_ = BLOB_START;
+      existing_ = 0;
+      return true;
     }
     if (file_.read(resolved_, RESOLVED_BITMAP_BYTES) != static_cast<int>(RESOLVED_BITMAP_BYTES)) {
       file_.close();
       return false;
     }
+    existing_ = count;
+    indexOffset_ = indexOffset;
     blobEnd_ = indexOffset;
-    if (!index_.reserve(count > 0 ? count : 32) || !file_.seekSet(indexOffset)) {
-      file_.close();
-      return false;
-    }
-    for (uint16_t i = 0; i < count; ++i) {
-      uint32_t row[2] = {0, 0};
-      if (file_.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) {
-        file_.close();
-        return false;
-      }
-      index_.push({row[0], row[1]});
-    }
-    existing_ = index_.size();
-    file_.close();
     return true;
   }
 
-  bool contains(const uint32_t keyHash) const {
-    for (const IndexRow& row : index_) {
+  // Do we already hold this note? Searched on disk against the handle open() left open, so it
+  // costs ~log2(count) eight-byte reads and nothing resident.
+  bool contains(const uint32_t keyHash) {
+    for (const IndexRow& row : newRows_) {
       if (row.keyHash == keyHash) return true;
     }
-    return false;
+    if (existing_ == 0 || !file_) return false;
+    uint32_t blobOffset = 0;
+    return findIndexRow(file_, indexOffset_, existing_, keyHash, blobOffset);
   }
 
-  bool full() const { return index_.size() >= FootnotePreviews::MAX_ENTRIES; }
-  size_t added() const { return index_.size() - existing_; }
+  bool full() const { return static_cast<size_t>(existing_) + newRows_.size() >= FootnotePreviews::MAX_ENTRIES; }
+  size_t added() const { return newRows_.size(); }
 
   static bool inBitmap(const int spineIndex) { return spineIndex >= 0 && spineIndex < RESOLVED_BITMAP_SPINES; }
   bool isResolved(const int spineIndex) const {
@@ -591,57 +655,163 @@ class Store {
     if (inBitmap(spineIndex)) resolved_[spineIndex / 8] |= static_cast<uint8_t>(1u << (spineIndex % 8));
   }
 
-  // Opens the file positioned where the old index started: the first blob written here lands on
-  // top of it, which is safe because the index is in RAM until commit() writes it back.
+  // Patches the bitmap where it lies, touching neither blob nor index. This is the path for a
+  // chapter with nothing to add -- no notes, or none outstanding -- which is most chapters in
+  // most books (20 of The Anarchy's 40 spines). It used to go the long way through
+  // beginAppend()/commit(), rewriting the entire index to flip one bit.
+  bool writeBitmapInPlace() {
+    if (!Storage.exists(path_.c_str())) return false;
+    closeIfOpen();
+    if (!Storage.openFileForUpdate("FNP", path_, file_)) return false;
+    const bool ok =
+        file_.seekSet(HEADER_BYTES) && file_.write(resolved_, RESOLVED_BITMAP_BYTES) == RESOLVED_BITMAP_BYTES;
+    file_.close();
+    return ok;
+  }
+
+  // Parks the existing index in the spill file, then opens the store positioned where that index
+  // started: the first blob written here lands on top of it, which is safe precisely because the
+  // copy that matters is now the spill.
   bool beginAppend() {
+    closeIfOpen();
+    if (existing_ > 0) {
+      FsFile in, out;
+      if (!Storage.openFileForRead("FNP", path_, in)) return false;
+      if (!Storage.openFileForWrite("FNP", spillPath(), out)) {
+        in.close();
+        return false;
+      }
+      const bool ok = in.seekSet(indexOffset_) &&
+                      serialization::copyBytes(in, out, static_cast<uint32_t>(existing_) * INDEX_ROW_BYTES);
+      out.flush();
+      out.close();
+      in.close();
+      if (!ok) {
+        LOG_ERR("FNP", "Could not park the index before appending; leaving the store alone");
+        Storage.remove(spillPath().c_str());
+        return false;
+      }
+      spilled_ = true;
+    }
     const bool opened = Storage.exists(path_.c_str()) ? Storage.openFileForUpdate("FNP", path_, file_)
                                                       : Storage.openFileForWrite("FNP", path_, file_);
-    if (!opened) return false;
-    if (blobEnd_ == BLOB_START) {
+    if (!opened) {
+      if (spilled_) Storage.remove(spillPath().c_str());
+      spilled_ = false;
+      return false;
+    }
+    if (existing_ == 0) {
       // Fresh store: lay down a placeholder header and an empty bitmap, patched by commit().
-      serialization::writePod(file_, CACHE_MAGIC);
-      serialization::writePod(file_, CACHE_VERSION);
-      serialization::writePod(file_, static_cast<uint16_t>(0));
-      serialization::writePod(file_, static_cast<uint32_t>(0));
-      file_.write(resolved_, RESOLVED_BITMAP_BYTES);
+      writeHeader(0, 0);
     }
     return file_.seekSet(blobEnd_);
   }
 
   void addNote(const uint32_t keyHash, const char* text, const size_t len) {
     if (full()) return;
+    // Remember it BEFORE writing: a row we cannot record is a blob nothing could ever find, and
+    // writing it anyway would push blobEnd_ past bytes the index does not describe.
+    if (!newRows_.push({keyHash, blobEnd_})) return;
     serialization::writePod(file_, static_cast<uint16_t>(len));
     file_.write(reinterpret_cast<const uint8_t*>(text), len);
-    index_.push({keyHash, blobEnd_});
     blobEnd_ += static_cast<uint32_t>(sizeof(uint16_t) + len);
   }
 
-  // Writes the merged index and patches the header. Also the rollback path: called with nothing
-  // added it simply restores the file to what it was, which is why a failed pass costs the
-  // reader nothing but the time.
+  // Merges the parked index with this pass's rows and patches the header. Both sides are sorted,
+  // so this is one streaming pass over the spill against one walk of newRows_: the merged index
+  // is written straight out, never assembled in memory.
   bool commit() {
-    std::sort(index_.begin(), index_.end());
+    std::sort(newRows_.begin(), newRows_.end());
     if (!file_.seekSet(blobEnd_)) return false;
-    for (const IndexRow& row : index_) {
+
+    FsFile spill;
+    if (spilled_ && !Storage.openFileForRead("FNP", spillPath(), spill)) {
+      LOG_ERR("FNP", "Lost the parked index; the store keeps what it had");
+      return false;
+    }
+
+    uint16_t written = 0;
+    size_t next = 0;  // cursor into newRows_
+    uint16_t remaining = spilled_ ? existing_ : 0;
+    IndexRow old{0, 0};
+    bool haveOld = false;
+    while (true) {
+      if (!haveOld && remaining > 0) {
+        uint32_t row[2] = {0, 0};
+        if (spill.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) {
+          spill.close();
+          return false;
+        }
+        old = {row[0], row[1]};
+        haveOld = true;
+        --remaining;
+      }
+      const bool haveNew = next < newRows_.size();
+      if (!haveOld && !haveNew) break;
+      // On a tie the stored row wins. Belt and braces rather than load-bearing: OpenStore filters
+      // this pass's targets through contains() before any of this runs, so a key already on disk
+      // never reaches newRows_ and the tie cannot currently occur. It costs one comparison and
+      // keeps the merge correct on its own terms if that filtering ever moves.
+      const bool takeOld = haveOld && (!haveNew || old.keyHash <= newRows_[next].keyHash);
+      const IndexRow& row = takeOld ? old : newRows_[next];
       serialization::writePod(file_, row.keyHash);
       serialization::writePod(file_, row.blobOffset);
+      ++written;
+      if (takeOld) {
+        haveOld = false;
+      } else {
+        ++next;
+      }
     }
+    if (spilled_) spill.close();
+
     if (!file_.seekSet(0)) return false;
-    serialization::writePod(file_, CACHE_MAGIC);
-    serialization::writePod(file_, CACHE_VERSION);
-    serialization::writePod(file_, static_cast<uint16_t>(index_.size()));
-    serialization::writePod(file_, blobEnd_);
-    file_.write(resolved_, RESOLVED_BITMAP_BYTES);
+    writeHeader(written, blobEnd_);
     file_.close();
+    if (spilled_) {
+      Storage.remove(spillPath().c_str());
+      spilled_ = false;
+    }
+    // What this pass wrote is now the store's state, so a second commit -- or an abandon after
+    // one -- is a no-op rather than merging the same rows a second time.
+    existing_ = written;
+    indexOffset_ = blobEnd_;
+    newRows_.clear();
     return true;
   }
 
+  // Drops what THIS pass appended and puts the parked index back, so the store stays exactly as
+  // complete as it was. The abandoned blobs are left as an unreferenced gap ahead of the restored
+  // index -- deliberately: the file's length has to stay exactly indexOffset + count*8 for open()
+  // and Lookup to accept it, and there is no truncate.
   void abandon() {
-    // Drop only what THIS pass appended, then write the old index back so the store stays
-    // exactly as complete as it was. The trailing blobs we already wrote are overwritten by the
-    // index or left as an unreferenced gap; either way the file stays valid.
-    while (index_.size() > existing_) index_.pop();
-    commit();
+    newRows_.clear();
+    if (!file_) {
+      if (spilled_) Storage.remove(spillPath().c_str());
+      spilled_ = false;
+      return;
+    }
+    bool ok = file_.seekSet(blobEnd_);
+    if (ok && spilled_) {
+      FsFile spill;
+      if (Storage.openFileForRead("FNP", spillPath(), spill)) {
+        ok = serialization::copyBytes(spill, file_, static_cast<uint32_t>(existing_) * INDEX_ROW_BYTES);
+        spill.close();
+      } else {
+        ok = false;
+      }
+    }
+    if (ok && file_.seekSet(0)) {
+      writeHeader(existing_, blobEnd_);
+      indexOffset_ = blobEnd_;
+    } else {
+      LOG_ERR("FNP", "Could not restore the parked index; the store will be rebuilt on next open");
+    }
+    file_.close();
+    if (spilled_) {
+      Storage.remove(spillPath().c_str());
+      spilled_ = false;
+    }
   }
 };
 
@@ -652,10 +822,15 @@ bool markSpineResolved(Store& store, const int spineIndex) {
   if (store.isResolved(spineIndex) || !Store::inBitmap(spineIndex)) {
     return true;
   }
+  store.markResolved(spineIndex);
+  // The bitmap sits at a fixed offset, so an existing store takes the bit in place -- no index
+  // work at all. Only a store that does not exist yet has to be laid down first.
+  if (store.writeBitmapInPlace()) {
+    return true;
+  }
   if (!store.beginAppend()) {
     return false;
   }
-  store.markResolved(spineIndex);
   return store.commit();
 }
 
@@ -1008,27 +1183,10 @@ bool Lookup::find(const char* href, std::string& outText) {
   }
   const uint32_t keyHash = makeKeyHash(targetSpine, hash + 1);
 
-  // Binary search the on-disk index. Written as two u32 per row, so one 8-byte read is one row.
-  int lo = 0, hi = static_cast<int>(entryCount_) - 1;
+  // Searched where it lies, by the same helper the Store uses to ask whether it already holds a
+  // note -- one implementation of the format for both sides.
   uint32_t blobOffset = 0;
-  bool found = false;
-  while (lo <= hi) {
-    const int mid = lo + (hi - lo) / 2;
-    uint32_t row[2] = {0, 0};
-    if (!file_.seekSet(indexOffset_ + static_cast<uint32_t>(mid) * INDEX_ENTRY_BYTES)) return false;
-    if (file_.read(reinterpret_cast<uint8_t*>(row), sizeof(row)) != static_cast<int>(sizeof(row))) return false;
-    if (row[0] == keyHash) {
-      blobOffset = row[1];
-      found = true;
-      break;
-    }
-    if (row[0] < keyHash) {
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  if (!found) return false;
+  if (!findIndexRow(file_, indexOffset_, entryCount_, keyHash, blobOffset)) return false;
 
   uint16_t len = 0;
   if (!file_.seekSet(blobOffset)) return false;

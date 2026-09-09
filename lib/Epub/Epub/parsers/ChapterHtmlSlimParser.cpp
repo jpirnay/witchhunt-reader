@@ -72,6 +72,13 @@ constexpr size_t PARSE_BUFFER_SIZE = 1024;
 // keep per-chapter counts lower still. Raise it when a real book is found that needs it -- and
 // give getPageForAnchor an index first if the number goes far past this.
 constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
+// The bound when anchors could NOT be spilled and are being held in RAM instead. Much lower than
+// the spilled cap on purpose: the resident path exists only for a chapter whose spill file would
+// not open, which means the SD is already unhappy -- and holding 1024 std::pairs (28.7 KB, the
+// exact allocation the spill was introduced to remove, on a plain vector whose push_back aborts
+// under -fno-exceptions) is the worst possible response to that. 256 keeps a chapter's early
+// anchors navigable for ~7 KB; the rest degrade the same way they do past any cap.
+constexpr size_t MAX_RESIDENT_ANCHORS = 256;
 // Write buffer for the anchor spill; see the emplace site in setup().
 constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
 
@@ -1290,7 +1297,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (!isPageBreakMarker && !idAttr.empty()) {
     const bool isTocAnchor =
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
-    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount < MAX_ANCHORS_PER_CHAPTER)) {
+    if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit())) {
       self->pendingAnchorId = idAttr;
     }
   }
@@ -2920,6 +2927,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
 
 ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
 
+size_t ChapterHtmlSlimParser::anchorLimit() const {
+  return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
+}
+
 void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
   // The on-disk anchor map counts with a uint16_t, so that is the hard ceiling whatever
   // MAX_ANCHORS_PER_CHAPTER says. Silently dropping past it is the same degradation as the cap:
@@ -2944,7 +2955,7 @@ void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
     anchorCount++;
     return;
   }
-  if (anchorSpillFailed || anchorCount >= MAX_ANCHORS_PER_CHAPTER) {
+  if (anchorSpillFailed || anchorCount >= MAX_RESIDENT_ANCHORS) {
     return;
   }
   // Counts UP rather than being assigned anchorData.size(), so that a resident anchor recorded

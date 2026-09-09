@@ -22,6 +22,7 @@
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
 
@@ -284,4 +285,170 @@ TEST(FootnotePreviewStore, ResolvedSpineIsNotScannedAgain) {
 
   EXPECT_TRUE(FootnotePreviews::resolveSpine(*epub, kChapterSpine));
   EXPECT_EQ(storeTexts(*epub), resolved);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The index MERGE, at a scale the fixtures above cannot reach.
+//
+// The store's index lives on disk and is never held in RAM: a pass parks it in a spill file, its
+// blobs overwrite it, and commit() merges the spill with the pass's own rows straight back out.
+// Above, that merge runs with four notes and a single pass, which is exactly the size at which a
+// wrong merge still looks right. These tests give it several passes over hundreds of notes, with
+// key hashes that interleave the two sides arbitrarily, and check the three properties a reader
+// depends on: every note is findable, the index is ordered so the binary search can find it, and
+// re-resolving does not grow it.
+namespace {
+
+// A book of `chapters` chapters, each with `notesPerChapter` callers into one shared notes
+// document. Deliberately minimal — no size padding, no front matter; the shapes those cover are
+// the subject of FootnoteResolveSliceTest. Note text is a function of the note's id so the test
+// can assert the exact string that came back, not merely that something did.
+std::string noteTextFor(const int id) { return "Note " + std::to_string(id) + " body text for the merge test."; }
+
+std::string makeManyNotesBook(const std::string& dir, const int chapters, const int notesPerChapter) {
+  test_zip::StoredZipWriter zip;
+  std::string manifest, spine, notesBodies;
+  int noteId = 0;
+  for (int c = 0; c < chapters; ++c) {
+    const std::string name = "chapter" + std::to_string(c) + ".xhtml";
+    std::string body;
+    for (int n = 0; n < notesPerChapter; ++n) {
+      const std::string id = std::to_string(++noteId);
+      body += "<p>Prose before the marker<a href=\"notes.xhtml#ft_" + id + "\" id=\"ft" + id +
+              "\"><sup>*</sup></a> and after it.</p>\n";
+      notesBodies += "<p id=\"ft_" + id + "\"><a href=\"" + name + "#ft" + id + "\"><sup>*</sup></a>" +
+                     noteTextFor(noteId) + "</p>\n";
+    }
+    zip.add("OEBPS/" + name,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+            "<head><title>C</title></head><body>\n" +
+                body + "</body></html>\n");
+    manifest +=
+        "<item id=\"c" + std::to_string(c) + "\" href=\"" + name + "\" media-type=\"application/xhtml+xml\"/>\n";
+    spine += "<itemref idref=\"c" + std::to_string(c) + "\"/>";
+  }
+  zip.add("OEBPS/notes.xhtml",
+          "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+          "<head><title>N</title></head><body>\n" +
+              notesBodies + "</body></html>\n");
+  manifest += "<item id=\"n\" href=\"notes.xhtml\" media-type=\"application/xhtml+xml\"/>\n";
+  spine += "<itemref idref=\"n\"/>";
+
+  zip.add("OEBPS/content.opf",
+          "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+          "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"id\">\n"
+          "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">many-notes"
+          "</dc:identifier><dc:title>Many Notes</dc:title><dc:language>en</dc:language></metadata>\n"
+          "<manifest>\n" +
+              manifest + "</manifest>\n<spine>" + spine + "</spine>\n</package>\n");
+  zip.add("mimetype", "application/epub+zip");
+  zip.add("META-INF/container.xml",
+          "<?xml version=\"1.0\"?>\n"
+          "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n"
+          "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" "
+          "media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+
+  const std::string path = dir + "/many_notes.epub";
+  zip.write(path);
+  return path;
+}
+
+// The index as it sits on disk: count, then the rows. Read from the bytes rather than through
+// Lookup, so the test can say something about the ORDER the search depends on and not only about
+// what a search happens to return.
+struct OnDiskIndex {
+  uint16_t count = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> rows;  // keyHash, blobOffset
+};
+
+OnDiskIndex readIndex(const Epub& epub) {
+  OnDiskIndex out;
+  std::ifstream in(epub.getCachePath() + FootnotePreviews::CACHE_FILENAME, std::ios::binary);
+  if (!in) return out;
+  const std::string bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  if (bytes.size() < kBlobStart) return out;
+  uint32_t indexOffset = 0;
+  memcpy(&out.count, bytes.data() + 6, sizeof(out.count));
+  memcpy(&indexOffset, bytes.data() + 8, sizeof(indexOffset));
+  // The invariant Lookup::open and Store::open both validate before trusting the file.
+  EXPECT_EQ(bytes.size(), indexOffset + static_cast<size_t>(out.count) * 8) << "store length does not match its header";
+  for (uint16_t i = 0; i < out.count; ++i) {
+    const size_t at = indexOffset + static_cast<size_t>(i) * 8;
+    if (at + 8 > bytes.size()) break;
+    uint32_t keyHash = 0, blobOffset = 0;
+    memcpy(&keyHash, bytes.data() + at, sizeof(keyHash));
+    memcpy(&blobOffset, bytes.data() + at + 4, sizeof(blobOffset));
+    out.rows.emplace_back(keyHash, blobOffset);
+  }
+  return out;
+}
+
+}  // namespace
+
+// Five passes, 140 notes each. Every note must come back with its own text — a merge that drops
+// one side, or writes the rows out of order, loses notes the binary search then cannot find.
+// 700 notes is also past the 512 the store used to cap at, so this fails outright on the old
+// budget rather than merely losing the ordering.
+TEST(FootnotePreviewStore, MergesHundredsOfNotesAcrossPasses) {
+  constexpr int kChapters = 5;
+  constexpr int kPerChapter = 140;
+  const std::string dir = freshDir("merge_scale");
+  const std::string book = makeManyNotesBook(dir, kChapters, kPerChapter);
+  auto epub = openBook(book, dir + "/cache");
+
+  for (int c = 0; c < kChapters; ++c) {
+    ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, c)) << "chapter " << c << " failed to resolve";
+  }
+
+  const OnDiskIndex index = readIndex(*epub);
+  EXPECT_EQ(index.count, kChapters * kPerChapter) << "the merge lost or duplicated notes";
+
+  // Ordered, and strictly so: the search assumes both.
+  bool sorted = true;
+  bool unique = true;
+  for (size_t i = 1; i < index.rows.size(); ++i) {
+    if (index.rows[i].first < index.rows[i - 1].first) sorted = false;
+    if (index.rows[i].first == index.rows[i - 1].first) unique = false;
+  }
+  EXPECT_TRUE(sorted) << "the merged index is not ordered by key hash";
+  EXPECT_TRUE(unique) << "the merged index contains duplicate keys";
+
+  // And every note actually resolves to ITS text, through the same Lookup the layout parse uses.
+  FootnotePreviews::Lookup lookup;
+  ASSERT_TRUE(lookup.open(epub->getCachePath(), epub.get(), /*currentSpineIndex=*/0));
+  int missing = 0;
+  int wrong = 0;
+  for (int id = 1; id <= kChapters * kPerChapter; ++id) {
+    const std::string href = "notes.xhtml#ft_" + std::to_string(id);
+    std::string text;
+    if (!lookup.find(href.c_str(), text)) {
+      ++missing;
+    } else if (text != noteTextFor(id)) {
+      ++wrong;
+    }
+  }
+  EXPECT_EQ(missing, 0) << missing << " notes are in no index the reader can search";
+  EXPECT_EQ(wrong, 0) << wrong << " notes resolved to another note's text";
+}
+
+// Re-resolving a chapter whose notes are all stored must leave the index alone, not append a
+// second copy of every row. What makes that true is contains() filtering the pass's targets
+// against the on-disk index before anything is appended -- the pass then has nothing to add and
+// short-circuits, so the merge is never reached at all. (Verified: breaking commit()'s tie rule
+// does not fail this test, because no tie ever arises.)
+TEST(FootnotePreviewStore, ReResolvingDoesNotGrowTheMergedIndex) {
+  const std::string dir = freshDir("merge_idempotent");
+  const std::string book = makeManyNotesBook(dir, /*chapters=*/3, /*notesPerChapter=*/60);
+  auto epub = openBook(book, dir + "/cache");
+
+  for (int c = 0; c < 3; ++c) ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, c));
+  const OnDiskIndex first = readIndex(*epub);
+  const uintmax_t sizeAfterFirst = storeSize(*epub);
+  ASSERT_EQ(first.count, 180);
+
+  for (int c = 0; c < 3; ++c) ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, c));
+  const OnDiskIndex second = readIndex(*epub);
+  EXPECT_EQ(second.count, first.count) << "a second pass over the same spines grew the index";
+  EXPECT_EQ(second.rows, first.rows) << "a second pass rewrote the index differently";
+  EXPECT_EQ(storeSize(*epub), sizeAfterFirst) << "a second pass grew the store on disk";
 }

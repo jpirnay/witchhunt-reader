@@ -304,31 +304,16 @@ std::string Section::getAnchorSpillPath() const {
 // own encoding, so this is a copy, not a re-serialisation -- which is the point: re-encoding
 // would mean reading the records back into memory, the exact cost the spill exists to avoid.
 //
-// The chunk is a fixed 512 B stack buffer: an anchor map is a few KB and this runs once per
-// build, so a bigger buffer would buy nothing, and asking the heap for one here -- at the end of
-// a parse, which is where contig is at its lowest -- is the last thing this path should do.
+// serialization::copyBytes is shared with the footnote preview store, which parks and splices its
+// hash index the same way and for the same reason.
 bool Section::copyAnchorSpill(FsFile& out, const std::string& spillPath) {
   FsFile in;
   if (!Storage.openFileForRead("SCT", spillPath, in)) {
     return false;
   }
-  uint8_t chunk[512];
-  size_t remaining = in.size();
-  while (remaining > 0) {
-    const size_t want = std::min(remaining, sizeof(chunk));
-    const int got = in.read(chunk, want);
-    if (got <= 0 || static_cast<size_t>(got) != want) {
-      in.close();
-      return false;
-    }
-    if (out.write(chunk, want) != want) {
-      in.close();
-      return false;
-    }
-    remaining -= want;
-  }
+  const bool ok = serialization::copyBytes(in, out, static_cast<uint32_t>(in.size()));
   in.close();
-  return true;
+  return ok;
 }
 
 // Deliberately carries NEITHER the spine index nor the layout property hash. What gets written

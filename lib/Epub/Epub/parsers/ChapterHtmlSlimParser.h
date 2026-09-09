@@ -333,6 +333,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool anchorSpillFailed = false;
   // Appends one anchor, to the spill file when it is open and to anchorData otherwise.
   void recordAnchor(std::string id, uint16_t page);
+  // How many anchors this chapter may still record: the spilled cap when the spill is open, the
+  // much smaller resident one when it is not. Defined in the .cpp beside the two constants.
+  size_t anchorLimit() const;
   std::string pendingAnchorId;  // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;
 

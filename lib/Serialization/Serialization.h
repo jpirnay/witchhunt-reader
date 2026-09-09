@@ -36,6 +36,26 @@ template <typename T>
   file.write(reinterpret_cast<const uint8_t*>(s.data()), len);
 }
 
+// Copies `bytes` from `in` at its current position into `out` at its current position, through a
+// small fixed buffer.
+//
+// Two caches now park a table in a scratch file while the pass that produced it overwrites where
+// it used to live, and splice it back afterwards: the section cache's anchor map and the footnote
+// preview store's hash index. Both do it for the same reason -- the table scales with the book
+// and must not be resident -- and both run at the end of a parse, where contiguous heap is at its
+// lowest, which is why the buffer is a stack array and not an allocation.
+constexpr size_t COPY_CHUNK_BYTES = 512;
+[[maybe_unused]] static bool copyBytes(FsFile& in, FsFile& out, uint32_t bytes) {
+  uint8_t chunk[COPY_CHUNK_BYTES];
+  while (bytes > 0) {
+    const size_t want = bytes < COPY_CHUNK_BYTES ? static_cast<size_t>(bytes) : COPY_CHUNK_BYTES;
+    if (in.read(chunk, want) != static_cast<int>(want)) return false;
+    if (out.write(chunk, want) != want) return false;
+    bytes -= static_cast<uint32_t>(want);
+  }
+  return true;
+}
+
 constexpr uint32_t MAX_STRING_LENGTH = 4096;
 
 [[maybe_unused]] static bool readString(std::istream& is, std::string& s) {

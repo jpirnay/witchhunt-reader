@@ -46,7 +46,17 @@ class Epub;
 namespace FootnotePreviews {
 
 constexpr const char* CACHE_FILENAME = "/footnotes.bin";
-constexpr size_t MAX_ENTRIES = 512;      // gather cap; index cap in Lookup matches
+// How many notes one book's store may hold. This bounded the RAM the resolver held, back when a
+// pass read the whole index into memory; it does not any more (see Store), so what it bounds now
+// is SD space and lookup depth: 8 bytes of index per note plus its text, and log2(N) eight-byte
+// reads to find one. At 2048 that is a 16 KB index, at most ~480 KB of note text, and eleven
+// reads a lookup.
+//
+// 512 was measurably too small. The Anarchy carries ~1,100 notes, and the store filled five
+// chapters into the narrative: spine 25 resolved 33 of its 118 notes and every chapter after it
+// fell back to bare markers, with nothing on screen to say why. There is no eviction -- a full
+// store stays full for that book -- so the cliff was permanent.
+constexpr size_t MAX_ENTRIES = 2048;     // index cap in Lookup matches
 constexpr size_t MAX_TEXT_BYTES = 240;   // per-preview text cap (matches old table)
 constexpr size_t MIN_SUBTREE_BYTES = 8;  // below this, an id'd element is treated as an
                                          // empty anchor and capture continues past it
@@ -63,11 +73,21 @@ bool cacheExists(const std::string& bookCachePath);
 // self-perpetuating — that was issue #211, where look-ahead died for whole books.
 bool spineResolved(const std::string& bookCachePath, int spineIndex);
 
-// Most footnote-shaped links one spine may contribute in a single pass. 8 bytes each, so the
-// scan's own footprint is bounded at 1 KB however many notes a chapter carries; links past the
-// cap keep their plain marker and stay navigable. A chapter with more than this many notes does
-// not exist in practice — Feet of Clay's heaviest has 5.
-constexpr size_t MAX_TARGETS_PER_SPINE = 128;
+// Most footnote-shaped links one spine may contribute in a single pass. Links past the cap keep
+// their plain marker and stay navigable.
+//
+// It said "a chapter with more than this many notes does not exist in practice — Feet of Clay's
+// heaviest has 5", and at 128 that was comfortable. It is not true of annotated non-fiction:
+// The Anarchy has chapters with 162 and 180 note callers, and five of its chapters reported
+// exactly 128 resolved, i.e. silently truncated.
+//
+// This is the one number here that IS a RAM budget, because a pass holds its targets, the subset
+// still missing, their key hashes, and the index rows it adds — four arrays that all scale with
+// it, ~28 bytes a target between them, so 256 costs ~7 KB against 128's ~3.5 KB. That is
+// affordable specifically because the resolve runs BETWEEN the build's extract and layout
+// phases (see Section::beginInlineFootnotePreviewResolve): its working set never overlaps the
+// ~20 KB layout parse, which is what the build's heap gates are sized against.
+constexpr size_t MAX_TARGETS_PER_SPINE = 256;
 
 // Resolves every footnote-shaped link in `spineIndex`'s document whose note text is not already
 // in the store, and appends what it finds. Idempotent: a spine that has been resolved before
