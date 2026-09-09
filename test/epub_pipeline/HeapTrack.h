@@ -23,11 +23,17 @@ size_t heapTrackAllocCount();
 // Fills up to `count` buckets. Reveals which allocations dominate by COUNT, which is what
 // fragments a no-compaction heap.
 void heapTrackSizeHistogram(size_t* out, int count);
-// Top allocation SITES by count, as raw return addresses (symbolize with addr2line).
-// Writes up to `count` pairs into out[]; returns how many were written.
+// Top allocation SITES, as raw return addresses (symbolize with addr2line). Writes up to `count`
+// entries into out[]; returns how many were written, ordered by peakLive.
+//
+// `bytes` is CUMULATIVE and answers "who allocates a lot" -- on a churning parser that is almost
+// always the per-word string traffic, and almost always the wrong thing to change. `peakLive` is
+// what the site was still HOLDING when the run hit its high-water mark, which is what a 380 KB
+// device actually runs out of.
 struct HeapTrackSite {
   unsigned long long pc;
   size_t count;
   size_t bytes;
+  size_t peakLive;
 };
 int heapTrackTopSites(HeapTrackSite* out, int count);

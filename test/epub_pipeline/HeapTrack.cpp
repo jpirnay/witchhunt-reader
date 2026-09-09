@@ -48,9 +48,17 @@ constexpr int kSiteSlots = 4096;
 std::atomic<uintptr_t> g_siteAddr[kSiteSlots];
 std::atomic<size_t> g_siteCount[kSiteSlots];
 std::atomic<size_t> g_siteBytes[kSiteSlots];
+// Cumulative bytes answer "who allocates a lot", which on a churning parser is nearly always the
+// per-word string traffic and nearly always the wrong thing to change. What a 380 KB device
+// actually runs out of is LIVE bytes at one instant, so this tracks those per site too, and
+// snapshots the table whenever a new peak is set: g_peakSiteLive is then "who was holding the
+// memory at the high-water mark", which is the question a fix has to answer.
+std::atomic<size_t> g_siteLive[kSiteSlots];
+std::atomic<size_t> g_peakSiteLive[kSiteSlots];
+std::atomic<size_t> g_peakSnapshotBytes{0};
 
-void trackSite(const uintptr_t pc, const size_t sz) {
-  if (pc == 0) return;
+int trackSite(const uintptr_t pc, const size_t sz) {
+  if (pc == 0) return -1;
   size_t h = (pc * 0x9E3779B97F4A7C15ull) >> 49;  // spread the low-entropy high bits of a code addr
   for (int probe = 0; probe < 8; ++probe) {
     const size_t slot = (h + probe) & (kSiteSlots - 1);
@@ -65,13 +73,14 @@ void trackSite(const uintptr_t pc, const size_t sz) {
     if (cur == pc) {
       g_siteCount[slot].fetch_add(1, std::memory_order_relaxed);
       g_siteBytes[slot].fetch_add(sz, std::memory_order_relaxed);
-      return;
+      g_siteLive[slot].fetch_add(sz, std::memory_order_relaxed);
+      return static_cast<int>(slot);
     }
   }
 }
 
-void trackAlloc(size_t sz) {
-  if (!g_tracking || g_inHook) return;
+int trackAlloc(size_t sz) {
+  if (!g_tracking || g_inHook) return -1;
   g_allocCount.fetch_add(1, std::memory_order_relaxed);
   // Size histogram: which allocations dominate the count is not obvious from the code — the
   // ones that fragment a no-compaction heap are not necessarily the ones you notice reading it.
@@ -96,15 +105,39 @@ void trackAlloc(size_t sz) {
   const int pick = depth > 3 ? 3 : depth - 1;
   const uintptr_t pc = pick >= 0 ? reinterpret_cast<uintptr_t>(frames[pick]) : 0;
   g_inHook = false;
-  trackSite(pc, sz);
+  const int slot = trackSite(pc, sz);
+
+  // Snapshot who is holding memory whenever the high-water mark moves meaningfully. Copying 4096
+  // slots is far too expensive to do on every new peak -- early in a run almost every allocation
+  // sets one -- so it only runs once the peak has grown by a bucket's worth since the last
+  // snapshot. The result trails the true peak by at most that much.
+  constexpr size_t kSnapshotStepBytes = 4096;
+  const size_t snapped = g_peakSnapshotBytes.load(std::memory_order_relaxed);
+  if (live > snapped + kSnapshotStepBytes) {
+    size_t expected = snapped;
+    if (g_peakSnapshotBytes.compare_exchange_strong(expected, live, std::memory_order_relaxed)) {
+      for (int i = 0; i < kSiteSlots; ++i) {
+        g_peakSiteLive[i].store(g_siteLive[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+      }
+    }
+  }
+  return slot;
 }
-void trackFree(size_t sz) {
+void trackFree(size_t sz, int slot) {
   if (!g_tracking || g_inHook) return;
   g_liveBytes.fetch_sub(sz, std::memory_order_relaxed);
+  if (slot >= 0 && slot < kSiteSlots) g_siteLive[slot].fetch_sub(sz, std::memory_order_relaxed);
 }
 
 constexpr size_t kAlign = alignof(std::max_align_t);
-constexpr size_t kHeaderSize = (sizeof(size_t) + kAlign - 1) & ~(kAlign - 1);
+// The header carries the allocation's size AND the site slot that claimed it, so free() can
+// return the bytes to the same site rather than only to the global total. Without the second
+// field per-site numbers could only ever grow, which is the cumulative view that misleads.
+struct Header {
+  size_t size;
+  size_t slot;  // +1 biased so 0 means "unattributed"
+};
+constexpr size_t kHeaderSize = (sizeof(Header) + kAlign - 1) & ~(kAlign - 1);
 
 void* rawAlloc(size_t bytes) {
 #if defined(_WIN32)
@@ -143,8 +176,10 @@ void* malloc(size_t size) {
   void* raw = rawAlloc(kHeaderSize + size);
   g_inHook = false;
   if (!raw) return nullptr;
-  *static_cast<size_t*>(raw) = size;
-  trackAlloc(size);
+  const int slot = trackAlloc(size);
+  auto* h = static_cast<Header*>(raw);
+  h->size = size;
+  h->slot = slot >= 0 ? static_cast<size_t>(slot) + 1 : 0;
   return static_cast<char*>(raw) + kHeaderSize;
 }
 
@@ -155,8 +190,9 @@ void free(void* ptr) {
     return;
   }
   void* raw = static_cast<char*>(ptr) - kHeaderSize;
-  const size_t size = *static_cast<size_t*>(raw);
-  trackFree(size);
+  const auto* h = static_cast<const Header*>(raw);
+  const size_t size = h->size;
+  trackFree(size, h->slot > 0 ? static_cast<int>(h->slot) - 1 : -1);
   g_inHook = true;
   rawFree(raw);
   g_inHook = false;
@@ -172,7 +208,7 @@ void* calloc(size_t nmemb, size_t size) {
 void* realloc(void* ptr, size_t size) {
   if (!ptr) return malloc(size);
   void* raw = static_cast<char*>(ptr) - kHeaderSize;
-  const size_t oldSize = *static_cast<size_t*>(raw);
+  const size_t oldSize = static_cast<const Header*>(raw)->size;
   void* np = malloc(size);
   if (!np) return nullptr;
   memcpy(np, ptr, oldSize < size ? oldSize : size);
@@ -189,7 +225,12 @@ void heapTrackBegin() {
   (void)captureFrames(warm, 4);
   g_liveBytes.store(0);
   g_peakBytes.store(0);
+  g_peakSnapshotBytes.store(0);
   g_allocCount.store(0);
+  for (int i = 0; i < kSiteSlots; ++i) {
+    g_siteLive[i].store(0);
+    g_peakSiteLive[i].store(0);
+  }
   for (auto& b : g_sizeBuckets) b.store(0);
   g_tracking.store(true);
 }
@@ -217,13 +258,15 @@ int heapTrackTopSites(HeapTrackSite* out, const int count) {
     out[n].pc = g_siteAddr[slot].load(std::memory_order_relaxed);
     out[n].count = c;
     out[n].bytes = g_siteBytes[slot].load(std::memory_order_relaxed);
+    out[n].peakLive = g_peakSiteLive[slot].load(std::memory_order_relaxed);
     ++n;
   }
-  // Descending by count; n is a few hundred at most, so an insertion sort is ample.
+  // Descending by what the site was HOLDING at the peak; n is a few hundred at most, so an
+  // insertion sort is ample.
   for (int i = 1; i < n; ++i) {
     HeapTrackSite key = out[i];
     int j = i - 1;
-    while (j >= 0 && out[j].count < key.count) {
+    while (j >= 0 && out[j].peakLive < key.peakLive) {
       out[j + 1] = out[j];
       --j;
     }

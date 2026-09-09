@@ -101,8 +101,8 @@ int main(const int argc, char** argv) {
       // .exe resolves it. Without this the profiler's site list is a column of raw pointers.
       rel = sites[i].pc - reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
 #endif
-      std::fprintf(stderr, "\nBENCHMARK alloc_site count=%zu bytes=%zu off=0x%llx sym=%s", sites[i].count,
-                   sites[i].bytes, rel, sym);
+      std::fprintf(stderr, "\nBENCHMARK alloc_site peakLive=%zu count=%zu bytes=%zu off=0x%llx sym=%s",
+                   sites[i].peakLive, sites[i].count, sites[i].bytes, rel, sym);
     }
   }
   std::fprintf(stderr, "\n");
