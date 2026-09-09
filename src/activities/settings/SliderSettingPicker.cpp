@@ -2,8 +2,10 @@
 
 #include <HalFrontlight.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include "CrossPointSettings.h"
+#include "SettingsList.h"
 
 namespace SliderSetting {
 
@@ -69,25 +71,35 @@ bool configFor(const SettingAction action, SliderPickerActivity::Config& cfg) {
 }
 
 void apply(const SettingAction action, const uint8_t value) {
+  // The field a slider edits is declared once, on the row itself (SettingInfo::persisting), and
+  // read from there by BOTH this and JsonSettingsIO. It used to be written out twice — a switch
+  // here and a hand-written line in the serialiser — and the two could disagree silently: the
+  // frontlight sliders had the switch and no serialiser line, so the level applied, drove the
+  // panel, and was gone at the next boot.
+  //
+  // Now a row that forgets to declare its field does not save AND does not apply, which is a
+  // report on the first use rather than one after a power cycle.
+  const SettingInfo* row = nullptr;
+  for (const auto& info : getSettingsList()) {
+    if (info.type == SettingType::ACTION && info.action == action && info.persistPtr) {
+      row = &info;
+      break;
+    }
+  }
+  if (!row) {
+    LOG_ERR("SET", "Slider action %d edits no declared field; see SettingInfo::persisting", static_cast<int>(action));
+    return;
+  }
+  SETTINGS.*(row->persistPtr) = value;
+
+  // Side effects only. Both light sliders drive the hardware as well as the setting: the picker
+  // is the only place the level is chosen, so waiting for a reboot to see it would make the
+  // control unusable.
   switch (action) {
-    case SettingAction::SleepTimeoutPicker:
-      SETTINGS.sleepTimeoutMinutes = value;
-      break;
-    case SettingAction::RefreshFrequencyPicker:
-      SETTINGS.refreshFrequencyPages = value;
-      break;
-    case SettingAction::KOSyncMinPagesPicker:
-      SETTINGS.koSyncMinSessionPages = value;
-      break;
-    // Both light sliders drive the hardware as well as the setting: the picker
-    // is the only place the level is chosen, so waiting for a reboot to see it
-    // would make the control unusable.
     case SettingAction::FrontlightBrightnessPicker:
-      SETTINGS.frontlightBrightness = value;
       Frontlight.setBrightness(value);
       break;
     case SettingAction::FrontlightWarmthPicker:
-      SETTINGS.frontlightWarmth = value;
       Frontlight.setWarmth(value);
       break;
     default:

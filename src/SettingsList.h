@@ -168,6 +168,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
 
   // --- Display ---
   settings.push_back(SettingInfo::Action(StrId::STR_TIME_TO_SLEEP, SettingAction::SleepTimeoutPicker)
+                         .persisting(&CrossPointSettings::sleepTimeoutMinutes, "sleepTimeoutMinutes", 60)
                          .withDisplayGetter(getSleepTimeoutDisplay)
                          .withCategory(StrId::STR_CAT_DISPLAY));
   settings.push_back(
@@ -206,6 +207,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                        "hideBatteryPercentage", StrId::STR_CAT_DISPLAY)
                          .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
   settings.push_back(SettingInfo::Action(StrId::STR_REFRESH_FREQ, SettingAction::RefreshFrequencyPicker)
+                         .persisting(&CrossPointSettings::refreshFrequencyPages, "refreshFrequencyPages", 60)
                          .withDisplayGetter(getRefreshFrequencyDisplay)
                          .withCategory(StrId::STR_CAT_DISPLAY)
                          .withSubmenu(StrId::STR_MENU_DISP_REFRESH)
@@ -236,11 +238,13 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubcategory(StrId::STR_MENU_DISP_LIGHT)
                          .requiring(SettingRequires::ReadingLight));
   settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_BRIGHTNESS, SettingAction::FrontlightBrightnessPicker)
+                         .persisting(&CrossPointSettings::frontlightBrightness, "frontlightBrightness", 100)
                          .withDisplayGetter(getFrontlightBrightnessDisplay)
                          .withCategory(StrId::STR_CAT_DISPLAY)
                          .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
                          .requiring(SettingRequires::ReadingLight));
   settings.push_back(SettingInfo::Action(StrId::STR_LIGHT_WARMTH, SettingAction::FrontlightWarmthPicker)
+                         .persisting(&CrossPointSettings::frontlightWarmth, "frontlightWarmth", 100)
                          .withDisplayGetter(getFrontlightWarmthDisplay)
                          .withCategory(StrId::STR_CAT_DISPLAY)
                          .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
@@ -602,6 +606,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
                                          "koSyncOnBookClose", StrId::STR_KOREADER_SYNC));
   settings.push_back(SettingInfo::Action(StrId::STR_KO_MIN_SESSION_PAGES, SettingAction::KOSyncMinPagesPicker)
+                         .persisting(&CrossPointSettings::koSyncMinSessionPages, "koSyncMinSessionPages", 60)
                          .withDisplayGetter(getKoSyncMinPagesDisplay)
                          .withCategory(StrId::STR_KOREADER_SYNC));
   settings.push_back([]() {

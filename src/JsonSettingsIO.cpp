@@ -202,8 +202,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
 
   for (const auto& info : settings) {
     if (!info.key) continue;
+    // persistPtr covers rows whose UI type carries no field pointer of its own (slider ACTIONs).
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    const auto field = info.valuePtr ? info.valuePtr : info.persistPtr;
+    if (!field && !info.stringOffset) continue;
 
     if (info.stringOffset) {
       const char* strPtr = (const char*)&s + info.stringOffset;
@@ -213,7 +215,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
         doc[info.key] = strPtr;
       }
     } else {
-      doc[info.key] = s.*(info.valuePtr);
+      doc[info.key] = s.*field;
     }
   }
 
@@ -234,14 +236,6 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Saved unconditionally, not behind the board's capability: a settings file
   // carried to a board with no light must come back with the preference intact.
   doc["frontlightOn"] = s.frontlightOn;
-  // Brightness and warmth are chosen through slider ACTIONS, which carry neither a field pointer
-  // nor a key, so the generic loop above cannot see them either. Without these two lines the
-  // level was live for the session and gone at the next boot: the slider drove the hardware and
-  // updated the setting, saveToFile() wrote a document that did not contain it, and begin()
-  // restored the compiled default. Saved unconditionally, for the same reason frontlightOn is —
-  // a settings file carried to a board without a light must come back with the preference intact.
-  doc["frontlightBrightness"] = s.frontlightBrightness;
-  doc["frontlightWarmth"] = s.frontlightWarmth;
   if (s.dictionaryName[0] != '\0') {
     doc["dictionaryName"] = s.dictionaryName;
   }
@@ -256,9 +250,6 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["moveFinishedBooksToCompleted"] = s.moveFinishedBooksToCompleted;
   doc["removeFinishedBooksFromRecents"] = s.removeFinishedBooksFromRecents;
   doc["syncFinishedBookToKOReader"] = s.syncFinishedBookToKOReader;
-  doc["koSyncMinSessionPages"] = s.koSyncMinSessionPages;
-  doc["sleepTimeoutMinutes"] = s.sleepTimeoutMinutes;
-  doc["refreshFrequencyPages"] = s.refreshFrequencyPages;
 
   String json;
   serializeJson(doc, json);
@@ -315,10 +306,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                                     CrossPointSettings::SLEEP_TIMEOUT_COUNT, CrossPointSettings::SLEEP_10_MIN);
     s.sleepTimeoutMinutes = kSleepMinutes[legacyIdx];
     if (needsResave) *needsResave = true;
-  } else {
-    const uint8_t v = doc["sleepTimeoutMinutes"] | s.sleepTimeoutMinutes;
-    s.sleepTimeoutMinutes = (v <= 60) ? v : 10;
   }
+  // No else: a file that already carries the key is read (and range-checked) by the generic loop,
+  // because the row declares where it is stored. Only the migration is special here.
 
   // Migrate legacy refreshFrequency enum → refreshFrequencyPages (pages, 0=never).
   if (doc["refreshFrequencyPages"].isNull()) {
@@ -327,10 +317,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                                     CrossPointSettings::REFRESH_FREQUENCY_COUNT, CrossPointSettings::REFRESH_15);
     s.refreshFrequencyPages = kRefreshPages[legacyIdx];
     if (needsResave) *needsResave = true;
-  } else {
-    const uint8_t v = doc["refreshFrequencyPages"] | s.refreshFrequencyPages;
-    s.refreshFrequencyPages = (v <= 60) ? v : 15;
   }
+  // As above: only the legacy migration needs saying here.
 
   const auto settings = getSettingsList();
   // Gesture keys written against an older generation of the shipped defaults are
@@ -348,8 +336,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
   for (const auto& info : settings) {
     if (!info.key) continue;
-    // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    // See the matching comment in saveSettings.
+    const auto field = info.valuePtr ? info.valuePtr : info.persistPtr;
+    if (!field && !info.stringOffset) continue;
 
     if (info.stringOffset) {
       const char* strPtr = (const char*)&s + info.stringOffset;
@@ -383,19 +372,23 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       strncpy(destPtr, val.c_str(), info.stringMaxLen - 1);
       destPtr[info.stringMaxLen - 1] = '\0';
     } else {
-      const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
+      const uint8_t fieldDefault = s.*field;  // struct-initializer default, read before we overwrite it
       // A gesture key written against an older generation of the defaults is
       // ignored, not loaded: a stored BTN_DEFAULT is indistinguishable from a
       // key that predates the default, so honouring it would pin every device
       // that has ever saved its settings to whatever the defaults were then.
       // See CrossPointSettings::GESTURE_DEFAULTS_VERSION.
       if (staleGestureDefaults && isGestureKey(info.key)) {
-        s.*(info.valuePtr) = fieldDefault;
+        s.*field = fieldDefault;
         if (needsResave) *needsResave = true;
         continue;
       }
       uint8_t v = doc[info.key] | fieldDefault;
-      if (info.type == SettingType::ENUM) {
+      if (info.persistPtr) {
+        // A slider's range is its own; anything past it falls back rather than driving the
+        // hardware (or the sleep timer) somewhere the UI would never have offered.
+        v = v <= info.persistMax ? v : fieldDefault;
+      } else if (info.type == SettingType::ENUM) {
         v = clamp(v, (uint8_t)info.enumValues.size(), fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {
         v = clamp(v, (uint8_t)2, fieldDefault);
@@ -405,7 +398,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
         else if (v > info.valueRange.max)
           v = info.valueRange.max;
       }
-      s.*(info.valuePtr) = v;
+      s.*field = v;
     }
   }
 
@@ -427,11 +420,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                        CrossPointSettings::BUILTIN_FONT_COUNT, CrossPointSettings::BOOKERLY);
   // Frontlight switch: dynamic in SettingsList, so it needs loading manually too.
   s.frontlightOn = (doc["frontlightOn"] | 0) ? 1 : 0;
-  // Both levels are percentages, so the valid range is 0..100 inclusive — hence 101 as the
-  // exclusive bound clamp() takes. An out-of-range value falls back to the compiled default
-  // rather than to a dark or blinding panel.
-  s.frontlightBrightness = clamp(doc["frontlightBrightness"] | s.frontlightBrightness, 101, s.frontlightBrightness);
-  s.frontlightWarmth = clamp(doc["frontlightWarmth"] | s.frontlightWarmth, 101, s.frontlightWarmth);
   const char* dictName = doc["dictionaryName"] | "";
   strncpy(s.dictionaryName, dictName, sizeof(s.dictionaryName) - 1);
   s.dictionaryName[sizeof(s.dictionaryName) - 1] = '\0';
@@ -447,7 +435,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.moveFinishedBooksToCompleted = doc["moveFinishedBooksToCompleted"] | (uint8_t)0;
   s.removeFinishedBooksFromRecents = doc["removeFinishedBooksFromRecents"] | (uint8_t)0;
   s.syncFinishedBookToKOReader = doc["syncFinishedBookToKOReader"] | (uint8_t)0;
-  s.koSyncMinSessionPages = doc["koSyncMinSessionPages"] | (uint8_t)3;
 
   const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
   CrossPointSettings::normalizeDependentSettings(s);

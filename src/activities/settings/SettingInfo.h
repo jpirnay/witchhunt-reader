@@ -291,6 +291,30 @@ struct SettingInfo {
     return s;
   }
 
+  // Where this row's value LIVES, for rows whose UI type does not carry a field pointer of its
+  // own: a slider ACTION, chiefly, which is edited through SliderSetting rather than by toggling.
+  //
+  // Deliberately not `valuePtr`. That member means "the UI reads and writes this directly", and
+  // getDisplayValue()/toggleValue() prefer it over a row's getter — so putting a field there
+  // would shadow the live value of a dynamic row. This one is about storage only.
+  //
+  // Rows that declare it are saved and loaded by the generic loop in JsonSettingsIO like any
+  // other field. Rows that do not, are not — which is how five slider rows came to need
+  // hand-written serialisation lines, and how two of them (the frontlight levels) ended up with
+  // none at all: they worked for a session and reset at the next boot.
+  uint8_t CrossPointSettings::* persistPtr = nullptr;
+  // Inclusive upper bound for a loaded value. Above it the compiled default is used instead,
+  // which is the same protection the generic loop gives an ENUM via its option count.
+  uint8_t persistMax = 100;
+
+  // Declares where this row's value is stored and under what key. See persistPtr.
+  SettingInfo& persisting(uint8_t CrossPointSettings::* field, const char* storageKey, const uint8_t maxValue = 100) {
+    persistPtr = field;
+    key = storageKey;
+    persistMax = maxValue;
+    return *this;
+  }
+
   bool isSeparator = false;
   bool usesSelectorActivity = false;        // Confirm opens a full-screen selector instead of inline cycling
   StrId subcategory = StrId::STR_NONE_OPT;  // Triggers a separator row on first use and on change
