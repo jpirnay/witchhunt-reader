@@ -297,6 +297,27 @@ class NoteCapturer {
     return name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0';
   }
 
+  // True when the element carrying the wanted id is itself a LINK — an <a> with an href.
+  //
+  // That is a caller, not a note. A notes document's entries each open with a link back to the
+  // caller they belong to ("<a href="chapter.xhtml#fnen1">1</a>"), and those back-links are
+  // marker-shaped, so Pass A collects them like any other footnote-shaped link. Pass B then found
+  // the caller <a> in the chapter, saw a subtree of one character ("1"), took that for the empty
+  // inline anchor of the Calibre filepos pattern, and captured the text FOLLOWING it — the
+  // chapter's next sentence, stored as if it were the note.
+  //
+  // On The Anarchy that put 512 entries of chapter prose in the store and spliced them into the
+  // endnotes page: every note there rendered as its number, then a parenthesised sentence lifted
+  // out of the chapter, then the note. 329 of them in one spine.
+  //
+  // An <a> WITH an href is the discriminator, and it leaves the pattern this was mistaken for
+  // intact: a Calibre filepos anchor is <a id="filepos123"></a> — an id and no href.
+  static bool isCallerAnchor(const char* name, const char** atts) {
+    if (strcmp(name, "a") != 0) return false;
+    const char* href = getAttribute(atts, "href");
+    return href != nullptr && *href != ' ';
+  }
+
   void beginCapture(const size_t targetIdx, const int idDepth) {
     activeIdx_ = targetIdx;
     captureDepth_ = idDepth;
@@ -324,10 +345,13 @@ class NoteCapturer {
     auto* self = static_cast<NoteCapturer*>(ctx);
     const int wantedIdx = self->findWanted(getAttribute(atts, "id"));
     if (wantedIdx >= 0) {
-      // A new wanted anchor always starts its own capture — in sequential rearnote
-      // lists it is also what terminates the previous note's tail capture.
+      // A new wanted anchor always terminates the previous note's tail capture, whether or not
+      // it goes on to start one of its own — in sequential rearnote lists that is what ends each
+      // note.
       if (self->captureDepth_ >= 0) self->finishCapture();
-      self->beginCapture(static_cast<size_t>(wantedIdx), self->depth_);
+      if (!isCallerAnchor(name, atts)) {
+        self->beginCapture(static_cast<size_t>(wantedIdx), self->depth_);
+      }
     } else if (self->captureDepth_ >= 0 && self->skipDepth_ < 0 && isChrome(name)) {
       self->skipDepth_ = self->depth_;
     }

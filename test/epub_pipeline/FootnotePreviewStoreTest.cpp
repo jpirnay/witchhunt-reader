@@ -452,3 +452,42 @@ TEST(FootnotePreviewStore, ReResolvingDoesNotGrowTheMergedIndex) {
   EXPECT_EQ(second.rows, first.rows) << "a second pass rewrote the index differently";
   EXPECT_EQ(storeSize(*epub), sizeAfterFirst) << "a second pass grew the store on disk";
 }
+
+// A notes document's entries open with a link back to the caller they belong to, and those
+// back-links are marker-shaped, so Pass A collects them like any other footnote-shaped link.
+// Pass B used to follow one into the chapter, land on the caller <a>, see a one-character subtree
+// ("*"), take that for the empty inline anchor of the Calibre filepos pattern, and capture the
+// text FOLLOWING it. The chapter's next sentence was then stored as if it were a note -- and
+// spliced into the notes page when it was laid out. On a real book that put 512 entries of
+// chapter prose in the store and injected 329 of them into the endnotes chapter.
+TEST(FootnotePreviewStore, ANoteBackLinkIsNotItselfANote) {
+  const std::string dir = freshDir("back_links");
+  const std::string book = makeManyNotesBook(dir, /*chapters=*/2, /*notesPerChapter=*/8);
+  auto epub = openBook(book, dir + "/cache");
+  constexpr int kNotesDocSpine = 2;  // after the two chapters
+
+  for (int c = 0; c < 2; ++c) ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, c));
+  const OnDiskIndex afterChapters = readIndex(*epub);
+  ASSERT_EQ(afterChapters.count, 16) << "both chapters' notes should be stored";
+
+  // Resolving the notes document itself must add nothing: every marker-shaped link in it points
+  // back at a caller, and a caller is not a note.
+  ASSERT_TRUE(FootnotePreviews::resolveSpine(*epub, kNotesDocSpine));
+  const OnDiskIndex afterNotesDoc = readIndex(*epub);
+  EXPECT_EQ(afterNotesDoc.count, afterChapters.count) << "back-links were stored as if they were notes";
+
+  // And specifically: nothing is stored for the caller anchors the back-links point at, so
+  // laying the notes document out cannot splice chapter prose into it.
+  FootnotePreviews::Lookup lookup;
+  ASSERT_TRUE(lookup.open(epub->getCachePath(), epub.get(), kNotesDocSpine));
+  std::string text;
+  EXPECT_FALSE(lookup.find("chapter0.xhtml#ft1", text))
+      << "the caller anchor resolved to a preview: '" << text << "'";
+  EXPECT_FALSE(lookup.find("chapter1.xhtml#ft9", text))
+      << "the caller anchor resolved to a preview: '" << text << "'";
+
+  // The real notes are untouched by the fix.
+  ASSERT_TRUE(lookup.open(epub->getCachePath(), epub.get(), /*currentSpineIndex=*/0));
+  ASSERT_TRUE(lookup.find("notes.xhtml#ft_1", text));
+  EXPECT_EQ(text, noteTextFor(1));
+}
