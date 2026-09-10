@@ -426,6 +426,16 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
 
   if (propNameBuf.empty() || propValueBuf.empty()) return;
 
+  // Strip `!important` once, here, for every property. It used to be applied per-property at
+  // the dozen sites that remembered to, so `margin: 0 !important`, `text-align: center
+  // !important`, `text-indent`, `font-style`, `font-weight` and `text-decoration` all parsed
+  // the marker as part of the value and silently dropped the declaration.
+  // Ported from crosspoint-reader PR #3221 (Phạm Bình An / @brianhuster).
+  // stripTrailingImportant only removes suffixes, so the view still starts at propValueBuf's
+  // own buffer and resizing to its length is safe.
+  propValueBuf.resize(stripTrailingImportant(propValueBuf).size());
+  if (propValueBuf.empty()) return;
+
   if (propNameBuf == "text-align") {
     style.textAlign = interpretAlignment(propValueBuf);
     style.defined.textAlign = 1;
@@ -486,22 +496,22 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     }
   } else if (propNameBuf == "height") {
     CssLength len;
-    if (interpretImageSize(stripTrailingImportant(propValueBuf), len)) {
+    if (interpretImageSize(propValueBuf, len)) {
       style.imageHeight = len;
       style.defined.imageHeight = 1;
     }
   } else if (propNameBuf == "width") {
     CssLength len;
-    if (interpretImageSize(stripTrailingImportant(propValueBuf), len)) {
+    if (interpretImageSize(propValueBuf, len)) {
       style.imageWidth = len;
       style.defined.imageWidth = 1;
     }
   } else if (propNameBuf == "display") {
-    const std::string_view displayValue = stripTrailingImportant(propValueBuf);
+    const std::string_view displayValue = propValueBuf;
     style.display = (displayValue == "none") ? CssDisplay::None : CssDisplay::Block;
     style.defined.display = 1;
   } else if (propNameBuf == "vertical-align") {
-    const std::string_view va = stripTrailingImportant(propValueBuf);
+    const std::string_view va = propValueBuf;
     if (va == "super") {
       style.verticalAlign = CssVerticalAlign::Super;
       style.defined.verticalAlign = 1;
@@ -513,7 +523,7 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.verticalAlign = 1;
     }
   } else if (propNameBuf == "font-variant" || propNameBuf == "font-variant-caps") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val == "small-caps" || val == "all-small-caps") {
       style.smallCaps = true;
       style.defined.smallCaps = 1;
@@ -522,7 +532,7 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.smallCaps = 1;
     }
   } else if (propNameBuf == "float") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val == "left") {
       style.cssFloat = CssFloat::Left;
       style.defined.cssFloat = 1;
@@ -534,25 +544,25 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.cssFloat = 1;
     }
   } else if (propNameBuf == "list-style-type" || propNameBuf == "list-style") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val == "none") {
       style.listStyleNone = true;
       style.defined.listStyleNone = 1;
     }
   } else if (propNameBuf == "page-break-before" || propNameBuf == "break-before") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val == "always" || val == "page" || val == "left" || val == "right") {
       style.pageBreakBefore = true;
       style.defined.pageBreakBefore = 1;
     }
   } else if (propNameBuf == "page-break-after" || propNameBuf == "break-after") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val == "always" || val == "page" || val == "left" || val == "right") {
       style.pageBreakAfter = true;
       style.defined.pageBreakAfter = 1;
     }
   } else if (propNameBuf == "line-height") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val != "normal" && val != "inherit" && val != "initial" && val != "unset") {
       // Parse unitless, %, or em. Normalise to a multiplier relative to default y_advance.
       // Base = 1.5 (typical body line-height). Result range clamped to [0.7, 2.0].
@@ -590,7 +600,7 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       }
     }
   } else if (propNameBuf == "font-size") {
-    const std::string_view val = stripTrailingImportant(propValueBuf);
+    const std::string_view val = propValueBuf;
     if (val != "inherit" && val != "initial" && val != "unset") {
       float parsed = 0.0f;
       bool ok = false;

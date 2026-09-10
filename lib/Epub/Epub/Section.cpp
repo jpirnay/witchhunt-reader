@@ -31,7 +31,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 71;  // bumped: the packed word style byte now carries a
+constexpr uint8_t SECTION_FILE_VERSION = 72;  // bumped: `!important` is now stripped from every
+                                              // CSS declaration value, so margins, text-align and
+                                              // text-indent that carry the marker take effect. Those
+                                              // feed layout, so a v71 cache holds the old geometry
+                                              // v71: the packed word style byte now carries a
                                               // per-word "continues the previous word" bit, so the
                                               // dictionary overlay can select a bionic-split or
                                               // hyphenated word as one word. A v70 cache reads the
