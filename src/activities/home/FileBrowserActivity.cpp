@@ -7,6 +7,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Txt.h>
+#include <Utf8.h>
 #include <Xtc.h>
 
 #include <algorithm>
@@ -417,7 +418,14 @@ void FileBrowserActivity::pageSelection(const int direction) {
   requestUpdate();
 }
 
+// Display copy only. `files[]` and every path built from it keep the raw directory-entry
+// bytes, because FAT long-filename lookup is byte-exact: opening or deleting an NFD entry
+// through an NFC-normalized name fails. Composing here fixes rendering -- the fonts carry
+// precomposed Hangul syllables but no conjoining jamo, so a Korean filename written by macOS
+// drew as blanks -- without touching what we hand to storage.
+// Ported from crosspoint-reader PR #3036 (Sung-jin Brian Hong <serialx@serialx.net>).
 std::string getFileName(std::string filename) {
+  filename = utf8NfcNorm(std::move(filename));
   if (filename.back() == '/') {
     filename.pop_back();
     if (!UITheme::getInstance().getTheme().showsFileIcons()) {
@@ -850,47 +858,47 @@ void FileBrowserActivity::doSetAsSleepCover(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::doDeleteCache(const std::string& fullPath, const std::string& entry) {
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_CACHE) + std::string("?"), entry),
-      [this, fullPath](const ActivityResult& res) {
-        if (!res.isCancelled) {
-          clearFileMetadata(fullPath);
-          LOG_INF("FBR", "Cache deleted for: %s", fullPath.c_str());
-        }
-        requestUpdate();
-      });
+  startActivityForResult(std::make_unique<ConfirmationActivity>(
+                             renderer, mappedInput, tr(STR_DELETE_CACHE) + std::string("?"), utf8NfcNorm(entry)),
+                         [this, fullPath](const ActivityResult& res) {
+                           if (!res.isCancelled) {
+                             clearFileMetadata(fullPath);
+                             LOG_INF("FBR", "Cache deleted for: %s", fullPath.c_str());
+                           }
+                           requestUpdate();
+                         });
 }
 
 void FileBrowserActivity::doRemove(const std::string& fullPath, const std::string& entry, bool isDirectory) {
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE) + std::string("? "), entry),
-      [this, fullPath, isDirectory](const ActivityResult& res) {
-        if (!res.isCancelled) {
-          LOG_DBG("FBR", "Attempting to delete: %s", fullPath.c_str());
-          bool deleted;
-          if (isDirectory) {
-            deleted = removeDirRecursive(fullPath);
-          } else {
-            clearFileMetadata(fullPath);
-            deleted = Storage.remove(fullPath.c_str());
-          }
-          if (deleted) {
-            LOG_DBG("FBR", "Deleted successfully");
-            loadFiles();
-            if (entryCount() == 0) {
-              selectorIndex = 0;
-            } else if (selectorIndex >= static_cast<int>(entryCount())) {
-              selectorIndex = static_cast<int>(entryCount()) - 1;
-            }
-            requestUpdate(true);
-          } else {
-            LOG_ERR("FBR", "Failed to delete: %s", fullPath.c_str());
-            requestUpdate();
-          }
-        } else {
-          requestUpdate();
-        }
-      });
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                                                                tr(STR_DELETE) + std::string("? "), utf8NfcNorm(entry)),
+                         [this, fullPath, isDirectory](const ActivityResult& res) {
+                           if (!res.isCancelled) {
+                             LOG_DBG("FBR", "Attempting to delete: %s", fullPath.c_str());
+                             bool deleted;
+                             if (isDirectory) {
+                               deleted = removeDirRecursive(fullPath);
+                             } else {
+                               clearFileMetadata(fullPath);
+                               deleted = Storage.remove(fullPath.c_str());
+                             }
+                             if (deleted) {
+                               LOG_DBG("FBR", "Deleted successfully");
+                               loadFiles();
+                               if (entryCount() == 0) {
+                                 selectorIndex = 0;
+                               } else if (selectorIndex >= static_cast<int>(entryCount())) {
+                                 selectorIndex = static_cast<int>(entryCount()) - 1;
+                               }
+                               requestUpdate(true);
+                             } else {
+                               LOG_ERR("FBR", "Failed to delete: %s", fullPath.c_str());
+                               requestUpdate();
+                             }
+                           } else {
+                             requestUpdate();
+                           }
+                         });
 }
 
 void FileBrowserActivity::doFlashFirmware(const std::string& fullPath) {
