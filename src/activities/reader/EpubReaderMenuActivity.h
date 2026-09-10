@@ -64,12 +64,10 @@ class EpubReaderMenuActivity final : public MenuListActivity {
   void onActionSelected(int index) override;
   void onBackPressed() override;
   void onSettingToggled(int index) override;
-  void toggleCurrentItem() override;
-  void openSubmenu(const SettingInfo& submenuEntry);
+  void openSubmenu(const SettingInfo& submenuEntry) override;
 
   // Map from StrId to MenuAction for result passing
   static MenuAction actionForNameId(StrId nameId);
-  static MenuAction actionForSettingAction(SettingAction action);
 
   // Pending state (mutated locally, returned to parent on finish)
   uint8_t pendingOrientation = 0;
