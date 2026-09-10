@@ -1,0 +1,267 @@
+BOOK title=Link Super And Sub lang=en spine=5 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=8 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=113 s=1 z=100 t=Raised
+   W x=221 s=1 z=100 t=By
+   W x=261 s=1 z=100 t=Class
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=A
+   W x=37 s=0 z=100 t=rule
+   W x=85 s=0 z=100 t=on
+   W x=119 s=0 z=100 t=the
+   W x=161 s=0 z=100 t=link
+   W x=206 s=0 z=100 t=alone
+   W x=270 s=0 z=100 t=lifts
+   W x=325 s=0 z=100 t=this
+   W x=373 s=0 z=100 t=reference
+   W x=453 s=20 z=50 t=1
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=2 z=100 t=(The
+   W x=55 s=2 z=100 t=first
+   W x=115 s=2 z=100 t=note,
+   W x=182 s=2 z=100 t=reached
+   W x=264 s=2 z=100 t=from
+   W x=321 s=2 z=100 t=a
+   W x=350 s=2 z=100 t=class-styled
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=superscript
+   W x=102 s=2 z=100 t=link.)
+   W x=171 s=0 z=100 t=clear
+   W x=229 s=0 z=100 t=of
+   W x=264 s=0 z=100 t=the
+   W x=308 s=0 z=100 t=baseline,
+   W x=400 s=0 z=100 t=and
+   W x=444 s=0 z=100 t=it
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=should
+   W x=72 s=0 z=100 t=shrink
+   W x=137 s=0 z=100 t=the
+   W x=179 s=0 z=100 t=way
+   W x=216 s=0 z=100 t=a
+   W x=239 s=0 z=100 t=sup-wrapped
+   W x=340 s=0 z=100 t=marker
+   W x=406 s=0 z=100 t=does.
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=The
+   W x=36 s=0 z=100 t=surrounding
+   W x=151 s=0 z=100 t=sentence
+   W x=235 s=0 z=100 t=must
+   W x=284 s=0 z=100 t=keep
+   W x=325 s=0 z=100 t=its
+   W x=359 s=0 z=100 t=own
+   W x=397 s=0 z=100 t=metrics
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=so
+   W x=29 s=0 z=100 t=the
+   W x=68 s=0 z=100 t=raised
+   W x=128 s=0 z=100 t=glyph
+   W x=182 s=0 z=100 t=is
+   W x=205 s=0 z=100 t=the
+   W x=244 s=0 z=100 t=only
+   W x=292 s=0 z=100 t=thing
+   W x=350 s=0 z=100 t=that
+   W x=402 s=0 z=100 t=moves
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=on
+   W x=29 s=0 z=100 t=the
+   W x=66 s=0 z=100 t=line.
+  FN n=1 href=notes.xhtml#n1
+SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=94 s=1 z=100 t=Raised
+   W x=202 s=1 z=100 t=With
+   W x=278 s=1 z=100 t=A
+   W x=302 s=1 z=100 t=Size
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=Here
+   W x=64 s=0 z=100 t=the
+   W x=107 s=0 z=100 t=publisher
+   W x=195 s=0 z=100 t=sets
+   W x=244 s=0 z=100 t=the
+   W x=287 s=0 z=100 t=size
+   W x=332 s=0 z=100 t=as
+   W x=365 s=0 z=100 t=well
+   W x=398 s=20 z=80 t=2
+   W x=415 s=2 z=100 t=(The
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=2 z=100 t=second
+   W x=79 s=2 z=100 t=note,
+   W x=152 s=2 z=100 t=whose
+   W x=223 s=2 z=100 t=caller
+   W x=300 s=2 z=100 t=carries
+   W x=382 s=2 z=100 t=its
+   W x=430 s=2 z=100 t=own
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=font-size.)
+   W x=122 s=0 z=100 t=so
+   W x=158 s=0 z=100 t=the
+   W x=204 s=0 z=100 t=50%
+   W x=249 s=0 z=100 t=default
+   W x=333 s=0 z=100 t=has
+   W x=381 s=0 z=100 t=to
+   W x=418 s=0 z=100 t=give
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=way
+   W x=38 s=0 z=100 t=to
+   W x=72 s=0 z=100 t=the
+   W x=115 s=0 z=100 t=stylesheet
+   W x=221 s=0 z=100 t=rather
+   W x=292 s=0 z=100 t=than
+   W x=349 s=0 z=100 t=override
+   W x=433 s=0 z=100 t=it.
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Body
+   W x=48 s=0 z=100 t=text
+   W x=95 s=0 z=100 t=either
+   W x=160 s=0 z=100 t=side
+   W x=203 s=0 z=100 t=of
+   W x=236 s=0 z=100 t=the
+   W x=278 s=0 z=100 t=marker
+   W x=344 s=0 z=100 t=anchors
+   W x=426 s=0 z=100 t=the
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=comparison.
+  FN n=2 href=notes.xhtml#n2
+SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
+   W x=173 s=1 z=100 t=Lowered
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=Subscripted
+   W x=117 s=0 z=100 t=callers
+   W x=187 s=0 z=100 t=are
+   W x=223 s=0 z=100 t=rarer
+   W x=275 s=0 z=100 t=but
+   W x=309 s=0 z=100 t=legal
+   W x=359 s=36 z=50 t=3
+   W x=367 s=2 z=100 t=(The
+   W x=412 s=2 z=100 t=third
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=2 z=100 t=note,
+   W x=61 s=2 z=100 t=reached
+   W x=137 s=2 z=100 t=from
+   W x=188 s=2 z=100 t=a
+   W x=211 s=2 z=100 t=subscripted
+   W x=311 s=2 z=100 t=link.)
+   W x=378 s=0 z=100 t=and
+   W x=420 s=0 z=100 t=take
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=43 s=0 z=100 t=same
+   W x=95 s=0 z=100 t=path
+   W x=147 s=0 z=100 t=through
+   W x=235 s=0 z=100 t=the
+   W x=278 s=0 z=100 t=parser,
+   W x=350 s=0 z=100 t=so
+   W x=383 s=0 z=100 t=they
+   W x=434 s=0 z=100 t=pin
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=other
+   W x=94 s=0 z=100 t=direction
+   W x=177 s=0 z=100 t=of
+   W x=205 s=0 z=100 t=the
+   W x=242 s=0 z=100 t=same
+   W x=288 s=0 z=100 t=branch.
+  FN n=3 href=notes.xhtml#n3
+SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=6 footnotes=1
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=4
+   W x=61 s=1 z=100 t=Cancelled
+   W x=220 s=1 z=100 t=Inside
+   W x=323 s=1 z=100 t=A
+   W x=347 s=1 z=100 t=Sup
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=A
+   W x=34 s=0 z=100 t=link
+   W x=76 s=0 z=100 t=that
+   W x=128 s=0 z=100 t=asks
+   W x=174 s=0 z=100 t=for
+   W x=212 s=0 z=100 t=the
+   W x=251 s=0 z=100 t=baseline
+   W x=330 s=0 z=100 t=inside
+   W x=387 s=0 z=100 t=a
+   W x=407 s=0 z=100 t=raised
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=run
+   W x=30 s=16 z=50 t=lifted
+   W x=67 s=4 z=50 t=4
+   W x=83 s=18 z=50 t=(The
+   W x=113 s=18 z=50 t=fourth
+   W x=156 s=18 z=50 t=note,
+   W x=192 s=18 z=50 t=whose
+   W x=227 s=18 z=50 t=caller
+   W x=265 s=18 z=50 t=cancels
+   W x=308 s=18 z=50 t=the
+   W x=335 s=18 z=50 t=surrounding
+   W x=399 s=18 z=50 t=sup.)
+   W x=434 s=16 z=50 t=back
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=16 z=50 t=down
+   W x=31 s=0 z=100 t=must
+   W x=86 s=0 z=100 t=drop
+   W x=135 s=0 z=100 t=back
+   W x=183 s=0 z=100 t=to
+   W x=220 s=0 z=100 t=the
+   W x=266 s=0 z=100 t=baseline
+   W x=352 s=0 z=100 t=instead
+   W x=432 s=0 z=100 t=of
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=inheriting
+   W x=98 s=0 z=100 t=the
+   W x=137 s=0 z=100 t=sup,
+   W x=179 s=0 z=100 t=which
+   W x=230 s=0 z=100 t=is
+   W x=253 s=0 z=100 t=what
+   W x=301 s=0 z=100 t=an
+   W x=332 s=0 z=100 t=explicit
+   W x=400 s=0 z=100 t=cancel
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=means.
+  FN n=4 href=notes.xhtml#n4
+SPINE 4 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=7 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=The
+   W x=61 s=0 z=100 t=first
+   W x=120 s=0 z=100 t=note,
+   W x=186 s=0 z=100 t=reached
+   W x=267 s=0 z=100 t=from
+   W x=323 s=0 z=100 t=a
+   W x=351 s=0 z=100 t=class-styled
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=superscript
+   W x=95 s=0 z=100 t=link.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=The
+   W x=58 s=0 z=100 t=second
+   W x=127 s=0 z=100 t=note,
+   W x=190 s=0 z=100 t=whose
+   W x=251 s=0 z=100 t=caller
+   W x=318 s=0 z=100 t=carries
+   W x=390 s=0 z=100 t=its
+   W x=428 s=0 z=100 t=own
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=font-size.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=The
+   W x=51 s=0 z=100 t=third
+   W x=101 s=0 z=100 t=note,
+   W x=157 s=0 z=100 t=reached
+   W x=228 s=0 z=100 t=from
+   W x=274 s=0 z=100 t=a
+   W x=292 s=0 z=100 t=subscripted
+   W x=387 s=0 z=100 t=link.
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=The
+   W x=62 s=0 z=100 t=fourth
+   W x=142 s=0 z=100 t=note,
+   W x=209 s=0 z=100 t=whose
+   W x=274 s=0 z=100 t=caller
+   W x=345 s=0 z=100 t=cancels
+   W x=426 s=0 z=100 t=the
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=surrounding
+   W x=112 s=0 z=100 t=sup.

@@ -31,7 +31,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 72;  // bumped: `!important` is now stripped from every
+constexpr uint8_t SECTION_FILE_VERSION = 73;  // bumped: an internal link honours CSS
+                                              // vertical-align, so footnote references marked
+                                              // `a { vertical-align: super }` are raised and
+                                              // shrunk. Word size/position are baked into layout
+                                              // v72: `!important` is now stripped from every
                                               // CSS declaration value, so margins, text-align and
                                               // text-indent that carry the marker take effect. Those
                                               // feed layout, so a v71 cache holds the old geometry
