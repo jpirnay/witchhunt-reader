@@ -245,8 +245,21 @@ std::string ReaderActivity::convertSidecarToBmp(const std::string& cacheDir, con
     if (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() <= width && bmp.getHeight() <= height &&
         src.seek(0)) {
       uint8_t buffer[1024];
-      while (src.available()) dst.write(buffer, src.read(buffer, sizeof(buffer)));
+      // read() returns int and is NEGATIVE on error; feeding that straight into
+      // write()'s size_t would read ~4 GB off the end of the buffer, and
+      // available() need not drop to 0 on a failing card. Stop on any non-positive
+      // read instead, and report failure so the caller falls back to a placeholder.
       ok = true;
+      while (src.available()) {
+        const int readBytes = src.read(buffer, sizeof(buffer));
+        if (readBytes <= 0) {
+          LOG_DBG("COVER", "Sidecar BMP copy read failed at offset %u: %s", static_cast<unsigned>(src.position()),
+                  sidecarPath.c_str());
+          ok = false;
+          break;
+        }
+        dst.write(buffer, static_cast<size_t>(readBytes));
+      }
     } else {
       LOG_DBG("COVER", "Sidecar BMP unusable for %dx%d slot (must fit 1:1): %s", width, height, sidecarPath.c_str());
     }
@@ -834,6 +847,10 @@ void ReaderActivity::onEnter() {
         // block, and reload on the warm-cache path (~50 ms, needs no released headroom).
         // Field-observed on X3: this exact miss previously cost a heap-recovery restart.
         epub.reset();
+        // Not a repeat of the call above: epub.reset() just freed the block that pinned the
+        // arena, so this attempt sees a different heap. cppcheck treats the identical call as
+        // returning the identical (false) value.
+        // cppcheck-suppress knownConditionTrueFalse
         restored = renderer.reallocSecondaryBuffer();
         LOG_INF("READER", "Dropped ePub to unpin framebuffer block (realloc %s); reloading from warm cache",
                 restored ? "ok" : "still failing");

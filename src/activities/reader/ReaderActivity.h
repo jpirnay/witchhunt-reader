@@ -81,7 +81,13 @@ class ReaderActivity final : public Activity {
     size_t bytesProduced() const;
     size_t totalBytes() const;
 
+    CoverExtractSession() = default;
     ~CoverExtractSession();
+    // Owns a malloc'd buf_ and an open destination file, so copying one would
+    // double-free and double-close. Only ever held by unique_ptr; make that a
+    // compile error rather than relying on nobody trying.
+    CoverExtractSession(const CoverExtractSession&) = delete;
+    CoverExtractSession& operator=(const CoverExtractSession&) = delete;
 
    private:
     std::unique_ptr<ZipFile> zip_;

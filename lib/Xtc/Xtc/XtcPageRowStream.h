@@ -245,7 +245,11 @@ class XtcPageRowStream {
 
     for (int bandY = 0; bandY < m_height && !failed; bandY += BAND_ROWS) {
       const int rowsInBand = (m_height - bandY < BAND_ROWS) ? (m_height - bandY) : BAND_ROWS;
+      // False positive: a failed malloc above sets `failed`, and this loop is
+      // guarded on !failed, so neither band pointer can be null here.
+      // cppcheck-suppress nullPointerOutOfMemory
       memset(bwBand, 0, static_cast<size_t>(rowsInBand) * m_bwRowBytes);
+      // cppcheck-suppress nullPointerOutOfMemory
       memset(grayBand, 0, static_cast<size_t>(rowsInBand) * m_grayRowBytes);
 
       for (int colBase = 0; colBase < m_width && !failed; colBase += COLS_PER_READ) {

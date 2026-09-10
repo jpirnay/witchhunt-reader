@@ -429,16 +429,6 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
   }
 }
 
-EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForSettingAction(SettingAction action) {
-  switch (action) {
-    case SettingAction::None:
-    case SettingAction::Submenu:
-      return MenuAction::NONE;
-    default:
-      return MenuAction::NONE;
-  }
-}
-
 void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   MenuResult payload{static_cast<int>(action),
                      -1,
@@ -646,14 +636,6 @@ void EpubReaderMenuActivity::openSubmenu(const SettingInfo& submenuEntry) {
                            if (!result.isCancelled) {
                              const auto* menuResult = std::get_if<MenuResult>(&result.data);
                              if (menuResult) {
-                               if (menuResult->action != -1) {
-                                 const auto action =
-                                     actionForSettingAction(static_cast<SettingAction>(menuResult->action));
-                                 if (action != MenuAction::NONE) {
-                                   finishWithAction(action);
-                                   return;
-                                 }
-                               }
                                if (menuResult->nameId != -1) {
                                  const auto action = actionForNameId(static_cast<StrId>(menuResult->nameId));
                                  if (action != MenuAction::NONE) {
@@ -665,25 +647,6 @@ void EpubReaderMenuActivity::openSubmenu(const SettingInfo& submenuEntry) {
                            }
                            requestUpdate();
                          });
-}
-
-void EpubReaderMenuActivity::toggleCurrentItem() {
-  if (selectedIndex < 0 || selectedIndex >= static_cast<int>(menuItems.size())) return;
-  const auto& item = menuItems[selectedIndex];
-  if (item.isSeparator) return;
-
-  if (item.type == SettingType::ACTION) {
-    if (item.action == SettingAction::Submenu) {
-      openSubmenu(item);
-      return;
-    }
-    onActionSelected(selectedIndex);
-    return;
-  }
-
-  menuItems[selectedIndex].toggleValue();
-  onSettingToggled(selectedIndex);
-  requestUpdate();
 }
 
 void EpubReaderMenuActivity::onEnter() { MenuListActivity::onEnter(); }
