@@ -27,6 +27,12 @@ void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
     return;
   }
 
+  // Same reason as the sync path: modem sleep can stall a request for seconds, which shows up
+  // as an HTTP timeout on a handful of small round trips. WiFi is torn down on exit.
+  // Ported from crosspoint-reader PR #3233 (Jadehawk / @jadehawk).
+  WiFi.setSleep(false);
+  LOG_DBG("KOAuth", "WiFi sleep disabled for authentication");
+
   {
     RenderLock lock(*this);
     if (mode == Mode::REGISTER) {

@@ -29,7 +29,20 @@ int zipReadCallback(uzlib_uncomp* uncomp) {
   if (ctx->fileRemaining == 0) return -1;
 
   const size_t toRead = ctx->fileRemaining < ctx->readBufSize ? ctx->fileRemaining : ctx->readBufSize;
-  const size_t bytesRead = ctx->file->read(ctx->readBuf, toRead);
+  // Ported from crosspoint-reader PR #3244 ("prevent size_t underflow on ZipFile read errors",
+  // Foulad / @sfoulad). The defect and the fix are theirs; the end-of-stream signal differs
+  // because this is a uzlib READ callback -- it returns the next byte, so 0 is data and -1 is
+  // the only way to say "no more". Upstream's fill callback returns a byte COUNT, where their
+  // `return 0` is the equivalent signal.
+  const int result = ctx->file->read(ctx->readBuf, toRead);
+  if (result < 0) {
+    // HalFile::read() reports errors as a negative int. Assigning that straight to size_t
+    // underflowed fileRemaining and produced a huge bytesRead, which pushed source_limit far
+    // past the end of readBuf and had uzlib inflate out of bounds.
+    LOG_ERR("ZIP", "Failed to read compressed data: %d", result);
+    return -1;
+  }
+  const size_t bytesRead = static_cast<size_t>(result);
   ctx->fileRemaining -= bytesRead;
 
   if (bytesRead == 0) return -1;

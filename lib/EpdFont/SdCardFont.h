@@ -13,6 +13,10 @@ class SdCardFont {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
   static constexpr uint8_t MAX_STYLES = 4;
+  // prewarmStyle: the bitmap arena did not fit in the largest free block. Distinct from a
+  // missed-glyph count so prewarm() can tell "the heap is fragmented, try a smaller set"
+  // apart from "these glyphs are not in the font", and retry rather than give up.
+  static constexpr int PREWARM_ARENA_TOO_LARGE = -2;
 
   SdCardFont() = default;
   SdCardFont(const SdCardFont&) = delete;
@@ -154,6 +158,10 @@ class SdCardFont {
     EpdUnicodeInterval* miniIntervals = nullptr;
     EpdGlyph* miniGlyphs = nullptr;
     uint8_t* miniBitmap = nullptr;
+    // Bitmap bytes per glyph of the last requested set, rounded up, for sizing the arena
+    // retry. Rounded rather than floored: the retry multiplies it back out, and a floored
+    // figure yields a glyph count whose arena still does not fit.
+    uint32_t measuredBytesPerGlyph = 0;
     uint32_t miniIntervalCount = 0;
     uint32_t miniGlyphCount = 0;
 

@@ -70,6 +70,15 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   }
 
   LOG_DBG("KOSync", "WiFi connected, starting sync");
+  // Keep the station fully awake for the sync transaction. Modem sleep parks the radio
+  // between DTIM beacons and can stall a request for seconds, which arrives here as an HTTP
+  // timeout on what is otherwise a few small round trips. The web server already does this
+  // for the same reason. WiFi is torn down when this activity exits, so the cost is bounded
+  // by the sync itself.
+  // Ported from crosspoint-reader PR #3233 (Jadehawk / @jadehawk).
+  WiFi.setSleep(false);
+  LOG_DBG("KOSync", "WiFi sleep disabled for sync");
+
   // Push the current setting before any request: the library cannot read SETTINGS,
   // and the value may have changed since boot.
   KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);

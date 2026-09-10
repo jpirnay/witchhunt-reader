@@ -20,9 +20,6 @@
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
 
-const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
-
 bool SettingsActivity::isListItemSelectable(int settingIdx) const {
   return settingIdx >= 0 && settingIdx < settingsCount && !(*currentSettings)[settingIdx].isSeparator;
 }

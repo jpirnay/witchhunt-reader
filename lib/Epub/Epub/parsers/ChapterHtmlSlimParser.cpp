@@ -522,6 +522,23 @@ void ChapterHtmlSlimParser::applySupSubDefaultSize(StyleStackEntry& entry) {
   }
 }
 
+void ChapterHtmlSlimParser::applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
+  if (!cssStyle.hasVerticalAlign()) return;
+  if (cssStyle.verticalAlign == CssVerticalAlign::Super) {
+    entry.hasSup = true;
+    entry.sup = true;
+  } else if (cssStyle.verticalAlign == CssVerticalAlign::Sub) {
+    entry.hasSub = true;
+    entry.sub = true;
+  } else {
+    // baseline: explicitly cancel any inherited sup/sub
+    entry.hasSup = true;
+    entry.sup = false;
+    entry.hasSub = true;
+    entry.sub = false;
+  }
+}
+
 namespace {
 bool isRootFontSizeElement(const char* tagName) { return strcmp(tagName, "html") == 0 || strcmp(tagName, "body") == 0; }
 
@@ -2006,10 +2023,24 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       entry.depth = self->depth;
       entry.hasUnderline = true;
       entry.underline = true;
+      // The generic inline path below never runs for an internal link, so vertical-align has to be
+      // folded in here or it is lost. Publishers mark footnote references as
+      // `a { vertical-align: super }` at least as often as they wrap them in <sup>, and those
+      // references were rendering full-size on the baseline.
+      // Ported from crosspoint-reader PR #3355 (Julia <julia@uxj.io>). Their fix extracts the same
+      // helper; ours additionally honours `baseline` as an explicit cancel, which our inline path
+      // already did and theirs does not.
+      applyVerticalAlignToEntry(entry, cssStyle);
+      // Not upstream's: they raise the reference but leave it full-size, which does not match the
+      // <sup> path three branches down. These two are documented as a pair -- the default first so
+      // publisher CSS on the link (`a.fn { font-size: 0.7em }`) still wins over the 50% default.
+      // applyCssFontSizeToEntry is a no-op unless the link itself carries a font-size.
+      applySupSubDefaultSize(entry);
+      applyCssFontSizeToEntry(entry, cssStyle);
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
 
-      // Skip CSS resolution — we already handled styling for this <a> tag
+      // Skip the rest of CSS resolution — the styling this <a> needs is applied above
       self->depth += 1;
       return;
     }
@@ -2383,21 +2414,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           }
         }
       }
-      if (cssStyle.hasVerticalAlign()) {
-        if (cssStyle.verticalAlign == CssVerticalAlign::Super) {
-          entry.hasSup = true;
-          entry.sup = true;
-        } else if (cssStyle.verticalAlign == CssVerticalAlign::Sub) {
-          entry.hasSub = true;
-          entry.sub = true;
-        } else {
-          // baseline: explicitly cancel any inherited sup/sub
-          entry.hasSup = true;
-          entry.sup = false;
-          entry.hasSub = true;
-          entry.sub = false;
-        }
-      }
+      applyVerticalAlignToEntry(entry, cssStyle);
       if (cssStyle.hasSmallCaps()) {
         entry.hasSmallCaps = true;
         entry.smallCaps = cssStyle.smallCaps;

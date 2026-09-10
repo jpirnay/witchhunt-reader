@@ -47,6 +47,20 @@ void DictionaryDefinitionActivity::onEnter() {
   requestUpdate();
 }
 
+void DictionaryDefinitionActivity::onExit() {
+  Activity::onExit();
+  // A definition can pull in a whole SD font's glyphs for a script the book never uses, and
+  // those caches would otherwise stay resident behind the reader for the rest of the session.
+  // They rebuild on demand, so handing the heap back on the way out costs a reload at worst
+  // and buys back tens of KB the reader wants for its next page build.
+  // Ported from crosspoint-reader PR #3317 (Uri Tauber <uritaube@gmail.com>). Theirs calls
+  // FontCacheManager::releaseSdFontCaches(); ours is named clearCache() and does the same two
+  // things -- drop the decompressor cache, then clear every SdCardFont.
+  if (auto* fontCache = renderer.getFontCacheManager()) {
+    fontCache->clearCache();
+  }
+}
+
 DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);

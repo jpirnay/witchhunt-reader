@@ -58,7 +58,19 @@ inline bool utf8IsDefaultIgnorable(const uint32_t cp) {
 // including U+031B (COMBINING HORN) which falls outside the standard mark range.
 inline bool utf8IsVietnameseCombining(const uint32_t cp) { return utf8IsCombiningMark(cp) || cp == 0x031B; }
 
-// Apply lightweight NFC-like normalization for Vietnamese precomposed characters.
+// Conjoining Hangul jamo: modern leading consonants (L), medial vowels (V) and trailing
+// consonants (T). These are not combining marks -- they are ordinary letters that COMPOSE
+// with the preceding one -- so utf8IsVietnameseCombining does not and should not match them.
+// Text stored in NFD (every filename macOS writes) carries Korean as these rather than as
+// precomposed syllables, and the fonts only have the syllables.
+inline bool utf8IsConjoiningJamo(const uint32_t cp) {
+  return (cp >= 0x1100 && cp <= 0x1112)      // L: choseong
+         || (cp >= 0x1161 && cp <= 0x1175)   // V: jungseong
+         || (cp >= 0x11A8 && cp <= 0x11C2);  // T: jongseong
+}
+
+// Apply lightweight NFC-like normalization for Vietnamese precomposed characters and for
+// conjoining Hangul jamo (L+V -> LV, LV+T -> LVT).
 // Converts NFD sequences (base vowel + combining marks) into NFC precomposed
 // codepoints from the U+1EA0-U+1EF9 range. Safe no-op for already-NFC text.
 // Handles both canonical NFD ordering and the "natural" order produced by

@@ -46,6 +46,7 @@ class DictionaryDefinitionActivity final : public Activity {
         dictionaryName(std::move(dictionaryName)) {}
 
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
 

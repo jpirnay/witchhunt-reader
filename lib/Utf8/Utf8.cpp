@@ -305,6 +305,26 @@ static const ComposeEntry kComposeTable[] = {
 static constexpr size_t kComposeTableSize = sizeof(kComposeTable) / sizeof(kComposeTable[0]);
 
 // Binary search for (base, mark) composition. Returns 0 if no entry found.
+// Hangul LV / LVT composition (Unicode 3.12). Pure arithmetic over the jamo blocks -- no
+// table, unlike the Latin/Vietnamese pairs composeOne has to look up. Returns 0 when the two
+// codepoints are not a composable L+V or LV+T pair.
+// Ported from crosspoint-reader PR #3036 (Sung-jin Brian Hong <serialx@serialx.net>).
+static uint32_t composeHangul(const uint32_t base, const uint32_t next) {
+  constexpr uint32_t SBase = 0xAC00, LBase = 0x1100, VBase = 0x1161, TBase = 0x11A7;
+  constexpr uint32_t VCount = 21, TCount = 28, NCount = VCount * TCount;  // 588
+  constexpr uint32_t SLast = SBase + 19 * NCount - 1;                     // 0xD7A3
+
+  // L + V -> LV
+  if (base >= LBase && base <= 0x1112 && next >= VBase && next <= 0x1175) {
+    return SBase + (base - LBase) * NCount + (next - VBase) * TCount;
+  }
+  // LV + T -> LVT. The modulo test rejects an existing LVT, which takes no second trailer.
+  if (base >= SBase && base <= SLast && (base - SBase) % TCount == 0 && next > TBase && next <= 0x11C2) {
+    return base + (next - TBase);
+  }
+  return 0;
+}
+
 static uint32_t composeOne(const uint32_t base, const uint32_t mark) {
   if (base > 0xFFFFu || mark > 0xFFFFu) return 0u;
   const uint32_t key = (base << 16u) | mark;
@@ -330,7 +350,7 @@ std::string utf8NfcNorm(std::string s) {
     const auto* p = reinterpret_cast<const unsigned char*>(s.c_str());
     uint32_t cp;
     while ((cp = utf8NextCodepoint(&p))) {
-      if (utf8IsVietnameseCombining(cp)) {
+      if (utf8IsVietnameseCombining(cp) || utf8IsConjoiningJamo(cp)) {
         hasCombining = true;
         break;
       }
@@ -351,6 +371,14 @@ std::string utf8NfcNorm(std::string s) {
       const auto* markStart = ptr;
       const uint32_t mark = utf8NextCodepoint(&ptr);
       if (mark == 0) break;
+
+      // Jamo compose with the base letter rather than decorating it, so they are checked
+      // before the combining-mark test that would otherwise push them back.
+      const uint32_t syllable = composeHangul(base, mark);
+      if (syllable != 0u) {
+        base = syllable;
+        continue;
+      }
 
       if (!utf8IsVietnameseCombining(mark)) {
         // Non-combining: put it back and stop absorbing.

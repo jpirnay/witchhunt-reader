@@ -1,5 +1,6 @@
 #include "SdCardFont.h"
 
+#include <Arduino.h>  // ESP.getMaxAllocHeap() for the prewarm arena retry
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Utf8.h>
@@ -32,6 +33,9 @@ static constexpr char CPFONT_MAGIC[8] = {'C', 'P', 'F', 'O', 'N', 'T', '\0', '\0
 static constexpr uint16_t CPFONT_VERSION = 4;
 static constexpr uint32_t HEADER_SIZE = 32;
 static constexpr uint32_t STYLE_TOC_ENTRY_SIZE = 32;
+// Working headroom left outside the mini bitmap arena's single contiguous block, for the
+// allocations prewarmStyle still makes after it.
+static constexpr uint32_t PREWARM_MAX_ALLOC_RESERVE = 4 * 1024;
 
 // Helper to read little-endian values from byte buffer
 static inline uint16_t readU16(const uint8_t* p) { return p[0] | (p[1] << 8); }
@@ -1091,7 +1095,35 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   int totalMissed = 0;
   for (uint8_t si = 0; si < MAX_STYLES; si++) {
     if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
-    totalMissed += prewarmStyle(si, cpBase, cpCount, metadataOnly, loadKernLigatureData);
+    int missedForStyle = prewarmStyle(si, cpBase, cpCount, metadataOnly, loadKernLigatureData);
+
+    // The bitmap arena is a single contiguous block, so on a fragmented heap it can fail with
+    // plenty of free bytes -- and the whole style was being dropped for it, which costs every
+    // glyph on the page rather than the few that would not fit. Retry with the largest prefix
+    // the biggest free block can hold, halving if variable-width glyphs made that estimate
+    // optimistic. Ported from crosspoint-reader PR #3126 (Sung-jin Brian Hong
+    // <serialx@serialx.net>).
+    if (missedForStyle == PREWARM_ARENA_TOO_LARGE) {
+      const uint32_t perGlyph = styles_[si].measuredBytesPerGlyph > 0 ? styles_[si].measuredBytesPerGlyph : 1;
+      const uint32_t maxAlloc = ESP.getMaxAllocHeap();
+      // Leave working headroom outside the arena: the read order and mappings are still
+      // allocated after it inside prewarmStyle.
+      const uint32_t arenaBytes = maxAlloc > PREWARM_MAX_ALLOC_RESERVE ? maxAlloc - PREWARM_MAX_ALLOC_RESERVE : 0;
+      uint32_t fit = arenaBytes / perGlyph;
+      if (fit > cpCount) fit = cpCount;
+      while (fit > 0) {
+        LOG_DBG("SDCF", "Arena retry: %u -> %u glyphs (%uB/glyph, maxAlloc=%u)", cpCount, fit, perGlyph, maxAlloc);
+        missedForStyle = prewarmStyle(si, cpBase, fit, metadataOnly, loadKernLigatureData);
+        if (missedForStyle != PREWARM_ARENA_TOO_LARGE) break;
+        fit /= 2;
+      }
+      if (missedForStyle == PREWARM_ARENA_TOO_LARGE) {
+        missedForStyle = static_cast<int>(cpCount);  // nothing resident, same as before
+      } else {
+        missedForStyle += static_cast<int>(cpCount - fit);  // the dropped suffix is missing too
+      }
+    }
+    totalMissed += missedForStyle;
   }
 
   stats_.prewarmTotalMs = millis() - startMs;
@@ -1510,13 +1542,19 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
       totalBitmapSize += s.miniGlyphs[i].dataLength;
     }
 
+    // Recorded before the allocation, because the retry in prewarm() needs it precisely when
+    // that allocation fails. Rounded up — see the field comment.
+    if (validCount > 0) s.measuredBytesPerGlyph = (totalBitmapSize + validCount - 1) / validCount;
+
     s.miniBitmap = new (std::nothrow) uint8_t[totalBitmapSize > 0 ? totalBitmapSize : 1];
     if (!s.miniBitmap) {
       LOG_ERR("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
       file.close();
       delete[] mappings;
       freeStyleMiniData(s);
-      return static_cast<int>(cpCount);
+      // Not a glyph count: this is one contiguous block, so it can fail with plenty of free
+      // heap. Let the caller retry with fewer glyphs instead of losing the whole style.
+      return PREWARM_ARENA_TOO_LARGE;
     }
 
     // Allocate a fresh readOrder covering all validCount glyphs, sorted by

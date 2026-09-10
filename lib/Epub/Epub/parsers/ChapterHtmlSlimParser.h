@@ -446,6 +446,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Apply kSupSubDefaultSizePct when the entry resolves to sup/sub. Call BEFORE
   // applyCssFontSizeToEntry so publisher CSS (e.g. `.sup { font-size: 0.7em }`) wins.
   static void applySupSubDefaultSize(StyleStackEntry& entry);
+  // Fold an element's CSS vertical-align into an inline style-stack entry. `baseline`
+  // explicitly cancels an inherited sup/sub rather than being ignored.
+  static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   void initializeFontSizeBaseline();
   void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
   CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;

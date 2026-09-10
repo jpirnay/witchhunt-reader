@@ -81,7 +81,10 @@ class CssParser {
   //      "does any rule match on #id" question can only be answered while PARSING the CSS, and
   //      the normal path loads a compiled cache instead — so every id-bearing element paid two
   //      guaranteed-miss rule lookups on every book.
-  static constexpr uint8_t CSS_CACHE_VERSION = 17;
+  // v18: `!important` is stripped from every declaration value, not only the dozen properties
+  //      that remembered to do it, so margins, text-align, text-indent and the font/text
+  //      shorthands no longer drop a declaration that carries the marker.
+  static constexpr uint8_t CSS_CACHE_VERSION = 18;
   // Bytes before the sorted offset index: version(1) + ruleCount(2) + totalSelectorCandidates(4)
   // + unsupportedSelectorSkips(4) + flags(1).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 12;
