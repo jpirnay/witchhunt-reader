@@ -66,6 +66,27 @@ chmod +x .githooks/pre-commit
 pio run
 ```
 
+### Windows: use a short PlatformIO core directory
+
+On Windows, keep PlatformIO's core directory at a short path such as `C:\pio`:
+
+```sh
+setx PLATFORMIO_CORE_DIR C:\pio
+```
+
+The default (`C:\Users\<name>\.platformio`) makes the build fail with a
+`filename or extension is too long` spawn error from the assembler.
+
+Since Arduino-ESP32 3.3.11 the framework contributes ~270 `-I` flags, and GCC
+forwards all of them to `as`. Measured on the C3 with the default path, that
+command line is **32,771 bytes** against Windows' hard 32,767-character
+`CreateProcess` limit -- four bytes over. Every C++ compile dies, and because the
+toolchain's `as` is a wrapper that re-spawns the real assembler, it panics
+instead of reporting anything useful. A short core directory saves ~18
+characters per include path, which is far more than enough headroom.
+
+Linux and macOS are unaffected; their limits are orders of magnitude higher.
+
 ## Flash
 
 ```sh
