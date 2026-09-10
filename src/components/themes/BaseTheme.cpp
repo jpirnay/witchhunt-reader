@@ -997,7 +997,16 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
   TapTargets::homeMenu().record(menuTargets);
 }
 
-Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame) const {
+void BaseTheme::shipPopup(const GfxRenderer& renderer, const PopupShip ship) {
+  if (ship == PopupShip::Async) {
+    renderer.triggerDisplayAsync();
+  } else {
+    renderer.displayBuffer();
+  }
+}
+
+Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, const bool overlayDisplayedFrame,
+                          const PopupShip ship) const {
   // Re-seed the write buffer from the frame on screen so the box overlays current content, not the
   // stale two-refreshes-ago frame left by the last buffer swap. Compose-then-popup callers skip this.
   if (overlayDisplayedFrame) renderer.syncWriteBufferFromDisplayed();
@@ -1015,7 +1024,7 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + margin - 2;
   renderer.drawText(UI_12_FONT_ID, textX, textY, message, true, EpdFontFamily::BOLD);
-  renderer.displayBuffer();
+  shipPopup(renderer, ship);
   return Rect{x, y, w, h};
 }
 

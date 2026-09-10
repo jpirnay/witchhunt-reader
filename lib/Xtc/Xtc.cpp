@@ -282,9 +282,11 @@ struct XthRowTranspose {
 
 std::string Xtc::getCoverBmpPath() const { return cachePath + "/cover.bmp"; }
 
+bool Xtc::coverBmpReady() const { return Storage.exists(getCoverBmpPath().c_str()); }
+
 bool Xtc::generateCoverBmp() const {
   // Already generated
-  if (Storage.exists(getCoverBmpPath().c_str())) {
+  if (coverBmpReady()) {
     return true;
   }
 

@@ -102,9 +102,11 @@ std::string Txt::findCoverImage() const {
 
 std::string Txt::getCoverBmpPath() const { return cachePath + "/cover.bmp"; }
 
+bool Txt::coverBmpReady() const { return Storage.exists(getCoverBmpPath().c_str()); }
+
 bool Txt::generateCoverBmp() const {
   // Already generated, return true
-  if (Storage.exists(getCoverBmpPath().c_str())) {
+  if (coverBmpReady()) {
     return true;
   }
 
