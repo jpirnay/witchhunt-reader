@@ -61,7 +61,7 @@ TEST(Utf8Compose, ComposesFullSyllable) {
 
 // Block boundaries: the first and last of each jamo range must compose.
 TEST(Utf8Compose, ComposesAtBlockBoundaries) {
-  EXPECT_EQ(utf8NfcNorm(cps({0x1100, 0x1161})), cps({0xAC00}));  // first L, first V
+  EXPECT_EQ(utf8NfcNorm(cps({0x1100, 0x1161})), cps({0xAC00}));       // first L, first V
   EXPECT_EQ(utf8NfcNorm(cps({0x1112, 0x1175})), cps({0xD7A3 - 27}));  // last L, last V, no T
   // Last L + last V + last T is the final syllable of the block, U+D7A3.
   EXPECT_EQ(utf8NfcNorm(cps({0x1112, 0x1175, 0x11C2})), cps({0xD7A3}));

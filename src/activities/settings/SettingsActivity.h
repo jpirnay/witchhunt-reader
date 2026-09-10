@@ -25,7 +25,7 @@ class SettingsActivity final : public Activity {
   // constexpr, not `static const` with an out-of-line definition: a compile-time table has no
   // reason to occupy .data and be initialized at startup when it can sit in flash.
   static constexpr StrId categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                        StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
+                                                         StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
 
   std::vector<SettingInfo::SubmenuData> submenuData;
   bool needsHalfRefresh = false;
