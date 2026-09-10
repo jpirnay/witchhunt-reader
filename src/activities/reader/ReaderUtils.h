@@ -188,12 +188,17 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   return x >= zoneWidth && x < width - zoneWidth && y >= zoneHeight && y < height - zoneHeight;
 }
 
-// Reader menu opens on the menu edge-swipe or a centre-third tap. With touch
-// reader controls Off the reading surface ignores touch entirely, menu
-// included, so a stray brush cannot open it; the menu stays reachable through
-// the Confirm button (and, on X4 Pro, the capacitive Home key).
+// Reader menu opens on the menu edge-swipe or a centre-third tap.
+//
+// Neither is gated on touchReaderControls: that setting chooses how touch turns PAGES
+// (swipe / tap / inverted tap / off) and is read by detectTouchPageTurn, which is the only
+// thing it should govern. Tying the menu to it as well meant switching page-turn touch off
+// -- the setting you reach for when reading with a palm on the glass -- also removed the
+// menu, with no separate way to get it back. The centre-third tap keeps its own switch
+// (tapForReaderMenu), so a stray brush is still opt-in, and Confirm (plus the capacitive
+// Home key on X4 Pro) reaches the menu on any board.
+// Ported from crosspoint-reader PR #3319 (adiskill <adiskill00@gmail.com>).
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
-  if (!SETTINGS.touchReaderControls) return false;
   return (input.hasTouch() && input.wasMenuGesture()) || isTouchMenuTap(renderer, input);
 }
 
