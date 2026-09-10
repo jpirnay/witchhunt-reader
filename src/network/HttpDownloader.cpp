@@ -7,6 +7,7 @@
 #include <SecureHttpClient.h>
 #include <base64.h>
 #include <esp_heap_caps.h>
+#include <esp_wifi.h>
 
 #include <cstring>
 #include <functional>
@@ -86,12 +87,35 @@ bool verificationRequested(HttpDownloader::TlsPolicy tls) {
   return true;
 }
 
+// Modem sleep parks the radio between DTIM beacons, which costs packets on a transfer long
+// enough to span them -- so a small OPDS feed usually gets away with it and a large category
+// or a multi-MB book consistently does not, surfacing as a stall or a short read rather than
+// a clean error. OtaUpdater has disabled power-save around firmware downloads for exactly
+// this reason since it was written; OPDS feeds and book fetches, which run just as long,
+// never did.
+// Ported from crosspoint-reader PR #3252 (Foulad / @sfoulad).
+//
+// Scoped to the request, not the session: a Session's keep-alive can sit idle between files
+// while the user picks the next one, and holding the radio awake through that would spend
+// battery for nothing.
+struct WifiPowerSaveGuard {
+  WifiPowerSaveGuard() {
+    const esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) LOG_ERR("HTTP", "Failed to disable WiFi power-save: %d", err);
+  }
+  ~WifiPowerSaveGuard() {
+    const esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (err != ESP_OK) LOG_ERR("HTTP", "Failed to restore WiFi power-save: %d", err);
+  }
+};
+
 // One-shot streaming GET over SecureNet (wolfSSL). Fills the Sink and emits
 // "Phase start"/"Phase open_ok"/"Phase done" heap telemetry. The TlsPolicy
 // decides whether the curated roots are loaded at all and what happens when the
 // peer fails to verify.
 HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::string& username,
                                            const std::string& password, Sink& sink, HttpDownloader::TlsPolicy tls) {
+  const WifiPowerSaveGuard psGuard;
   const bool clockReady = logPreCallContext(url);
   const unsigned long startMs = millis();
   LOG_DBG("HTTP", "Phase start @%lums heap=%u largest=%u", millis() - startMs, esp_get_free_heap_size(),
@@ -181,6 +205,7 @@ namespace {
 HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& session, const std::string& url,
                                                     const std::string& username, const std::string& password,
                                                     Sink& sink, HttpDownloader::TlsPolicy tls) {
+  const WifiPowerSaveGuard psGuard;
   auto* impl = session.impl();
   // Evaluated on every call, not just when the session is created: a session opened before the
   // clock was set must not keep that verdict for the rest of its life (nor the reverse).
