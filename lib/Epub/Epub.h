@@ -182,6 +182,11 @@ class Epub {
   // True if cover.img is usable now. allowExtract=false never inflates — it only reports
   // whether an already-cached cover.img exists, deferring extraction to a sliced session.
   bool coverImageCachedAndValid(bool allowExtract) const;
+  // True when generateCoverBmp() would return immediately because a usable BMP is already
+  // cached. Needs no load() — the path is derived in the constructor — so a caller can ask
+  // "is this going to be slow?" before committing to the work (the sleep screen decides
+  // whether to put up a popup on that answer).
+  bool coverBmpReady(bool cropped = false) const;
   bool generateCoverBmp(bool cropped = false) const;
   std::string getThumbBmpPath() const;
   std::string getThumbBmpPath(int height) const;

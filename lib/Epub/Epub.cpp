@@ -1216,9 +1216,11 @@ bool coverBmpComplete(const std::string& path) {
 }
 }  // namespace
 
+bool Epub::coverBmpReady(bool cropped) const { return coverBmpComplete(getCoverBmpPath(cropped)); }
+
 bool Epub::generateCoverBmp(bool cropped) const {
   // Reuse only a COMPLETE cached BMP; a truncated one (interrupted write) must be regenerated.
-  if (coverBmpComplete(getCoverBmpPath(cropped))) return true;
+  if (coverBmpReady(cropped)) return true;
   Storage.remove(getCoverBmpPath(cropped).c_str());  // drop any partial before regenerating
 
   if (!ensureCoverImageCached()) return false;

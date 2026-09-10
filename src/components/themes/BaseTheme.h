@@ -22,6 +22,16 @@ struct Rect {
   explicit Rect(int x = 0, int y = 0, int width = 0, int height = 0) : x(x), y(y), width(width), height(height) {}
 };
 
+// How drawPopup() ships the frame it just composed.
+enum class PopupShip : uint8_t {
+  Blocking,  // displayBuffer(): return once the panel has finished painting the box.
+  Async,     // triggerDisplayAsync(): return while the panel is still painting, so the caller can
+             // start the slow work the popup is announcing. The caller then owes the panel a
+             // GfxRenderer::finishDisplayAsync() before it next writes the framebuffer, touches
+             // the display, or frees a framebuffer — releaseSecondaryBuffer() in particular does
+             // NOT drain a refresh in flight, and X3 re-reads the frame after the waveform.
+};
+
 struct TabInfo {
   const char* label;
   bool selected;
@@ -183,7 +193,9 @@ class BaseTheme {
   // Syncing the write buffer from the displayed frame first fixes that. Callers that have already
   // composed a full fresh frame into the write buffer (clearScreen + render, then popup in the same
   // displayBuffer) must pass overlayDisplayedFrame=false so their render is not discarded.
-  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool overlayDisplayedFrame = true) const;
+  // ship=Async returns while the panel paints; see PopupShip for what the caller then owes.
+  virtual Rect drawPopup(const GfxRenderer& renderer, const char* message, bool overlayDisplayedFrame = true,
+                         PopupShip ship = PopupShip::Blocking) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
   virtual void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                              const int pageCount, std::string title, const int paddingBottom = 0,
@@ -275,4 +287,8 @@ class BaseTheme {
   // Up/down triangles marking that the list continues past the visible rows. Used by themes
   // without a scroll bar.
   static void drawListOverflowArrows(const GfxRenderer& renderer, Rect rect);
+
+  // Ships the frame a drawPopup() override just composed, blocking or not. One place so the two
+  // popup looks cannot drift on the part that isn't a look at all.
+  static void shipPopup(const GfxRenderer& renderer, PopupShip ship);
 };

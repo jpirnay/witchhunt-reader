@@ -75,6 +75,10 @@ class Xtc {
 
   // Cover image support (for sleep screen)
   std::string getCoverBmpPath() const;
+  // True when generateCoverBmp() would return immediately from its cache. Needs no load() —
+  // the path is derived in the constructor — so a caller can ask "is this going to be slow?"
+  // before committing to the work. See Epub::coverBmpReady.
+  bool coverBmpReady() const;
   bool generateCoverBmp() const;
   // Thumbnail support (for Continue Reading card)
   std::string getThumbBmpPath() const;
