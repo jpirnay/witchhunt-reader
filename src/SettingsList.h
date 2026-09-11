@@ -477,20 +477,6 @@ inline std::vector<SettingInfo> buildSettingsList() {
   settings.push_back(SettingInfo::Enum(StrId::STR_BTN_LONG_PRESS, &CrossPointSettings::btnLongPower,
                                        {StrId::STR_BTN_DEF_SLEEP}, "btnLongPower", StrId::STR_CAT_CONTROLS)
                          .withSubmenu(StrId::STR_BTN_POWER));
-  // Touch reading controls (touch boards only — gated on the capability, not on
-  // a board name, so X4 Pro and T5S3 both get them).
-  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_UI_CONTROLS, &CrossPointSettings::touchUiControls,
-                                       {StrId::STR_TOUCH_UI_OFF, StrId::STR_TOUCH_UI_ON}, "touchUiControls",
-                                       StrId::STR_CAT_CONTROLS)
-                         .requiring(SettingRequires::TouchPanel));
-  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
-                                       {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP,
-                                        StrId::STR_TOUCH_READER_SWIPE, StrId::STR_TOUCH_READER_INVERTED},
-                                       "touchReaderCtl", StrId::STR_CAT_CONTROLS)
-                         .requiring(SettingRequires::TouchPanel));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_TAP_FOR_READER_MENU, &CrossPointSettings::tapForReaderMenu,
-                                         "tapReaderMenu", StrId::STR_CAT_CONTROLS)
-                         .requiring(SettingRequires::TouchPanel));
   // --- Gesture actions (reader only) ---
   // Generated from TouchGestures::BINDINGS rather than written out row by row:
   // eighteen near-identical push_backs is exactly the kind of ladder that drifts
@@ -505,6 +491,18 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // not just when the settings screen opens. Gated rather than left to the
   // remove_if below, which cannot un-allocate them.
 #if CP_TOUCH_UI
+  // Touch reading controls (touch boards only — gated on the capability, not on
+  // a board name, so X4 Pro and T5S3 both get them).
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_UI_CONTROLS, &CrossPointSettings::touchUiControls,
+                                       {StrId::STR_TOUCH_UI_OFF, StrId::STR_TOUCH_UI_ON}, "touchUiControls",
+                                       StrId::STR_CAT_CONTROLS)
+                         .withSubcategory(StrId::STR_TOUCH_UI_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
+  settings.push_back(SettingInfo::Enum(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
+                                       {StrId::STR_TOUCH_READER_OFF, StrId::STR_TOUCH_READER_TAP,
+                                        StrId::STR_TOUCH_READER_SWIPE, StrId::STR_TOUCH_READER_INVERTED},
+                                       "touchReaderCtl", StrId::STR_CAT_CONTROLS)
+                         .requiring(SettingRequires::TouchPanel));
   for (const auto& binding : TouchGestures::BINDINGS) {
     // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
     // whole chained builder in a lambda and append through a back_inserter, which

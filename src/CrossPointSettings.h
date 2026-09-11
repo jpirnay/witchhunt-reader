@@ -499,8 +499,8 @@ class CrossPointSettings {
   // In Swipe reading mode these WIN over the plain page-turn swipe inside the outer
   // thirds, since GestureEventManager resolves first. That is the trade: the outer
   // thirds lose the one-page swipe and keep the one-page tap.
-  uint8_t gestSwipeLeftInLeft = BTN_PAGE_BACK_10;
-  uint8_t gestSwipeRightInRight = BTN_PAGE_FORWARD_10;
+  uint8_t gestSwipeInLeftZone = BTN_PAGE_BACK_10;
+  uint8_t gestSwipeInRightZone = BTN_PAGE_FORWARD_10;
   // Every tap zone stays Built-in, and must. The reader's own tap handling is
   // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
   // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look
@@ -523,11 +523,16 @@ class CrossPointSettings {
   // reason.
   uint8_t gestLongTapTop = BTN_DEFAULT;
   uint8_t gestLongTapBottom = BTN_STAR_PAGE;
-  // Corners, long press only. Only the top-left ships bound: it is the light on/off
-  // that the edge-column brightness swipes cannot reach, since dimming clamps at
-  // MIN_BRIGHTNESS. The light submenu on the top-edge down-swipe is the other route,
-  // and the one that works outside the reader -- taps and long taps are reader-only,
-  // swipes are not.
+  // Corners, long press only, and live on EVERY screen rather than only in the reader --
+  // see GestureEventManager's scope note. Only the top-left ships bound: it is the light
+  // on/off that the edge-column brightness swipes cannot reach, since dimming clamps at
+  // MIN_BRIGHTNESS.
+  //
+  // One gesture for one meaning everywhere, deliberately. The alternative considered was a
+  // separate home-screen gesture, and it was rejected: a reader should not have to know
+  // which screen they are on to know how to turn the light off. The light submenu on the
+  // top-edge down-swipe remains the discoverable route, and double-press Power the one that
+  // needs no touch at all.
   //
   // The other three are offered rather than assigned, following KOReader, which ships
   // every corner HOLD as nil.
@@ -546,9 +551,6 @@ class CrossPointSettings {
   uint8_t gestRotateCw = BTN_CYCLE_ORIENTATION;
   uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION_BACK;
 
-  // Centre-third tap opens the reader menu. Separate from touchReaderControls
-  // so the page-turn style and the menu tap can be chosen independently.
-  uint8_t tapForReaderMenu = 1;
   // Enable synthetic TOC fallback for malformed/sparse TOC books (1 = enabled, 0 = disabled)
   uint8_t syntheticTocFallback = 1;
   // Default bionic reading in EPUB pages when no per-book override is set (1 = enabled, 0 = disabled)
@@ -698,7 +700,14 @@ class CrossPointSettings {
   uint8_t btnDoubleRight = BTN_PAGE_FORWARD_10;
   uint8_t btnDoublePageBack = BTN_DEFAULT;
   uint8_t btnDoublePageForward = BTN_DEFAULT;
-  uint8_t btnDoublePower = BTN_DEFAULT;
+  // The reading light, on the one control no overlay can ever cover and every board has.
+  // It works from every screen and needs no digitiser at all, which makes it the fallback
+  // for the top-left corner hold on a board where touch is off or awkward.
+  //
+  // Safe as a DOUBLE press specifically: a single press still sleeps, so nothing about the
+  // power button's primary job changes. dropUnsupportedActions() clears this back to
+  // Built-in on a board with no light, so X3/X4 are unaffected.
+  uint8_t btnDoublePower = BTN_LIGHT_TOGGLE;
 
   // Long-press actions (default: built-in)
   uint8_t btnLongBack = BTN_DEFAULT;

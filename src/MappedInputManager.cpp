@@ -407,12 +407,6 @@ bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const 
                         renderer.getScreenHeight(orientation));
 }
 
-bool MappedInputManager::wasBackGesture() const {
-  // Edge-anchored so mid-screen horizontal swipes stay available to activities
-  // that consume SwipeDir::Left/Right (percent selection, image viewer).
-  return wasEdgeSwipe(fui::ScreenEdge::Left);
-}
-
 bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }

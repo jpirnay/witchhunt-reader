@@ -90,13 +90,37 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   // deliberately does NOT suppress — an unbound long tap then degrades to
   // whatever the tap in that zone does, which is the least surprising thing for
   // a reader who holds a finger down a little too long.
-  if (inReader && input.peekScreenLongPressIn(touchOrientation, x, y)) {
+  if (input.peekScreenLongPressIn(touchOrientation, x, y)) {
     // Corner before zone — a corner sits inside Left or Right, so the other order would
-    // never reach one. longTapGestureForPoint() owns that precedence.
-    const Gesture gesture = TouchGestures::longTapGestureForPoint(x, y, width, height);
-    if (boundAction(gesture, action, inReader)) {
-      input.suppressTouchContact();
-      return true;
+    // never reach one.
+    const TapZones::Corner corner = TapZones::cornerFor(x, y, width, height);
+
+    // The CORNERS are live on every screen; the five ZONES stay reader-only. The line is
+    // drawn on size, not on taste: a zone is a third of the glass and would sit on top of
+    // whatever a screen has drawn there, while a corner is an eighth of the shorter edge at
+    // an extremity, and outside the reader the only other long-press consumer is the button
+    // hint strip along the bottom (ActivityManager::dispatchHintStripTap) — every other
+    // screen resolves lists, covers, the tab bar and the keyboard on TAPS.
+    //
+    // Opening the corners up is what makes the reading-light toggle mean the same thing
+    // everywhere. A control that works in a book and silently does nothing on the home
+    // screen is worse than one that does not exist, and the light is exactly the control
+    // someone reaches for in the dark without looking at the screen.
+    //
+    // Claiming here suppresses the contact, so a bound corner wins over anything the screen
+    // underneath would have made of the press. That is deliberate: the corner is the more
+    // specific target.
+    const bool haveGesture = corner != TapZones::Corner::None || inReader;
+    if (haveGesture) {
+      const Gesture gesture = corner != TapZones::Corner::None
+                                  ? TouchGestures::longTapCornerGestureFor(corner)
+                                  : TouchGestures::longTapGestureFor(TapZones::zoneFor(x, y, width, height));
+      // boundAction() still declines a reader-SCOPED action outside the reader, so a corner
+      // bound to e.g. Next Chapter stays inert on the home screen rather than being eaten.
+      if (boundAction(gesture, action, inReader)) {
+        input.suppressTouchContact();
+        return true;
+      }
     }
   }
 
@@ -128,14 +152,30 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   // outer third, so this is the same zone a tap there would hit.
   const TapZones::Zone startZone = TapZones::zoneFor(swipeStartX, swipeStartY, width, height);
   switch (swipeDir) {
+    // A horizontal swipe that STARTS in an outer third is the ten-page jump for that third,
+    // WHICHEVER WAY IT TRAVELS. The direction is deliberately not part of the test.
+    //
+    // It used to require travelling OUTWARD -- leftward in the left third -- and that was
+    // reported unreliable on a T5S3, working about one attempt in ten on the left while the
+    // right worked. Every code path here is symmetric, so the cause is not in the software:
+    // an outward swipe has to START inside the third and still find 60 px
+    // (InputManager::TOUCH_SWIPE_MIN_PX) of room to travel FURTHER outward, which is a narrow
+    // window hard against the bezel, and how reliably a thumb lands in it depends on which
+    // hand is holding the device. Direction-agnostic removes the window entirely: begin
+    // anywhere in the third and flick either way.
+    //
+    // The cost is confined to Swipe reading mode, where the outer thirds lose the one-page
+    // swipe and keep the one-page TAP. In the shipped default (TOUCH_READER_ON, i.e. taps)
+    // horizontal swipes are unused, so there is no cost at all.
     case MappedInputManager::SwipeDir::Left:
-      // Outward first: leftward inside the left (back) zone is the ten-page jump, and only
-      // a swipe that both starts and travels that way qualifies. Everything else -- inward,
-      // or from the centre -- stays the plain page turn.
-      swipe = startZone == TapZones::Zone::Left ? Gesture::SwipeLeftInLeft : Gesture::SwipeLeft;
+      swipe = startZone == TapZones::Zone::Left    ? Gesture::SwipeInLeftZone
+              : startZone == TapZones::Zone::Right ? Gesture::SwipeInRightZone
+                                                   : Gesture::SwipeLeft;
       break;
     case MappedInputManager::SwipeDir::Right:
-      swipe = startZone == TapZones::Zone::Right ? Gesture::SwipeRightInRight : Gesture::SwipeRight;
+      swipe = startZone == TapZones::Zone::Right  ? Gesture::SwipeInRightZone
+              : startZone == TapZones::Zone::Left ? Gesture::SwipeInLeftZone
+                                                  : Gesture::SwipeRight;
       break;
     case MappedInputManager::SwipeDir::Up:
       if (startColumn == TapZones::EdgeColumn::Left) {

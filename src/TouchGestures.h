@@ -45,16 +45,18 @@ enum class Gesture : uint8_t {
   SwipeUpRight,
   SwipeDownLeft,
   SwipeDownRight,
-  // The OUTWARD horizontal swipes: leftward in the left page-turn third, rightward
-  // in the right one — travelling toward the edge the finger started at. Those
-  // thirds already MEAN back and forward (a tap there turns one page), so flicking
-  // the same way in the same zone jumping ten is one rule rather than two.
-  // KOReader ships the same +/-10 magnitude on double_tap_left_side /
-  // double_tap_right_side; the trigger differs because this firmware has no
-  // double-tap detector, and an outward swipe costs two gestures rather than a
-  // whole event class. Every inward and centre swipe keeps the plain page turn.
-  SwipeLeftInLeft,
-  SwipeRightInRight,
+  // A horizontal swipe that STARTS in one of the page-turn thirds, whichever way it
+  // travels. Those thirds already MEAN back and forward (a tap there turns one page),
+  // so a flick in the same zone jumping ten is one rule rather than two. KOReader
+  // ships the same +/-10 magnitude on double_tap_left_side / double_tap_right_side;
+  // the trigger differs because this firmware has no double-tap detector.
+  //
+  // Direction is NOT part of the test, and that is a device-driven correction: the
+  // first version required travelling outward, which was reported working about one
+  // attempt in ten on a T5S3's left edge. See GestureEventManager for why -- an
+  // outward swipe has to find 60 px of travel hard against the bezel.
+  SwipeInLeftZone,
+  SwipeInRightZone,
   TapLeft,
   TapRight,
   TapCentre,
@@ -113,10 +115,10 @@ inline constexpr Binding BINDINGS[] = {
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownLeft", false},
     {Gesture::SwipeDownRight, &CrossPointSettings::gestSwipeDownRight, StrId::STR_GEST_SWIPE_DOWN_RIGHT,
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownRight", false},
-    {Gesture::SwipeLeftInLeft, &CrossPointSettings::gestSwipeLeftInLeft, StrId::STR_GEST_SWIPE_LEFT_IN_LEFT,
-     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeLeftInLeft", false},
-    {Gesture::SwipeRightInRight, &CrossPointSettings::gestSwipeRightInRight, StrId::STR_GEST_SWIPE_RIGHT_IN_RIGHT,
-     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeRightInRight", false},
+    {Gesture::SwipeInLeftZone, &CrossPointSettings::gestSwipeInLeftZone, StrId::STR_GEST_SWIPE_IN_LEFT_ZONE,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeInLeftZone", false},
+    {Gesture::SwipeInRightZone, &CrossPointSettings::gestSwipeInRightZone, StrId::STR_GEST_SWIPE_IN_RIGHT_ZONE,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeInRightZone", false},
     {Gesture::TapLeft, &CrossPointSettings::gestTapLeft, StrId::STR_GEST_TAP_LEFT, StrId::STR_GEST_TAP_GROUP,
      "gestTapLeft", false},
     {Gesture::TapRight, &CrossPointSettings::gestTapRight, StrId::STR_GEST_TAP_RIGHT, StrId::STR_GEST_TAP_GROUP,
@@ -169,8 +171,8 @@ inline const char* nameOf(const Gesture gesture) {
       "swipe-up-right",
       "swipe-down-left",
       "swipe-down-right",
-      "swipe-left-in-left",
-      "swipe-right-in-right",
+      "swipe-in-left-zone",
+      "swipe-in-right-zone",
       "tap-left",
       "tap-right",
       "tap-centre",
@@ -222,12 +224,12 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::SwipeRight:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
-    case Gesture::SwipeLeftInLeft:
+    case Gesture::SwipeInLeftZone:
       // Left alone these are the plain page-turn swipe, because that is what the
       // contact falls through to: an unbound gesture is never claimed, so the
       // reader's own detectTouchPageTurn sees it as an ordinary horizontal swipe.
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
-    case Gesture::SwipeRightInRight:
+    case Gesture::SwipeInRightZone:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
     // SwipeDownLeft/SwipeDownRight now fall through to NOTHING below, and that is a
     // correction rather than a regression. They used to claim the reader menu, because a
@@ -249,8 +251,7 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NEXT_PAGE;
     case Gesture::TapCentre:
-      return (readerTouchOn && SETTINGS.tapForReaderMenu != 0) ? StrId::STR_BTN_DEF_READER_MENU
-                                                               : StrId::STR_BTN_DEF_NOTHING;
+      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
     default:
       // Everything else was dead before gestures existed, so leaving it alone
       // genuinely does nothing.

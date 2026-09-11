@@ -216,7 +216,6 @@ class MappedInputManager {
   void flushTouchEvents() const { gpio.flushTouchEvents(); }
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.
-  bool wasBackGesture() const;
   // Home-key boards (X4 Pro) exit with a short Home-key tap; their bottom-edge
   // swipe is intentionally unused. Other touch boards keep the bottom-edge
   // gesture.

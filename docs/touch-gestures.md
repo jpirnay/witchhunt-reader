@@ -109,13 +109,23 @@ the X4 Pro and the T5S3).
 ## 2. Everywhere else
 
 Outside a book, **taps belong to whatever is on screen** — a row, a cover, a keyboard
-key, a button hint. Only swipes are interpreted as gestures, which is why the reading
-light is reachable from the home screen in the dark and the corner hold is not.
+key, a button hint. Swipes are interpreted as gestures, and so are the four corner
+**holds**: they are small and at the extremities, and nothing else outside a book acts
+on a hold except the button hint strip along the bottom.
+
+So the top-left corner hold turns the reading light on and off **on every screen**, not
+just while reading. One gesture, one meaning, wherever you are.
+
+**Double-press the Power button** for the same thing without touching the screen at all.
+A single press still puts the device to sleep, so nothing about the button's usual job
+changes. This is the route to reach for in the dark: no overlay can cover a physical
+button, and it works on every screen.
 
 | Gesture | What it does |
 | --- | --- |
 | Tap a row, cover, folder or button hint | Select it; tap again to activate |
 | Hold a button hint | The same as holding that button |
+| **Hold the top-left corner** | **Toggle reading light** — the same as in a book |
 | Swipe up / down over a list | Page the list |
 | **Tap the scroll bar** above / below the thumb | Page back / forward |
 | Swipe **right from the left edge** | Back |

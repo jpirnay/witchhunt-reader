@@ -255,7 +255,6 @@ void ActivityManager::loop() {
 #if CP_TOUCH_UI
     // Before the list dispatchers: a top-edge pull is an edge gesture, and a list occupying
     // the whole screen would otherwise read it as a page-down first.
-    dispatchBackGesture();
     dispatchLightPanelGesture();
     dispatchListSwipe();
     // Before dispatchListTap(), which consumes the tap: a tap on the bar is a page turn, not
@@ -640,28 +639,6 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
 }
 
 #if CP_TOUCH_UI
-
-// A rightward swipe from the LEFT EDGE goes back, on every screen except a reader.
-//
-// Excluded in the reader deliberately: there a rightward swipe is the previous page in Swipe
-// reading mode, and gestSwipeRight is bindable on top of that. CrossInk documents the same
-// carve-out ("swipe right from the left edge ... to go back from most screens") for the same
-// reason. Outside the reader nothing consumes a horizontal swipe, so this is free.
-//
-// It matters most on the T5S3, whose only nav key is the expander button wired as BTN_DOWN:
-// Back there is otherwise reachable only by holding the capacitive home key.
-//
-// Edge-anchored by fui::edgeSwipe, so mid-screen horizontal swipes stay available to the
-// activities that consume SwipeDir::Left/Right (percent selection, the image viewer).
-void ActivityManager::dispatchBackGesture() {
-  if (!mappedInput.hasTouch()) return;
-  if (currentActivity == nullptr || currentActivity->isReaderActivity()) return;
-  if (!mappedInput.wasBackGesture()) return;
-
-  mappedInput.suppressTouchContact();
-  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::Button::Back));
-  LOG_DBG("TCH", "Left-edge swipe -> Back");
-}
 
 void ActivityManager::dispatchLightPanelGesture() {
   if (!mappedInput.hasTouch()) return;

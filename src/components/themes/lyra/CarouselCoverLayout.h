@@ -68,11 +68,38 @@ inline Slots compute(const Dimensions& d, const int screenW, const int rectY, co
   return slots;
 }
 
+// Clip a slot to the screen, so the part of a side tile that hangs off the edge stops being
+// tappable.
+//
+// The side tiles are positioned to slide behind the centre one, which puts the left tile's x at
+// `centreX - sideW + overlap`. On a narrow panel that is NEGATIVE -- 540 px wide gives -40 --
+// so the tile is drawn clipped, and the recorded rect used to keep claiming the empty margin
+// beside it. A press there opened a book that was not visible under the finger.
+//
+// Clipping on the RECORDING side rather than in the hit test, so the geometry a caller reads is
+// the geometry a reader can see; a slot clipped away entirely reports w/h 0 and hitTest misses
+// it like any other empty rect.
+inline Slot clampToScreen(const Slot& slot, const int screenW, const int screenH) {
+  Slot out = slot;
+  const int right = slot.x + slot.w;
+  const int bottom = slot.y + slot.h;
+  out.x = slot.x < 0 ? 0 : slot.x;
+  out.y = slot.y < 0 ? 0 : slot.y;
+  const int clippedRight = right > screenW ? screenW : right;
+  const int clippedBottom = bottom > screenH ? screenH : bottom;
+  out.w = clippedRight - out.x;
+  out.h = clippedBottom - out.y;
+  if (out.w < 0) out.w = 0;
+  if (out.h < 0) out.h = 0;
+  return out;
+}
+
 // The book under a point, or -1 for a miss. Centre first: the side tiles slide behind it and the
 // draw puts the centre on top, so the overlapping strip belongs to whatever the reader can see.
 inline int hitTest(const Slots& slots, const int px, const int py) {
   for (const Slot* slot : {&slots.centre, &slots.left, &slots.right}) {
     if (slot->bookIndex < 0) continue;
+    if (slot->w <= 0 || slot->h <= 0) continue;
     if (px >= slot->x && px < slot->x + slot->w && py >= slot->y && py < slot->y + slot->h) return slot->bookIndex;
   }
   return -1;

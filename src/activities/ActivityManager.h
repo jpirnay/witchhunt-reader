@@ -200,9 +200,6 @@ class ActivityManager {
   void dispatchButtonAction(CrossPointSettings::BUTTON_ACTION action);
 
 #if CP_TOUCH_UI
-  // A rightward swipe from the left edge goes back, on every screen except a reader. See the
-  // definition for why the reader is carved out.
-  void dispatchBackGesture();
   // Pull the reading-light submenu down from the top edge, from whatever screen is up.
   // Global rather than reader-only on purpose: reaching the light from the home screen in
   // the dark is most of what a quick route to it is for, and taps/long taps are reader-only

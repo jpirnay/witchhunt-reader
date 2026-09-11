@@ -42,11 +42,15 @@ class GestureEventManager {
   //
   //   in the reader   every gesture, because the page has no touch targets of
   //                   its own to compete with.
-  //   anywhere else   swipes and two-finger gestures only. Taps and long taps
-  //                   belong to the screen — a tap on a list row is that row —
-  //                   and no swipe is consumed by any non-reader screen, so
-  //                   opening those up costs nothing and is what lets the
-  //                   reading light be reached from the home screen at night.
+  //   anywhere else   swipes, two-finger gestures, and the four long-press
+  //                   CORNERS. Plain taps and the five long-press ZONES belong to
+  //                   the screen — a tap on a list row is that row, and a zone is
+  //                   a third of the glass — but a corner is an eighth of the
+  //                   shorter edge at an extremity, and outside the reader the
+  //                   only other long-press consumer is the button hint strip
+  //                   along the bottom. Everything else out there resolves on
+  //                   taps, so the corners cost nothing and are what let the
+  //                   reading light toggle mean the same thing on every screen.
   //
   // Outside the reader a gesture bound to a reader-scoped action is left
   // unclaimed rather than swallowed, exactly as the button path does.

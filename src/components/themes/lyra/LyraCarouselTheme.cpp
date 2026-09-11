@@ -61,13 +61,20 @@ constexpr CarouselCoverLayout::Dimensions kCoverDims{kCenterCoverMaxW, kCenterCo
 // Centre is recorded FIRST because the side covers slide kOverlap px BEHIND it: the draw order
 // puts the centre on top, and TapTargets::hitTestIn returns the first rect containing the point,
 // so recording the centre first makes the overlap resolve to what the reader can actually see.
-void recordCarouselCoverTargets(const int screenW, const int rectY, const int centerIdx, const int bookCount) {
+void recordCarouselCoverTargets(const int screenW, const int screenH, const int rectY, const int centerIdx,
+                                const int bookCount) {
   const CarouselCoverLayout::Slots slots =
       CarouselCoverLayout::compute(kCoverDims, screenW, rectY, centerIdx, bookCount);
   TapTargets::Recorder::Builder targets;
   for (const CarouselCoverLayout::Slot* slot : {&slots.centre, &slots.left, &slots.right}) {
     if (slot->bookIndex < 0) continue;
-    targets.add(slot->x, slot->y, slot->w, slot->h, slot->bookIndex);
+    // Clipped to the screen before recording: the left tile's x is centreX - sideW + overlap,
+    // which is NEGATIVE on a narrow panel (-40 at 540 px), so the unclipped rect claimed the
+    // empty margin beside a cover that is only partly drawn. A press there opened a book the
+    // reader could not see under their finger.
+    const CarouselCoverLayout::Slot visible = CarouselCoverLayout::clampToScreen(*slot, screenW, screenH);
+    if (visible.w <= 0 || visible.h <= 0) continue;
+    targets.add(visible.x, visible.y, visible.w, visible.h, visible.bookIndex);
   }
   TapTargets::homeCovers().record(targets);
 }
@@ -348,7 +355,8 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
 
   // The covers came back from the cache rather than from drawRecentBookCover(), so record their
   // targets here or the carousel would be the one home screen whose covers ignore a tap.
-  recordCarouselCoverTargets(renderer.getScreenWidth(), metrics.homeTopPadding, centerIdx, bookCount);
+  recordCarouselCoverTargets(renderer.getScreenWidth(), renderer.getScreenHeight(), metrics.homeTopPadding, centerIdx,
+                             bookCount);
 
   // Overlay the selection border when carousel row is active
   if (inCarouselRow) {
@@ -409,7 +417,7 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
   }
 
   const int screenW = renderer.getScreenWidth();
-  recordCarouselCoverTargets(screenW, rect.y, centerIdx, bookCount);
+  recordCarouselCoverTargets(screenW, renderer.getScreenHeight(), rect.y, centerIdx, bookCount);
   // Same slots the targets were just recorded from, so what is painted and what answers a tap
   // are one decision rather than two that agree by inspection.
   const CarouselCoverLayout::Slots slots =

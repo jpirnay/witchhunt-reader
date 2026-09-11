@@ -2,7 +2,6 @@
 
 #include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
-#include "GestureActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
@@ -11,6 +10,7 @@
 #include "EnumSelectionActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
+#include "GestureActionsOverviewActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "OpdsServerListActivity.h"
