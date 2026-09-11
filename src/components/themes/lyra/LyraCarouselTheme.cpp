@@ -9,6 +9,7 @@
 #include <Logging.h>
 #include <Txt.h>
 #include <Xtc.h>
+#include <esp_system.h>
 
 #include <algorithm>
 #include <cstring>
@@ -142,6 +143,16 @@ int gCachedFrameRegionH = 0;   // region height (logical)
 bool gFrameCacheDirty = false;
 int gCachedFrameCount = 0;
 std::string gCacheKey;
+// Book set whose region allocation already failed. The cached region is ~48 KB, the
+// same order as the secondary framebuffer, and Home's steady-state free heap is
+// smaller than either (measured on X3: 39,276 free vs 49,104 needed) — so while the
+// secondary buffer is resident this malloc CANNOT succeed, and freeFrameCache()
+// clearing gCacheKey made every subsequent render attempt it again. Remember the key
+// that failed and skip the retry until something actually changes: a new book set, an
+// explicit invalidate, or a cover landing on disk (markFrameCacheDirty). That keeps the
+// cold-cache path intact — covers arriving there re-arm this on every decode — while a
+// warm boot stops paying a doomed 48 KB allocation attempt per render.
+std::string gAllocFailedKey;
 
 int findFrameSlot(int bookIdx) {
   for (int i = 0; i < kFrameCount; ++i) {
@@ -170,8 +181,14 @@ void freeFrameCache() {
 // ---------------------------------------------------------------------------
 void LyraCarouselTheme::setPreRenderIndex(int idx) { lastCarouselSelectorIndex = idx; }
 
-void LyraCarouselTheme::invalidateFrameCache() { freeFrameCache(); }
-void LyraCarouselTheme::markFrameCacheDirty() { gFrameCacheDirty = true; }
+void LyraCarouselTheme::invalidateFrameCache() {
+  freeFrameCache();
+  gAllocFailedKey.clear();  // conditions may have changed; allow one more attempt
+}
+void LyraCarouselTheme::markFrameCacheDirty() {
+  gFrameCacheDirty = true;
+  gAllocFailedKey.clear();  // a cover just landed, so the rebuild is worth retrying
+}
 
 void LyraCarouselTheme::onBookWillClose(const std::string& /*path*/, Epub* /*epub*/, Xtc* xtc, Txt* /*txt*/) {
   // EPUB thumbnail generation is handled lazily by HomeActivity (sliced ZIP + PNG decode).
@@ -274,6 +291,9 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
   }
 
   if (newKey != gCacheKey || gCachedFrameCount == 0) {
+    // Already established that this book set does not fit alongside whatever else is
+    // resident; don't re-run the allocation (and its log line) on every render.
+    if (newKey == gAllocFailedKey) return false;
     // Free old cache and allocate fresh region buffers.
     freeFrameCache();
     if (regionBytes == 0) return false;
@@ -284,9 +304,12 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     for (int i = 0; i < frameCount; ++i) {
       gCachedFrames[i] = static_cast<uint8_t*>(malloc(regionBytes));
       if (!gCachedFrames[i]) {
-        LOG_DBG("CAROUSEL", "tryFastHomeRender: malloc failed for cover region %d (%u bytes) — retrying next render", i,
-                static_cast<unsigned>(regionBytes));
-        freeFrameCache();
+        LOG_DBG("CAROUSEL",
+                "tryFastHomeRender: malloc failed for cover region %d (%u bytes, %u free) — skipping until the book "
+                "set changes or a cover lands",
+                i, static_cast<unsigned>(regionBytes), static_cast<unsigned>(esp_get_free_heap_size()));
+        freeFrameCache();  // clears gCacheKey, so latch AFTER it
+        gAllocFailedKey = newKey;
         return false;
       }
     }
@@ -295,6 +318,7 @@ bool LyraCarouselTheme::tryFastHomeRender(GfxRenderer& renderer, const std::vect
     renderOneCarouselFrame(renderer, recentBooks, initialIdx, 0, metrics);
     gCachedFrameCount = frameCount;
     gCacheKey = newKey;
+    gAllocFailedKey.clear();  // it fits now; forget any earlier failure
   }
 
   const bool inCarouselRow = (selectorIndex < bookCount);
