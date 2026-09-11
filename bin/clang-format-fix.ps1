@@ -99,6 +99,9 @@ $exclude = @(
     'build'
     '.pio'
     '.venv'
+    'third_party'
+    'managed_components'
+    'node_modules'
 )
 
 function Test-Excluded($fullPath) {

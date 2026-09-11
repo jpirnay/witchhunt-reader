@@ -2007,25 +2007,25 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         }
       }
       if (p) {
-          std::string fullText;
-          for (const auto& el : p->elements) {
-            if (el->getTag() == TAG_PageLine) {
-              const auto& line = static_cast<const PageLine&>(*el);
-              if (line.getBlock()) {
-                const auto& block = *line.getBlock();
-                const uint16_t wordCount = block.wordCount();
-                for (uint16_t i = 0; i < wordCount; ++i) {
-                  if (!fullText.empty()) fullText += " ";
-                  fullText += block.wordText(i);
-                }
+        std::string fullText;
+        for (const auto& el : p->elements) {
+          if (el->getTag() == TAG_PageLine) {
+            const auto& line = static_cast<const PageLine&>(*el);
+            if (line.getBlock()) {
+              const auto& block = *line.getBlock();
+              const uint16_t wordCount = block.wordCount();
+              for (uint16_t i = 0; i < wordCount; ++i) {
+                if (!fullText.empty()) fullText += " ";
+                fullText += block.wordText(i);
               }
             }
           }
-          if (!fullText.empty()) {
-            startActivityForResult(std::make_unique<QrDisplayActivity>(renderer, mappedInput, fullText),
-                                   [this](const ActivityResult& result) {});
-            break;
-          }
+        }
+        if (!fullText.empty()) {
+          startActivityForResult(std::make_unique<QrDisplayActivity>(renderer, mappedInput, fullText),
+                                 [this](const ActivityResult& result) {});
+          break;
+        }
       }
       // If no text or page loading failed, just close menu
       requestUpdate();
@@ -5636,15 +5636,13 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       requestUpdate();
       break;
-    case BA::BTN_STAR_PAGE:
-      {
-        RenderLock lock(*this);
-        if (section) {
-          bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-          requestUpdate();
-        }
+    case BA::BTN_STAR_PAGE: {
+      RenderLock lock(*this);
+      if (section) {
+        bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+        requestUpdate();
       }
-      break;
+    } break;
     case BA::BTN_DICTIONARY:
       openDictionary();
       break;

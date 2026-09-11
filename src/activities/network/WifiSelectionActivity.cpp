@@ -68,15 +68,14 @@ void WifiSelectionActivity::onEnter() {
         // whole story: pairing this BSSID with the one in the disconnect below says whether a
         // failed attempt cost us a bad node, or whether the same node needed two tries.
         LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u",
-          millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed),
+                millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed),
                 formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
       [eventGeneration](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
         if (wifiEventGeneration.load(std::memory_order_acquire) != eventGeneration) return;
-        LOG_DBG("WIFI", "EVT got_ip at %lu ms",
-                millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed));
+        LOG_DBG("WIFI", "EVT got_ip at %lu ms", millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed));
       },
       ARDUINO_EVENT_WIFI_STA_GOT_IP);
   // STA_START = the driver finished esp_wifi_start() (PHY init + RF calibration). Splits
