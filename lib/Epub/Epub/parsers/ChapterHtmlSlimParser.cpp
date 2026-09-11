@@ -1247,12 +1247,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     return;
   }
 
-  // Extract class, style, id, and pagebreak metadata attributes
+  // Extract class, style, id, hidden, and pagebreak metadata attributes
   std::string classAttr;
   std::string styleAttr;
   std::string idAttr;
   std::string ariaLabel;
   std::string titleAttr;
+  bool hasHiddenAttr = false;
   bool isPageBreakMarker = false;
   if (atts != nullptr) {
     for (int i = 0; atts[i]; i += 2) {
@@ -1266,6 +1267,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         ariaLabel = atts[i + 1];
       } else if (strcmp(atts[i], "title") == 0) {
         titleAttr = atts[i + 1];
+      } else if (strcmp(atts[i], "hidden") == 0) {
+        // A boolean attribute: its presence is what counts. HTML says any value,
+        // including the empty string and "false", still means hidden.
+        hasHiddenAttr = true;
       } else if (strcmp(atts[i], "role") == 0 && strcmp(atts[i + 1], "doc-pagebreak") == 0) {
         isPageBreakMarker = true;
       } else if (strcmp(atts[i], "epub:type") == 0 && strcmp(atts[i + 1], "pagebreak") == 0) {
@@ -1376,6 +1381,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         it = self->inlineStyleCache_.emplace(styleAttr, CssParser::parseInlineStyle(styleAttr)).first;
       cssStyle.applyOver(it->second);
     }
+  }
+
+  // The HTML `hidden` attribute means display:none, and outranks the CSS that got
+  // us here -- it is applied after the cascade above for that reason. EPUBs use it
+  // to carry notes, answers and alternate-language blocks that must not be shown.
+  // Ported from crosspoint-reader PR #3390 (Joe Harpham / @jjharpham).
+  if (hasHiddenAttr) {
+    cssStyle.display = CssDisplay::None;
+    cssStyle.defined.display = 1;
   }
 
   // Skip elements with display:none before all fast paths (tables, links, etc.).
