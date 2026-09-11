@@ -1671,3 +1671,222 @@ Cost: **+410 bytes flash, +24 bytes RAM.**
 
 - §4 lists the settings **tab bar** as still open under 4a. It shipped:
   `SettingsActivity::loop()` hit-tests `TapTargets::tabBar()`, single-tap by design.
+
+---
+
+## 10. Phase 9 — resource gating, zone rework, self-documentation (2026-09-11)
+
+Twelve commits on `perf/gate-touch-ui-on-non-touch-boards` (PR #244). Prompted by three
+questions: what do non-touch boards pay for this, should the vertical swipes be split
+by where they end, and what should the defaults actually be.
+
+**Validation status: one LilyGo T5S3 session, which found four faults (§10.8). The
+X4 Pro is deliberately NOT flashed — see §10.9; that is a safety decision, not
+outstanding work.**
+
+### 10.1 The app-side layer was never gated (`b7826239`)
+
+`FREEINK_CAP_TOUCH` has always gated the SDK's touch backend. The half this fork owns
+never was: the tap/row/target recorders, the gesture classifier, the three touch
+dispatchers and the twenty gesture settings rows were compiled, linked and in two
+places executed on X3/X4.
+
+Measured on `env:default`, both builds against the same tree:
+
+| | baseline | gated | delta |
+|---|---|---|---|
+| text | 6275269 | 6262441 | **-12828 B** |
+| bss | 2542833 | 2542097 | **-736 B** |
+
+Two costs show in neither figure: `BaseTheme::drawList` built a 280-byte
+`ListTouchBand::Builder` on the **render stack** on every list draw, and
+`buildSettingsList()` pushed twenty `SettingInfo` rows — each with its own ~66-byte
+option vector — that `getSettingsList()` then deleted with `remove_if`, on every
+settings **save and load**, not only when the settings screen opened.
+
+`CP_TOUCH_UI` is **asserted in platformio.ini, not derived** from
+`FREEINK_CAP_TOUCH`. The recorder headers are dependency-free so the host tests can
+include them, and a macro that only exists once `BoardConfig.h` has been included
+would give different TUs different answers about `sizeof(ListTouchBand::Band)` — an
+ODR violation, not a missed optimisation. It defaults to 1 (keep touch) and
+`MappedInputManager.cpp` static_asserts the two against each other.
+
+### 10.2 The vertical swipes were split by screen half, and that was wrong
+
+Three problems, all fixed by anchoring to the **edge columns** (`c8af60f2`):
+
+1. **A half is not a place.** KOReader puts these in the outer eighths
+   (`DSWIPE_ZONE_LEFT_EDGE`), Kobo on the left edge. Half the screen is most of the
+   page, so a thumb resting mid-page could dim the display.
+2. **The halves shadowed the reader menu.** `gestSwipeDownRight` shipped as Light
+   Dimmer and fired anywhere in the right half — including the top edge, which is the
+   built-in menu swipe. `GestureEventManager` runs before the activity loop and calls
+   `suppressTouchContact()`, which zeroes the snapshot `wasSwipe()` reads
+   (`HalGPIO::clearTouchEventState`), so **the menu gesture silently did nothing on
+   half the screen.** A live bug, found by re-reading the interaction rather than by
+   testing.
+3. **`builtinLabelFor()` had to lie about it**, reporting "Reader Menu" as the
+   built-in for a row that overlapped the real one.
+
+The original request was to split by where the swipe **ends**. Declined, with reason:
+end-position is a function of swipe *length* rather than of a place the reader picks,
+and e-paper cannot animate a drag, so there is nothing to aim at while the finger
+moves. All three reference firmwares anchor at the start.
+
+`TapZones::edgeColumnFor()` excludes the top/bottom bands, without which a swipe
+starting in a bottom corner would be both "open the menu" and "brighten the light" —
+an overlap the half-split never had because it had no bands to collide with.
+
+### 10.3 The defaults, and where each came from
+
+| Gesture | Default | Source |
+|---|---|---|
+| Left edge column, up/down | Brightness ± | KOReader `defaults.lua`, Kobo |
+| Right edge column, up/down | Warmth ± | KOReader (`RIGHT_EDGE` = warmth) |
+| Top edge, swipe down | Light panel | Kindle quick settings, CrossInk |
+| Bottom edge, swipe up | Reader menu | CrossInk (X4 Pro), phone bottom-sheet |
+| Outward swipe in outer thirds | -/+10 pages | KOReader `double_tap_*_side = page_jmp` |
+| Hold top-left corner | Toggle light | KOReader `tap_left_bottom_corner` |
+| Pinch in/out | Font size -/+ | all three |
+| Double-press Power | Toggle light | the one control no overlay can cover |
+
+Rotate stays bound to orientation. It was proposed for unbinding (KOReader ships both
+`rotate_cw`/`ccw` nil) and that was **rejected by the maintainer as useful** — recorded
+because the role-model argument was the weaker one here.
+
+### 10.4 Scope is decided by size, not by screen
+
+Taps and the five long-press **zones** stay reader-only; a zone is a third of the glass
+and would sit on whatever a screen has drawn. The four **corners** are live everywhere,
+because an audit found that outside the reader the only other long-press consumer is
+the button hint strip along the bottom — lists, covers, the tab bar and the keyboard
+all resolve on taps.
+
+That distinction exists to serve one requirement: **the light toggle means the same
+thing on every screen.** A control that works in a book and silently does nothing on
+the home screen is worse than one that does not exist. The alternative — a separate
+home-screen gesture — was considered and rejected on those grounds.
+
+### 10.5 Self-documentation
+
+`GestureActionsOverviewActivity` (`ec8fab36`) draws the zones with each region's bound
+action inside it, in three pages. Every string comes from `getSettingsList()` via
+`getDisplayValue()`, looked up by the gesture's label out of `BINDINGS` — so there is
+no parallel table to drift, "Built-in" rows show what `builtinLabelFor()` really does,
+and board variance handles itself because filtered-out rows render empty.
+
+`docs/touch-gestures.md` is the user-facing companion, and names the on-device page as
+the authority over itself. Its 26 documented defaults were cross-checked against the
+struct initialisers programmatically, which caught two wrong setting names.
+
+### 10.6 Audit: nine unwired accessors (`6a84ee76`)
+
+Eight deleted, one wired. `wasBackGesture()` — a rightward swipe from the left edge —
+now goes Back outside the reader (excluded inside it, where a rightward swipe is
+already previous-page; CrossInk documents the same carve-out). It earns its keep on the
+T5S3, where Back was otherwise only a home-key hold.
+
+Deleted: `wasScreenLongPress`, `peekScreenLongPress`, `wasTapInRect`, `rowTouch`,
+`colTouch`, `getRenderer`, `touchEventsEnabled`, and `wasHomeKeyHold` — the last
+replaced by a comment, because its absence is load-bearing: a Home-key hold **is**
+handled, at the HAL layer, arriving as an ordinary Back press.
+
+Five of the eight were upstream API taken across signature-for-signature during phases
+3-4 to keep the diff comparable. That was right then; this is the cleanup it owed.
+
+**Method note.** The first pass of this audit was wrong three times, always the same
+way: reading `BoardConfig`'s pin tables and concluding something was unwired when the
+wiring lived a layer below — the HAL's home-key routing, `dropUnsupportedActions()`,
+and `InputManager::setButtonHook()` (which is how the T5S3's expander button becomes
+`BTN_DOWN`). A scan that excludes the defining file also reports internal helpers as
+dead. **Treat `BoardConfig` as necessary but not sufficient, and check the hook and HAL
+layers before calling anything dead.**
+
+### 10.8 Device test on a LilyGo T5S3 (2026-09-11)
+
+The first hardware run of §10. It found more than the whole build-and-host-test chain
+did, and two of the four findings were pre-existing bugs this work merely walked into.
+
+**1. The corner light toggle worked in the reader.** The one thing that needed a thumb
+to confirm — is a 67x67 px corner findable without looking — is confirmed on a 540 px
+panel.
+
+**2. A press on the carousel home screen opened a book, from outside every drawn
+cover.** Two distinct faults behind one symptom.
+
+The first was that the corner gestures were still reader-only in the flashed build, so
+the press fell through unclaimed and its lift became an ordinary tap.
+
+The second is the real bug, and it predates this branch.
+`CarouselCoverLayout::compute()` puts the left tile at `centreX - sideW + overlap`,
+which is **-40** on a 540 px panel — the tile is DRAWN clipped, but
+`recordCarouselCoverTargets()` recorded the full unclipped rect. So
+`x in [0,160), y in [141,531)` was tappable empty margin beside a partly-drawn cover,
+and a press there opened a book that was not under the finger. Fixed by clamping on
+the recording side (`clampToScreen`), with a test pinning the -40 geometry.
+
+Worth noting how this was missed: §9.1 fixed the carousel's *wrap* logic and added
+`test/carousel_cover_layout` to round-trip compute-then-hit-test. Every one of those
+tests used a 480 px screen, where the left tile's x is +20 and nothing hangs off the
+edge. The bug needed a NARROWER panel to appear, and the test suite had no narrow
+panel in it.
+
+**3. The ten-page swipe worked on the right and not the left.** Diagnosed wrongly
+twice before the cause was accepted as ergonomic rather than logical: every code path
+here is symmetric, so nothing in the source explains it. The original design required
+the swipe to travel OUTWARD — leftward in the left third — which means starting inside
+the third and still finding 60 px (`TOUCH_SWIPE_MIN_PX`) of room toward the bezel. That
+is a narrow window, and which hand holds the device decides how reliably a thumb lands
+in it.
+
+Made direction-agnostic within the zone: begin anywhere in an outer third and flick
+either way. `SwipeLeftInLeft`/`SwipeRightInRight` were renamed to
+`SwipeInLeftZone`/`SwipeInRightZone`, since the old names described a direction
+requirement that no longer exists.
+
+That in turn collided with the left-edge back swipe wired in §10.6 — a rightward swipe
+in the left third would have been both "Back" and "back ten pages". The left edge had
+three claimants (Back, the ten-page jump, the brightness column), and **the back swipe
+was dropped** as the weakest: it could never run in the reader anyway, Back is already
+the capacitive home-key hold on both touch boards, and it had only been wired because
+the accessor was lying around unused. Wiring a dead accessor because it exists is not a
+reason to add a gesture, and it is how the contention arose.
+
+**4. The gesture overview's later pages were unreachable.** `mapLabels(back, "", "", "")`
+left the Prev/Next hint boxes empty, and an empty hint label marks its box INACTIVE — so
+it is neither drawn nor tappable. On a board whose only physical keys are Down and the
+capacitive home key, that left the later pages with no route and nothing on screen
+saying they existed. Both fixed by labelling the boxes (which also makes them touch
+targets, via `dispatchHintStripTap`) and putting "2 / 3" in the header subtitle.
+
+Also from the same session: the page no longer forces landscape (a MAP of the screen has
+to be the shape of the screen, unlike the button TABLE next door, so the frame now
+carries the panel's own aspect ratio), page 1 gained a "bold = tap, below = hold" key,
+and `tapForReaderMenu` was removed in favour of binding Tap centre to "Ignore".
+
+**What this says about the verification here.** Eleven commits passed two board builds
+and 880 host tests; the host tests cover the geometry helpers thoroughly and could not
+see any of the four findings above. Three of them are about what a screen shows or what a
+thumb can reach, and one needed a panel narrower than any the tests use. Build-green is
+not evidence about an input layer.
+
+### 10.9 What is still open
+
+- **The X4 Pro is DELIBERATELY NOT being flashed, and this is not a gap to close.** An
+  earlier X4 Pro was bricked permanently, and the replacement is the only one there is. It
+  does not get a build until there has been a thorough audit of everything that touches
+  its boot, display power and USB paths, plus a comparison against upstream where those
+  paths came from. Treat "untested on X4 Pro" in section 10 as a standing decision, not as
+  work outstanding -- nothing here should be read as a suggestion to flash it.
+- Whether the ten-page swipe is now reliable, and whether the overview's labels fit
+  legibly, both need another pass on hardware.
+- **`BTN_PAGE_BACK_10`/`FORWARD_10` stop at a chapter boundary.** Crossing a spine does
+  `section.reset()`, so the next iteration of the ten-step loop returns false and breaks:
+  "skip 10 pages" silently means "skip up to 10 within this chapter". Pre-existing, and it
+  affects the `btnDoubleLeft`/`btnDoubleRight` button defaults too. Investigated as a
+  candidate cause of finding 3 and ruled out (the report was from page 30+), but it is a
+  real defect and still unfixed.
+- **`GESTURE_DEFAULTS_VERSION` 2 -> 3** discards existing gesture customisation.
+- **The overflow-arrow lists have no tappable scroll bar** (`ListScrollBar` covers only
+  the two wrapped-list draws).
+- **P2, the localised tap flash**, still unaddressed (see §9.10).

@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "TouchUi.h"
+
 // Rectangles a screen painted that a finger can mean something by, published by the draw for
 // the input side to match against.
 //
@@ -57,6 +59,28 @@ inline int hitTestIn(const Set& s, const int px, const int py) {
   }
   return -1;
 }
+
+#if !CP_TOUCH_UI
+
+// No digitiser: nothing ever hit-tests a target, so the recorder keeps no storage
+// and the builder collects nothing. Same bargain as ListTouchBand -- the four named
+// instances below still exist and every theme call site is untouched, but each one
+// is an empty object instead of 108 bytes of .bss.
+class Recorder {
+ public:
+  class Builder {
+   public:
+    void add(int, int, int, int, int) {}
+  };
+  void record(const Set&) {}
+  void record(const Builder&) {}
+  void invalidate() {}
+  bool snapshot(Set&) const { return false; }
+  bool hasTargets() const { return false; }
+  int hitTest(int, int) const { return -1; }
+};
+
+#else
 
 // One published set. Seqlock for the same reason ButtonHintStrip has one: the draw runs on the
 // render task and the hit test on the loop task, and a half-written Set would be matched against
@@ -119,6 +143,8 @@ class Recorder {
   Set storage_{};
   mutable std::atomic<uint32_t> seq_{0};
 };
+
+#endif  // CP_TOUCH_UI
 
 // The home screen's two live sets. Function-local statics rather than namespace-scope objects so
 // there is no static-init order to reason about between the themes that write them and the

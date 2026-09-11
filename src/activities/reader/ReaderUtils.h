@@ -177,7 +177,7 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
 // Tap in the centre third: the tap path into the reader menu. The page-turn tap
 // zones are the outer horizontal thirds, so the centred rectangle stays free.
 inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager& input) {
-  if (!input.hasTouch() || !SETTINGS.tapForReaderMenu) return false;
+  if (!input.hasTouch()) return false;
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
@@ -195,7 +195,7 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
 // thing it should govern. Tying the menu to it as well meant switching page-turn touch off
 // -- the setting you reach for when reading with a palm on the glass -- also removed the
 // menu, with no separate way to get it back. The centre-third tap keeps its own switch
-// (tapForReaderMenu), so a stray brush is still opt-in, and Confirm (plus the capacitive
+// (bind Tap centre to "Ignore (do nothing)"), so a stray brush is still opt-out, and Confirm (plus the capacitive
 // Home key on X4 Pro) reaches the menu on any board.
 // Ported from crosspoint-reader PR #3319 (adiskill <adiskill00@gmail.com>).
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {

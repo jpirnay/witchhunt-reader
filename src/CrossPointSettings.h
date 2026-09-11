@@ -447,7 +447,14 @@ class CrossPointSettings {
   // 2: BTN_CYCLE_ORIENTATION_BACK was inserted before the board-gated light
   //    block, shifting BTN_LIGHT_* up by one. Stored gesture values naming a
   //    light action would otherwise be read as the action next to it.
-  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 2;
+  // 3: the vertical swipes changed MEANING, from "which half of the screen did
+  //    this start in" to "which edge column, excluding the top/bottom bands".
+  //    A stored value was chosen against a gesture that no longer exists, so
+  //    the compiled defaults have to win. The same bump also covers the light
+  //    toggle moving from gestLongTapTop to gestLongTapTopLeft, and the new
+  //    outward page-turn swipes — all of which shipped together, so one stamp
+  //    is enough for the lot.
+  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
   // --- Gesture actions (touch boards) ---------------------------------------
@@ -464,21 +471,36 @@ class CrossPointSettings {
   // binding them would override that in every mode.
   uint8_t gestSwipeLeft = BTN_DEFAULT;
   uint8_t gestSwipeRight = BTN_DEFAULT;
-  // Vertical swipes are split by the half of the screen they start in, the way a
-  // phone splits the notification shade from quick settings: the left half is
-  // where you reach the menu, the right half is where you reach the light. That
-  // split is what lets both live on the same gesture without either losing it.
+  // Vertical swipes are anchored to the left/right EDGE COLUMN they start in, which is
+  // where KOReader puts the same controls (DSWIPE_ZONE_LEFT_EDGE adjusts the frontlight,
+  // RIGHT_EDGE its warmth) and where a thumb already rests. The columns exclude the top
+  // and bottom bands, so they never contend with the light panel or the reader menu —
+  // TapZones::edgeColumnFor() carries that rule and the reason for it.
   //
-  // Swipe up on the left is the quick on/off. It has to be a SWIPE rather than a
-  // tap or a hold, because swipes are the only gestures live outside the reader
-  // — and reaching the light from the home screen in the dark is most of the
-  // point of having a quick toggle at all. It also has to exist: dimming clamps
-  // at MIN_BRIGHTNESS, so there is deliberately no way to reach "off" by
-  // swiping down.
-  uint8_t gestSwipeUpLeft = BTN_LIGHT_TOGGLE;
-  uint8_t gestSwipeUpRight = BTN_LIGHT_BRIGHTER;
-  uint8_t gestSwipeDownLeft = BTN_READER_MENU;
-  uint8_t gestSwipeDownRight = BTN_LIGHT_DIMMER;
+  // The left column is brightness and the right warmth, which means neither direction can
+  // reach "off": dimming clamps at MIN_BRIGHTNESS, and brightening an unlit panel lights it
+  // (see BTN_LIGHT_BRIGHTER in main.cpp). Turning the light OFF therefore stays on
+  // gestLongTapTop below, which is where it already was — a long press being deliberate
+  // enough not to fire while repositioning a grip.
+  //
+  // Warmth is dropped to Built-in by dropUnsupportedActions() on a board with a
+  // single-channel light, so the right column is simply free there.
+  uint8_t gestSwipeUpLeft = BTN_LIGHT_BRIGHTER;
+  uint8_t gestSwipeUpRight = BTN_LIGHT_WARMER;
+  uint8_t gestSwipeDownLeft = BTN_LIGHT_DIMMER;
+  uint8_t gestSwipeDownRight = BTN_LIGHT_COOLER;
+  // Outward horizontal swipes: ten pages back in the back zone, ten forward in the
+  // forward zone. Safe to bind by default where the tap zones are not, because these
+  // route through dispatchButtonAction(BTN_PAGE_*_10) exactly as the physical buttons
+  // do -- there is no separate end-of-book flow for a ten-page jump to bypass, which
+  // is what keeps every tap zone on Built-in. Magnitude follows KOReader's
+  // double_tap_left_side / double_tap_right_side.
+  //
+  // In Swipe reading mode these WIN over the plain page-turn swipe inside the outer
+  // thirds, since GestureEventManager resolves first. That is the trade: the outer
+  // thirds lose the one-page swipe and keep the one-page tap.
+  uint8_t gestSwipeInLeftZone = BTN_PAGE_BACK_10;
+  uint8_t gestSwipeInRightZone = BTN_PAGE_FORWARD_10;
   // Every tap zone stays Built-in, and must. The reader's own tap handling is
   // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
   // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look
@@ -494,8 +516,30 @@ class CrossPointSettings {
   uint8_t gestLongTapLeft = BTN_PREV_SECTION;
   uint8_t gestLongTapRight = BTN_NEXT_SECTION;
   uint8_t gestLongTapCentre = BTN_DICTIONARY;
-  uint8_t gestLongTapTop = BTN_LIGHT_TOGGLE;
+  // The light toggle moved off this row onto the top-left CORNER below. A full-width
+  // band across the top of the page is easy to catch when shifting grip, and toggling
+  // the light by accident mid-paragraph is a whole-screen event; a corner is a place
+  // you have to mean. KOReader puts its frontlight toggle in a corner for the same
+  // reason.
+  uint8_t gestLongTapTop = BTN_DEFAULT;
   uint8_t gestLongTapBottom = BTN_STAR_PAGE;
+  // Corners, long press only, and live on EVERY screen rather than only in the reader --
+  // see GestureEventManager's scope note. Only the top-left ships bound: it is the light
+  // on/off that the edge-column brightness swipes cannot reach, since dimming clamps at
+  // MIN_BRIGHTNESS.
+  //
+  // One gesture for one meaning everywhere, deliberately. The alternative considered was a
+  // separate home-screen gesture, and it was rejected: a reader should not have to know
+  // which screen they are on to know how to turn the light off. The light submenu on the
+  // top-edge down-swipe remains the discoverable route, and double-press Power the one that
+  // needs no touch at all.
+  //
+  // The other three are offered rather than assigned, following KOReader, which ships
+  // every corner HOLD as nil.
+  uint8_t gestLongTapTopLeft = BTN_LIGHT_TOGGLE;
+  uint8_t gestLongTapTopRight = BTN_DEFAULT;
+  uint8_t gestLongTapBottomLeft = BTN_DEFAULT;
+  uint8_t gestLongTapBottomRight = BTN_DEFAULT;
   // Pinch resizes text and a two-finger turn turns the page: the two gestures
   // whose meaning users already carry with them from every other device.
   uint8_t gestPinchIn = BTN_FONT_SIZE_SMALLER;
@@ -507,9 +551,6 @@ class CrossPointSettings {
   uint8_t gestRotateCw = BTN_CYCLE_ORIENTATION;
   uint8_t gestRotateCcw = BTN_CYCLE_ORIENTATION_BACK;
 
-  // Centre-third tap opens the reader menu. Separate from touchReaderControls
-  // so the page-turn style and the menu tap can be chosen independently.
-  uint8_t tapForReaderMenu = 1;
   // Enable synthetic TOC fallback for malformed/sparse TOC books (1 = enabled, 0 = disabled)
   uint8_t syntheticTocFallback = 1;
   // Default bionic reading in EPUB pages when no per-book override is set (1 = enabled, 0 = disabled)
@@ -659,7 +700,14 @@ class CrossPointSettings {
   uint8_t btnDoubleRight = BTN_PAGE_FORWARD_10;
   uint8_t btnDoublePageBack = BTN_DEFAULT;
   uint8_t btnDoublePageForward = BTN_DEFAULT;
-  uint8_t btnDoublePower = BTN_DEFAULT;
+  // The reading light, on the one control no overlay can ever cover and every board has.
+  // It works from every screen and needs no digitiser at all, which makes it the fallback
+  // for the top-left corner hold on a board where touch is off or awkward.
+  //
+  // Safe as a DOUBLE press specifically: a single press still sleeps, so nothing about the
+  // power button's primary job changes. dropUnsupportedActions() clears this back to
+  // Built-in on a board with no light, so X3/X4 are unaffected.
+  uint8_t btnDoublePower = BTN_LIGHT_TOGGLE;
 
   // Long-press actions (default: built-in)
   uint8_t btnLongBack = BTN_DEFAULT;

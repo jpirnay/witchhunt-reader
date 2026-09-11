@@ -15,6 +15,7 @@
 #include "SettingsList.h"
 #include "SettingsSubmenuActivity.h"
 #include "SliderSettingPicker.h"
+#include "TouchUi.h"
 #include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
@@ -125,6 +126,17 @@ void SettingsActivity::onEnter() {
              std::move(SettingInfo::Action(StrId::STR_BTN_ACTIONS_OVERVIEW, SettingAction::ButtonActionsOverview)
                            .withSubcategory(StrId::STR_MENU_BTN_ACTIONS)));
 
+#if CP_TOUCH_UI
+  // The same thing for touch: where the zones are and what each currently does. Sits beside
+  // the gesture rows it summarises. Inside the CP_TOUCH_UI bracket with every other touch-UI
+  // row, so a non-touch build does not construct a SettingInfo it will only delete again --
+  // the runtime requiring() below is for a multi-board binary, not a substitute for the gate.
+  addToMoved(controlsSettings,
+             std::move(SettingInfo::Action(StrId::STR_GEST_ACTIONS_OVERVIEW, SettingAction::GestureActionsOverview)
+                           .withSubcategory(StrId::STR_MENU_GESTURE_ACTIONS)
+                           .requiring(SettingRequires::TouchPanel)));
+#endif  // CP_TOUCH_UI
+
   addToMoved(readerSettings, SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
 
   addToMoved(systemSettings, SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
@@ -209,6 +221,7 @@ void SettingsActivity::loop() {
   // activating the wrong row can be expensive to undo; switching to the wrong
   // category costs one more tap on the right one, and demanding two taps to
   // reach a tab that is already visible is exactly the awkwardness this removes.
+#if CP_TOUCH_UI
   if (mappedInput.hasTouch() && TapTargets::tabBar().hasTargets()) {
     int tx = 0;
     int ty = 0;
@@ -230,6 +243,7 @@ void SettingsActivity::loop() {
       }
     }
   }
+#endif  // CP_TOUCH_UI
 
   // Handle actions with early return
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {

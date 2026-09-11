@@ -75,8 +75,7 @@ bool HalStorage::begin() {
   {
     // SD init drives the shared bus, so it must be serialized against the
     // display too when this profile uses SPI. Native SDMMC is independent.
-    const auto spiLock =
-        sdSharesDisplaySpiBus() ? std::optional<HalSpiBus::Lock>(std::in_place) : std::nullopt;
+    const auto spiLock = sdSharesDisplaySpiBus() ? std::optional<HalSpiBus::Lock>(std::in_place) : std::nullopt;
     if (!SDCard.begin()) return false;
   }
   FsDateTime::setCallback([](uint16_t* date, uint16_t* time) {

@@ -31,15 +31,32 @@ namespace TouchGestures {
 enum class Gesture : uint8_t {
   SwipeLeft,
   SwipeRight,
-  // Vertical swipes are split by the half of the screen they START in, the way a
-  // phone splits the notification shade from quick settings: down the left half
-  // reaches the menu, down the right half reaches the light. Horizontal swipes
-  // are not split — they are the page turn in Swipe mode, and a page turn does
-  // not care which half of the page it began on.
+  // Vertical swipes are anchored to the left/right EDGE COLUMN they START in —
+  // the left column adjusts brightness, the right one warmth — and exclude the
+  // top and bottom bands, which belong to the light panel and the reader menu.
+  // TapZones::edgeColumnFor() owns that geometry and explains the exclusion.
+  // The names keep their original "Left"/"Right" spelling: a column IS on the
+  // left, so renaming the enum, the settings fields and the JSON keys would
+  // ripple through BINDINGS and ACTION_FIELDS for no behavioural gain.
+  //
+  // Horizontal swipes are not split — they are the page turn in Swipe mode, and
+  // a page turn does not care where on the page it began.
   SwipeUpLeft,
   SwipeUpRight,
   SwipeDownLeft,
   SwipeDownRight,
+  // A horizontal swipe that STARTS in one of the page-turn thirds, whichever way it
+  // travels. Those thirds already MEAN back and forward (a tap there turns one page),
+  // so a flick in the same zone jumping ten is one rule rather than two. KOReader
+  // ships the same +/-10 magnitude on double_tap_left_side / double_tap_right_side;
+  // the trigger differs because this firmware has no double-tap detector.
+  //
+  // Direction is NOT part of the test, and that is a device-driven correction: the
+  // first version required travelling outward, which was reported working about one
+  // attempt in ten on a T5S3's left edge. See GestureEventManager for why -- an
+  // outward swipe has to find 60 px of travel hard against the bezel.
+  SwipeInLeftZone,
+  SwipeInRightZone,
   TapLeft,
   TapRight,
   TapCentre,
@@ -50,6 +67,17 @@ enum class Gesture : uint8_t {
   LongTapCentre,
   LongTapTop,
   LongTapBottom,
+  // The four corners, long press only. Resolved BEFORE the five zones above, since
+  // a corner sits inside Left or Right — see longTapGestureForPoint(). Taps never
+  // consult them, so no tap changes meaning and the page-turn thirds are intact.
+  //
+  // Only the top-left ships bound (the light toggle). KOReader ships every corner
+  // HOLD as nil and the other three have no obvious job here, so they are offered
+  // rather than assigned.
+  LongTapTopLeft,
+  LongTapTopRight,
+  LongTapBottomLeft,
+  LongTapBottomRight,
   PinchIn,
   PinchOut,
   RotateClockwise,
@@ -87,6 +115,10 @@ inline constexpr Binding BINDINGS[] = {
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownLeft", false},
     {Gesture::SwipeDownRight, &CrossPointSettings::gestSwipeDownRight, StrId::STR_GEST_SWIPE_DOWN_RIGHT,
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownRight", false},
+    {Gesture::SwipeInLeftZone, &CrossPointSettings::gestSwipeInLeftZone, StrId::STR_GEST_SWIPE_IN_LEFT_ZONE,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeInLeftZone", false},
+    {Gesture::SwipeInRightZone, &CrossPointSettings::gestSwipeInRightZone, StrId::STR_GEST_SWIPE_IN_RIGHT_ZONE,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeInRightZone", false},
     {Gesture::TapLeft, &CrossPointSettings::gestTapLeft, StrId::STR_GEST_TAP_LEFT, StrId::STR_GEST_TAP_GROUP,
      "gestTapLeft", false},
     {Gesture::TapRight, &CrossPointSettings::gestTapRight, StrId::STR_GEST_TAP_RIGHT, StrId::STR_GEST_TAP_GROUP,
@@ -107,6 +139,14 @@ inline constexpr Binding BINDINGS[] = {
      StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTop", false},
     {Gesture::LongTapBottom, &CrossPointSettings::gestLongTapBottom, StrId::STR_GEST_LONG_TAP_BOTTOM,
      StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottom", false},
+    {Gesture::LongTapTopLeft, &CrossPointSettings::gestLongTapTopLeft, StrId::STR_GEST_LONG_TAP_TOP_LEFT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTopLeft", false},
+    {Gesture::LongTapTopRight, &CrossPointSettings::gestLongTapTopRight, StrId::STR_GEST_LONG_TAP_TOP_RIGHT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTopRight", false},
+    {Gesture::LongTapBottomLeft, &CrossPointSettings::gestLongTapBottomLeft, StrId::STR_GEST_LONG_TAP_BOTTOM_LEFT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottomLeft", false},
+    {Gesture::LongTapBottomRight, &CrossPointSettings::gestLongTapBottomRight, StrId::STR_GEST_LONG_TAP_BOTTOM_RIGHT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottomRight", false},
     {Gesture::PinchIn, &CrossPointSettings::gestPinchIn, StrId::STR_GEST_PINCH_IN, StrId::STR_GEST_MULTI_GROUP,
      "gestPinchIn", true},
     {Gesture::PinchOut, &CrossPointSettings::gestPinchOut, StrId::STR_GEST_PINCH_OUT, StrId::STR_GEST_MULTI_GROUP,
@@ -125,10 +165,32 @@ static_assert(sizeof(BINDINGS) / sizeof(BINDINGS[0]) == static_cast<size_t>(Gest
 // enum automatically.
 inline const char* nameOf(const Gesture gesture) {
   static constexpr const char* kNames[] = {
-      "swipe-left",       "swipe-right",  "swipe-up-left", "swipe-up-right", "swipe-down-left",
-      "swipe-down-right", "tap-left",     "tap-right",     "tap-centre",     "tap-top",
-      "tap-bottom",       "longtap-left", "longtap-right", "longtap-centre", "longtap-top",
-      "longtap-bottom",   "pinch-in",     "pinch-out",     "rotate-cw",      "rotate-ccw",
+      "swipe-left",
+      "swipe-right",
+      "swipe-up-left",
+      "swipe-up-right",
+      "swipe-down-left",
+      "swipe-down-right",
+      "swipe-in-left-zone",
+      "swipe-in-right-zone",
+      "tap-left",
+      "tap-right",
+      "tap-centre",
+      "tap-top",
+      "tap-bottom",
+      "longtap-left",
+      "longtap-right",
+      "longtap-centre",
+      "longtap-top",
+      "longtap-bottom",
+      "longtap-top-left",
+      "longtap-top-right",
+      "longtap-bottom-left",
+      "longtap-bottom-right",
+      "pinch-in",
+      "pinch-out",
+      "rotate-cw",
+      "rotate-ccw",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Gesture::Count),
                 "every Gesture needs a trace name");
@@ -162,14 +224,26 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::SwipeRight:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
-    case Gesture::SwipeDownLeft:
-    case Gesture::SwipeDownRight:
-      // Left alone, a downward swipe that starts at the TOP EDGE opens the
-      // reader menu, on either half — that is the reader's own built-in
-      // (isTouchMenuGesture), and it is narrower than these rows, which fire
-      // anywhere in their half. Only the reading controls gate it; unlike the
-      // centre tap it does not consult tapForReaderMenu.
-      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeInLeftZone:
+      // Left alone these are the plain page-turn swipe, because that is what the
+      // contact falls through to: an unbound gesture is never claimed, so the
+      // reader's own detectTouchPageTurn sees it as an ordinary horizontal swipe.
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeInRightZone:
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    // SwipeDownLeft/SwipeDownRight now fall through to NOTHING below, and that is a
+    // correction rather than a regression. They used to claim the reader menu, because a
+    // down-swipe starting at the TOP EDGE opened it and these rows fired anywhere in
+    // their half — so the row overlapped the built-in and had to name it.
+    //
+    // Since they are anchored to the edge COLUMNS, which exclude the top band
+    // (TapZones::edgeColumnFor), they no longer overlap it at all: a top-edge down-swipe
+    // is the reader's own isTouchMenuGesture and never reaches this table.
+    //
+    // That also fixes a live bug. The shipped gestSwipeDownRight = Light Dimmer used to
+    // claim a top-edge down-swipe in the right half and suppressTouchContact() it, which
+    // zeroes the snapshot wasSwipe() reads — so the menu swipe silently did nothing on
+    // half the screen. It works on both halves again.
     case Gesture::TapLeft:
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_PREV_PAGE;
@@ -177,8 +251,7 @@ inline StrId builtinLabelFor(const Gesture gesture) {
       if (!tapTurnsPages) return StrId::STR_BTN_DEF_NOTHING;
       return invertedTaps ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NEXT_PAGE;
     case Gesture::TapCentre:
-      return (readerTouchOn && SETTINGS.tapForReaderMenu != 0) ? StrId::STR_BTN_DEF_READER_MENU
-                                                               : StrId::STR_BTN_DEF_NOTHING;
+      return readerTouchOn ? StrId::STR_BTN_DEF_READER_MENU : StrId::STR_BTN_DEF_NOTHING;
     default:
       // Everything else was dead before gestures existed, so leaving it alone
       // genuinely does nothing.
@@ -231,6 +304,35 @@ inline Gesture longTapGestureFor(const TapZones::Zone zone) {
       break;
   }
   return Gesture::LongTapCentre;
+}
+
+inline Gesture longTapCornerGestureFor(const TapZones::Corner corner) {
+  switch (corner) {
+    case TapZones::Corner::TopLeft:
+      return Gesture::LongTapTopLeft;
+    case TapZones::Corner::TopRight:
+      return Gesture::LongTapTopRight;
+    case TapZones::Corner::BottomLeft:
+      return Gesture::LongTapBottomLeft;
+    case TapZones::Corner::BottomRight:
+      return Gesture::LongTapBottomRight;
+    case TapZones::Corner::None:
+      break;
+  }
+  return Gesture::LongTapCentre;  // unreachable: guarded by the caller
+}
+
+// A long press resolved against the whole frame: the corner it landed in, or failing
+// that the zone. Corners are tested FIRST because a corner sits inside Left or Right,
+// so asking the other way round would never reach one.
+//
+// Stated here rather than in GestureEventManager so the precedence lives next to the
+// two tables it arbitrates between, and so a caller cannot accidentally ask for the
+// zone alone and lose every corner.
+inline Gesture longTapGestureForPoint(const int x, const int y, const int width, const int height) {
+  const TapZones::Corner corner = TapZones::cornerFor(x, y, width, height);
+  if (corner != TapZones::Corner::None) return longTapCornerGestureFor(corner);
+  return longTapGestureFor(TapZones::zoneFor(x, y, width, height));
 }
 
 }  // namespace TouchGestures

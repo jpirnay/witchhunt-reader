@@ -2007,25 +2007,25 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         }
       }
       if (p) {
-          std::string fullText;
-          for (const auto& el : p->elements) {
-            if (el->getTag() == TAG_PageLine) {
-              const auto& line = static_cast<const PageLine&>(*el);
-              if (line.getBlock()) {
-                const auto& block = *line.getBlock();
-                const uint16_t wordCount = block.wordCount();
-                for (uint16_t i = 0; i < wordCount; ++i) {
-                  if (!fullText.empty()) fullText += " ";
-                  fullText += block.wordText(i);
-                }
+        std::string fullText;
+        for (const auto& el : p->elements) {
+          if (el->getTag() == TAG_PageLine) {
+            const auto& line = static_cast<const PageLine&>(*el);
+            if (line.getBlock()) {
+              const auto& block = *line.getBlock();
+              const uint16_t wordCount = block.wordCount();
+              for (uint16_t i = 0; i < wordCount; ++i) {
+                if (!fullText.empty()) fullText += " ";
+                fullText += block.wordText(i);
               }
             }
           }
-          if (!fullText.empty()) {
-            startActivityForResult(std::make_unique<QrDisplayActivity>(renderer, mappedInput, fullText),
-                                   [this](const ActivityResult& result) {});
-            break;
-          }
+        }
+        if (!fullText.empty()) {
+          startActivityForResult(std::make_unique<QrDisplayActivity>(renderer, mappedInput, fullText),
+                                 [this](const ActivityResult& result) {});
+          break;
+        }
       }
       // If no text or page loading failed, just close menu
       requestUpdate();
@@ -5259,6 +5259,13 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
 // on a full page of text there is not; and the jump is the cheapest action in the reader to undo,
 // because coming back is already a first-class gesture.
 bool EpubReaderActivity::handleLinkTouch() {
+#if !CP_TOUCH_UI
+  // Unreachable without a digitiser, and cppcheck proves it: readerLinks().hitTest() is a
+  // literal -1 in the stub, so it reads the guarded currentPageFootnotes[link] below as an
+  // index of -1 and reports it at HIGH severity. The guard is correct -- the path is simply
+  // dead -- so the honest answer is to not compile it.
+  return false;
+#else
   if (!mappedInput.hasTouch() || !SETTINGS.touchReaderControls) return false;
   if (!TapTargets::readerLinks().hasTargets()) return false;
 
@@ -5274,6 +5281,7 @@ bool EpubReaderActivity::handleLinkTouch() {
   LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
   navigateToHref(currentPageFootnotes[link].href, true);
   return true;
+#endif  // CP_TOUCH_UI
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -5636,15 +5644,13 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       }
       requestUpdate();
       break;
-    case BA::BTN_STAR_PAGE:
-      {
-        RenderLock lock(*this);
-        if (section) {
-          bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-          requestUpdate();
-        }
+    case BA::BTN_STAR_PAGE: {
+      RenderLock lock(*this);
+      if (section) {
+        bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+        requestUpdate();
       }
-      break;
+    } break;
     case BA::BTN_DICTIONARY:
       openDictionary();
       break;

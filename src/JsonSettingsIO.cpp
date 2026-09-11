@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
 #include "TouchGestures.h"
+#include "TouchUi.h"
 #include "WifiCredentialStore.h"
 #include "util/UrlUtils.h"
 
@@ -326,11 +327,20 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // which is exactly the case for every file written before the stamp existed.
   const bool staleGestureDefaults =
       (doc["gestureDefaultsV"] | 0) < static_cast<int>(CrossPointSettings::GESTURE_DEFAULTS_VERSION);
+  // Cannot match on a board with no digitiser: the loop below walks the FILTERED
+  // settings list, which carries no gesture rows there, so no gesture key ever
+  // reaches this. Gated rather than left to be evaluated and always fail, because
+  // the BINDINGS table it walks is 400 bytes of .rodata that nothing else in such
+  // a build refers to.
   const auto isGestureKey = [](const char* key) {
+#if CP_TOUCH_UI
     if (key == nullptr) return false;
     for (const auto& binding : TouchGestures::BINDINGS) {
       if (std::strcmp(key, binding.key) == 0) return true;
     }
+#else
+    (void)key;
+#endif
     return false;
   };
 

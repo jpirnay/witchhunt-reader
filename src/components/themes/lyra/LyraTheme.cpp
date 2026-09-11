@@ -34,6 +34,7 @@
 #include "components/icons/weather32.h"
 #include "components/icons/wifi.h"
 #include "components/themes/ButtonHintLayout.h"
+#include "components/themes/ListScrollBar.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
@@ -335,6 +336,11 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     renderer.drawLine(scrollBarX, rect.y, scrollBarX, rect.y + scrollAreaHeight, true);
     renderer.fillRect(scrollBarX - LyraMetrics::values.scrollBarWidth, scrollBarY, LyraMetrics::values.scrollBarWidth,
                       scrollBarHeight, true);
+    // See BaseTheme::drawWrappedList: recorded from the same values the draw used, through
+    // the shared widener, so the two themes cannot disagree about the tappable strip.
+    ListScrollBar::record(ListScrollBar::fromPaintedBar(scrollBarX - LyraMetrics::values.scrollBarWidth,
+                                                        LyraMetrics::values.scrollBarWidth, rect.x, rect.y,
+                                                        scrollAreaHeight, scrollBarY, scrollBarHeight));
   }
 
   bool selectedIsSeparator = false;

@@ -122,7 +122,6 @@ class MappedInputManager {
   bool hasPendingInput() const { return gpio.hasPendingInput(); }
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
-  const GfxRenderer& getRenderer() const { return renderer; }
 
   // --- Touch ----------------------------------------------------------------
   // Everything here reports LOGICAL screen pixels, already mapped through the
@@ -146,7 +145,6 @@ class MappedInputManager {
   // reader menu style, whether to draw a hint strip at all), and a board does not
   // stop having a digitiser because its owner turned touch navigation off.
   void setTouchEventsEnabled(bool enabled);
-  [[nodiscard]] bool touchEventsEnabled() const { return touchEventsEnabled_; }
 
   bool wasScreenTapped(int& x, int& y) const;
   // Same, resolved against an EXPLICIT orientation instead of the live one. For chrome that
@@ -157,17 +155,6 @@ class MappedInputManager {
   // two enums are static_asserted to agree in GfxRenderer.cpp.
   bool wasScreenTappedIn(touchtransform::Orientation orientation, int& x, int& y) const;
   bool wasScreenTouchDown(int& x, int& y) const;
-  // One-shot long-press from the SDK classifier, fired WHILE the finger is
-  // still down. Consuming it suppresses the rest of the contact — its continued
-  // hold and its release edge — so the ensuing lift can't also tap-dismiss
-  // whatever the long-press opened. The SDK owns that latch and self-clears it.
-  bool wasScreenLongPress(int& x, int& y) const;
-  // Same event, WITHOUT the suppression — for a caller that must decide whether
-  // the long press is one it wants before claiming the contact. Pair it with
-  // suppressTouchContact() when the answer is yes; leave the contact alone when
-  // it is no, and the lift will go on to be a tap as usual.
-  bool peekScreenLongPress(int& x, int& y) const;
-  // Same, against an explicit orientation — see wasScreenTappedIn().
   bool peekScreenLongPressIn(touchtransform::Orientation orientation, int& x, int& y) const;
   // Ignore the rest of this contact — its continued hold and its release edge.
   // For a caller that has acted on a tap or swipe and must stop the same contact
@@ -182,30 +169,19 @@ class MappedInputManager {
   // Duration of the contact just ended, latched at release. Readers use it to
   // tell a tap from a deliberate hold on the same zone.
   unsigned long lastTouchHeldMs() const;
-  bool wasTapInRect(int x, int y, int width, int height) const;
 
-  // Combined touch interaction for a band of equal rows with caller-supplied
-  // geometry — the shared hit-test for lists the theme helpers do not cover
-  // (custom row heights, option prompts, menus). Down = a held tap-candidate is
-  // on a row (move the selection highlight); Tap = a tap released on one
-  // (activate). rowHeight limits the hit to the top rowHeight px of each step
-  // (0 = the full step, no gap band).
-  enum class RowTouch : uint8_t { None, Down, Tap };
-  RowTouch rowTouch(int& row, int top, int rowStep, int rowCount, int xStart = 0, int xEnd = INT32_MAX,
-                    int rowHeight = 0) const;
-  // Horizontal variant for side-by-side button pairs (confirmation prompts).
-  RowTouch colTouch(int& col, int left, int colStep, int colCount, int yStart, int yEnd, int colWidth = 0) const;
-
-  // The same interaction against the list the themes actually painted, rather than against
+  // Touch interaction against the list the themes actually painted, rather than against
   // geometry the caller re-derives. `index` is an ITEM index, already resolved through the
   // page or scroll offset, so a caller assigns it straight to its selection.
   //
-  // Prefer this to rowTouch() for anything drawn by GUI.drawList: rowTouch cannot express a
-  // wrapped list (its rows differ in height), and a screen computing its own band is a second
-  // copy of the theme's layout rule. rowTouch stays for the bands no theme draws — option
-  // prompts, custom row heights, menus.
+  // Down = a held tap-candidate is on a row (move the selection highlight); Tap = a tap
+  // released on one (activate). Returns None when no list was recorded, so it is inert on
+  // every screen that draws none.
   //
-  // Returns None when no list was recorded, so it is inert on every screen that draws none.
+  // This is the only band hit-test left. There were once caller-supplied rowTouch() and
+  // colTouch() variants for "the bands no theme draws" -- no theme ever drew one and nothing
+  // ever called them, so they went with the rest of the unwired port.
+  enum class RowTouch : uint8_t { None, Down, Tap };
   RowTouch listTouch(int& index) const;
 
   SwipeDir wasSwipe() const;
@@ -240,14 +216,20 @@ class MappedInputManager {
   void flushTouchEvents() const { gpio.flushTouchEvents(); }
   // Back = left-to-right swipe anchored at the left edge. Public so swipe-mode
   // page turns (reader) can exclude it from a plain SwipeDir::Right.
-  bool wasBackGesture() const;
   // Home-key boards (X4 Pro) exit with a short Home-key tap; their bottom-edge
   // swipe is intentionally unused. Other touch boards keep the bottom-edge
   // gesture.
   bool wasHomeGesture() const;
-  // A Home-key hold runs the configured long-press action in the reader.
-  bool wasHomeKeyHold() const;
+  // NOTE there is deliberately no wasHomeKeyHold(). A Home-key HOLD is already routed at the
+  // HAL layer -- HalGPIO::begin() maps the capacitive key to the nav buttons the board
+  // physically lacks, tap->CONFIRM and hold->BACK -- so it arrives as an ordinary Back press
+  // and needs no gesture query. The accessor that used to be here had no callers because
+  // there was nothing for it to do.
   bool wasMenuGesture() const;
+  // The reading-light panel gesture: the top edge pulled down, on boards that have a
+  // light. Reports nothing on an unlit board, where the top edge is the reader menu
+  // instead — see the definition for why the two swap per board.
+  bool wasLightPanelGesture() const;
 
   // Front-strip hints for a screen that labels only the front buttons. `previous`/`next` name the
   // movement the strip performs — which physical pair that is, and in which order, follows the

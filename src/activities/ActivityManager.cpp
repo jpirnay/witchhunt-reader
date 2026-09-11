@@ -14,10 +14,12 @@
 #include "CrossPointState.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
+#include "SettingsList.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/themes/ButtonHintStrip.h"
+#include "components/themes/ListScrollBar.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "home/FileBrowserActivity.h"
@@ -33,6 +35,7 @@
 #include "settings/KOReaderSettingsActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "settings/SettingsSubmenuActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "weather/WeatherActivity.h"
 
@@ -141,6 +144,7 @@ void ActivityManager::renderTaskLoop() {
       // last frame" is a property of the render pass, not something 26 screens should each
       // remember.
       ListTouchBand::invalidate();
+      ListScrollBar::invalidate();
       TapTargets::homeCovers().invalidate();
       TapTargets::homeMenu().invalidate();
       TapTargets::tabBar().invalidate();
@@ -248,9 +252,17 @@ void ActivityManager::loop() {
     // the same contact when the travel sits near the threshold. Resolving the swipe first (it
     // suppresses the contact when it claims one) stops a marginal drag from BOTH moving the
     // selection and paging the list. Same ordering, and the same reason, as GestureEventManager.
+#if CP_TOUCH_UI
+    // Before the list dispatchers: a top-edge pull is an edge gesture, and a list occupying
+    // the whole screen would otherwise read it as a page-down first.
+    dispatchLightPanelGesture();
     dispatchListSwipe();
+    // Before dispatchListTap(), which consumes the tap: a tap on the bar is a page turn, not
+    // a hit on whatever row happens to sit beside it.
+    dispatchScrollBarTap();
     dispatchListTap();
     dispatchHintStripTap();
+#endif
   }
 
   if (SETTINGS.useClock && HalClock::isSynced()) {
@@ -626,6 +638,66 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
   }
 }
 
+#if CP_TOUCH_UI
+
+void ActivityManager::dispatchLightPanelGesture() {
+  if (!mappedInput.hasTouch()) return;
+  // Inert on an unlit board: wasLightPanelGesture() already answers false there, because
+  // the top edge is the reader menu on those and the two must not compete.
+  if (!mappedInput.wasLightPanelGesture()) return;
+  if (currentActivity == nullptr) return;
+
+  // Don't stack a panel on top of itself, or on a screen that owns the whole surface for
+  // text entry -- a keyboard's own rows would be behind it and a swipe there is likelier to
+  // be a mis-stroke than a request for the light.
+  const std::string& name = currentActivity->getName();
+  if (name == "SettingsSubmenu" || name == "KeyboardEntry") return;
+
+  // The light submenu already exists, complete with the on/off toggle, both pickers and
+  // their board gating (requiring(ReadingLight) / requiring(WarmLight)). Borrowing it beats
+  // a second panel that would have to be kept in step with it -- and the toggle being its
+  // FIRST row is what makes "swipe, tap" reach on/off.
+  std::vector<SettingInfo> lightItems;
+  for (const auto& setting : getSettingsList()) {
+    if (setting.submenu == StrId::STR_MENU_DISP_LIGHT) lightItems.push_back(setting);
+  }
+  if (lightItems.empty()) return;
+
+  mappedInput.suppressTouchContact();
+  pushActivity(
+      std::make_unique<SettingsSubmenuActivity>(renderer, mappedInput, StrId::STR_MENU_DISP_LIGHT, lightItems));
+  LOG_DBG("TCH", "Top-edge swipe -> reading light");
+}
+
+// A tap beside the scroll-bar thumb pages the list: above it back, below it forward.
+//
+// The discoverable twin of dispatchListSwipe() below. That one works anywhere on a list but
+// nothing on screen suggests it exists; the bar is painted, so this is the version someone
+// can find. It matters most on the T5S3 and X4 Pro, which have a Down key and no Up key --
+// paging BACK has no physical button on either board.
+//
+// Synthesized rather than handled, exactly as the swipe is: logical Left/Right are already
+// the list page buttons across the firmware, so no screen learns a new verb.
+void ActivityManager::dispatchScrollBarTap() {
+  if (!mappedInput.hasTouch()) return;
+  // Only the two wrapped-list draws paint a bar; the fixed-height drawList marks overflow
+  // with arrows instead, so there is nothing to tap there and the swipe remains the route.
+  if (!ListScrollBar::hasBar()) return;
+
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTapped(x, y)) return;
+
+  const ListScrollBar::Hit hit = ListScrollBar::hitTest(x, y);
+  if (hit == ListScrollBar::Hit::None) return;
+
+  const auto direction = hit == ListScrollBar::Hit::PageForward ? MappedInputManager::Direction::Right
+                                                                : MappedInputManager::Direction::Left;
+  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::buttonFor(direction)));
+  LOG_DBG("TCH", "Scroll bar tap at (%d,%d) -> page %s", x, y,
+          hit == ListScrollBar::Hit::PageForward ? "next" : "prev");
+}
+
 void ActivityManager::dispatchListTap() {
   if (!mappedInput.hasTouch()) return;
 
@@ -804,6 +876,8 @@ void ActivityManager::dispatchHintStripTap() {
   mappedInput.injectRawPress(static_cast<uint8_t>(hint));
   LOG_DBG("TCH", "Hint strip tap at (%d,%d) -> raw button %d", x, y, hint);
 }
+
+#endif  // CP_TOUCH_UI
 
 void ActivityManager::requestUpdate(bool immediate) {
   if (immediate) {

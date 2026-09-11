@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "TouchUi.h"
+
 // Where the four bottom button hints actually landed, so a tap can be matched against the
 // strip that is really on screen.
 //
@@ -41,6 +43,7 @@ struct Strip {
 // losing a read to a concurrent write costs nothing -- a failed snapshot reads as "no strip
 // this tick" and the tap falls through to whoever else wants it, which is the safe way to
 // be wrong.
+#if CP_TOUCH_UI
 namespace detail {
 inline Strip& storage() {
   static Strip s;
@@ -101,5 +104,19 @@ inline int hitTest(const int px, const int py) {
   if (!snapshot(s)) return -1;
   return hitTestIn(s, px, py);
 }
+
+#else  // !CP_TOUCH_UI
+
+// Strip itself stays defined above: the themes still PAINT the hint strip on a
+// board with no digitiser, and construct one to do it. What goes is the published
+// copy -- which nothing there hit-tests -- and the seqlock that guarded it.
+inline void record(const Strip&) {}
+inline void invalidate() {}
+inline bool snapshot(Strip&) { return false; }
+inline bool hasStrip() { return false; }
+inline int hitTestIn(const Strip&, int, int) { return -1; }
+inline int hitTest(int, int) { return -1; }
+
+#endif  // CP_TOUCH_UI
 
 }  // namespace ButtonHintStrip

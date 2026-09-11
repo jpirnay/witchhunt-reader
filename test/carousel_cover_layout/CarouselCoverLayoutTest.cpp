@@ -132,3 +132,65 @@ TEST(CarouselCoverLayout, TilesSitWhereTheThemeDrawsThem) {
   EXPECT_EQ(s.left.x + s.left.w, s.centre.x + kDims.overlap);
   EXPECT_EQ(s.right.x, s.centre.x + s.centre.w - kDims.overlap);
 }
+
+// --- Clipping to the screen ---------------------------------------------------
+// The device bug this pins: the left tile's x is `centreX - sideW + overlap`, which on a 540 px
+// portrait panel is -40. The tile is therefore DRAWN clipped, but the recorded tap target kept
+// its full unclipped width -- so a press in the empty margin beside a partly-drawn cover opened
+// a book that was not under the finger. Reported on a LilyGo T5S3.
+
+TEST(CarouselCoverLayout, TheLeftTileHangsOffANarrowScreen) {
+  // Not an assertion about desired behaviour -- a statement of the geometry that made the bug,
+  // so the numbers below are anchored to something real.
+  constexpr int narrowW = 540;
+  const auto s = CarouselCoverLayout::compute(kDims, narrowW, kRectY, 1, 4);
+  EXPECT_EQ(s.centre.x, (narrowW - kDims.centreW) / 2);  // 100
+  EXPECT_LT(s.left.x, 0) << "the left tile starts off-screen on this panel";
+  EXPECT_EQ(s.left.x, -40);
+}
+
+TEST(CarouselCoverLayout, ClampingRemovesTheOffScreenPart) {
+  constexpr int narrowW = 540;
+  constexpr int screenH = 960;
+  const auto s = CarouselCoverLayout::compute(kDims, narrowW, kRectY, 1, 4);
+  const auto clipped = CarouselCoverLayout::clampToScreen(s.left, narrowW, screenH);
+
+  EXPECT_EQ(clipped.x, 0);
+  // The visible width is what was on-screen: -40 + 200 = 160.
+  EXPECT_EQ(clipped.w, s.left.x + s.left.w);
+  EXPECT_EQ(clipped.bookIndex, s.left.bookIndex) << "clipping must not change which book it is";
+  // Vertical extent is untouched here: the tile fits.
+  EXPECT_EQ(clipped.y, s.left.y);
+  EXPECT_EQ(clipped.h, s.left.h);
+}
+
+TEST(CarouselCoverLayout, ClampingIsIdentityForAnOnScreenTile) {
+  const auto s = CarouselCoverLayout::compute(kDims, kScreenW, kRectY, 1, 4);
+  const auto clipped = CarouselCoverLayout::clampToScreen(s.centre, kScreenW, 800);
+  EXPECT_EQ(clipped.x, s.centre.x);
+  EXPECT_EQ(clipped.y, s.centre.y);
+  EXPECT_EQ(clipped.w, s.centre.w);
+  EXPECT_EQ(clipped.h, s.centre.h);
+}
+
+TEST(CarouselCoverLayout, ATileEntirelyOffScreenClampsToNothing) {
+  // w/h 0 is the signal the recorder and hitTest both treat as "not there", so a slot that is
+  // completely off-screen can never be pressed.
+  const CarouselCoverLayout::Slot offLeft{/*bookIndex=*/3, /*x=*/-300, /*y=*/100, /*w=*/200, /*h=*/390};
+  const auto clipped = CarouselCoverLayout::clampToScreen(offLeft, 540, 960);
+  EXPECT_EQ(clipped.w, 0);
+
+  CarouselCoverLayout::Slots slots;
+  slots.centre = clipped;
+  EXPECT_EQ(CarouselCoverLayout::hitTest(slots, 0, 200), -1) << "a zero-width slot must never hit";
+}
+
+TEST(CarouselCoverLayout, ClampingAlsoTrimsTheBottom) {
+  // The tall centre tile overruns a short panel; the part below the screen must not be tappable
+  // either, for the same reason as the left margin.
+  const auto s = CarouselCoverLayout::compute(kDims, kScreenW, kRectY, 1, 4);
+  constexpr int shortH = 400;
+  const auto clipped = CarouselCoverLayout::clampToScreen(s.centre, kScreenW, shortH);
+  EXPECT_EQ(clipped.y, s.centre.y);
+  EXPECT_EQ(clipped.y + clipped.h, shortH);
+}

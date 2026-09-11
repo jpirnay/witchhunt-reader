@@ -2,10 +2,22 @@
 
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
+#include "TouchUi.h"
 #include "components/themes/ListTouchBand.h"
+
+// CP_TOUCH_UI is asserted on the command line rather than derived, because the
+// dependency-free recorder headers it guards cannot reach BoardConfig.h without
+// dragging Arduino.h into the host tests -- see TouchUi.h. This TU is the one place
+// where both it and the SDK's own capability are in scope, so it is where the two
+// are held to each other. Getting it wrong in the permissive direction only wastes
+// flash; getting it wrong the other way ships a device whose screen does nothing,
+// which is not a failure a build should be able to hide.
+static_assert(CP_TOUCH_UI == (FREEINK_CAP_TOUCH ? 1 : 0),
+              "CP_TOUCH_UI (platformio.ini) disagrees with FREEINK_CAP_TOUCH (BoardConfig)");
 
 namespace fui = freeink::ui;
 
@@ -272,25 +284,6 @@ bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   return true;
 }
 
-bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
-  float nx = 0.0f;
-  float ny = 0.0f;
-  if (!rawLongPress(nx, ny)) return false;
-  // Consuming the long-press implies acting on it: suppress the rest of the
-  // contact so the finger lift can't also tap whatever the action opened.
-  gpio.suppressTouchContact();
-  renderer.tapToLogical(nx, ny, x, y);
-  return true;
-}
-
-bool MappedInputManager::peekScreenLongPress(int& x, int& y) const {
-  float nx = 0.0f;
-  float ny = 0.0f;
-  if (!rawLongPress(nx, ny)) return false;
-  renderer.tapToLogical(nx, ny, x, y);
-  return true;
-}
-
 bool MappedInputManager::peekScreenLongPressIn(const touchtransform::Orientation orientation, int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
@@ -315,42 +308,14 @@ bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); 
 
 unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
 
-bool MappedInputManager::wasTapInRect(const int x, const int y, const int width, const int height) const {
-  int tx = 0;
-  int ty = 0;
-  return wasScreenTapped(tx, ty) && tx >= x && tx < x + width && ty >= y && ty < y + height;
-}
-
-MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int top, const int rowStep,
-                                                          const int rowCount, const int xStart, const int xEnd,
-                                                          const int rowHeight) const {
-  // Rows band along y, bounded on x. Arithmetic lives in touchtransform so it
-  // can be host-tested (see test/touch_transform).
-  const auto hit = [&](const int x, const int y) {
-    return touchtransform::bandHit(y, x, top, rowStep, rowCount, xStart, xEnd, rowHeight, row);
-  };
-  int x = 0;
-  int y = 0;
-  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
-  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
-  return RowTouch::None;
-}
-
-MappedInputManager::RowTouch MappedInputManager::colTouch(int& col, const int left, const int colStep,
-                                                          const int colCount, const int yStart, const int yEnd,
-                                                          const int colWidth) const {
-  // Columns are the same test with the axes swapped: band along x, bounded on y.
-  const auto hit = [&](const int x, const int y) {
-    return touchtransform::bandHit(x, y, left, colStep, colCount, yStart, yEnd, colWidth, col);
-  };
-  int x = 0;
-  int y = 0;
-  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
-  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
-  return RowTouch::None;
-}
-
 MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
+#if !CP_TOUCH_UI
+  // No digitiser: ListTouchBand's stub hit test is a literal -1, so everything below is
+  // unreachable. Returned early rather than left for the optimiser, because cppcheck reads the
+  // constant and reports the dependent conditions -- correctly -- as always-true.
+  (void)index;
+  return RowTouch::None;
+#else
   // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
   // orientation the renderer is in rather than forcing Portrait, so that is the frame its rows
   // were recorded in. See ListTouchBand.h.
@@ -365,6 +330,7 @@ MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
   if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
   if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
   return RowTouch::None;
+#endif  // CP_TOUCH_UI
 }
 
 MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {
@@ -449,26 +415,37 @@ bool MappedInputManager::wasEdgeSwipe(const freeink::ui::ScreenEdge edge) const 
                         renderer.getScreenHeight(orientation));
 }
 
-bool MappedInputManager::wasBackGesture() const {
-  // Edge-anchored so mid-screen horizontal swipes stay available to activities
-  // that consume SwipeDir::Left/Right (percent selection, image viewer).
-  return wasEdgeSwipe(fui::ScreenEdge::Left);
-}
-
 bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Top); }
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
-// Stays on the top edge, on every board. An earlier revision moved it to the
-// bottom on boards with a light, because the shipped defaults then bound BOTH
-// vertical directions to brightness and the top edge was contended. Splitting
-// the vertical swipes by screen half removed that contention entirely — the menu
-// and the light now share the downward swipe, one half each — so the menu stays
-// where it has always been.
-bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
+// Which edge the reader menu answers to depends on whether the board has a light,
+// because a lit board has one more thing to reach than edges to put it on.
+//
+//   lit board    bottom edge, swiped UP. The top edge carries the light panel, the
+//                way Kindle's quick settings and CrossInk's frontlight panel both
+//                pull down from the top. Swiping a menu up from the bottom is the
+//                bottom-sheet gesture every phone has.
+//   unlit board  top edge, swiped DOWN — where it has always been, because with no
+//                panel to place there the top edge is free.
+//
+// CrossInk splits it by board for exactly this reason, and per-board is better than
+// a compromise both boards live with. Asked of the HAL rather than BoardConfig: the
+// EEGO A4's I2C light only reports present() after begin() gets an ACK, so the
+// profile alone would over-report.
+//
+// This is a capability question answered in the input layer, which is the same shape
+// as wasHomeGesture() below consulting hasHomeKey() — this file owns what each edge
+// MEANS, while the SDK owns what counts as an edge swipe at all.
+bool MappedInputManager::wasMenuGesture() const {
+  return Frontlight.present() ? wasBottomEdgeUpSwipe() : wasTopEdgeDownSwipe();
+}
+
+// The reading-light panel: the top edge pulled down, and only where there is a light
+// to show. On an unlit board the top edge stays the reader menu, so this must report
+// nothing rather than compete with it.
+bool MappedInputManager::wasLightPanelGesture() const { return Frontlight.present() && wasTopEdgeDownSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
 }
-
-bool MappedInputManager::wasHomeKeyHold() const { return gpio.hasHomeKey() && gpio.wasHomeKeyLongPressed(); }
