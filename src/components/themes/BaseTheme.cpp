@@ -17,6 +17,7 @@
 #include "components/ListLayout.h"
 #include "components/UITheme.h"
 #include "components/themes/ButtonHintLayout.h"
+#include "components/themes/ListScrollBar.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
@@ -398,6 +399,10 @@ void BaseTheme::drawWrappedList(const GfxRenderer& renderer, const Rect rect, co
       const int barX = rect.x + rect.width - style.scrollBarRightOffset;
       renderer.drawLine(barX, rect.y, barX, rect.y + rect.height, true);
       renderer.fillRect(barX - style.scrollBarWidth, barY, style.scrollBarWidth, barHeight, true);
+      // Publish the bar for touch from the same values the draw just used, so the tappable
+      // strip cannot drift from the thumb it is beside.
+      ListScrollBar::record(ListScrollBar::fromPaintedBar(barX - style.scrollBarWidth, style.scrollBarWidth, rect.x,
+                                                          rect.y, rect.height, barY, barHeight));
     } else {
       drawListOverflowArrows(renderer, rect);
     }

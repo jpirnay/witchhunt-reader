@@ -19,6 +19,7 @@
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/themes/ButtonHintStrip.h"
+#include "components/themes/ListScrollBar.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "home/FileBrowserActivity.h"
@@ -143,6 +144,7 @@ void ActivityManager::renderTaskLoop() {
       // last frame" is a property of the render pass, not something 26 screens should each
       // remember.
       ListTouchBand::invalidate();
+      ListScrollBar::invalidate();
       TapTargets::homeCovers().invalidate();
       TapTargets::homeMenu().invalidate();
       TapTargets::tabBar().invalidate();
@@ -255,6 +257,9 @@ void ActivityManager::loop() {
     // the whole screen would otherwise read it as a page-down first.
     dispatchLightPanelGesture();
     dispatchListSwipe();
+    // Before dispatchListTap(), which consumes the tap: a tap on the bar is a page turn, not
+    // a hit on whatever row happens to sit beside it.
+    dispatchScrollBarTap();
     dispatchListTap();
     dispatchHintStripTap();
 #endif
@@ -662,6 +667,35 @@ void ActivityManager::dispatchLightPanelGesture() {
   pushActivity(
       std::make_unique<SettingsSubmenuActivity>(renderer, mappedInput, StrId::STR_MENU_DISP_LIGHT, lightItems));
   LOG_DBG("TCH", "Top-edge swipe -> reading light");
+}
+
+// A tap beside the scroll-bar thumb pages the list: above it back, below it forward.
+//
+// The discoverable twin of dispatchListSwipe() below. That one works anywhere on a list but
+// nothing on screen suggests it exists; the bar is painted, so this is the version someone
+// can find. It matters most on the T5S3 and X4 Pro, which have a Down key and no Up key --
+// paging BACK has no physical button on either board.
+//
+// Synthesized rather than handled, exactly as the swipe is: logical Left/Right are already
+// the list page buttons across the firmware, so no screen learns a new verb.
+void ActivityManager::dispatchScrollBarTap() {
+  if (!mappedInput.hasTouch()) return;
+  // Only the two wrapped-list draws paint a bar; the fixed-height drawList marks overflow
+  // with arrows instead, so there is nothing to tap there and the swipe remains the route.
+  if (!ListScrollBar::hasBar()) return;
+
+  int x = 0;
+  int y = 0;
+  if (!mappedInput.wasScreenTapped(x, y)) return;
+
+  const ListScrollBar::Hit hit = ListScrollBar::hitTest(x, y);
+  if (hit == ListScrollBar::Hit::None) return;
+
+  const auto direction = hit == ListScrollBar::Hit::PageForward ? MappedInputManager::Direction::Right
+                                                                : MappedInputManager::Direction::Left;
+  mappedInput.injectRawPress(mappedInput.rawIndex(MappedInputManager::buttonFor(direction)));
+  LOG_DBG("TCH", "Scroll bar tap at (%d,%d) -> page %s", x, y,
+          hit == ListScrollBar::Hit::PageForward ? "next" : "prev");
 }
 
 void ActivityManager::dispatchListTap() {

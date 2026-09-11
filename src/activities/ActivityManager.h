@@ -209,6 +209,9 @@ class ActivityManager {
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see
   // the definition for why that ordering matters.
+  // A tap beside the scroll-bar thumb pages the list. See the definition for why this
+  // exists alongside the swipe: the bar is painted, so it is the discoverable route.
+  void dispatchScrollBarTap();
   void dispatchListTap();
   // A vertical swipe over a painted list pages it, by injecting the list page button. See the
   // definition for why this is a synthesis rather than a per-screen handler.
