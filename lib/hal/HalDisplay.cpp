@@ -206,7 +206,10 @@ uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(
 
 void HalDisplay::syncWriteBufferFromActive() const { einkDisplay.syncWriteBufferFromActive(); }
 
-void HalDisplay::releaseBuffers() { einkDisplay.releaseBuffers(); }
+void HalDisplay::releaseBuffers() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.releaseBuffers();
+}
 
 // FBUF: centralized framebuffer-state trace. Every secondary-buffer / RED-RAM / single-buffer
 // transition logs here so a ghosting regression can be tracked to the exact op that left the panel
@@ -333,22 +336,36 @@ HalDisplay::RefreshMode HalDisplay::getLastRefreshMode() const { return lastRefr
 uint8_t HalDisplay::getLastDisplayModeByte() const { return lastDisplayModeByte; }
 
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
+  HalSpiBus::Lock spiLock;
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }
 
-void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) { einkDisplay.copyGrayscaleLsbBuffers(lsbBuffer); }
+void HalDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.copyGrayscaleLsbBuffers(lsbBuffer);
+}
 
-void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) { einkDisplay.copyGrayscaleMsbBuffers(msbBuffer); }
+void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.copyGrayscaleMsbBuffers(msbBuffer);
+}
 
 void HalDisplay::syncRedRamFromFrameBuffer() {
+  HalSpiBus::Lock spiLock;
   einkDisplay.syncRedRamFromFrameBuffer();
   LOG_INF("FBUF", "syncRedRamFromFrameBuffer (hasSecondary=%d redSynced=%d)", einkDisplay.hasSecondaryBuffer() ? 1 : 0,
           einkDisplay.isRedRamSynced() ? 1 : 0);
 }
 
-void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) { einkDisplay.cleanupGrayscaleBuffers(bwBuffer); }
+void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.cleanupGrayscaleBuffers(bwBuffer);
+}
 
-void HalDisplay::cleanupGrayscaleWithPreviousBuffer() { einkDisplay.cleanupGrayscaleWithPreviousBuffer(); }
+void HalDisplay::cleanupGrayscaleWithPreviousBuffer() {
+  HalSpiBus::Lock spiLock;
+  einkDisplay.cleanupGrayscaleWithPreviousBuffer();
+}
 
 bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFrame(); }
 

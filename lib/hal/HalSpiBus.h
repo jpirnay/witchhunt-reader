@@ -3,7 +3,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
-// Serializes access to the SPI bus shared by the e-ink panel and the SD card.
+// Serializes display-controller access and, on SPI-SD boards, access to the
+// physical SPI bus shared by the e-ink panel and the SD card.
 //
 // The two devices share the physical bus (see SPI_MISO in HalGPIO.h, "shared
 // between SD card and display"). HalStorage already serializes SD access with
@@ -18,15 +19,16 @@
 // corrupted reads or a FreeRTOS panic - a signature easily misfiled as heap
 // corruption.
 //
-// Lock ordering is SPI-outer, storage-inner: HalStorage::StorageLock acquires
-// this lock as its outermost member (construction order guarantees it), and
-// display code takes only this lock, so the global order is consistent and
-// deadlock-free.
+// Lock ordering is SPI-outer, storage-inner: on SPI-SD boards,
+// HalStorage::StorageLock acquires this lock as its outermost member
+// (construction order guarantees it), and display code takes only this lock,
+// so the global order is consistent and deadlock-free. Native-SDMMC boards do
+// not take this lock for storage operations.
 //
 // The mutex is recursive so a storage path that re-enters the bus lock cannot
-// self-deadlock. Note this does NOT make HalStorage's own storageMutex
-// recursive - that one stays plain, because no storage path nests it today
-// (~FsFile calls SdFat's close() directly, not the locking HalFile::close()).
+// self-deadlock. HalStorage's own mutex is recursive as well because replacing
+// a HalFile while already inside StorageLock destroys its previous SdFat handle
+// and that implicit close must remain serialized.
 class HalSpiBus {
  public:
   class Lock {

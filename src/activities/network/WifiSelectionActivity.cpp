@@ -11,6 +11,7 @@
 #include <esp_mac.h>
 #include <esp_wifi.h>
 
+#include <atomic>
 #include <cstring>
 #include <ctime>
 #include <map>
@@ -23,6 +24,10 @@
 #include "util/QrUtils.h"
 
 namespace {
+
+std::atomic<uint32_t> wifiEventGeneration{0};
+std::atomic<unsigned long> wifiEventConnectionStartMs{0};
+std::atomic<bool> wifiEventAttemptAssociated{false};
 
 void readDeviceBaseMac(uint8_t mac[6]) { esp_efuse_mac_get_default(mac); }
 
@@ -50,23 +55,28 @@ String formatMacCompact(const uint8_t mac[6]) {
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
+  const uint32_t eventGeneration = wifiEventGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
   // Timing instrumentation: split total connect time into association vs DHCP.
   // STA_CONNECTED = association (auth + 4-way handshake done).
   // STA_GOT_IP    = DHCP done.
   evtIdConnected = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
-        currentAttemptAssociated = true;
+      [eventGeneration](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+        if (wifiEventGeneration.load(std::memory_order_acquire) != eventGeneration) return;
+        wifiEventAttemptAssociated.store(true, std::memory_order_relaxed);
         // Which AP we landed on, not just when. On a mesh SSID the sorted candidate list is the
         // whole story: pairing this BSSID with the one in the disconnect below says whether a
         // failed attempt cost us a bad node, or whether the same node needed two tries.
-        LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u", millis() - connectionStartTime,
+        LOG_DBG("WIFI", "EVT associated at %lu ms: bssid=%s ch=%u",
+          millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed),
                 formatMacDashed(info.wifi_sta_connected.bssid).c_str(), info.wifi_sta_connected.channel);
       },
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   evtIdGotIp = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
-        LOG_DBG("WIFI", "EVT got_ip at %lu ms", millis() - connectionStartTime);
+      [eventGeneration](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+        if (wifiEventGeneration.load(std::memory_order_acquire) != eventGeneration) return;
+        LOG_DBG("WIFI", "EVT got_ip at %lu ms",
+                millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed));
       },
       ARDUINO_EVENT_WIFI_STA_GOT_IP);
   // STA_START = the driver finished esp_wifi_start() (PHY init + RF calibration). Splits
@@ -74,8 +84,10 @@ void WifiSelectionActivity::onEnter() {
   // alone cannot: measured begin->associated is a flat ~2.5 s regardless of scan method, hint,
   // or RSSI, and that invariance is what this pair exists to explain.
   evtIdStaStart = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
-        LOG_DBG("WIFI", "EVT sta_start at %lu ms (driver up; scan/auth begins here)", millis() - connectionStartTime);
+      [eventGeneration](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+        if (wifiEventGeneration.load(std::memory_order_acquire) != eventGeneration) return;
+        LOG_DBG("WIFI", "EVT sta_start at %lu ms (driver up; scan/auth begins here)",
+                millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed));
       },
       ARDUINO_EVENT_WIFI_STA_START);
   // The one that should settle it. A cost that flat across every configuration looks like a
@@ -84,14 +96,16 @@ void WifiSelectionActivity::onEnter() {
   // the AP taking that long and there is nothing here to win; if AUTH_EXPIRE / ASSOC_EXPIRE /
   // HANDSHAKE_TIMEOUT shows up mid-connect, that names the second we are paying for.
   evtIdDisconnected = WiFi.onEvent(
-      [this](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+      [eventGeneration](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+        if (wifiEventGeneration.load(std::memory_order_acquire) != eventGeneration) return;
         const uint8_t reason = info.wifi_sta_disconnected.reason;
         // bssid/rssi name the AP that failed and how loud it was at the moment it gave up, which
         // is what separates "the driver picked a node it cannot actually hold" from "the whole
         // SSID is too weak here".
         LOG_DBG("WIFI", "EVT disconnected at %lu ms: reason=%u (%s) assoc=%d bssid=%s rssi=%d",
-                millis() - connectionStartTime, reason,
-                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)), currentAttemptAssociated ? 1 : 0,
+                millis() - wifiEventConnectionStartMs.load(std::memory_order_relaxed), reason,
+                WiFi.disconnectReasonName(static_cast<wifi_err_reason_t>(reason)),
+                wifiEventAttemptAssociated.load(std::memory_order_relaxed) ? 1 : 0,
                 formatMacDashed(info.wifi_sta_disconnected.bssid).c_str(),
                 static_cast<int>(info.wifi_sta_disconnected.rssi));
       },
@@ -158,6 +172,7 @@ void WifiSelectionActivity::onEnter() {
 }
 
 void WifiSelectionActivity::onExit() {
+  wifiEventGeneration.fetch_add(1, std::memory_order_acq_rel);
   Activity::onExit();
 
   if (evtIdConnected != 0) {
@@ -261,6 +276,7 @@ void WifiSelectionActivity::tryNextAutoCycleCandidate() {
 
   state = WifiSelectionState::AUTO_CYCLING;
   connectionStartTime = millis();
+  wifiEventConnectionStartMs.store(connectionStartTime, std::memory_order_relaxed);
   connectedIP.clear();
   connectionError.clear();
   requestUpdate();
@@ -387,6 +403,7 @@ void WifiSelectionActivity::selectNetwork(const int index) {
 void WifiSelectionActivity::attemptConnection() {
   state = autoConnecting ? WifiSelectionState::AUTO_CONNECTING : WifiSelectionState::CONNECTING;
   connectionStartTime = millis();
+  wifiEventConnectionStartMs.store(connectionStartTime, std::memory_order_relaxed);
   connectedIP.clear();
   connectionError.clear();
   requestUpdate();
@@ -490,7 +507,7 @@ void WifiSelectionActivity::applyScanBudget() {
 }
 
 void WifiSelectionActivity::issueWifiBegin() {
-  currentAttemptAssociated = false;
+  wifiEventAttemptAssociated.store(false, std::memory_order_relaxed);
 
   // Always a full, signal-sorted scan. The cached channel/BSSID hint that used to shortcut this
   // is gone, and the device data is unambiguous about why:

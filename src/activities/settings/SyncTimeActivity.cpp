@@ -211,8 +211,10 @@ void SyncTimeActivity::loop() {
     }
 
     if (state == FAILED && mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      RenderLock lock(*this);
-      state = SYNCING;
+      {
+        RenderLock lock(*this);
+        state = SYNCING;
+      }
       requestUpdateAndWait();
       performSync();
     }

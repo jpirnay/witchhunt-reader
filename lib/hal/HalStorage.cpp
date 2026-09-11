@@ -35,14 +35,22 @@ HalStorage HalStorage::instance;
 
 HalStorage::HalStorage() {}
 
+// True when the SD card really is on the SPI bus the display also uses. Native
+// SDMMC boards (X4 Pro: 1-bit slot 1, CLK41/CMD42/DAT0 40) share nothing with
+// the panel, so serializing their card against panel refreshes is pure
+// contention for no safety benefit.
+static bool sdSharesDisplaySpiBus() { return BoardConfig::ACTIVE.sdmmc.busWidth == 0; }
+
 // begin() and ready() are only called from setup, no need to acquire mutex for them
 
 bool HalStorage::begin() {
   // Create the mutex here rather than in the constructor: HalStorage::instance
   // is a global, and its constructor runs before the FreeRTOS scheduler starts.
-  // Calling xSemaphoreCreateMutex() that early corrupts the TLSF heap metadata.
+  // Calling xSemaphoreCreateRecursiveMutex() that early corrupts the TLSF heap metadata.
+  // Recursive ownership lets HalStorage replace an existing HalFile while it
+  // already holds StorageLock; destroying the replaced SdFat handle may close it.
   if (!storageMutex) {
-    storageMutex = xSemaphoreCreateMutex();
+    storageMutex = xSemaphoreCreateRecursiveMutex();
     assert(storageMutex != nullptr);
   }
   // SD-over-SPI clock ceiling on the S3 boards.
@@ -66,8 +74,9 @@ bool HalStorage::begin() {
 
   {
     // SD init drives the shared bus, so it must be serialized against the
-    // display too - the render task is already running by this point.
-    HalSpiBus::Lock spiLock;
+    // display too when this profile uses SPI. Native SDMMC is independent.
+    const auto spiLock =
+        sdSharesDisplaySpiBus() ? std::optional<HalSpiBus::Lock>(std::in_place) : std::nullopt;
     if (!SDCard.begin()) return false;
   }
   FsDateTime::setCallback([](uint16_t* date, uint16_t* time) {
@@ -95,12 +104,6 @@ void HalStorage::prepareForSleep() { SDCard.prepareForSleep(); }
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
-// True when the SD card really is on the SPI bus the display also uses. Native
-// SDMMC boards (X4 Pro: 1-bit slot 1, CLK41/CMD42/DAT0 40) share nothing with
-// the panel, so serializing their card against panel refreshes is pure
-// contention for no safety benefit.
-static bool sdSharesDisplaySpiBus() { return BoardConfig::ACTIVE.sdmmc.busWidth == 0; }
-
 class HalStorage::StorageLock {
  public:
   StorageLock()
@@ -108,9 +111,9 @@ class HalStorage::StorageLock {
       // still acquired BEFORE storageMutex when it is taken at all — see the
       // ordering note below.
       : spiLock(sdSharesDisplaySpiBus() ? std::optional<HalSpiBus::Lock>(std::in_place) : std::nullopt) {
-    xSemaphoreTake(HalStorage::getInstance().storageMutex, portMAX_DELAY);
+    xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY);
   }
-  ~StorageLock() { xSemaphoreGive(HalStorage::getInstance().storageMutex); }
+  ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
 
  private:
   // Declared first so it is acquired before storageMutex and released after it:
@@ -247,7 +250,7 @@ size_t HalStorage::readFileToBuffer(const char* path, char* buffer, size_t buffe
 // (@itsthisjustin).
 //
 // Composed of already-locked HalStorage/HalFile operations, so it takes no
-// StorageLock of its own - doing so would deadlock on the non-recursive mutex.
+// StorageLock of its own.
 bool HalStorage::readFileToString(const char* moduleName, const std::string& path, size_t cap, std::string& out) {
   out.clear();
   HalFile file;
@@ -292,11 +295,20 @@ HalFile::HalFile() = default;
 
 HalFile::HalFile(std::unique_ptr<Impl> impl) : impl(std::move(impl)) {}
 
-HalFile::~HalFile() = default;
+HalFile::~HalFile() {
+  if (!impl) return;
+  HalStorage::StorageLock lock;
+  impl.reset();
+}
 
 HalFile::HalFile(HalFile&&) = default;
 
-HalFile& HalFile::operator=(HalFile&&) = default;
+HalFile& HalFile::operator=(HalFile&& other) {
+  if (this == &other) return *this;
+  HalStorage::StorageLock lock;
+  impl = std::move(other.impl);
+  return *this;
+}
 
 HalFile HalStorage::open(const char* path, const oflag_t oflag) {
   StorageLock lock;  // ensure thread safety for the duration of this function

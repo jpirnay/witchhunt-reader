@@ -538,7 +538,7 @@ class EpubReaderActivity final : public Activity {
   // with no lock at all, because the invariant they rely on is "only the loop task touches
   // them", not "the render lock covers them". A unique_ptr assigned from one task while another
   // moves it is a double-free waiting to happen.
-  bool finishedBookLaunchPending_ = false;
+  std::atomic<bool> finishedBookLaunchPending_{false};
   // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
   // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
   int finishedBookSyncSpineIndex_ = 0;
@@ -863,6 +863,7 @@ class EpubReaderActivity final : public Activity {
   // section->currentPage that stays inside the loaded section — see the definition for why.
   void anchorNavTargetToCurrentPage();
   bool stepPageState(bool isForwardTurn);
+  bool stepPageStateLocked(bool isForwardTurn);
   void pageTurn(bool isForwardTurn);
 #if ENABLE_BENCHMARKS
   void runRenderBenchmark();

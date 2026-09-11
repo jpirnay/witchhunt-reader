@@ -97,10 +97,6 @@ class WifiSelectionActivity final : public Activity {
 
   unsigned long connectionStartTime = 0;
 
-  // Set by the STA_CONNECTED handler; read by the disconnect log to tell a mid-connect failure
-  // apart from a drop after association.
-  volatile bool currentAttemptAssociated = false;
-
   // WiFi event handler IDs so we can deregister on exit.
   uint16_t evtIdConnected = 0;
   uint16_t evtIdGotIp = 0;

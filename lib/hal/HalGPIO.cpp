@@ -548,18 +548,24 @@ void HalGPIO::sampleOnce() {
 void HalGPIO::samplerTask(void* arg) {
   HalGPIO* self = static_cast<HalGPIO*>(arg);
   TickType_t last = xTaskGetTickCount();
-  while (self->samplerRunning_) {
+  while (self->samplerRunning_.load(std::memory_order_acquire)) {
     vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
     self->sampleOnce();
   }
+  xSemaphoreGive(self->samplerStoppedSemaphore_);
   vTaskDelete(nullptr);  // self-terminate once stopInputSampler() clears the flag
 }
 
 void HalGPIO::startInputSampler() {
-  if (samplerRunning_) {
+  if (samplerRunning_.load(std::memory_order_acquire)) {
     return;
   }
-  samplerRunning_ = true;
+  samplerStoppedSemaphore_ = xSemaphoreCreateBinary();
+  if (samplerStoppedSemaphore_ == nullptr) {
+    LOG_ERR("BTN", "Failed to create input sampler stop semaphore");
+    return;
+  }
+  samplerRunning_.store(true, std::memory_order_release);
   sampleOnce();  // prime so the first loop iteration sees current state
   // Priority above the Arduino loop task (1) so the 10ms cadence holds even while
   // the loop task is busy in a long build slice.
@@ -577,17 +583,27 @@ void HalGPIO::startInputSampler() {
   // runs on real hardware — see docs/touch-input-migration-2026-08-14.md §5.
   // Watch the btnSampler high-water [MEM] line if changed.
   constexpr uint32_t SAMPLER_STACK_BYTES = FREEINK_CAP_TOUCH ? 4096 : 2048;
-  xTaskCreate(&HalGPIO::samplerTask, "btnsample", SAMPLER_STACK_BYTES, this, 2, &samplerTaskHandle_);
+  const BaseType_t created =
+      xTaskCreate(&HalGPIO::samplerTask, "btnsample", SAMPLER_STACK_BYTES, this, 2, &samplerTaskHandle_);
+  if (created != pdPASS || samplerTaskHandle_ == nullptr) {
+    LOG_ERR("BTN", "Failed to create input sampler task");
+    samplerRunning_.store(false, std::memory_order_release);
+    vSemaphoreDelete(samplerStoppedSemaphore_);
+    samplerStoppedSemaphore_ = nullptr;
+  }
 }
 
 void HalGPIO::stopInputSampler() {
-  if (!samplerRunning_) {
+  if (!samplerRunning_.load(std::memory_order_acquire)) {
     return;
   }
   // Signal the task to exit on its next wake and self-delete. Avoids vTaskDelete()
   // tearing it down mid-analogRead (which would leak the ADC driver mutex).
-  samplerRunning_ = false;
+  samplerRunning_.store(false, std::memory_order_release);
+  xSemaphoreTake(samplerStoppedSemaphore_, portMAX_DELAY);
   samplerTaskHandle_ = nullptr;
+  vSemaphoreDelete(samplerStoppedSemaphore_);
+  samplerStoppedSemaphore_ = nullptr;
 }
 
 bool HalGPIO::hasPendingInput() const {
@@ -636,7 +652,7 @@ void HalGPIO::flushButtonEdges() {
 }
 
 void HalGPIO::update() {
-  if (!samplerRunning_) {
+  if (!samplerRunning_.load(std::memory_order_acquire)) {
     // Pre-sampler (early boot): sample synchronously on the calling task.
     sampleOnce();
   }
@@ -722,7 +738,9 @@ bool HalGPIO::isAnyPressed() const { return snapState_ != 0; }
 
 bool HalGPIO::isDebouncePending() const { return inputMgr.isDebouncePending(); }
 
-unsigned long HalGPIO::getHeldTime() const { return samplerRunning_ ? heldTimeSnapshot_ : inputMgr.getHeldTime(); }
+unsigned long HalGPIO::getHeldTime() const {
+  return samplerRunning_.load(std::memory_order_acquire) ? heldTimeSnapshot_ : inputMgr.getHeldTime();
+}
 
 // --- Touch passthrough ------------------------------------------------------
 // Deliberately dumb one-liners: no orientation, no logical pixels, no gesture
