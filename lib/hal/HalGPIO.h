@@ -3,7 +3,10 @@
 #include <Arduino.h>
 #include <InputManager.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
+
+#include <atomic>
 
 // Display SPI pins (custom pins for XteinkX4, not hardware SPI defaults)
 #define EPD_SCLK 8   // SPI Clock
@@ -134,7 +137,8 @@ class HalGPIO {
   // samples + debounces on a fixed ~10ms cadence regardless of loop progress and
   // latches every edge for the loop task to drain.
   TaskHandle_t samplerTaskHandle_ = nullptr;
-  volatile bool samplerRunning_ = false;
+  SemaphoreHandle_t samplerStoppedSemaphore_ = nullptr;
+  std::atomic<bool> samplerRunning_{false};
   portMUX_TYPE inputMux_ = portMUX_INITIALIZER_UNLOCKED;
 
   // Shared sampler→loop state, guarded by inputMux_.

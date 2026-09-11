@@ -26,10 +26,9 @@
 // (BoardProfile::batteryGauge.i2cBus, moving the gauge to Wire1 on Sticky) does
 // not help here, because the X4 Pro wires all three devices to the same pins.
 //
-// This mirrors HalSpiBus exactly, including the recursive mutex and the
-// timeout-and-proceed policy: a wedged bus should show up as a diagnosable log
-// line, not a frozen device. There is no lock-ordering relationship with
-// HalSpiBus — no path holds one and takes the other.
+// This mirrors HalSpiBus's recursive, fail-closed mutex. There is no
+// lock-ordering relationship with HalSpiBus — no path holds one and takes the
+// other.
 //
 // On a NON-touch board the whole thing compiles away to nothing: the sampler
 // reads the ADC only, and the RTC and gauge are both driven from the loop task,

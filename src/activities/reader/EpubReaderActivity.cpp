@@ -730,7 +730,7 @@ void EpubReaderActivity::loop() {
   // After the progress flush and before input handling: this is the reader's LAST loop() pass —
   // the launch pushes it onto the activity stack, which stops loop() being called — so anything
   // still owed must be flushed above, and nothing below it will run again.
-  if (finishedBookLaunchPending_) {
+  if (finishedBookLaunchPending_.load(std::memory_order_acquire)) {
     serviceFinishedBookLaunch();
     return;
   }
@@ -746,11 +746,6 @@ void EpubReaderActivity::loop() {
       buttonEvents.drain();
       stopAutomaticPageTurn();
       // updates chapter title space to indicate page turn disabled
-      requestUpdate();
-      return;
-    }
-
-    if (!section) {
       requestUpdate();
       return;
     }
@@ -892,9 +887,12 @@ void EpubReaderActivity::loop() {
       const int lastSpineIndex = epub->getSpineItemsCount() - 1;
       int lastPageIndex = 0;
       int lastPageCount = 0;
-      if (section && currentSpineIndex == lastSpineIndex) {
-        lastPageCount = section->pageCount;
-        lastPageIndex = std::max(0, section->pageCount - 1);
+      {
+        RenderLock lock(*this);
+        if (section && currentSpineIndex == lastSpineIndex) {
+          lastPageCount = section->pageCount;
+          lastPageIndex = std::max(0, section->pageCount - 1);
+        }
       }
       writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, lastPageIndex, lastPageCount, 100);
       finishedBookSyncSpineIndex_ = lastSpineIndex;
@@ -905,17 +903,23 @@ void EpubReaderActivity::loop() {
                                            epub->getSeriesIndex(), epub->getAuthor(), nullptr, nullptr,
                                            &EpubReaderActivity::onFinishedBookSyncRequested, this);
     } else {
-      currentSpineIndex = epub->getSpineItemsCount() - 1;
-      navTarget = NavigationTarget::makeLastPage();
+      {
+        RenderLock lock(*this);
+        currentSpineIndex = epub->getSpineItemsCount() - 1;
+        navTarget = NavigationTarget::makeLastPage();
+      }
       requestUpdate();
     }
     return;
   }
 
   // No current section, attempt to rerender the book
-  if (!section) {
-    requestUpdate();
-    return;
+  {
+    RenderLock lock(*this);
+    if (!section) {
+      requestUpdate();
+      return;
+    }
   }
 
   if (prevTriggered) {
@@ -933,13 +937,24 @@ void EpubReaderActivity::serviceBackgroundWork() {
   // the deferred AA pass first, then Background B (next-section pre-build) — B also
   // self-gates on A having finished, since A drives perceived page-turn speed.
   runDeferredGrayscalePass();
-  if (pendingGrayscale_.active) {
-    return;  // AA still owed (display bus busy); it keeps priority over B/C
+  if (RenderLock::peek()) {
+    return;
+  }
+  {
+    RenderLock lock;
+    if (pendingGrayscale_.active) {
+      return;  // AA still owed (display bus busy); it keeps priority over B/C
+    }
   }
   // Background C (build of the section the reader is waiting on) takes priority over A and B:
   // the user has nothing to read until it produces pages. A/B are look-ahead work for a section
   // that is already displayed, so they only matter once the current section is built.
-  if (section && section->hasActiveBuild()) {
+  bool currentSectionBuildActive = false;
+  {
+    RenderLock lock;
+    currentSectionBuildActive = section && section->hasActiveBuild();
+  }
+  if (currentSectionBuildActive) {
     stepCurrentSectionBuild();
     return;
   }
@@ -953,6 +968,7 @@ void EpubReaderActivity::serviceBackgroundDebugLog() {
     return;
   }
   lastBgDebugLogMs_ = now;
+  RenderLock lock;
   // B state + gate inputs so a stalled B explains itself from the log alone (e.g. parked
   // in waitheap because free/contig sit below the BG_BUILD_* floors, or css=1 with too
   // little heap for Section::heapAllowsEmbeddedStyle()).
@@ -979,15 +995,13 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // run concurrently. isRefreshPending() is true from triggerDisplay() until
   // completeDisplay() clears it; when it returns false the render task has
   // finished all post-waveform SPI work and it is safe to issue new SPI writes.
-  if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
+  if (RenderLock::peek()) {
     return;
   }
-  // Serialize deferred AA with the render task. This prevents loop-side
-  // grayscale SPI/framebuffer work from racing with render() updates.
+  // Serialize both the guard reads and deferred AA with the render task. Reading
+  // the shared_ptr itself before taking this lock is a C++ data race even when
+  // the same conditions are checked again afterwards.
   RenderLock lock;
-  // Re-check under the lock: the render task may have flipped these between the
-  // unlocked test above and acquiring the lock.
-  // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
   if (!pendingGrayscale_.active || !pendingGrayscale_.page || renderer.isRefreshPending()) {
     return;
   }
@@ -1107,13 +1121,13 @@ void EpubReaderActivity::startActivityForResult(std::unique_ptr<Activity>&& acti
 }
 
 void EpubReaderActivity::suspendBackgroundWork() {
-  if (backgroundWorkSuspended_) return;
-  backgroundWorkSuspended_ = true;
   {
     // Under the render lock, like every other borrow teardown: the render task
     // calls endBackgroundBorrow() from the top of every render(), and two
     // unlocked teardowns double-free the same Section.
     RenderLock lock(*this);
+    if (backgroundWorkSuspended_) return;
+    backgroundWorkSuspended_ = true;
     // endBackgroundBorrow(), NOT resetBackgroundBuild(). This releases what is
     // actually large — the lent 48 KB region and the build arena inside it —
     // and aborts only a build that is still live, which is resumable by design:
@@ -1130,19 +1144,19 @@ void EpubReaderActivity::suspendBackgroundWork() {
     // nothing about whether the parse fits between two page turns, so it must
     // not burn the budget that makes B abandon a spine.
     backgroundPreemptCount_ = preemptionsBeforeOverlay;
+    // Discard the pre-rendered next page: it lives in the secondary framebuffer,
+    // which the overlay is about to draw over.
+    preRenderedPage = {};
   }
-  // Discard the pre-rendered next page: it lives in the secondary framebuffer,
-  // which the overlay is about to draw over. render()'s prologue also clears
-  // this on any pass that is not PreRender/BufferDisplay, so the flag would not
-  // survive the reader's next render either -- but doing it here means the
-  // discard does not depend on which pass that render turns out to be.
-  preRenderedPage = {};
   LOG_INF("ERS", "Background work suspended for a dictionary interaction");
 }
 
 void EpubReaderActivity::resumeBackgroundWork() {
-  if (!backgroundWorkSuspended_) return;
-  backgroundWorkSuspended_ = false;
+  {
+    RenderLock lock(*this);
+    if (!backgroundWorkSuspended_) return;
+    backgroundWorkSuspended_ = false;
+  }
   // Nothing to restart explicitly: the look-ahead re-probes from Probe on the
   // next loop() and the pre-render re-arms on the next render().
   LOG_INF("ERS", "Background work resumed");
@@ -1236,43 +1250,26 @@ void EpubReaderActivity::endBackgroundBorrow() {
 }
 
 void EpubReaderActivity::stepBackgroundSectionBuild() {
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_) {
-    return;
-  }
-  // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
-  // actual preview availability, so a build started before the gather is cached under the
-  // previews-OFF hash rather than masquerading as preview-enabled. Blocking B here used to stall
-  // all background building for the whole of a preview-enabled book's first open.
-  // Background A keeps priority: it determines perceived page-turn speed, and its total
-  // cost is small against a multi-second page-read window. Wait until its pass has run
-  // (pendingPreRender clears whether or not it produced a ready page).
-  if (pendingPreRender || usePreRenderedBuffer) {
-    return;
-  }
   // B does SD I/O only, no SPI — but it must not contend with the render task for the
   // render lock while a waveform (or a render) is in flight: a blocked loop task cannot
   // service input. Skip the tick instead; idle ticks are plentiful while the user reads.
   // Note RenderLock::peek() returns true when the mutex is HELD (busy), not when free.
-  if (renderer.isRefreshPending() || RenderLock::peek()) {
-    return;
-  }
-  // Don't start a heap-hungry build slice while the render task is decoding an image:
-  // both compete for the same ~48-52 KB contiguous block. RenderLock::peek() above already
-  // excludes this in practice (renderContents() holds the lock for the whole warm pass), but
-  // check explicitly too — see the comment on imageProcessingActive_.
-  if (imageProcessingActive_) {
+  if (RenderLock::peek()) {
     return;
   }
   // One lock for the whole step: every branch below touches the SD (even discarding a
   // stale build removes its partial file) and the parse slice reads glyph metrics from
   // the shared renderer, so all of it must be serialised against the render task.
   RenderLock lock;
-  // Re-check under the lock: the render task may have scheduled A or started a refresh
-  // between the unlocked test above and acquiring the lock (mirrors runDeferredGrayscalePass).
-  // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
-  if (pendingPreRender || renderer.isRefreshPending()) {
+  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || pendingPreRender ||
+      usePreRenderedBuffer || renderer.isRefreshPending() || imageProcessingActive_) {
     return;
   }
+
+  // B no longer has to wait for footnotes.bin. makeSectionBuildParams() now keys the variant on
+  // actual preview availability, so a build started before the gather is cached under the
+  // previews-OFF hash rather than masquerading as preview-enabled. Background A keeps priority:
+  // pendingPreRender clears whether or not it produced a ready page.
 
   // Background A re-arm (one retry per displayed page): A's pass runs right after the
   // page render, while the deferred AA still holds the just-rendered page (~10 KB) —
@@ -1591,24 +1588,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 }
 
 void EpubReaderActivity::stepCurrentSectionBuild() {
-  if (!epub || !section || !section->hasActiveBuild()) {
-    return;
-  }
   // Don't contend with the render task for the lock while a refresh/render is in flight: a
   // blocked loop task can't service input. peek() is true when the mutex is HELD (busy).
-  if (renderer.isRefreshPending() || RenderLock::peek()) {
-    return;
-  }
-  // Don't start a build slice while the render task is mid image-decode — see the comment
-  // on imageProcessingActive_ in renderContents().
-  if (imageProcessingActive_) {
+  if (RenderLock::peek()) {
     return;
   }
   RenderLock lock;
-  // Re-check under the lock: the render task may have started a refresh, turned a page, or
-  // finished/aborted the build between the unlocked test above and acquiring the lock.
-  // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
-  if (!section || !section->hasActiveBuild() || renderer.isRefreshPending()) {
+  if (!epub || !section || !section->hasActiveBuild() || renderer.isRefreshPending() || imageProcessingActive_) {
     return;
   }
 
@@ -1831,7 +1817,10 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 }
 
 void EpubReaderActivity::openDictionary() {
-  if (!section) return;
+  {
+    RenderLock lock(*this);
+    if (!section) return;
+  }
 
   if (SETTINGS.dictionaryName[0] == '\0') {
     // Send the user somewhere they can act rather than showing a popup that
@@ -1847,8 +1836,13 @@ void EpubReaderActivity::openDictionary() {
 
   // During an active build the on-disk LUT is not written yet, so the page has
   // to come from the in-memory one -- the same choice the pre-render pass makes.
-  auto page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(section->currentPage))
-                                        : section->loadPageFromSectionFile();
+  std::unique_ptr<Page> page;
+  {
+    RenderLock lock(*this);
+    if (!section) return;
+    page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(section->currentPage))
+                                     : section->loadPageFromSectionFile();
+  }
   if (!page) {
     LOG_ERR("ERS", "Dictionary: could not load the current page");
     return;
@@ -1871,9 +1865,14 @@ void EpubReaderActivity::openDictionary() {
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
-      const int spineIdx = currentSpineIndex;
-      const int tocIdx = section ? section->getTocIndexForPage(section->currentPage)
-                                 : epub->getTocIndexForSpineIndex(currentSpineIndex);
+      int spineIdx;
+      int tocIdx;
+      {
+        RenderLock lock(*this);
+        spineIdx = currentSpineIndex;
+        tocIdx = section ? section->getTocIndexForPage(section->currentPage)
+                         : epub->getTocIndexForSpineIndex(currentSpineIndex);
+      }
       const std::string path = epub->getPath();
       startActivityForResult(
           std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx, tocIdx),
@@ -1924,9 +1923,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PERCENT: {
       float bookProgress = 0.0f;
-      if (epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
-        const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-        bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+      {
+        RenderLock lock(*this);
+        if (epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
+          const float chapterProgress =
+              static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+          bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+        }
       }
       const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
       startActivityForResult(
@@ -1953,11 +1956,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       // two printed pages, so the closest prior anchor is the "you're here" hint). Falls
       // back to the lowest integer label in the book if no prior anchor exists.
       int initialValue = minLabel;
-      if (section) {
-        if (const auto rawLabel =
-                section->getNearestPrintedPageLabelAtOrBefore(static_cast<uint16_t>(section->currentPage))) {
-          if (const auto n = parsePrintedPageLabel(*rawLabel)) {
-            initialValue = *n;
+      {
+        RenderLock lock(*this);
+        if (section) {
+          if (const auto rawLabel =
+                  section->getNearestPrintedPageLabelAtOrBefore(static_cast<uint16_t>(section->currentPage))) {
+            if (const auto n = parsePrintedPageLabel(*rawLabel)) {
+              initialValue = *n;
+            }
           }
         }
       }
@@ -1993,9 +1999,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
-      if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
-        auto p = section->loadPageFromSectionFile();
-        if (p) {
+      std::unique_ptr<Page> p;
+      {
+        RenderLock lock(*this);
+        if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
+          p = section->loadPageFromSectionFile();
+        }
+      }
+      if (p) {
           std::string fullText;
           for (const auto& el : p->elements) {
             if (el->getTag() == TAG_PageLine) {
@@ -2015,16 +2026,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                                    [this](const ActivityResult& result) {});
             break;
           }
-        }
       }
       // If no text or page loading failed, just close menu
       requestUpdate();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::STAR_PAGE: {
-      if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
-        bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-        requestUpdate();
+      {
+        RenderLock lock(*this);
+        if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
+          bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+          requestUpdate();
+        }
       }
       break;
     }
@@ -2034,8 +2047,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           [this](const ActivityResult& result) {
             if (!result.isCancelled) {
               const auto& starred = std::get<StarredPageResult>(result.data);
+              RenderLock lock(*this);
               if (currentSpineIndex != starred.spineIndex || !section || section->currentPage != starred.pageNumber) {
-                RenderLock lock(*this);
                 currentSpineIndex = starred.spineIndex;
                 navTarget = NavigationTarget::makePage(starred.pageNumber);
                 section.reset();
@@ -2076,9 +2089,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         const int lastSpineIndex = spineCount - 1;
         int lastPageIndex = 0;
         int lastPageCount = 0;
-        if (section && currentSpineIndex == lastSpineIndex) {
-          lastPageCount = section->pageCount;
-          lastPageIndex = std::max(0, section->pageCount - 1);
+        {
+          RenderLock lock(*this);
+          if (section && currentSpineIndex == lastSpineIndex) {
+            lastPageCount = section->pageCount;
+            lastPageIndex = std::max(0, section->pageCount - 1);
+          }
         }
         if (lastPageCount > 0) {
           writeReaderProgressCache(epub->getCachePath(), lastSpineIndex, lastPageIndex, lastPageCount, 100);
@@ -2655,6 +2671,11 @@ void EpubReaderActivity::anchorNavTargetToCurrentPage() {
 }
 
 bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
+  RenderLock lock(*this);
+  return stepPageStateLocked(isForwardTurn);
+}
+
+bool EpubReaderActivity::stepPageStateLocked(const bool isForwardTurn) {
   if (!epub || !section) {
     return false;
   }
@@ -2669,12 +2690,6 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     if (navTarget.kind != NavigationTarget::Kind::Page) {
       return false;
     }
-    // The lock must cover the GUARDS, not just the mutation: the PreRender pass temporarily
-    // sets section->currentPage to the page it is laying out, so a guard evaluated unlocked
-    // can pass on that transient value and the mutation then lands on the restored one —
-    // observed on-device as a back turn at page 0 reading a transient 1, then decrementing
-    // the restored 0 to -1 (a visible "out of bounds" frame).
-    RenderLock lock(*this);
     if (isForwardTurn) {
       section->currentPage++;
     } else if (section->currentPage > 0) {
@@ -2705,14 +2720,6 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
     pageHasPlaceholders = false;
     return true;
   }
-
-  // Serialize the WHOLE step decision against the render task, guards included: the
-  // PreRender pass temporarily writes section->currentPage while laying out the next page,
-  // so a guard evaluated outside the lock can pass on that transient value and the mutation
-  // then lands on the restored one. Observed on-device: a back turn at page 0 read the
-  // pre-render's transient 1, blocked on the lock, then decremented the restored 0 to -1 —
-  // a visible "out of bounds" frame. The forward mirror can double-advance past the end.
-  RenderLock lock(*this);
 
   // A 0-page section (permanently unparse-able chapter) has no within-chapter navigation,
   // but the user must still be able to cross spine boundaries to escape it.
@@ -2758,6 +2765,11 @@ bool EpubReaderActivity::stepPageState(const bool isForwardTurn) {
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  // One lock covers cancellation, pre-render selection, navigation, and cleanup. The
+  // render task temporarily mutates section/pre-render state and publishes deferred-AA
+  // shared_ptrs, so even guard-only reads must be serialized.
+  RenderLock lock(*this);
+
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
 
@@ -2812,30 +2824,6 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // loop task, then hand off to render() via usePreRenderedBuffer — all display work (status
     // bar, flush, AA pass) stays on the render task where it belongs.
     //
-    // Serialize the shared-state mutation against the render task: the PreRender pass temporarily
-    // writes section->currentPage and rewrites preRenderedPage, so reading/advancing them here
-    // without the lock races (stale buffer shown, or a torn section pointer → reboot). Acquire the
-    // lock, then re-check the condition under it — the render task may have invalidated the
-    // pre-render between the unlocked test above and the lock.
-    RenderLock lock;
-    // The single-line form lands on the `if` only; cppcheck reports the sub-expression on the
-    // continuation line below, so the suppression has to span the whole condition.
-    // cppcheck-suppress-begin knownConditionTrueFalse ; render task mutates these concurrently
-    if (!(section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
-          preRenderedPage.pageIndex == section->currentPage + 1)) {
-      // cppcheck-suppress-end knownConditionTrueFalse
-      lock.unlock();
-      if (!stepPageState(isForwardTurn)) {
-        return;
-      }
-      sessionPagesAdvanced++;
-      globalReadingSessionTracker().onPageTurn();
-      preRenderedPage.ready = false;
-      preRenderedPlanesStaged_ = false;
-      pendingPreRender = false;
-      requestUpdate();
-      return;
-    }
     const unsigned long nowMs = millis();
     const unsigned long idleSlackMs = (preRenderedPage.completedAtMs > 0 && nowMs >= preRenderedPage.completedAtMs)
                                           ? (nowMs - preRenderedPage.completedAtMs)
@@ -2868,7 +2856,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     return;
   }
 
-  if (!stepPageState(isForwardTurn)) {
+  if (!stepPageStateLocked(isForwardTurn)) {
     return;
   }
 
@@ -3131,14 +3119,14 @@ void EpubReaderActivity::renderFinishedBookPass(const int spineCount) {
   // both mutated ActivityManager's pending-activity state from the wrong task and did SD work
   // (findNextBookInDirectory) on the render task's stack. The lock is now simply kept: nothing
   // below it is long-running any more.
-  finishedBookLaunchPending_ = true;
+  finishedBookLaunchPending_.store(true, std::memory_order_release);
 }
 
 void EpubReaderActivity::serviceFinishedBookLaunch() {
-  if (!finishedBookLaunchPending_ || !epub) {
+  if (!finishedBookLaunchPending_.load(std::memory_order_acquire) || !epub) {
     return;
   }
-  finishedBookLaunchPending_ = false;
+  finishedBookLaunchPending_.store(false, std::memory_order_relaxed);
   BookFinished::launchFinishedBookFlow(
       *this, renderer, mappedInput, epub->getPath(), epub->getSeries(), epub->getSeriesIndex(), epub->getAuthor(),
       [](void* ctx) { static_cast<EpubReaderActivity*>(ctx)->finishedBookActivityStarted_ = false; }, this,
@@ -5291,24 +5279,29 @@ bool EpubReaderActivity::handleLinkTouch() {
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
   if (!epub) return;
 
+  int sourceSpineIndex;
   // Push current position onto saved stack
-  if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
-    SavedPosition& saved = savedPositions[footnoteDepth];
-    saved = {};
-    saved.spineIndex = currentSpineIndex;
-    saved.pageNumber = section->currentPage;
-    // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
-    // total; the paragraph anchor below is unaffected either way.
-    if (!section->hasActiveBuild()) {
-      saved.pageCount = section->pageCount;
-      if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
-        saved.paragraphIndex = *paragraphIndex;
-        saved.hasParagraph = true;
+  {
+    RenderLock lock(*this);
+    sourceSpineIndex = currentSpineIndex;
+    if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
+      SavedPosition& saved = savedPositions[footnoteDepth];
+      saved = {};
+      saved.spineIndex = currentSpineIndex;
+      saved.pageNumber = section->currentPage;
+      // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
+      // total; the paragraph anchor below is unaffected either way.
+      if (!section->hasActiveBuild()) {
+        saved.pageCount = section->pageCount;
+        if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
+          saved.paragraphIndex = *paragraphIndex;
+          saved.hasParagraph = true;
+        }
       }
+      footnoteDepth++;
+      LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, saved.spineIndex,
+              saved.pageNumber, saved.hasParagraph ? saved.paragraphIndex : -1);
     }
-    footnoteDepth++;
-    LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, currentSpineIndex,
-            section->currentPage, saved.hasParagraph ? saved.paragraphIndex : -1);
   }
 
   // Extract fragment anchor (e.g. "#note1" or "chapter2.xhtml#note1")
@@ -5323,7 +5316,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   int targetSpineIndex;
   if (sameFile) {
-    targetSpineIndex = currentSpineIndex;
+    targetSpineIndex = sourceSpineIndex;
   } else {
     targetSpineIndex = epub->resolveHrefToSpineIndex(hrefStr);
   }
@@ -5537,21 +5530,26 @@ void EpubReaderActivity::openQuickOverrides() {
 }
 
 void EpubReaderActivity::openReaderMenu() {
-  const int currentPage = section ? section->currentPage + 1 : 0;
-  const int totalPages = section ? section->pageCount : 0;
-
   if (!epub) {
     return;
   }
 
+  int currentPage = 0;
+  int totalPages = 0;
   float bookProgress = 0.0f;
-  if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
-    const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-    bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+  bool isCurrentPageStarred = false;
+  {
+    RenderLock lock(*this);
+    currentPage = section ? section->currentPage + 1 : 0;
+    totalPages = section ? section->pageCount : 0;
+    if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
+      const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+      bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+    }
+    isCurrentPageStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
+                                                        static_cast<uint16_t>(section->currentPage));
   }
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-  const bool isCurrentPageStarred = section && bookmarkStore.has(static_cast<uint16_t>(currentSpineIndex),
-                                                                 static_cast<uint16_t>(section->currentPage));
 
   // Show the "Go to printed page" item only when this book has at least one integer-labelled
   // entry in pagelist.bin. Roman-only or empty page lists are excluded — the numeric input
@@ -5591,7 +5589,10 @@ void EpubReaderActivity::openReaderMenu() {
         // corrupts the current image outright. Observed as an unreadable screen on
         // leaving the menu, with the AA landing ~14 s and nine menu refreshes after
         // the page it was computed for.
-        pendingGrayscale_ = {};
+        {
+          RenderLock lock(*this);
+          pendingGrayscale_ = {};
+        }
 
         // Arm a HALF for the resumed page, then repaint. Every other sub-activity handler
         // here already requests an update (book info, reading stats, chapter selection);
@@ -5636,9 +5637,12 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       requestUpdate();
       break;
     case BA::BTN_STAR_PAGE:
-      if (section) {
-        bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
-        requestUpdate();
+      {
+        RenderLock lock(*this);
+        if (section) {
+          bookmarkStore.toggle(static_cast<uint16_t>(currentSpineIndex), static_cast<uint16_t>(section->currentPage));
+          requestUpdate();
+        }
       }
       break;
     case BA::BTN_DICTIONARY:
@@ -5664,9 +5668,14 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       break;
     case BA::BTN_OPEN_TOC:
       if (epub) {
-        const int spineIdx = currentSpineIndex;
-        const int tocIdx = section ? section->getTocIndexForPage(section->currentPage)
-                                   : epub->getTocIndexForSpineIndex(currentSpineIndex);
+        int spineIdx;
+        int tocIdx;
+        {
+          RenderLock lock(*this);
+          spineIdx = currentSpineIndex;
+          tocIdx = section ? section->getTocIndexForPage(section->currentPage)
+                           : epub->getTocIndexForSpineIndex(currentSpineIndex);
+        }
         ReaderUtils::enforceExitFullRefresh(renderer);
         startActivityForResult(std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub,
                                                                                     epub->getPath(), spineIdx, tocIdx),
@@ -5818,12 +5827,15 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
       // framebuffer may hold a Background-A pre-render of the *next* page, which would look
       // like a page turn). Clear the pre-render flags so classifyRenderPass() picks a Normal
       // render of the current page, request the forced mode for that render, and re-render.
-      pendingPreRender = false;
-      usePreRenderedBuffer = false;
-      preRenderedPage.ready = false;
-      preRenderedPlanesStaged_ = false;
-      forceRefreshModeNextRender_ = static_cast<int8_t>(
-          action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+      {
+        RenderLock lock(*this);
+        pendingPreRender = false;
+        usePreRenderedBuffer = false;
+        preRenderedPage.ready = false;
+        preRenderedPlanesStaged_ = false;
+        forceRefreshModeNextRender_ = static_cast<int8_t>(
+            action == BA::BTN_FORCE_FAST_REFRESH ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH);
+      }
       requestUpdate();
       break;
     default:
