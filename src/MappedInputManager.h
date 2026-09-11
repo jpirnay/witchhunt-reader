@@ -248,6 +248,10 @@ class MappedInputManager {
   // A Home-key hold runs the configured long-press action in the reader.
   bool wasHomeKeyHold() const;
   bool wasMenuGesture() const;
+  // The reading-light panel gesture: the top edge pulled down, on boards that have a
+  // light. Reports nothing on an unlit board, where the top edge is the reader menu
+  // instead — see the definition for why the two swap per board.
+  bool wasLightPanelGesture() const;
 
   // Front-strip hints for a screen that labels only the front buttons. `previous`/`next` name the
   // movement the strip performs — which physical pair that is, and in which order, follows the

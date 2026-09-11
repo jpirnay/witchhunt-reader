@@ -14,6 +14,7 @@
 #include "CrossPointState.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontGlobals.h"
+#include "SettingsList.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -33,6 +34,7 @@
 #include "settings/KOReaderSettingsActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
+#include "settings/SettingsSubmenuActivity.h"
 #include "util/FullScreenMessageActivity.h"
 #include "weather/WeatherActivity.h"
 
@@ -249,6 +251,9 @@ void ActivityManager::loop() {
     // suppresses the contact when it claims one) stops a marginal drag from BOTH moving the
     // selection and paging the list. Same ordering, and the same reason, as GestureEventManager.
 #if CP_TOUCH_UI
+    // Before the list dispatchers: a top-edge pull is an edge gesture, and a list occupying
+    // the whole screen would otherwise read it as a page-down first.
+    dispatchLightPanelGesture();
     dispatchListSwipe();
     dispatchListTap();
     dispatchHintStripTap();
@@ -629,6 +634,35 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
 }
 
 #if CP_TOUCH_UI
+
+void ActivityManager::dispatchLightPanelGesture() {
+  if (!mappedInput.hasTouch()) return;
+  // Inert on an unlit board: wasLightPanelGesture() already answers false there, because
+  // the top edge is the reader menu on those and the two must not compete.
+  if (!mappedInput.wasLightPanelGesture()) return;
+  if (currentActivity == nullptr) return;
+
+  // Don't stack a panel on top of itself, or on a screen that owns the whole surface for
+  // text entry -- a keyboard's own rows would be behind it and a swipe there is likelier to
+  // be a mis-stroke than a request for the light.
+  const std::string& name = currentActivity->getName();
+  if (name == "SettingsSubmenu" || name == "KeyboardEntry") return;
+
+  // The light submenu already exists, complete with the on/off toggle, both pickers and
+  // their board gating (requiring(ReadingLight) / requiring(WarmLight)). Borrowing it beats
+  // a second panel that would have to be kept in step with it -- and the toggle being its
+  // FIRST row is what makes "swipe, tap" reach on/off.
+  std::vector<SettingInfo> lightItems;
+  for (const auto& setting : getSettingsList()) {
+    if (setting.submenu == StrId::STR_MENU_DISP_LIGHT) lightItems.push_back(setting);
+  }
+  if (lightItems.empty()) return;
+
+  mappedInput.suppressTouchContact();
+  pushActivity(
+      std::make_unique<SettingsSubmenuActivity>(renderer, mappedInput, StrId::STR_MENU_DISP_LIGHT, lightItems));
+  LOG_DBG("TCH", "Top-edge swipe -> reading light");
+}
 
 void ActivityManager::dispatchListTap() {
   if (!mappedInput.hasTouch()) return;

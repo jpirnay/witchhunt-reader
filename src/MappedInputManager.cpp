@@ -2,6 +2,7 @@
 
 #include <FreeInkUICore.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
@@ -470,13 +471,32 @@ bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
-// Stays on the top edge, on every board. An earlier revision moved it to the
-// bottom on boards with a light, because the shipped defaults then bound BOTH
-// vertical directions to brightness and the top edge was contended. Splitting
-// the vertical swipes by screen half removed that contention entirely — the menu
-// and the light now share the downward swipe, one half each — so the menu stays
-// where it has always been.
-bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
+// Which edge the reader menu answers to depends on whether the board has a light,
+// because a lit board has one more thing to reach than edges to put it on.
+//
+//   lit board    bottom edge, swiped UP. The top edge carries the light panel, the
+//                way Kindle's quick settings and CrossInk's frontlight panel both
+//                pull down from the top. Swiping a menu up from the bottom is the
+//                bottom-sheet gesture every phone has.
+//   unlit board  top edge, swiped DOWN — where it has always been, because with no
+//                panel to place there the top edge is free.
+//
+// CrossInk splits it by board for exactly this reason, and per-board is better than
+// a compromise both boards live with. Asked of the HAL rather than BoardConfig: the
+// EEGO A4's I2C light only reports present() after begin() gets an ACK, so the
+// profile alone would over-report.
+//
+// This is a capability question answered in the input layer, which is the same shape
+// as wasHomeGesture() below consulting hasHomeKey() — this file owns what each edge
+// MEANS, while the SDK owns what counts as an edge swipe at all.
+bool MappedInputManager::wasMenuGesture() const {
+  return Frontlight.present() ? wasBottomEdgeUpSwipe() : wasTopEdgeDownSwipe();
+}
+
+// The reading-light panel: the top edge pulled down, and only where there is a light
+// to show. On an unlit board the top edge stays the reader menu, so this must report
+// nothing rather than compete with it.
+bool MappedInputManager::wasLightPanelGesture() const { return Frontlight.present() && wasTopEdgeDownSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();

@@ -200,6 +200,11 @@ class ActivityManager {
   void dispatchButtonAction(CrossPointSettings::BUTTON_ACTION action);
 
 #if CP_TOUCH_UI
+  // Pull the reading-light submenu down from the top edge, from whatever screen is up.
+  // Global rather than reader-only on purpose: reaching the light from the home screen in
+  // the dark is most of what a quick route to it is for, and taps/long taps are reader-only
+  // so a swipe is the only gesture that can serve both.
+  void dispatchLightPanelGesture();
   // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see
