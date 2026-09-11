@@ -447,7 +447,11 @@ class CrossPointSettings {
   // 2: BTN_CYCLE_ORIENTATION_BACK was inserted before the board-gated light
   //    block, shifting BTN_LIGHT_* up by one. Stored gesture values naming a
   //    light action would otherwise be read as the action next to it.
-  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 2;
+  // 3: the vertical swipes changed MEANING, from "which half of the screen did
+  //    this start in" to "which edge column, excluding the top/bottom bands".
+  //    A stored value was chosen against a gesture that no longer exists, so
+  //    the compiled defaults have to win.
+  static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
   // --- Gesture actions (touch boards) ---------------------------------------
@@ -464,21 +468,24 @@ class CrossPointSettings {
   // binding them would override that in every mode.
   uint8_t gestSwipeLeft = BTN_DEFAULT;
   uint8_t gestSwipeRight = BTN_DEFAULT;
-  // Vertical swipes are split by the half of the screen they start in, the way a
-  // phone splits the notification shade from quick settings: the left half is
-  // where you reach the menu, the right half is where you reach the light. That
-  // split is what lets both live on the same gesture without either losing it.
+  // Vertical swipes are anchored to the left/right EDGE COLUMN they start in, which is
+  // where KOReader puts the same controls (DSWIPE_ZONE_LEFT_EDGE adjusts the frontlight,
+  // RIGHT_EDGE its warmth) and where a thumb already rests. The columns exclude the top
+  // and bottom bands, so they never contend with the light panel or the reader menu —
+  // TapZones::edgeColumnFor() carries that rule and the reason for it.
   //
-  // Swipe up on the left is the quick on/off. It has to be a SWIPE rather than a
-  // tap or a hold, because swipes are the only gestures live outside the reader
-  // — and reaching the light from the home screen in the dark is most of the
-  // point of having a quick toggle at all. It also has to exist: dimming clamps
-  // at MIN_BRIGHTNESS, so there is deliberately no way to reach "off" by
-  // swiping down.
-  uint8_t gestSwipeUpLeft = BTN_LIGHT_TOGGLE;
-  uint8_t gestSwipeUpRight = BTN_LIGHT_BRIGHTER;
-  uint8_t gestSwipeDownLeft = BTN_READER_MENU;
-  uint8_t gestSwipeDownRight = BTN_LIGHT_DIMMER;
+  // The left column is brightness and the right warmth, which means neither direction can
+  // reach "off": dimming clamps at MIN_BRIGHTNESS, and brightening an unlit panel lights it
+  // (see BTN_LIGHT_BRIGHTER in main.cpp). Turning the light OFF therefore stays on
+  // gestLongTapTop below, which is where it already was — a long press being deliberate
+  // enough not to fire while repositioning a grip.
+  //
+  // Warmth is dropped to Built-in by dropUnsupportedActions() on a board with a
+  // single-channel light, so the right column is simply free there.
+  uint8_t gestSwipeUpLeft = BTN_LIGHT_BRIGHTER;
+  uint8_t gestSwipeUpRight = BTN_LIGHT_WARMER;
+  uint8_t gestSwipeDownLeft = BTN_LIGHT_DIMMER;
+  uint8_t gestSwipeDownRight = BTN_LIGHT_COOLER;
   // Every tap zone stays Built-in, and must. The reader's own tap handling is
   // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
   // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look

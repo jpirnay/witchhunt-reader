@@ -159,6 +159,61 @@ TEST(TapZones, CornersOverlapTheZonesTheyAreCarvedFrom) {
   EXPECT_EQ(Corner::TopLeft, cornerFor(0, 0, W, H));
 }
 
+// --- Edge columns (vertical swipe anchoring) ----------------------------------
+
+using TapZones::EdgeColumn;
+using TapZones::edgeColumnFor;
+
+TEST(TapZones, EdgeColumnsAreTheOuterQuartersOfTheWidth) {
+  const int column = W * 25 / 100;
+  const int y = H / 2;  // clear of both bands
+  EXPECT_EQ(EdgeColumn::Left, edgeColumnFor(0, y, W, H));
+  EXPECT_EQ(EdgeColumn::Left, edgeColumnFor(column - 1, y, W, H));
+  EXPECT_EQ(EdgeColumn::None, edgeColumnFor(column, y, W, H));
+  EXPECT_EQ(EdgeColumn::None, edgeColumnFor(W - column - 1, y, W, H));
+  EXPECT_EQ(EdgeColumn::Right, edgeColumnFor(W - column, y, W, H));
+  EXPECT_EQ(EdgeColumn::Right, edgeColumnFor(W - 1, y, W, H));
+}
+
+TEST(TapZones, TheBandsAreExcludedFromBothColumns) {
+  // The whole reason this helper exists rather than a bare x test: a swipe starting in a
+  // bottom corner must NOT be both "open the reader menu" and "brighten the light".
+  const int band = H * 14 / 100;
+  for (int x = 0; x < W; x += 9) {
+    EXPECT_EQ(EdgeColumn::None, edgeColumnFor(x, 0, W, H)) << "x=" << x;
+    EXPECT_EQ(EdgeColumn::None, edgeColumnFor(x, band - 1, W, H)) << "x=" << x;
+    EXPECT_EQ(EdgeColumn::None, edgeColumnFor(x, H - 1, W, H)) << "x=" << x;
+    EXPECT_EQ(EdgeColumn::None, edgeColumnFor(x, H - band, W, H)) << "x=" << x;
+  }
+  // One pixel inside the band boundary the columns are live again.
+  EXPECT_EQ(EdgeColumn::Left, edgeColumnFor(0, band, W, H));
+  EXPECT_EQ(EdgeColumn::Right, edgeColumnFor(W - 1, H - band - 1, W, H));
+}
+
+TEST(TapZones, MidPageVerticalSwipesBelongToNobody) {
+  // The deliberate capability change in re-anchoring: a vertical swipe down the middle of
+  // the page used to be brightness (whichever half it fell in) and now means nothing, so a
+  // reader resting a thumb mid-page cannot dim the screen by accident.
+  for (int y = H * 14 / 100; y < H - H * 14 / 100; y += 23) {
+    EXPECT_EQ(EdgeColumn::None, edgeColumnFor(W / 2, y, W, H)) << "y=" << y;
+  }
+}
+
+TEST(TapZones, EdgeColumnsFollowThePageInLandscape) {
+  const int column = H * 25 / 100;  // width is H once rotated
+  EXPECT_EQ(EdgeColumn::Left, edgeColumnFor(0, W / 2, H, W));
+  EXPECT_EQ(EdgeColumn::Right, edgeColumnFor(H - 1, W / 2, H, W));
+  EXPECT_EQ(EdgeColumn::None, edgeColumnFor(column, W / 2, H, W));
+}
+
+TEST(TapZones, DegenerateSizesHaveNoEdgeColumns) {
+  EXPECT_EQ(EdgeColumn::None, edgeColumnFor(0, 0, 0, 0));
+  EXPECT_EQ(EdgeColumn::None, edgeColumnFor(0, 0, -5, -5));
+  // A tiny frame collapses the band to 0, so y is never excluded, but the column test still
+  // has to answer rather than misbehave.
+  EXPECT_NE(EdgeColumn::Right, edgeColumnFor(0, 0, 1, 1));
+}
+
 }  // namespace
 
 // --- Bounded band split -------------------------------------------------------

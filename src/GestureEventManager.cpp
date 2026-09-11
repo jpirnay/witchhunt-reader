@@ -103,16 +103,25 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   // Direction is resolved in the orientation sampled above, so it is the way the
   // page moved, not the way the panel is wired.
   //
-  // Vertical swipes are split by the half of the screen they START in, which is
-  // the question a phone asks to tell the notification shade from quick
-  // settings. The start point rather than the end: a downward swipe travels, and
-  // where it ends up says nothing about which control the reader reached for.
-  // Horizontal swipes are not split — they are the page turn in Swipe mode, and
-  // a page turn does not care which half of the page it began on.
+  // Vertical swipes are anchored to the left/right EDGE COLUMN they START in, the way
+  // KOReader anchors its frontlight swipes (DSWIPE_ZONE_LEFT_EDGE / RIGHT_EDGE). The start
+  // point rather than the end: an end-anchored split would be a function of swipe LENGTH
+  // rather than of a place the reader picks, and e-paper cannot animate a drag, so there
+  // would be nothing to aim at while the finger is moving.
+  //
+  // edgeColumnFor() also excludes the top and bottom bands, which belong to the reader menu
+  // and the light panel — see the note there on the overlap that creates. A vertical swipe
+  // anywhere else on the page is deliberately nobody's: it used to be brightness on
+  // whichever half it fell in, which meant a thumb resting mid-page could dim the screen.
+  //
+  // Horizontal swipes are not split — they are the page turn in Swipe mode, and a page turn
+  // does not care where on the page it began.
   int swipeStartX = 0;
-  int swipeStartY = 0;  // unused: the split is horizontal, but decodeSwipe reports both
+  int swipeStartY = 0;
   Gesture swipe = Gesture::Count;
-  switch (input.wasSwipeIn(touchOrientation, swipeStartX, swipeStartY)) {
+  const auto swipeDir = input.wasSwipeIn(touchOrientation, swipeStartX, swipeStartY);
+  const TapZones::EdgeColumn startColumn = TapZones::edgeColumnFor(swipeStartX, swipeStartY, width, height);
+  switch (swipeDir) {
     case MappedInputManager::SwipeDir::Left:
       swipe = Gesture::SwipeLeft;
       break;
@@ -120,10 +129,18 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
       swipe = Gesture::SwipeRight;
       break;
     case MappedInputManager::SwipeDir::Up:
-      swipe = swipeStartX < width / 2 ? Gesture::SwipeUpLeft : Gesture::SwipeUpRight;
+      if (startColumn == TapZones::EdgeColumn::Left) {
+        swipe = Gesture::SwipeUpLeft;
+      } else if (startColumn == TapZones::EdgeColumn::Right) {
+        swipe = Gesture::SwipeUpRight;
+      }
       break;
     case MappedInputManager::SwipeDir::Down:
-      swipe = swipeStartX < width / 2 ? Gesture::SwipeDownLeft : Gesture::SwipeDownRight;
+      if (startColumn == TapZones::EdgeColumn::Left) {
+        swipe = Gesture::SwipeDownLeft;
+      } else if (startColumn == TapZones::EdgeColumn::Right) {
+        swipe = Gesture::SwipeDownRight;
+      }
       break;
     case MappedInputManager::SwipeDir::None:
       break;
