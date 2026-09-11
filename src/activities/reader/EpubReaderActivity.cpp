@@ -2818,9 +2818,12 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     // lock, then re-check the condition under it — the render task may have invalidated the
     // pre-render between the unlocked test above and the lock.
     RenderLock lock;
-    // cppcheck-suppress knownConditionTrueFalse ; render task mutates these concurrently
+    // The single-line form lands on the `if` only; cppcheck reports the sub-expression on the
+    // continuation line below, so the suppression has to span the whole condition.
+    // cppcheck-suppress-begin knownConditionTrueFalse ; render task mutates these concurrently
     if (!(section && preRenderedPage.ready && preRenderedPage.spineIndex == currentSpineIndex &&
           preRenderedPage.pageIndex == section->currentPage + 1)) {
+      // cppcheck-suppress-end knownConditionTrueFalse
       lock.unlock();
       if (!stepPageState(isForwardTurn)) {
         return;
@@ -3643,9 +3646,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
           renderer.clearRefreshOverride();  // discard the armed HALF -> popup paints FAST
         }
         GUI.drawPopup(renderer, tr(STR_INDEXING));  // immediate feedback before the first page lands
-      }
 
-      if (mode == SectionBuildMode::IncrementalReleased) {
         // Tight heap: free the secondary buffer (~48–52 KB) for the build. AA is off until the
         // build ends and recoverSecondaryBufferIfNeeded() reallocates it (marked via
         // secondaryBufferDegraded_); mid-build draws are BW. No display downside on X3 (baseline

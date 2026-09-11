@@ -117,7 +117,7 @@ bool writeAttributes(const std::string& html, size_t pos, const size_t end, Sink
       continue;
     }
 
-    char nameBuf[NAME_BUF_BYTES];
+    char nameBuf[NAME_BUF_BYTES] = {};
     size_t nameLen = 0;
     while (pos < end && isNameChar(static_cast<unsigned char>(html[pos]))) {
       if (nameLen < NAME_BUF_BYTES - 1) nameBuf[nameLen++] = toLowerAscii(html[pos]);
@@ -197,7 +197,7 @@ bool normalizeDictionaryHtml(const std::string& html, Print& out) {
 
       const bool closing = html[i + 1] == '/';
       size_t nameEnd = i + (closing ? 2 : 1);
-      char nameBuf[NAME_BUF_BYTES];
+      char nameBuf[NAME_BUF_BYTES] = {};
       size_t nameLen = 0;
       while (nameEnd < j && isNameChar(static_cast<unsigned char>(html[nameEnd]))) {
         if (nameLen < NAME_BUF_BYTES - 1) nameBuf[nameLen++] = toLowerAscii(html[nameEnd]);

@@ -247,21 +247,12 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
     int textBlockHeight = 0;
     if (!overlayInfo.title.empty()) {
       textBlockHeight += lineHeight12;
-      if (!overlayInfo.author.empty()) {
-        textBlockHeight += lineSpacing;
-      } else if (!overlayInfo.progressText.empty()) {
-        textBlockHeight += sectionSpacing;
-      }
+      textBlockHeight += overlayInfo.author.empty() ? sectionSpacing : lineSpacing;
     }
     if (!overlayInfo.author.empty()) {
-      textBlockHeight += lineHeight10;
-      if (!overlayInfo.progressText.empty()) {
-        textBlockHeight += sectionSpacing;
-      }
+      textBlockHeight += lineHeight10 + sectionSpacing;
     }
-    if (!overlayInfo.progressText.empty()) {
-      textBlockHeight += lineHeight10;
-    }
+    textBlockHeight += lineHeight10;
 
     const int overlayY = pageHeight - textBlockHeight - (lineHeight12 / 3) - (lineHeight10 * 2 / 3);
     int y = overlayY + (lineHeight12 / 3);
@@ -269,25 +260,15 @@ bool renderPngSleepScreen(const std::string& filename, GfxRenderer& renderer, co
       const std::string title = renderer.truncatedText(BOOKERLY_12_FONT_ID, overlayInfo.title.c_str(), maxTextWidth);
       renderer.drawText(BOOKERLY_12_FONT_ID, 10, y, title.c_str(), true);
       y += lineHeight12;
-      if (!overlayInfo.author.empty()) {
-        y += lineSpacing;
-      } else if (!overlayInfo.progressText.empty()) {
-        y += sectionSpacing;
-      }
+      y += overlayInfo.author.empty() ? sectionSpacing : lineSpacing;
     }
     if (!overlayInfo.author.empty()) {
       const std::string author = renderer.truncatedText(UI_10_FONT_ID, overlayInfo.author.c_str(), maxTextWidth);
       renderer.drawText(UI_10_FONT_ID, 10, y, author.c_str(), true);
-      y += lineHeight10;
-      if (!overlayInfo.progressText.empty()) {
-        y += sectionSpacing;
-      }
+      y += lineHeight10 + sectionSpacing;
     }
-    if (!overlayInfo.progressText.empty()) {
-      const std::string progress =
-          renderer.truncatedText(UI_10_FONT_ID, overlayInfo.progressText.c_str(), maxTextWidth);
-      renderer.drawText(UI_10_FONT_ID, 10, y, progress.c_str(), true);
-    }
+    const std::string progress = renderer.truncatedText(UI_10_FONT_ID, overlayInfo.progressText.c_str(), maxTextWidth);
+    renderer.drawText(UI_10_FONT_ID, 10, y, progress.c_str(), true);
   };
 
   PngToFramebufferConverter decoder;

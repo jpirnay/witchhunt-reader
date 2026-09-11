@@ -83,7 +83,10 @@ class MenuListActivity : public Activity {
 
   // Process SettingInfo items marked with withSubmenu() into submenu placeholders.
   void prepareSubmenus();
-  void openSubmenu(const SettingInfo& submenuEntry);
+  // Virtual so a subclass can supply its own submenu wiring: toggleCurrentItem()
+  // below dispatches through this, and EpubReaderMenuActivity needs a per-item
+  // value-string override that the plain version has no way to pass.
+  virtual void openSubmenu(const SettingInfo& submenuEntry);
 
   // Handle up/down navigation via buttonNavigator.  Call from loop() if overriding.
   void handleNavigation();
