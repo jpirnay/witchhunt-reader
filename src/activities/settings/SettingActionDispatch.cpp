@@ -2,6 +2,7 @@
 
 #include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
+#include "GestureActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
@@ -32,6 +33,10 @@ std::unique_ptr<Activity> createActivityForAction(SettingAction action, GfxRende
       return std::make_unique<ButtonRemapActivity>(renderer, mappedInput);
     case SettingAction::ButtonActionsOverview:
       return std::make_unique<ButtonActionsOverviewActivity>(renderer, mappedInput);
+#if CP_TOUCH_UI
+    case SettingAction::GestureActionsOverview:
+      return std::make_unique<GestureActionsOverviewActivity>(renderer, mappedInput);
+#endif
     case SettingAction::CustomiseStatusBar:
       return std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput);
     case SettingAction::DownloadFonts:

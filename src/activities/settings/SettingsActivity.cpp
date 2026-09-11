@@ -125,6 +125,13 @@ void SettingsActivity::onEnter() {
              std::move(SettingInfo::Action(StrId::STR_BTN_ACTIONS_OVERVIEW, SettingAction::ButtonActionsOverview)
                            .withSubcategory(StrId::STR_MENU_BTN_ACTIONS)));
 
+  // The same thing for touch: where the zones are and what each currently does. Sits beside
+  // the gesture rows it summarises, and only appears on a board with a digitiser.
+  addToMoved(controlsSettings,
+             std::move(SettingInfo::Action(StrId::STR_GEST_ACTIONS_OVERVIEW, SettingAction::GestureActionsOverview)
+                           .withSubcategory(StrId::STR_MENU_GESTURE_ACTIONS)
+                           .requiring(SettingRequires::TouchPanel)));
+
   addToMoved(readerSettings, SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
 
   addToMoved(systemSettings, SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
