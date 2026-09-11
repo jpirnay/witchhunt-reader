@@ -486,6 +486,18 @@ class CrossPointSettings {
   uint8_t gestSwipeUpRight = BTN_LIGHT_WARMER;
   uint8_t gestSwipeDownLeft = BTN_LIGHT_DIMMER;
   uint8_t gestSwipeDownRight = BTN_LIGHT_COOLER;
+  // Outward horizontal swipes: ten pages back in the back zone, ten forward in the
+  // forward zone. Safe to bind by default where the tap zones are not, because these
+  // route through dispatchButtonAction(BTN_PAGE_*_10) exactly as the physical buttons
+  // do -- there is no separate end-of-book flow for a ten-page jump to bypass, which
+  // is what keeps every tap zone on Built-in. Magnitude follows KOReader's
+  // double_tap_left_side / double_tap_right_side.
+  //
+  // In Swipe reading mode these WIN over the plain page-turn swipe inside the outer
+  // thirds, since GestureEventManager resolves first. That is the trade: the outer
+  // thirds lose the one-page swipe and keep the one-page tap.
+  uint8_t gestSwipeLeftInLeft = BTN_PAGE_BACK_10;
+  uint8_t gestSwipeRightInRight = BTN_PAGE_FORWARD_10;
   // Every tap zone stays Built-in, and must. The reader's own tap handling is
   // what implements Touch Reading Controls (Off / Tap / Swipe / Inverted tap)
   // and the end-of-book flow; binding a zone to BTN_PAGE_BACK would look

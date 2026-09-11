@@ -45,6 +45,16 @@ enum class Gesture : uint8_t {
   SwipeUpRight,
   SwipeDownLeft,
   SwipeDownRight,
+  // The OUTWARD horizontal swipes: leftward in the left page-turn third, rightward
+  // in the right one — travelling toward the edge the finger started at. Those
+  // thirds already MEAN back and forward (a tap there turns one page), so flicking
+  // the same way in the same zone jumping ten is one rule rather than two.
+  // KOReader ships the same +/-10 magnitude on double_tap_left_side /
+  // double_tap_right_side; the trigger differs because this firmware has no
+  // double-tap detector, and an outward swipe costs two gestures rather than a
+  // whole event class. Every inward and centre swipe keeps the plain page turn.
+  SwipeLeftInLeft,
+  SwipeRightInRight,
   TapLeft,
   TapRight,
   TapCentre,
@@ -92,6 +102,10 @@ inline constexpr Binding BINDINGS[] = {
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownLeft", false},
     {Gesture::SwipeDownRight, &CrossPointSettings::gestSwipeDownRight, StrId::STR_GEST_SWIPE_DOWN_RIGHT,
      StrId::STR_GEST_SWIPE_GROUP, "gestSwipeDownRight", false},
+    {Gesture::SwipeLeftInLeft, &CrossPointSettings::gestSwipeLeftInLeft, StrId::STR_GEST_SWIPE_LEFT_IN_LEFT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeLeftInLeft", false},
+    {Gesture::SwipeRightInRight, &CrossPointSettings::gestSwipeRightInRight, StrId::STR_GEST_SWIPE_RIGHT_IN_RIGHT,
+     StrId::STR_GEST_SWIPE_GROUP, "gestSwipeRightInRight", false},
     {Gesture::TapLeft, &CrossPointSettings::gestTapLeft, StrId::STR_GEST_TAP_LEFT, StrId::STR_GEST_TAP_GROUP,
      "gestTapLeft", false},
     {Gesture::TapRight, &CrossPointSettings::gestTapRight, StrId::STR_GEST_TAP_RIGHT, StrId::STR_GEST_TAP_GROUP,
@@ -130,10 +144,12 @@ static_assert(sizeof(BINDINGS) / sizeof(BINDINGS[0]) == static_cast<size_t>(Gest
 // enum automatically.
 inline const char* nameOf(const Gesture gesture) {
   static constexpr const char* kNames[] = {
-      "swipe-left",       "swipe-right",  "swipe-up-left", "swipe-up-right", "swipe-down-left",
-      "swipe-down-right", "tap-left",     "tap-right",     "tap-centre",     "tap-top",
-      "tap-bottom",       "longtap-left", "longtap-right", "longtap-centre", "longtap-top",
-      "longtap-bottom",   "pinch-in",     "pinch-out",     "rotate-cw",      "rotate-ccw",
+      "swipe-left",      "swipe-right",      "swipe-up-left",      "swipe-up-right",
+      "swipe-down-left", "swipe-down-right", "swipe-left-in-left", "swipe-right-in-right",
+      "tap-left",        "tap-right",        "tap-centre",         "tap-top",
+      "tap-bottom",      "longtap-left",     "longtap-right",      "longtap-centre",
+      "longtap-top",     "longtap-bottom",   "pinch-in",           "pinch-out",
+      "rotate-cw",       "rotate-ccw",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Gesture::Count),
                 "every Gesture needs a trace name");
@@ -166,6 +182,13 @@ inline StrId builtinLabelFor(const Gesture gesture) {
     case Gesture::SwipeLeft:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
     case Gesture::SwipeRight:
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeLeftInLeft:
+      // Left alone these are the plain page-turn swipe, because that is what the
+      // contact falls through to: an unbound gesture is never claimed, so the
+      // reader's own detectTouchPageTurn sees it as an ordinary horizontal swipe.
+      return swipeTurnsPages ? StrId::STR_BTN_DEF_NEXT_PAGE : StrId::STR_BTN_DEF_NOTHING;
+    case Gesture::SwipeRightInRight:
       return swipeTurnsPages ? StrId::STR_BTN_DEF_PREV_PAGE : StrId::STR_BTN_DEF_NOTHING;
     // SwipeDownLeft/SwipeDownRight now fall through to NOTHING below, and that is a
     // correction rather than a regression. They used to claim the reader menu, because a

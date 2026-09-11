@@ -121,12 +121,19 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   Gesture swipe = Gesture::Count;
   const auto swipeDir = input.wasSwipeIn(touchOrientation, swipeStartX, swipeStartY);
   const TapZones::EdgeColumn startColumn = TapZones::edgeColumnFor(swipeStartX, swipeStartY, width, height);
+  // The page-turn third the swipe STARTED in, for the outward horizontal swipes. Only the
+  // horizontal position matters, and zoneFor() answers Left/Right for any y once x is in an
+  // outer third, so this is the same zone a tap there would hit.
+  const TapZones::Zone startZone = TapZones::zoneFor(swipeStartX, swipeStartY, width, height);
   switch (swipeDir) {
     case MappedInputManager::SwipeDir::Left:
-      swipe = Gesture::SwipeLeft;
+      // Outward first: leftward inside the left (back) zone is the ten-page jump, and only
+      // a swipe that both starts and travels that way qualifies. Everything else -- inward,
+      // or from the centre -- stays the plain page turn.
+      swipe = startZone == TapZones::Zone::Left ? Gesture::SwipeLeftInLeft : Gesture::SwipeLeft;
       break;
     case MappedInputManager::SwipeDir::Right:
-      swipe = Gesture::SwipeRight;
+      swipe = startZone == TapZones::Zone::Right ? Gesture::SwipeRightInRight : Gesture::SwipeRight;
       break;
     case MappedInputManager::SwipeDir::Up:
       if (startColumn == TapZones::EdgeColumn::Left) {
