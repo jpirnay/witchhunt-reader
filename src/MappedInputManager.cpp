@@ -284,25 +284,6 @@ bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   return true;
 }
 
-bool MappedInputManager::wasScreenLongPress(int& x, int& y) const {
-  float nx = 0.0f;
-  float ny = 0.0f;
-  if (!rawLongPress(nx, ny)) return false;
-  // Consuming the long-press implies acting on it: suppress the rest of the
-  // contact so the finger lift can't also tap whatever the action opened.
-  gpio.suppressTouchContact();
-  renderer.tapToLogical(nx, ny, x, y);
-  return true;
-}
-
-bool MappedInputManager::peekScreenLongPress(int& x, int& y) const {
-  float nx = 0.0f;
-  float ny = 0.0f;
-  if (!rawLongPress(nx, ny)) return false;
-  renderer.tapToLogical(nx, ny, x, y);
-  return true;
-}
-
 bool MappedInputManager::peekScreenLongPressIn(const touchtransform::Orientation orientation, int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;
@@ -326,41 +307,6 @@ void MappedInputManager::injectRawPress(const uint8_t rawButtonIndex, const bool
 bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); }
 
 unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
-
-bool MappedInputManager::wasTapInRect(const int x, const int y, const int width, const int height) const {
-  int tx = 0;
-  int ty = 0;
-  return wasScreenTapped(tx, ty) && tx >= x && tx < x + width && ty >= y && ty < y + height;
-}
-
-MappedInputManager::RowTouch MappedInputManager::rowTouch(int& row, const int top, const int rowStep,
-                                                          const int rowCount, const int xStart, const int xEnd,
-                                                          const int rowHeight) const {
-  // Rows band along y, bounded on x. Arithmetic lives in touchtransform so it
-  // can be host-tested (see test/touch_transform).
-  const auto hit = [&](const int x, const int y) {
-    return touchtransform::bandHit(y, x, top, rowStep, rowCount, xStart, xEnd, rowHeight, row);
-  };
-  int x = 0;
-  int y = 0;
-  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
-  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
-  return RowTouch::None;
-}
-
-MappedInputManager::RowTouch MappedInputManager::colTouch(int& col, const int left, const int colStep,
-                                                          const int colCount, const int yStart, const int yEnd,
-                                                          const int colWidth) const {
-  // Columns are the same test with the axes swapped: band along x, bounded on y.
-  const auto hit = [&](const int x, const int y) {
-    return touchtransform::bandHit(x, y, left, colStep, colCount, yStart, yEnd, colWidth, col);
-  };
-  int x = 0;
-  int y = 0;
-  if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
-  if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
-  return RowTouch::None;
-}
 
 MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
   // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
@@ -501,5 +447,3 @@ bool MappedInputManager::wasLightPanelGesture() const { return Frontlight.presen
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();
 }
-
-bool MappedInputManager::wasHomeKeyHold() const { return gpio.hasHomeKey() && gpio.wasHomeKeyLongPressed(); }
