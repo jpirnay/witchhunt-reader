@@ -15,6 +15,7 @@
 #include "KOReaderCredentialStore.h"
 #include "SdCardFontGlobals.h"
 #include "TouchGestures.h"
+#include "TouchUi.h"
 #include "activities/settings/SettingInfo.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
@@ -498,6 +499,12 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // gesture means "leave this contact to the reader" — and the label on that
   // entry names what the reader will then do with it, the way each button row
   // names its own default, rather than a bare "Built-in" that answers nothing.
+  // Built then filtered out again on a board with no digitiser: twenty SettingInfo
+  // rows, each with its own ~66-byte option vector, constructed and freed on every
+  // getSettingsList() -- which JsonSettingsIO calls on every settings SAVE and LOAD,
+  // not just when the settings screen opens. Gated rather than left to the
+  // remove_if below, which cannot un-allocate them.
+#if CP_TOUCH_UI
   for (const auto& binding : TouchGestures::BINDINGS) {
     // cppcheck-suppress useStlAlgorithm ; std::transform would have to carry this
     // whole chained builder in a lambda and append through a back_inserter, which
@@ -511,6 +518,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
             .withSelectorActivity()
             .requiring(binding.needsMultiTouch ? SettingRequires::MultiTouchPanel : SettingRequires::TouchPanel));
   }
+#endif  // CP_TOUCH_UI
   // Tilt page turn (X3-only)
   settings.push_back(SettingInfo::Toggle(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn, "tiltPageTurn",
                                          StrId::STR_CAT_CONTROLS)

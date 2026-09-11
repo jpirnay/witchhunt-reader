@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "TouchUi.h"
+
 // Where the rows of the list on screen actually landed, so a tap can be matched against the
 // list that is really painted.
 //
@@ -69,6 +71,7 @@ static_assert(kMaxRows <= 64, "selectable is a uint64_t bitmask");
 // against a mix of two screens' geometry. Writes are frequent and reads rare, so losing a read
 // to a concurrent write costs nothing -- a failed snapshot reads as "no list this tick" and
 // the tap falls through to whoever else wants it, which is the safe way to be wrong.
+#if CP_TOUCH_UI
 namespace detail {
 inline Band& storage() {
   static Band b;
@@ -134,6 +137,31 @@ inline int hitTest(const int px, const int py) {
   return hitTestIn(b, px, py);
 }
 
+#else  // !CP_TOUCH_UI
+
+// No digitiser on this board, so nothing ever reads a band back. Every entry point
+// is inert and the 272-byte storage is gone -- but the call sites in the themes and
+// in Activity are left EXACTLY as they are, which is the point: the compiler drops
+// the 280-byte Builder off the render stack, the memcpy and the seqlock, and no
+// draw code grows an #ifdef.
+inline void record(const Band&) {}
+inline void invalidate() {}
+inline bool snapshot(Band&) { return false; }
+inline bool hasBand() { return false; }
+inline int hitTestIn(const Band&, int, int) { return -1; }
+inline int hitTest(int, int) { return -1; }
+
+struct Builder {
+  void begin(int, int, int) {}
+  void addRow(int, int, bool) {}
+  void commit() const {}
+};
+
+inline void recordUniformRows(int, int, int, int, int, int) {}
+
+#endif  // CP_TOUCH_UI
+
+#if CP_TOUCH_UI
 // --- Recording helpers -------------------------------------------------------------------
 //
 // Both live here rather than in the themes so the two fixed-height `drawList` implementations
@@ -183,5 +211,6 @@ inline void recordUniformRows(const int x, const int width, const int top, const
   for (int r = 0; r < rowCount; ++r) b.addRow(top + r * rowHeight, rowHeight, /*selectable=*/true);
   b.commit();
 }
+#endif  // CP_TOUCH_UI
 
 }  // namespace ListTouchBand

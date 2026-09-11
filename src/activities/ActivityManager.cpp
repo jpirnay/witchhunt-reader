@@ -248,9 +248,11 @@ void ActivityManager::loop() {
     // the same contact when the travel sits near the threshold. Resolving the swipe first (it
     // suppresses the contact when it claims one) stops a marginal drag from BOTH moving the
     // selection and paging the list. Same ordering, and the same reason, as GestureEventManager.
+#if CP_TOUCH_UI
     dispatchListSwipe();
     dispatchListTap();
     dispatchHintStripTap();
+#endif
   }
 
   if (SETTINGS.useClock && HalClock::isSynced()) {
@@ -626,6 +628,8 @@ void ActivityManager::dispatchButtonAction(const CrossPointSettings::BUTTON_ACTI
   }
 }
 
+#if CP_TOUCH_UI
+
 void ActivityManager::dispatchListTap() {
   if (!mappedInput.hasTouch()) return;
 
@@ -804,6 +808,8 @@ void ActivityManager::dispatchHintStripTap() {
   mappedInput.injectRawPress(static_cast<uint8_t>(hint));
   LOG_DBG("TCH", "Hint strip tap at (%d,%d) -> raw button %d", x, y, hint);
 }
+
+#endif  // CP_TOUCH_UI
 
 void ActivityManager::requestUpdate(bool immediate) {
   if (immediate) {

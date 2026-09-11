@@ -5,7 +5,18 @@
 #include <TouchTransform.h>
 
 #include "CrossPointSettings.h"
+#include "TouchUi.h"
 #include "components/themes/ListTouchBand.h"
+
+// CP_TOUCH_UI is asserted on the command line rather than derived, because the
+// dependency-free recorder headers it guards cannot reach BoardConfig.h without
+// dragging Arduino.h into the host tests -- see TouchUi.h. This TU is the one place
+// where both it and the SDK's own capability are in scope, so it is where the two
+// are held to each other. Getting it wrong in the permissive direction only wastes
+// flash; getting it wrong the other way ships a device whose screen does nothing,
+// which is not a failure a build should be able to hide.
+static_assert(CP_TOUCH_UI == (FREEINK_CAP_TOUCH ? 1 : 0),
+              "CP_TOUCH_UI (platformio.ini) disagrees with FREEINK_CAP_TOUCH (BoardConfig)");
 
 namespace fui = freeink::ui;
 

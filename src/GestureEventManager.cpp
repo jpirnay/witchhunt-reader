@@ -4,10 +4,14 @@
 #include <Logging.h>
 #include <TouchTransform.h>
 
+#include "TouchUi.h"
+
 namespace {
 using BA = CrossPointSettings::BUTTON_ACTION;
 using TouchGestures::Gesture;
 }  // namespace
+
+#if CP_TOUCH_UI
 
 bool GestureEventManager::boundAction(const Gesture gesture, BA& action, const bool inReader) {
   const uint8_t configured = TouchGestures::actionFor(gesture);
@@ -139,3 +143,17 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
 
   return false;
 }
+
+#else  // !CP_TOUCH_UI
+
+// main.cpp still calls this every tick, so it keeps its symbol and answers "no
+// gesture". boundAction() is not defined at all, and that is what makes
+// TouchGestures::BINDINGS (400 B of .rodata) and builtinLabelFor() unreachable --
+// SettingsList's gesture loop being the only other user of either.
+bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
+  (void)action;
+  (void)inReader;
+  return false;
+}
+
+#endif  // CP_TOUCH_UI

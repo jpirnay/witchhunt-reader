@@ -14,6 +14,7 @@
 #include "CrossPointSettings.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "TouchUi.h"
 
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
@@ -198,6 +199,7 @@ class ActivityManager {
   // only when the current activity is a reader; others are no-ops in other contexts.
   void dispatchButtonAction(CrossPointSettings::BUTTON_ACTION action);
 
+#if CP_TOUCH_UI
   // Turn a tap on the on-screen button-hint strip into the button press it depicts, so the
   // four labels at the bottom work as touch targets on every screen that draws them. Runs
   // after the current activity's loop() so screens that handle touch themselves win; see
@@ -207,6 +209,7 @@ class ActivityManager {
   // definition for why this is a synthesis rather than a per-screen handler.
   void dispatchListSwipe();
   void dispatchHintStripTap();
+#endif  // CP_TOUCH_UI
 
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
