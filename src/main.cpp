@@ -74,6 +74,30 @@ GestureEventManager gestureEventManager(mappedInputManager, renderer);
 // Lets lib-layer long tasks (image decoders) bail out mid-work so a queued button
 // press is serviced on the next main-loop pass. Installed once in setup().
 static bool hasPendingButtonInput() { return mappedInputManager.hasPendingInput(); }
+
+// logSerial.write() returns a SHORT count when the USB-CDC TX ring stays full past
+// HWCDC's ~100 ms tx timeout -- a host that reads in small chunks with work between
+// reads is enough to trigger it. Ignoring the return value silently drops the
+// remainder and truncates the transfer. SerialTransferDevice::writeBytes() already
+// loops for exactly this reason; this is the same guard for the one-shot senders in
+// this file. Yields rather than spinning: a tight loop on the C3 starves the USB-CDC
+// task that we are waiting on. Returns false if the host stopped draining entirely.
+static bool writeAllToSerial(const uint8_t* data, size_t len) {
+  constexpr unsigned long kWriteStallAbortMs = 15000;  // matches SerialTransferDevice
+  size_t sent = 0;
+  unsigned long lastProgressMs = millis();
+  while (sent < len) {
+    const size_t n = logSerial.write(data + sent, len - sent);
+    if (n > 0) {
+      sent += n;
+      lastProgressMs = millis();
+      continue;
+    }
+    if (millis() - lastProgressMs > kWriteStallAbortMs) return false;  // host vanished
+    delay(1);
+  }
+  return true;
+}
 ButtonEventManager& globalButtonEvents() { return buttonEventManager; }
 ActivityManager activityManager(renderer, mappedInputManager);
 FontDecompressor fontDecompressor;
@@ -1444,8 +1468,14 @@ void loop() {
           const uint16_t height = display.getDisplayHeight();
           const uint32_t bufferSize = display.getBufferSize();
           logSerial.printf("SCREENSHOT_START:%d:%d:%d\n", width, height, bufferSize);
-          logSerial.write(buf, bufferSize);
-          logSerial.printf("SCREENSHOT_END\n");
+          // ~52 KB in one go is exactly the sustained write that trips the short-write
+          // behaviour, so the END marker must not be sent if the payload was cut short:
+          // a truncated frame with a valid trailer looks complete to the host.
+          if (writeAllToSerial(buf, bufferSize)) {
+            logSerial.printf("SCREENSHOT_END\n");
+          } else {
+            logSerial.printf("SCREENSHOT_ERROR:transfer stalled\n");
+          }
         } else {
           // Framebuffers are released during the web server session — nothing to send.
           logSerial.printf("SCREENSHOT_ERROR:framebuffer released\n");
