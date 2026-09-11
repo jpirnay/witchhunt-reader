@@ -450,7 +450,10 @@ class CrossPointSettings {
   // 3: the vertical swipes changed MEANING, from "which half of the screen did
   //    this start in" to "which edge column, excluding the top/bottom bands".
   //    A stored value was chosen against a gesture that no longer exists, so
-  //    the compiled defaults have to win.
+  //    the compiled defaults have to win. The same bump also covers the light
+  //    toggle moving from gestLongTapTop to gestLongTapTopLeft, and the new
+  //    outward page-turn swipes — all of which shipped together, so one stamp
+  //    is enough for the lot.
   static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
@@ -513,8 +516,25 @@ class CrossPointSettings {
   uint8_t gestLongTapLeft = BTN_PREV_SECTION;
   uint8_t gestLongTapRight = BTN_NEXT_SECTION;
   uint8_t gestLongTapCentre = BTN_DICTIONARY;
-  uint8_t gestLongTapTop = BTN_LIGHT_TOGGLE;
+  // The light toggle moved off this row onto the top-left CORNER below. A full-width
+  // band across the top of the page is easy to catch when shifting grip, and toggling
+  // the light by accident mid-paragraph is a whole-screen event; a corner is a place
+  // you have to mean. KOReader puts its frontlight toggle in a corner for the same
+  // reason.
+  uint8_t gestLongTapTop = BTN_DEFAULT;
   uint8_t gestLongTapBottom = BTN_STAR_PAGE;
+  // Corners, long press only. Only the top-left ships bound: it is the light on/off
+  // that the edge-column brightness swipes cannot reach, since dimming clamps at
+  // MIN_BRIGHTNESS. The light submenu on the top-edge down-swipe is the other route,
+  // and the one that works outside the reader -- taps and long taps are reader-only,
+  // swipes are not.
+  //
+  // The other three are offered rather than assigned, following KOReader, which ships
+  // every corner HOLD as nil.
+  uint8_t gestLongTapTopLeft = BTN_LIGHT_TOGGLE;
+  uint8_t gestLongTapTopRight = BTN_DEFAULT;
+  uint8_t gestLongTapBottomLeft = BTN_DEFAULT;
+  uint8_t gestLongTapBottomRight = BTN_DEFAULT;
   // Pinch resizes text and a two-finger turn turns the page: the two gestures
   // whose meaning users already carry with them from every other device.
   uint8_t gestPinchIn = BTN_FONT_SIZE_SMALLER;

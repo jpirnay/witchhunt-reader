@@ -91,7 +91,9 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
   // whatever the tap in that zone does, which is the least surprising thing for
   // a reader who holds a finger down a little too long.
   if (inReader && input.peekScreenLongPressIn(touchOrientation, x, y)) {
-    const Gesture gesture = TouchGestures::longTapGestureFor(TapZones::zoneFor(x, y, width, height));
+    // Corner before zone — a corner sits inside Left or Right, so the other order would
+    // never reach one. longTapGestureForPoint() owns that precedence.
+    const Gesture gesture = TouchGestures::longTapGestureForPoint(x, y, width, height);
     if (boundAction(gesture, action, inReader)) {
       input.suppressTouchContact();
       return true;

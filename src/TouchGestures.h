@@ -65,6 +65,17 @@ enum class Gesture : uint8_t {
   LongTapCentre,
   LongTapTop,
   LongTapBottom,
+  // The four corners, long press only. Resolved BEFORE the five zones above, since
+  // a corner sits inside Left or Right — see longTapGestureForPoint(). Taps never
+  // consult them, so no tap changes meaning and the page-turn thirds are intact.
+  //
+  // Only the top-left ships bound (the light toggle). KOReader ships every corner
+  // HOLD as nil and the other three have no obvious job here, so they are offered
+  // rather than assigned.
+  LongTapTopLeft,
+  LongTapTopRight,
+  LongTapBottomLeft,
+  LongTapBottomRight,
   PinchIn,
   PinchOut,
   RotateClockwise,
@@ -126,6 +137,14 @@ inline constexpr Binding BINDINGS[] = {
      StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTop", false},
     {Gesture::LongTapBottom, &CrossPointSettings::gestLongTapBottom, StrId::STR_GEST_LONG_TAP_BOTTOM,
      StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottom", false},
+    {Gesture::LongTapTopLeft, &CrossPointSettings::gestLongTapTopLeft, StrId::STR_GEST_LONG_TAP_TOP_LEFT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTopLeft", false},
+    {Gesture::LongTapTopRight, &CrossPointSettings::gestLongTapTopRight, StrId::STR_GEST_LONG_TAP_TOP_RIGHT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapTopRight", false},
+    {Gesture::LongTapBottomLeft, &CrossPointSettings::gestLongTapBottomLeft, StrId::STR_GEST_LONG_TAP_BOTTOM_LEFT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottomLeft", false},
+    {Gesture::LongTapBottomRight, &CrossPointSettings::gestLongTapBottomRight, StrId::STR_GEST_LONG_TAP_BOTTOM_RIGHT,
+     StrId::STR_GEST_LONG_TAP_GROUP, "gestLongTapBottomRight", false},
     {Gesture::PinchIn, &CrossPointSettings::gestPinchIn, StrId::STR_GEST_PINCH_IN, StrId::STR_GEST_MULTI_GROUP,
      "gestPinchIn", true},
     {Gesture::PinchOut, &CrossPointSettings::gestPinchOut, StrId::STR_GEST_PINCH_OUT, StrId::STR_GEST_MULTI_GROUP,
@@ -144,12 +163,32 @@ static_assert(sizeof(BINDINGS) / sizeof(BINDINGS[0]) == static_cast<size_t>(Gest
 // enum automatically.
 inline const char* nameOf(const Gesture gesture) {
   static constexpr const char* kNames[] = {
-      "swipe-left",      "swipe-right",      "swipe-up-left",      "swipe-up-right",
-      "swipe-down-left", "swipe-down-right", "swipe-left-in-left", "swipe-right-in-right",
-      "tap-left",        "tap-right",        "tap-centre",         "tap-top",
-      "tap-bottom",      "longtap-left",     "longtap-right",      "longtap-centre",
-      "longtap-top",     "longtap-bottom",   "pinch-in",           "pinch-out",
-      "rotate-cw",       "rotate-ccw",
+      "swipe-left",
+      "swipe-right",
+      "swipe-up-left",
+      "swipe-up-right",
+      "swipe-down-left",
+      "swipe-down-right",
+      "swipe-left-in-left",
+      "swipe-right-in-right",
+      "tap-left",
+      "tap-right",
+      "tap-centre",
+      "tap-top",
+      "tap-bottom",
+      "longtap-left",
+      "longtap-right",
+      "longtap-centre",
+      "longtap-top",
+      "longtap-bottom",
+      "longtap-top-left",
+      "longtap-top-right",
+      "longtap-bottom-left",
+      "longtap-bottom-right",
+      "pinch-in",
+      "pinch-out",
+      "rotate-cw",
+      "rotate-ccw",
   };
   static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Gesture::Count),
                 "every Gesture needs a trace name");
@@ -264,6 +303,35 @@ inline Gesture longTapGestureFor(const TapZones::Zone zone) {
       break;
   }
   return Gesture::LongTapCentre;
+}
+
+inline Gesture longTapCornerGestureFor(const TapZones::Corner corner) {
+  switch (corner) {
+    case TapZones::Corner::TopLeft:
+      return Gesture::LongTapTopLeft;
+    case TapZones::Corner::TopRight:
+      return Gesture::LongTapTopRight;
+    case TapZones::Corner::BottomLeft:
+      return Gesture::LongTapBottomLeft;
+    case TapZones::Corner::BottomRight:
+      return Gesture::LongTapBottomRight;
+    case TapZones::Corner::None:
+      break;
+  }
+  return Gesture::LongTapCentre;  // unreachable: guarded by the caller
+}
+
+// A long press resolved against the whole frame: the corner it landed in, or failing
+// that the zone. Corners are tested FIRST because a corner sits inside Left or Right,
+// so asking the other way round would never reach one.
+//
+// Stated here rather than in GestureEventManager so the precedence lives next to the
+// two tables it arbitrates between, and so a caller cannot accidentally ask for the
+// zone alone and lose every corner.
+inline Gesture longTapGestureForPoint(const int x, const int y, const int width, const int height) {
+  const TapZones::Corner corner = TapZones::cornerFor(x, y, width, height);
+  if (corner != TapZones::Corner::None) return longTapCornerGestureFor(corner);
+  return longTapGestureFor(TapZones::zoneFor(x, y, width, height));
 }
 
 }  // namespace TouchGestures
