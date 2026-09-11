@@ -1676,10 +1676,13 @@ Cost: **+410 bytes flash, +24 bytes RAM.**
 
 ## 10. Phase 9 — resource gating, zone rework, self-documentation (2026-09-11)
 
-Eleven commits on `perf/gate-touch-ui-on-non-touch-boards`. Prompted by three
+Twelve commits on `perf/gate-touch-ui-on-non-touch-boards` (PR #244). Prompted by three
 questions: what do non-touch boards pay for this, should the vertical swipes be split
-by where they end, and what should the defaults actually be. **Code complete, NOT
-device validated.**
+by where they end, and what should the defaults actually be.
+
+**Validation status: one LilyGo T5S3 session, which found four faults (§10.8). The
+X4 Pro is deliberately NOT flashed — see §10.9; that is a safety decision, not
+outstanding work.**
 
 ### 10.1 The app-side layer was never gated (`b7826239`)
 
@@ -1869,7 +1872,12 @@ not evidence about an input layer.
 
 ### 10.9 What is still open
 
-- **X4 Pro has not been tested at all.** Only the T5S3 has run this.
+- **The X4 Pro is DELIBERATELY NOT being flashed, and this is not a gap to close.** An
+  earlier X4 Pro was bricked permanently, and the replacement is the only one there is. It
+  does not get a build until there has been a thorough audit of everything that touches
+  its boot, display power and USB paths, plus a comparison against upstream where those
+  paths came from. Treat "untested on X4 Pro" in section 10 as a standing decision, not as
+  work outstanding -- nothing here should be read as a suggestion to flash it.
 - Whether the ten-page swipe is now reliable, and whether the overview's labels fit
   legibly, both need another pass on hardware.
 - **`BTN_PAGE_BACK_10`/`FORWARD_10` stop at a chapter boundary.** Crossing a spine does
