@@ -309,6 +309,13 @@ bool MappedInputManager::wasScreenTouchReleased() const { return rawReleased(); 
 unsigned long MappedInputManager::lastTouchHeldMs() const { return gpio.lastTouchHeldMs(); }
 
 MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
+#if !CP_TOUCH_UI
+  // No digitiser: ListTouchBand's stub hit test is a literal -1, so everything below is
+  // unreachable. Returned early rather than left for the optimiser, because cppcheck reads the
+  // constant and reports the dependent conditions -- correctly -- as always-true.
+  (void)index;
+  return RowTouch::None;
+#else
   // Live-orientation coordinates, unlike the hint strip: drawList() paints in whatever
   // orientation the renderer is in rather than forcing Portrait, so that is the frame its rows
   // were recorded in. See ListTouchBand.h.
@@ -323,6 +330,7 @@ MappedInputManager::RowTouch MappedInputManager::listTouch(int& index) const {
   if (wasScreenTouchDown(x, y) && hit(x, y)) return RowTouch::Down;
   if (wasScreenTapped(x, y) && hit(x, y)) return RowTouch::Tap;
   return RowTouch::None;
+#endif  // CP_TOUCH_UI
 }
 
 MappedInputManager::MultiTouch MappedInputManager::popMultiTouch(int& x, int& y) const {

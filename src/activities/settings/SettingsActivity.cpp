@@ -221,6 +221,7 @@ void SettingsActivity::loop() {
   // activating the wrong row can be expensive to undo; switching to the wrong
   // category costs one more tap on the right one, and demanding two taps to
   // reach a tab that is already visible is exactly the awkwardness this removes.
+#if CP_TOUCH_UI
   if (mappedInput.hasTouch() && TapTargets::tabBar().hasTargets()) {
     int tx = 0;
     int ty = 0;
@@ -242,6 +243,7 @@ void SettingsActivity::loop() {
       }
     }
   }
+#endif  // CP_TOUCH_UI
 
   // Handle actions with early return
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {

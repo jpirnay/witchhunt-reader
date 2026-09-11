@@ -5259,6 +5259,13 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
 // on a full page of text there is not; and the jump is the cheapest action in the reader to undo,
 // because coming back is already a first-class gesture.
 bool EpubReaderActivity::handleLinkTouch() {
+#if !CP_TOUCH_UI
+  // Unreachable without a digitiser, and cppcheck proves it: readerLinks().hitTest() is a
+  // literal -1 in the stub, so it reads the guarded currentPageFootnotes[link] below as an
+  // index of -1 and reports it at HIGH severity. The guard is correct -- the path is simply
+  // dead -- so the honest answer is to not compile it.
+  return false;
+#else
   if (!mappedInput.hasTouch() || !SETTINGS.touchReaderControls) return false;
   if (!TapTargets::readerLinks().hasTargets()) return false;
 
@@ -5274,6 +5281,7 @@ bool EpubReaderActivity::handleLinkTouch() {
   LOG_DBG("ERS", "Link tap at (%d,%d) -> %s", x, y, currentPageFootnotes[link].href);
   navigateToHref(currentPageFootnotes[link].href, true);
   return true;
+#endif  // CP_TOUCH_UI
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {

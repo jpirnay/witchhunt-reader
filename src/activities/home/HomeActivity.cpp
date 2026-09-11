@@ -28,6 +28,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "TouchUi.h"
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/TapTargets.h"
@@ -1003,6 +1004,12 @@ void HomeActivity::render(RenderLock&&) {
 // on the one already selected acts. Home is where that matters most — its entries open books and
 // launch whole activities, so a mis-tap is the most expensive thing a stray finger can do here.
 bool HomeActivity::handleHomeTouch() {
+#if !CP_TOUCH_UI
+  // The TapTargets stubs report no targets and hit-test to -1 on a board with no digitiser, so
+  // none of this can run. See MappedInputManager::listTouch for why it is returned rather than
+  // left to the optimiser.
+  return false;
+#else
   if (!mappedInput.hasTouch()) return false;
   if (!TapTargets::homeCovers().hasTargets() && !TapTargets::homeMenu().hasTargets()) return false;
 
@@ -1054,6 +1061,7 @@ bool HomeActivity::handleHomeTouch() {
       return true;
   }
   return true;
+#endif  // CP_TOUCH_UI
 }
 
 void HomeActivity::onSelectBook(const std::string& path) {
