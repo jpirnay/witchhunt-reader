@@ -242,11 +242,15 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                           .withSubmenu(StrId::STR_READER_OVERRIDES)
                           .withSelectorActivity());
 
-  // Text darkness: straightforward 0-3 cycle
+  // Text darkness. The list is positional -- index IS the stored value -- and
+  // Lighter sits last despite being the lightest, because the value is
+  // persisted and inserting it at 0 would redefine every saved choice. Same
+  // order as the Settings list, deliberately: two different orderings for one
+  // setting would be worse than one odd one.
   menuItems.push_back(
       SettingInfo::DynamicEnumCtx(
-          StrId::STR_TEXT_DARKNESS, {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK},
-          self,
+          StrId::STR_TEXT_DARKNESS,
+          {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK, StrId::STR_LIGHTER}, self,
           [](const void* ctx) -> uint8_t {
             return static_cast<const EpubReaderMenuActivity*>(ctx)->pendingTextDarkness;
           },

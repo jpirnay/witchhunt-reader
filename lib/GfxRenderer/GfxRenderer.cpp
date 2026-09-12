@@ -632,10 +632,33 @@ static inline uint8_t get2BitPixel(const uint8_t* const bitmap, const int stride
 //                      footprint to darkness=2 but driven harder, so
 //                      strokes look noticeably bolder/blacker on the
 //                      physical e-ink panel.
+//
+//   darkness=4  Lighter — both AA shades go to the LIGHT tone
+//     . . . ░ ●        raw=1 → (1,0) light gray (unchanged)
+//     . . ░ ● ░        raw=2 → (1,0) light gray (was dark gray)
+//     . ░ ● ░ .        The mirror of darkness=2: instead of collapsing
+//     ░ ● ░ . .        both fringes to the dark tone, both take the
+//     ● ░ . . .        light one. Thins the apparent stroke without
+//                      touching the panel waveform.
+//
+//     Numerically last because the value is PERSISTED (see
+//     CrossPointSettings::TEXT_DARKNESS) — inserting it at 0 would
+//     silently redefine every saved setting. It reads out of order in
+//     the menu; that is the price of not rewriting users' choices.
 // ───────────────────────────────────────────────────────────────────────────
+// Mirrors CrossPointSettings::DARKNESS_LIGHT. Spelled out here because this
+// library does not include the firmware's settings header.
+static constexpr uint8_t kDarknessLighter = 4;
+
 static inline uint8_t drawMaskFor2BitMode(const GfxRenderer::RenderMode mode, const uint8_t darkness) {
   if (mode == GfxRenderer::BW) return 0x0E;  // draw raw {1,2,3}
-  if (darkness >= 3) return 0x00;            // skip grayscale entirely (Maximum)
+  // Before the >= 3 test, which would otherwise swallow this as Maximum: the
+  // value sits past Maximum in the enum only because it is persisted.
+  if (darkness == kDarknessLighter) {
+    // Both AA shades take the light tone -> raw 1 and 2 both land on (1,0).
+    return (mode == GfxRenderer::GRAYSCALE_MSB) ? 0x06 : 0x00;
+  }
+  if (darkness >= 3) return 0x00;  // skip grayscale entirely (Maximum)
   if (mode == GfxRenderer::GRAYSCALE_MSB) {
     return (darkness == 0) ? 0x02 : 0x06;
   }

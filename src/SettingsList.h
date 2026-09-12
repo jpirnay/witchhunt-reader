@@ -296,7 +296,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSubmenu(StrId::STR_MENU_READER_FONT)
                          .requiring(SettingRequires::SelectableGrayscaleLut));
   settings.push_back(SettingInfo::Enum(StrId::STR_TEXT_DARKNESS, &CrossPointSettings::textDarkness,
-                                       {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK},
+                                       {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK,
+                                        StrId::STR_LIGHTER},
                                        "textDarkness", StrId::STR_CAT_READER)
                          .withSubmenu(StrId::STR_MENU_READER_FONT)
                          .withSelectorActivity());
