@@ -2,9 +2,9 @@
 
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <I18n.h>
 #include <WiFi.h>
-#include <esp_task_wdt.h>
 
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
@@ -133,12 +133,12 @@ void CalibreConnectActivity::loop() {
       LOG_DBG("CAL", "WARNING: %lu ms gap since last handleClient", timeSinceLastHandleClient);
     }
 
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     constexpr int MAX_ITERATIONS = 80;
     for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
       webServer->handleClient();
       if ((i & 0x07) == 0x07) {
-        esp_task_wdt_reset();
+        HalSystem::feedWatchdog();
       }
       if ((i & 0x0F) == 0x0F) {
         yield();

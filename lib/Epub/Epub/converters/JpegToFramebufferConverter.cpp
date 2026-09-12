@@ -7,11 +7,11 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
 #include <ProgressiveJpegDc.h>
 #include <ZipFile.h>
-#include <esp_task_wdt.h>
 #include <tjpgd.h>
 
 #include <cstdlib>
@@ -507,7 +507,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   JpegContext* ctx = &ctxRef;
 
   // Feed the interrupt WDT every block — large JPEGs can take many seconds.
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
 
   if (stride <= 0 || blockH <= 0 || validW <= 0) return 1;
 

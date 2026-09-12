@@ -1,9 +1,9 @@
 #pragma once
 
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
 #include <WebServer.h>
-#include <esp_task_wdt.h>
 
 #include <cstring>
 #include <memory>
@@ -63,13 +63,13 @@ class ChunkedResponse {
 
   void flush() {
     if (used == 0) return;
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     server->sendContent(buffer.get(), used);
     used = 0;
     // Yield so WiFi and the other tasks get to run: sendContent() is a blocking
     // network write that can stall for seconds under concurrent connections.
     yield();
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
   }
 
   WebServer* server;

@@ -9,6 +9,7 @@
 #include "esp_private/esp_cpu_internal.h"
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
+#include "esp_task_wdt.h"
 
 #define MAX_PANIC_STACK_DEPTH 32
 
@@ -158,6 +159,15 @@ bool isRebootFromPanic() {
   // rebooted silently to Home with no diagnostic trail.
   return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_INT_WDT ||
          resetReason == ESP_RST_TASK_WDT || resetReason == ESP_RST_WDT;
+}
+
+void feedWatchdog() {
+  // ESP_OK means this task is subscribed; anything else (ESP_ERR_NOT_FOUND, or
+  // the watchdog not being initialised at all) means there is nothing to feed
+  // and calling reset would only log an error. See the header for the cost.
+  if (esp_task_wdt_status(nullptr) == ESP_OK) {
+    esp_task_wdt_reset();
+  }
 }
 
 }  // namespace HalSystem

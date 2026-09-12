@@ -1,8 +1,7 @@
 #include "HttpFileStreamer.h"
 
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
-#include <esp_task_wdt.h>
-
 namespace {
 constexpr size_t DOWNLOAD_CHUNK_SIZE = 4096;
 }
@@ -17,7 +16,7 @@ bool streamFileToClient(FsFile& file, NetworkClient& client) {
 
   bool ok = true;
   while (ok) {
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     int result = file.read(buffer, DOWNLOAD_CHUNK_SIZE);
     if (result < 0) {
       ok = false;
@@ -28,7 +27,7 @@ bool streamFileToClient(FsFile& file, NetworkClient& client) {
     size_t bytesRead = static_cast<size_t>(result);
     size_t totalWritten = 0;
     while (totalWritten < bytesRead) {
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       size_t wrote = client.write(buffer + totalWritten, bytesRead - totalWritten);
       if (wrote == 0) {
         ok = false;
