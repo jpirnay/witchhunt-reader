@@ -1099,9 +1099,14 @@ void setup() {
       gpio.update();
       delay(10);
     }
-    if (gpio.isHeldNow(HalGPIO::BTN_UP)) {
+    // Up normally, Down on a board that wires Up to the MCU's boot-mode strap.
+    // There, holding Up through the reset enters ROM download mode instead of
+    // running this firmware at all, so the combo could never fire and the user
+    // is left looking at a device that appears dead. See upKeyIsBootStrap().
+    const bool upIsStrap = HalCapabilities::upKeyIsBootStrap();
+    if (gpio.isHeldNow(upIsStrap ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP)) {
       recoveryFirmwareMode = true;
-      LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
+      LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", upIsStrap ? "DOWN" : "UP");
     }
     BootDiag::markPhase(BootPhase::RecoverySettle);
   }

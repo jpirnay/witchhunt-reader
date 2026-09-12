@@ -107,6 +107,31 @@ inline bool hasBackAndConfirmButtons() {
 // arrangement rather than a yes/no capability.
 inline BoardConfig::InputStyle inputStyle() { return BoardConfig::ACTIVE.inputStyle; }
 
+// The MCU pin the ROM samples at reset to choose boot vs. download mode. Holding
+// it LOW while the chip comes out of reset enters ROM download mode, so firmware
+// never runs and no boot-time key combo on that pin can ever be observed.
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32H2)
+inline constexpr int8_t BOOT_MODE_STRAP_PIN = 9;
+#else  // ESP32 / ESP32-S2 / ESP32-S3
+inline constexpr int8_t BOOT_MODE_STRAP_PIN = 0;
+#endif
+
+// True when this board wires its Up key to that strapping pin, so a boot-time
+// combo must use a different key. The X4 Pro and X4 Classic both put Up on
+// GPIO0; on those, "hold Up + power" drops the device into ROM download mode
+// instead of into the firmware check the user was aiming for, which looks
+// exactly like a dead device. Derived from the profile rather than a board list,
+// so the next board that reuses the strap is covered without an edit.
+//
+// The InputStyle test is load-bearing, not defensive: on the X3/X4 ladder the
+// InputPins fields hold LADDER INDICES, not GPIO numbers (X4's tuple is
+// {0,1,2,3,4,5,...}), so comparing input.up against a pin number there is a
+// category error that happens to be false today only because no index reaches 9.
+inline bool upKeyIsBootStrap() {
+  return BoardConfig::ACTIVE.inputStyle != BoardConfig::InputStyle::XteinkAdcLadder &&
+         BoardConfig::ACTIVE.input.up == BOOT_MODE_STRAP_PIN;
+}
+
 // Chrome scale factor for finger-sized targets. 1.0 on button boards, 1.2 on the
 // touch boards. Read by ThemeMetrics in touch phase 5.
 inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
