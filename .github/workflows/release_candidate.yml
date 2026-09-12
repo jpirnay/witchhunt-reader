@@ -80,6 +80,9 @@ jobs:
           - env: gh_release_rc
             label: X3/X4
             asset: firmware.bin
+          - env: x4pro_gh_release_rc
+            label: X4 Pro
+            asset: firmware-x4pro.bin
           - env: lilygo_gh_release_rc
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
