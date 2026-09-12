@@ -5,6 +5,7 @@
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
+#include <XteinkDetect.h>  // applyXteinkDisplayController() — see begin()
 #include <esp_heap_caps.h>
 
 #include "HalSpiBus.h"
@@ -48,6 +49,38 @@ HalDisplay::HalDisplay()
 HalDisplay::~HalDisplay() {}
 
 void HalDisplay::begin(bool seamless) {
+#if !FREEINK_MCU_C3
+  // Resolve which panel controller this unit actually carries, before
+  // einkDisplay.begin() picks a driver from it.
+  //
+  // The Xteink 800x480 boards ship two different controllers depending on
+  // production batch -- the original SSD1677 and, in newer batches, an UltraChip
+  // UC8179/UC8279. FreeInkDisplay::begin() selects the driver purely from
+  // BoardConfig::ACTIVE.displayController, and the ONLY thing that ever writes
+  // that field is this probe. Without it a newer X4 Pro gets driven with
+  // SSD1677 command streams and develops no image.
+  //
+  // The C3 already does this inside HalGPIO::begin(), which is where it has to
+  // happen there: the probe bit-bangs the display pins, and the C3 pre-claims
+  // them with SPI.begin() in that same function. Every other board leaves the
+  // pins alone until EpdBus claims them inside einkDisplay.begin() below, so
+  // here is that board's equivalent moment -- after gpio.begin(), before SPI.
+  // Guarded rather than unconditional so the C3 does not probe a second time
+  // with SPI already holding the bus.
+  //
+  // Safe to run on a unit that turns out NOT to be UltraChip: the probe only
+  // resets and reads, and a part that does not answer the UC81xx read registers
+  // leaves the profile's own controller in place. Matches upstream/develop,
+  // which does the same call from setupDisplayAndFonts().
+  static bool controllerResolved = false;
+  if (!controllerResolved) {
+    controllerResolved = true;
+    if (freeink::applyXteinkDisplayController()) {
+      LOG_INF("DISP", "Panel controller: UltraChip UC81xx variant detected");
+    }
+  }
+#endif
+
   // Set X3-specific panel mode before initializing.
   if (gpio.deviceIsX3()) {
     einkDisplay.setDisplayX3();
