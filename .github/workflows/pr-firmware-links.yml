@@ -75,6 +75,7 @@ jobs:
             // comment, so the two lists have to move together.
             const builds = [
               { name: 'firmware.bin', device: 'X3 / X4' },
+              { name: 'firmware-x4pro.bin', device: 'X4 Pro' },
               { name: 'firmware-lilygo.bin', device: 'LilyGo T5S3' },
             ];
             const { data: artifactResponse } =
