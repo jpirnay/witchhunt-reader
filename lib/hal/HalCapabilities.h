@@ -107,6 +107,16 @@ inline bool hasBackAndConfirmButtons() {
 // arrangement rather than a yes/no capability.
 inline BoardConfig::InputStyle inputStyle() { return BoardConfig::ACTIVE.inputStyle; }
 
+// True when the SD card is reached over SPI, false when the board drives the
+// slot through the native SDMMC peripheral (X4 Pro, X4 Classic).
+//
+// Everything in the SdPins struct -- spiHz, cs, the shared-bus locking -- is
+// dead configuration on an SDMMC board, which mounts through SdmmcBlockDevice
+// and never touches those pins. Code that tunes or reports the SPI path must
+// ask this first, or it ends up announcing an SPI clock on a board that has no
+// SD SPI bus.
+inline bool sdUsesSpi() { return BoardConfig::ACTIVE.sdmmc.busWidth == 0; }
+
 // The MCU pin the ROM samples at reset to choose boot vs. download mode. Holding
 // it LOW while the chip comes out of reset enters ROM download mode, so firmware
 // never runs and no boot-time key combo on that pin can ever be observed.

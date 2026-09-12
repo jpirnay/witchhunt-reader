@@ -3,6 +3,7 @@
 
 #include <BoardConfig.h>
 #include <FS.h>  // need to be included before SdFat.h for compatibility with FS.h's File class
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <Logging.h>
 #include <SDCardManager.h>
@@ -65,8 +66,14 @@ bool HalStorage::begin() {
   // touches profiles that expressed no preference; a profile that sets spiHz
   // explicitly is left alone, so raising it later is a one-value profile change
   // rather than an edit here.
+  //
+  // Gated on the board actually having an SD SPI bus. The X4 Pro and X4 Classic
+  // mount through the native SDMMC peripheral, where sd.spiHz is dead config:
+  // setting it changed nothing and the log line announced a clock for a bus that
+  // does not exist, which is exactly the sort of line that costs someone an hour
+  // when they are reading a boot log looking for why storage is slow.
 #if !FREEINK_MCU_C3
-  if (BoardConfig::ACTIVE.sd.spiHz == 0) {
+  if (HalCapabilities::sdUsesSpi() && BoardConfig::ACTIVE.sd.spiHz == 0) {
     BoardConfig::ACTIVE.sd.spiHz = 20000000;
     LOG_INF("SD", "SPI clock held at 20 MHz on this board (SDK default is 40 MHz, unvalidated here)");
   }
