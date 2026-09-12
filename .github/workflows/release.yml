@@ -6,6 +6,13 @@ name: Compile Release
 # devices in the field keep updating — and firmware-<board>.bin for every other
 # board. The legs build in parallel and a single publish job attaches them, so
 # two jobs never race on the same release.
+#
+# Publishing an env here (and in release_candidate.yml) makes that board's
+# binary eligible for the firmware's own OTA update check on every device of
+# that board in the field -- so an env only belongs in this matrix once it is
+# validated enough to ship, not merely once it compiles. x4pro joined
+# 2026-09-12 after its preflight fixes (PR #246) landed and initial on-device
+# testing came back positive.
 
 on:
   release:
@@ -25,6 +32,9 @@ jobs:
           - env: gh_release
             label: X3/X4
             asset: firmware.bin
+          - env: x4pro_gh_release
+            label: X4 Pro
+            asset: firmware-x4pro.bin
           - env: lilygo_gh_release
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
