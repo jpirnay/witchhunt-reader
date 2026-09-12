@@ -2,8 +2,8 @@
 
 #include <Arduino.h>
 #include <FsHelpers.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
-#include <esp_task_wdt.h>
 
 #include <cstdarg>
 #include <ctime>
@@ -128,7 +128,7 @@ int SerialTransferDevice::readByte() {
     if (millis() - start >= kReadTimeoutMs) return -1;
     // Yield + feed the watchdog while waiting so a slow/stalled host can't trip
     // the task WDT or peg the CPU (the old busy-wait did both).
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     vTaskDelay(1);
   }
   return logSerial.read();
@@ -149,7 +149,7 @@ void SerialTransferDevice::writeBytes(const uint8_t* data, size_t len) {
       lastProgressMs = millis();
     } else {
       if (millis() - lastProgressMs > kWriteStallAbortMs) break;  // host vanished
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       vTaskDelay(1);
     }
   }
@@ -186,7 +186,7 @@ bool SerialTransferDevice::fileWrite(const uint8_t* data, size_t len) {
   if (!uploadOpen_) return false;
   // Feed the task WDT once per chunk so a long steady upload (which never waits
   // in readByte) can't trip it.
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   uploadBytes_ += static_cast<uint32_t>(len);
   // Buffer into a larger block; flush when full. This lets the protocol ACK each
   // 2048-byte chunk without waiting on a fresh SD/FAT block write every time —
@@ -238,7 +238,7 @@ bool SerialTransferDevice::fileReadBegin(const std::string& path, uint32_t& outS
 
 size_t SerialTransferDevice::fileRead(uint8_t* buf, size_t len) {
   // Feed the task WDT once per chunk (a long download never waits in readByte).
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   const int n = downloadFile_.read(buf, len);
   if (n <= 0) return 0;
   downloadBytes_ += static_cast<uint32_t>(n);

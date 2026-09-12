@@ -4,10 +4,10 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
 #include <PngStreamDecoder.h>
-#include <esp_task_wdt.h>
 
 #include <cstdlib>
 #include <memory>
@@ -402,7 +402,7 @@ bool PngToFramebufferConverter::decodeOpenFile(FsFile& file, const std::string& 
       }
       decodedSrcY++;
       // Feed the WDT periodically: a large image can take seconds to inflate.
-      if ((decodedSrcY & 31) == 0) esp_task_wdt_reset();
+      if ((decodedSrcY & 31) == 0) HalSystem::feedWatchdog();
     }
     if (!ok) break;
 

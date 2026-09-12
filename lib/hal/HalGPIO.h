@@ -28,8 +28,11 @@
 #define X3_I2C_FREQ 400000
 
 // TI BQ27220 Fuel gauge I2C
+// StateOfCharge() is deliberately absent: percentage now comes from the SDK's
+// BatteryMonitor, which dispatches on the profile's GaugeType instead of
+// assuming every gauge is a BQ27220. Current() stays because the X3's USB
+// charge inference reads it directly, and the X3 really does carry a BQ27220.
 #define I2C_ADDR_BQ27220 0x55    // Fuel gauge I2C address
-#define BQ27220_SOC_REG 0x2C     // StateOfCharge() command code (%)
 #define BQ27220_CUR_REG 0x0C     // Current() command code (signed mA)
 #define BQ27220_VOLT_REG 0x08    // Voltage() command code (mV)
 #define BQ27220_FLAGS_REG 0x0A   // BatteryStatus() / Flags() command code (bit0=DSG, bit9=FC)
@@ -452,6 +455,13 @@ class HalGPIO {
   // verdict came out the way it did — the serial-log gate's diagnostic — can
   // report the two terms apart.
   bool isUsbHostLinkActive() const;
+
+  // Whether this board can observe a cable at all WITHOUT an enumerated host —
+  // an X3-style gauge-current inference or a usbDetect pin. False on the
+  // native-USB boards whose profile leaves usbDetect unassigned (X4 Pro, T5S3):
+  // there, a false from isUsbConnected() means "no host enumerated right now",
+  // NOT "no cable", so nothing may treat it as a negative signal.
+  bool canDetectUsbElectrically() const;
 
   // USB state as sampled by the last update() call. Prefer this in per-loop
   // polling: isUsbConnected() performs a fresh I2C read on X3.

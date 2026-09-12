@@ -3,10 +3,10 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Txt.h>
 #include <Xtc.h>
-#include <esp_task_wdt.h>
 
 #include "ChunkedResponse.h"
 #include "HttpFileStreamer.h"
@@ -89,7 +89,7 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
 
   } else if (raw.status == RAW_WRITE) {
     if (_putFile && _putOk) {
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       size_t written = _putFile.write(raw.buf, raw.currentSize);
       if (written != raw.currentSize) {
         _putOk = false;
@@ -259,7 +259,7 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
       file.close();
       yield();
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       file = root.openNextFile();
     }
   }
@@ -639,7 +639,7 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   uint8_t buf[4096];
   bool copyOk = true;
   while (srcFile.available()) {
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     int bytesRead = srcFile.read(buf, sizeof(buf));
     if (bytesRead <= 0) break;
     size_t written = dstFile.write(buf, bytesRead);

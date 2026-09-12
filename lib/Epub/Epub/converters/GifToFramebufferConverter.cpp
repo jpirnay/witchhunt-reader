@@ -4,8 +4,8 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
-#include <esp_task_wdt.h>
 
 #include <cstring>
 #include <new>
@@ -425,7 +425,7 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
       aborted = true;
       return false;
     }
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     indexedToGray(idxRow, grayRow, w, *st);
 
     // Interlaced rows arrive out of order, so there is no monotonic cursor to run and no way

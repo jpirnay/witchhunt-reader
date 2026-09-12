@@ -184,7 +184,17 @@ uint8_t* GfxRenderer::allocScaledGlyphMask(const void* fontData, const uint32_t 
   if (scaledGlyphCount_ >= SCALED_GLYPH_MAX_ENTRIES || scaledGlyphUsed_ + bytes > SCALED_GLYPH_ARENA_BYTES) {
     // Wholesale reset instead of LRU bookkeeping: the working set is one page's
     // distinct glyphs, so a reset costs at most one re-resample each.
-    LOG_DBG("GFX", "Scaled-glyph cache reset (%u entries, %u bytes used)", scaledGlyphCount_, scaledGlyphUsed_);
+    //
+    // TRC, not DBG, and deliberately not device-gated: this is a designed,
+    // cheap event that happens several times on a dense page (the 80-entry cap
+    // binds long before the 3584-byte arena does -- the X4 Pro hit it at ~1.9 KB
+    // used), so at DBG it is several lines per page turn reporting that the
+    // cache did exactly what it was built to do. It is not worth resizing
+    // either: the same page summaries measured glyphUs=1656 across 1120
+    // glyphCalls, i.e. ~1.5 us a call and under 2 ms of glyph work per page, so
+    // the re-resampling a reset causes is beneath notice. Rebuild with
+    // -DLOG_LEVEL=3 to watch it.
+    LOG_TRC("GFX", "Scaled-glyph cache reset (%u entries, %u bytes used)", scaledGlyphCount_, scaledGlyphUsed_);
     invalidateScaledGlyphCache();
   }
 

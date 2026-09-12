@@ -8,7 +8,6 @@
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
-#include <esp_task_wdt.h>
 #ifdef BENCH_EXTRACT_PROFILE
 #include <esp_timer.h>
 #endif
@@ -101,6 +100,8 @@ inline uint32_t paragraphLutEntryOffset(uint32_t lutStart, uint16_t page) {
   return lutStart + page * PARAGRAPH_LUT_ENTRY_SIZE;
 }
 }  // namespace
+
+#include <HalSystem.h>  // feedWatchdog()
 
 #include <algorithm>
 
@@ -1971,7 +1972,7 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
     ++warmed;
     // Each image decode can take hundreds of ms; reset the WDT between pages
     // to avoid an interrupt watchdog timeout on image-heavy chapters.
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
   }
   currentPage = savedPage;
   if (warmed > 0) {

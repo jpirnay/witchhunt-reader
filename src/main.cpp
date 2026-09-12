@@ -779,7 +779,16 @@ static bool openSerialLogIfHostPresent() {
   // isUsbConnected() is only consulted when there is none, since on X3 it costs
   // an I2C read and can only add a (harmless) false positive here.
   const bool hostLink = gpio.isUsbHostLinkActive();
-  if (!hostLink && !gpio.isUsbConnected()) {
+  // Close the gate only on a REAL negative. A board with no cable detect (X4
+  // Pro, T5S3: usbDetect unassigned) has nothing behind isUsbConnected() but the
+  // same SOF check hostLink already made, so a false there means "no host
+  // enumerated in this instant", not "no cable" — and a host that attaches a
+  // moment after boot, or a SOF read that lands in a quiet window, would cost
+  // the whole boot log. That is the T5S3 failure again (7c9f6623), where six
+  // rounds went into debugging a board that was simply not talking.
+  const bool cableDetectable = gpio.canDetectUsbElectrically();
+  const bool cable = cableDetectable && gpio.isUsbConnected();
+  if (!hostLink && cableDetectable && !cable) {
     // Ring-buffer only — the wire is closed by definition. Surfaces in the crash
     // report's "Last logs", so a session that produced no serial output at all
     // can still be explained after the fact.
@@ -799,12 +808,19 @@ static bool openSerialLogIfHostPresent() {
   // to "disconnected" and silently drops TX).
   logSerial.setTxBufferSize(8192);
   Serial.begin(115200);
-  const unsigned long start = millis();
-  while (!Serial && (millis() - start) < 500) {
-    delay(10);
+  // Only wait for the host when we have positive evidence one is there. On a
+  // board that cannot detect a cable we open the log speculatively, and paying
+  // 500 ms on every battery boot for a host that is not coming is not a trade
+  // worth making.
+  if (hostLink || cable) {
+    const unsigned long start = millis();
+    while (!Serial && (millis() - start) < 500) {
+      delay(10);
+    }
   }
   serialLogOpen = true;
-  LOG_INF("MAIN", "Serial log opened (%s)", hostLink ? "enumerated host link" : "charge-inferred cable");
+  LOG_INF("MAIN", "Serial log opened (%s)",
+          hostLink ? "enumerated host link" : (cable ? "charge-inferred cable" : "board has no cable detect"));
   return true;
 }
 #endif
@@ -1099,9 +1115,14 @@ void setup() {
       gpio.update();
       delay(10);
     }
-    if (gpio.isHeldNow(HalGPIO::BTN_UP)) {
+    // Up normally, Down on a board that wires Up to the MCU's boot-mode strap.
+    // There, holding Up through the reset enters ROM download mode instead of
+    // running this firmware at all, so the combo could never fire and the user
+    // is left looking at a device that appears dead. See upKeyIsBootStrap().
+    const bool upIsStrap = HalCapabilities::upKeyIsBootStrap();
+    if (gpio.isHeldNow(upIsStrap ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP)) {
       recoveryFirmwareMode = true;
-      LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
+      LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", upIsStrap ? "DOWN" : "UP");
     }
     BootDiag::markPhase(BootPhase::RecoverySettle);
   }

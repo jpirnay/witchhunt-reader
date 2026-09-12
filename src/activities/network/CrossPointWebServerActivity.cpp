@@ -4,10 +4,10 @@
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <HalPowerManager.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <I18n.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <esp_task_wdt.h>
 
 #include <cstddef>
 
@@ -357,7 +357,7 @@ void CrossPointWebServerActivity::loop() {
       }
 
       // Reset watchdog BEFORE processing - HTTP header parsing can be slow
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
 
       // Process HTTP requests in tight loop for maximum throughput
       // More iterations = more data processed per main loop cycle
@@ -366,7 +366,7 @@ void CrossPointWebServerActivity::loop() {
         webServer->handleClient();
         // Reset watchdog every 32 iterations
         if ((i & 0x1F) == 0x1F) {
-          esp_task_wdt_reset();
+          HalSystem::feedWatchdog();
         }
         // Yield and check for exit button every 64 iterations
         if ((i & 0x3F) == 0x3F) {

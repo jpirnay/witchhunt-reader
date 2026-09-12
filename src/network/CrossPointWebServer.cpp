@@ -5,12 +5,12 @@
 #include <FsHelpers.h>
 #include <HalClock.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
 #include <Txt.h>
 #include <WiFi.h>
 #include <Xtc.h>
-#include <esp_task_wdt.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -122,7 +122,7 @@ void clearBookCacheIfNeeded(const String& filePath) {
 
 // Recursively clear book caches for all ebooks inside a directory
 void clearBookCachesInDirectory(const String& dirPath) {
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   yield();
   FsFile dir = Storage.open(dirPath.c_str());
   if (!dir || !dir.isDirectory()) {
@@ -132,7 +132,7 @@ void clearBookCachesInDirectory(const String& dirPath) {
   char name[500];
   FsFile entry = dir.openNextFile();
   while (entry) {
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     yield();
     entry.getName(name, sizeof(name));
     String childPath = dirPath;
@@ -600,10 +600,10 @@ static void sendJson(WebServer* server, int code, const JsonDocument& doc) {
   serializeJson(doc, buf, payloadSize + 1);
   server->setContentLength(payloadSize);
   server->send(code, "application/json", "");
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   server->sendContent(buf, payloadSize);
   free(buf);
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
 }
 
 void CrossPointWebServer::handleRoot() const {
@@ -874,8 +874,8 @@ void CrossPointWebServer::scanFiles(const char* path, const FileVisitor visitor,
     }
 
     file.close();
-    yield();               // Yield to allow WiFi and other tasks to process during long scans
-    esp_task_wdt_reset();  // Reset watchdog to prevent timeout on large directories
+    yield();                    // Yield to allow WiFi and other tasks to process during long scans
+    HalSystem::feedWatchdog();  // Reset watchdog to prevent timeout on large directories
     file = root.openNextFile();
   }
   root.close();
@@ -902,10 +902,10 @@ void CrossPointWebServer::handleFileListData() const {
   LOG_DBG("WEB", "File list request for path: %s", currentPath.c_str());
 
   LOG_WEB_MEM("files_enter");
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   ChunkedJsonArray out(server.get());
   char output[512];
   constexpr size_t outputSize = sizeof(output);
@@ -921,7 +921,7 @@ void CrossPointWebServer::handleFileListData() const {
       currentPath.c_str(),
       [](const FileInfo& info, void* rawContext) {
         auto& ctx = *static_cast<FileListContext*>(rawContext);
-        esp_task_wdt_reset();
+        HalSystem::feedWatchdog();
         ctx.doc->clear();
         (*ctx.doc)["name"] = info.name;
         (*ctx.doc)["size"] = info.size;
@@ -937,7 +937,7 @@ void CrossPointWebServer::handleFileListData() const {
       },
       &context);
 
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
   out.finish();
   LOG_WEB_MEM("files_exit");
   LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
@@ -1016,12 +1016,12 @@ static size_t writeCount = 0;
 
 static bool flushUploadBuffer(CrossPointWebServer::UploadState& state) {
   if (state.bufferPos > 0 && state.file) {
-    esp_task_wdt_reset();  // Reset watchdog before potentially slow SD write
+    HalSystem::feedWatchdog();  // Reset watchdog before potentially slow SD write
     const unsigned long writeStart = millis();
     const size_t written = state.file.write(state.buffer.data(), state.bufferPos);
     totalWriteTime += millis() - writeStart;
     writeCount++;
-    esp_task_wdt_reset();  // Reset watchdog after SD write
+    HalSystem::feedWatchdog();  // Reset watchdog after SD write
 
     if (written != state.bufferPos) {
       LOG_DBG("WEB", "[UPLOAD] Buffer flush failed: expected %d, wrote %d", state.bufferPos, written);
@@ -1037,7 +1037,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
   static size_t lastLoggedSize = 0;
 
   // Reset watchdog at start of every upload callback - HTTP parsing can be slow
-  esp_task_wdt_reset();
+  HalSystem::feedWatchdog();
 
   // Safety check: ensure server is still valid
   if (!running || !server) {
@@ -1049,7 +1049,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
   if (upload.status == UPLOAD_FILE_START) {
     // Reset watchdog - this is the critical 1% crash point
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
 
     state.fileName = upload.filename;
     state.size = 0;
@@ -1089,21 +1089,21 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     filePath += state.fileName;
 
     // Check if file already exists - SD operations can be slow
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     if (Storage.exists(filePath.c_str())) {
       LOG_DBG("WEB", "[UPLOAD] Overwriting existing file: %s", filePath.c_str());
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       Storage.remove(filePath.c_str());
     }
 
     // Open file for writing - this can be slow due to FAT cluster allocation
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
       state.error = "Failed to create file on SD card";
       LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
       return;
     }
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
 
     LOG_DBG("WEB", "[UPLOAD] File created successfully: %s", filePath.c_str());
   } else if (upload.status == UPLOAD_FILE_WRITE) {
@@ -1996,7 +1996,7 @@ bool installRemoteFamily(HttpDownloader::Session& session, const RemoteManifestF
   // The session is owned by the caller (handleFontInstall) so it can be
   // reused across the manifest fetch and every family install in one batch.
   for (const auto& file : family.files) {
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     yield();
 
     std::string localFilename = file.name;
@@ -2248,7 +2248,7 @@ void CrossPointWebServer::handleFontDownload() {
 
   size_t installedCount = 0;
   for (auto& family : targetCopies) {
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     yield();
 
     LOG_DBG("WEB", "Installing font family: %s", family.name.c_str());
@@ -2277,7 +2277,7 @@ void CrossPointWebServer::handleFontUploadData() {
 
   switch (up.status) {
     case UPLOAD_FILE_START: {
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       String family = server->arg("family");
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
@@ -2325,7 +2325,7 @@ void CrossPointWebServer::handleFontUploadData() {
 
     case UPLOAD_FILE_WRITE: {
       if (!fontUpload.valid) break;
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
 
       if (!fontUpload.magicChecked) {
         size_t needed = 8 - fontUpload.headerBytesReceived;
@@ -2367,7 +2367,7 @@ void CrossPointWebServer::handleFontUploadData() {
             return;
           }
           fontUpload.bufferPos = 0;
-          esp_task_wdt_reset();
+          HalSystem::feedWatchdog();
         }
       }
       break;
@@ -2887,7 +2887,7 @@ void CrossPointWebServer::handleRelay() {
       server->send(200, "application/octet-stream", "");
       headerSent = true;
     }
-    esp_task_wdt_reset();
+    HalSystem::feedWatchdog();
     server->sendContent(reinterpret_cast<const char*>(data), len);
     total += len;
     return true;
@@ -3085,20 +3085,20 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
                   filePath.c_str());
 
           // Check if file exists and remove it
-          esp_task_wdt_reset();
+          HalSystem::feedWatchdog();
           if (Storage.exists(filePath.c_str())) {
             Storage.remove(filePath.c_str());
           }
 
           // Open file for writing
-          esp_task_wdt_reset();
+          HalSystem::feedWatchdog();
           if (!Storage.openFileForWrite("WS", filePath, wsUploadFile)) {
             wsServer->sendTXT(num, "ERROR:Failed to create file");
             wsUploadInProgress = false;
             wsUploadClientNum = 255;
             return;
           }
-          esp_task_wdt_reset();
+          HalSystem::feedWatchdog();
 
           // Zero-byte upload: complete immediately without waiting for BIN frames
           if (wsUploadSize == 0) {
@@ -3136,9 +3136,9 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
         wsServer->sendTXT(num, "ERROR:Upload overflow");
         return;
       }
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
       size_t written = wsUploadFile.write(payload, length);
-      esp_task_wdt_reset();
+      HalSystem::feedWatchdog();
 
       if (written != length) {
         abortWsUpload("WS");

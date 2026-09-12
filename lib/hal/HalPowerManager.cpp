@@ -1,5 +1,6 @@
 #include "HalPowerManager.h"
 
+#include <BatteryMonitor.h>
 #include <BoardConfig.h>
 #include <HalCapabilities.h>
 #include <Logging.h>
@@ -11,12 +12,46 @@
 #include <cassert>
 
 #include "HalGPIO.h"
+#include "HalI2cBus.h"
 
 HalPowerManager powerManager;  // Singleton instance
 
 // The C3 flash SPIWP pad, unused in these boards' DIO flash mode and rewired as a
 // power control on the Xteink C3 units (see lightSleep()).
 static constexpr gpio_num_t GPIO_BATTERY_LATCH = GPIO_NUM_13;
+
+// Whether this build is allowed to call setCpuFrequencyMhz() at all.
+//
+// On the ESP32-S3 the PSRAM clock is derived from the CPU/APB clock, so changing
+// the CPU frequency while anything is touching PSRAM corrupts those accesses. On
+// the T5S3 that is not a corner case: the 960x540 framebuffer lives in PSRAM, so
+// the render path is in it more or less continuously. It is no better on the X4
+// Pro, whose prebuilt Arduino variant sets CONFIG_SPIRAM_USE_MALLOC with
+// CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096 — every allocation over 4 KB lands in
+// PSRAM — and which runs that PSRAM octal at 80 MHz.
+//
+// Observed on T5S3 hardware as a TG1WDT_SYS_RST immediately after the "Going to
+// low-power mode" line, on four consecutive boots and then intermittently —
+// intermittent because it depends on what is mid-access when the switch happens,
+// which is exactly the signature of this hazard rather than of a logic bug.
+//
+// This started life as an #if inside setPowerSaving() alone (commit 0a0851eb),
+// which left the two waveform hooks below scaling the clock unguarded. That gap
+// was invisible on the T5S3 — its panel is LGFX/parallel and never reaches
+// EpdBus::waitBusy, so the hooks never fire there — but on the X4 Pro they fire
+// on EVERY refresh (EpdBus fires them above a 20 ms wait), which would have made
+// the hot path the one that breaks PSRAM. Hence a single named predicate: every
+// setCpuFrequencyMhz() call site in this file is gated on it.
+//
+// The cost is idle power on a board that has 8 MB of PSRAM and a wired USB port;
+// the alternative is random resets. Revisit if ESP-IDF's dynamic frequency
+// scaling is ever configured properly for this build (it needs the PSRAM-aware
+// DFS path, not a bare setCpuFrequencyMhz()).
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+static constexpr bool CPU_SCALING_ALLOWED = false;
+#else
+static constexpr bool CPU_SCALING_ALLOWED = true;
+#endif
 
 void HalPowerManager::begin() {
   if (HalCapabilities::hasI2cFuelGauge()) {
@@ -29,12 +64,11 @@ void HalPowerManager::begin() {
     // board the SDK's InputManager has already started it. main.cpp calls the
     // owner after gpio.begin() so the touch driver gets first claim.
     //
-    // NOTE the gauge PROTOCOL is still BQ27220-specific (I2C_ADDR_BQ27220 and
-    // the BQ27220_*_REG offsets below). X4 Pro's CW2017 answers at a different
-    // address with different registers, so it needs its own read path -- taking
-    // the address from the profile alone would talk BQ27220 registers to a
-    // CW2017, the same trap as DS3231-vs-BM8563 in HalClock. T5S3's gauge is a
-    // BQ27220, so this path suits it as-is.
+    // The gauge PROTOCOL is no longer ours: getBatteryPercentage() dispatches
+    // through BatteryMonitor on ACTIVE.batteryGauge.gaugeType, so a BQ27220
+    // (X3, T5S3) and a CW2017 (X4 Pro) each get their own register map. This
+    // used to be a hardcoded BQ27220 read, which is the same trap as
+    // DS3231-vs-BM8563 in HalClock and failed on the X4 Pro for the same reason.
     _batteryUseI2C = true;
   } else if (HalCapabilities::hasAdcBattery()) {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
@@ -48,6 +82,10 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   if (normalFreq <= 0) {
     return;  // invalid state
   }
+  if constexpr (!CPU_SCALING_ALLOWED) {
+    (void)enabled;
+    return;
+  }
 
   auto wifiMode = WiFi.getMode();
   if (wifiMode != WIFI_MODE_NULL) {
@@ -59,28 +97,6 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // that just won the race will re-call setPowerSaving anyway), but we want
   // defined semantics rather than relying on compiler behavior for a plain int.
   const LockMode mode = currentLockMode.load(std::memory_order_relaxed);
-
-#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
-  // CPU frequency scaling is disabled on PSRAM boards.
-  //
-  // On the ESP32-S3 the PSRAM clock is derived from the CPU/APB clock, so
-  // changing the CPU frequency while anything is touching PSRAM corrupts those
-  // accesses. On the T5S3 that is not a corner case: the 960x540 framebuffer
-  // lives in PSRAM, so the render path is in it more or less continuously.
-  //
-  // Observed on hardware as a TG1WDT_SYS_RST immediately after the
-  // "Going to low-power mode" line, on four consecutive boots and then
-  // intermittently -- intermittent because it depends on what is mid-access when
-  // the switch happens, which is exactly the signature of this hazard rather
-  // than of a logic bug.
-  //
-  // The cost is idle power on a board that has 8 MB of PSRAM and a wired USB
-  // port; the alternative is random resets. Revisit if ESP-IDF's dynamic
-  // frequency scaling is ever configured properly for this build (it needs the
-  // PSRAM-aware DFS path, not a bare setCpuFrequencyMhz()).
-  (void)enabled;
-  return;
-#endif
 
   if (mode == None && enabled && !isLowPower) {
     LOG_DBG("PWR", "Going to low-power mode");
@@ -105,6 +121,9 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 void HalPowerManager::ensureFullSpeedForRadio() {
   if (normalFreq <= 0) {
     return;  // begin() not called yet — nothing to restore to
+  }
+  if constexpr (!CPU_SCALING_ALLOWED) {
+    return;  // nothing ever lowered the clock, so there is nothing to restore
   }
   // Clear BOTH downclock owners before touching the frequency. The idle governor
   // (isLowPower) and the waveform hook (waveformLowPower_) track their drops separately, and
@@ -135,6 +154,11 @@ void HalPowerManager::enterWaveformWait() {
   if (normalFreq <= 0) {
     return;  // begin() not called yet — nothing to restore to
   }
+  if constexpr (!CPU_SCALING_ALLOWED) {
+    // EpdBus fires this hook above a 20 ms busy wait, i.e. on every refresh.
+    // Scaling here would be the most frequent PSRAM-clock change in the build.
+    return;
+  }
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     return;  // WiFi requires the 80 MHz APB clock
   }
@@ -159,6 +183,9 @@ void HalPowerManager::enterWaveformWait() {
 }
 
 void HalPowerManager::exitWaveformWait() {
+  if constexpr (!CPU_SCALING_ALLOWED) {
+    return;  // enterWaveformWait() never lowered the clock; stay balanced with it
+  }
   xSemaphoreTake(modeMutex, portMAX_DELAY);
   if (waveformLowPower_) {
     waveformLowPower_ = false;
@@ -462,26 +489,65 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   // reused as X3_I2C_SCL on X3, so reading it as ADC would collide with the
   // fuel-gauge bus. _batteryUseI2C must match the detected device type.
   assert(_batteryUseI2C == HalCapabilities::hasI2cFuelGauge());
+
+  // One monitor for both backends, built from the WHOLE battery config rather
+  // than half of it: the default constructor takes the ADC pin, the divider
+  // multiplier AND the charge-status pin (with its per-board polarity) from
+  // BoardConfig::ACTIVE. The previous `BatteryMonitor(ACTIVE.batteryAdc)` passed
+  // the pin and defaulted the rest, which happens to be identical on X3/X4
+  // (divider 2.0, no charge-status pin) but silently drops both on any board
+  // that differs -- the X4 Pro's active-high STAT line on GPIO21 among them.
+  static const BatteryMonitor battery;
+
   if (_batteryUseI2C) {
     const unsigned long now = millis();
     if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
       return _batteryCachedPercent;
     }
+    _batteryLastPollMs = now;
 
-    // Read SOC from the I2C fuel gauge via the shared helper so the transaction
-    // shape stays consistent with other BQ27220/DS3231/QMI8658 reads.
-    // On I2C error, keep last known value to avoid UI jitter/slowdowns.
+    // Ask the SDK monitor, which dispatches on the profile's GaugeType, instead
+    // of reading BQ27220 registers by hand.
+    //
+    // The hand-rolled read was StateOfCharge() at 0x55 -- correct for the X3 and
+    // the T5S3, both of which carry a BQ27220, and wrong for the X4 Pro, whose
+    // gauge is a CW2017 at 0x63 with an entirely different register map. Nothing
+    // answers at 0x55 there, so every poll failed and the reported percentage was
+    // whatever the cache last held. Device-confirmed: two
+    // `i2cWriteReadNonStop ... ESP_ERR_INVALID_STATE` lines per Home render, one
+    // BATTERY_POLL_MS apart. (The error surfaces on the read rather than the
+    // address phase because endTransmission(false) defers the transfer under the
+    // ESP-IDF i2c_master driver.)
+    //
+    // The SDK already had the answer: BatteryMonitor carries the CW2017 driver,
+    // including the 80-byte BATINFO profile upload the part needs before it will
+    // report anything but 0%, and picks the backend from
+    // ACTIVE.batteryGauge.gaugeType. Its init is self-throttled to one attempt
+    // per second and returns false rather than blocking, so this stays cheap on
+    // the loop task.
+    //
+    // The bus lock is ours to take: BatteryMonitor talks to Wire directly, and on
+    // a touch board the GT911 is serviced from the sampler task on the same pins.
+    // Same arrangement as HalStorage::usbDriveExternalPower().
     uint16_t soc = 0;
-    if (X3GPIO::readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_SOC_REG, &soc)) {
+    bool read = false;
+    {
+      HalI2cBus::Lock i2cLock;
+      read = battery.readPercentageChecked(soc);
+    }
+    // On a failed read keep the last known value, to avoid UI jitter.
+    if (read) {
       _batteryCachedPercent = soc > 100 ? 100 : soc;
     }
-    _batteryLastPollMs = now;
     return _batteryCachedPercent;
   }
-  // ADC pin from the profile. Only reached when hasI2cFuelGauge() was false, so
-  // hasAdcBattery() holds and batteryAdc is a real pin -- the same gate that
-  // decides whether gpio.begin() configures it as an input.
-  static const BatteryMonitor battery = BatteryMonitor(BoardConfig::ACTIVE.batteryAdc);
+  // ADC path. Only reached when hasI2cFuelGauge() was false, so hasAdcBattery()
+  // holds and batteryAdc is a real pin -- the same gate that decides whether
+  // gpio.begin() configures it as an input.
+  //
+  // NOTE _batteryCachedPercent means different things in the two branches: a
+  // plain percent above, and percent x10 below. Safe only because a board takes
+  // one branch for its whole life.
 
   // Smooth the battery % with a 1/10-weight IIR. The cache stores the value
   // scaled ×10 so integer math keeps enough precision. Seed explicitly on the

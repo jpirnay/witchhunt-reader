@@ -394,8 +394,31 @@ inline void checkHeapIntegrity(const char*) {}
 // snapshot and this one — that is the bracket, not a point measurement.
 uint32_t g_lastHeapWatermark = 0;
 
+// The watermark of the pool that can actually run out on THIS board.
+//
+// esp_get_minimum_free_heap_size() sums every heap the allocator owns. On the
+// C3 that is the one pool the whole hunt above was about, so it is exactly
+// right. On a PSRAM board it also sums in 8 MB of SPI RAM, and the number stops
+// meaning anything: the X4 Pro reported drops of 152, 296 and 656 bytes against
+// an 8.4 MB total -- noise at ERROR level, several lines per page turn, in a
+// diagnostic whose entire job is to make a real dip stand out.
+//
+// Internal RAM is the pool under pressure there (DMA buffers, task stacks, and
+// everything under the 4 KB CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL threshold), and
+// it is what the periodic [MEM] line already reports as `internal=`. So watch
+// that instead. On a board without PSRAM the two are the same pool and the C3
+// behaviour is unchanged -- which is the point: this narrows the question to the
+// scarce resource rather than muting the alarm.
+uint32_t scarceHeapWatermark() {
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+  return heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+#else
+  return esp_get_minimum_free_heap_size();
+#endif
+}
+
 void noteHeapWatermark(const char* stage) {
-  const uint32_t mark = esp_get_minimum_free_heap_size();
+  const uint32_t mark = scarceHeapWatermark();
   if (g_lastHeapWatermark == 0) {
     g_lastHeapWatermark = mark;  // first call: establish the baseline, nothing to report yet
     return;

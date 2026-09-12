@@ -1091,6 +1091,13 @@ bool HalGPIO::isUsbElectricalConnected() const {
   return digitalRead(usbDetect) == HIGH;
 }
 
+bool HalGPIO::canDetectUsbElectrically() const {
+  // X3 has no usable detect pin — GPIO20 is its gauge SDA — and infers the cable
+  // from fuel-gauge charge current instead, so it CAN answer the question.
+  if (deviceIsX3()) return true;
+  return BoardConfig::ACTIVE.usbDetect != BoardConfig::PIN_UNASSIGNED;
+}
+
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
