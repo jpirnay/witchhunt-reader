@@ -3,6 +3,9 @@
 #include <BoardConfig.h>
 #include <HalClock.h>
 #include <esp_rom_sys.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 
 #include <algorithm>
 #include <cstring>
@@ -29,6 +32,41 @@ static volatile bool serialWireMuted = false;
 
 void setSerialWireMuted(bool muted) { serialWireMuted = muted; }
 bool isSerialWireMuted() { return serialWireMuted; }
+
+// Serializes the EMIT half of logPrintf: the transport write and the RTC ring
+// append. Formatting stays outside it.
+//
+// Two tasks logging at once interleaved mid-line on the wire. Device log, X4 Pro:
+//
+//   [442] [DBG] [GPIO] getWakeupReason: wakeupCause=0, resetReason=11, [442] [INF] [MAIN] Serial log opened
+//
+// — the GPIO line is cut in half and its tail is lost. Cosmetic on its own, but
+// it happens precisely when several tasks are busy, which is when the log is
+// worth reading.
+//
+// The unlogged half is worse: logHead++ is not atomic, so two callers can claim
+// the same slot or skip one, corrupting the RTC_NOINIT ring that getLastLogs()
+// reads. That buffer exists to explain a crash, so racing it loses the evidence
+// exactly when something has gone wrong.
+//
+// STATIC allocation, deliberately, not xSemaphoreCreateMutex(): logPrintf is
+// reachable from global constructors, before setup() runs, and this codebase has
+// twice recorded that creating a mutex that early corrupts the TLSF heap
+// metadata (ActivityManager::begin, HalStorage::begin say so in as many words).
+// A StaticSemaphore_t lives in .bss and touches no heap. The function-local
+// static gives one-time, thread-safe initialisation without a second guard.
+static SemaphoreHandle_t logMutex() {
+  static StaticSemaphore_t storage;
+  static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&storage);
+  return handle;
+}
+
+// Whether it is legal to block on that mutex right now. Taking one from an ISR
+// is undefined, and from a suspended scheduler (a panic unwind) it cannot
+// succeed — in both cases an interleaved line is far better than a fault inside
+// the logger. logPrintf is a public entry point, so this is asserted here rather
+// than assumed of every caller.
+static bool logLockUsable() { return !xPortInIsrContext() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING; }
 
 void addToLogRingBuffer(const char* message) {
   // Add the message to the ring buffer, overwriting old messages if necessary.
@@ -80,6 +118,11 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
     }
   }
   va_end(args);
+  // Everything above is local state (buf, and HalClock::formatLogTime, which is
+  // pure). Only the shared state below is serialised, so a slow USB-CDC write
+  // never holds up another task's formatting. See logMutex().
+  const bool locked = logLockUsable();
+  if (locked) xSemaphoreTake(logMutex(), portMAX_DELAY);
   // Log transport, chosen by the board profile (FREEINK_LOG_TRANSPORT).
   //
   // Boards with the same MCU expose logs differently, and getting this wrong is
@@ -108,6 +151,7 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
 #endif
   }
   addToLogRingBuffer(buf);
+  if (locked) xSemaphoreGive(logMutex());
 }
 
 std::string getLastLogs() {
