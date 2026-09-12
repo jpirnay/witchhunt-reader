@@ -56,10 +56,32 @@ class HalI2cBus {
   // starts, so mutex allocation never lands in the first touch poll.
   static void begin();
 
+  // Use `external` as THE bus mutex instead of the one begin() created.
+  //
+  // For a board whose support layer also drives peripherals on these pins from
+  // a task of its own. The T5S3 is one: its PCA9535 and TPS65185 helpers take a
+  // mutex private to the board layer, and LovyanGFX's panel task runs them on
+  // every refresh to raise the EPD rails. Two mutexes over one Wire serialise
+  // nothing, and the consequence there is not a garbled register read -- a
+  // failed power-up makes the panel task clock a whole frame out with the
+  // high-voltage rails down, so the frame lands weakly or not at all.
+  //
+  // Adopting the board's handle rather than handing it ours keeps the direction
+  // of the dependency right: the SDK board layer cannot see this header, and the
+  // board-specific choice stays in the wiring layer (main.cpp) next to the
+  // BoardT5S3::begin() call that already lives there.
+  //
+  // Call before anything can take a Lock -- i.e. before the input sampler and
+  // the display come up. Idempotent; a null handle is ignored.
+  static void adoptMutex(SemaphoreHandle_t external);
+
  private:
   HalI2cBus();
 
   SemaphoreHandle_t mutex = nullptr;
+  // False once adoptMutex() has taken someone else's handle, so we never delete
+  // a mutex the board layer is still using.
+  bool ownsMutex = true;
 
   friend class Lock;
 #else
@@ -72,6 +94,9 @@ class HalI2cBus {
   };
 
   static void begin() {}
+  // No cross-task I2C to serialize, so there is no mutex to replace. Declared
+  // anyway so the wiring layer needs no #if of its own.
+  static void adoptMutex(SemaphoreHandle_t) {}
 #endif
 
  public:
