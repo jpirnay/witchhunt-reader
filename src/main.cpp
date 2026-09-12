@@ -981,6 +981,21 @@ void setup() {
   // mutex before gpio.begin() can start the sampler, so no first-use allocation
   // lands in a touch poll. Compiles away on non-touch boards.
   HalI2cBus::begin();
+#if BOARD_SUPPORT_OWNS_BUSES
+  // One lock for one bus. The board-support layer drives the PCA9535 and the
+  // TPS65185 under a mutex of its own, and LovyanGFX's EPD panel task runs those
+  // helpers on EVERY refresh to raise the panel rails -- while the GT911 is
+  // polled from the input sampler and the RTC and gauge from this task, all
+  // under HalI2cBus. Two mutexes over one Wire serialise nothing, and the
+  // failure is not a bad register read: a collided power-up returns false,
+  // Panel_EPD's task ignores that, and the frame is clocked out with the
+  // high-voltage rails down -- a page that lands weakly or not at all, then gets
+  // repainted by the next refresh.
+  //
+  // Here rather than inside HalI2cBus because this is the one file that already
+  // knows which board it is; the HAL takes a handle and asks no questions.
+  HalI2cBus::adoptMutex(BoardT5S3::i2cMutexHandle());
+#endif
   gpio.begin();
   // Bus start-up must follow gpio.begin(): that runs inputMgr.begin(), and on a
   // touch board the SDK's GT911 init starts the shared I2C bus itself. The owner

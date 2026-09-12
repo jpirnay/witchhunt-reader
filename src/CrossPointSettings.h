@@ -221,6 +221,12 @@ class CrossPointSettings {
     DARKNESS_DARK = 1,        // historical default — bolder dark-gray AA
     DARKNESS_EXTRA_DARK = 2,  // both AA shades pushed to darkest gray state
     DARKNESS_MAXIMUM = 3,     // skip grayscale passes — AA pixels stay solid black from BW pass
+    // Lighter than NORMAL: both AA shades take the LIGHT tone instead of their
+    // own. Appended rather than placed at 0, where it belongs on a darkness
+    // scale, because this value is PERSISTED — inserting would silently turn
+    // every saved DARKNESS_DARK into DARKNESS_NORMAL and so on down the list.
+    // The menu therefore reads Normal, Dark, Extra Dark, Maximum, Lighter.
+    DARKNESS_LIGHT = 4,
     TEXT_DARKNESS_COUNT
   };
 #ifdef ENABLE_IMAGE_DITHERING_EXTENSION

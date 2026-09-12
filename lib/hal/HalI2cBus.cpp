@@ -20,6 +20,20 @@ HalI2cBus& HalI2cBus::getInstance() {
 
 void HalI2cBus::begin() { (void)getInstance(); }
 
+void HalI2cBus::adoptMutex(SemaphoreHandle_t external) {
+  if (external == nullptr) return;
+  auto& bus = getInstance();
+  if (bus.mutex == external) return;
+  // Safe because this runs during setup, before the input sampler and the
+  // display exist: nothing can be holding the mutex we are about to drop.
+  if (bus.mutex != nullptr && bus.ownsMutex) {
+    vSemaphoreDelete(bus.mutex);
+  }
+  bus.mutex = external;
+  bus.ownsMutex = false;
+  LOG_INF("I2C", "Adopted the board-support layer's bus mutex (one lock for touch/RTC/gauge and the EPD rails)");
+}
+
 HalI2cBus::Lock::Lock() {
   auto& bus = HalI2cBus::getInstance();
   if (bus.mutex == nullptr) {
