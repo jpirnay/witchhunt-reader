@@ -1,8 +1,10 @@
 # Witch(hunt) Reader
 
-This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) for the XTEINK X3/X4, a great piece of software by Dave Allie and others.
+This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader), a great piece of software by Dave Allie and others.
 
-**Caveat: new hardware batches of the X3 / X4 from xteink seem to come with a newer display panels. These models should work with Witch(hunt) Reader from version 2.21 onwards.**
+It supports the following devices:
+- ESP32C3-based Xteink X4 and X3.
+- ESP32S3-based Xteink X4Pro, LilyGo T5S3 Pro
 
 # Installation
 
@@ -10,7 +12,7 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 
 1. Download `firmware.bin` for your device from the [latest release](../../releases/latest).
 2. Open the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools).
-3. Pick your device (X3 or X4).
+3. Pick your device.
 4. Choose **Custom .bin** and upload the `firmware.bin` you downloaded in step 1.
 5. Connect the device via USB and start the flash — pick the device's serial port when the browser asks.
 
@@ -20,7 +22,7 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 - Memory - where others fail Witch Reader still works
 - Proper KOReader Snychronisation
 - Additional sleep screens support (information overlay, transparent pictures over current reader screen)
-- Clock-Support for X4 and X3
+- Clock-Support for all supported devices
 - Weather information panel
 - Multiple under-the-hood performance improvements
 - Book information screen
