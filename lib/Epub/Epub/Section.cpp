@@ -31,7 +31,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 73;  // bumped: an internal link honours CSS
+constexpr uint8_t SECTION_FILE_VERSION = 74;  // bumped: the HTML `hidden` attribute now
+                                              // suppresses an element, so a v73 cache still
+                                              // holds the laid-out text it should have hidden
+                                              // v73: an internal link honours CSS
                                               // vertical-align, so footnote references marked
                                               // `a { vertical-align: super }` are raised and
                                               // shrunk. Word size/position are baked into layout

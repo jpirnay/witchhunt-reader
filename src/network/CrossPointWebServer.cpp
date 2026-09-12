@@ -180,11 +180,17 @@ bool isProtectedItemName(const String& name) {
   return false;
 }
 
-// True when `s` is usable as a single path component: no separator and no
-// parent reference, so it cannot escape the folder it is joined to. Rejecting
-// "/" outright also means plugin folders are flat - no subdirectories.
+// True when `s` is usable as a single path component: no separator, and not a
+// self/parent reference, so it cannot escape the folder it is joined to.
+// Rejecting "/" outright also means plugin folders are flat - no subdirectories.
+//
+// Only the EXACT components "." and ".." are refused. Refusing every name that
+// merely CONTAINED ".." -- what this did before -- also threw out legitimate
+// files like "volume..2.epub" or "notes...txt", none of which can traverse
+// anywhere: a component with no separator in it resolves inside its parent
+// whatever it is called. Narrowed per crosspoint-reader PR #3353.
 bool isSafePathComponent(const String& s) {
-  return !s.isEmpty() && s.indexOf('/') < 0 && s.indexOf('\\') < 0 && s.indexOf("..") < 0;
+  return !s.isEmpty() && s.indexOf('/') < 0 && s.indexOf('\\') < 0 && s != "." && s != "..";
 }
 
 const char* pluginContentType(const String& file) {
@@ -886,15 +892,12 @@ void CrossPointWebServer::handleFileListData() const {
   // Get current path from query string (default to root)
   String currentPath = "/";
   if (server->hasArg("path")) {
-    currentPath = server->arg("path");
-    // Ensure path starts with /
-    if (!currentPath.startsWith("/")) {
-      currentPath = "/" + currentPath;
-    }
-    // Remove trailing slash unless it's root
-    if (currentPath.length() > 1 && currentPath.endsWith("/")) {
-      currentPath = currentPath.substring(0, currentPath.length() - 1);
-    }
+    // normalizeWebPath, not a bare startsWith("/"): the naive form leaves ".."
+    // in the string, and the protected-item guards below test the LAST component
+    // of whatever is passed. "/books/../.private/x" reads as component "x" to
+    // those guards while the filesystem resolves it into the dot-folder they
+    // exist to protect. Ported from crosspoint-reader PR #3353 (Sylve / @s0lness).
+    currentPath = normalizeWebPath(server->arg("path"));
   }
   LOG_DBG("WEB", "File list request for path: %s", currentPath.c_str());
 
@@ -946,13 +949,12 @@ void CrossPointWebServer::handleDownload() const {
     return;
   }
 
-  String itemPath = server->arg("path");
+  // Resolved before the protected-item checks below, which inspect only the last
+  // component -- see handleFileListData. crosspoint-reader PR #3353.
+  String itemPath = normalizeWebPath(server->arg("path"));
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
     return;
-  }
-  if (!itemPath.startsWith("/")) {
-    itemPath = "/" + itemPath;
   }
 
   const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
@@ -1060,19 +1062,20 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     writeCount = 0;
     state.buffer.resize(UploadState::UPLOAD_BUFFER_SIZE);
 
+    // The client controls this name outright, and it is concatenated onto the
+    // target directory below. Without this it can carry its own separators and
+    // land the write anywhere on the card. crosspoint-reader PR #3353.
+    if (!isSafePathComponent(state.fileName)) {
+      state.error = "Invalid file name";
+      LOG_DBG("WEB", "[UPLOAD] Rejected unsafe filename: %s", state.fileName.c_str());
+      return;
+    }
+
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
     // fields aren't available until after file upload completes
     if (server->hasArg("path")) {
-      state.path = server->arg("path");
-      // Ensure path starts with /
-      if (!state.path.startsWith("/")) {
-        state.path = "/" + state.path;
-      }
-      // Remove trailing slash unless it's root
-      if (state.path.length() > 1 && state.path.endsWith("/")) {
-        state.path = state.path.substring(0, state.path.length() - 1);
-      }
+      state.path = normalizeWebPath(server->arg("path"));
     } else {
       state.path = "/";
     }
@@ -1219,16 +1222,12 @@ void CrossPointWebServer::handleCreateFolder() const {
     return;
   }
 
-  // Get parent path
+  // The name is checked as a single component below; the parent it is joined to
+  // has to be resolved too, or ".." in the parent puts the new folder outside it.
+  // crosspoint-reader PR #3353.
   String parentPath = "/";
   if (server->hasArg("path")) {
-    parentPath = server->arg("path");
-    if (!parentPath.startsWith("/")) {
-      parentPath = "/" + parentPath;
-    }
-    if (parentPath.length() > 1 && parentPath.endsWith("/")) {
-      parentPath = parentPath.substring(0, parentPath.length() - 1);
-    }
+    parentPath = normalizeWebPath(server->arg("path"));
   }
 
   // Build full folder path
@@ -1478,18 +1477,15 @@ void CrossPointWebServer::handleDelete() const {
   String lastDeletedItem;
 
   for (const auto& p : paths) {
-    auto itemPath = p.as<String>();
+    // Resolved before the protected-item checks below, which inspect only the last
+    // component -- see handleFileListData. crosspoint-reader PR #3353.
+    auto itemPath = normalizeWebPath(p.as<String>());
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {
       failedItems += itemPath + " (cannot delete root); ";
       allSuccess = false;
       continue;
-    }
-
-    // Ensure path starts with /
-    if (!itemPath.startsWith("/")) {
-      itemPath = "/" + itemPath;
     }
 
     // Security check: prevent deletion of protected items
@@ -3069,11 +3065,16 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           wsLastProgressSent = 0;
           wsUploadStartTime = millis();
 
-          // Ensure path is valid
-          if (!wsUploadPath.startsWith("/")) wsUploadPath = "/" + wsUploadPath;
-          if (wsUploadPath.length() > 1 && wsUploadPath.endsWith("/")) {
-            wsUploadPath = wsUploadPath.substring(0, wsUploadPath.length() - 1);
+          // Same containment rule as the HTTP upload above. This path is ours, not
+          // upstream's -- they have no WebSocket upload -- but the exposure is
+          // identical: both the directory and the client-supplied file name are
+          // concatenated into a write target.
+          if (!isSafePathComponent(wsUploadFileName)) {
+            LOG_DBG("WS", "START rejected: unsafe file name '%s'", wsUploadFileName.c_str());
+            wsServer->sendTXT(num, "ERROR:Invalid file name");
+            return;
           }
+          wsUploadPath = normalizeWebPath(wsUploadPath);
 
           // Build file path
           String filePath = wsUploadPath;

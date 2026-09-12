@@ -1,0 +1,130 @@
+BOOK title=Hidden Attribute lang=en spine=5 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=54 s=1 z=100 t=Plain
+   W x=147 s=1 z=100 t=Hidden
+   W x=247 s=1 z=100 t=Paragraph
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=This
+   W x=69 s=0 z=100 t=opening
+   W x=153 s=0 z=100 t=paragraph
+   W x=258 s=0 z=100 t=is
+   W x=291 s=0 z=100 t=visible
+   W x=366 s=0 z=100 t=and
+   W x=415 s=0 z=100 t=must
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=survive.
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=0 z=100 t=This
+   W x=70 s=0 z=100 t=closing
+   W x=154 s=0 z=100 t=paragraph
+   W x=260 s=0 z=100 t=is
+   W x=294 s=0 z=100 t=visible
+   W x=370 s=0 z=100 t=and
+   W x=420 s=0 z=100 t=must
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=survive.
+SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=101 s=1 z=100 t=Hidden
+   W x=201 s=1 z=100 t=Container
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Visible
+   W x=77 s=0 z=100 t=before
+   W x=137 s=0 z=100 t=the
+   W x=174 s=0 z=100 t=container.
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=18 s=0 z=100 t=Visible
+   W x=77 s=0 z=100 t=after
+   W x=132 s=0 z=100 t=the
+   W x=169 s=0 z=100 t=container.
+SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=45 s=1 z=100 t=Boolean
+   W x=185 s=1 z=100 t=Attribute
+   W x=334 s=1 z=100 t=Forms
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=Visible
+   W x=77 s=0 z=100 t=lead-in
+   W x=147 s=0 z=100 t=for
+   W x=183 s=0 z=100 t=the
+   W x=220 s=0 z=100 t=boolean
+   W x=297 s=0 z=100 t=forms.
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=Visible
+   W x=77 s=0 z=100 t=tail
+   W x=120 s=0 z=100 t=for
+   W x=156 s=0 z=100 t=the
+   W x=193 s=0 z=100 t=boolean
+   W x=270 s=0 z=100 t=forms.
+SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=53 s=1 z=100 t=Attribute
+   W x=202 s=1 z=100 t=Outranks
+   W x=348 s=1 z=100 t=CSS
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=18 s=0 z=100 t=The
+   W x=51 s=0 z=100 t=attribute
+   W x=139 s=0 z=100 t=has
+   W x=178 s=0 z=100 t=to
+   W x=206 s=0 z=100 t=win
+   W x=235 s=0 z=100 t=over
+   W x=282 s=0 z=100 t=a
+   W x=300 s=0 z=100 t=rule
+   W x=343 s=0 z=100 t=that
+   W x=393 s=0 z=100 t=asks
+   W x=437 s=0 z=100 t=to
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=show
+   W x=45 s=0 z=100 t=the
+   W x=82 s=0 z=100 t=element.
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=This
+   W x=57 s=0 z=100 t=one
+   W x=95 s=0 z=100 t=has
+   W x=134 s=0 z=100 t=the
+   W x=171 s=0 z=100 t=same
+   W x=217 s=0 z=100 t=class
+   W x=269 s=0 z=100 t=and
+   W x=306 s=0 z=100 t=no
+   W x=335 s=0 z=100 t=attribute,
+   W x=431 s=0 z=100 t=so
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=it
+   W x=22 s=0 z=100 t=stays.
+SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=83 s=1 z=100 t=Nothing
+   W x=215 s=1 z=100 t=Hidden
+   W x=315 s=1 z=100 t=Here
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=A
+   W x=33 s=0 z=100 t=control
+   W x=109 s=0 z=100 t=chapter:
+   W x=188 s=0 z=100 t=every
+   W x=241 s=0 z=100 t=word
+   W x=282 s=0 z=100 t=in
+   W x=306 s=0 z=100 t=it
+   W x=329 s=0 z=100 t=must
+   W x=376 s=0 z=100 t=appear
+   W x=436 s=0 z=100 t=in
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=golden.
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=18 s=2 z=100 t=Including
+   W x=117 s=2 z=100 t=this
+   W x=170 s=2 z=100 t=italic
+   W x=236 s=2 z=100 t=note,
+   W x=302 s=2 z=100 t=which
+   W x=361 s=2 z=100 t=carries
+   W x=436 s=2 z=100 t=no
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=2 z=100 t=attribute
+   W x=88 s=2 z=100 t=at
+   W x=116 s=2 z=100 t=all.

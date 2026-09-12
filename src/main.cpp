@@ -1432,6 +1432,15 @@ void loop() {
     // waveform wait, 160 = normal) is visible in a steady-state log.
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, CPU: %lu MHz", ESP.getFreeHeap(),
             ESP.getHeapSize(), ESP.getMinFreeHeap(), static_cast<unsigned long>(getCpuFrequencyMhz()));
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+    // Second line, tagged "PSRAM:", so scripts/debugging_monitor.py can tell the
+    // two pools apart and give PSRAM its own subplot. The C3 emits nothing here
+    // and its graph is unchanged. MaxAlloc is omitted for the same reason as the
+    // internal-heap line above -- walking heap metadata on every tick is what
+    // triggered the interrupt WDTs.
+    LOG_INF("MEM", "PSRAM: Free: %u bytes, Total: %u bytes, Min Free: %u bytes", ESP.getFreePsram(), ESP.getPsramSize(),
+            ESP.getMinFreePsram());
+#endif
     // Right-sizing aid for the background button sampler task (2 KB allocated).
     // High-water is the min free stack ever seen; shrink the xTaskCreate size if
     // this stays comfortably high across a session.
