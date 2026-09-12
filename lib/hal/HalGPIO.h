@@ -453,6 +453,13 @@ class HalGPIO {
   // report the two terms apart.
   bool isUsbHostLinkActive() const;
 
+  // Whether this board can observe a cable at all WITHOUT an enumerated host —
+  // an X3-style gauge-current inference or a usbDetect pin. False on the
+  // native-USB boards whose profile leaves usbDetect unassigned (X4 Pro, T5S3):
+  // there, a false from isUsbConnected() means "no host enumerated right now",
+  // NOT "no cable", so nothing may treat it as a negative signal.
+  bool canDetectUsbElectrically() const;
+
   // USB state as sampled by the last update() call. Prefer this in per-loop
   // polling: isUsbConnected() performs a fresh I2C read on X3.
   bool isUsbConnectedCached() const { return lastUsbConnected; }
