@@ -19,6 +19,10 @@ class WeatherSettingsActivity final : public MenuListActivity {
   }
 
   void onEnter() override;
+  // Tap on a list row -> move the selection there; ActivityManager synthesizes Confirm. Serves
+  // BOTH of this screen's lists: the settings menu, and the city-search results, which are not
+  // menuItems and so cannot be validated by the MenuListActivity version.
+  ListRowTap::Result selectListRow(int index) override;
   void loop() override;
   void render(RenderLock&&) override;
 

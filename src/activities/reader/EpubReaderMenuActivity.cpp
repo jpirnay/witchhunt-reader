@@ -69,7 +69,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
     const int8_t initialFontSizeNormalizationOverride, const int8_t initialInlineFootnotePreviewsOverride,
     const bool hasStarredPages, const bool isCurrentPageStarred, const bool hasPrintedPages)
-    : UiListActivity("EpubReaderMenu", renderer, mappedInput),
+    : TabbedUiListActivity("EpubReaderMenu", renderer, mappedInput),
       currentPageStarred(isCurrentPageStarred),
       pendingOrientation(currentOrientation),
       pendingEmbeddedStyleOverride(initialEmbeddedStyleOverride),
@@ -542,74 +542,13 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
 }
 
 void EpubReaderMenuActivity::onEnter() {
-  UiListActivity::onEnter();
-  app.on(ACTION_USER, &EpubReaderMenuActivity::onTabEvent, this);
+  // Every tab starts focused on the bar rather than on a row; the base puts the ACTIVE tab
+  // there, this resets the others so stepping between them does not reveal a stale selection.
   for (auto& tab : tabNav) tab.reset(-1);
+  TabbedUiListActivity::onEnter();
 }
 
-void EpubReaderMenuActivity::onExit() {
-  closeRouting();
-  Activity::onExit();
-}
-
-void EpubReaderMenuActivity::focusTabs() {
-  activeNav().selected = -1;
-  listTapActivation.reset();
-  requestUpdate();
-}
-
-void EpubReaderMenuActivity::selectTab(const uint8_t slot) {
-  if (slot >= visibleTabCount) return;
-  selectedTabSlot = slot;
-  focusTabs();
-}
-
-void EpubReaderMenuActivity::onTabEvent(const fui::ActionEvent& event, void* user) {
-  auto* self = static_cast<EpubReaderMenuActivity*>(user);
-  if (event.value < 0 || event.value >= self->visibleTabCount) return;
-  self->selectTab(static_cast<uint8_t>(event.value));
-  self->app.clearTapFlash();
-}
-
-bool EpubReaderMenuActivity::handleButtons() {
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    if (activeNav().selected >= 0) {
-      focusTabs();
-    } else {
-      onBackPressed();
-    }
-    return true;
-  }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (activeNav().selected < 0) {
-      selectTab(static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedTabSlot, visibleTabCount)));
-    } else {
-      activateIndex(activeNav().selected);
-    }
-    return true;
-  }
-  return false;
-}
-
-void EpubReaderMenuActivity::navigateButtons() {
-  const int count = listCount();
-  buttonNavigator.onNextRelease([this, count] {
-    activeNav().selected = ButtonNavigator::nextIndex(activeNav().selected + 1, count + 1) - 1;
-    if (activeNav().selected >= 0) activeNav().follow(count);
-    listTapActivation.reset();
-    requestUpdate();
-  });
-  buttonNavigator.onPreviousRelease([this, count] {
-    activeNav().selected = ButtonNavigator::previousIndex(activeNav().selected + 1, count + 1) - 1;
-    if (activeNav().selected >= 0) activeNav().follow(count);
-    listTapActivation.reset();
-    requestUpdate();
-  });
-  buttonNavigator.onNextContinuous(
-      [this] { selectTab(static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedTabSlot, visibleTabCount))); });
-  buttonNavigator.onPreviousContinuous(
-      [this] { selectTab(static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedTabSlot, visibleTabCount))); });
-}
+void EpubReaderMenuActivity::onExit() { TabbedUiListActivity::onExit(); }
 
 void EpubReaderMenuActivity::activateIndex(const int index) {
   if (index < 0 || index >= listCount()) return;
@@ -626,10 +565,6 @@ void EpubReaderMenuActivity::activateIndex(const int index) {
   item.toggleValue();
   onSettingToggled(index);
   requestUpdate();
-}
-
-ListRowTap::Result EpubReaderMenuActivity::selectListRow(const int index) {
-  return ListRowTap::apply(index, listCount(), activeNav().selected);
 }
 
 void EpubReaderMenuActivity::materializeListWindow() {
@@ -697,6 +632,21 @@ bool EpubReaderMenuActivity::paintTabIcon(fui::DrawTarget& target, const fui::Re
   return true;
 }
 
+const char* EpubReaderMenuActivity::tabLabel(const int slot) const {
+  static constexpr StrId tabLabels[MENU_TAB_COUNT] = {StrId::STR_READER_NAVIGATION, StrId::STR_SETTINGS_TITLE,
+                                                      StrId::STR_SYNC, StrId::STR_READER_TOOLS};
+  return I18N.get(tabLabels[static_cast<size_t>(visibleTabs[slot])]);
+}
+
+void EpubReaderMenuActivity::customizeTabBar(UiScreen& screen, fui::TabBarProps& props) {
+  // This menu labels its tabs with an icon above the word, so it wants the smaller text and an
+  // icon painter; the settings screen takes the plain text default.
+  props.text = screen.theme().smallText;
+  props.iconSize = 16;
+  props.iconPainter = &EpubReaderMenuActivity::paintTabIcon;
+  props.iconPainterUserData = this;
+}
+
 void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   const int16_t top = static_cast<int16_t>(contentRect.y + 75);
@@ -705,43 +655,7 @@ void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
                   static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height)),
                   static_cast<int16_t>(contentRect.x)});
 
-  static constexpr StrId tabLabels[MENU_TAB_COUNT] = {StrId::STR_READER_NAVIGATION, StrId::STR_SETTINGS_TITLE,
-                                                      StrId::STR_SYNC, StrId::STR_READER_TOOLS};
-  fui::TabItem tabs[MENU_TAB_COUNT]{};
-  for (uint8_t slot = 0; slot < visibleTabCount; ++slot) {
-    tabs[slot].label = I18N.get(tabLabels[static_cast<size_t>(visibleTabs[slot])]);
-    tabs[slot].value = slot;
-    tabs[slot].selected = slot == selectedTabSlot;
-  }
-  fui::TabBarProps tabProps;
-  tabProps.tabs = tabs;
-  tabProps.count = visibleTabCount;
-  tabProps.action = ACTION_USER;
-  tabProps.inputMask = fui::InputTouch;
-  tabProps.text = screen.theme().smallText;
-  tabProps.iconSize = 16;
-  tabProps.iconPainter = &EpubReaderMenuActivity::paintTabIcon;
-  tabProps.iconPainterUserData = this;
-  tabProps.tabInset = {};
-  tabProps.contentInset = {};
-
-  // Adapted from CrossInk's icon-tab reader menu at commit 60cc4da5 and
-  // touch tab routing at cd4b122e (MIT): https://github.com/uxjulia/crossink
-  fui::StyleSet tabStyles;
-  tabStyles.explicitlySet = true;
-  tabStyles.normal.background = fui::Paint::solid(fui::Color::White);
-  tabStyles.normal.foreground = fui::Paint::solid(fui::Color::Black);
-  tabStyles.normal.border = fui::Paint::solid(fui::Color::Black);
-  tabStyles.normal.borderWidth = 1;
-  tabStyles.selected.background =
-      activeNav().selected < 0 ? fui::Paint::solid(fui::Color::Black) : fui::Paint::dither(fui::Color::LightGray);
-  tabStyles.selected.foreground = fui::Paint::solid(activeNav().selected < 0 ? fui::Color::White : fui::Color::Black);
-  tabStyles.selected.border = fui::Paint::solid(fui::Color::Black);
-  tabStyles.selected.borderWidth = 1;
-  tabStyles.focused = tabStyles.selected;
-  tabStyles.active = tabStyles.selected;
-  tabProps.tabStyles = tabStyles;
-  fui::tabBar(screen.frame(), screen.takeTop(54), tabProps);
+  buildTabBar(screen);
   screen.spacer(6);
 
   fui::ListProps listProps;

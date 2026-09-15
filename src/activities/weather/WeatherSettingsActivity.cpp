@@ -143,6 +143,11 @@ void WeatherSettingsActivity::onBackPressed() {
   finish();
 }
 
+ListRowTap::Result WeatherSettingsActivity::selectListRow(const int index) {
+  if (!showingSearchResults) return MenuListActivity::selectListRow(index);
+  return ListRowTap::apply(index, static_cast<int>(searchResults.size()), selectedIndex);
+}
+
 void WeatherSettingsActivity::launchCitySearch() {
   startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_WEATHER_SEARCH_CITY), "",
                                                                  64, InputType::Text),

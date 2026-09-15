@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
@@ -554,9 +555,9 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
 
     // Progress + pace-based ETA as a badge in the centre cover's top-right corner,
     // e.g. "62% · ~45m". The large centre cover has room to carry it overlaid.
-    const int centerProgress = UITheme::getBookProgressPercent(recentBooks[centerIdx]);
-    UITheme::drawCoverProgressBadge(renderer, Rect{centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH},
-                                    recentBooks[centerIdx], centerProgress);
+    const int centerProgress = BookProgressPresentation::readPercent(recentBooks[centerIdx]);
+    BookProgressPresentation::drawBadge(renderer, Rect{centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH},
+                                        recentBooks[centerIdx], centerProgress);
 
     // Dots — centred over the cover tile, count = actual book count
     const int dotsY = centerTileY + kCenterCoverMaxH + 8;

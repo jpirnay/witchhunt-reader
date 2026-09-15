@@ -7,8 +7,17 @@
 class UiListActivity : public Activity, protected UiAppHost {
  public:
   void onEnter() override;
+  // Stops touch routing before the activity goes away. Every screen here builds its UI in
+  // onEnter() (resetUi() re-arms routing), so closing it on the way out is always right --
+  // and doing it here means a subclass cannot forget. Two did it by hand; the rest did not.
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // What a tap on a row means. Overriding it here is what puts the FreeInkUI path and the
+  // legacy ListTouchBand path on the same rule: onRowAction() used to apply ListRowTap
+  // inline, so a subclass could override this (as MenuListActivity does, to decline
+  // separators) and never be consulted for a tap it actually receives.
+  ListRowTap::Result selectListRow(int index) override;
 
  protected:
   static constexpr freeink::ui::ActionId ACTION_ROW = 1;

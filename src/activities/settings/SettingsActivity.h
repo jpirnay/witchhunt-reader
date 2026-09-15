@@ -6,16 +6,9 @@
 #include <vector>
 
 #include "SettingInfo.h"
-#include "activities/Activity.h"
-#include "components/UiAppHost.h"
-#include "util/ButtonNavigator.h"
+#include "activities/TabbedUiListActivity.h"
 
-class SettingsActivity final : public Activity, protected UiAppHost {
-  ButtonNavigator buttonNavigator;
-  freeink::ui::ListNav listNav;
-
-  int selectedCategoryIndex = 0;  // Currently selected category
-  int selectedSettingIndex = 0;
+class SettingsActivity final : public TabbedUiListActivity {
   int settingsCount = 0;
 
   // Per-category settings derived from shared list + device-only actions
@@ -35,12 +28,7 @@ class SettingsActivity final : public Activity, protected UiAppHost {
   bool needsHalfRefresh = false;
 
   void enterCategory(int categoryIndex);
-  void toggleCurrentSetting();
-  [[nodiscard]] bool isListItemSelectable(int settingIdx) const;
-  void syncListSelection();
 
-  static constexpr freeink::ui::ActionId ACTION_ROW = 1;
-  static constexpr freeink::ui::ActionId ACTION_TAB = 2;
   static constexpr size_t LIST_WINDOW_CAPACITY = 24;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowLabels;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowValues;
@@ -48,21 +36,26 @@ class SettingsActivity final : public Activity, protected UiAppHost {
   uint16_t windowFirst = 0;
   uint16_t windowCount = 0;
 
-  static void settingsScreen(UiScreen& screen, void* user);
-  static void onTabEvent(const freeink::ui::ActionEvent& event, void* user);
-  static void onRowEvent(const freeink::ui::ActionEvent& event, void* user);
-  void buildSettingsScreen(UiScreen& screen);
   void materializeListWindow();
-  void handleRowTouch(int index);
+
+  // UiListActivity / TabbedUiListActivity overrides
+  int listCount() const override { return settingsCount; }
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  int tabCount() const override { return categoryCount; }
+  const char* tabLabel(int slot) const override { return I18N.get(categoryNames[slot]); }
+  [[nodiscard]] int16_t tabBarHeight() const override;
+  void onTabSelected(int slot) override { enterCategory(slot); }
+  void onBackFromTabs() override;
+  [[nodiscard]] bool isRowSelectable(int index) const override;
+  void drawChrome() override;
+  void drawFooter() override;
+  // Overridden only to ship the frame with this screen's refresh mode; see the definition.
+  void render(RenderLock&&) override;
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Settings", renderer, mappedInput), UiAppHost(renderer) {}
+      : TabbedUiListActivity("Settings", renderer, mappedInput) {}
   void onEnter() override;
   void onExit() override;
-  // Index 0 of selectedSettingIndex is the category tab, so list row i maps to i + 1.
-  ListRowTap::Result selectListRow(int index) override;
-  bool pageList(ListPageDirection direction) override;
-  void loop() override;
-  void render(RenderLock&&) override;
 };

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
@@ -128,10 +129,12 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
   return nullptr;
 }
 
-// Reads the overall progress percent for a recent book. Delegates to the shared
-// UITheme helper so the progress.bin layout lives in one place.
+// Reads the overall progress percent for a recent book. Delegates to
+// BookProgressPresentation so the progress.bin layout lives in one place.
 // Returns -1 if the file is absent or the percent byte is not yet written.
-int LyraTheme::getRecentBookProgressPercent(const RecentBook& book) { return UITheme::getBookProgressPercent(book); }
+int LyraTheme::getRecentBookProgressPercent(const RecentBook& book) {
+  return BookProgressPresentation::readPercent(book);
+}
 
 void LyraTheme::drawBatteryLeft(const GfxRenderer& renderer, Rect rect, const bool showPercentage) const {
   // Left aligned: icon on left, percentage on right (reader mode)
@@ -724,7 +727,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
     // Progress + pace-based ETA, e.g. "62% · ~45m". Replaces the old top-right
     // percent badge on this layout — the percentage now lives in the text line.
-    const std::string statusLine = UITheme::formatBookProgressStatus(book, progressPercent);
+    const std::string statusLine = BookProgressPresentation::formatStatus(book, progressPercent);
 
     auto titleLines = renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth, 3, EpdFontFamily::BOLD);
     auto authorLines = renderer.wrappedText(UI_10_FONT_ID, book.author.c_str(), textWidth, 2);

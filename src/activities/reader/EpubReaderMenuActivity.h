@@ -6,10 +6,10 @@
 #include <string>
 #include <vector>
 
-#include "../UiListActivity.h"
+#include "../TabbedUiListActivity.h"
 #include "activities/settings/SettingInfo.h"
 
-class EpubReaderMenuActivity final : public UiListActivity {
+class EpubReaderMenuActivity final : public TabbedUiListActivity {
  public:
   // Menu actions identified by StrId of the menu item.
   // Used by the parent activity to interpret the result.
@@ -54,30 +54,32 @@ class EpubReaderMenuActivity final : public UiListActivity {
 
   void onEnter() override;
   void onExit() override;
-  ListRowTap::Result selectListRow(int index) override;
 
  private:
   enum class MenuTab : uint8_t { Navigation, Settings, Sync, Tools, Count };
   static constexpr size_t MENU_TAB_COUNT = static_cast<size_t>(MenuTab::Count);
 
   void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages);
-  [[nodiscard]] MenuTab activeTab() const { return visibleTabs[selectedTabSlot]; }
+  [[nodiscard]] MenuTab activeTab() const { return visibleTabs[selectedTab()]; }
   [[nodiscard]] size_t activeTabIndex() const { return static_cast<size_t>(activeTab()); }
   [[nodiscard]] std::vector<SettingInfo>& activeMenuItems() { return tabMenuItems[activeTabIndex()]; }
   [[nodiscard]] const std::vector<SettingInfo>& activeMenuItems() const { return tabMenuItems[activeTabIndex()]; }
-  void selectTab(uint8_t slot);
-  void focusTabs();
 
   bool currentPageStarred = false;
   void finishWithAction(MenuAction action);
 
-  // UiListActivity overrides
+  // UiListActivity / TabbedUiListActivity overrides
   int listCount() const override { return static_cast<int>(activeMenuItems().size()); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
+  // Each tab keeps its own scroll position and selection, so a reader who steps away to another
+  // tab and back finds the row they left rather than the top of the list.
   freeink::ui::ListNav& activeNav() override { return tabNav[activeTabIndex()]; }
-  bool handleButtons() override;
-  void navigateButtons() override;
+  int tabCount() const override { return visibleTabCount; }
+  const char* tabLabel(int slot) const override;
+  int16_t tabBarHeight() const override { return 54; }
+  void customizeTabBar(UiScreen& screen, freeink::ui::TabBarProps& props) override;
+  void onBackFromTabs() override { onBackPressed(); }
   void drawChrome() override;
   void drawFooter() override;
   [[nodiscard]] std::string getItemValueString(int index) const;
@@ -86,7 +88,6 @@ class EpubReaderMenuActivity final : public UiListActivity {
   void onSettingToggled(int index);
   void materializeListWindow();
 
-  static void onTabEvent(const freeink::ui::ActionEvent& event, void* user);
   static bool paintTabIcon(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, const freeink::ui::TabItem& tab,
                            uint8_t index, void* user);
 
@@ -97,7 +98,6 @@ class EpubReaderMenuActivity final : public UiListActivity {
   std::array<MenuTab, MENU_TAB_COUNT> visibleTabs{};
   std::array<freeink::ui::ListNav, MENU_TAB_COUNT> tabNav;
   uint8_t visibleTabCount = 0;
-  uint8_t selectedTabSlot = 0;
 
   static constexpr size_t LIST_WINDOW_CAPACITY = 24;
   std::array<std::string, LIST_WINDOW_CAPACITY> windowLabels;

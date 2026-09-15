@@ -32,136 +32,13 @@
 
 namespace fui = freeink::ui;
 
-// Legacy global function (for backward compat if needed elsewhere)
-void sortFileList(std::vector<std::string>& strs) {
-  std::sort(begin(strs), end(strs), [](const std::string& str1, const std::string& str2) {
-    // Directories first
-    bool isDir1 = str1.back() == '/';
-    bool isDir2 = str2.back() == '/';
-    if (isDir1 != isDir2) return isDir1;
-
-    return FsHelpers::naturalCompare(str1.c_str(), str2.c_str()) < 0;
-  });
-}
-
-void FileBrowserActivity::loadFiles() {
-  files.clear();
-  fileSizes.clear();
-  fileDateTimes.clear();
-
-  auto root = Storage.open(basepath.c_str());
-  if (!root || !root.isDirectory()) {
-    if (root) root.close();
-    return;
-  }
-
-  root.rewindDirectory();
-
-  char name[500];
-  for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
-    file.getName(name, sizeof(name));
-    if ((!SETTINGS.showHiddenFiles && name[0] == '.') || strcmp(name, "System Volume Information") == 0) {
-      file.close();
-      continue;
-    }
-
-    if (file.isDirectory()) {
-      files.emplace_back(std::string(name) + "/");
-      fileSizes.push_back(0);      // directories have size 0
-      fileDateTimes.push_back(0);  // will use default date
-    } else {
-      std::string_view filename{name};
-      bool shouldAdd = false;
-      if (mode == Mode::PickFirmware) {
-        shouldAdd = FsHelpers::checkFileExtension(filename, ".bin");
-      } else {
-        shouldAdd = FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
-                    FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-                    FsHelpers::hasBmpExtension(filename) || FsHelpers::hasJpgExtension(filename) ||
-                    FsHelpers::hasPngExtension(filename);
-      }
-      if (shouldAdd) {
-        files.emplace_back(filename);
-        fileSizes.push_back(static_cast<uint32_t>(file.fileSize()));
-        uint16_t fdate = 0, ftime = 0;
-        file.getModifyDateTime(&fdate, &ftime);
-        uint32_t combined = (static_cast<uint32_t>(fdate) << 16) | ftime;
-        fileDateTimes.push_back(combined);
-      }
-    }
-    file.close();
-  }
-  root.close();
-
-  // Try to use FileIndex for large folders (64+ entries); fall back to in-RAM sort
-  tryOpenFileIndex();
-
-  // Only sort in-RAM if FileIndex is not in use
-  if (!fileIndex) {
-    sortFileList();
-  }
-}
-
-bool FileBrowserActivity::acceptFileForBrowser(const char* name, bool isDir) {
-  // Mirror loadFiles() filter logic for FileIndex
-  if (!SETTINGS.showHiddenFiles && name[0] == '.') return false;
-  if (strcmp(name, "System Volume Information") == 0) return false;
-  if (isDir) return true;  // all dirs accepted
-
-  // File: check extension
-  std::string_view filename{name};
-  return FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
-         FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-         FsHelpers::hasBmpExtension(filename) || FsHelpers::hasJpgExtension(filename) ||
-         FsHelpers::hasPngExtension(filename);
-}
-
-void FileBrowserActivity::tryOpenFileIndex() {
-  // For large folders (64+ entries), use SD-backed index to keep RAM bounded
-  if (files.size() < FILE_INDEX_THRESHOLD) {
-    fileIndex = nullptr;
-    return;
-  }
-
-  fileIndex = std::make_unique<FileIndex>();
-  const FileIndex::SortMode indexSortMode = static_cast<FileIndex::SortMode>(sortMode);
-  if (!fileIndex->open(basepath.c_str(), indexSortMode, acceptFileForBrowser)) {
-    LOG_ERR("FBR", "FileIndex build failed for %s, falling back to in-RAM sort", basepath.c_str());
-    fileIndex = nullptr;
-  }
-}
-
-size_t FileBrowserActivity::getDisplayEntryCount() const { return fileIndex ? fileIndex->totalCount() : files.size(); }
-
-bool FileBrowserActivity::useFileIndexForEntry(size_t displayIndex, FileIndex::Entry& out) {
-  if (!fileIndex) return false;
-  const bool desc = (sortDirection == CrossPointSettings::SORT_DESCENDING);
-  return fileIndex->entryAt(displayIndex, desc, out);
-}
-
-size_t FileBrowserActivity::entryCount() const { return getDisplayEntryCount(); }
-
-// Returns the row's name in the canonical browser form: a trailing '/' marks a
-// directory. For the in-RAM backend `files` already stores this form; for the SD
-// index we reconstruct it from the Entry. Out-of-range / index-read failure → "".
-std::string FileBrowserActivity::entryName(size_t displayIndex) {
-  FileIndex::Entry e;
-  if (useFileIndexForEntry(displayIndex, e)) {
-    std::string name(e.name);
-    if (e.isDir) name += '/';
-    return name;
-  }
-  if (fileIndex || displayIndex >= files.size()) return "";  // index read failed, or OOR
-  return files[displayIndex];
-}
-
 void FileBrowserActivity::onEnter() {
-  loadFiles();
+  model.load();
   int selectedIndex = 0;
 
   if (!focusName.empty()) {
-    const size_t idx = findEntry(focusName);
-    if (idx < entryCount()) {
+    const size_t idx = model.findEntry(focusName);
+    if (idx < model.entryCount()) {
       selectedIndex = static_cast<int>(idx);
     }
     focusName.clear();
@@ -174,11 +51,7 @@ void FileBrowserActivity::onEnter() {
 
 void FileBrowserActivity::onExit() {
   UiListActivity::onExit();
-  files.clear();
-  fileSizes.clear();
-  fileDateTimes.clear();
-  if (fileIndex) fileIndex->close();
-  fileIndex = nullptr;
+  model.clear();
 }
 
 void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
@@ -264,24 +137,29 @@ bool FileBrowserActivity::handleCustomInput() {
   while (buttonEvents.consumeEvent(ev)) {
     if (ev.button == MappedInputManager::Button::Back) {
       if (ev.type == ButtonEventManager::PressType::Long) {
-        if (mode == Mode::Books) {
+        if (model.getMode() == Mode::Books) {
           onGoHome();
           return true;
         }
         // PickFirmware: long Back = same as short Back (cancel / up dir)
       }
       if (ev.type == ButtonEventManager::PressType::Short || ev.type == ButtonEventManager::PressType::Long) {
-        if (basepath != "/") {
-          const std::string oldPath = basepath;
-          basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
-          if (basepath.empty()) basepath = "/";
-          loadFiles();
+        if (model.path() != "/") {
+          std::string parent = model.path();
+          while (parent.size() > 1 && parent.back() == '/') parent.pop_back();
+          const std::string oldPath = parent;
+          parent.replace(parent.find_last_of('/'), std::string::npos, "");
+          // The rows are about to be replaced. Any contact still queued was aimed at the folder
+          // we are leaving, and the list it would land in is a different one.
+          mappedInput.flushTouchEvents();
+          model.setPath(std::move(parent));  // empty -> "/"
+          model.load();
           const auto pos = oldPath.find_last_of('/');
           const std::string dirName = oldPath.substr(pos + 1) + "/";
-          const size_t idx = findEntry(dirName);
-          resetNavigation((idx < entryCount()) ? static_cast<int>(idx) : 0);
+          const size_t idx = model.findEntry(dirName);
+          resetNavigation((idx < model.entryCount()) ? static_cast<int>(idx) : 0);
           requestUpdate();
-        } else if (mode == Mode::PickFirmware) {
+        } else if (model.getMode() == Mode::PickFirmware) {
           // At root in PickFirmware: cancel back to caller.
           ActivityResult res;
           res.isCancelled = true;
@@ -355,22 +233,26 @@ void FileBrowserActivity::navigateButtons() {
 }
 
 void FileBrowserActivity::activateSelected(const bool longPress) {
-  if (entryCount() == 0 || nav.selected < 0 || nav.selected >= listCount()) return;
+  if (model.entryCount() == 0 || nav.selected < 0 || nav.selected >= listCount()) return;
 
-  const std::string entry = entryName(static_cast<size_t>(nav.selected));
+  const std::string entry = model.entryName(static_cast<size_t>(nav.selected));
   if (entry.empty()) return;
   const bool isDirectory = entry.back() == '/';
   if (isDirectory) {
     if (longPress) return;
-    if (basepath.back() != '/') basepath += "/";
-    basepath += entry.substr(0, entry.length() - 1);
-    loadFiles();
+    std::string child = model.path();
+    if (child.back() != '/') child += "/";
+    child += entry.substr(0, entry.length() - 1);
+    // As in the Back branch: drop contacts aimed at the folder we are leaving.
+    mappedInput.flushTouchEvents();
+    model.setPath(std::move(child));
+    model.load();
     resetNavigation();
     requestUpdate();
     return;
   }
-  if (mode == Mode::PickFirmware) {
-    std::string cleanBasePath = basepath;
+  if (model.getMode() == Mode::PickFirmware) {
+    std::string cleanBasePath = model.path();
     if (cleanBasePath.back() != '/') cleanBasePath += "/";
     ActivityResult res{FilePathResult{cleanBasePath + entry}};
     res.isCancelled = false;
@@ -379,7 +261,7 @@ void FileBrowserActivity::activateSelected(const bool longPress) {
     return;
   }
 
-  std::string fullPath = basepath;
+  std::string fullPath = model.path();
   if (fullPath.back() != '/') fullPath += "/";
   fullPath += entry;
   if (longPress && KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
@@ -390,7 +272,7 @@ void FileBrowserActivity::activateSelected(const bool longPress) {
   }
   ReturnHint hint;
   hint.target = ReturnTo::FileBrowser;
-  hint.path = basepath;
+  hint.path = model.path();
   hint.selectName = entry;
   activityManager.replaceWithReader(std::move(fullPath), std::move(hint));
 }
@@ -438,20 +320,23 @@ void FileBrowserActivity::pageSelection(const int direction) {
   requestUpdate();
 }
 
-// Display copy only. `files[]` and every path built from it keep the raw directory-entry
-// bytes, because FAT long-filename lookup is byte-exact: opening or deleting an NFD entry
-// through an NFC-normalized name fails. Composing here fixes rendering -- the fonts carry
-// precomposed Hangul syllables but no conjoining jamo, so a Korean filename written by macOS
-// drew as blanks -- without touching what we hand to storage.
+// Display copy only. FileBrowserModel's entry names, and every path built from them, keep the
+// raw directory-entry bytes, because FAT long-filename lookup is byte-exact: opening or
+// deleting an NFD entry through an NFC-normalized name fails. Composing here fixes
+// rendering -- the fonts carry precomposed Hangul syllables but no conjoining jamo, so a
+// Korean filename written by macOS drew as blanks -- without touching what we hand to
+// storage.
 // Ported from crosspoint-reader PR #3036 (Sung-jin Brian Hong <serialx@serialx.net>).
 std::string getFileName(std::string filename) {
   filename = utf8NfcNorm(std::move(filename));
   if (filename.back() == '/') {
+    // Bracketed unconditionally. This used to skip the brackets when the theme reported
+    // showsFileIcons(), on the assumption that a folder icon carried the distinction -- but
+    // buildScreen() below fills in nothing but `label` and `actionValue`, so no row in this
+    // browser has ever had an icon, and under Lyra (the one theme that answers true) folders
+    // were left indistinguishable from files.
     filename.pop_back();
-    if (!UITheme::getInstance().getTheme().showsFileIcons()) {
-      return "[" + filename + "]";
-    }
-    return filename;
+    return "[" + filename + "]";
   }
   if (SETTINGS.showFileExtensions) {
     return filename;
@@ -467,7 +352,7 @@ void FileBrowserActivity::materializeListWindow() {
       std::min(static_cast<size_t>(total - windowFirst), static_cast<size_t>(LIST_WINDOW_CAPACITY)));
   for (uint16_t offset = 0; offset < windowCount; ++offset) {
     const uint16_t index = static_cast<uint16_t>(windowFirst + offset);
-    windowLabels[offset] = getFileName(entryName(index));
+    windowLabels[offset] = getFileName(model.entryName(index));
     windowItems[offset] = {};
     windowItems[offset].label = windowLabels[offset].c_str();
     windowItems[offset].actionValue = static_cast<int16_t>(index);
@@ -486,7 +371,7 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
 
   if (listCount() == 0) {
     fui::TextAreaProps empty;
-    empty.text = mode == Mode::PickFirmware ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
+    empty.text = model.getMode() == Mode::PickFirmware ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     empty.style = screen.theme().bodyText;
     empty.showCaret = false;
     screen.textArea(empty);
@@ -511,26 +396,27 @@ void FileBrowserActivity::drawChrome() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, true);
   std::string folderName =
-      (mode == Mode::PickFirmware)
+      (model.getMode() == Mode::PickFirmware)
           ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
-          : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
+          : ((model.path() == "/") ? std::string(tr(STR_SD_CARD)) : model.path().substr(model.path().rfind('/') + 1));
   GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
                  folderName.c_str());
 }
 
 void FileBrowserActivity::drawFooter() {
-  const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
+  const char* backLabel =
+      (model.path() == "/") ? (model.getMode() == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
   const bool hasEntries = listCount() > 0;
   bool selectingFirmwareFile = false;
-  if (mode == Mode::PickFirmware && hasEntries) {
-    const std::string selectedEntry = entryName(static_cast<size_t>(nav.selected));
+  if (model.getMode() == Mode::PickFirmware && hasEntries) {
+    const std::string selectedEntry = model.entryName(static_cast<size_t>(nav.selected));
     selectingFirmwareFile = !selectedEntry.empty() && selectedEntry.back() != '/';
   }
   const char* confirmLabel = !hasEntries ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
   // The Options menu is available for every entry in Books mode. The menu always
   // offers the browser display options (sort + visibility); supported files get
   // extra file-specific actions appended. So the hint shows for files and dirs alike.
-  const bool showOptionsHint = mode == Mode::Books && hasEntries;
+  const bool showOptionsHint = model.getMode() == Mode::Books && hasEntries;
   // In a folder worth paging through, Left/Right are the page buttons and the hints say so —
   // Options is then the long press on Right. In a folder that fits on one screen there is nothing
   // to page, so the strip looks exactly as it always did.
@@ -546,156 +432,42 @@ void FileBrowserActivity::drawFooter() {
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 }
 
-size_t FileBrowserActivity::findEntry(const std::string& name) {
-  if (fileIndex) {
-    // The index stores names without the trailing '/'; strip it for the lookup.
-    std::string bare = name;
-    if (!bare.empty() && bare.back() == '/') bare.pop_back();
-    const bool desc = (sortDirection == CrossPointSettings::SORT_DESCENDING);
-    const size_t row = fileIndex->findRowByName(bare.c_str(), desc);
-    return (row == SIZE_MAX) ? entryCount() : row;
-  }
-  for (size_t i = 0; i < files.size(); i++)
-    if (files[i] == name) return i;
-  return files.size();
-}
-
-std::string FileBrowserActivity::getFileExtension(const std::string& name) const {
-  const char* dot = strrchr(name.c_str(), '.');
-  if (!dot || dot == name.c_str() || name.back() == '/') {
-    return "";  // directory, no extension, or dot-file
-  }
-  return std::string(dot + 1);
-}
-
-void FileBrowserActivity::sortFileList() {
-  // Create index array to preserve metadata array alignment
-  std::vector<size_t> indices(files.size());
-  for (size_t i = 0; i < files.size(); ++i) indices[i] = i;
-
-  std::sort(indices.begin(), indices.end(), [this](size_t idx_a, size_t idx_b) {
-    const std::string& a = files[idx_a];
-    const std::string& b = files[idx_b];
-    const bool isDir_a = a.back() == '/';
-    const bool isDir_b = b.back() == '/';
-
-    // Directories always sort first
-    if (isDir_a != isDir_b) return isDir_a;
-
-    // Both are directories or both are files; apply sort mode
-    const char* name_a = a.c_str();
-    const char* name_b = b.c_str();
-
-    int cmp = 0;  // -1 if a < b, 0 if equal, +1 if a > b
-
-    switch (sortMode) {
-      case CrossPointSettings::SORT_BY_NAME:
-        cmp = FsHelpers::naturalCompare(name_a, name_b);
-        break;
-
-      case CrossPointSettings::SORT_BY_DATE: {
-        // Use cached metadata (no file opens)
-        uint32_t dt_a = (idx_a < fileDateTimes.size()) ? fileDateTimes[idx_a] : 0;
-        uint32_t dt_b = (idx_b < fileDateTimes.size()) ? fileDateTimes[idx_b] : 0;
-        if (dt_a < dt_b) {
-          cmp = -1;
-        } else if (dt_a > dt_b) {
-          cmp = 1;
-        } else {
-          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
-        }
-        break;
-      }
-
-      case CrossPointSettings::SORT_BY_SIZE: {
-        // Use cached metadata (no file opens)
-        uint32_t size_a = (idx_a < fileSizes.size()) ? fileSizes[idx_a] : 0;
-        uint32_t size_b = (idx_b < fileSizes.size()) ? fileSizes[idx_b] : 0;
-        if (size_a < size_b) {
-          cmp = -1;
-        } else if (size_a > size_b) {
-          cmp = 1;
-        } else {
-          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
-        }
-        break;
-      }
-
-      case CrossPointSettings::SORT_BY_TYPE: {
-        std::string ext_a = getFileExtension(a);
-        std::string ext_b = getFileExtension(b);
-        // Case-insensitive extension comparison
-        std::transform(ext_a.begin(), ext_a.end(), ext_a.begin(), ::tolower);
-        std::transform(ext_b.begin(), ext_b.end(), ext_b.begin(), ::tolower);
-        cmp = FsHelpers::naturalCompare(ext_a.c_str(), ext_b.c_str());
-        if (cmp == 0) {
-          cmp = FsHelpers::naturalCompare(name_a, name_b);  // Tie: use name
-        }
-        break;
-      }
-
-      default:
-        cmp = 0;
-    }
-
-    // Apply sort direction
-    if (sortDirection == CrossPointSettings::SORT_DESCENDING) {
-      cmp = -cmp;
-    }
-
-    return cmp < 0;
-  });
-
-  // Reorder files vector and metadata arrays based on sorted indices
-  std::vector<std::string> sorted_files(files.size());
-  std::vector<uint32_t> sorted_sizes(fileSizes.size());
-  std::vector<uint32_t> sorted_dateTimes(fileDateTimes.size());
-  for (size_t i = 0; i < indices.size(); ++i) {
-    size_t idx = indices[i];
-    sorted_files[i] = files[idx];
-    if (idx < fileSizes.size()) sorted_sizes[i] = fileSizes[idx];
-    if (idx < fileDateTimes.size()) sorted_dateTimes[i] = fileDateTimes[idx];
-  }
-  files = std::move(sorted_files);
-  fileSizes = std::move(sorted_sizes);
-  fileDateTimes = std::move(sorted_dateTimes);
-}
-
 void FileBrowserActivity::openContextMenu() {
   // If no file selected or a directory selected, show browser options only
-  if (entryCount() == 0 || nav.selected < 0 || nav.selected >= listCount()) {
+  if (model.entryCount() == 0 || nav.selected < 0 || nav.selected >= listCount()) {
     showBrowserOptionsMenu();
     return;
   }
 
-  const std::string entry = entryName(static_cast<size_t>(nav.selected));
+  const std::string entry = model.entryName(static_cast<size_t>(nav.selected));
   if (entry.empty() || entry.back() == '/') {
     showBrowserOptionsMenu();
     return;
   }
 
-  std::string cleanBase = basepath;
+  std::string cleanBase = model.path();
   if (cleanBase.back() != '/') cleanBase += "/";
   const std::string fullPath = cleanBase + entry;
 
-  startActivityForResult(
-      std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath, sortMode, sortDirection),
-      [this, fullPath, entry](const ActivityResult& res) {
-        if (res.isCancelled) {
-          requestUpdate();
-          return;
-        }
-        const auto* menuRes = std::get_if<MenuResult>(&res.data);
-        if (!menuRes) {
-          requestUpdate();
-          return;
-        }
-        handleContextMenuAction(menuRes->action, fullPath, entry, menuRes);
-      });
+  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, fullPath, model.getSortMode(),
+                                                                   model.getSortDirection()),
+                         [this, fullPath, entry](const ActivityResult& res) {
+                           if (res.isCancelled) {
+                             requestUpdate();
+                             return;
+                           }
+                           const auto* menuRes = std::get_if<MenuResult>(&res.data);
+                           if (!menuRes) {
+                             requestUpdate();
+                             return;
+                           }
+                           handleContextMenuAction(menuRes->action, fullPath, entry, menuRes);
+                         });
 }
 
 void FileBrowserActivity::showBrowserOptionsMenu() {
-  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, "", sortMode, sortDirection),
+  startActivityForResult(std::make_unique<FileContextMenuActivity>(renderer, mappedInput, "", model.getSortMode(),
+                                                                   model.getSortDirection()),
                          [this](const ActivityResult& res) {
                            if (res.isCancelled) {
                              requestUpdate();
@@ -721,8 +493,8 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
       requestUpdate();
       return;
     }
-    sortMode = static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode);
-    sortDirection = static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection);
+    model.setSort(static_cast<CrossPointSettings::FILE_SORT_MODE>(menuRes->sortMode),
+                  static_cast<CrossPointSettings::FILE_SORT_DIRECTION>(menuRes->sortDirection));
 
     // Hidden-files visibility changes the set of entries, so reload from disk.
     const bool hiddenChanged = (SETTINGS.showHiddenFiles != menuRes->showHiddenFiles);
@@ -734,10 +506,10 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
     // active any sort change must re-open it (open() rebuilds on a mode mismatch);
     // loadFiles() does that. Hidden-files visibility changes the entry set, so it also
     // needs a full reload. Only the in-RAM small-folder case can re-sort in place.
-    if (hiddenChanged || fileIndex) {
-      loadFiles();  // re-enumerate + (for the index) rebuild/reopen with the new mode
+    if (hiddenChanged || model.usesIndex()) {
+      model.load();  // re-enumerate + (for the index) rebuild/reopen with the new mode
     } else {
-      sortFileList();
+      model.resort();
     }
     // Keep the selection in range after a reorder/reload.
     resetNavigation(nav.selected);
@@ -750,7 +522,7 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
     case Action::Open: {
       ReturnHint hint;
       hint.target = ReturnTo::FileBrowser;
-      hint.path = basepath;
+      hint.path = model.path();
       hint.selectName = entry;
       activityManager.replaceWithReader(std::string(fullPath), std::move(hint));
       return;
@@ -764,7 +536,7 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
       }
       ReturnHint hint;
       hint.target = ReturnTo::FileBrowser;
-      hint.path = basepath;
+      hint.path = model.path();
       hint.selectName = entry;
       activityManager.replaceWithReader(std::string(fullPath), std::move(hint));
       return;
@@ -864,7 +636,7 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
                              }
                              ReturnHint hint;
                              hint.target = ReturnTo::FileBrowser;
-                             hint.path = basepath;
+                             hint.path = model.path();
                              activityManager.replaceWithReader(nextBookPath, std::move(hint));
                              return;
                            }
@@ -876,7 +648,7 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
                            if (SETTINGS.removeFinishedBooksFromRecents) {
                              RECENT_BOOKS.removeBook(fullPath);
                            }
-                           loadFiles();
+                           model.load();
                            resetNavigation(nav.selected);
                            requestUpdate(true);
                          });
@@ -898,8 +670,8 @@ void FileBrowserActivity::doSetAsSleepCover(const std::string& fullPath) {
     // JPG/PNG: must render to framebuffer — open the image viewer so the user can use its Set Sleep button.
     ReturnHint hint;
     hint.target = ReturnTo::FileBrowser;
-    hint.path = basepath;
-    hint.selectName = entryName(static_cast<size_t>(nav.selected));
+    hint.path = model.path();
+    hint.selectName = model.entryName(static_cast<size_t>(nav.selected));
     activityManager.replaceWithReader(std::string(fullPath), std::move(hint));
   }
 }
@@ -931,7 +703,7 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
                              }
                              if (deleted) {
                                LOG_DBG("FBR", "Deleted successfully");
-                               loadFiles();
+                               model.load();
                                resetNavigation(nav.selected);
                                requestUpdate(true);
                              } else {
@@ -951,5 +723,5 @@ void FileBrowserActivity::doFlashFirmware(const std::string& fullPath) {
 }
 
 int FileBrowserActivity::listCount() const {
-  return static_cast<int>(std::min(entryCount(), static_cast<size_t>(std::numeric_limits<uint16_t>::max())));
+  return static_cast<int>(std::min(model.entryCount(), static_cast<size_t>(std::numeric_limits<uint16_t>::max())));
 }

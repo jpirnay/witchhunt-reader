@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 #include "components/themes/TapTargets.h"
@@ -151,10 +152,10 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
                                  cornerRadius, false, false, true, true, Color::LightGray);
       }
 
-      UITheme::drawCoverProgressIndicator(static_cast<const GfxRenderer&>(renderer),
-                                          Rect{tileX + hPaddingInSelection, tileY + hPaddingInSelection,
-                                               tileWidth - 2 * hPaddingInSelection, coverHeight},
-                                          progressPercent);
+      BookProgressPresentation::drawIndicator(static_cast<const GfxRenderer&>(renderer),
+                                              Rect{tileX + hPaddingInSelection, tileY + hPaddingInSelection,
+                                                   tileWidth - 2 * hPaddingInSelection, coverHeight},
+                                              progressPercent);
 
       int currentY = tileY + coverHeight + hPaddingInSelection + 5;
       for (const auto& line : titleLines) {

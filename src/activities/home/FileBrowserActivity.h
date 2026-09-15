@@ -9,12 +9,15 @@
 #include <vector>
 
 #include "../UiListActivity.h"
+#include "FileBrowserModel.h"
 #include "RecentBooksStore.h"
 
 class FileBrowserActivity final : public UiListActivity {
  public:
-  // Books = standard reader browser; PickFirmware = filter to .bin only and return path via ActivityResult.
-  enum class Mode { Books, PickFirmware };
+  // Books = standard reader browser; PickFirmware = filter to .bin only and return path via
+  // ActivityResult. Owned by the model, which needs it to filter; aliased here so callers keep
+  // naming it FileBrowserActivity::Mode.
+  using Mode = FileBrowserModel::Mode;
 
  private:
   void clearFileMetadata(const std::string& fullPath);
@@ -34,58 +37,26 @@ class FileBrowserActivity final : public UiListActivity {
   uint16_t windowFirst = 0;
   uint16_t windowCount = 0;
 
-  Mode mode = Mode::Books;
+  // What is in the folder and in what order. Everything about enumeration, the SD index and
+  // sorting lives there; this class decides what a row means and where a tap goes next.
+  FileBrowserModel model;
 
-  // Files state (small folders use in-RAM vector; large folders use SD index)
-  std::string basepath = "/";
   std::string focusName;  // entry to select on first load (e.g. the file just returned from)
-  std::vector<std::string> files;
-  std::vector<uint32_t> fileSizes;       // cached file sizes (0 for directories)
-  std::vector<uint32_t> fileDateTimes;   // cached FAT date/time pairs
-  std::unique_ptr<FileIndex> fileIndex;  // null for small folders, active for 64+ entries
 
-  // Threshold: use FileIndex for folders with 64+ entries (bounded RAM always)
-  static constexpr size_t FILE_INDEX_THRESHOLD = 64;
-
-  // Sorting state (per-session, not persisted). Visibility toggles
-  // (showHiddenFiles / showFileExtensions) live in SETTINGS.
-  CrossPointSettings::FILE_SORT_MODE sortMode = CrossPointSettings::SORT_BY_NAME;
-  CrossPointSettings::FILE_SORT_DIRECTION sortDirection = CrossPointSettings::SORT_ASCENDING;
-
-  // Data loading
-  void loadFiles();
-  size_t findEntry(const std::string& name);
   [[nodiscard]] int listPageSize() const;
   [[nodiscard]] bool listPages() const;
   void pageSelection(int direction);
-  void sortFileList();
-  std::string getFileExtension(const std::string& name) const;
   void showBrowserOptionsMenu();
   void activateSelected(bool longPress);
   void resetNavigation(int selected = 0);
   void materializeListWindow();
 
-  // Backend-agnostic list access. Both backends present the same entry-name form
-  // (a trailing '/' marks a directory) so render/navigation/selection code is
-  // identical whether the folder is small (in-RAM `files`) or large (SD FileIndex).
-  // displayIndex is the row as currently shown (already reflects sortDirection).
-  // Non-const: the SD-index backend streams from the open index file (I/O + cache).
-  size_t entryCount() const;
-  std::string entryName(size_t displayIndex);
-
-  // FileIndex backend: filter for index scanning/building
-  static bool acceptFileForBrowser(const char* name, bool isDir);
-  void tryOpenFileIndex();
-  bool useFileIndexForEntry(size_t displayIndex, FileIndex::Entry& out);
-  size_t getDisplayEntryCount() const;
-
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",
                                std::string focusName = {}, Mode mode = Mode::Books)
-      : UiListActivity("FileBrowser", renderer, mappedInput),
-        mode(mode),
-        basepath(initialPath.empty() ? "/" : std::move(initialPath)),
-        focusName(std::move(focusName)) {}
+      : UiListActivity("FileBrowser", renderer, mappedInput), model(mode), focusName(std::move(focusName)) {
+    model.setPath(std::move(initialPath));
+  }
   void onEnter() override;
   void onExit() override;
 
@@ -94,6 +65,15 @@ class FileBrowserActivity final : public UiListActivity {
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   bool handleCustomInput() override;
+  // Back and Confirm belong to handleCustomInput() alone, which classifies them through
+  // ButtonEventManager because this screen means different things by a short and a long press
+  // (Back: up one folder vs. leave the browser; Confirm: open vs. sync-then-open). The base
+  // implementation acts on the raw press-down EDGE, which arrives a tick before the Short event
+  // that the same physical press later produces -- so leaving it in place ran BOTH handlers for
+  // one press: Confirm entered a folder on the press and then activated row 0 of the folder it
+  // had just entered on the release, and Back finished the activity before the short-press
+  // up-one-folder branch could ever be reached.
+  bool handleButtons() override { return false; }
   int indexForActionValue(int16_t value) const override { return static_cast<uint16_t>(value); }
   void drawChrome() override;
   void drawFooter() override;
