@@ -601,6 +601,7 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
 #endif
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
+  // cppcheck-suppress knownConditionTrueFalse ; compile-time false without CROSSPOINT_KOREADER_AUTOSYNC
   if (!keepRadioUp && WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
