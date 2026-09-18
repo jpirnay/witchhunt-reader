@@ -46,6 +46,7 @@ class CalibreConnectActivity final : public Activity {
   explicit CalibreConnectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("CalibreConnect", renderer, mappedInput) {}
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

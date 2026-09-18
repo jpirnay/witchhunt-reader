@@ -352,6 +352,10 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
   doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
+  doc["syncOnWake"] = store.getSyncOnWake();
+  doc["syncOnSleep"] = store.getSyncOnSleep();
+  doc["pushIntervalPages"] = store.getPushIntervalPages();
+  doc["showSyncIndicator"] = store.getShowSyncIndicator();
 
   String json;
   serializeJson(doc, json);
@@ -402,6 +406,13 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   } else {
     store.setSyncBehavior(static_cast<KOReaderSyncBehavior>(behaviorValue | (uint8_t)0));
   }
+
+  store.syncOnWake = doc["syncOnWake"] | false;
+  store.syncOnSleep = doc["syncOnSleep"] | false;
+  const uint16_t pushPages = doc["pushIntervalPages"] | (uint16_t)0;
+  store.setPushIntervalPages(pushPages);
+  if (needsResave && store.pushIntervalPages != pushPages) *needsResave = true;
+  store.showSyncIndicator = doc["showSyncIndicator"] | true;
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;

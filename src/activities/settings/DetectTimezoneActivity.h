@@ -10,6 +10,7 @@ class DetectTimezoneActivity final : public Activity {
       : Activity("DetectTimezone", renderer, mappedInput) {}
 
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

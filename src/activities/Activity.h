@@ -62,6 +62,7 @@ class Activity {
   // while the host still owns the sectors.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
+  virtual bool usesWifi() const { return false; }
 
   // What a tap on the row at `index` should do, moving this screen's selection if it lands on a
   // new row. See ListRowTap.h for the rule; most implementations are one call to

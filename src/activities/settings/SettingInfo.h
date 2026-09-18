@@ -81,7 +81,8 @@ enum class SettingAction {
   DictionarySelect,
   SleepTimeoutPicker,
   RefreshFrequencyPicker,
-  KOSyncMinPagesPicker,
+  KOSyncOnClosePicker,
+  KOSyncIntervalPicker,
   FrontlightBrightnessPicker,
   FrontlightWarmthPicker,
   SwitchToUsbDrive,
@@ -240,6 +241,19 @@ struct SettingInfo {
     SettingInfo s;
     s.nameId = nameId;
     s.type = SettingType::TOGGLE;
+    s.valueGetter = getter;
+    s.valueSetter = setter;
+    s.key = key;
+    s.category = category;
+    return s;
+  }
+
+  static SettingInfo DynamicValue(StrId nameId, const ValueRange valueRange, ValueGetterFn getter, ValueSetterFn setter,
+                                  const char* key = nullptr, StrId category = StrId::STR_NONE_OPT) {
+    SettingInfo s;
+    s.nameId = nameId;
+    s.type = SettingType::VALUE;
+    s.valueRange = valueRange;
     s.valueGetter = getter;
     s.valueSetter = setter;
     s.key = key;

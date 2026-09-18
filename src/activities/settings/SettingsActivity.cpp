@@ -14,10 +14,8 @@
 #include "SettingActionDispatch.h"
 #include "SettingsList.h"
 #include "SettingsSubmenuActivity.h"
-#include "SliderSettingPicker.h"
 #include "TouchUi.h"
 #include "UiFontScale.h"
-#include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -251,22 +249,7 @@ void SettingsActivity::activateIndex(const int index) {
     return;
   }
 
-  SliderPickerActivity::Config sliderCfg;
-  if (setting.type == SettingType::ACTION && SliderSetting::configFor(setting.action, sliderCfg)) {
-    const SettingAction sliderAction = setting.action;
-    startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(sliderCfg)),
-                           [this, sliderAction](const ActivityResult& result) {
-                             const auto* pr = std::get_if<PercentResult>(&result.data);
-                             if (!result.isCancelled && pr != nullptr) {
-                               SliderSetting::apply(sliderAction, static_cast<uint8_t>(pr->percent));
-                               SETTINGS.saveToFile();
-                             } else {
-                               // Dismissed, or confirmed with no value to read: either way the
-                               // preview must come back off. See SliderSetting::cancel().
-                               SliderSetting::cancel(sliderAction);
-                             }
-                             needsHalfRefresh = true;
-                           });
+  if (setting.type == SettingType::ACTION && tryOpenSliderFor(setting.action, [this] { needsHalfRefresh = true; })) {
     return;
   }
 

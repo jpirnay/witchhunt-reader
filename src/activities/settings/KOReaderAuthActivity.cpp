@@ -13,6 +13,7 @@
 #include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/KOReaderSyncWorker.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -109,6 +110,21 @@ void KOReaderAuthActivity::performRegistration() {
 
 void KOReaderAuthActivity::onEnter() {
   Activity::onEnter();
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderSyncWorker::isBusy()) {
+    {
+      RenderLock lock(*this);
+      state = AUTHENTICATING;
+      statusMessage = tr(STR_KO_BG_SYNC_WAIT);
+    }
+    requestUpdateAndWait();
+    constexpr unsigned long BACKGROUND_DRAIN_TIMEOUT_MS = 10000;
+    if (!KOReaderSyncWorker::drain(BACKGROUND_DRAIN_TIMEOUT_MS)) {
+      LOG_ERR("KOSync", "Background sync job still running; proceeding anyway");
+    }
+  }
+#endif
 
   // Free the heap the WiFi stack needs before it is brought up, not after —
   // association itself is the allocation-heavy step, well ahead of TLS.

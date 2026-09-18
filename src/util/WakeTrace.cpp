@@ -35,6 +35,8 @@ static_assert(sizeof(PHASE_NAMES) / sizeof(PHASE_NAMES[0]) == static_cast<size_t
 
 void armResume() { resumeArmed = true; }
 
+bool isResume() { return traceFromWake; }
+
 void begin() {
   for (uint8_t i = 0; i < static_cast<uint8_t>(Phase::Count); i++) {
     phaseMs[i] = 0;

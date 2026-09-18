@@ -22,6 +22,7 @@
 #include <new>
 
 #include "../reader/EpubReaderActivity.h"
+#include "../reader/KOReaderAutoSync.h"
 #include "../reader/TxtReaderActivity.h"
 #include "../reader/XtcReaderActivity.h"
 #include "CrossPointSettings.h"
@@ -453,7 +454,19 @@ bool sleepCoverNeedsPreparing(const std::string& bookPath, bool cropped) {
 }  // namespace
 
 void SleepActivity::onEnter() {
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  const uint64_t sleepPushSeq = KOReaderAutoSync::pushStashedSleepPushAsync();
+#endif
+
   Activity::onEnter();
+  renderSleepScreen();
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  KOReaderAutoSync::joinStashedSleepPush(sleepPushSeq);
+#endif
+}
+
+void SleepActivity::renderSleepScreen() {
   RenderLock lock(*this);
 
   // Quick Resume: paint a moon icon over the current page and keep the framebuffer

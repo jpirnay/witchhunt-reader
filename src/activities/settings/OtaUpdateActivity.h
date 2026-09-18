@@ -48,6 +48,7 @@ class OtaUpdateActivity : public Activity, private UiAppHost {
   explicit OtaUpdateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("OtaUpdate", renderer, mappedInput), UiAppHost(renderer), updater() {}
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

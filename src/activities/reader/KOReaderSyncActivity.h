@@ -52,6 +52,7 @@ class KOReaderSyncActivity final : public Activity {
         localProgress{} {}
 
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   // Tap on one of the three conflict options -> select it; ActivityManager synthesizes
   // Confirm. Only accepted in SHOWING_RESULT, the one state that draws them.

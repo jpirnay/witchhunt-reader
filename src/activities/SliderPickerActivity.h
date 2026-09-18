@@ -24,6 +24,8 @@ class SliderPickerActivity : public Activity {
     // Label used instead of the numeric value when value == minValue.
     // Empty string = show numeric value even at min.
     std::string zeroLabel;
+    // Same idea as zeroLabel, just for the max value
+    std::string maxLabel;
     // Applied as the value moves, so a setting the reader can SEE is judged by looking at it
     // rather than by reading a number and guessing. Empty for settings with nothing to show
     // (a sleep timeout has no preview).

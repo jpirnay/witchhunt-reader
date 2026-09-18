@@ -35,6 +35,7 @@ class OpdsBookBrowserActivity final : public Activity {
         initialQuery_(std::move(initialQuery)) {}
 
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   // Tap on a row -> move the selection there; ActivityManager synthesizes Confirm. Serves
   // BOTH of this screen's lists (the entry list and the format picker), keyed on state.

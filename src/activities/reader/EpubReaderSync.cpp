@@ -161,6 +161,13 @@ bool EpubReaderActivity::tryAutoPushOnClose() {
     return false;
   }
 
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (AUTOSYNC_STATE.isPositionSynced(epub->getPath(), currentSpineIndex, section->currentPage)) {
+    LOG_DBG("ERS", "Skipping AUTO_PUSH: spine %d page %d already synced", currentSpineIndex, section->currentPage);
+    return false;
+  }
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
+
   // Reader-close auto-push has no reader session left to return to once it completes.
   launchKOReaderSync(SyncLaunchMode::AUTO_PUSH, nullptr, {KOReaderSyncPostAction::Home, {}});
   return true;

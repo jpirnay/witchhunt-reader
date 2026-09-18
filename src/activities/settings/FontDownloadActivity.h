@@ -18,6 +18,7 @@ class FontDownloadActivity : public Activity {
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   // Tap on a row -> move the selection there; ActivityManager synthesizes Confirm.
   ListRowTap::Result selectListRow(int index) override;

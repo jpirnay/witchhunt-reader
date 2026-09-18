@@ -60,6 +60,11 @@ class ActivityManager {
   std::vector<std::unique_ptr<Activity>> stackActivities;
   std::unique_ptr<Activity> currentActivity;
 
+  bool sleepTransition = false;
+
+  std::atomic<bool> activityUsesWifi{false};
+  void refreshWifiActivityFlag();
+
   void exitActivity(const RenderLock& lock);
 
   // Pending activity to be launched on next loop iteration
@@ -177,6 +182,10 @@ class ActivityManager {
   // Remove the currentActivity, returning the last one on stack
   // Note: if popActivity() on last activity on the stack, we will goHome()
   void popActivity();
+
+  bool currentActivityUsesWifi() const { return activityUsesWifi.load(std::memory_order_relaxed); }
+
+  bool inSleepTransition() const { return sleepTransition; }
 
   bool preventAutoSleep() const;
   // True while the current activity owns the raw SD card (USB Drive). main.cpp

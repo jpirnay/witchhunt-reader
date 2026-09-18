@@ -156,6 +156,8 @@ void SliderPickerActivity::render(RenderLock&&) {
   std::string valueText;
   if (!cfg.zeroLabel.empty() && value == cfg.minValue) {
     valueText = cfg.zeroLabel;
+  } else if (!cfg.maxLabel.empty() && value == cfg.maxValue) {
+    valueText = cfg.maxLabel;
   } else {
     valueText = std::to_string(value) + cfg.suffix;
   }

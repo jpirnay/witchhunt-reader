@@ -72,6 +72,32 @@ int statusBarProgressPercent(const uint8_t progressBar, const float bookProgress
       (pageCount > 0) ? static_cast<int>((static_cast<float>(currentPage) / pageCount) * 100) : 0;
   return std::clamp(chapterProgress, 0, 100);
 }
+
+constexpr int SYNC_INDICATOR_SIZE = 12;
+
+void drawSyncIndicator(const GfxRenderer& renderer, const int x, const int y, const SyncIndicator indicator) {
+  const int r = SYNC_INDICATOR_SIZE / 2;
+  const int cx = x + r;
+  const int cy = y + r;
+  switch (indicator) {
+    case SyncIndicator::None:
+      return;
+    case SyncIndicator::Active:
+      renderer.drawArc(r, cx, cy, 1, -1, 2, true);
+      renderer.drawArc(r, cx, cy, -1, 1, 2, true);
+      renderer.fillRect(cx + r - 3, cy - 1, 4, 3, true);
+      renderer.fillRect(cx - r, cy - 1, 4, 3, true);
+      return;
+    case SyncIndicator::Failed:
+      renderer.drawArc(r, cx, cy, 1, -1, 1, true);
+      renderer.drawArc(r, cx, cy, -1, -1, 1, true);
+      renderer.drawArc(r, cx, cy, 1, 1, 1, true);
+      renderer.drawArc(r, cx, cy, -1, 1, 1, true);
+      renderer.fillRect(cx - 1, cy - 4, 2, 5, true);
+      renderer.fillRect(cx - 1, cy + 2, 2, 2, true);
+      return;
+  }
+}
 }  // namespace
 
 void BaseTheme::drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight) {
@@ -903,7 +929,7 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const bool isStarred,
                               const std::string& printedPageLabel, const bool fillMargin,
-                              const bool pageCountApproximate) const {
+                              const bool pageCountApproximate, const SyncIndicator syncIndicator) const {
   // While a section is still being laid out the total page count is a byte-based estimate, shown
   // with a leading "~" so the reader knows it will firm up as the chapter finishes building.
   const char* pageCountPrefix = pageCountApproximate ? "~" : "";
@@ -939,7 +965,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   const bool hasProgressText = SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount;
   const bool hasStatusItems = hasProgressText || SETTINGS.statusBarBattery || !title.empty() ||
                               SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE ||
-                              (SETTINGS.useClock && SETTINGS.statusBarClock) || !printedPageLabel.empty();
+                              (SETTINGS.useClock && SETTINGS.statusBarClock) || !printedPageLabel.empty() ||
+                              syncIndicator != SyncIndicator::None;
   if (!hasStatusItems) {
     return;
   }
@@ -1021,11 +1048,14 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   }
 
   // Right cluster, laid out from the right edge inwards: progress text (already drawn), then the
-  // star, then the clock when it is right-positioned.
+  // star, then the sync indicator, then the clock when it is right-positioned.
   const int rightEdge = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight;
   const int starWidth = isStarred ? renderer.getTextWidth(SMALL_FONT_ID, "*") : 0;
   const int starReserve = isStarred ? starWidth + (progressTextWidth > 0 ? starGap : 0) : 0;
-  int rightClusterWidth = progressTextWidth + starReserve;
+  const int syncReserve = syncIndicator != SyncIndicator::None
+                              ? SYNC_INDICATOR_SIZE + (progressTextWidth + starReserve > 0 ? statusItemGap : 0)
+                              : 0;
+  int rightClusterWidth = progressTextWidth + starReserve + syncReserve;
 
   // Draw Clock at whichever end it was assigned. Left: just past the battery. Right: just past the
   // star / progress text, so it can never land on top of either.
@@ -1076,6 +1106,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   if (isStarred) {
     renderer.drawText(SMALL_FONT_ID, rightEdge - progressTextWidth - starReserve, textY, "*");
   }
+  drawSyncIndicator(renderer, rightEdge - progressTextWidth - starReserve - syncReserve, textY + 6, syncIndicator);
 }
 
 void BaseTheme::drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const {

@@ -73,6 +73,7 @@ class CrossPointWebServerActivity final : public Activity {
   explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("CrossPointWebServer", renderer, mappedInput) {}
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

@@ -6,7 +6,9 @@
 #include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
+#include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
+#include "settings/SliderSettingPicker.h"
 
 namespace fui = freeink::ui;
 
@@ -153,4 +155,22 @@ void UiListActivity::render(RenderLock&&) {
   afterUiRender();
   drawFooter();
   renderer.displayBuffer();
+}
+
+bool UiListActivity::tryOpenSliderFor(const SettingAction action, std::function<void()> onDone) {
+  SliderPickerActivity::Config cfg;
+  if (!SliderSetting::configFor(action, cfg)) return false;
+
+  startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(cfg)),
+                         [this, action, onDone = std::move(onDone)](const ActivityResult& result) {
+                           const auto* pr = std::get_if<PercentResult>(&result.data);
+                           if (!result.isCancelled && pr != nullptr) {
+                             SliderSetting::apply(action, static_cast<uint8_t>(pr->percent));
+                             SETTINGS.saveToFile();
+                           } else {
+                             SliderSetting::cancel(action);
+                           }
+                           if (onDone) onDone();
+                         });
+  return true;
 }

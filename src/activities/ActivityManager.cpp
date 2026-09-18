@@ -309,6 +309,7 @@ void ActivityManager::loop() {
       } else {
         currentActivity = std::move(stackActivities.back());
         stackActivities.pop_back();
+        refreshWifiActivityFlag();
         if (exitingReader && !currentActivity->isReaderActivity()) {
           unloadSdFontIfLoaded();
         }
@@ -381,6 +382,7 @@ void ActivityManager::loop() {
       }
       pendingAction = PendingAction::None;
       currentActivity = std::move(pendingActivity);
+      refreshWifiActivityFlag();
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -412,7 +414,12 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
   if (currentActivity) {
     currentActivity->onExit();
     currentActivity.reset();
+    refreshWifiActivityFlag();
   }
+}
+
+void ActivityManager::refreshWifiActivityFlag() {
+  activityUsesWifi.store(currentActivity && currentActivity->usesWifi(), std::memory_order_relaxed);
 }
 
 void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
@@ -429,6 +436,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
   } else {
     // No current activity, safe to launch immediately
     currentActivity = std::move(newActivity);
+    refreshWifiActivityFlag();
     currentActivity->onEnter();
   }
 }
@@ -568,8 +576,10 @@ void ActivityManager::returnFromChild() {
 }
 
 void ActivityManager::goToSleep(bool fromTimeout) {
+  sleepTransition = true;
   replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
   loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
+  sleepTransition = false;
 }
 
 void ActivityManager::goToBoot() { replaceActivity(std::make_unique<BootActivity>(renderer, mappedInput)); }
