@@ -440,6 +440,21 @@ bool HalDisplay::beginAbsoluteGrayPass(const RefreshMode fallback, const bool tu
   return true;
 }
 
+bool HalDisplay::supportsDirectGrayPass() const {
+  return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Direct).supported();
+}
+
+bool HalDisplay::beginDirectGrayPass(const bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  if (!einkDisplay.displayGrayscaleBase(freeink::GrayscaleMode::Direct, convertRefreshMode(HALF_REFRESH),
+                                        turnOffScreen)) {
+    return false;
+  }
+  lastRefreshMode = FULL_REFRESH;
+  lastDisplayModeByte = refreshModeToByte(FULL_REFRESH);
+  return true;
+}
+
 void HalDisplay::displayGrayscaleFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
   HalSpiBus::Lock spiLock;
   einkDisplay.displayGrayscaleFrame(convertRefreshMode(refreshMode), turnOffScreen);

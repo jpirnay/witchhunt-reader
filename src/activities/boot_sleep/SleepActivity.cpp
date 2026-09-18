@@ -764,7 +764,10 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
   // immediately below works on the framebuffer this path does not display.
   const bool nativeGray = hasGreyscale && renderer.getGrayLevels() > 4;
 
-  if (!nativeGray) {
+  const bool directPass =
+      hasGreyscale && !nativeGray && renderer.supportsDirectGrayPass() && renderer.beginDirectGrayPass();
+
+  if (!nativeGray && !directPass) {
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
     if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
@@ -887,13 +890,18 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     // before the planes land -- both X3 drivers report asyncBase=false -- and
     // beginAbsoluteGrayPass() does that base push itself, blocking. The
     // differential path keeps the async scrub.
-    const bool panelHasAbsolute = renderer.supportsAbsoluteGrayPlanes();
-    const bool absolutePass = panelHasAbsolute && renderer.beginAbsoluteGrayPass();
-    LOG_DBG("SLP", "Grayscale planes: %s",
-            absolutePass ? "absolute"
-                         : (panelHasAbsolute ? "differential (panel declined the absolute pass)"
-                                             : "differential (panel has no absolute encoding)"));
-    if (!absolutePass) {
+    const char* passName;
+    bool absolutePlanes = directPass;
+    if (directPass) {
+      passName = "direct (single activation)";
+    } else if (renderer.supportsAbsoluteGrayPlanes()) {
+      absolutePlanes = renderer.beginAbsoluteGrayPass();
+      passName = absolutePlanes ? "absolute" : "differential (panel declined the absolute pass)";
+    } else {
+      passName = "differential (panel has no absolute encoding)";
+    }
+    LOG_DBG("SLP", "Grayscale planes: %s", passName);
+    if (!absolutePlanes) {
       // Fire the BW scrub without waiting: the waveform runs on the controller's own RAM,
       // so the LSB draw below (CPU/SD-only work) overlaps it. copyGrayscaleLsbBuffers()
       // drains the pending finish before its SPI plane write.
@@ -906,24 +914,27 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     // ordinary BW, which is already the right bits when white is 11 and black
     // 00 across the pair.
     const auto renderPlane = [&](const GfxRenderer::RenderMode mode) {
-      bitmap.rewindToData();
-      renderer.clearScreen(absolutePass ? 0xFF : 0x00);
+      if (bitmap.rewindToData() != BmpReaderError::Ok) return false;
+      renderer.clearScreen(absolutePlanes ? 0xFF : 0x00);
       renderer.setRenderMode(mode);
-      renderer.setAbsoluteGrayPlanes(absolutePass);
+      renderer.setAbsoluteGrayPlanes(absolutePlanes);
       renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
       // setRenderMode(BW) also clears the absolute flag, hence re-arming it per
       // plane above.
-      if (absolutePass) renderer.setRenderMode(GfxRenderer::BW);
+      if (absolutePlanes) renderer.setRenderMode(GfxRenderer::BW);
       drawOverlay();
+      return true;
     };
 
-    renderPlane(GfxRenderer::GRAYSCALE_LSB);
-    renderer.copyGrayscaleLsbBuffers();
+    bool planesStaged = false;
+    if (renderPlane(GfxRenderer::GRAYSCALE_LSB)) {
+      renderer.copyGrayscaleLsbBuffers();
+      planesStaged = renderPlane(GfxRenderer::GRAYSCALE_MSB);
+      if (planesStaged) renderer.copyGrayscaleMsbBuffers();
+    }
+    if (!planesStaged) LOG_ERR("SLP", "Sleep image rewind failed; abandoning the grayscale pass");
 
-    renderPlane(GfxRenderer::GRAYSCALE_MSB);
-    renderer.copyGrayscaleMsbBuffers();
-
-    renderer.displayGrayBuffer();
+    if (planesStaged || absolutePlanes) renderer.displayGrayBuffer();
     renderer.setRenderMode(GfxRenderer::BW);
   }
 }

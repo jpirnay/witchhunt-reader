@@ -3346,6 +3346,10 @@ bool GfxRenderer::beginAbsoluteGrayPass(const HalDisplay::RefreshMode fallback) 
   return display.beginAbsoluteGrayPass(fallback, fadingFix);
 }
 
+bool GfxRenderer::supportsDirectGrayPass() const { return display.supportsDirectGrayPass(); }
+
+bool GfxRenderer::beginDirectGrayPass() const { return display.beginDirectGrayPass(fadingFix); }
+
 uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }
 
 uint8_t* GfxRenderer::borrowGray8Canvas(uint16_t* stride) const { return display.borrowGray8Canvas(stride); }

@@ -160,6 +160,9 @@ class HalDisplay {
   // asks the controller for a clean B/W refresh next.
   bool beginAbsoluteGrayPass(RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
 
+  bool supportsDirectGrayPass() const;
+  bool beginDirectGrayPass(bool turnOffScreen = false);
+
   // True when the panel can show a B/W base and its grayscale planes as ONE
   // waveform. Where it can, the two-push flow (base, then a grey overlay) is
   // not merely slower but wrong: a self-normalizing grey column expects the

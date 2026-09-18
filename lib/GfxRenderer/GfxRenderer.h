@@ -523,6 +523,9 @@ class GfxRenderer {
   bool supportsAbsoluteGrayPlanes() const;
   bool beginAbsoluteGrayPass(HalDisplay::RefreshMode fallback = HalDisplay::HALF_REFRESH) const;
 
+  bool supportsDirectGrayPass() const;
+  bool beginDirectGrayPass() const;
+
   // Text darkness control:
   //   0 = Normal, 1 = Dark, 2 = Extra Dark, 3 = Maximum.
   // Only affects anti-aliased pixels in 2-bit (grayscale) glyph rendering;
