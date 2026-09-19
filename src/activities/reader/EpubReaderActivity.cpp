@@ -492,7 +492,7 @@ int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
 
   const bool imageOnlyPage = std::all_of(
       page.elements.begin(), page.elements.end(),
-      [](const std::shared_ptr<PageElement>& element) { return element && element->getTag() == TAG_PageImage; });
+      [](const std::unique_ptr<PageElement>& element) { return element && element->getTag() == TAG_PageImage; });
   if (!imageOnlyPage) {
     return 0;
   }

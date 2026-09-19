@@ -35,6 +35,10 @@ class KeyboardEntryActivity : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Half-typed text only exists here, so sleeping would discard it. Same reason as
+  // WifiSelectionActivity: this runs as a child activity, so whatever launched it
+  // is no longer the one being asked.
+  bool preventAutoSleep() override { return true; }
 
  private:
   std::string title;

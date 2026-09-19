@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,12 +42,12 @@ class PageElement {
 
 // a line from a block element
 class PageLine final : public PageElement {
-  std::shared_ptr<TextBlock> block;
+  std::unique_ptr<TextBlock> block;
 
  public:
-  PageLine(std::shared_ptr<TextBlock> block, const int16_t xPos, const int16_t yPos)
+  PageLine(std::unique_ptr<TextBlock> block, const int16_t xPos, const int16_t yPos)
       : PageElement(xPos, yPos), block(std::move(block)) {}
-  const std::shared_ptr<TextBlock>& getBlock() const { return block; }
+  const TextBlock* getBlock() const { return block.get(); }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
@@ -55,10 +56,10 @@ class PageLine final : public PageElement {
 
 // New PageImage class
 class PageImage final : public PageElement {
-  std::shared_ptr<ImageBlock> imageBlock;
+  std::unique_ptr<ImageBlock> imageBlock;
 
  public:
-  PageImage(std::shared_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
+  PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
       : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   void renderWithForceLoad(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoad,
@@ -81,8 +82,8 @@ class PageHR final : public PageElement {
 };
 
 struct TableCell {
-  std::vector<std::shared_ptr<TextBlock>> lines;
-  std::shared_ptr<ImageBlock> image;  // optional in-cell graphic, drawn below any cell text
+  std::vector<std::unique_ptr<TextBlock>> lines;
+  std::unique_ptr<ImageBlock> image;  // optional in-cell graphic, drawn below any cell text
   bool isHeader = false;
   // Number of grid columns this cell occupies. A row's spans always sum to the fragment's
   // columnCount (layout pads short rows), so the renderer can walk cells and accumulate.
@@ -137,7 +138,7 @@ class PageTableFragment final : public PageElement {
 class Page {
  public:
   // the list of block index and line numbers on this page
-  std::vector<std::shared_ptr<PageElement>> elements;
+  std::vector<std::unique_ptr<PageElement>> elements;
   std::vector<FootnoteEntry> footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
 
@@ -186,7 +187,7 @@ class Page {
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {
-    return std::any_of(elements.begin(), elements.end(), [](const std::shared_ptr<PageElement>& el) {
+    return std::any_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& el) {
       if (el->getTag() == TAG_PageImage) return true;
       return el->getTag() == TAG_PageTable && static_cast<const PageTableFragment&>(*el).hasImages();
     });
@@ -198,7 +199,7 @@ class Page {
   // alsoWarmGrayscale mirrors warmImageCaches(): a missing .bayer.pxc is decode work too,
   // so it must count here or the secondary buffer stays allocated through that decode.
   bool hasUncachedImages(bool forceLoadLargeImages, bool monochromeOutput, bool alsoWarmGrayscale = false) const {
-    return std::any_of(elements.begin(), elements.end(), [&](const std::shared_ptr<PageElement>& el) {
+    return std::any_of(elements.begin(), elements.end(), [&](const std::unique_ptr<PageElement>& el) {
       if (el->getTag() == TAG_PageTable)
         return static_cast<const PageTableFragment&>(*el).hasUncachedImages(forceLoadLargeImages, monochromeOutput,
                                                                             alsoWarmGrayscale);

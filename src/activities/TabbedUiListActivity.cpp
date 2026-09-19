@@ -108,8 +108,11 @@ void TabbedUiListActivity::stepSelection(const bool forward) {
   const int current = activeNav().selected + 1;
   const int next = forward ? ButtonNavigator::nextIndex(current, count + 1, selectable)
                            : ButtonNavigator::previousIndex(current, count + 1, selectable);
-  activeNav().selected = next - 1;
-  if (activeNav().selected >= 0) activeNav().follow(count);
+  // requestSelection() rather than writing follow() here: follow() moves `top`, which
+  // belongs to the render task, and this runs on the loop task with no lock held. The
+  // deferred pull resolves it in syncToProps instead -- including the bar-focused
+  // case (selection -1), which snaps the viewport to the top.
+  activeNav().requestSelection(next - 1);
   listTapActivation.reset();
   requestUpdate();
 }

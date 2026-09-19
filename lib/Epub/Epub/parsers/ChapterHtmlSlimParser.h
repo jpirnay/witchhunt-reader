@@ -97,8 +97,8 @@ class ChapterHtmlSlimParser final : public Print {
     // epubFilePath is not stored — epub->getPath() is read at ImageBlock construction time
     // to avoid a redundant heap copy of a constant string.
   };
-  PendingInlineImage pendingInlineImage_;         // active=true when a float-context image is deferred
-  std::shared_ptr<PageImage> deferredPageImage_;  // the PageImage whose yPos needs updating
+  PendingInlineImage pendingInlineImage_;   // active=true when a float-context image is deferred
+  PageImage* deferredPageImage_ = nullptr;  // borrowed from currentPage; its yPos needs updating
 
   // Drop cap: a left-floated span with a large font-size at the very start of a
   // paragraph (<p><span class="first-letter">A</span>ll ...). The letter is captured
@@ -117,7 +117,7 @@ class ChapterHtmlSlimParser final : public Print {
     int textLen = 0;
   };
   PendingDropCap pendingDropCap_;
-  std::shared_ptr<PageLine> deferredDropCapLine_;  // the cap PageLine whose yPos needs updating
+  PageLine* deferredDropCapLine_ = nullptr;  // borrowed from currentPage; its yPos needs updating
   // Offset from the paragraph's first-line top to the cap PageLine's yPos, so the cap's
   // INK top (not its leading-padded ascender top) aligns with the first line's ink top.
   int16_t dropCapYAdjust_ = 0;
@@ -508,10 +508,10 @@ class ChapterHtmlSlimParser final : public Print {
   // Resolve an image src to a sized ImageBlock (lazy-extracted from the EPUB), scaled to fit
   // maxWidth/maxHeight. Returns nullptr when the image is unsupported or its dimensions
   // cannot be resolved. The cache path is derived from the archive entry, not from parse order.
-  std::shared_ptr<ImageBlock> buildCellImage(const std::string& src, const std::string& alt, uint16_t maxWidth,
+  std::unique_ptr<ImageBlock> buildCellImage(const std::string& src, const std::string& alt, uint16_t maxWidth,
                                              uint16_t maxHeight);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
-  void placeImageBlockAsBlock(const std::shared_ptr<ImageBlock>& image);
+  void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
@@ -590,7 +590,7 @@ class ChapterHtmlSlimParser final : public Print {
   size_t write(uint8_t) override;
   size_t write(const uint8_t* buffer, size_t size) override;
 
-  ParsedText::LineProcessResult addLineToPage(std::shared_ptr<TextBlock> line, bool lineEndsWithHyphenatedWord,
+  ParsedText::LineProcessResult addLineToPage(std::unique_ptr<TextBlock> line, bool lineEndsWithHyphenatedWord,
                                               bool suppressHyphenationRetry);
   // Anchors reach the section cache through the spill file, not through this vector: see
   // setAnchorSpillPath. Non-empty only when the spill could not be opened, in which case these

@@ -410,6 +410,28 @@ void OpdsBookBrowserActivity::loop() {
   }
 }
 
+// A catalog list is something you READ, so it has to be allowed to sleep like any
+// other list. Only the states with work in flight hold the device awake.
+// WIFI_SELECTION and SEARCH_INPUT are the two states where a child activity owns
+// the screen and therefore owns its own override; they stay true here to cover the
+// gap either side of the handover, when this activity is still the current one.
+bool OpdsBookBrowserActivity::preventAutoSleep() {
+  switch (state) {
+    case BrowserState::CHECK_WIFI:
+    case BrowserState::WIFI_SELECTION:
+    case BrowserState::LOADING:
+    case BrowserState::DOWNLOADING:
+    case BrowserState::SEARCH_INPUT:
+      return true;
+    case BrowserState::BROWSING:
+    case BrowserState::BOOK_DETAIL:
+    case BrowserState::FORMAT_SELECTION:
+    case BrowserState::ERROR:
+      return false;
+  }
+  return false;
+}
+
 void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
 

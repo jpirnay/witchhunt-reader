@@ -87,7 +87,7 @@ class ParsedText {
   LineProcessResult extractLine(
       size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths, const std::vector<bool>& continuesVec,
       const std::vector<size_t>& lineBreakIndices,
-      const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
+      const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
       int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer,
@@ -134,7 +134,7 @@ class ParsedText {
   // of the call, so it is opt-in and only the table grid path uses it.
   void layoutAndExtractLines(
       const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
-      const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
+      const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       bool includeLastLine = true,
       int16_t blockStartY = 0,  // currentPageNextY at call site — needed for float zone geometry
       int lineHeight = 0,       // 0 = no float zones (fast path, existing callers unchanged)

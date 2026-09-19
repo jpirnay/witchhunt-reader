@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -249,7 +250,7 @@ int ParsedText::widthForLine(const int lineIndex, const int lineHeight, const in
 
 void ParsedText::layoutAndExtractLines(
     const GfxRenderer& renderer, const int bodyFontId, const uint16_t viewportWidth,
-    const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
+    const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
     const bool includeLastLine, const int16_t blockStartY, const int lineHeight, const bool preserveSource) {
   if (words.empty()) {
     return;
@@ -1105,7 +1106,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 ParsedText::LineProcessResult ParsedText::extractLine(
     const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
     const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
-    const std::function<LineProcessResult(std::shared_ptr<TextBlock>, bool, bool)>& processLine,
+    const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
     const GfxRenderer& renderer, const int fontId, const bool lineEndsWithHyphenatedWord,
     const bool suppressHyphenationRetry, const int firstLineIndent, const int16_t blockStartY, const int lineHeight) {
   const size_t lineBreak = lineBreakIndices[breakIndex];
@@ -1234,8 +1235,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = std::make_shared<TextBlock>(range, lineXPos, blockStyle);
-  if (!block->valid()) {
+  auto block = makeUniqueNoThrow<TextBlock>(range, lineXPos, blockStyle);
+  if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return LineProcessResult::Accepted;
   }

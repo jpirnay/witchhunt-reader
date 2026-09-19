@@ -79,5 +79,5 @@ class OpdsBookBrowserActivity final : public Activity {
   void launchSearch();
   void performSearch(const std::string& query);
   void fetchCoverForEntry(const OpdsEntry& entry);
-  bool preventAutoSleep() override { return true; }
+  bool preventAutoSleep() override;
 };

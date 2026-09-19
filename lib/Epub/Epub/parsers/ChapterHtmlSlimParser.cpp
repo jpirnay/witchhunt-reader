@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SaxParser/SaxParser.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
@@ -386,7 +387,7 @@ bool isTableStructuralTag(const char* name) {
   return strcmp(name, "table") == 0 || strcmp(name, "tr") == 0 || strcmp(name, "td") == 0 || strcmp(name, "th") == 0;
 }
 
-std::string buildTextBlockPreview(const std::shared_ptr<TextBlock>& line, const size_t maxLen = 120) {
+std::string buildTextBlockPreview(const TextBlock* line, const size_t maxLen = 120) {
   if (!line) {
     return {};
   }
@@ -868,9 +869,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       }
       currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
-          [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
+          [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
                  const bool suppressHyphenationRetry) {
-            return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
+            return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry);
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
@@ -888,13 +889,16 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.
 void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   paragraphLutPerPage.push_back({xhtmlByteOffset, xpathParagraphIndex, xpathListItemIndex});
+  // Both of these borrow elements of the page being handed off, so they must be dropped
+  // before it goes -- and the deferred yPos update is moot on a fresh page anyway (a drop
+  // cap stays on the emitted page).
+  deferredPageImage_ = nullptr;
+  deferredDropCapLine_ = nullptr;
   completePageFn(std::move(currentPage));
   completedPageCount++;
   currentPage.reset(new (std::nothrow) Page());
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
-  deferredPageImage_.reset();    // the deferred yPos update is moot on a fresh page
-  deferredDropCapLine_.reset();  // ditto for a drop cap — it stays on the emitted page
 
   // A floated image never crosses a page boundary, so any active float ended on the
   // page we just emitted. Clear it and drop stale float zones from the block that
@@ -954,10 +958,18 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   const int16_t top = static_cast<int16_t>(currentPageNextY);
 
   auto fullImageBlock =
-      std::make_shared<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt, epub->getPath(),
-                                   pendingInlineImage_.epubEntryPath);
-  deferredPageImage_ = std::make_shared<PageImage>(fullImageBlock, imgX, top);
-  currentPage->elements.push_back(deferredPageImage_);
+      makeUniqueNoThrow<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
+                                    epub->getPath(), pendingInlineImage_.epubEntryPath);
+  auto pageImage = fullImageBlock ? makeUniqueNoThrow<PageImage>(std::move(fullImageBlock), imgX, top) : nullptr;
+  if (!pageImage) {
+    LOG_ERR("EHP", "Float image dropped: allocation failed");
+    return;
+  }
+  // The page owns it from here; this is a borrowed pointer purely so the first line of
+  // the block can re-base its yPos below. emitPage() clears it before handing the page
+  // on, so it never outlives the element it points at.
+  deferredPageImage_ = pageImage.get();
+  currentPage->elements.push_back(std::move(pageImage));
 
   // Attach the float zone to the originating block (the caption/first paragraph).
   // makePages() re-anchors it to the first line and then propagates it to every
@@ -1098,10 +1110,10 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   capBlockStyle.headingFontId = capFontId;
   capBlockStyle.fontSizeMultiplier = capScale;
   capBlockStyle.fontResolved = true;
-  auto capBlock = std::make_shared<TextBlock>(std::vector<std::string>{pendingDropCap_.text}, std::vector<int16_t>{0},
-                                              std::vector<EpdFontFamily::Style>{pendingDropCap_.style}, capBlockStyle,
-                                              std::vector<uint8_t>{});
-  if (!capBlock->valid()) {
+  auto capBlock = makeUniqueNoThrow<TextBlock>(std::vector<std::string>{pendingDropCap_.text}, std::vector<int16_t>{0},
+                                               std::vector<EpdFontFamily::Style>{pendingDropCap_.style}, capBlockStyle,
+                                               std::vector<uint8_t>{});
+  if (!capBlock || !capBlock->valid()) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (block alloc failed)", pendingDropCap_.text);
     currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
     nextWordContinues = true;
@@ -1114,8 +1126,16 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   // internal leading (offset by the first line's own small leading) puts the cap's ink
   // top level with the first line's ink top. Provisional; re-based in addLineToPage.
   dropCapYAdjust_ = static_cast<int16_t>(bodyLeading - capLeadScaled);
-  deferredDropCapLine_ = std::make_shared<PageLine>(capBlock, capX, static_cast<int16_t>(top + dropCapYAdjust_));
-  currentPage->elements.push_back(deferredDropCapLine_);
+  auto capLine = makeUniqueNoThrow<PageLine>(std::move(capBlock), capX, static_cast<int16_t>(top + dropCapYAdjust_));
+  if (!capLine) {
+    LOG_DBG("EHP", "dropcap '%s': inline fallback (PageLine alloc failed)", pendingDropCap_.text);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    nextWordContinues = true;
+    return;
+  }
+  // Borrowed, like deferredPageImage_ above: the page owns the line.
+  deferredDropCapLine_ = capLine.get();
+  currentPage->elements.push_back(std::move(capLine));
 
   BlockStyle& bs = currentTextBlock->getBlockStyle();
   if (bs.floatZoneCount < BlockStyle::kMaxFloatZones) {
@@ -1918,19 +1938,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 // Create ImageBlock with lazy-extraction source info.
                 // The SD file at cachedImagePath does not exist yet — it will be extracted
                 // from the EPUB at first render time by ImageBlock::ensureExtracted().
-                auto imageBlock = std::make_shared<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt,
-                                                               self->epub->getPath(), resolvedPath);
+                auto imageBlock = makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight, alt,
+                                                                self->epub->getPath(), resolvedPath);
                 if (!imageBlock) {
                   LOG_ERR("EHP", "Failed to create ImageBlock");
                   return;
                 }
                 int xPos = (self->viewportWidth - displayWidth) / 2;
-                auto pageImage = std::make_shared<PageImage>(imageBlock, xPos, self->currentPageNextY);
+                auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, self->currentPageNextY);
                 if (!pageImage) {
                   LOG_ERR("EHP", "Failed to create PageImage");
                   return;
                 }
-                self->currentPage->elements.push_back(pageImage);
+                self->currentPage->elements.push_back(std::move(pageImage));
                 self->currentPageNextY += displayHeight;
                 self->currentPageNextY += imageSpacingBottom;
 
@@ -2253,7 +2273,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // the conventional reader default. Books rarely set hr width in their own CSS.
     const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
     const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
-    self->currentPage->elements.push_back(std::make_shared<PageHR>(hrX, self->currentPageNextY, hrWidth));
+    if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
+      self->currentPage->elements.push_back(std::move(hr));
+    }
     self->currentPageNextY += 1 + marginV;
     BlockStyle emptyStyle;
     self->startNewTextBlock(emptyStyle);
@@ -3216,6 +3238,10 @@ bool ChapterHtmlSlimParser::finalize() {
         emitPage(0u);  // post-parse: no byte offset available
       }
     }
+    // Both borrow elements of currentPage, and the layoutFailed / empty-final-page paths
+    // reach here without going through emitPage(), which is the other place they are cleared.
+    deferredPageImage_ = nullptr;
+    deferredDropCapLine_ = nullptr;
     currentPage.reset();
     currentTextBlock.reset();
   }
@@ -3266,7 +3292,7 @@ int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
   return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * lineCompression * bs.fontSizeMultiplier + 0.5f);
 }
 
-ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line,
+ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
                                                                    const bool suppressHyphenationRetry) {
   // Spacing (insets, float zones) lives on the ParsedText that produced this line,
@@ -3298,7 +3324,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   const bool noRoomForAnotherLine =
       currentPageNextY + lineHeight <= viewportHeight && currentPageNextY + (lineHeight * 2) > viewportHeight;
   if (lineEndsWithHyphenatedWord && !suppressHyphenationRetry && noRoomForAnotherLine) {
-    const std::string linePreview = buildTextBlockPreview(line);
+    const std::string linePreview = buildTextBlockPreview(line.get());
     LOG_TRC("EHP", "Requesting line rerender without hyphenation to avoid page-break split word: %s",
             linePreview.c_str());
     return ParsedText::LineProcessResult::RetryWithoutHyphenation;
@@ -3334,7 +3360,13 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
       }
     }
   }
-  currentPage->elements.push_back(std::make_shared<PageLine>(line, xOffset, currentPageNextY));
+  auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
+  if (!pageLine) {
+    // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
+    LOG_ERR("EHP", "Dropping line: PageLine allocation failed");
+    return ParsedText::LineProcessResult::Accepted;
+  }
+  currentPage->elements.push_back(std::move(pageLine));
 
   // On the first line of a block with a deferred inline image, fix the image's
   // yPos so its top aligns with the glyph top of the first text line.
@@ -3342,14 +3374,14 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::shared_p
   // Float zones were already pre-corrected in makePages() to the same value.
   if (isFirstLineOfBlock && deferredPageImage_) {
     deferredPageImage_->yPos = static_cast<int16_t>(currentPageNextY);
-    deferredPageImage_.reset();
+    deferredPageImage_ = nullptr;
   }
 
   // Same deferred fix for a drop cap: re-base to the first line's top, keeping the
   // ink-alignment offset computed in finalizePendingDropCap.
   if (isFirstLineOfBlock && deferredDropCapLine_) {
     deferredDropCapLine_->yPos = static_cast<int16_t>(currentPageNextY + dropCapYAdjust_);
-    deferredDropCapLine_.reset();
+    deferredDropCapLine_ = nullptr;
   }
 
   currentPageNextY += lineHeight;
@@ -3459,9 +3491,9 @@ void ChapterHtmlSlimParser::makePages() {
   }
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
-      [this](const std::shared_ptr<TextBlock>& textBlock, const bool lineEndsWithHyphenatedWord,
+      [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
              const bool suppressHyphenationRetry) {
-        return addLineToPage(textBlock, lineEndsWithHyphenatedWord, suppressHyphenationRetry);
+        return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry);
       },
       /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
 
@@ -3642,7 +3674,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   t.pendingRowBytes = 0;
 }
 
-std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::string& src, const std::string& alt,
+std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::string& src, const std::string& alt,
                                                                   const uint16_t maxWidth, const uint16_t maxHeight) {
   if (src.empty() || maxWidth == 0 || maxHeight == 0) return nullptr;
 
@@ -3677,11 +3709,11 @@ std::shared_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::str
 
   const std::string cachedPath = imageCachePathFor(imageBasePath, resolvedPath);
 
-  return std::make_shared<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
-                                      static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+  return makeUniqueNoThrow<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
+                                       static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
 }
 
-void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBlock>& image) {
+void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image) {
   if (!image) return;
   const int displayWidth = image->getWidth();
   const int displayHeight = image->getRenderedHeight();
@@ -3701,7 +3733,12 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
   const int xPos = (viewportWidth - displayWidth) / 2;
 
   if (displayHeight <= viewportHeight) {
-    currentPage->elements.push_back(std::make_shared<PageImage>(image, xPos, currentPageNextY));
+    auto pageImage = makeUniqueNoThrow<PageImage>(std::move(image), xPos, currentPageNextY);
+    if (!pageImage) {
+      LOG_ERR("EHP", "Image dropped: PageImage allocation failed");
+      return;
+    }
+    currentPage->elements.push_back(std::move(pageImage));
     currentPageNextY += displayHeight;
     LOG_TRC("EHP", "Image placed as block: %dx%d", displayWidth, displayHeight);
     return;
@@ -3721,13 +3758,17 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(const std::shared_ptr<ImageBl
     if (leftover > 0 && leftover < kMinImageSliceH) {
       sliceH -= (kMinImageSliceH - leftover);
     }
-    auto crop =
-        std::shared_ptr<ImageBlock>(image->makeCrop(static_cast<int16_t>(srcOffset), static_cast<int16_t>(sliceH)));
+    auto crop = image->makeCrop(static_cast<int16_t>(srcOffset), static_cast<int16_t>(sliceH));
     if (!currentPage) {
       currentPage.reset(new Page());
       currentPageNextY = 0;
     }
-    currentPage->elements.push_back(std::make_shared<PageImage>(crop, xPos, currentPageNextY));
+    auto slice = makeUniqueNoThrow<PageImage>(std::move(crop), xPos, currentPageNextY);
+    if (!slice) {
+      LOG_ERR("EHP", "Image slice dropped: PageImage allocation failed");
+      return;
+    }
+    currentPage->elements.push_back(std::move(slice));
     currentPageNextY += sliceH;
     srcOffset += sliceH;
     LOG_DBG("EHP", "Image slice placed: offset=%d h=%d", srcOffset - sliceH, sliceH);
@@ -3864,12 +3905,12 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       size_t producedLines = 0;
       bufCell.text->layoutAndExtractLines(
           renderer, fontId, renderInnerWidth,
-          [&cell, &producedLines](const std::shared_ptr<TextBlock>& tb, bool, bool) {
+          [&cell, &producedLines](std::unique_ptr<TextBlock> tb, bool, bool) {
             ++producedLines;
             // Stop collecting past the cap: the cell is going to the paragraph fallback anyway,
             // and a cell that needs 139 lines would otherwise build 139 TextBlocks to throw away.
             if (cell.lines.size() < MAX_CELL_LINES) {
-              cell.lines.push_back(tb);
+              cell.lines.push_back(std::move(tb));
             }
             return ParsedText::LineProcessResult::Accepted;
           },
@@ -3932,9 +3973,13 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
     emitPage(lastBodyChildByteOffset);
   }
 
-  currentPage->elements.push_back(std::make_shared<PageTableFragment>(
-      packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
-      /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder));
+  if (auto fragment = makeUniqueNoThrow<PageTableFragment>(
+          packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
+          /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder)) {
+    currentPage->elements.push_back(std::move(fragment));
+  } else {
+    LOG_ERR("EHP", "Dropping table fragment: allocation failed");
+  }
   currentPageNextY += fragTotalHeight;
   packer.rows.clear();
   packer.height = 0;
@@ -3965,11 +4010,10 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
     startNewTextBlock(cellBlockStyle);
     // Transfer words from the buffered cell text into the new currentTextBlock
     // by re-running layout directly
-    text->layoutAndExtractLines(
-        renderer, fontId, viewportWidth,
-        [this](const std::shared_ptr<TextBlock>& tb, bool lineEndsWithHyphen, bool suppressRetry) {
-          return addLineToPage(tb, lineEndsWithHyphen, suppressRetry);
-        });
+    text->layoutAndExtractLines(renderer, fontId, viewportWidth,
+                                [this](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
+                                  return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry);
+                                });
   }
   text.reset();  // free the words before the image decode below needs contiguous heap
 

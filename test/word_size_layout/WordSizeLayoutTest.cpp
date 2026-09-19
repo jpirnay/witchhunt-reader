@@ -26,7 +26,7 @@ namespace {
 constexpr int kFontId = 1;
 
 struct LayoutResult {
-  std::vector<std::shared_ptr<TextBlock>> lines;
+  std::vector<std::unique_ptr<TextBlock>> lines;
 };
 
 // Lay out the given ParsedText at viewportWidth and collect the emitted lines.
@@ -34,7 +34,7 @@ LayoutResult layout(ParsedText& text, const GfxRenderer& renderer, const uint16_
   LayoutResult result;
   text.layoutAndExtractLines(
       renderer, kFontId, viewportWidth,
-      [&result](std::shared_ptr<TextBlock> line, bool, bool) {
+      [&result](std::unique_ptr<TextBlock> line, bool, bool) {
         result.lines.push_back(std::move(line));
         return ParsedText::LineProcessResult::Accepted;
       },
