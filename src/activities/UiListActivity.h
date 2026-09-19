@@ -1,8 +1,12 @@
 #pragma once
 
+#include <functional>
+
 #include "activities/Activity.h"
 #include "components/UiAppHost.h"
 #include "util/ButtonNavigator.h"
+
+enum class SettingAction;
 
 class UiListActivity : public Activity, protected UiAppHost {
  public:
@@ -20,6 +24,8 @@ class UiListActivity : public Activity, protected UiAppHost {
   ListRowTap::Result selectListRow(int index) override;
 
  protected:
+  bool tryOpenSliderFor(SettingAction action, std::function<void()> onDone = {});
+
   static constexpr freeink::ui::ActionId ACTION_ROW = 1;
   static constexpr freeink::ui::ActionId ACTION_USER = 2;
 

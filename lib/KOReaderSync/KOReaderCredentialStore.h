@@ -38,6 +38,12 @@ class KOReaderCredentialStore {
   // migrated to ASK_EVERY_TIME on load, so nobody's sync silently changes behaviour.
   KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
 
+  // Auto background sync fields
+  bool syncOnWake = false;
+  bool syncOnSleep = false;
+  uint16_t pushIntervalPages = 0;
+  bool showSyncIndicator = true;
+
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
 
@@ -51,6 +57,8 @@ class KOReaderCredentialStore {
 
   // Get singleton instance
   static KOReaderCredentialStore& getInstance() { return instance; }
+
+  static constexpr uint16_t PUSH_INTERVAL_MAX_PAGES = 64;
 
   // Save/load from SD card
   bool saveToFile() const;
@@ -88,6 +96,17 @@ class KOReaderCredentialStore {
   // How the compare flow resolves a local/remote difference
   void setSyncBehavior(KOReaderSyncBehavior behavior);
   KOReaderSyncBehavior getSyncBehavior() const { return syncBehavior; }
+
+  void setSyncOnWake(bool enabled) { syncOnWake = enabled; }
+  bool getSyncOnWake() const { return syncOnWake; }
+  void setSyncOnSleep(bool enabled) { syncOnSleep = enabled; }
+  bool getSyncOnSleep() const { return syncOnSleep; }
+  void setPushIntervalPages(const uint16_t pages) {
+    pushIntervalPages = pages > PUSH_INTERVAL_MAX_PAGES ? PUSH_INTERVAL_MAX_PAGES : pages;
+  }
+  uint16_t getPushIntervalPages() const { return pushIntervalPages; }
+  void setShowSyncIndicator(bool enabled) { showSyncIndicator = enabled; }
+  bool getShowSyncIndicator() const { return showSyncIndicator; }
 };
 
 // Helper macro to access credential store

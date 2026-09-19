@@ -18,8 +18,12 @@
 #include "BookmarkStore.h"
 #include "CrossPointState.h"
 #include "EpubReaderMenuActivity.h"
+#include "KOReaderAutoSync.h"
+#include "KOReaderSyncWorker.h"
+#include "ProgressMapper.h"
 #include "ReaderUtils.h"
 #include "activities/Activity.h"
+#include "components/themes/BaseTheme.h"
 #include "components/themes/TapTargets.h"
 
 class EpubReaderActivity final : public Activity {
@@ -555,6 +559,33 @@ class EpubReaderActivity final : public Activity {
   // inspection of a book should not trigger a network round-trip. Reset on every reader
   // entry; not persisted, since "session" means the lifetime of this activity instance.
   int sessionPagesAdvanced = 0;
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  bool autoSyncPullPending = false;
+  unsigned long autoSyncLastPushAt = 0;
+  uint64_t autoSyncPushSeq = 0;
+  uint64_t autoSyncPullSeq = 0;
+  KOReaderSyncJob autoSyncPullJob;
+  bool autoSyncPullJobPending = false;
+  bool autoSyncPullDialogLaunched = false;
+  static constexpr unsigned long AUTO_SYNC_MIN_INTERVAL_MS = 60 * 1000;
+  SyncIndicator autoSyncIndicator = SyncIndicator::None;
+  void refreshAutoSyncIndicator();
+
+  void serviceAutoSync();
+  bool autoSyncReaderIsQuiet() const;
+  void maybeAutoPullOnWake();
+  bool pollAutoSyncPull();
+  void evaluateAutoSyncPull();
+  bool handOffToInteractiveSync();
+  void silentUploadCurrentPosition();
+  void silentApplyRemote(const KOReaderProgress& remote);
+  void maybeAutoPushInterval();
+  void pollAutoSyncJob();
+  void maybeAutoPushOnSleep();
+  KOReaderPosition currentKoPosition(int page, int pageCount) const;
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
+
   // -1 means use global SETTINGS value.
   int8_t bookEmbeddedStyleOverride = -1;
   int8_t bookImageRenderingOverride = -1;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "activities/MenuListActivity.h"
+#include "activities/reader/KOReaderAutoSync.h"
 
 /**
  * Submenu for KOReader Sync settings.
@@ -14,6 +15,7 @@ class KOReaderSettingsActivity final : public MenuListActivity {
 
  private:
   void buildMenuItems();
+  void buildAutoSyncItems();
 
   // MenuListActivity overrides
   std::string getItemValueString(int index) const override;

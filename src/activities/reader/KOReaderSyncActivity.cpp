@@ -13,8 +13,10 @@
 #include <cmath>
 
 #include "CrossPointSettings.h"
+#include "KOReaderAutoSync.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
+#include "KOReaderSyncWorker.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
@@ -155,6 +157,9 @@ bool KOReaderSyncActivity::calculateDocumentHash() {
 void KOReaderSyncActivity::applyRemoteAndFinish() {
   // Preserve the apply result and show explicit confirmation before returning
   // to the reader so users can tell the remote position was taken.
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  AUTOSYNC_STATE.markSynced(epubPath, remotePosition.spineIndex, remotePosition.pageNumber);
+#endif
   auto& sync = APP_STATE.koReaderSyncSession;
   sync.outcome = KOReaderSyncOutcomeState::APPLIED_REMOTE;
   sync.resultSpineIndex = remotePosition.spineIndex;
@@ -432,6 +437,9 @@ void KOReaderSyncActivity::performFetchAndCompare() {
     // cases, and it was already preselected — this just stops making the user confirm it.
     if (comparison == 0) {
       LOG_DBG("KOSync", "Smart sync: the two sides agree, nothing to do");
+#if CROSSPOINT_KOREADER_AUTOSYNC
+      AUTOSYNC_STATE.markSynced(epubPath, currentSpineIndex, currentPage);
+#endif
       {
         RenderLock lock(*this);
         state = SYNC_COMPLETE;
@@ -586,6 +594,9 @@ void KOReaderSyncActivity::performUpload() {
   esp_wifi_stop();
   APP_STATE.koReaderSyncSession.outcome = KOReaderSyncOutcomeState::UPLOAD_COMPLETE;
   APP_STATE.saveToFile();
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  AUTOSYNC_STATE.markSynced(epubPath, currentSpineIndex, currentPage);
+#endif
   if (syncIntent == KOReaderSyncIntentState::AUTO_PUSH) {
     // Auto-push doesn't need user acknowledgement on success; resume immediately
     // back to the calling activity (RecentBooks / FileBrowser via reader).
@@ -612,6 +623,21 @@ void KOReaderSyncActivity::onEnter() {
     requestUpdate();
     return;
   }
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderSyncWorker::isBusy()) {
+    {
+      RenderLock lock(*this);
+      state = SYNCING;
+      statusMessage = tr(STR_KO_BG_SYNC_WAIT);
+    }
+    requestUpdateAndWait();
+    constexpr unsigned long BACKGROUND_DRAIN_TIMEOUT_MS = 10000;
+    if (!KOReaderSyncWorker::drain(BACKGROUND_DRAIN_TIMEOUT_MS)) {
+      LOG_ERR("KOSync", "Background sync job still running; proceeding anyway");
+    }
+  }
+#endif
 
   // Past this point every path uses WiFi.
   wifiActivated = true;
@@ -643,6 +669,11 @@ void KOReaderSyncActivity::onEnter() {
 
 void KOReaderSyncActivity::onExit() {
   Activity::onExit();
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (state == SYNC_FAILED) {
+    AUTOSYNC_STATE.markSyncFailed();
+  }
+#endif
 
   logSyncMemSnapshot("onExit_before_cleanup");
   KOReaderSyncClient::endPersistentSession();

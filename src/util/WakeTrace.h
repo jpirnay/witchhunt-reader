@@ -53,6 +53,8 @@ void mark(Phase phase);
 // APP_STATE.lastSleepFromReader cannot serve this purpose because nothing clears it during a
 // session, so a library open later in the same session would still read as a resume.
 void armResume();
+// Whether the trace begun most recently was a deep-sleep resume.
+bool isResume();
 
 // Clear all stamps and start a fresh trace. Called from ReaderActivity::onEnter, which is the
 // single funnel for every book open (library, recent books, and the wake resume alike).

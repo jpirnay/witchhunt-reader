@@ -16,6 +16,7 @@ class KOReaderAuthActivity final : public Activity {
       : Activity("KOReaderAuth", renderer, mappedInput), mode(mode) {}
 
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;

@@ -29,6 +29,7 @@ class NetworkModeSelectionActivity final : public Activity {
   explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("NetworkModeSelection", renderer, mappedInput) {}
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   // Tap on a list row -> move the selection there; ActivityManager then synthesizes Confirm.
   ListRowTap::Result selectListRow(int index) override;

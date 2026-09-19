@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "KOReaderCredentialStore.h"
 #include "SettingsList.h"
 
 namespace SliderSetting {
@@ -38,6 +39,11 @@ void endFrontlightPreview() {
   if (!previewLitBefore) Frontlight.setOn(false);
 }
 
+constexpr int KO_CLOSE_PAGES_MAX = 60;
+constexpr int KO_CLOSE_NEVER = KO_CLOSE_PAGES_MAX + 1;
+constexpr int KO_INTERVAL_MAX = KOReaderCredentialStore::PUSH_INTERVAL_MAX_PAGES;
+constexpr int KO_INTERVAL_NEVER = KO_INTERVAL_MAX + 1;
+
 }  // namespace
 
 bool configFor(const SettingAction action, SliderPickerActivity::Config& cfg) {
@@ -60,19 +66,30 @@ bool configFor(const SettingAction action, SliderPickerActivity::Config& cfg) {
              .suffix = tr(STR_PAGES_SUFFIX),
              .zeroLabel = tr(STR_NEVER)};
       return true;
-    case SettingAction::KOSyncMinPagesPicker:
-      // Zero reads as "Always" rather than "Never" here: it means no minimum, so every book
-      // close pushes. Whether anything is pushed at all is the separate Auto-Push toggle.
-      // Useful in its own right — jumping via the TOC and closing changes the position without
-      // turning a single page.
-      cfg = {.titleId = StrId::STR_KO_MIN_SESSION_PAGES,
+    case SettingAction::KOSyncOnClosePicker:
+      // same as above - zero is "always"
+      cfg = {.titleId = StrId::STR_KO_AUTO_ON_CLOSE,
              .hintId = StrId::STR_SLIDER_STEP_HINT,
              .minValue = 0,
-             .maxValue = 60,
-             .initialValue = SETTINGS.koSyncMinSessionPages,
+             .maxValue = KO_CLOSE_NEVER,
+             .initialValue = SETTINGS.koSyncOnBookClose
+                                 ? std::min<int>(SETTINGS.koSyncMinSessionPages, KO_CLOSE_PAGES_MAX)
+                                 : KO_CLOSE_NEVER,
              .suffix = tr(STR_PAGES_SUFFIX),
-             .zeroLabel = tr(STR_ALWAYS)};
+             .zeroLabel = tr(STR_ALWAYS),
+             .maxLabel = tr(STR_NEVER)};
       return true;
+    case SettingAction::KOSyncIntervalPicker: {
+      const uint16_t interval = KOREADER_STORE.getPushIntervalPages();
+      cfg = {.titleId = StrId::STR_KO_AUTO_WHILE_READING,
+             .hintId = StrId::STR_SLIDER_STEP_HINT,
+             .minValue = 1,
+             .maxValue = KO_INTERVAL_NEVER,
+             .initialValue = interval == 0 ? KO_INTERVAL_NEVER : std::min<int>(interval, KO_INTERVAL_MAX),
+             .suffix = tr(STR_PAGES_SUFFIX),
+             .maxLabel = tr(STR_NEVER)};
+      return true;
+    }
     case SettingAction::FrontlightBrightnessPicker:
       // The floor is MIN_BRIGHTNESS, not 0: turning the light off is the
       // separate on/off switch, so a 0% "on" level would only be a second,
@@ -117,6 +134,19 @@ void apply(const SettingAction action, const uint8_t value) {
   // Bound to a named local, NOT iterated straight out of the call: getSettingsList() returns the
   // vector BY VALUE, so a range-for over the call alone destroys it at the end of the loop and
   // anything still pointing into it dangles. Same form JsonSettingsIO uses.
+  switch (action) {
+    case SettingAction::KOSyncOnClosePicker:
+      SETTINGS.koSyncOnBookClose = value >= KO_CLOSE_NEVER ? 0 : 1;
+      if (value < KO_CLOSE_NEVER) SETTINGS.koSyncMinSessionPages = value;
+      return;
+    case SettingAction::KOSyncIntervalPicker:
+      KOREADER_STORE.setPushIntervalPages(value >= KO_INTERVAL_NEVER ? 0 : value);
+      KOREADER_STORE.saveToFile();
+      return;
+    default:
+      break;
+  }
+
   const auto settings = getSettingsList();
   const auto row = std::find_if(settings.begin(), settings.end(), [action](const SettingInfo& info) {
     return info.type == SettingType::ACTION && info.action == action && info.persistPtr;

@@ -8,8 +8,6 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SettingActionDispatch.h"
-#include "SliderSettingPicker.h"
-#include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -23,23 +21,10 @@ void SettingsSubmenuActivity::onActionSelected(int index) {
   if (setting.isSeparator) return;
 
   if (setting.type == SettingType::ACTION) {
-    SliderPickerActivity::Config sliderCfg;
-    if (SliderSetting::configFor(setting.action, sliderCfg)) {
-      const SettingAction sliderAction = setting.action;
-      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(sliderCfg)),
-                             [this, sliderAction](const ActivityResult& result) {
-                               const auto* pr = std::get_if<PercentResult>(&result.data);
-                               if (!result.isCancelled && pr != nullptr) {
-                                 SliderSetting::apply(sliderAction, static_cast<uint8_t>(pr->percent));
-                                 SETTINGS.saveToFile();
-                               } else {
-                                 // Dismissed, or confirmed with no value to read: either way the
-                                 // preview must come back off. See SliderSetting::cancel().
-                                 SliderSetting::cancel(sliderAction);
-                               }
-                               needsHalfRefresh = true;
-                               requestUpdate();
-                             });
+    if (tryOpenSliderFor(setting.action, [this] {
+          needsHalfRefresh = true;
+          requestUpdate();
+        })) {
       return;
     }
 
@@ -67,7 +52,7 @@ void SettingsSubmenuActivity::onActionSelected(int index) {
 std::string SettingsSubmenuActivity::getItemValueString(int index) const {
   const auto& item = menuItems[index];
   if (item.type == SettingType::ACTION && item.action != SettingAction::Submenu) {
-    return {};
+    return item.stringGetter ? item.getDisplayValue() : std::string{};
   }
   if (itemValueStringOverride) {
     return itemValueStringOverride(item);

@@ -3,15 +3,34 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <string>
+#include <utility>
+
 #include "CrossPointSettings.h"
 #include "KOReaderAuthActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
-#include "SliderSettingPicker.h"
-#include "activities/SliderPickerActivity.h"
+#include "activities/reader/KOReaderAutoSync.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+namespace {
+std::string closePushDisplay(void*) {
+  if (!SETTINGS.koSyncOnBookClose) return std::string(tr(STR_NEVER));
+  const uint8_t pages = SETTINGS.koSyncMinSessionPages;
+  if (pages == 0) return std::string(tr(STR_ALWAYS));
+  return std::to_string(pages) + tr(STR_PAGES_SUFFIX);
+}
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+std::string whileReadingDisplay(void*) {
+  const uint16_t pages = KOREADER_STORE.getPushIntervalPages();
+  if (pages == 0) return std::string(tr(STR_NEVER));
+  return std::to_string(pages) + tr(STR_PAGES_SUFFIX);
+}
+#endif
+}  // namespace
 
 KOReaderSettingsActivity::KOReaderSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : MenuListActivity("KOReaderSettings", renderer, mappedInput) {
@@ -19,7 +38,7 @@ KOReaderSettingsActivity::KOReaderSettingsActivity(GfxRenderer& renderer, Mapped
 }
 
 void KOReaderSettingsActivity::buildMenuItems() {
-  menuItems.reserve(8);
+  menuItems.reserve(14);
   // Username, Password, Server URL: ACTION items with custom value display
   menuItems.push_back(SettingInfo::Action(StrId::STR_SYNC_SERVER_URL, SettingAction::None)
                           .withSubcategory(StrId::STR_MENU_KOSYNC_SERVER));
@@ -42,9 +61,6 @@ void KOReaderSettingsActivity::buildMenuItems() {
         KOREADER_STORE.setSyncBehavior(static_cast<KOReaderSyncBehavior>(v));
         KOREADER_STORE.saveToFile();
       }));
-  menuItems.push_back(SettingInfo::Toggle(StrId::STR_KO_SYNC_ON_BOOK_CLOSE, &CrossPointSettings::koSyncOnBookClose,
-                                          "koSyncOnBookClose"));
-  menuItems.push_back(SettingInfo::Action(StrId::STR_KO_MIN_SESSION_PAGES, SettingAction::KOSyncMinPagesPicker));
   {
     SettingInfo s;
     s.nameId = StrId::STR_SEND_METADATA;
@@ -57,10 +73,61 @@ void KOReaderSettingsActivity::buildMenuItems() {
     menuItems.push_back(std::move(s));
   }
 
+  buildAutoSyncItems();
+
   // Authenticate and Register: ACTION items
   menuItems.push_back(
       SettingInfo::Action(StrId::STR_AUTHENTICATE, SettingAction::None).withSubcategory(StrId::STR_MENU_KOSYNC_AUTH));
   menuItems.push_back(SettingInfo::Action(StrId::STR_REGISTER, SettingAction::None));
+}
+
+void KOReaderSettingsActivity::buildAutoSyncItems() {
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  menuItems.push_back(SettingInfo::DynamicToggle(
+                          StrId::STR_KO_AUTO_ON_WAKE,
+                          [](const void*) -> uint8_t { return KOREADER_STORE.getSyncOnWake() ? 1u : 0u; },
+                          [](void*, uint8_t v) {
+                            KOREADER_STORE.setSyncOnWake(v != 0);
+                            KOREADER_STORE.saveToFile();
+                          })
+                          .withSubmenu(StrId::STR_MENU_KOSYNC_AUTO)
+                          .withSubcategory(StrId::STR_KO_AUTO_RECEIVE));
+  menuItems.push_back(SettingInfo::Action(StrId::STR_KO_AUTO_WHILE_READING, SettingAction::KOSyncIntervalPicker)
+                          .withDisplayGetter(whileReadingDisplay)
+                          .withSubmenu(StrId::STR_MENU_KOSYNC_AUTO)
+                          .withSubcategory(StrId::STR_KO_AUTO_SEND));
+  menuItems.push_back(SettingInfo::DynamicToggle(
+                          StrId::STR_KO_AUTO_ON_SLEEP,
+                          [](const void*) -> uint8_t { return KOREADER_STORE.getSyncOnSleep() ? 1u : 0u; },
+                          [](void*, uint8_t v) {
+                            KOREADER_STORE.setSyncOnSleep(v != 0);
+                            KOREADER_STORE.saveToFile();
+                          })
+                          .withSubmenu(StrId::STR_MENU_KOSYNC_AUTO));
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
+
+  {
+    SettingInfo onClose = SettingInfo::Action(StrId::STR_KO_AUTO_ON_CLOSE, SettingAction::KOSyncOnClosePicker)
+                              .withDisplayGetter(closePushDisplay);
+#if CROSSPOINT_KOREADER_AUTOSYNC
+    // On a C3 this is the only automatic row there is, so it makes sense to stay inline rather than become a submenu
+    // with a single entry
+    onClose.withSubmenu(StrId::STR_MENU_KOSYNC_AUTO);
+#endif
+    menuItems.push_back(std::move(onClose));
+  }
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  menuItems.push_back(SettingInfo::DynamicToggle(
+                          StrId::STR_KO_SHOW_SYNC_INDICATOR,
+                          [](const void*) -> uint8_t { return KOREADER_STORE.getShowSyncIndicator() ? 1u : 0u; },
+                          [](void*, uint8_t v) {
+                            KOREADER_STORE.setShowSyncIndicator(v != 0);
+                            KOREADER_STORE.saveToFile();
+                          })
+                          .withSubmenu(StrId::STR_MENU_KOSYNC_AUTO)
+                          .withSubcategory(StrId::STR_KO_AUTO_STATUS_BAR));
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
 }
 
 std::string KOReaderSettingsActivity::getItemValueString(int index) const {
@@ -77,12 +144,6 @@ std::string KOReaderSettingsActivity::getItemValueString(int index) const {
     auto serverUrl = KOREADER_STORE.getServerUrl();
     return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
   }
-  if (item.nameId == StrId::STR_KO_MIN_SESSION_PAGES) {
-    const uint8_t v = SETTINGS.koSyncMinSessionPages;
-    // Zero means no minimum, not "off" — the Auto-Push toggle above is what turns it off.
-    if (v == 0) return std::string(tr(STR_ALWAYS));
-    return std::to_string(v) + tr(STR_PAGES_SUFFIX);
-  }
   if (item.nameId == StrId::STR_AUTHENTICATE || item.nameId == StrId::STR_REGISTER) {
     return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
   }
@@ -92,6 +153,8 @@ std::string KOReaderSettingsActivity::getItemValueString(int index) const {
 
 void KOReaderSettingsActivity::onActionSelected(int index) {
   const auto& item = menuItems[index];
+
+  if (tryOpenSliderFor(item.action, [this] { requestUpdate(); })) return;
 
   if (item.nameId == StrId::STR_USERNAME) {
     startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
@@ -128,21 +191,6 @@ void KOReaderSettingsActivity::onActionSelected(int index) {
                                KOREADER_STORE.saveToFile();
                              }
                            });
-  } else if (item.nameId == StrId::STR_KO_MIN_SESSION_PAGES) {
-    SliderPickerActivity::Config cfg;
-    if (SliderSetting::configFor(SettingAction::KOSyncMinPagesPicker, cfg)) {
-      startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(cfg)),
-                             [this](const ActivityResult& result) {
-                               if (!result.isCancelled) {
-                                 if (const auto* pr = std::get_if<PercentResult>(&result.data)) {
-                                   SliderSetting::apply(SettingAction::KOSyncMinPagesPicker,
-                                                        static_cast<uint8_t>(pr->percent));
-                                   SETTINGS.saveToFile();
-                                 }
-                               }
-                               requestUpdate();
-                             });
-    }
   } else if (item.nameId == StrId::STR_AUTHENTICATE) {
     if (!KOREADER_STORE.hasCredentials()) return;
     startActivityForResult(

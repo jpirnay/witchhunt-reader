@@ -139,6 +139,7 @@ class WifiSelectionActivity final : public Activity {
   explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = true)
       : Activity("WifiSelection", renderer, mappedInput), allowAutoConnect(autoConnect) {}
   void onEnter() override;
+  bool usesWifi() const override { return true; }
   void onExit() override;
   // Tap on a list row -> move the selection there; ActivityManager then synthesizes Confirm.
   ListRowTap::Result selectListRow(int index) override;

@@ -651,6 +651,18 @@ void EpubReaderActivity::onEnter() {
   // shortcut would most plausibly skip or cache in RTC, so they get their own bucket.
   WakeTrace::mark(WakeTrace::Phase::StoresLoaded);
 
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderAutoSync::sleepPushEnabled() || KOReaderAutoSync::intervalPushEnabled()) {
+    AUTOSYNC_STATE.seedLastSeen(
+        currentSpineIndex, navTarget.kind == NavigationTarget::Kind::Page ? navTarget.page : navTarget.fallbackPage);
+  }
+  autoSyncPullPending = KOReaderAutoSync::pullEnabled() && WakeTrace::isResume();
+  autoSyncIndicator = SyncIndicator::None;
+  if (KOREADER_STORE.getShowSyncIndicator() && AUTOSYNC_STATE.lastSyncFailed()) {
+    autoSyncIndicator = SyncIndicator::Failed;
+  }
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
+
   // Trigger first update
   logReaderMemSnapshot("onEnter_before_request_update");
   requestUpdate();
@@ -691,6 +703,11 @@ void EpubReaderActivity::onExit() {
   // no live epub reference and persists the JSON. Sleep paths that bypass
   // onExit() still end up here on resume because the activity is recreated.
   globalReadingSessionTracker().end();
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  maybeAutoPushOnSleep();
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
+
   // If a pre-render left the next page in the frame buffer, redraw the current page so the
   // next activity (notably SleepActivity's OVERLAY mode) sees what the user was looking at.
   // Must run before section.reset() and the orientation reset below.
@@ -770,6 +787,16 @@ void EpubReaderActivity::loop() {
     serviceFinishedBookLaunch();
     return;
   }
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (autoSyncPullDialogLaunched) {
+    return;
+  }
+  serviceAutoSync();
+  if (autoSyncPullDialogLaunched) {
+    return;
+  }
+#endif  // CROSSPOINT_KOREADER_AUTOSYNC
 
   if (inputDrainGuard.shouldDrain(mappedInput)) {
     buttonEvents.drain();
@@ -5126,8 +5153,13 @@ void EpubReaderActivity::renderStatusBar() const {
       printedPageLabel = std::string("(") + *nearest + ")";
     }
   }
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  const SyncIndicator syncIndicator = autoSyncIndicator;
+#else
+  const SyncIndicator syncIndicator = SyncIndicator::None;
+#endif
   GUI.drawStatusBar(renderer, bookProgress, currentPage, displayPageCount, title, 0, isStarred, printedPageLabel,
-                    /*fillMargin=*/true, /*pageCountApproximate=*/building);
+                    /*fillMargin=*/true, /*pageCountApproximate=*/building, syncIndicator);
 
 #if DEBUG_BACKGROUND_WORK
   renderBackgroundDebugOverlay();
