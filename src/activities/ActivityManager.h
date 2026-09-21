@@ -95,6 +95,8 @@ class ActivityManager {
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
   volatile bool requestedUpdate = false;
+  // Draws the "working on it" mark before a queued transition runs. See the .cpp.
+  void showTransitionMark();
 
   // When true, input events are consumed (discarded) until all buttons are released
   // and no press/release events remain.  Armed automatically on activity transitions

@@ -487,6 +487,9 @@ class CrossPointSettings {
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // UI Theme
   uint8_t uiTheme = LYRA;
+  // Acknowledge a press that starts a slow screen change with a mark on screen. See
+  // ActivityManager::showTransitionMark().
+  uint8_t inputFeedback = 1;
   // Menu/chrome text size (UI_FONT_SIZE)
   uint8_t uiFontSize = UI_FONT_SIZE_DEFAULT;
   // Sunlight fading compensation
