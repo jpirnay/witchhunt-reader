@@ -230,10 +230,16 @@ Same procedure as T1 on each. The controller code is unchanged on all three; onl
 |---|---|---|---|
 | X4 (SSD1677) | `default` | ~~Overlay branch pushes a HALF base first → likely clean; absolute branch skips the base → ghost plausible~~ **Result 2026-09-23: clean.** Log: `Gray base: overridePending=1`, `Grayscale planes: absolute`, then **no base refresh at all** — straight to `factory_gray (1071 ms)`. SSD1677's absolute mode is `GrayscaleBase::Combined`: `beginGrayscale()` skips `displayGrayscaleBase()` and the factory waveform drives every pixel from the two planes in one self-contained pass. There is no base for greys-on-glass to survive into. The prediction's outcome was right and its reasoning wrong: "skips the base" is *why it is safe*, not a risk. **X4 closed for this symptom; SSD1677 needs no `_grayOnGlass` for it.** | done |
 | X4 Pro | `x4pro` | ~~Carries `_redriveAfterGray`; depends on which silicon~~ **Result 2026-09-23: clean; silicon is UC8179 (`8179_` tags).** Log: `Gray base: overridePending=1`, base `8179_DRF (1493 ms)`, planes, `8179_gray_split_DRF (355 ms)`. `Uc8179Driver::displayGrayscaleBase()` never takes its differential transition for a fallback other than Fast (*"Explicit Full/Half requests must remain real B/W clearing activations"*), so the sleep cover's HALF became the charge scrub — OLD = ~target, GC bank, every pixel through a transition cell. Safe by construction, and by the rule UC8253 lacked: honour the requested mode as a floor. Also seen just before sleep: the reader's last FAST after an AA page was routed through `8179_gray_pre_DRF` (the `_redriveAfterGray` transition), exactly as the audit §2.4 describes. **X4 Pro closed for this symptom.** | done |
-| T5S3 | `lilygo_t5s3` | Cover goes through `displayGray8Canvas(FULL)` = clean bank → clean | ghost y/n |
+| T5S3 | `lilygo_t5s3` | ~~Cover goes through `displayGray8Canvas(FULL)` = clean bank → clean~~ **Result 2026-09-23: clean, as predicted.** Log: `displayGray8Canvas levels=11`, `Sleep bitmap rendered at 11 levels` — the native-gray branch, `epd_text` clean bank. No `[SLP] Gray base:` line: that branch returns before the plane path. **T5S3 closed for this symptom.** | done |
 
 A ghost on X4 or X4 Pro would mean the same class (the driver forgetting greys on the glass)
 needs the same treatment there; a clean result closes those boards for this symptom.
+
+**Outcome (2026-09-23, all four boards tested):** only the X3 (UC8253) had the symptom, and only
+it needed a change. X4 is safe because its absolute pass has no base; X4 Pro because UC8179
+treats a HALF fallback as a floor; T5S3 because its cover uses the clean-bank native path. The
+`Gray base: overridePending=1` line appeared on every board that reaches the plane path (X3,
+X4, X4 Pro): finding F is general.
 
 ## 7. Suggested next step (as written before T0, kept for the record)
 
