@@ -901,10 +901,9 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const BookOver
     // beginAbsoluteGrayPass() does that base push itself, blocking. The
     // differential path keeps the async scrub.
     const bool panelHasAbsolute = renderer.supportsAbsoluteGrayPlanes();
-    // A reader exit arms a HALF via setNextDisplayRefreshMode(). beginAbsoluteGrayPass() and
-    // displayGrayBuffer() are the only display entry points that never call
-    // consumeRefreshOverride(), so on this path that scheduled scrub is dropped unconsumed.
-    // Report it, so the log shows the fact instead of leaving it to be re-derived.
+    // A reader exit arms a HALF via setNextDisplayRefreshMode(); beginAbsoluteGrayPass() below
+    // consumes it as its base mode. Logged BEFORE that consume, so the line still says whether one
+    // was pending (it was, on every reader -> cover sleep captured on X3, X4 and X4 Pro).
     LOG_DBG("SLP", "Gray base: overridePending=%d", renderer.hasRefreshOverridePending() ? 1 : 0);
     const bool absolutePass = panelHasAbsolute && renderer.beginAbsoluteGrayPass();
     LOG_DBG("SLP", "Grayscale planes: %s",
