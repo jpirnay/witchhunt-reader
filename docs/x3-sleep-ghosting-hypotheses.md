@@ -207,7 +207,7 @@ is `-e x4pro`; T5S3 is `-e lilygo_t5s3`. For every test, send the ~40 serial lin
 |---|---|---|---|
 | T1 | Read 2–3 pages with AA on, then **Cover** sleep | `[SLP] Grayscale planes: absolute`, `Gray base: overridePending=1`, an `X3_DRF_half`, then `X3_GRAYBASE_clean` | Clean cover |
 | T2 | Same reading state, **Dark** sleep | `X3_DRF_half` | Clean (confirms T0 ran the bank the reasoning assumes) |
-| T3 | Just read: page turns, and past the periodic scrub | turns `X3_DRF_fast`; the scrub `X3_DRF_half`; **no** `X3_DRF_full` | No new flashes; sleep entry not noticeably slower — report the two `Wait complete` times |
+| T3 | Just read: page turns, and past the periodic scrub | turns `X3_DRF_fast`; the scrub `X3_DRF_half`; **no** `X3_DRF_full` | **Done 2026-09-23 22:21, ~17 turns:** every turn `X3_DRF_fast (382 ms)`, every completed AA pass `X3_DRF (228 ms)` (the gray pass, default label), the `counter=1` scrub `X3_DRF_half (460 ms)`, no `X3_DRF_full`. Aborted AA passes are the expected turn-preemption. No extra refresh from the flag — the reader never consumes it. Aside: `PreRender skipped: free < floor=45056` on every page, so Background A never runs on this unit. |
 | T4 | Open a grayscale BMP/JPEG in the viewer **from a reading session** | `X3_GRAYBASE_clean` (it is the other `beginAbsoluteGrayPass` consumer) | Clean |
 
 If T1 logs `X3_GRAYBASE_diff`, the flag did not engage: check for an earlier `[ERS] Deferred AA`
