@@ -51,6 +51,16 @@ void LineReaderActivity::onEnter() {
 void LineReaderActivity::onExit() {
   Activity::onExit();
 
+  // Same rule as EpubReaderActivity::onExit(), minus its anti-aliasing clause (these readers have
+  // none): on a panel where EVERY push goes through a graded canvas (supportsGrayFrame -- the
+  // T5S3), a B/W page leaves that canvas holding the page and the next screen's FAST diff runs
+  // against it. The EPUB reader's comment records the device symptom: the last page and Home
+  // superimposed, settling a refresh later. Until now only the EPUB reader armed this; the TXT and
+  // MD readers only did so on their submenu-launch paths, never on exit.
+  if (renderer.supportsGrayFrame()) {
+    ReaderUtils::enforceExitFullRefresh(renderer);
+  }
+
   // Flush the stats session before tearing down the document — same pattern as
   // EpubReaderActivity::onExit().
   globalReadingSessionTracker().end();
