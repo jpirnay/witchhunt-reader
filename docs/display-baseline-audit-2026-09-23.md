@@ -198,7 +198,7 @@ edge.** What each controller *believes*:
 | UC8253 | DTM1 = DTM2 = B/W page N | `_redRamSynced=true`, `_inGrayscaleMode=false`, `lsbValid=false` | **No** — until this branch; now `_grayOnGlass` (see below) |
 | UC8279 | DTM1 = DTM2 = B/W page N | `_oldPlaneValid=true`, `_inGrayscaleMode=false` | **No** |
 | SSD1677 | RED = B/W page N | `_inGrayscaleMode=false` | **No** — but not exposed by the sleep cover: with `_cfg.absoluteGrayscale` its absolute pass is `Combined` (no base push; `factory_gray` drives every pixel from the planes). Device-confirmed clean 2026-09-23. |
-| UC8179 | both planes = `_grayBase` (B/W page N) | `_redriveAfterGray=true` | **Yes** — next FAST becomes XTF_PRE_BW_MID |
+| UC8179 | both planes = `_grayBase` (B/W page N) | `_redriveAfterGray=true` | **Yes** — next FAST becomes XTF_PRE_BW_MID. And its `displayGrayscaleBase()` treats a Half/Full fallback as a floor (never the differential), so the sleep cover always got the charge scrub. Device-confirmed clean 2026-09-23, `8179_DRF (1493 ms)`. |
 | UC8279X4 | DTM1 = `_grayBase` | `_redriveAfterGray=true` | **Yes** — next FAST seeds OLD = ~target |
 | LGFX | canvas = B/W page N (`fillCanvasBW`); Panel_EPD's step buffer = what it pushed | — | The panel library knows what it pushed; the host canvas does not |
 
@@ -278,6 +278,11 @@ The same sequence elsewhere, briefly:
 - **F4.** `beginAbsoluteGrayPass()` defaults its base to HALF and, like `displayGrayBuffer()`,
   never calls `consumeRefreshOverride()`. The reader-armed HALF is dropped on the sleep-cover
   path. On UC8253 the `_full` bank is unreachable in normal reading (§2.1).
+- **F4b.** UC8179's `displayGrayscaleBase()` honours the caller's fallback mode as a floor
+  (Half/Full → a real clearing activation; only Fast may become the differential transition).
+  UC8253's used `fallback` only inside its clean branch and chose the differential from RAM
+  flags alone. `_grayOnGlass` closes the gap by state; adopting UC8179's floor rule on UC8253
+  as well would be a uniform-contract change — optional, not needed for the symptom.
 - **F5.** HALF means different things on the two X3 controllers: single-pass target drive
   (UC8253) vs GC diff against the real old frame (UC8279). Fixes do not transfer by name.
 - **F6.** `cleanupGrayscaleBuffers(nullptr)` is honoured everywhere but differently: UC8253
