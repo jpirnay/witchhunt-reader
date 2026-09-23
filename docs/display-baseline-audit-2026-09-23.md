@@ -195,18 +195,20 @@ edge.** What each controller *believes*:
 
 | Controller | Baseline after cleanup | Flags after cleanup | Remembers grey is on the glass? |
 |---|---|---|---|
-| UC8253 | DTM1 = DTM2 = B/W page N | `_redRamSynced=true`, `_inGrayscaleMode=false`, `lsbValid=false` | **No** |
+| UC8253 | DTM1 = DTM2 = B/W page N | `_redRamSynced=true`, `_inGrayscaleMode=false`, `lsbValid=false` | **No** — until this branch; now `_grayOnGlass` (see below) |
 | UC8279 | DTM1 = DTM2 = B/W page N | `_oldPlaneValid=true`, `_inGrayscaleMode=false` | **No** |
 | SSD1677 | RED = B/W page N | `_inGrayscaleMode=false` | **No** |
 | UC8179 | both planes = `_grayBase` (B/W page N) | `_redriveAfterGray=true` | **Yes** — next FAST becomes XTF_PRE_BW_MID |
 | UC8279X4 | DTM1 = `_grayBase` | `_redriveAfterGray=true` | **Yes** — next FAST seeds OLD = ~target |
 | LGFX | canvas = B/W page N (`fillCanvasBW`); Panel_EPD's step buffer = what it pushed | — | The panel library knows what it pushed; the host canvas does not |
 
-**Only the two UltraChip X4-Pro drivers carry a flag that means "the glass has grey the
-baseline does not describe."** UC8253, UC8279 and SSD1677 declare a clean B/W sync the moment
-`cleanupGrayscaleBuffers()` runs. Whether that omission is *visible* depends on whether the
-next push's waveform can move a grey pixel to its rail — a LUT question this audit cannot
-answer from code.
+**Only the two UltraChip X4-Pro drivers carried a flag that means "the glass has grey the
+baseline does not describe."** UC8253, UC8279 and SSD1677 declared a clean B/W sync the moment
+`cleanupGrayscaleBuffers()` ran. Whether that omission is *visible* depends on whether the
+next push's waveform can move a grey pixel to its rail — a LUT question this audit could not
+answer from code, and which test T0 then answered for UC8253: one `_half` clears it, the
+differential `_aa_pre_bw_mid` transition does not. UC8253 now tracks the state as
+`_grayOnGlass` (`x3-sleep-ghosting-hypotheses.md` §6). UC8279 and SSD1677 still do not.
 
 ---
 
@@ -323,8 +325,11 @@ names, or nowhere:
    `_secondaryLent` is private. This is the one-bit `hasDisplayedFrame()` from the reverted
    branch, generalised.
 3. **Glass carries grey beyond the B/W baseline** — a *controller-side* state, and the one
-   this bug actually turns on. It exists today on exactly two drivers as a private flag
-   (`_redriveAfterGray`) and is absent from the other four (§5). Any consumer that is about
+   this bug actually turns on. Before this branch it existed on exactly two drivers as a
+   private flag (`_redriveAfterGray`) and was absent from the other four (§5). UC8253 now
+   has it as `_grayOnGlass`; the decision it feeds is which base bank a grayscale pass gets,
+   which is the granularity a 1-bit old plane can express. A finer, per-pixel correction was
+   costed and declined on memory grounds — see the hypotheses document §6. Any consumer that is about
    to push a differential after a grayscale page — the sleep cover, the home screen after the
    reader, a T5S3 FAST — needs it, and none can ask for it.
 

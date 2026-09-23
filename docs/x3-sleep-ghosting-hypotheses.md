@@ -1,8 +1,9 @@
 # X3 sleep-screen ghosting — observations and open hypotheses
 
-**Status: cause NOT established.** One fix was derived from code reading, built, flashed and
-made no difference; it has been reverted in full. This document separates what is *observed*
-from what is *inferred*, so the next step is chosen by evidence rather than by narrative.
+**Status: cause established by test T0 and a code deduction; fix built, awaiting device
+confirmation — see §6.** The earlier fix derived from code reading alone was flashed, made no
+difference, and was reverted in full. This document separates what is *observed* from what is
+*inferred*, so each step is chosen by evidence rather than by narrative.
 
 Nothing below is a fix proposal. Section 5 lists candidate causes, each with the cheapest
 test that would discriminate it.
@@ -132,7 +133,98 @@ from the reader, and compare.
 
 ---
 
-## 6. Suggested next step
+## 6. Result
+
+**T0 ran: a Dark sleep screen from the same reading state shows no ghosting.** That is one
+`_half` pass from the anti-aliased page — `clearScreen()` + `displayBuffer(HALF_REFRESH)` —
+and it is clean. So a single `_half` clears the AA residue. **H3 is refuted.**
+
+What that lets us deduce about the cover path, from the code alone:
+
+1. The absolute gray pass (S6) cannot produce reader-text shapes. Its planes are derived from
+   the cover, and `absoluteGc` idles WW and BB, so it never drives an endpoint pixel. **H6 is
+   refuted.** Whatever text outline is on the cover was left by the base push (S4).
+2. If S4 had taken the *clean* branch it would have run `display(cover, nullptr, HALF)` — the
+   same `_half` T0 just showed clears the residue — followed by the `_aa_pre_bw_mid` settle
+   with DTM1 == DTM2, which drives nothing anywhere strongly and cannot bring shapes back.
+   A clean-branch cover would therefore be clean.
+3. So S4 took the **differential** branch: `_aa_pre_bw_mid` as an old→new transition against
+   DTM1 = the B/W reader page. An AA-edge pixel — grey on the glass, white in DTM1, white on
+   the cover — lands in that bank's gentle WW cell, is not cleared, and the absolute pass
+   then leaves it alone forever. **H4 is the mechanism.**
+4. It took that branch because `cleanBaseNeeded` was false, and it was false because
+   `cleanupGrayscaleBuffers()` sets `_redRamSynced = true` after every AA pass. That is a true
+   statement about controller RAM and a false one about the glass — the third state in
+   `display-baseline-audit-2026-09-23.md` §9, which the UC8253 driver did not track.
+
+H5 (the dropped `enforceExitFullRefresh` override) remains a true fact about the facade and is
+still worth closing on its own, but it is not what this fix rests on.
+
+**The fix**, in the UC8253 driver only (the controller with evidence): a `_grayOnGlass` state,
+set by the gray waveform, cleared only by a waveform that drives every pixel from a known
+state (`_full`, `_half`, `grayscaleRevert`), explicitly *not* cleared by the RAM restore, and
+folded into `cleanBaseNeeded`. The differential base is now taken only when the start state is
+genuinely 1-bit. A host test in `run_uc8253_power.py` fails without the consuming term
+(differential, 1 refresh) and passes with it (clean, 2).
+
+Why `_half` and not a targeted correction of the known grey pixels: the correction needs the
+grey mask alive at the *next* push (52,272 B on X3, against `free=42992` in the log), rests on
+the unproven premise that `_fast`'s 4-frame BW cell clears grey where `_half`'s 6-frame cell
+is what T0 proved, and would make every host-copy producer in the audit a mask-invalidation
+site. The `_half` bank is the LUT header's own named tool for this ("scrub bank … to reset
+after AA grayscale"). Decided 2026-09-23.
+
+**Still to confirm on the device**, with the label trace now in the build: a cover sleep from
+an AA page should log `X3_GRAYBASE_clean` and `X3_DRF_half` where the previous firmware would
+have logged `X3_GRAYBASE_diff`, and the cover should be clean. A Dark sleep should log
+`X3_DRF_half`, confirming T0 ran the bank this reasoning assumes. If the labels say `clean`
+and the ghost persists, points 1–3 above are wrong somewhere and the search reopens.
+
+The same omission exists, untouched, on UC8279d (X3 newer) and SSD1677 — see the audit §5.
+Not changed here: no unit to test on, and no report.
+
+## 8. Device verification plan (2026-09-23)
+
+Hardware on the bench: X3 (UC8253), X4 (SSD1677), X4 Pro (UC8179 or UC8279 — the log says
+which: `8179_DRF` vs `8279x4_DRF`), LilyGo T5S3. Builds: X3 and X4 share `-e default`; X4 Pro
+is `-e x4pro`; T5S3 is `-e lilygo_t5s3`. For every test, send the ~40 serial lines before
+`Entering deep sleep` plus a yes/no on the ghost. All `[SLP]`/`X3_*` lines are `LOG_DBG`.
+
+### X3 — the fix under test
+
+| # | Do | Expect in the log | Expect on the glass |
+|---|---|---|---|
+| T1 | Read 2–3 pages with AA on, then **Cover** sleep | `[SLP] Grayscale planes: absolute`, `Gray base: overridePending=1`, an `X3_DRF_half`, then `X3_GRAYBASE_clean` | Clean cover |
+| T2 | Same reading state, **Dark** sleep | `X3_DRF_half` | Clean (confirms T0 ran the bank the reasoning assumes) |
+| T3 | Just read: page turns, and past the periodic scrub | turns `X3_DRF_fast`; the scrub `X3_DRF_half`; **no** `X3_DRF_full` | No new flashes; sleep entry not noticeably slower — report the two `Wait complete` times |
+| T4 | Open a grayscale BMP/JPEG in the viewer **from a reading session** | `X3_GRAYBASE_clean` (it is the other `beginAbsoluteGrayPass` consumer) | Clean |
+
+If T1 logs `X3_GRAYBASE_diff`, the flag did not engage: check for an earlier `[ERS] Deferred AA`
+line — if AA never ran on the last page there was nothing to clear and the test is void. If it
+logs `clean` and the ghost is still there, §6 points 1–3 are wrong and the search reopens.
+
+### X3 — the two device-independent open findings (one minute each)
+
+| # | Do | Finding | Question |
+|---|---|---|---|
+| T5 | Sleep screen = **Overlay**; turn forward twice quickly, then sleep | D | Is the page under the overlay the one you were reading, or the previous one? |
+| T6 | Sleep screen = **Quick Resume**; sleep, then wake | E | Does the restored frame during the wake show the moon icon? |
+
+### The other boards — does the symptom exist there at all?
+
+Same procedure as T1 on each. The controller code is unchanged on all three; only the
+`[SLP] Gray base:` line is new.
+
+| Board | Build | Prediction from the audit | Report |
+|---|---|---|---|
+| X4 (SSD1677) | `default` | Overlay branch pushes a `BYPASS_RED` HALF base before the planes → likely clean. If `_cfg.absoluteGrayscale` is set the absolute branch skips the base entirely → ghost plausible | ghost y/n, `[SLP] Grayscale planes:` line |
+| X4 Pro | `x4pro` | Carries `_redriveAfterGray`; base behaviour depends on which silicon | ghost y/n, the DRF tag prefix, `[SLP]` lines |
+| T5S3 | `lilygo_t5s3` | Cover goes through `displayGray8Canvas(FULL)` = clean bank → clean | ghost y/n |
+
+A ghost on X4 or X4 Pro would mean the same class (the driver forgetting greys on the glass)
+needs the same treatment there; a clean result closes those boards for this symptom.
+
+## 7. Suggested next step (as written before T0, kept for the record)
 
 Run **T0** first. It needs no build, no flash and no code change, and it splits the search in
 half: grayscale path vs. refresh drive. Everything in §5 after it assumes T0's answer.
