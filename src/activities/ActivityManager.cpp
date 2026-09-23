@@ -694,11 +694,13 @@ void ActivityManager::dispatchLightPanelGesture() {
   //  1. syncWriteBufferFromDisplayed() -- displayBuffer() ends in a swap, so on an ordinary screen
   //     the write buffer holds the frame from two refreshes ago while the secondary holds what is
   //     on the panel.
-  //  2. prepareFramebufferForCapture() -- but in the READER the secondary is not the displayed
-  //     frame at all: Background-A parks the pre-rendered NEXT page there, so step 1 alone
-  //     cheerfully copies the wrong page back (device log: hasSecondary=1, wrong frame). This is
-  //     the reader's own hook for exactly that ("redraw the visible page here so the capture
-  //     matches the display"), and it re-renders the current page over the top. A no-op on every
+  //  2. prepareFramebufferForCapture() -- step 1 can silently do nothing: its memcpy is gated on
+  //     frameBufferActive, which is null while the reader has the secondary lent to a section
+  //     build or released for a decode. And in the reader the WRITE buffer may hold the
+  //     pre-rendered NEXT page (Background-A draws it there -- renderPageContentOnly, not the
+  //     secondary), which step 1 overwrites only when it actually runs. This is the reader's own
+  //     hook for exactly that ("redraw the visible page here so the capture matches the
+  //     display"), and it re-renders the current page over whatever step 1 left. A no-op on every
   //     activity that has no pre-render.
   //
   // Under a RenderLock and in this order: the screenshot path in main.cpp does the same thing for
