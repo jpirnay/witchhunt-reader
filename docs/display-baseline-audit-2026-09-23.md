@@ -208,7 +208,8 @@ baseline does not describe."** UC8253, UC8279 and SSD1677 declared a clean B/W s
 next push's waveform can move a grey pixel to its rail — a LUT question this audit could not
 answer from code, and which test T0 then answered for UC8253: one `_half` clears it, the
 differential `_aa_pre_bw_mid` transition does not. UC8253 now tracks the state as
-`_grayOnGlass` (`x3-sleep-ghosting-hypotheses.md` §6). UC8279 and SSD1677 still do not.
+`_grayOnGlass`, device-confirmed 2026-09-23 (`x3-sleep-ghosting-hypotheses.md` §6). UC8279 and
+SSD1677 still do not.
 
 ---
 

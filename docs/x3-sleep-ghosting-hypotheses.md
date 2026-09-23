@@ -1,7 +1,7 @@
 # X3 sleep-screen ghosting — observations and open hypotheses
 
-**Status: cause established by test T0 and a code deduction; fix built, awaiting device
-confirmation — see §6.** The earlier fix derived from code reading alone was flashed, made no
+**Status: RESOLVED on X3 — cause established by test T0 and a code deduction, fix confirmed
+on the device 2026-09-23 21:49 (§6).** The earlier fix derived from code reading alone was flashed, made no
 difference, and was reverted in full. This document separates what is *observed* from what is
 *inferred*, so each step is chosen by evidence rather than by narrative.
 
@@ -174,11 +174,22 @@ is what T0 proved, and would make every host-copy producer in the audit a mask-i
 site. The `_half` bank is the LUT header's own named tool for this ("scrub bank … to reset
 after AA grayscale"). Decided 2026-09-23.
 
-**Still to confirm on the device**, with the label trace now in the build: a cover sleep from
-an AA page should log `X3_GRAYBASE_clean` and `X3_DRF_half` where the previous firmware would
-have logged `X3_GRAYBASE_diff`, and the cover should be clean. A Dark sleep should log
-`X3_DRF_half`, confirming T0 ran the bank this reasoning assumes. If the labels say `clean`
-and the ghost persists, points 1–3 above are wrong somewhere and the search reopens.
+**Confirmed on the device** (X3, 2026-09-23 21:49, after 4 pages of AA reading). No ghosting.
+The log, in order:
+
+```
+[SLP] Gray base: overridePending=1        <- finding F, on device: the HALF override was armed and dropped
+Wait complete:  X3_DRF_half (458 ms)      <- the clean branch's inner display(cover, HALF)
+Wait complete:  X3_GRAYBASE_clean (484 ms) <- the branch changed; old firmware: X3_GRAYBASE_diff
+[SLP] Grayscale planes: absolute
+Wait complete:  X3_DRF (228 ms)           <- the absolute gray pass (untagged default label)
+```
+
+`X3_DRF_half` is also the bank a Dark sleep runs from this state, so T2 is answered by this
+line. Measured cost: the base went from one ≈485 ms push to 458 + 484 ≈ 940 ms — about half a
+second more on sleep entry, once, on a terminal frame. Reading is untouched by construction
+(the reader never calls `displayGrayscaleBase()`); T3 in §8 verifies that no `X3_DRF_full`
+appears while paging.
 
 The same omission exists, untouched, on UC8279d (X3 newer) and SSD1677 — see the audit §5.
 Not changed here: no unit to test on, and no report.
