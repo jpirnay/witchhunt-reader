@@ -228,7 +228,7 @@ Same procedure as T1 on each. The controller code is unchanged on all three; onl
 
 | Board | Build | Prediction from the audit | Report |
 |---|---|---|---|
-| X4 (SSD1677) | `default` | Overlay branch pushes a `BYPASS_RED` HALF base before the planes → likely clean. If `_cfg.absoluteGrayscale` is set the absolute branch skips the base entirely → ghost plausible | ghost y/n, `[SLP] Grayscale planes:` line |
+| X4 (SSD1677) | `default` | ~~Overlay branch pushes a HALF base first → likely clean; absolute branch skips the base → ghost plausible~~ **Result 2026-09-23: clean.** Log: `Gray base: overridePending=1`, `Grayscale planes: absolute`, then **no base refresh at all** — straight to `factory_gray (1071 ms)`. SSD1677's absolute mode is `GrayscaleBase::Combined`: `beginGrayscale()` skips `displayGrayscaleBase()` and the factory waveform drives every pixel from the two planes in one self-contained pass. There is no base for greys-on-glass to survive into. The prediction's outcome was right and its reasoning wrong: "skips the base" is *why it is safe*, not a risk. **X4 closed for this symptom; SSD1677 needs no `_grayOnGlass` for it.** | done |
 | X4 Pro | `x4pro` | Carries `_redriveAfterGray`; base behaviour depends on which silicon | ghost y/n, the DRF tag prefix, `[SLP]` lines |
 | T5S3 | `lilygo_t5s3` | Cover goes through `displayGray8Canvas(FULL)` = clean bank → clean | ghost y/n |
 

@@ -197,7 +197,7 @@ edge.** What each controller *believes*:
 |---|---|---|---|
 | UC8253 | DTM1 = DTM2 = B/W page N | `_redRamSynced=true`, `_inGrayscaleMode=false`, `lsbValid=false` | **No** — until this branch; now `_grayOnGlass` (see below) |
 | UC8279 | DTM1 = DTM2 = B/W page N | `_oldPlaneValid=true`, `_inGrayscaleMode=false` | **No** |
-| SSD1677 | RED = B/W page N | `_inGrayscaleMode=false` | **No** |
+| SSD1677 | RED = B/W page N | `_inGrayscaleMode=false` | **No** — but not exposed by the sleep cover: with `_cfg.absoluteGrayscale` its absolute pass is `Combined` (no base push; `factory_gray` drives every pixel from the planes). Device-confirmed clean 2026-09-23. |
 | UC8179 | both planes = `_grayBase` (B/W page N) | `_redriveAfterGray=true` | **Yes** — next FAST becomes XTF_PRE_BW_MID |
 | UC8279X4 | DTM1 = `_grayBase` | `_redriveAfterGray=true` | **Yes** — next FAST seeds OLD = ~target |
 | LGFX | canvas = B/W page N (`fillCanvasBW`); Panel_EPD's step buffer = what it pushed | — | The panel library knows what it pushed; the host canvas does not |
