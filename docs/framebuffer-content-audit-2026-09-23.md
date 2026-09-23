@@ -206,8 +206,10 @@ on UC8253 with `_grayOnGlass`; the same omission remains on UC8279 and SSD1677.
 
 ## 6. What was done — and then reverted
 
-All five rows below were reverted with the branch on 2026-09-23 and are **open**. They are
-listed with the fix that was written so it need not be re-derived.
+All five rows below were reverted with the branch on 2026-09-23. **D1 was re-landed later that
+day** (SDK `4a320d6`, host-tested, upstream PR #117). D5, D2, D3 and D4 remain open pending a
+re-audit — D3/D4's device checks (T5/T6) were skipped by decision. The written fixes are listed
+so they need not be re-derived. See `x3-sleep-ghosting-hypotheses.md` §9.
 
 | Defect | Fix (reverted; in reflog) |
 |---|---|

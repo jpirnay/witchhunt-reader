@@ -248,3 +248,23 @@ half: grayscale path vs. refresh drive. Everything in §5 after it assumes T0's 
 
 If a diagnostic build is wanted after that, H3/H4/H5 share one — three log labels, no
 behaviour change — and it should be flashed and read *before* any fix is written.
+
+## 9. Disposition of the code findings (2026-09-23, late)
+
+Decided with the bar "fix only where the evidence is clear; everything else needs a re-audit".
+
+| # | Finding | Evidence | Disposition |
+|---|---|---|---|
+| A | `cleanupGrayscaleWithPreviousBuffer()` fallback is always a plane | host test fails on the fallback, deterministic | **Fixed** — SDK `4a320d6`; upstream PR #117 updated (its `main` still has the unguarded form) |
+| B | return/realloc reseed the secondary while reporting resident | code + my re-reading of a 2026-09-17 T5S3 observation | **Re-audit.** Not fixed |
+| C | pre-render location stated backwards in two comments | code, unambiguous | **Fixed** — comments only |
+| D | `goToSleep()` does no buffer prep (OVERLAY / QUICK_RESUME composite onto the previous frame) | code only; T5 not run by decision | **Re-audit.** Not fixed |
+| E | Quick Resume persists the post-swap slot | code only; T6 not run by decision | **Re-audit.** Not fixed |
+| F | gray-path entry drops the reader's HALF override | `overridePending=1` on X3, X4, X4 Pro | **Fixed** — `GfxRenderer::beginAbsoluteGrayPass()` consumes it like every other display entry |
+| I | driver declares sync while greys are on the glass | device (T0 + T1), UC8253 | **Fixed** — `_grayOnGlass`, SDK `5efa7ef`; upstream PR #118 (`main` `:370`/`:562` identical) |
+| J | Txt / Md / Xtc never arm the exit refresh | function boundaries verified; EPUB precedent device-recorded | **Fixed** — `LineReaderActivity::onExit()` (gate: `supportsGrayFrame()`), `XtcReaderActivity::onExit()` (gate: `bitDepth == 2 \|\| supportsGrayFrame()`) |
+| F7 | `[FBUF] redSynced=` prints the facade flag, meaningless on X3 | every X3 line this session; misread once | **Fixed** — prints `n/a` on X3 |
+| — | UC8279 (X3 newer) / SSD1677 share I's omission | code | **Left.** No UC8279 unit; SSD1677 shown safe on this path |
+| — | X3 steady free heap ~10–14 KB below the 2026-08-02 floor measurement | T3 log vs `6f097ad77` | **Deferred** to a later session (recorded in memory) |
+
+T5 and T6 were skipped by decision, not oversight; D and E stay open until they run.

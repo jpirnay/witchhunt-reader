@@ -276,8 +276,10 @@ The same sequence elsewhere, briefly:
 - **F3.** UC8253's absolute gray pass drives dark/light only; WW and BB idle (§2.1). It can
   add greys to a base; it cannot remove what the base left.
 - **F4.** `beginAbsoluteGrayPass()` defaults its base to HALF and, like `displayGrayBuffer()`,
-  never calls `consumeRefreshOverride()`. The reader-armed HALF is dropped on the sleep-cover
-  path. On UC8253 the `_full` bank is unreachable in normal reading (§2.1).
+  never called `consumeRefreshOverride()`. The reader-armed HALF was dropped on the sleep-cover
+  path — device-confirmed (`overridePending=1`) on X3, X4 and X4 Pro. **Fixed 2026-09-23:**
+  `GfxRenderer::beginAbsoluteGrayPass()` now consumes it as its base mode. On UC8253 the `_full`
+  bank remains unreachable in normal reading (§2.1).
 - **F4b.** UC8179's `displayGrayscaleBase()` honours the caller's fallback mode as a floor
   (Half/Full → a real clearing activation; only Fast may become the differential transition).
   UC8253's used `fallback` only inside its clean branch and chose the differential from RAM
@@ -288,8 +290,9 @@ The same sequence elsewhere, briefly:
 - **F6.** `cleanupGrayscaleBuffers(nullptr)` is honoured everywhere but differently: UC8253
   drops `_redRamSynced` (→ `_full`); UC8279 sets `_forceFullSyncNext`; UC8179/X4 set
   `_needFullClear`; SSD1677 leaves `_inGrayscaleMode` (→ FAST promoted to HALF); LGFX no-op.
-- **F7.** The facade's `_redRamSynced` is X4-only and the FBUF log prints it on X3 as
-  `redSynced=0` unconditionally. Already misread once in this investigation.
+- **F7.** The facade's `_redRamSynced` is X4-only and the FBUF log printed it on X3 as
+  `redSynced=0` unconditionally. Already misread once in this investigation. **Fixed
+  2026-09-23:** the FBUF lines print `redSynced=n/a` on X3.
 - **F8.** `displayGrayBuffer()` hands every driver a buffer that holds a plane. Four ignore
   it; LGFX overlays; UC8179/X4 use their snapshot. The HAL's LGFX-only reseed before it is
   documented as a deletion candidate.
