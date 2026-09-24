@@ -767,6 +767,8 @@ inline std::vector<SettingInfo> buildSettingsList() {
       {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
       "statusBarLowerProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR));
 
+  // cppcheck-suppress knownConditionTrueFalse ; false while kCommonRows is right, which is the
+  // point: it turns true only when someone adds rows without raising the reserve.
   if (settings.size() > kReservedRows) {
     LOG_ERR("SET", "Settings list outgrew its reserve (%u > %u rows): raise kCommonRows",
             static_cast<unsigned>(settings.size()), static_cast<unsigned>(kReservedRows));
