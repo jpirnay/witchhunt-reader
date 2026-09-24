@@ -224,6 +224,40 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                        {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS},
                                        "hideBatteryPercentage", StrId::STR_CAT_DISPLAY)
                          .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
+  // --- User interface ---
+  // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
+  settings.push_back(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
+                                       {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
+                                        StrId::STR_THEME_LYRA_CAROUSEL},
+                                       "uiTheme", StrId::STR_CAT_DISPLAY)
+                         .withSelectorActivity()
+                         .withSubcategory(StrId::STR_MENU_DISP_UI));
+  settings.push_back(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
+                                       {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
+  // Home screen entries: on = on the home screen, off = behind its "More" entry.
+  settings.push_back(SettingInfo::Toggle(StrId::STR_BROWSE_FILES, &CrossPointSettings::showBrowseFilesOnHome,
+                                         "showBrowseFilesOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_MENU_RECENT_BOOKS, &CrossPointSettings::showRecentBooksOnHome,
+                                         "showRecentBooksOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
+                                         "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_GLOBAL_BOOKMARKS, &CrossPointSettings::showBookmarksOnHome,
+                                         "showBookmarksOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_OPDS_BROWSER, &CrossPointSettings::showOpdsBrowserOnHome,
+                                         "showOpdsBrowserOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_FILE_TRANSFER, &CrossPointSettings::showFileTransferOnHome,
+                                         "showFileTransferOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_WEATHER, &CrossPointSettings::showWeatherOnHome,
+                                         "showWeatherOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_BUSY_INDICATOR, &CrossPointSettings::showBusyIndicator,
+                                         "showBusyIndicator", StrId::STR_CAT_DISPLAY));
   settings.push_back(SettingInfo::Action(StrId::STR_REFRESH_FREQ, SettingAction::RefreshFrequencyPicker)
                          .persisting(&CrossPointSettings::refreshFrequencyPages, "refreshFrequencyPages", 60)
                          .withDisplayGetter(getRefreshFrequencyDisplay)
@@ -275,37 +309,6 @@ inline std::vector<SettingInfo> buildSettingsList() {
                                          "frontlightRestoreOnWake", StrId::STR_CAT_DISPLAY)
                          .withSubmenu(StrId::STR_MENU_DISP_LIGHT)
                          .requiring(SettingRequires::ReadingLight));
-  settings.push_back(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
-                                       {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                        StrId::STR_THEME_LYRA_CAROUSEL},
-                                       "uiTheme", StrId::STR_CAT_DISPLAY)
-                         .withSelectorActivity());
-  settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_BUSY_INDICATOR, &CrossPointSettings::showBusyIndicator,
-                                         "showBusyIndicator", StrId::STR_CAT_DISPLAY));
-  // Home screen entries: on = on the home screen, off = behind its "More" entry.
-  settings.push_back(SettingInfo::Toggle(StrId::STR_BROWSE_FILES, &CrossPointSettings::showBrowseFilesOnHome,
-                                         "showBrowseFilesOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_MENU_RECENT_BOOKS, &CrossPointSettings::showRecentBooksOnHome,
-                                         "showRecentBooksOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
-                                         "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_GLOBAL_BOOKMARKS, &CrossPointSettings::showBookmarksOnHome,
-                                         "showBookmarksOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_OPDS_BROWSER, &CrossPointSettings::showOpdsBrowserOnHome,
-                                         "showOpdsBrowserOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_FILE_TRANSFER, &CrossPointSettings::showFileTransferOnHome,
-                                         "showFileTransferOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_WEATHER, &CrossPointSettings::showWeatherOnHome,
-                                         "showWeatherOnHome", StrId::STR_CAT_DISPLAY)
-                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  settings.push_back(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
-                                       {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
 
   // --- Reader ---
   // General reader settings
