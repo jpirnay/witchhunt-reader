@@ -167,7 +167,7 @@ inline std::vector<SettingInfo> buildSettingsList() {
   // outgrown: touch C3 boards were already past it, and an X3 that crossed it aborted a settings
   // save at contig 23540. The counts are the push_backs in each block; the headroom absorbs a few
   // new rows, and the log at the end says when it no longer does.
-  constexpr size_t kCommonRows = 97;
+  constexpr size_t kCommonRows = 103;
 #if CP_TOUCH_UI
   constexpr size_t kTouchRows = 3 + std::size(TouchGestures::BINDINGS);
 #else
@@ -282,8 +282,28 @@ inline std::vector<SettingInfo> buildSettingsList() {
                          .withSelectorActivity());
   settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_BUSY_INDICATOR, &CrossPointSettings::showBusyIndicator,
                                          "showBusyIndicator", StrId::STR_CAT_DISPLAY));
-  settings.push_back(SettingInfo::Toggle(StrId::STR_SHOW_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
-                                         "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY));
+  // Home screen entries: on = on the home screen, off = behind its "More" entry.
+  settings.push_back(SettingInfo::Toggle(StrId::STR_BROWSE_FILES, &CrossPointSettings::showBrowseFilesOnHome,
+                                         "showBrowseFilesOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_MENU_RECENT_BOOKS, &CrossPointSettings::showRecentBooksOnHome,
+                                         "showRecentBooksOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
+                                         "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_GLOBAL_BOOKMARKS, &CrossPointSettings::showBookmarksOnHome,
+                                         "showBookmarksOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_OPDS_BROWSER, &CrossPointSettings::showOpdsBrowserOnHome,
+                                         "showOpdsBrowserOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_FILE_TRANSFER, &CrossPointSettings::showFileTransferOnHome,
+                                         "showFileTransferOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
+  settings.push_back(SettingInfo::Toggle(StrId::STR_WEATHER, &CrossPointSettings::showWeatherOnHome,
+                                         "showWeatherOnHome", StrId::STR_CAT_DISPLAY)
+                         .withSubmenu(StrId::STR_MENU_DISP_HOME));
   settings.push_back(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
                                        {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
 

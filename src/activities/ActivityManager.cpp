@@ -25,6 +25,7 @@
 #include "home/FileBrowserActivity.h"
 #include "home/GlobalBookmarksActivity.h"
 #include "home/HomeActivity.h"
+#include "home/HomeMoreActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "network/SerialTransferActivity.h"
@@ -600,6 +601,40 @@ void ActivityManager::goToWeather() { replaceActivity(std::make_unique<WeatherAc
 
 void ActivityManager::goToReadingStats() {
   replaceActivity(std::make_unique<ReadingStatsActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToHomeMore() { replaceActivity(std::make_unique<HomeMoreActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
+  switch (action) {
+    case HomeMenuAction::FileBrowser:
+      goToFileBrowser();
+      break;
+    case HomeMenuAction::Recents:
+      goToRecentBooks();
+      break;
+    case HomeMenuAction::ReadingStats:
+      goToReadingStats();
+      break;
+    case HomeMenuAction::GlobalBookmarks:
+      goToGlobalBookmarks();
+      break;
+    case HomeMenuAction::OpdsBrowser:
+      goToBrowser();
+      break;
+    case HomeMenuAction::FileTransfer:
+      goToFileTransfer();
+      break;
+    case HomeMenuAction::Weather:
+      goToWeather();
+      break;
+    case HomeMenuAction::More:
+      goToHomeMore();
+      break;
+    case HomeMenuAction::Settings:
+      goToSettings();
+      break;
+  }
 }
 
 void ActivityManager::goHome(std::string focusBookPath, int focusSelectorIndex) {

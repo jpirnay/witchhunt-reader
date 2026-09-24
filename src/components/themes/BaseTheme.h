@@ -95,7 +95,8 @@ enum UIIcon {
   Hotspot,
   Weather,
   Usb,
-  Stats
+  Stats,
+  Ellipsis
 };
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Reveal, Space, Del, Ok, Disabled };

@@ -23,6 +23,7 @@
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
 #include "components/icons/cover.h"
+#include "components/icons/ellipsis.h"
 #include "components/icons/file24.h"
 #include "components/icons/folder.h"
 #include "components/icons/folder24.h"
@@ -111,6 +112,8 @@ const uint8_t* iconBitmapFor(UIIcon icon) {
       return RecentIcon;
     case UIIcon::Stats:
       return StatsIcon;
+    case UIIcon::Ellipsis:
+      return EllipsisIcon;
     case UIIcon::Transfer:
       return TransferIcon;
     case UIIcon::Settings:
