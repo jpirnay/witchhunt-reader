@@ -3485,7 +3485,15 @@ void GfxRenderer::displayGrayBuffer() const { display.displayGrayBuffer(fadingFi
 bool GfxRenderer::supportsAbsoluteGrayPlanes() const { return display.supportsAbsoluteGrayPlanes(); }
 
 bool GfxRenderer::beginAbsoluteGrayPass(const HalDisplay::RefreshMode fallback) const {
-  return display.beginAbsoluteGrayPass(fallback, fadingFix);
+  // Consume a pending setNextDisplayRefreshMode() override exactly as displayBuffer() and
+  // triggerDisplay() do. This was the one display entry point that did not, so a reader exit's
+  // enforceExitFullRefresh() HALF arrived here armed and left armed: not applied to this base,
+  // and lying in wait for whatever unrelated refresh came next (device logs 2026-09-23, X3, X4
+  // and X4 Pro: `Gray base: overridePending=1` on every cover sleep from the reader). The
+  // override is the caller asking for a stronger base; the driver receives it as the fallback
+  // mode and applies it wherever it takes a B/W base push.
+  const HalDisplay::RefreshMode effective = consumeRefreshOverride(fallback);
+  return display.beginAbsoluteGrayPass(effective, fadingFix);
 }
 
 uint8_t GfxRenderer::getGrayLevels() const { return display.getGrayLevels(); }

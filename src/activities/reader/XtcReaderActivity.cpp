@@ -62,6 +62,17 @@ void XtcReaderActivity::onEnter() {
 void XtcReaderActivity::onExit() {
   Activity::onExit();
 
+  // Same rule as EpubReaderActivity::onExit(). A 2-bit XTC page goes out through the grayscale
+  // plane pass (renderPage, bitDepth == 2), which leaves grey on the glass that the controller's
+  // B/W baseline does not describe; and on a graded-canvas panel (supportsGrayFrame -- the T5S3)
+  // even a 1-bit page leaves the canvas holding it. Either way the next screen's FAST diff runs
+  // against a frame that is not what is on the panel. The EPUB reader's comment records the
+  // device symptom. Until now this reader armed the refresh only on its submenu-launch paths,
+  // never on exit. Before xtc.reset() below, which this reads.
+  if ((xtc && xtc->getBitDepth() == 2) || renderer.supportsGrayFrame()) {
+    ReaderUtils::enforceExitFullRefresh(renderer);
+  }
+
   // Flush stats session before tearing down the XTC reader.
   globalReadingSessionTracker().end();
 

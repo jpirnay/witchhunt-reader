@@ -255,6 +255,13 @@ void HalDisplay::releaseBuffers() {
 // diffing against the wrong baseline. free=largest contiguous 8-bit block (what a realloc needs).
 static uint32_t fbufContig() { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT); }
 
+// `redSynced=` in the FBUF lines is FreeInkDisplay's advisory RED-RAM flag. It exists for the
+// SSD1677's host-managed previous-frame plane; on X3 the facade never sets it (its baseline is
+// controller DTM1) and isRedRamSynced() hard-returns false there. Printing "0" on X3 reads as a
+// fact about the panel and is not one -- it was misread as the driver's own sync flag once,
+// which cost a debugging cycle. Say n/a where it means nothing.
+static const char* redSyncedLabel(const bool isX3, const bool synced) { return isX3 ? "n/a" : (synced ? "1" : "0"); }
+
 bool HalDisplay::releaseSecondaryBuffer() {
   HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
   // Double-release guard. releaseSecondaryBuffer() returning false means the
@@ -290,8 +297,8 @@ bool HalDisplay::releaseSecondaryBuffer() {
   // decoding a cover, so the cost does not register.
   einkDisplay.syncWriteBufferFromActive();
   const bool ok = einkDisplay.releaseSecondaryBuffer();
-  LOG_INF("FBUF", "releaseSecondary -> %d (hasSecondary=%d redSynced=%d contig=%lu)", ok ? 1 : 0,
-          einkDisplay.hasSecondaryBuffer() ? 1 : 0, einkDisplay.isRedRamSynced() ? 1 : 0,
+  LOG_INF("FBUF", "releaseSecondary -> %d (hasSecondary=%d redSynced=%s contig=%lu)", ok ? 1 : 0,
+          einkDisplay.hasSecondaryBuffer() ? 1 : 0, redSyncedLabel(deviceIsX3(), einkDisplay.isRedRamSynced()),
           static_cast<unsigned long>(fbufContig()));
   return ok;
 }
@@ -299,8 +306,8 @@ bool HalDisplay::releaseSecondaryBuffer() {
 bool HalDisplay::reallocSecondaryBuffer() {
   HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
   const bool ok = einkDisplay.reallocSecondaryBuffer();
-  LOG_INF("FBUF", "reallocSecondary -> %d (hasSecondary=%d redSynced=%d contig=%lu)", ok ? 1 : 0,
-          einkDisplay.hasSecondaryBuffer() ? 1 : 0, einkDisplay.isRedRamSynced() ? 1 : 0,
+  LOG_INF("FBUF", "reallocSecondary -> %d (hasSecondary=%d redSynced=%s contig=%lu)", ok ? 1 : 0,
+          einkDisplay.hasSecondaryBuffer() ? 1 : 0, redSyncedLabel(deviceIsX3(), einkDisplay.isRedRamSynced()),
           static_cast<unsigned long>(fbufContig()));
   return ok;
 }
@@ -337,8 +344,8 @@ bool HalDisplay::returnSecondaryBuffer() {
 }
 
 void HalDisplay::setSingleBufferFastDiff(bool enabled) {
-  LOG_INF("FBUF", "singleBufferFastDiff=%d (hasSecondary=%d redSynced=%d)", enabled ? 1 : 0,
-          einkDisplay.hasSecondaryBuffer() ? 1 : 0, einkDisplay.isRedRamSynced() ? 1 : 0);
+  LOG_INF("FBUF", "singleBufferFastDiff=%d (hasSecondary=%d redSynced=%s)", enabled ? 1 : 0,
+          einkDisplay.hasSecondaryBuffer() ? 1 : 0, redSyncedLabel(deviceIsX3(), einkDisplay.isRedRamSynced()));
   einkDisplay.setSingleBufferFastDiff(enabled);
 }
 
@@ -412,8 +419,8 @@ void HalDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) {
 void HalDisplay::syncRedRamFromFrameBuffer() {
   HalSpiBus::Lock spiLock;
   einkDisplay.syncRedRamFromFrameBuffer();
-  LOG_INF("FBUF", "syncRedRamFromFrameBuffer (hasSecondary=%d redSynced=%d)", einkDisplay.hasSecondaryBuffer() ? 1 : 0,
-          einkDisplay.isRedRamSynced() ? 1 : 0);
+  LOG_INF("FBUF", "syncRedRamFromFrameBuffer (hasSecondary=%d redSynced=%s)", einkDisplay.hasSecondaryBuffer() ? 1 : 0,
+          redSyncedLabel(deviceIsX3(), einkDisplay.isRedRamSynced()));
 }
 
 void HalDisplay::cleanupGrayscaleBuffers(const uint8_t* bwBuffer) {

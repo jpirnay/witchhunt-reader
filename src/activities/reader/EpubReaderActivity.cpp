@@ -1208,8 +1208,9 @@ void EpubReaderActivity::suspendBackgroundWork() {
     // nothing about whether the parse fits between two page turns, so it must
     // not burn the budget that makes B abandon a spine.
     backgroundPreemptCount_ = preemptionsBeforeOverlay;
-    // Discard the pre-rendered next page: it lives in the secondary framebuffer,
-    // which the overlay is about to draw over.
+    // Discard the pre-rendered next page: it lives in the WRITE framebuffer
+    // (renderPageContentOnly draws there, not into the secondary), which is exactly
+    // what the overlay is about to draw over.
     preRenderedPage = {};
   }
   LOG_INF("ERS", "Background work suspended for a dictionary interaction");
