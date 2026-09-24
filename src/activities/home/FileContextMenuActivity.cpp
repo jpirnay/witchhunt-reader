@@ -191,8 +191,7 @@ void FileContextMenuActivity::render(RenderLock&&) {
     const auto slashPos = filePath.rfind('/');
     return (slashPos == std::string::npos) ? filePath : filePath.substr(slashPos + 1);
   }();
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 header.c_str());
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), header.c_str());
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
