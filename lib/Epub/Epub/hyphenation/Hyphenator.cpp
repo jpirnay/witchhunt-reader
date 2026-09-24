@@ -14,7 +14,7 @@ struct Iso639Mapping {
 };
 static constexpr Iso639Mapping kIso639Mappings[] = {{"eng", "en"}, {"fra", "fr"}, {"fre", "fr"}, {"deu", "de"},
                                                     {"ger", "de"}, {"rus", "ru"}, {"spa", "es"}, {"ita", "it"},
-                                                    {"ukr", "uk"}, {"swe", "sv"}, {"pol", "pl"}};
+                                                    {"ukr", "uk"}, {"swe", "sv"}, {"pol", "pl"}, {"por", "pt"}};
 
 const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
 
