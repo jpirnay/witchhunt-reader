@@ -218,8 +218,8 @@ logs `clean` and the ghost is still there, §6 points 1–3 are wrong and the se
 
 | # | Do | Finding | Question |
 |---|---|---|---|
-| T5 | Sleep screen = **Overlay**; turn forward twice quickly, then sleep | D | Is the page under the overlay the one you were reading, or the previous one? |
-| T6 | Sleep screen = **Quick Resume**; sleep, then wake | E | Does the restored frame during the wake show the moon icon? |
+| T5 | Sleep screen = **Overlay**; turn forward twice quickly, then sleep | D | **Done 2026-09-24: okay — the current page.** Which refutes D as stated for AA-on reading: the AA pass ends in `cleanupGrayscaleWithPreviousBuffer()`, whose last step is `memcpy(frameBuffer, frameBufferActive)` — the write buffer is rewritten from the displayed frame after every completed *or aborted* pass (a quick double turn aborts the middle page's pass, which still restores). What D can still mean is narrower: AA off, or a sleep inside the ~0.5 s before the deferred pass runs, with no pre-render. Untested; stays on the re-audit list. |
+| T6 | Sleep screen = **Quick Resume**; sleep, then wake | E | Does the restored frame during the wake show the moon icon? **Still open (2026-09-24).** |
 
 ### The other boards — does the symptom exist there at all?
 
@@ -258,7 +258,7 @@ Decided with the bar "fix only where the evidence is clear; everything else need
 | A | `cleanupGrayscaleWithPreviousBuffer()` fallback is always a plane | host test fails on the fallback, deterministic | **Fixed** — SDK `4a320d6`; upstream PR #117 updated (its `main` still has the unguarded form) |
 | B | return/realloc reseed the secondary while reporting resident | code + my re-reading of a 2026-09-17 T5S3 observation | **Re-audit.** Not fixed |
 | C | pre-render location stated backwards in two comments | code, unambiguous | **Fixed** — comments only |
-| D | `goToSleep()` does no buffer prep (OVERLAY / QUICK_RESUME composite onto the previous frame) | code only; T5 not run by decision | **Re-audit.** Not fixed |
+| D | `goToSleep()` does no buffer prep (OVERLAY / QUICK_RESUME composite onto the previous frame) | T5 run 2026-09-24: **okay** with AA on — the AA cleanup's `memcpy` from the displayed frame explains it | **Refuted as stated; narrowed** to AA-off or pre-pass sleeps. Re-audit before touching. Not fixed |
 | E | Quick Resume persists the post-swap slot | code only; T6 not run by decision | **Re-audit.** Not fixed |
 | F | gray-path entry drops the reader's HALF override | `overridePending=1` on X3, X4, X4 Pro | **Fixed** — `GfxRenderer::beginAbsoluteGrayPass()` consumes it like every other display entry |
 | I | driver declares sync while greys are on the glass | device (T0 + T1), UC8253 | **Fixed** — `_grayOnGlass`, SDK `5efa7ef`; upstream PR #118 (`main` `:370`/`:562` identical) |
