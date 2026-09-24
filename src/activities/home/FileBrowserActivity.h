@@ -48,6 +48,7 @@ class FileBrowserActivity final : public UiListActivity {
   void pageSelection(int direction);
   void createFolderHere();
   void moveToFolder(const std::string& fullPath, const std::string& entry);
+  bool confirmOpensOptions() const;
   void showBrowserOptionsMenu(const std::string& dirEntry = {});
   void activateSelected(bool longPress);
   void resetNavigation(int selected = 0);

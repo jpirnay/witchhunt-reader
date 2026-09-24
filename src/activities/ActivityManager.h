@@ -157,6 +157,7 @@ class ActivityManager {
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToWeather();
+  void goToReadingStats();
   void goHome(std::string focusBookPath = {}, int focusSelectorIndex = -1);
 
   // Replace-with-hint helpers: destroy the current activity before launching the new

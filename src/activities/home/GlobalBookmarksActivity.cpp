@@ -263,8 +263,7 @@ void GlobalBookmarksActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, true);
 
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_GLOBAL_BOOKMARKS));
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_GLOBAL_BOOKMARKS));
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;

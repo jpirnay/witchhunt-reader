@@ -722,6 +722,9 @@ class CrossPointSettings {
   uint8_t useClock = 0;
   // Show the Weather home screen menu item (1 = enabled, 0 = hidden)
   uint8_t useWeather = 1;
+  // Whether the Reading Stats row appears on the home menu. On by default, because a screen
+  // nobody can find is a screen nobody reads; off for anyone who does not want the row.
+  uint8_t showReadingStatsOnHome = 1;
   // Include release candidate builds when checking for OTA updates.
   uint8_t includeBetaUpdates = 0;
   // Accept any TLS certificate on https requests (1 = skip validation).

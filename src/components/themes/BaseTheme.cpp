@@ -11,10 +11,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "I18n.h"
 #include "RecentBooksStore.h"
 #include "UiFontScale.h"
+#include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/themes/ButtonHintLayout.h"
 #include "components/themes/ListTouchBand.h"
@@ -581,15 +583,21 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
   // --- Top "book" card for the current title (selectorIndex == 0) ---
   // When there's no cover image, use fixed size (half screen)
   // When there's cover image, adapt width to image aspect ratio, keep height fixed at 400px
-  const int baseHeight = rect.height;  // Fixed height (400px)
+  const int baseHeight = rect.height;  // The tile height the layout settled on, not the metric
+
+  // The cover thumbnail's height is part of its filename, and HomeActivity generates the file
+  // from this same rect (getHomeCoverRenderHeight). Asking for BaseMetrics::homeCoverHeight
+  // instead is equivalent only while the tile is never trimmed -- and computeHomeScreenLayout
+  // trims it as soon as the menu needs the room, at which point this side asks the card for a
+  // file the other side never wrote and the cover reads "Loading..." for ever.
+  const int coverThumbHeight = std::max(120, rect.height);
 
   int bookWidth, bookX;
   bool hasCoverImage = false;
 
   if (hasContinueReading && !recentBooks[0].coverBmpPath.empty()) {
     // Try to get actual image dimensions from BMP header
-    const std::string coverBmpPath =
-        UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+    const std::string coverBmpPath = UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight);
 
     FsFile file;
     if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
@@ -651,8 +659,7 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // Only load from SD on first render, then use stored buffer
 
     if (hasContinueReading && !recentBooks[0].coverBmpPath.empty() && !coverRendered) {
-      const std::string coverBmpPath =
-          UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, BaseMetrics::values.homeCoverHeight);
+      const std::string coverBmpPath = UITheme::getCoverThumbPath(recentBooks[0].coverBmpPath, coverThumbHeight);
 
       // First time: load cover from SD and render
       FsFile file;
@@ -750,6 +757,19 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       totalTextHeight += renderer.getLineHeight(UI_10_FONT_ID);
     }
 
+    // What you have put into the book, under the title block rather than over the cover art.
+    // The card is a little over half the screen wide, so the sentence gets up to two lines, set
+    // in the non-scaling small face: this block is centred inside a fixed-height card and sits
+    // above the "Continue Reading" label, so it must not grow with the UI font setting.
+    const std::string history = BookProgressPresentation::historyLine(recentBooks[0]);
+    const int historyLineHeight = renderer.getLineHeight(FIT_SMALL_FONT_ID);
+    const auto historyLines = history.empty()
+                                  ? std::vector<std::string>{}
+                                  : renderer.wrappedText(FIT_SMALL_FONT_ID, history.c_str(), bookWidth - 40, 2);
+    if (!historyLines.empty()) {
+      totalTextHeight += historyLineHeight / 2 + static_cast<int>(historyLines.size()) * historyLineHeight;
+    }
+
     // Vertically center the title block within the card
     int titleYStart = bookY + (bookHeight - totalTextHeight) / 2;
 
@@ -783,6 +803,12 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
           maxTextWidth = seriesWidth;
         }
       }
+      for (const auto& line : historyLines) {
+        const int historyWidth = renderer.getTextWidth(FIT_SMALL_FONT_ID, line.c_str());
+        if (historyWidth > maxTextWidth) {
+          maxTextWidth = historyWidth;
+        }
+      }
 
       const int boxWidth = maxTextWidth + boxPadding * 2;
       const int boxHeight = totalTextHeight + boxPadding * 2;
@@ -808,6 +834,15 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
     if (!truncatedSeries.empty()) {
       renderer.drawCenteredText(UI_10_FONT_ID, titleYStart, truncatedSeries.c_str(), !bookSelected);
+      titleYStart += renderer.getLineHeight(UI_10_FONT_ID);
+    }
+
+    if (!historyLines.empty()) {
+      titleYStart += historyLineHeight / 2;
+      for (const auto& line : historyLines) {
+        renderer.drawCenteredText(FIT_SMALL_FONT_ID, titleYStart, line.c_str(), !bookSelected);
+        titleYStart += historyLineHeight;
+      }
     }
 
     // "Continue Reading" label at the bottom

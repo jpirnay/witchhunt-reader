@@ -28,6 +28,7 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/stats.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/usb.h"
@@ -109,6 +110,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return BookIcon;
       case UIIcon::Recent:
         return RecentIcon;
+      case UIIcon::Stats:
+        return StatsIcon;
       case UIIcon::Settings:
         return Settings2Icon;
       case UIIcon::Transfer:
@@ -694,13 +697,50 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
     const int smallLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
     const int titleBlockHeight = titleLineHeight * static_cast<int>(titleLines.size());
-    const int titleAuthorSpacing = (!authorLines.empty() || !seriesLines.empty()) ? (smallLineHeight / 2) : 0;
     const int authorHeight = static_cast<int>(authorLines.size()) * smallLineHeight;
     const int seriesHeight = static_cast<int>(seriesLines.size()) * smallLineHeight;
-    const int statusSpacing = statusLine.empty() ? 0 : (smallLineHeight / 2);
     const int statusHeight = statusLine.empty() ? 0 : smallLineHeight;
-    const int totalBlockHeight =
-        titleBlockHeight + titleAuthorSpacing + authorHeight + seriesHeight + statusSpacing + statusHeight;
+    const bool hasAuthorBlock = !authorLines.empty() || !seriesLines.empty();
+
+    // What you have put into the book, under what is left of it. This column is only the part of
+    // the tile the cover does not use, so the sentence usually needs two lines; it is set in the
+    // non-scaling small face so a larger UI font cannot make the row itself any taller.
+    const std::string history = BookProgressPresentation::historyLine(book);
+    const int historyLineHeight = renderer.getLineHeight(FIT_SMALL_FONT_ID);
+    auto historyLines = history.empty() ? std::vector<std::string>{}
+                                        : renderer.wrappedText(FIT_SMALL_FONT_ID, history.c_str(), textWidth, 2);
+
+    // Spacing gives way before content does.
+    //
+    // At a large UI font the title, author and status fill this tile between them, so anything
+    // that asks whether the history "fits" gets told no every time and the row is simply never
+    // drawn. That is the wrong answer on the one setting that most wants a legible summary. The
+    // gaps between the parts are worth less than the parts, so they are what shrinks: tried in
+    // order, first one that fits wins -- the sentence with roomy gaps, the sentence with tight
+    // ones, the short form with tight ones, and only then nothing.
+    const auto blockHeight = [&](int gap, size_t historyRows) {
+      return titleBlockHeight + (hasAuthorBlock ? gap : 0) + authorHeight + seriesHeight +
+             (statusLine.empty() ? 0 : gap) + statusHeight + (historyRows == 0 ? 0 : gap) +
+             static_cast<int>(historyRows) * historyLineHeight;
+    };
+    constexpr int tightGap = 4;
+    int gap = smallLineHeight / 2;
+    if (!historyLines.empty() && blockHeight(gap, historyLines.size()) > tileHeight) {
+      if (blockHeight(tightGap, historyLines.size()) <= tileHeight) {
+        gap = tightGap;
+      } else {
+        const std::string compact = BookProgressPresentation::historyLineCompact(book);
+        historyLines.clear();
+        if (!compact.empty() && blockHeight(tightGap, 1) <= tileHeight) {
+          gap = tightGap;
+          historyLines.push_back(renderer.truncatedText(FIT_SMALL_FONT_ID, compact.c_str(), textWidth));
+        }
+      }
+    }
+    const int titleAuthorSpacing = hasAuthorBlock ? gap : 0;
+    const int statusSpacing = statusLine.empty() ? 0 : gap;
+    const int historySpacing = historyLines.empty() ? 0 : gap;
+    const int totalBlockHeight = blockHeight(gap, historyLines.size());
     int titleY = tileY + tileHeight / 2 - totalBlockHeight / 2;
     const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
     for (const auto& line : titleLines) {
@@ -721,6 +761,14 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     if (!statusLine.empty()) {
       titleY += statusSpacing;
       renderer.drawText(UI_10_FONT_ID, textX, titleY, statusLine.c_str(), true, EpdFontFamily::BOLD);
+      titleY += smallLineHeight;
+    }
+    if (!historyLines.empty()) {
+      titleY += historySpacing;
+      for (const auto& line : historyLines) {
+        renderer.drawText(FIT_SMALL_FONT_ID, textX, titleY, line.c_str(), true);
+        titleY += historyLineHeight;
+      }
     }
   } else {
     drawEmptyRecents(renderer, rect);

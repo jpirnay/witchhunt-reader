@@ -2,12 +2,15 @@
 
 #include <Epub.h>
 #include <FsHelpers.h>
+#include <HalClock.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <Txt.h>
 #include <Xtc.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <string>
 
 #include "KOReaderDocumentId.h"
@@ -169,6 +172,111 @@ void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& bo
   if (!line2.empty()) {
     renderer.drawText(SMALL_FONT_ID, badgeX + (badgeW - w2) / 2, badgeY + padY + textH + lineGap, line2.c_str(), true);
   }
+}
+
+std::string formatReadingDuration(uint32_t totalSeconds) {
+  const uint32_t h = totalSeconds / 3600;
+  const uint32_t m = (totalSeconds % 3600) / 60;
+  const uint32_t s = totalSeconds % 60;
+  char buf[24];
+  if (h > 0) {
+    snprintf(buf, sizeof(buf), "%uh %02um", h, m);
+  } else if (m > 0) {
+    snprintf(buf, sizeof(buf), "%um %02us", m, s);
+  } else {
+    snprintf(buf, sizeof(buf), "%us", s);
+  }
+  return buf;
+}
+
+std::string formatLastRead(time_t epoch) {
+  if (epoch == 0 || !HalClock::isSynced()) {
+    return {};
+  }
+  const time_t now = HalClock::now();
+  if (now <= epoch) {
+    return "just now";
+  }
+  const uint32_t delta = static_cast<uint32_t>(now - epoch);
+  char buf[24];
+  if (delta < 60) {
+    return "just now";
+  }
+  if (delta < 3600) {
+    snprintf(buf, sizeof(buf), "%um ago", delta / 60);
+    return buf;
+  }
+  if (delta < 86400) {
+    snprintf(buf, sizeof(buf), "%uh ago", delta / 3600);
+    return buf;
+  }
+  const uint32_t days = delta / 86400;
+  if (days < 30) {
+    snprintf(buf, sizeof(buf), "%ud ago", days);
+    return buf;
+  }
+  struct tm t{};
+  localtime_r(&epoch, &t);
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+  return buf;
+}
+
+std::string historyLine(const RecentBook& book) {
+  const BookReadingStats* stats = READING_STATS.findBook(KOReaderDocumentId::calculateFromFilename(book.path));
+  if (stats == nullptr || stats->totalSeconds == 0) {
+    return {};
+  }
+
+  char buf[48];
+  snprintf(buf, sizeof(buf), tr(STR_STATS_READ_FORMAT), formatReadingDuration(stats->totalSeconds).c_str());
+  std::string line = buf;
+
+  // Days the book was opened on, not sittings. Sessions counts every open, so a glance inflates
+  // it and "69 sittings" says nothing; days says how long you have been living with the book,
+  // which is the thing you can feel.
+  //
+  // dayIndex 0 is the bucket for sessions recorded while the clock was not wall-anchored. Those
+  // are real reading but belong to no known day, so they are excluded -- and on a device whose
+  // clock has never synced that leaves nothing to say, so the clause is dropped rather than
+  // claiming zero days.
+  size_t knownDays = 0;
+  for (const auto& day : stats->days) {
+    if (day.dayIndex != 0) ++knownDays;
+  }
+  if (knownDays > 0) {
+    snprintf(buf, sizeof(buf), knownDays == 1 ? tr(STR_STATS_DAY_ONE) : tr(STR_STATS_DAYS_FORMAT),
+             static_cast<unsigned>(knownDays));
+    line += " ";
+    line += buf;
+  }
+  // Dropped rather than shown as unknown: a clock that has never synced would otherwise put
+  // "last read: never" under a book finished yesterday.
+  const std::string last = formatLastRead(stats->lastReadEpoch);
+  if (!last.empty()) {
+    snprintf(buf, sizeof(buf), tr(STR_STATS_LAST_FORMAT), last.c_str());
+    line += " - ";
+    line += buf;
+  }
+  return line;
+}
+
+std::string historyLineCompact(const RecentBook& book) {
+  const BookReadingStats* stats = READING_STATS.findBook(KOReaderDocumentId::calculateFromFilename(book.path));
+  if (stats == nullptr || stats->totalSeconds == 0) {
+    return {};
+  }
+
+  std::string line = formatReadingDuration(stats->totalSeconds);
+  size_t knownDays = 0;
+  for (const auto& day : stats->days) {
+    if (day.dayIndex != 0) ++knownDays;
+  }
+  if (knownDays > 0) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), " · %ud", static_cast<unsigned>(knownDays));
+    line += buf;
+  }
+  return line;
 }
 
 }  // namespace BookProgressPresentation

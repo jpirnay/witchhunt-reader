@@ -16,6 +16,7 @@
 #include "ReadingSessionTracker.h"
 #include "ReadingStats.h"
 #include "ReadingStatsBookListActivity.h"
+#include "components/BookProgressPresentation.h"
 #include "components/CardLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -23,20 +24,7 @@
 namespace {
 
 // "1h 23m" / "23m 45s" / "12s" — compact so a long row fits on the X3.
-std::string formatDuration(uint32_t totalSeconds) {
-  const uint32_t h = totalSeconds / 3600;
-  const uint32_t m = (totalSeconds % 3600) / 60;
-  const uint32_t s = totalSeconds % 60;
-  char buf[24];
-  if (h > 0) {
-    snprintf(buf, sizeof(buf), "%uh %02um", h, m);
-  } else if (m > 0) {
-    snprintf(buf, sizeof(buf), "%um %02us", m, s);
-  } else {
-    snprintf(buf, sizeof(buf), "%us", s);
-  }
-  return buf;
-}
+using BookProgressPresentation::formatReadingDuration;
 
 // Pages per minute, rounded to 1 decimal. Returns "—" when there's not enough
 // data (fewer than a minute total) so we don't display "120.0 ppm" when only
@@ -55,6 +43,9 @@ std::string formatPagesPerMin(uint32_t pages, uint32_t seconds) {
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
+  // See the member: only now is the previous screen gone, so only now is "is the store already
+  // loaded" a question with a lasting answer.
+  statsLoad_.emplace();
   requestUpdate();
 }
 
@@ -102,7 +93,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
   // ---- Live session card ----
   if (tracker.isActive()) {
     layout.card(tr(STR_READING_STATS_CURRENT_SESSION), [&](CardLayout::Body& b) {
-      b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatDuration(tracker.getLiveSeconds()));
+      b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatReadingDuration(tracker.getLiveSeconds()));
       b.rowLR(tr(STR_READING_STATS_PAGES), std::to_string(tracker.getLivePages()));
     });
   }
@@ -127,7 +118,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
                  {curStreak, tr(STR_READING_STATS_STREAK)},
                  {maxStreak, tr(STR_READING_STATS_LONGEST)}}});
 
-    b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatDuration(store.getGlobalTotalSeconds()));
+    b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatReadingDuration(store.getGlobalTotalSeconds()));
     b.rowLR(tr(STR_READING_STATS_PAGES), std::to_string(store.getGlobalTotalPagesTurned()));
     b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN),
             formatPagesPerMin(store.getGlobalTotalPagesTurned(), store.getGlobalTotalSeconds()));
@@ -193,7 +184,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
       const int innerRight = b.innerRight();
       for (size_t i = 0; i < shown; ++i) {
         const auto* bk = sorted[i];
-        const std::string time = formatDuration(bk->totalSeconds);
+        const std::string time = formatReadingDuration(bk->totalSeconds);
         const int timeWidth = renderer.getTextWidth(UI_10_FONT_ID, time.c_str());
         renderer.drawText(UI_10_FONT_ID, innerRight - timeWidth, b.currentY(), time.c_str());
 

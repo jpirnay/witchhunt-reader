@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "RecentBooksStore.h"
+#include "UiFontScale.h"
 #include "components/BookProgressPresentation.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
@@ -30,6 +31,7 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/stats.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/usb.h"
@@ -82,7 +84,9 @@ void recordCarouselCoverTargets(const int screenW, const int screenH, const int 
 
 constexpr int kTitleFontId = UI_12_FONT_ID;
 constexpr int kDotSize = 8;  // px square dot
-constexpr int kDotGap = 6;   // px between dots
+// Breathing room for the history line, which is measured against the screen rather than the cover.
+constexpr int kHistorySideMargin = 10;
+constexpr int kDotGap = 6;  // px between dots
 
 constexpr int kCornerRadius = 6;
 constexpr int kThinOutlineW = 1;    // always-visible outline around centre cover
@@ -105,6 +109,8 @@ const uint8_t* iconBitmapFor(UIIcon icon) {
       return FolderIcon;
     case UIIcon::Recent:
       return RecentIcon;
+    case UIIcon::Stats:
+      return StatsIcon;
     case UIIcon::Transfer:
       return TransferIcon;
     case UIIcon::Settings:
@@ -525,11 +531,12 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     // Clear from the top of the tile down through the author/title text area.
     // Use absolute coordinates so the clear covers the text regardless of what
     // rect.height HomeActivity computed (it may be smaller than homeCoverTileHeight).
-    const int textAreaBottom = centerTileY + kCenterCoverMaxH              // bottom of centre cover
-                               + 8 + kDotSize                              // dots
-                               + 6 + renderer.getLineHeight(kTitleFontId)  // author line
-                               + 2 + renderer.getLineHeight(kTitleFontId)  // title line
-                               + 4;                                        // small margin
+    const int textAreaBottom = centerTileY + kCenterCoverMaxH               // bottom of centre cover
+                               + 8 + kDotSize                               // dots
+                               + 6 + renderer.getLineHeight(kTitleFontId)   // author line
+                               + 2 + renderer.getLineHeight(kTitleFontId)   // title line
+                               + 3 + renderer.getLineHeight(SMALL_FONT_ID)  // history line
+                               + 4;                                         // small margin
     renderer.fillRect(rect.x, rect.y, rect.width, textAreaBottom - rect.y, false);
 
     // Sides first so centre renders on top.
@@ -584,6 +591,31 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
         renderer.truncatedText(kTitleFontId, recentBooks[centerIdx].title.c_str(), kCenterCoverMaxW);
     const int titleW = renderer.getTextWidth(kTitleFontId, titleTrunc.c_str());
     renderer.drawText(kTitleFontId, centerX + (kCenterCoverMaxW - titleW) / 2, titleY, titleTrunc.c_str(), true);
+
+    // What you have put into this book, under what it is. The badge on the cover says what is
+    // left of it; this says what it cost so far. A smaller face on purpose: it is a footnote to
+    // the book, not a third thing competing with the title.
+    //
+    // Centre tile only. The side tiles are thumbnails of where you are going, and a row of
+    // numbers under each would be noise. Empty for a book never opened, and then nothing is
+    // drawn -- the space above is still cleared, so no ghost of a previous book's line remains.
+    const std::string history = BookProgressPresentation::historyLine(recentBooks[centerIdx]);
+    if (!history.empty()) {
+      // Measured against the SCREEN, not the cover. The author and title above are held to the
+      // cover's width so they sit visually inside it, but this line is a sentence rather than a
+      // label: holding it to 340px on a 480px panel threw away 70px a side and cut "last 1m ago"
+      // to "last 1...". Centred on the screen, which is where the cover is centred anyway.
+      const int historyY = titleY + renderer.getLineHeight(kTitleFontId) + 3;
+      const int historyMaxW = screenW - kHistorySideMargin * 2;
+      // Drop a size before clipping, the same order the button hints use: this is a sentence, and
+      // half a sentence tells you less than the whole one a little smaller. FIT_SMALL_FONT_ID
+      // does not move with the UI font setting, which is what makes it a floor to fall back to.
+      const int historyFont =
+          renderer.getTextWidth(SMALL_FONT_ID, history.c_str()) > historyMaxW ? FIT_SMALL_FONT_ID : SMALL_FONT_ID;
+      const std::string historyTrunc = renderer.truncatedText(historyFont, history.c_str(), historyMaxW);
+      const int historyW = renderer.getTextWidth(historyFont, historyTrunc.c_str());
+      renderer.drawText(historyFont, (screenW - historyW) / 2, historyY, historyTrunc.c_str(), true);
+    }
 
     // Only cache the frame buffer once all tiles are definitively resolved.
     // If any cover is still being generated we keep coverRendered=false so the next render will retry.

@@ -13,56 +13,22 @@
 
 #include "MappedInputManager.h"
 #include "ReadingStats.h"
+#include "components/BookProgressPresentation.h"
 #include "components/CardLayout.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
 
-std::string formatDuration(uint32_t totalSeconds) {
-  const uint32_t h = totalSeconds / 3600;
-  const uint32_t m = (totalSeconds % 3600) / 60;
-  const uint32_t s = totalSeconds % 60;
-  char buf[24];
-  if (h > 0) {
-    snprintf(buf, sizeof(buf), "%uh %02um", h, m);
-  } else if (m > 0) {
-    snprintf(buf, sizeof(buf), "%um %02us", m, s);
-  } else {
-    snprintf(buf, sizeof(buf), "%us", s);
-  }
-  return buf;
-}
+using BookProgressPresentation::formatReadingDuration;
 
 // "today", "yesterday", "N days ago", or "YYYY-MM-DD" beyond a month.
 // Returns "—" when epoch is 0 or the clock isn't synced.
 std::string formatDateOrRelative(time_t epoch) {
-  if (epoch == 0 || !HalClock::isSynced()) {
-    return tr(STR_READING_STATS_UNKNOWN);
-  }
-  const time_t now = HalClock::now();
-  if (now <= epoch) return "just now";
-  const uint32_t delta = static_cast<uint32_t>(now - epoch);
-  char buf[24];
-  if (delta < 60) return "just now";
-  if (delta < 3600) {
-    snprintf(buf, sizeof(buf), "%um ago", delta / 60);
-    return buf;
-  }
-  if (delta < 86400) {
-    snprintf(buf, sizeof(buf), "%uh ago", delta / 3600);
-    return buf;
-  }
-  const uint32_t days = delta / 86400;
-  if (days < 30) {
-    snprintf(buf, sizeof(buf), "%ud ago", days);
-    return buf;
-  }
-  // Past a month, the relative form ("60d ago") is noisier than a date.
-  struct tm t{};
-  localtime_r(&epoch, &t);
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
-  return buf;
+  // Same wording as everywhere else; this screen differs only in that an unknown date is worth
+  // saying out loud in a table of dates, where on the home screen it is worth saying nothing.
+  const std::string relative = BookProgressPresentation::formatLastRead(epoch);
+  return relative.empty() ? std::string(tr(STR_READING_STATS_UNKNOWN)) : relative;
 }
 
 std::string formatPagesPerMin(uint32_t pages, uint32_t seconds) {
@@ -138,7 +104,7 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
     layout.card(nullptr, [](CardLayout::Body& b) { b.centeredMessage(tr(STR_READING_STATS_NO_DATA)); });
   } else {
     // ---- Summary card: 4-cell grid (sessions / pages / avg / progress) ----
-    const std::string avgValue = book->sessions > 0 ? formatDuration(book->totalSeconds / book->sessions)
+    const std::string avgValue = book->sessions > 0 ? formatReadingDuration(book->totalSeconds / book->sessions)
                                                     : std::string(tr(STR_READING_STATS_UNKNOWN));
     char pctBuf[8];
     snprintf(pctBuf, sizeof(pctBuf), "%u%%", book->progress);
@@ -152,7 +118,7 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
 
     // ---- Time card ----
     layout.card(tr(STR_READING_STATS_TOTAL_TIME), [&](CardLayout::Body& b) {
-      b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatDuration(book->totalSeconds));
+      b.rowLR(tr(STR_READING_STATS_TOTAL_TIME), formatReadingDuration(book->totalSeconds));
       b.rowLR(tr(STR_READING_STATS_PAGES_PER_MIN), formatPagesPerMin(book->pagesTurned, book->totalSeconds));
       // Time-to-finish estimate based on the user's pace. We display it on the
       // detail screen so the reader sees the projection even when not actively
@@ -161,7 +127,7 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
         const float remainingPercent = 100.0f - static_cast<float>(book->progress);
         const uint32_t etaSeconds = store.estimateRemainingSeconds(book->docId, remainingPercent);
         b.rowLR(tr(STR_READING_STATS_ETA),
-                etaSeconds > 0 ? formatDuration(etaSeconds) : std::string(tr(STR_READING_STATS_UNKNOWN)));
+                etaSeconds > 0 ? formatReadingDuration(etaSeconds) : std::string(tr(STR_READING_STATS_UNKNOWN)));
       }
     });
 

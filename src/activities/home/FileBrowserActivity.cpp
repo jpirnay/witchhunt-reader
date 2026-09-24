@@ -3,6 +3,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -175,6 +176,10 @@ bool FileBrowserActivity::handleCustomInput() {
 
     if (ev.button == MappedInputManager::Button::Confirm &&
         (ev.type == ButtonEventManager::PressType::Short || ev.type == ButtonEventManager::PressType::Long)) {
+      if (confirmOpensOptions()) {
+        openContextMenu();
+        return true;
+      }
       activateSelected(ev.type == ButtonEventManager::PressType::Long);
       return true;
     }
@@ -435,7 +440,10 @@ void FileBrowserActivity::drawFooter() {
     const std::string selectedEntry = model.entryName(static_cast<size_t>(nav.selected));
     selectingFirmwareFile = !selectedEntry.empty() && selectedEntry.back() != '/';
   }
-  const char* confirmLabel = !hasEntries ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
+  const char* confirmLabel = !hasEntries             ? ""
+                             : selectingFirmwareFile ? tr(STR_SELECT)
+                             : confirmOpensOptions() ? tr(STR_OPTIONS)
+                                                     : tr(STR_OPEN);
   // The Options menu is available for every entry in Books mode. The menu always
   // offers the browser display options (sort + visibility); supported files get
   // extra file-specific actions appended. So the hint shows for files and dirs alike.
@@ -445,9 +453,13 @@ void FileBrowserActivity::drawFooter() {
   // to page, so the strip looks exactly as it always did.
   const bool pages = listPages();
   const char* prevLabel = (model.getMode() == Mode::PickFolder) ? tr(STR_NEW) : pages ? tr(STR_LIST_PAGE_PREV) : "";
-  const char* nextLabel = (model.getMode() == Mode::PickFolder) ? tr(STR_MOVE_HERE)
-                          : pages                               ? tr(STR_LIST_PAGE_NEXT)
-                                                                : (showOptionsHint ? tr(STR_OPTIONS) : "");
+  // In a folder small enough not to page, this slot carries Options. Where Confirm already
+  // carries it that would draw the same word twice on one strip, and the second copy would sit on
+  // a slot such a board has no key for.
+  const char* nextLabel = (model.getMode() == Mode::PickFolder)         ? tr(STR_MOVE_HERE)
+                          : pages                                       ? tr(STR_LIST_PAGE_NEXT)
+                          : (showOptionsHint && !confirmOpensOptions()) ? tr(STR_OPTIONS)
+                                                                        : "";
   // Paging is bound to logical Left/Right and stepping to logical Up/Down, so which physical pair
   // carries which — and therefore which hint strip each label belongs on — is the orientation's
   // business, not this screen's.
@@ -568,6 +580,20 @@ void FileBrowserActivity::moveToFolder(const std::string& fullPath, const std::s
         }
         requestUpdate();
       });
+}
+
+// True when Confirm should open the entry's menu rather than the entry itself.
+//
+// Only on a board with no Back or Confirm key. There, Confirm exists solely as a tap -- on a
+// capacitive Home key, or on the hint box -- and every route this screen has to its menu is a
+// HOLD: of logical Right, or of a hint box. Neither is a gesture that hardware can make, so
+// Delete, Info, Move to folder, New Folder and the sort options have no reachable home at all.
+// Opening a file still does: a tap on the row selects it and a second tap opens it, through
+// activateIndex() rather than through this button.
+//
+// A board with the keys keeps Confirm as Open, and its menu one hold of Right away.
+bool FileBrowserActivity::confirmOpensOptions() const {
+  return model.getMode() == Mode::Books && !HalCapabilities::hasBackAndConfirmButtons();
 }
 
 void FileBrowserActivity::showBrowserOptionsMenu(const std::string& dirEntry) {

@@ -34,6 +34,7 @@
 #include "settings/ClockSettingsActivity.h"
 #include "settings/KOReaderSettingsActivity.h"
 #include "settings/OpdsServerListActivity.h"
+#include "settings/ReadingStatsActivity.h"
 #include "settings/SettingsActivity.h"
 #include "settings/SettingsSubmenuActivity.h"
 #include "util/FrontlightPanelActivity.h"
@@ -596,6 +597,10 @@ void ActivityManager::goToFullScreenMessage(std::string message, EpdFontFamily::
 }
 
 void ActivityManager::goToWeather() { replaceActivity(std::make_unique<WeatherActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToReadingStats() {
+  replaceActivity(std::make_unique<ReadingStatsActivity>(renderer, mappedInput));
+}
 
 void ActivityManager::goHome(std::string focusBookPath, int focusSelectorIndex) {
   hasReturnHint = false;
