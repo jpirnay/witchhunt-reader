@@ -5,10 +5,12 @@
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -159,8 +161,23 @@ inline std::vector<SettingInfo> buildSettingsList() {
     return result;
   };
 
+  // Sized to the build so the vector never grows. SettingInfo is 100 bytes on the C3, so growing
+  // past capacity doubles it: a ~20 KB contiguous request made while the old block is still held,
+  // on every settings save and load (JsonSettingsIO rebuilds this list each time). A flat 100 was
+  // outgrown: touch C3 boards were already past it, and an X3 that crossed it aborted a settings
+  // save at contig 23540. The counts are the push_backs in each block; the headroom absorbs a few
+  // new rows, and the log at the end says when it no longer does.
+  constexpr size_t kCommonRows = 97;
+#if CP_TOUCH_UI
+  constexpr size_t kTouchRows = 3 + std::size(TouchGestures::BINDINGS);
+#else
+  constexpr size_t kTouchRows = 0;
+#endif
+  constexpr size_t kKoreaderAutoSyncRows = CROSSPOINT_KOREADER_AUTOSYNC ? 4 : 0;
+  constexpr size_t kHeadroomRows = 8;
+  constexpr size_t kReservedRows = kCommonRows + kTouchRows + kKoreaderAutoSyncRows + kHeadroomRows;
   std::vector<SettingInfo> settings;
-  settings.reserve(100);
+  settings.reserve(kReservedRows);
 
   // --- Display ---
   settings.push_back(SettingInfo::Action(StrId::STR_TIME_TO_SLEEP, SettingAction::SleepTimeoutPicker)
@@ -727,6 +744,10 @@ inline std::vector<SettingInfo> buildSettingsList() {
       {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
       "statusBarLowerProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR));
 
+  if (settings.size() > kReservedRows) {
+    LOG_ERR("SET", "Settings list outgrew its reserve (%u > %u rows): raise kCommonRows",
+            static_cast<unsigned>(settings.size()), static_cast<unsigned>(kReservedRows));
+  }
   return settings;
 }
 
