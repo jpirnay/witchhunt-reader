@@ -11,6 +11,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -70,6 +71,11 @@ void SyncTimeActivity::onEnter() {
 void SyncTimeActivity::onExit() {
   Activity::onExit();
   HalClock::wifiOff(true);
+  // Turning the radio off does not give the heap back: a torn-down session still
+  // ends well below the pre-WiFi baseline. Reboot, as DetectTimezoneActivity does.
+  if (wifiWasUsed_) {
+    silentRestartToClockSettings();
+  }
 }
 
 void SyncTimeActivity::onWifiSelectionComplete(bool success) {
@@ -91,6 +97,7 @@ void SyncTimeActivity::onWifiSelectionComplete(bool success) {
 void SyncTimeActivity::onWifiSelectionCancelled() { finish(); }
 
 void SyncTimeActivity::performSync() {
+  wifiWasUsed_ = true;
   hadTimeBeforeSync = HalClock::isSynced();
   preSyncTime = hadTimeBeforeSync ? time(nullptr) : 0;
   prevSyncTime = HalClock::lastSyncTime();

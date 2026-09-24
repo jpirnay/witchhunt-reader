@@ -1,5 +1,8 @@
 #include "SettingActionDispatch.h"
 
+#include <Logging.h>
+#include <WiFi.h>
+
 #include "BootDiagnosticsActivity.h"
 #include "ButtonActionsOverviewActivity.h"
 #include "ButtonRemapActivity.h"
@@ -20,6 +23,7 @@
 #include "ScreenRepairActivity.h"
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
+#include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
 #include "SwitchToUsbDriveActivity.h"
 #include "SyncTimeActivity.h"
@@ -102,4 +106,12 @@ std::unique_ptr<Activity> createSelectorActivity(const SettingInfo& setting, Gfx
 
   if (setting.type != SettingType::ENUM) return nullptr;
   return std::make_unique<EnumSelectionActivity>(renderer, mappedInput, setting);
+}
+
+void restartToSettingsIfRadioLeftOn() {
+  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+  LOG_DBG("SET", "Settings action left the radio up; rebooting to clear the WiFi heap");
+  WiFi.disconnect(false);
+  delay(30);
+  silentRestartToSettings();
 }

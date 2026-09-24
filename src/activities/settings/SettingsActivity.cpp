@@ -258,17 +258,20 @@ void SettingsActivity::activateIndex(const int index) {
   }
 
   if (setting.type == SettingType::ACTION) {
-    auto resultHandler = [this](const ActivityResult& result) {
+    auto resultHandler = [this](const ActivityResult& result, const bool usedWifi) {
       CrossPointSettings::normalizeDependentSettings(SETTINGS);
       SETTINGS.saveToFile();
+      if (usedWifi) restartToSettingsIfRadioLeftOn();
       needsHalfRefresh = true;
       const auto* menuResult = std::get_if<MenuResult>(&result.data);
       if (menuResult && menuResult->action != -1) {
         auto activity = createActivityForAction(static_cast<SettingAction>(menuResult->action), renderer, mappedInput);
         if (activity) {
-          startActivityForResult(std::move(activity), [this](const ActivityResult&) {
+          const bool nextUsedWifi = activity->usesWifi();
+          startActivityForResult(std::move(activity), [this, nextUsedWifi](const ActivityResult&) {
             CrossPointSettings::normalizeDependentSettings(SETTINGS);
             SETTINGS.saveToFile();
+            if (nextUsedWifi) restartToSettingsIfRadioLeftOn();
             needsHalfRefresh = true;
           });
         }
@@ -285,7 +288,12 @@ void SettingsActivity::activateIndex(const int index) {
       }
     } else {
       auto activity = createActivityForAction(setting.action, renderer, mappedInput);
-      if (activity) startActivityForResult(std::move(activity), resultHandler);
+      if (activity) {
+        const bool usedWifi = activity->usesWifi();
+        startActivityForResult(std::move(activity), [resultHandler, usedWifi](const ActivityResult& result) {
+          resultHandler(result, usedWifi);
+        });
+      }
     }
     return;
   }
