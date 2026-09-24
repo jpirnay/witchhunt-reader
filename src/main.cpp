@@ -1657,6 +1657,9 @@ void loop() {
   // never press a button, and without this the device would sleep under their
   // finger. Always false on non-touch boards.
   static unsigned long lastActivityTime = millis();
+  // Start of the auto-sleep countdown. Follows lastActivityTime, and is additionally held
+  // while the activity asks to stay awake without counting as activity (Activity::keepAwake()).
+  static unsigned long sleepTimerStart = lastActivityTime;
   // isAnyPressed() alongside the edge checks: a button that is DOWN produces no press/release
   // edges, so an edge-only test reads a held finger as an idle device. With IDLE_DOWNCLOCK_MS at
   // 500 ms and ButtonEventManager's long-press at 1000 ms, every long press used to cross the
@@ -1669,6 +1672,11 @@ void loop() {
       halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
+    sleepTimerStart = lastActivityTime;
+  } else if (activityManager.keepAwake()) {
+    // Hold off the sleep timeout only. lastActivityTime also drives the idle governor below, so
+    // stamping it here would pin the CPU at full speed for as long as the activity stays awake.
+    sleepTimerStart = millis();
   }
 
   // Power-hold timer for sleep. Hoisted above the screenshot block so the
@@ -1698,7 +1706,7 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (millis() - lastActivityTime >= sleepTimeoutMs) {
+  if (millis() - sleepTimerStart >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(/*fromTimeout=*/true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
