@@ -100,6 +100,43 @@ constexpr int kHighlightPad = 12;  // horizontal padding around the icon on each
 // Row is anchored to the bottom of the screen, just above button hints. Read live rather than
 // from the constexpr table: the strip grows with the UI font size.
 int buttonHintsHeight() { return UITheme::getInstance().getMetrics().buttonHintsHeight; }
+constexpr int kMenuTileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
+constexpr int kMenuHighlightSize = kMenuIconSize + 2 * kHighlightPad;
+int menuRowY(const GfxRenderer& renderer) { return renderer.getScreenHeight() - buttonHintsHeight() - kMenuTileH; }
+// The highest pixel the icon row ever paints: the selected icon's highlight square, which stands
+// taller than the icons themselves. Text above the row has to end here, not at the icons, or a
+// selected icon covers it.
+int menuInkTop(const GfxRenderer& renderer) { return menuRowY(renderer) + (kMenuTileH - kMenuHighlightSize) / 2; }
+
+// Vertical gaps of the text under the centre cover: dots, author, title, and the history line.
+// The history line comes last and is the one that runs out of room -- the X3 panel is 8 px
+// shorter than the X4's -- so there is a tight spacing to fall back on before giving it up. It
+// buys 14 px from the gaps and from the title face's headroom: inter_ui_12 has ~7 px of accent
+// room above its caps, so a pitch 2 px under the line height still leaves the ink 5 px apart.
+struct CenterTextSpacing {
+  int coverToDots;
+  int dotsToAuthor;
+  int authorToTitle;
+  int titleToHistory;
+};
+constexpr CenterTextSpacing kRelaxedSpacing{8, 6, 2, 3};
+constexpr CenterTextSpacing kTightSpacing{5, 2, -2, 0};
+
+struct CenterTextLayout {
+  int dotsY;
+  int authorY;
+  int titleY;
+  int historyY;
+};
+CenterTextLayout layoutCenterText(const GfxRenderer& renderer, const int coverBottom, const CenterTextSpacing& gaps) {
+  const int lineH = renderer.getLineHeight(kTitleFontId);
+  CenterTextLayout l{};
+  l.dotsY = coverBottom + gaps.coverToDots;
+  l.authorY = l.dotsY + kDotSize + gaps.dotsToAuthor;
+  l.titleY = l.authorY + lineH + gaps.authorToTitle;
+  l.historyY = l.titleY + lineH + gaps.titleToHistory;
+  return l;
+}
 
 int lastCarouselSelectorIndex = -1;
 
@@ -531,12 +568,11 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     // Clear from the top of the tile down through the author/title text area.
     // Use absolute coordinates so the clear covers the text regardless of what
     // rect.height HomeActivity computed (it may be smaller than homeCoverTileHeight).
-    const int textAreaBottom = centerTileY + kCenterCoverMaxH               // bottom of centre cover
-                               + 8 + kDotSize                               // dots
-                               + 6 + renderer.getLineHeight(kTitleFontId)   // author line
-                               + 2 + renderer.getLineHeight(kTitleFontId)   // title line
-                               + 3 + renderer.getLineHeight(SMALL_FONT_ID)  // history line
-                               + 4;                                         // small margin
+    // The relaxed spacing is the taller of the two, so it bounds whichever one gets drawn.
+    const int textAreaBottom =
+        layoutCenterText(renderer, centerTileY + kCenterCoverMaxH, kRelaxedSpacing).historyY  // history line top
+        + renderer.getLineHeight(SMALL_FONT_ID)                                               // history line
+        + 4;                                                                                  // small margin
     renderer.fillRect(rect.x, rect.y, rect.width, textAreaBottom - rect.y, false);
 
     // Sides first so centre renders on top.
@@ -561,37 +597,6 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
                       kCenterCoverMaxH + 2 * kCenterOutlineW, false);
     drawCover(centerIdx, centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH);
 
-    // Progress + pace-based ETA as a badge in the centre cover's top-right corner,
-    // e.g. "62% · ~45m". The large centre cover has room to carry it overlaid.
-    const int centerProgress = BookProgressPresentation::readPercent(recentBooks[centerIdx]);
-    BookProgressPresentation::drawBadge(renderer, Rect{centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH},
-                                        recentBooks[centerIdx], centerProgress);
-
-    // Dots — centred over the cover tile, count = actual book count
-    const int dotsY = centerTileY + kCenterCoverMaxH + 8;
-    const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
-    int dotX = centerX + (kCenterCoverMaxW - totalDotsW) / 2;
-    for (int i = 0; i < bookCount; ++i) {
-      if (i == centerIdx)
-        renderer.fillRect(dotX, dotsY, kDotSize, kDotSize, true);
-      else
-        renderer.drawRect(dotX, dotsY, kDotSize, kDotSize, true);
-      dotX += kDotSize + kDotGap;
-    }
-
-    // Author then title below dots
-    const int authorY = dotsY + kDotSize + 6;
-    const std::string authorTrunc =
-        renderer.truncatedText(kTitleFontId, recentBooks[centerIdx].author.c_str(), kCenterCoverMaxW);
-    const int authorW = renderer.getTextWidth(kTitleFontId, authorTrunc.c_str());
-    renderer.drawText(kTitleFontId, centerX + (kCenterCoverMaxW - authorW) / 2, authorY, authorTrunc.c_str(), true);
-
-    const int titleY = authorY + renderer.getLineHeight(kTitleFontId) + 2;
-    const std::string titleTrunc =
-        renderer.truncatedText(kTitleFontId, recentBooks[centerIdx].title.c_str(), kCenterCoverMaxW);
-    const int titleW = renderer.getTextWidth(kTitleFontId, titleTrunc.c_str());
-    renderer.drawText(kTitleFontId, centerX + (kCenterCoverMaxW - titleW) / 2, titleY, titleTrunc.c_str(), true);
-
     // What you have put into this book, under what it is. The badge on the cover says what is
     // left of it; this says what it cost so far. A smaller face on purpose: it is a footnote to
     // the book, not a third thing competing with the title.
@@ -599,22 +604,72 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
     // Centre tile only. The side tiles are thumbnails of where you are going, and a row of
     // numbers under each would be noise. Empty for a book never opened, and then nothing is
     // drawn -- the space above is still cleared, so no ghost of a previous book's line remains.
-    const std::string history = BookProgressPresentation::historyLine(recentBooks[centerIdx]);
+    //
+    // Measured against the SCREEN, not the cover. The author and title above are held to the
+    // cover's width so they sit visually inside it, but this line is a sentence rather than a
+    // label: holding it to 340px on a 480px panel threw away 70px a side and cut "last 1m ago"
+    // to "last 1...". Centred on the screen, which is where the cover is centred anyway.
+    const RecentBook& centerBook = recentBooks[centerIdx];
+    const std::string history = BookProgressPresentation::historyLine(centerBook);
+    const int historyMaxW = screenW - kHistorySideMargin * 2;
+    // Drop a size before clipping, the same order the button hints use: this is a sentence, and
+    // half a sentence tells you less than the whole one a little smaller. FIT_SMALL_FONT_ID
+    // does not move with the UI font setting, which is what makes it a floor to fall back to.
+    const int historyFont =
+        renderer.getTextWidth(SMALL_FONT_ID, history.c_str()) > historyMaxW ? FIT_SMALL_FONT_ID : SMALL_FONT_ID;
+
+    // It has to end above the icon row, which is anchored to the bottom of the screen, so how
+    // much room it gets depends on the panel height and the UI font size. Relaxed spacing if it
+    // fits, tight spacing if that makes it fit, and otherwise it does not go under the cover at
+    // all: its compact form joins the badge on the cover instead.
+    const int coverBottom = centerTileY + kCenterCoverMaxH;
+    CenterTextLayout text = layoutCenterText(renderer, coverBottom, kRelaxedSpacing);
+    bool historyUnderCover = false;
     if (!history.empty()) {
-      // Measured against the SCREEN, not the cover. The author and title above are held to the
-      // cover's width so they sit visually inside it, but this line is a sentence rather than a
-      // label: holding it to 340px on a 480px panel threw away 70px a side and cut "last 1m ago"
-      // to "last 1...". Centred on the screen, which is where the cover is centred anyway.
-      const int historyY = titleY + renderer.getLineHeight(kTitleFontId) + 3;
-      const int historyMaxW = screenW - kHistorySideMargin * 2;
-      // Drop a size before clipping, the same order the button hints use: this is a sentence, and
-      // half a sentence tells you less than the whole one a little smaller. FIT_SMALL_FONT_ID
-      // does not move with the UI font setting, which is what makes it a floor to fall back to.
-      const int historyFont =
-          renderer.getTextWidth(SMALL_FONT_ID, history.c_str()) > historyMaxW ? FIT_SMALL_FONT_ID : SMALL_FONT_ID;
+      const int floorY = menuInkTop(renderer);
+      const int historyH = renderer.getLineHeight(historyFont);
+      for (const CenterTextSpacing* gaps : {&kRelaxedSpacing, &kTightSpacing}) {
+        const CenterTextLayout candidate = layoutCenterText(renderer, coverBottom, *gaps);
+        if (candidate.historyY + historyH <= floorY) {
+          text = candidate;
+          historyUnderCover = true;
+          break;
+        }
+      }
+    }
+
+    // Progress + pace-based ETA as a badge in the centre cover's top-right corner,
+    // e.g. "62% · ~45m". The large centre cover has room to carry it overlaid.
+    const int centerProgress = BookProgressPresentation::readPercent(centerBook);
+    BookProgressPresentation::drawBadge(
+        renderer, Rect{centerX, centerTileY, kCenterCoverMaxW, kCenterCoverMaxH}, centerBook, centerProgress,
+        historyUnderCover ? std::string{} : BookProgressPresentation::historyLineCompact(centerBook));
+
+    // Dots — centred over the cover tile, count = actual book count
+    const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
+    int dotX = centerX + (kCenterCoverMaxW - totalDotsW) / 2;
+    for (int i = 0; i < bookCount; ++i) {
+      if (i == centerIdx)
+        renderer.fillRect(dotX, text.dotsY, kDotSize, kDotSize, true);
+      else
+        renderer.drawRect(dotX, text.dotsY, kDotSize, kDotSize, true);
+      dotX += kDotSize + kDotGap;
+    }
+
+    // Author then title below dots
+    const std::string authorTrunc = renderer.truncatedText(kTitleFontId, centerBook.author.c_str(), kCenterCoverMaxW);
+    const int authorW = renderer.getTextWidth(kTitleFontId, authorTrunc.c_str());
+    renderer.drawText(kTitleFontId, centerX + (kCenterCoverMaxW - authorW) / 2, text.authorY, authorTrunc.c_str(),
+                      true);
+
+    const std::string titleTrunc = renderer.truncatedText(kTitleFontId, centerBook.title.c_str(), kCenterCoverMaxW);
+    const int titleW = renderer.getTextWidth(kTitleFontId, titleTrunc.c_str());
+    renderer.drawText(kTitleFontId, centerX + (kCenterCoverMaxW - titleW) / 2, text.titleY, titleTrunc.c_str(), true);
+
+    if (historyUnderCover) {
       const std::string historyTrunc = renderer.truncatedText(historyFont, history.c_str(), historyMaxW);
       const int historyW = renderer.getTextWidth(historyFont, historyTrunc.c_str());
-      renderer.drawText(historyFont, (screenW - historyW) / 2, historyY, historyTrunc.c_str(), true);
+      renderer.drawText(historyFont, (screenW - historyW) / 2, text.historyY, historyTrunc.c_str(), true);
     }
 
     // Only cache the frame buffer once all tiles are definitively resolved.
@@ -640,9 +695,9 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
   if (buttonCount <= 0) return;
 
   const int screenW = renderer.getScreenWidth();
-  const int tileH = kMenuIconPad + kMenuIconSize + kMenuIconPad;
+  const int tileH = kMenuTileH;
   // Anchor row just above button hints, ignoring rect.y which may be off-screen for large cover tiles
-  const int rowY = renderer.getScreenHeight() - buttonHintsHeight() - tileH;
+  const int rowY = menuRowY(renderer);
 
   // How many icons fit side-by-side? Each needs at least (kMenuIconSize + 2*kHighlightPad).
   const int minTileW = kMenuIconSize + 2 * kHighlightPad;
@@ -684,7 +739,7 @@ void LyraCarouselTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int but
 
     const bool selected = (selectedIndex == i);
     if (selected) {
-      const int highlightSize = kMenuIconSize + 2 * kHighlightPad;
+      const int highlightSize = kMenuHighlightSize;
       const int highlightY = rowY + (tileH - highlightSize) / 2;
       renderer.fillRoundedRect(iconX - kHighlightPad, highlightY, highlightSize, highlightSize, kCornerRadius,
                                Color::Black);
