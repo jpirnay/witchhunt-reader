@@ -260,9 +260,7 @@ static uint32_t fbufContig() { return heap_caps_get_largest_free_block(MALLOC_CA
 // controller DTM1) and isRedRamSynced() hard-returns false there. Printing "0" on X3 reads as a
 // fact about the panel and is not one -- it was misread as the driver's own sync flag once,
 // which cost a debugging cycle. Say n/a where it means nothing.
-static const char* redSyncedLabel(const bool isX3, const bool synced) {
-  return isX3 ? "n/a" : (synced ? "1" : "0");
-}
+static const char* redSyncedLabel(const bool isX3, const bool synced) { return isX3 ? "n/a" : (synced ? "1" : "0"); }
 
 bool HalDisplay::releaseSecondaryBuffer() {
   HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
