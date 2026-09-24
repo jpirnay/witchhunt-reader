@@ -12,6 +12,7 @@
 
 #include "../Activity.h"
 #include "./FileBrowserActivity.h"
+#include "HomeMenu.h"
 #include "ReadingStats.h"
 #include "activities/reader/ReaderActivity.h"
 #include "components/UITheme.h"
@@ -21,25 +22,6 @@ struct RecentBook;
 struct Rect;
 
 class HomeActivity final : public Activity {
- public:
-  enum class MenuAction {
-    FileBrowser,
-    Recents,
-    ReadingStats,
-    GlobalBookmarks,
-    OpdsBrowser,
-    FileTransfer,
-    Weather,
-    Settings,
-  };
-
- private:
-  struct MenuEntry {
-    MenuAction action;
-    StrId label;
-    UIIcon icon;
-  };
-
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
   int lastCarouselBookIndex = 0;  // remembered position when leaving carousel row
@@ -83,7 +65,7 @@ class HomeActivity final : public Activity {
   int coverRectH = 0;
 
   std::vector<RecentBook> recentBooks;
-  std::vector<MenuEntry> menuEntries;
+  std::vector<HomeMenuEntry> menuEntries;
   bool menuEntriesDirty = true;
 
   std::string focusBookPath;
@@ -93,7 +75,7 @@ class HomeActivity final : public Activity {
   // Tap on a cover or a menu entry: opens it. Returns true when the touch was consumed.
   // Inert on non-touch boards. Reads the targets the active theme published.
   bool handleHomeTouch();
-  void dispatchMenuAction(MenuAction action);
+  void dispatchMenuAction(HomeMenuAction action);
 
   void rebuildMenuEntries();
   bool storeCoverBuffer();

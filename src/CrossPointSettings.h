@@ -720,11 +720,20 @@ class CrossPointSettings {
   // Use clock and keep the LP timer running during deep sleep (GPIO13 HIGH)
   // so time can be accurately restored on wake. Increases sleep current by ~3-4 mA.
   uint8_t useClock = 0;
-  // Show the Weather home screen menu item (1 = enabled, 0 = hidden)
+  // Weather on or off as a feature. Off removes it from the home screen and from "More" alike;
+  // which of the two it sits on is showWeatherOnHome.
   uint8_t useWeather = 1;
-  // Whether the Reading Stats row appears on the home menu. On by default, because a screen
-  // nobody can find is a screen nobody reads; off for anyone who does not want the row.
+  // Which entries sit on the home screen (1) rather than behind its "More" entry (0). An entry
+  // with nothing behind it (no bookmarks, no OPDS server, weather off) shows in neither place.
+  // Settings has no switch: it is where these are turned back on. See HomeMenu.cpp.
+  uint8_t showBrowseFilesOnHome = 1;
+  uint8_t showRecentBooksOnHome = 1;
+  // On by default, because a screen nobody can find is a screen nobody reads.
   uint8_t showReadingStatsOnHome = 1;
+  uint8_t showBookmarksOnHome = 1;
+  uint8_t showOpdsBrowserOnHome = 1;
+  uint8_t showFileTransferOnHome = 1;
+  uint8_t showWeatherOnHome = 1;
   // Include release candidate builds when checking for OTA updates.
   uint8_t includeBetaUpdates = 0;
   // Accept any TLS certificate on https requests (1 = skip validation).
