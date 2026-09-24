@@ -137,6 +137,12 @@ class SdCardFont {
 
     // Full intervals loaded from file (kept in RAM for codepoint lookup)
     EpdUnicodeInterval* fullIntervals = nullptr;
+    // Index of the earlier style whose fullIntervals this style borrows, or -1 when the
+    // table is this style's own allocation. Regular/bold/italic weights of one family
+    // almost always cover the same codepoints, so the tables are byte-identical -- on a
+    // CJK font that is up to 48 KB per style. Only the owner frees; a borrower survives
+    // unloadMetadata() so reloadMetadata() can point it at the owner's new table.
+    int8_t intervalsOwner = -1;
 
     // Persistent kern-class + ligature tables (lazy-loaded on first prewarm).
     // The full kern MATRIX is NOT resident — on Literata-class fonts a single
@@ -256,6 +262,8 @@ class SdCardFont {
   void freeStyleKernLigatureData(PerStyle& s);
   void freeStyleMiniKern(PerStyle& s);
   bool loadStyleKernLigatureData(PerStyle& s, bool ligatureOnly = false);
+  int8_t findIdenticalIntervals(uint8_t styleIdx, HalFile& file);
+  int8_t findIdenticalIntervals(uint8_t styleIdx, const uint8_t* records);
   bool buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, uint32_t cpCount, HalFile& file);
   void applyKernLigaturePointers(const PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
