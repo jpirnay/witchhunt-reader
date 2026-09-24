@@ -141,24 +141,32 @@ std::string formatStatus(const RecentBook& book, int progressPercent) {
   return line;
 }
 
-void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& book, int progressPercent) {
-  if (progressPercent < 0) {
+void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& book, int progressPercent,
+               const std::string& history) {
+  if (progressPercent < 0 && history.empty()) {
     return;
   }
-  // Stacked pill: percent on the first line, pace-based ETA on the second (when
-  // available). Two short lines read narrower than one long "62% · ~45m" string.
-  const std::string line1 = std::to_string(progressPercent) + "%";
-  const std::string line2 = bookEtaSuffix(book, progressPercent);
+  // Stacked pill: percent, then the pace-based ETA, then -- when the caller had no room for it
+  // under the cover -- the compact reading history. Short lines stacked read narrower than one
+  // long "62% · ~45m" string. Any of them may be empty and is then skipped.
+  const std::string percent = progressPercent >= 0 ? std::to_string(progressPercent) + "%" : std::string{};
+  const std::string eta = progressPercent >= 0 ? bookEtaSuffix(book, progressPercent) : std::string{};
+  const std::string* const candidates[] = {&percent, &eta, &history};
+  const std::string* lines[3];
+  int lineCount = 0;
+  int textW = 0;
+  for (const std::string* line : candidates) {
+    if (line->empty()) continue;
+    lines[lineCount++] = line;
+    textW = std::max(textW, renderer.getTextWidth(SMALL_FONT_ID, line->c_str()));
+  }
 
   constexpr int inset = 6;  // clear the cover's rounded corner + selection ring
   constexpr int padX = 6;
   constexpr int padY = 3;
   constexpr int lineGap = 1;
   const int textH = renderer.getLineHeight(SMALL_FONT_ID);
-  const int w1 = renderer.getTextWidth(SMALL_FONT_ID, line1.c_str());
-  const int w2 = line2.empty() ? 0 : renderer.getTextWidth(SMALL_FONT_ID, line2.c_str());
-  const int lineCount = line2.empty() ? 1 : 2;
-  const int badgeW = std::max(w1, w2) + 2 * padX;
+  const int badgeW = textW + 2 * padX;
   const int badgeH = textH * lineCount + lineGap * (lineCount - 1) + 2 * padY;
   const int badgeX = coverRect.x + coverRect.width - badgeW - inset;
   const int badgeY = coverRect.y + inset;
@@ -168,9 +176,10 @@ void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& bo
   // frame separates the pill from light artwork).
   renderer.fillRoundedRect(badgeX, badgeY, badgeW, badgeH, 4, Color::White);
   renderer.drawRoundedRect(badgeX, badgeY, badgeW, badgeH, 1, 4, true);
-  renderer.drawText(SMALL_FONT_ID, badgeX + (badgeW - w1) / 2, badgeY + padY, line1.c_str(), true);
-  if (!line2.empty()) {
-    renderer.drawText(SMALL_FONT_ID, badgeX + (badgeW - w2) / 2, badgeY + padY + textH + lineGap, line2.c_str(), true);
+  for (int i = 0; i < lineCount; ++i) {
+    const int w = renderer.getTextWidth(SMALL_FONT_ID, lines[i]->c_str());
+    renderer.drawText(SMALL_FONT_ID, badgeX + (badgeW - w) / 2, badgeY + padY + i * (textH + lineGap),
+                      lines[i]->c_str(), true);
   }
 }
 

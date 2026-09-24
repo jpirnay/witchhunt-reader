@@ -38,8 +38,11 @@ std::string formatStatus(const RecentBook& book, int progressPercent);
 
 // Draws formatStatus()'s content as a filled pill badge inset into the top-right corner of a
 // cover. Used where the cover is large enough to carry an overlaid label (e.g. the carousel
-// centre cover). Draws nothing when the book has no progress data.
-void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& book, int progressPercent);
+// centre cover). `history` is an optional extra line underneath -- historyLineCompact() for a
+// layout that has no room for the history under the cover. Draws nothing when there is neither
+// progress data nor history.
+void drawBadge(const GfxRenderer& renderer, Rect coverRect, const RecentBook& book, int progressPercent,
+               const std::string& history = {});
 
 // "3h 07m" / "45m 30s" / "12s". The single spelling of a reading duration, shared by the home
 // themes and the two reading-stats screens -- two spellings of the same number read as two
