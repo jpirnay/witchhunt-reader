@@ -197,6 +197,7 @@ class ActivityManager {
   bool inSleepTransition() const { return sleepTransition; }
 
   bool preventAutoSleep() const;
+  bool keepAwake() const;
   // True while the current activity owns the raw SD card (USB Drive). main.cpp
   // consults this to suspend its own loop work — see Activity::requiresExclusiveStorageLoop().
   bool requiresExclusiveStorageLoop() const;
