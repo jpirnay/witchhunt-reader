@@ -136,9 +136,15 @@ void FileBrowserModel::openIndexIfLarge() {
     LOG_ERR("FBR", "FileIndex build failed for %s, falling back to in-RAM sort", basepath.c_str());
     fileIndex = nullptr;
   }
+  rebuildMatches();  // the rows were just renumbered
 }
 
-size_t FileBrowserModel::entryCount() const { return fileIndex ? fileIndex->totalCount() : files.size(); }
+size_t FileBrowserModel::unfilteredEntryCount() const { return fileIndex ? fileIndex->totalCount() : files.size(); }
+
+size_t FileBrowserModel::entryCount() const {
+  if (deepSearch) return deepResults.size();
+  return isFiltered() ? matches.size() : unfilteredEntryCount();
+}
 
 bool FileBrowserModel::indexEntryAt(const size_t displayIndex, FileIndex::Entry& out) {
   if (!fileIndex) return false;
@@ -150,6 +156,17 @@ bool FileBrowserModel::indexEntryAt(const size_t displayIndex, FileIndex::Entry&
 // directory. For the in-RAM backend `files` already stores this form; for the SD
 // index we reconstruct it from the Entry. Out-of-range / index-read failure → "".
 std::string FileBrowserModel::entryName(const size_t displayIndex) {
+  if (deepSearch) {
+    return displayIndex < deepResults.size() ? deepResults[displayIndex] : "";
+  }
+  if (isFiltered()) {
+    if (displayIndex >= matches.size()) return "";
+    return backendEntryName(matches[displayIndex]);
+  }
+  return backendEntryName(displayIndex);
+}
+
+std::string FileBrowserModel::backendEntryName(const size_t displayIndex) {
   FileIndex::Entry e;
   if (indexEntryAt(displayIndex, e)) {
     std::string name(e.name);
@@ -161,6 +178,11 @@ std::string FileBrowserModel::entryName(const size_t displayIndex) {
 }
 
 size_t FileBrowserModel::findEntry(const std::string& name) {
+  if (isFiltered()) {
+    for (size_t i = 0; i < matches.size(); i++)
+      if (backendEntryName(matches[i]) == name) return i;
+    return matches.size();
+  }
   if (fileIndex) {
     // The index stores names without the trailing '/'; strip it for the lookup.
     std::string bare = name;
@@ -174,8 +196,120 @@ size_t FileBrowserModel::findEntry(const std::string& name) {
   return files.size();
 }
 
+void FileBrowserModel::setFilter(std::string query) {
+  // Trim: a stray space from the keyboard should not be the reason nothing matches.
+  while (!query.empty() && query.front() == ' ') query.erase(query.begin());
+  while (!query.empty() && query.back() == ' ') query.pop_back();
+  if (query == filterQuery) return;
+  filterQuery = std::move(query);
+  rebuildMatches();
+}
+
+void FileBrowserModel::rebuildMatches() {
+  matches.clear();
+  if (filterQuery.empty()) {
+    matches.shrink_to_fit();  // an unfiltered browser should not keep the capacity around
+    return;
+  }
+  // ASCII-folded substring match. Deliberately not a full Unicode fold: filenames on these cards
+  // are overwhelmingly ASCII, and a UTF-8 case table costs more flash than the feature does.
+  std::string needle = filterQuery;
+  for (char& c : needle) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+
+  const size_t total = unfilteredEntryCount();
+  for (size_t i = 0; i < total && matches.size() < MAX_MATCHES; i++) {
+    std::string name = backendEntryName(i);
+    if (name.empty()) continue;
+    if (name.back() == '/') name.pop_back();  // match on the name, not the marker
+    for (char& c : name) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (name.find(needle) != std::string::npos) matches.push_back(static_cast<uint32_t>(i));
+  }
+}
+
+std::string FileBrowserModel::entryFullPath(const size_t displayIndex) {
+  const std::string name = entryName(displayIndex);
+  if (name.empty()) return "";
+  const std::string& base = deepSearch ? deepRoot : basepath;
+  std::string full = base;
+  if (full.empty() || full.back() != '/') full += '/';
+  full += name;
+  if (!full.empty() && full.back() == '/') full.pop_back();  // directories carry a marker
+  return full;
+}
+
+std::string FileBrowserModel::resultFolder(const size_t displayIndex) {
+  if (!deepSearch || displayIndex >= deepResults.size()) return "";
+  const std::string& rel = deepResults[displayIndex];
+  const size_t slash = rel.rfind('/');
+  if (slash == std::string::npos) return deepRoot;  // it sat in the search root
+  std::string folder = deepRoot;
+  if (folder.empty() || folder.back() != '/') folder += '/';
+  folder += rel.substr(0, slash);
+  return folder;
+}
+
+void FileBrowserModel::searchEverywhere(const std::string& query) {
+  clearDeepSearch();
+  if (query.empty()) return;
+
+  std::string needle = query;
+  for (char& c : needle) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+
+  deepRoot = basepath;
+  deepSearch = true;
+
+  // Explicit stack, not recursion: the depth of a card is not ours to choose, and the reader's
+  // task stack is not the place to find out. Same shape the browser's recursive delete uses.
+  std::vector<std::string> pending;
+  pending.push_back(basepath);
+
+  char name[500];
+  while (!pending.empty() && deepResults.size() < MAX_DEEP_RESULTS) {
+    const std::string dirPath = std::move(pending.back());
+    pending.pop_back();
+
+    auto dir = Storage.open(dirPath.c_str());
+    if (!dir || !dir.isDirectory()) {
+      if (dir) dir.close();
+      continue;
+    }
+    dir.rewindDirectory();
+    for (auto entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+      entry.getName(name, sizeof(name));
+      const bool isDir = entry.isDirectory();
+      entry.close();
+      // "." and ".." always; anything else beginning with a dot only when the browser is
+      // showing hidden files, so a search sees exactly what browsing would.
+      if (name[0] == '.') {
+        const bool dotdot = (name[1] == '\0') || (name[1] == '.' && name[2] == '\0');
+        if (dotdot || !SETTINGS.showHiddenFiles) continue;
+      }
+      std::string child = dirPath;
+      if (child.empty() || child.back() != '/') child += '/';
+      child += name;
+      if (isDir) {
+        pending.push_back(std::move(child));
+        continue;
+      }
+      if (!acceptEntry(name, false)) continue;
+      std::string folded = name;
+      for (char& c : folded) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+      if (folded.find(needle) == std::string::npos) continue;
+      if (deepResults.size() >= MAX_DEEP_RESULTS) {
+        deepTruncated = true;
+        break;
+      }
+      // Stored relative to the root, so the row shows which folder it came from.
+      deepResults.push_back(child.substr(deepRoot.size() + (deepRoot.back() == '/' ? 0 : 1)));
+    }
+    dir.close();
+  }
+  if (!pending.empty() && deepResults.size() >= MAX_DEEP_RESULTS) deepTruncated = true;
+}
+
 void FileBrowserModel::resort() {
   if (fileIndex) return;  // the index is ordered at build time; see the header.
+  // Whatever happens below renumbers the rows, so the match list is rebuilt at the end.
   // Create index array to preserve metadata array alignment
   std::vector<size_t> indices(files.size());
   for (size_t i = 0; i < files.size(); ++i) indices[i] = i;
@@ -266,12 +400,17 @@ void FileBrowserModel::resort() {
   files = std::move(sorted_files);
   fileSizes = std::move(sorted_sizes);
   fileDateTimes = std::move(sorted_dateTimes);
+  rebuildMatches();  // the rows were just renumbered
 }
 
 void FileBrowserModel::clear() {
   files.clear();
   fileSizes.clear();
   fileDateTimes.clear();
+  filterQuery.clear();
+  matches.clear();
+  matches.shrink_to_fit();
+  clearDeepSearch();
   if (fileIndex) fileIndex->close();
   fileIndex = nullptr;
 }
