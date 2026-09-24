@@ -31,6 +31,7 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/stats.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/usb.h"
@@ -108,6 +109,8 @@ const uint8_t* iconBitmapFor(UIIcon icon) {
       return FolderIcon;
     case UIIcon::Recent:
       return RecentIcon;
+    case UIIcon::Stats:
+      return StatsIcon;
     case UIIcon::Transfer:
       return TransferIcon;
     case UIIcon::Settings:

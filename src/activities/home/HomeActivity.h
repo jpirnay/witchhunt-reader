@@ -25,6 +25,7 @@ class HomeActivity final : public Activity {
   enum class MenuAction {
     FileBrowser,
     Recents,
+    ReadingStats,
     GlobalBookmarks,
     OpdsBrowser,
     FileTransfer,

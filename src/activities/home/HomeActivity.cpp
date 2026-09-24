@@ -120,10 +120,21 @@ int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
 // dispatches Confirm based on action) and render() (which draws labels/icons).
 void HomeActivity::rebuildMenuEntries() {
   menuEntries.clear();
-  menuEntries.reserve(7);
+  menuEntries.reserve(8);
 
   menuEntries.push_back({MenuAction::FileBrowser, StrId::STR_BROWSE_FILES, Folder});
   menuEntries.push_back({MenuAction::Recents, StrId::STR_MENU_RECENT_BOOKS, Recent});
+  // Beside Recent Books rather than down in Settings: both answer "what have I been reading",
+  // and a screen nobody can find is a screen nobody reads.
+  //
+  // Unconditional on purpose. Hiding it until there was history would mean asking the stats
+  // store, which is deliberately not resident -- loaded on demand and released to give the heap
+  // back -- and rebuildMenuEntries() runs both inside and outside that window. Outside it every
+  // accessor reads zero, so the row would come and go depending on which rebuild ran last. The
+  // screen already says so plainly when there is nothing to show.
+  if (SETTINGS.showReadingStatsOnHome) {
+    menuEntries.push_back({MenuAction::ReadingStats, StrId::STR_READING_STATS, Stats});
+  }
   if (!GLOBAL_BOOKMARKS.isEmpty()) {
     menuEntries.push_back({MenuAction::GlobalBookmarks, StrId::STR_GLOBAL_BOOKMARKS, Book});
   }
@@ -1103,6 +1114,9 @@ void HomeActivity::dispatchMenuAction(MenuAction action) {
       break;
     case MenuAction::FileTransfer:
       activityManager.goToFileTransfer();
+      break;
+    case MenuAction::ReadingStats:
+      activityManager.goToReadingStats();
       break;
     case MenuAction::Weather:
       activityManager.goToWeather();

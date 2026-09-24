@@ -28,6 +28,7 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/stats.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/usb.h"
@@ -109,6 +110,8 @@ const uint8_t* LyraTheme::iconForName(UIIcon icon, int size) {
         return BookIcon;
       case UIIcon::Recent:
         return RecentIcon;
+      case UIIcon::Stats:
+        return StatsIcon;
       case UIIcon::Settings:
         return Settings2Icon;
       case UIIcon::Transfer:

@@ -43,6 +43,9 @@ std::string formatPagesPerMin(uint32_t pages, uint32_t seconds) {
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
+  // See the member: only now is the previous screen gone, so only now is "is the store already
+  // loaded" a question with a lasting answer.
+  statsLoad_.emplace();
   requestUpdate();
 }
 
