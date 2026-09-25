@@ -37,8 +37,11 @@ class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
   // The same walk over a reader the caller has already opened on the entry, for a caller that
   // holds the archive and the entry's central-directory stat (the image manifest) — no second
   // ZipFile, no second central-directory scan. The reader's ring is the only memory involved.
+  // needMore (optional): set when the stream ENDED with the marker chain still consistent -- a
+  // reader opened with an output cap stopped before SOF, and a longer read would find it -- as
+  // distinct from a header no read can fix (bad SOI, SOS before SOF, corrupt lengths).
   static bool getDimensionsFromEntryReader(ZipFile::EntryReader& reader, ImageDimensions& out,
-                                           JpegMode* outMode = nullptr);
+                                           JpegMode* outMode = nullptr, bool* needMore = nullptr);
 
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 

@@ -762,18 +762,13 @@ bool ChapterHtmlSlimParser::heapAllowsImageHeaderRead() const {
   return ok;
 }
 
-bool ChapterHtmlSlimParser::heapAllowsImageWalk(const size_t walkBytes) const {
+size_t ChapterHtmlSlimParser::imageWalkBudget() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
   // The ring is one contiguous block, so contig is the hard bar; free keeps the same margin the
   // header-read gate keeps for the paragraph fallback, on top of what the walk itself takes.
-  const bool ok =
-      freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER + walkBytes && maxAllocHeap >= walkBytes + LARGEST_FREE_BLOCK_SLACK;
-  if (!ok) {
-    LOG_DBG("EHP", "Skipping image header walk (%u bytes; %u free, %u max alloc); image deferred to build end",
-            static_cast<unsigned>(walkBytes), freeHeap, maxAllocHeap);
-  }
-  return ok;
+  if (freeHeap <= MIN_FREE_HEAP_FOR_IMAGE_HEADER || maxAllocHeap <= LARGEST_FREE_BLOCK_SLACK) return 1;
+  return std::min<size_t>(freeHeap - MIN_FREE_HEAP_FOR_IMAGE_HEADER, maxAllocHeap - LARGEST_FREE_BLOCK_SLACK);
 }
 
 bool ChapterHtmlSlimParser::recoverHeapForImageHeader() {
@@ -1767,27 +1762,36 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   break;
                 case EpubImageManifest::Resolve::Deferred: {
                   // A valid JPEG whose SOF lies beyond the probe window (Exif/IPTC/XMP/ICC ahead
-                  // of it — ~29 KB per image in the #249 book). Reaching it means walking the
-                  // entry through an inflate ring sized to the entry, up to 32 KB contiguous —
-                  // the block the C3 cannot promise mid-parse: on the reporter's X3 the ring
-                  // OOMed at page 54 of a 58-page chapter and the alt text was cached as if the
-                  // file were corrupt. Walk now only when contiguous heap really covers it;
-                  // otherwise latch provisional and let the build's end resolve it
-                  // (Epub::persistImageManifest), after which the caller rebuilds clean.
-                  const size_t walkBytes = self->imageManifest->deferredWalkBytes(resolvedPath);
-                  if (self->heapAllowsImageWalk(walkBytes) ||
-                      (self->recoverHeapForImageHeader() && self->heapAllowsImageWalk(walkBytes))) {
-                    if (self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, entry)) {
-                      dims.width = entry->width;
-                      dims.height = entry->height;
-                      dimsOk = true;
-                    } else {
-                      // The ring was refused after all, or the walk found nothing: both are
-                      // retried at the build's end, so neither may be cached as final.
-                      self->imageHeaderSkippedForHeap = true;
-                      imageDeferred = true;
-                    }
+                  // of it — 10-29 KB per image in the books this was measured on). Reaching it
+                  // means walking the entry through an inflate ring: 16 KB for the first stage,
+                  // the entry's size (≤32 KB) only when the header runs past that. The heap is
+                  // asked for exactly the stage the walk takes, within what it can spare now
+                  // (imageWalkBudget); a stage that does not fit is latched provisional and left
+                  // to the build's end (Epub::persistImageManifest), after which the caller
+                  // rebuilds clean. On the reporter's X3 the old entry-sized ring OOMed at page
+                  // 54 of a 58-page chapter and the alt text was cached as if the file were
+                  // corrupt.
+                  using Walk = EpubImageManifest::Walk;
+                  Walk walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, entry,
+                                                                      self->imageWalkBudget());
+                  if (walk == Walk::NeedsHeap && self->recoverHeapForImageHeader()) {
+                    walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, entry,
+                                                                   self->imageWalkBudget());
+                  }
+                  if (walk == Walk::Resolved) {
+                    dims.width = entry->width;
+                    dims.height = entry->height;
+                    dimsOk = true;
                   } else {
+                    // The ring did not fit, or the walk found nothing: both are retried at the
+                    // build's end, so neither may be cached as final.
+                    if (walk == Walk::NeedsHeap) {
+                      LOG_DBG("EHP",
+                              "Image header walk deferred to build end (%u bytes for its first stage; %u free, %u max "
+                              "alloc)",
+                              static_cast<unsigned>(self->imageManifest->deferredWalkBytes(resolvedPath)),
+                              ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+                    }
                     self->imageHeaderSkippedForHeap = true;
                     imageDeferred = true;
                   }

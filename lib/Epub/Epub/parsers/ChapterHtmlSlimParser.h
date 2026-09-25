@@ -488,7 +488,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Gate for the streaming header walk of a deferred image: walkBytes is what the walk will
   // allocate (EpubImageManifest::deferredWalkBytes — one contiguous inflate ring of up to 32 KB
   // plus its read chunk), so contiguous heap is the hard bar.
-  bool heapAllowsImageWalk(size_t walkBytes) const;
+  // Contiguous heap a deferred image's walk may take right now (never 0: 0 would mean "no
+  // limit" to the manifest). See EpubImageManifest::resolveDeferredNow.
+  size_t imageWalkBudget() const;
   // Last resort before an image degrades to alt text: drop the rebuildable SD-font
   // glyph caches, which are usually what is holding the contiguous space the header
   // read needs. One shot per parse — once they are gone there is nothing left to

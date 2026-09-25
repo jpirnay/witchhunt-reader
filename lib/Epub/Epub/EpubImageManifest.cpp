@@ -218,69 +218,97 @@ const EpubImageManifest::PendingImage* EpubImageManifest::findPending(const std:
 
 bool EpubImageManifest::hasPending() const { return !pending_.empty(); }
 
-size_t EpubImageManifest::walkBytesFor(const ZipFile::FileStatSlim& stat) {
-  // EntryReader::open: the read chunk, plus — for a deflated entry — a ring sized to the entry.
-  // A stored entry needs no ring; its walk is a seek.
+size_t EpubImageManifest::walkBytesFor(const ZipFile::FileStatSlim& stat, const size_t outputCap) {
+  // EntryReader::open(stat, cap): the read chunk, plus — for a deflated entry — a ring sized to
+  // what will be read. A stored entry needs no ring; its walk is a seek.
   constexpr uint16_t kZipMethodStored = 0;
-  const size_t ring = stat.method == kZipMethodStored ? 0 : InflateReader::ringSizeFor(stat.uncompressedSize);
+  const size_t expected = outputCap == 0 ? stat.uncompressedSize : std::min<size_t>(stat.uncompressedSize, outputCap);
+  const size_t ring = stat.method == kZipMethodStored ? 0 : InflateReader::ringSizeFor(expected);
   return kWalkChunkBytes + ring;
 }
 
 size_t EpubImageManifest::deferredWalkBytes(const std::string& epubEntryPath) const {
   const PendingImage* p = findPending(epubEntryPath);
-  return p ? walkBytesFor(p->stat) : 0;
+  return p ? walkBytesFor(p->stat, kWalkStageBytes) : 0;
 }
 
-bool EpubImageManifest::walkEntry(const ZipFile::FileStatSlim& stat, ImageDimensions& dims, BuildArena* arena) {
-  if (!resolveZip_ || (!resolveZip_->isOpen() && !resolveZip_->open())) return false;
-  // walkBytesFor(stat) for this call only — carved from `arena` as a scoped block when given,
-  // else on the heap. EntryReader::open allocates nothrow, logs the exact shortfall and returns
-  // false. Its own file handle, so the resolve zip's central-directory cursor is untouched.
-  ZipFile::EntryReader reader(*resolveZip_, kWalkChunkBytes, arena);
-  if (!reader.open(stat)) return false;
-  return JpegToFramebufferConverter::getDimensionsFromEntryReader(reader, dims) && dims.width > 0 && dims.height > 0;
+EpubImageManifest::Walk EpubImageManifest::walkEntry(const ZipFile::FileStatSlim& stat, ImageDimensions& dims,
+                                                     BuildArena* arena, const size_t heapBudget) {
+  if (!resolveZip_ || (!resolveZip_->isOpen() && !resolveZip_->open())) return Walk::NeedsHeap;
+  // Stage caps: the leading kWalkStageBytes, then the whole entry. The second stage is only
+  // reached when the first ended with the marker chain still consistent (needMore), and is
+  // skipped when the first already covered the entry.
+  const size_t caps[2] = {kWalkStageBytes, 0};
+  for (const size_t cap : caps) {
+    if (cap != 0 && cap >= stat.uncompressedSize) {
+      // The stage would read the whole entry: identical to the final stage, so run that one.
+      continue;
+    }
+    const size_t need = walkBytesFor(stat, cap);
+    // Prefer the caller's arena: the borrowed secondary framebuffer, idle once its build is
+    // finished, is the only region of full-ring size a C3 reader session ever has. EntryReader
+    // reserves a block and releases it on close, so the arena is left as found. Without an arena
+    // (or one too small) the heap must cover it, within the caller's budget.
+    BuildArena* stageArena = nullptr;
+    if (arena && arena->valid() && arena->capacity() - arena->used() >= need + 2 * alignof(std::max_align_t)) {
+      stageArena = arena;
+    }
+    if (!stageArena && heapBudget != 0 && need > heapBudget) {
+      LOG_DBG("IMF", "walk stage %u: needs %u contiguous, budget %u", static_cast<unsigned>(cap),
+              static_cast<unsigned>(need), static_cast<unsigned>(heapBudget));
+      return Walk::NeedsHeap;
+    }
+    // Its own file handle, so the resolve zip's central-directory cursor is untouched.
+    // EntryReader::open allocates nothrow, logs the exact shortfall and returns false.
+    ZipFile::EntryReader reader(*resolveZip_, kWalkChunkBytes, stageArena);
+    if (!reader.open(stat, cap)) return Walk::NeedsHeap;
+    bool needMore = false;
+    if (JpegToFramebufferConverter::getDimensionsFromEntryReader(reader, dims, nullptr, &needMore) && dims.width > 0 &&
+        dims.height > 0) {
+      return Walk::Resolved;
+    }
+    if (!needMore || cap == 0) return Walk::Unreadable;
+  }
+  return Walk::Unreadable;
 }
 
-bool EpubImageManifest::resolveDeferredNow(const std::string& epubPath, const std::string& epubEntryPath,
-                                           const ImageManifestEntry*& out) {
+EpubImageManifest::Walk EpubImageManifest::resolveDeferredNow(const std::string& epubPath,
+                                                              const std::string& epubEntryPath,
+                                                              const ImageManifestEntry*& out, const size_t heapBudget) {
   out = nullptr;
   const PendingImage* p = findPending(epubEntryPath);
-  if (!p) return false;
-  if (!openResolveZip(epubPath)) return false;
+  if (!p) return Walk::Unreadable;
+  if (!openResolveZip(epubPath)) return Walk::NeedsHeap;
   ImageDimensions dims = {0, 0};
-  if (!walkEntry(p->stat, dims, nullptr)) return false;
+  const Walk walk = walkEntry(p->stat, dims, nullptr, heapBudget);
+  if (walk != Walk::Resolved) return walk;
   out = insertEntry(epubEntryPath, dims);
   pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
                                 [&](const PendingImage& q) { return q.epubEntryPath == epubEntryPath; }),
                  pending_.end());
-  return true;
+  return Walk::Resolved;
 }
 
 size_t EpubImageManifest::resolvePending(BuildArena* walkArena) {
   size_t resolved = 0;
   for (const auto& p : pending_) {
-    const size_t need = walkBytesFor(p.stat);
-    // Prefer the caller's arena: the borrowed secondary framebuffer, idle once its build is
-    // finished, is the only region of ring size a C3 reader session ever has — device-measured
-    // (#249), reader-time contiguous heap tops out around 31.7 KB against a 33.3 KB walk, at
-    // every moment including this one. EntryReader reserves a block and releases it on close, so
-    // the arena is left as found. Without an arena (or one too small) the heap must cover it.
-    BuildArena* arena = nullptr;
-    if (walkArena && walkArena->valid() &&
-        walkArena->capacity() - walkArena->used() >= need + 2 * alignof(std::max_align_t)) {
-      arena = walkArena;
-    }
-    if (!arena && ESP.getMaxAllocHeap() < need + kWalkHeapSlack) {
-      LOG_DBG("IMF", "resolvePending: %s needs %u contiguous, have %u; left for a later build", p.epubEntryPath.c_str(),
-              static_cast<unsigned>(need), static_cast<unsigned>(ESP.getMaxAllocHeap()));
-      continue;
-    }
+    // Largest-free-block readings land a few bytes under the round number (allocator
+    // bookkeeping), so the heap budget sits just under what the allocator reports.
+    const uint32_t maxAlloc = ESP.getMaxAllocHeap();
+    const size_t heapBudget = maxAlloc > kWalkHeapSlack ? maxAlloc - kWalkHeapSlack : 1;
     ImageDimensions dims = {0, 0};
-    if (walkEntry(p.stat, dims, arena)) {
-      insertEntry(p.epubEntryPath, dims);
-      ++resolved;
-    } else {
-      LOG_DBG("IMF", "resolvePending: no dimensions for %s", p.epubEntryPath.c_str());
+    switch (walkEntry(p.stat, dims, walkArena, heapBudget)) {
+      case Walk::Resolved:
+        insertEntry(p.epubEntryPath, dims);
+        ++resolved;
+        break;
+      case Walk::NeedsHeap:
+        LOG_DBG("IMF", "resolvePending: %s: no room for its walk (have %u contiguous); left for a later build",
+                p.epubEntryPath.c_str(), static_cast<unsigned>(maxAlloc));
+        break;
+      case Walk::Unreadable:
+        LOG_DBG("IMF", "resolvePending: no dimensions for %s", p.epubEntryPath.c_str());
+        break;
     }
   }
   // Unresolved ones are re-queued by the next build's miss; holding them here would only keep

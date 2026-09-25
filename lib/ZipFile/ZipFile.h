@@ -150,6 +150,12 @@ class ZipFile {
     // central-directory scan loadFileStatSlim performs. Closes any previously
     // open entry first.
     bool open(const FileStatSlim& fileStat);
+    // Same, reading at most `outputCap` bytes of the entry (0 = all of it): step() reports done at
+    // the cap. A deflate back-reference never reaches further back than the bytes produced so far,
+    // so the inflate ring is sized to min(entry, cap) instead of the entry -- a header walk that
+    // stops 16 KB into a 400 KB JPEG costs a 16 KB ring, not 32 KB. Budget per open:
+    // chunkSize + InflateReader::ringSizeFor(min(entry, cap)) + alignment.
+    bool open(const FileStatSlim& fileStat, size_t outputCap);
 
     // Decompress up to `cap` bytes into `out`. Sets `*produced` to the number
     // of bytes written and `*done` to true when the entry is exhausted.

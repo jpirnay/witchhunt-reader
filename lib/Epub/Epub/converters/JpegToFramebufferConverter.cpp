@@ -1160,7 +1160,8 @@ bool JpegToFramebufferConverter::getDimensionsFromZipEntryStreaming(const std::s
 }
 
 bool JpegToFramebufferConverter::getDimensionsFromEntryReader(ZipFile::EntryReader& reader, ImageDimensions& out,
-                                                              JpegMode* outMode) {
+                                                              JpegMode* outMode, bool* needMore) {
+  if (needMore) *needMore = false;
   if (!reader.isOpen()) return false;
 
   // Pull decompressed bytes one chunk at a time. Segment bodies are skipped byte-by-byte
@@ -1169,37 +1170,47 @@ bool JpegToFramebufferConverter::getDimensionsFromEntryReader(ZipFile::EntryRead
   size_t chunkLen = 0;
   size_t chunkPos = 0;
   bool streamDone = false;
+  bool endedClean = false;  // ran out of bytes with no read error: the header continues past the cap
   auto nextByte = [&](uint8_t& b) -> bool {
     while (chunkPos >= chunkLen) {
-      if (streamDone) return false;
+      if (streamDone) {
+        endedClean = true;
+        return false;
+      }
       size_t produced = 0;
       bool done = false;
       if (!reader.step(chunk, sizeof(chunk), &produced, &done)) return false;
       chunkLen = produced;
       chunkPos = 0;
       streamDone = done;
-      if (produced == 0 && done) return false;
     }
     b = chunk[chunkPos++];
     return true;
   };
+  // A structure-consistent end of data is only "needMore" when the reader was capped short of the
+  // entry; an entry read to its real end with no SOF is unreadable.
+  auto outOfBytes = [&]() -> bool {
+    if (needMore && endedClean && reader.bytesProduced() < reader.inflatedSize()) *needMore = true;
+    return false;
+  };
 
   uint8_t b0 = 0, b1 = 0;
-  if (!nextByte(b0) || !nextByte(b1) || b0 != 0xFF || b1 != 0xD8) return false;  // SOI
+  if (!nextByte(b0) || !nextByte(b1)) return outOfBytes();
+  if (b0 != 0xFF || b1 != 0xD8) return false;  // SOI
 
   while (true) {
     uint8_t b = 0;
-    if (!nextByte(b)) return false;
+    if (!nextByte(b)) return outOfBytes();
     if (b != 0xFF) continue;  // resync to next marker prefix
     uint8_t marker = 0;
     do {
-      if (!nextByte(marker)) return false;  // skip fill bytes
+      if (!nextByte(marker)) return outOfBytes();  // skip fill bytes
     } while (marker == 0xFF);
     // Standalone markers carry no length payload.
     if (marker == 0x00 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD9)) continue;
 
     uint8_t l0 = 0, l1 = 0;
-    if (!nextByte(l0) || !nextByte(l1)) return false;
+    if (!nextByte(l0) || !nextByte(l1)) return outOfBytes();
     const uint16_t segLen = (static_cast<uint16_t>(l0) << 8) | l1;
     if (segLen < 2) return false;
 
@@ -1208,7 +1219,7 @@ bool JpegToFramebufferConverter::getDimensionsFromEntryReader(ZipFile::EntryRead
     if (isSof) {
       uint8_t sof[5] = {0};  // precision, height(hi,lo), width(hi,lo)
       for (uint8_t& s : sof)
-        if (!nextByte(s)) return false;
+        if (!nextByte(s)) return outOfBytes();
       const uint16_t h = (static_cast<uint16_t>(sof[1]) << 8) | sof[2];
       const uint16_t w = (static_cast<uint16_t>(sof[3]) << 8) | sof[4];
       if (w == 0 || h == 0 || w > 0x7FFF || h > 0x7FFF) return false;
@@ -1221,7 +1232,7 @@ bool JpegToFramebufferConverter::getDimensionsFromEntryReader(ZipFile::EntryRead
 
     for (uint16_t i = 0; i < segLen - 2; i++) {
       uint8_t skip = 0;
-      if (!nextByte(skip)) return false;
+      if (!nextByte(skip)) return outOfBytes();
     }
   }
 }

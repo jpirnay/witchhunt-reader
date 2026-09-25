@@ -38,6 +38,11 @@ const char* kBook = CORPUS_DIR "/test_jpeg_metadata_heavy.epub";
 const char* kEntry = "OEBPS/images/photo.jpg";
 constexpr int16_t kPhotoWidth = 64;
 constexpr int16_t kPhotoHeight = 48;
+// SOF 12 KB into a 53 KB entry: inside the walk's first 16 KB stage, in an entry whose full-size
+// ring would be 32 KB.
+const char* kBigEntry = "OEBPS/images/photo_big.jpg";
+constexpr int16_t kBigWidth = 96;
+constexpr int16_t kBigHeight = 64;
 
 // A header that IS within the probe window, for the inline control case.
 const char* kPngBook = CORPUS_DIR "/test_png_images.epub";
@@ -124,6 +129,76 @@ TEST_F(ImageManifestFixture, ResolvePendingWalksFromAnArenaWhenTheHeapCannot) {
   const ImageManifestEntry* found = manifest.find(kEntry);
   ASSERT_NE(found, nullptr);
   EXPECT_EQ(found->width, kPhotoWidth);
+}
+
+// --- the staged walk ---------------------------------------------------------------------------
+//
+// Every image in "Strange Pictures" (78 JPEGs, SOF 9.7-18.4 KB in) was unresolvable on the X3
+// because the walk sized its ring to the ENTRY -- 32 KB, which that heap never holds mid-parse
+// and, after a fragmented build, not even at the build's end (28660 contig vs 33280 needed).
+// The header sits in the first 16 KB of output, and a 16 KB ring reads those bytes exactly.
+
+TEST_F(ImageManifestFixture, AHeaderInsideTheFirstStageResolvesWithAStageSizedRing) {
+  EpubImageManifest manifest;
+  ASSERT_TRUE(manifest.load(cacheDir));
+  const ImageManifestEntry* entry = nullptr;
+  ASSERT_EQ(manifest.resolve(kBook, kBigEntry, entry), EpubImageManifest::Resolve::Deferred);
+
+  // 20 KB: hosts a 16 KB stage ring plus its chunk, never a 32 KB one. The heap is closed off,
+  // so the only way to the dimensions is the first stage from this arena.
+  ESP.setMaxAllocHeap(4 * 1024);
+  BuildArena arena(20 * 1024);
+  ASSERT_TRUE(arena.valid());
+  EXPECT_EQ(manifest.resolvePending(&arena), 1u);
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_LE(arena.highWater(), 17u * 1024u) << "the first stage must not take an entry-sized ring";
+  const ImageManifestEntry* found = manifest.find(kBigEntry);
+  ASSERT_NE(found, nullptr);
+  EXPECT_EQ(found->width, kBigWidth);
+  EXPECT_EQ(found->height, kBigHeight);
+}
+
+TEST_F(ImageManifestFixture, TheHeapBudgetAdmitsExactlyTheStagesThatFit) {
+  EpubImageManifest manifest;
+  ASSERT_TRUE(manifest.load(cacheDir));
+  const ImageManifestEntry* entry = nullptr;
+  ASSERT_EQ(manifest.resolve(kBook, kBigEntry, entry), EpubImageManifest::Resolve::Deferred);
+  ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
+
+  // 18 KB of contiguous heap: the 16 KB first stage fits, so photo_big (SOF at 12 KB) resolves.
+  // photo.jpg's SOF sits at 20.5 KB: its first stage ends short with the header still running,
+  // and the second stage -- the whole 20.9 KB entry -- does not fit. It must be left for later,
+  // not written off.
+  ESP.setMaxAllocHeap(18 * 1024);
+  EXPECT_EQ(manifest.resolvePending(), 1u);
+  EXPECT_NE(manifest.find(kBigEntry), nullptr);
+  EXPECT_EQ(manifest.find(kEntry), nullptr);
+
+  // Re-queued by the next miss, and resolved once the heap can host its second stage.
+  ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
+  ESP.setMaxAllocHeap(100 * 1024);
+  EXPECT_EQ(manifest.resolvePending(), 1u);
+  const ImageManifestEntry* found = manifest.find(kEntry);
+  ASSERT_NE(found, nullptr);
+  EXPECT_EQ(found->width, kPhotoWidth);
+}
+
+TEST_F(ImageManifestFixture, ResolveDeferredNowReportsWhichStageItLacked) {
+  EpubImageManifest manifest;
+  ASSERT_TRUE(manifest.load(cacheDir));
+  const ImageManifestEntry* entry = nullptr;
+  ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
+
+  // The parser's mid-parse path, with what the heap can spare passed in explicitly.
+  EXPECT_EQ(manifest.resolveDeferredNow(kBook, kEntry, entry, 8 * 1024), EpubImageManifest::Walk::NeedsHeap)
+      << "not even the first stage fits";
+  EXPECT_EQ(manifest.resolveDeferredNow(kBook, kEntry, entry, 18 * 1024), EpubImageManifest::Walk::NeedsHeap)
+      << "the first stage ran and ended with the header still open; the second does not fit";
+  EXPECT_TRUE(manifest.hasPending()) << "a walk short of heap leaves the image queued";
+  EXPECT_EQ(manifest.resolveDeferredNow(kBook, kEntry, entry, 24 * 1024), EpubImageManifest::Walk::Resolved);
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->width, kPhotoWidth);
+  EXPECT_FALSE(manifest.hasPending());
 }
 
 TEST_F(ImageManifestFixture, ResolvePendingFallsBackToTheHeapWhenTheArenaIsTooSmall) {

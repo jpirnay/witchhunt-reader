@@ -54,15 +54,28 @@ class EpubImageManifest {
 
   // True when resolve() deferred at least one image since the last resolvePending().
   bool hasPending() const;
-  // Heap the streaming walk of a deferred image takes: its read chunk plus an inflate ring sized
-  // to the entry (InflateReader::ringSizeFor, ≤32 KB; none for a stored entry). 0 when the image
+
+  // The walk of a deferred image runs in stages: first over the entry's leading kWalkStageBytes
+  // (a ring of that size -- a deflate back-reference never reaches further back than the bytes
+  // produced, so a capped read needs only a capped ring), then, only if the header continues past
+  // that, over the whole entry (ring ≤ 32 KB). SOF sits within the first stage for every
+  // Photoshop-style export measured (9.7-18.4 KB in, "Strange Pictures"), so the 32 KB ring the
+  // walk used to demand outright -- the block an X3 reader heap never holds mid-parse -- is
+  // now the exception. A stored entry has no ring at all.
+  static constexpr size_t kWalkStageBytes = 16 * 1024;
+  // Heap the cheapest stage of a deferred image's walk takes (read chunk + ring). 0 when the image
   // is not pending. Lets the parser gate the walk on what it will actually allocate.
   size_t deferredWalkBytes(const std::string& epubEntryPath) const;
-  // Walk one deferred image now — mid-parse, for a caller that has checked deferredWalkBytes()
-  // against the heap. On success the entry is recorded (and dequeued) exactly as a probe-window
-  // hit would be; false means the ring could not be had or the walk found no SOF.
-  bool resolveDeferredNow(const std::string& epubPath, const std::string& epubEntryPath,
-                          const ImageManifestEntry*& out);
+  enum class Walk : uint8_t {
+    Resolved,    // recorded like a probe-window hit
+    NeedsHeap,   // a stage's ring did not fit `heapBudget` (or its allocation failed): retry later
+    Unreadable,  // the entry ends with no SOF: no walk can do better
+  };
+  // Walk one deferred image now, mid-parse, from the heap: every stage the walk takes must fit
+  // `heapBudget` (contiguous bytes the caller can spare). On Resolved the entry is recorded and
+  // dequeued.
+  Walk resolveDeferredNow(const std::string& epubPath, const std::string& epubEntryPath, const ImageManifestEntry*& out,
+                          size_t heapBudget);
   // Walk every deferred entry through the streaming header reader and record what it finds.
   // Returns how many were resolved. Meant for a build's end, with the build's now-idle arena
   // (the borrowed secondary framebuffer) as ring storage when the caller has one — on the C3 the
@@ -111,10 +124,13 @@ class EpubImageManifest {
   // Queue the image for the walk (no-op if already queued or the queue is full) and report Deferred.
   Resolve deferFor(const std::string& epubEntryPath, const ZipFile::FileStatSlim& stat);
   const PendingImage* findPending(const std::string& epubEntryPath) const;
-  static size_t walkBytesFor(const ZipFile::FileStatSlim& stat);
-  // Stream the entry's header through an inflate ring until SOF. walkBytesFor(stat), held only
-  // for the call: a scoped block of `arena` when one is given, else heap.
-  bool walkEntry(const ZipFile::FileStatSlim& stat, ImageDimensions& dims, BuildArena* arena);
+  // Read chunk + ring for one stage: `outputCap` bytes of the entry, 0 = all of it.
+  static size_t walkBytesFor(const ZipFile::FileStatSlim& stat, size_t outputCap);
+  // Stream the entry's header through an inflate ring until SOF, stage by stage (see
+  // kWalkStageBytes). Each stage's ring is held only for that stage: a scoped block of `arena`
+  // when one is given and can host it, else the heap when the stage fits `heapBudget` (0 = no
+  // limit). NeedsHeap when neither could host a stage the walk still needed.
+  Walk walkEntry(const ZipFile::FileStatSlim& stat, ImageDimensions& dims, BuildArena* arena, size_t heapBudget);
   const ImageManifestEntry* insertEntry(const std::string& epubEntryPath, const ImageDimensions& dims);
 
   // One ZipFile reused across ensureResolved() misses (see the .cpp). ZipFile caches the
