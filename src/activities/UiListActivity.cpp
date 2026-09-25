@@ -142,7 +142,26 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
   // bug rather than a measurement one. Non-touch is unchanged: its explicit rowHeight is kept
   // by resolveListProps() and its gap was the theme's listRowGap already.
   props = screen.resolveListProps(props);
-  activeNav().syncToProps(screen.body(), props.rowHeight, props.rowGap, listCount(), props);
+  auto& currentNav = activeNav();
+  const int count = listCount();
+  const int prevTop = currentNav.top;
+  const int drawn = currentNav.trusts(count) ? currentNav.drawnRows : 0;
+  currentNav.syncToProps(screen.body(), props.rowHeight, props.rowGap, count, props);
+
+  // A selection the last frame already drew needs no scroll, but the follow above does not
+  // know that: it clamps the viewport to count minus the fixed-height ESTIMATE of rows per
+  // page, and when labels wrap to two lines fewer rows really fit. On the last page that clamp
+  // pulled a still-visible selection one row up, and the next press down drew the selection
+  // off-page and paid a follow-correction rebuild -- a one-row jump and an extra build on
+  // every press near the bottom. Keep the viewport the measurement says is valid. Only for a
+  // follow: a swipe clears followPending and its new viewport must stand.
+  if (currentNav.followPending && drawn > 0) {
+    const int sel = props.selectedIndex;
+    if (sel >= prevTop && sel < prevTop + drawn) {
+      currentNav.top = prevTop;
+      props.topIndex = static_cast<uint16_t>(prevTop);
+    }
+  }
 }
 
 void UiListActivity::drawChrome() {

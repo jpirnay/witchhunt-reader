@@ -138,10 +138,11 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
   s.reportedMissCount = 0;
-  if (metadataOwned_) {
+  if (metadataOwned_ && s.intervalsOwner < 0) {
     delete[] s.fullIntervals;
   }
   s.fullIntervals = nullptr;
+  s.intervalsOwner = -1;
   freeStyleKernLigatureData(s);
   s.present = false;
 }
@@ -174,7 +175,10 @@ void SdCardFont::unloadMetadata() {
     auto& s = styles_[i];
     if (!s.present) continue;
     // Free fullIntervals and kern/lig tables — keeps file offsets and header counts intact.
-    delete[] s.fullIntervals;
+    // A borrowed table is the owner's to free; the borrower keeps intervalsOwner for the reload.
+    if (s.intervalsOwner < 0) {
+      delete[] s.fullIntervals;
+    }
     s.fullIntervals = nullptr;
     freeStyleKernLigatureData(s);
     // Mini data is NOT freed — it is managed per-section and is already empty at the
@@ -199,6 +203,12 @@ bool SdCardFont::reloadMetadata() {
   for (uint8_t i = 0; i < MAX_STYLES; i++) {
     auto& s = styles_[i];
     if (!s.present) continue;
+
+    // A borrower re-points at its owner, which has a lower index and so was reloaded first.
+    if (s.intervalsOwner >= 0) {
+      s.fullIntervals = styles_[s.intervalsOwner].fullIntervals;
+      continue;
+    }
 
     // Re-read fullIntervals using stored file offset
     if (!s.fullIntervals) {
@@ -633,6 +643,52 @@ void SdCardFont::computeStyleFileOffsets(PerStyle& s, uint32_t baseOffset) {
   s.bitmapFileOffset = s.ligatureFileOffset + s.header.ligaturePairCount * sizeof(EpdLigaturePair);
 }
 
+// --- Interval table sharing ---
+
+// Returns the lowest earlier style that owns a table byte-identical to style `styleIdx`'s
+// on-file intervals, or -1. Only owners are candidates, so a borrower never chains.
+// Reads the file in stack-sized chunks, so a mismatch costs a re-read, never an allocation.
+int8_t SdCardFont::findIdenticalIntervals(const uint8_t styleIdx, HalFile& file) {
+  const auto& s = styles_[styleIdx];
+  static constexpr uint32_t CHUNK = 16;  // 192 bytes of stack
+  EpdUnicodeInterval chunk[CHUNK];
+  for (uint8_t k = 0; k < styleIdx; k++) {
+    const auto& owner = styles_[k];
+    if (!owner.present || owner.intervalsOwner >= 0 || !owner.fullIntervals) continue;
+    if (owner.header.intervalCount != s.header.intervalCount) continue;
+    if (!file.seekSet(s.intervalsFileOffset)) return -1;
+    bool same = true;
+    for (uint32_t done = 0; same && done < s.header.intervalCount; done += CHUNK) {
+      const uint32_t n = std::min(CHUNK, s.header.intervalCount - done);
+      const int bytes = static_cast<int>(n * sizeof(EpdUnicodeInterval));
+      same = file.read(reinterpret_cast<uint8_t*>(chunk), bytes) == bytes &&
+             memcmp(chunk, owner.fullIntervals + done, bytes) == 0;
+    }
+    if (same) {
+      LOG_DBG("SDCF", "Style %u shares style %u's %u-interval table (%u B not allocated)", styleIdx, k,
+              s.header.intervalCount, static_cast<unsigned>(s.header.intervalCount * sizeof(EpdUnicodeInterval)));
+      return static_cast<int8_t>(k);
+    }
+  }
+  return -1;
+}
+
+int8_t SdCardFont::findIdenticalIntervals(const uint8_t styleIdx, const uint8_t* records) {
+  const auto& s = styles_[styleIdx];
+  const size_t bytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
+  for (uint8_t k = 0; k < styleIdx; k++) {
+    const auto& owner = styles_[k];
+    if (!owner.present || owner.intervalsOwner >= 0 || !owner.fullIntervals) continue;
+    if (owner.header.intervalCount != s.header.intervalCount) continue;
+    if (memcmp(records, owner.fullIntervals, bytes) == 0) {
+      LOG_DBG("SDCF", "Style %u shares style %u's %u-interval table (%u B not allocated)", styleIdx, k,
+              s.header.intervalCount, static_cast<unsigned>(bytes));
+      return static_cast<int8_t>(k);
+    }
+  }
+  return -1;
+}
+
 // --- Load ---
 
 bool SdCardFont::load(const char* path) {
@@ -747,26 +803,33 @@ bool SdCardFont::load(const char* path) {
     auto& s = styles_[i];
     if (!s.present) continue;
 
-    s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
-    if (!s.fullIntervals) {
-      LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, i);
-      file.close();
-      freeAll();
-      return false;
-    }
+    // Compared against the file BEFORE allocating: de-duplicating after the read would still
+    // need both copies resident at once, and that peak is what fails on a tight heap.
+    s.intervalsOwner = findIdenticalIntervals(i, file);
+    if (s.intervalsOwner >= 0) {
+      s.fullIntervals = styles_[s.intervalsOwner].fullIntervals;
+    } else {
+      s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
+      if (!s.fullIntervals) {
+        LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, i);
+        file.close();
+        freeAll();
+        return false;
+      }
 
-    if (!file.seekSet(s.intervalsFileOffset)) {
-      LOG_ERR("SDCF", "Failed to seek to intervals for style %u", i);
-      file.close();
-      freeAll();
-      return false;
-    }
-    size_t intervalsBytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
-    if (file.read(reinterpret_cast<uint8_t*>(s.fullIntervals), intervalsBytes) != static_cast<int>(intervalsBytes)) {
-      LOG_ERR("SDCF", "Failed to read intervals for style %u", i);
-      file.close();
-      freeAll();
-      return false;
+      if (!file.seekSet(s.intervalsFileOffset)) {
+        LOG_ERR("SDCF", "Failed to seek to intervals for style %u", i);
+        file.close();
+        freeAll();
+        return false;
+      }
+      size_t intervalsBytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
+      if (file.read(reinterpret_cast<uint8_t*>(s.fullIntervals), intervalsBytes) != static_cast<int>(intervalsBytes)) {
+        LOG_ERR("SDCF", "Failed to read intervals for style %u", i);
+        file.close();
+        freeAll();
+        return false;
+      }
     }
 
     // Initialize stub data
@@ -901,13 +964,18 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
       freeAll();
       return false;
     }
-    s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
-    if (!s.fullIntervals) {
-      LOG_ERR("SDCF", "loadFromMmap: OOM for intervals style %u", i);
-      freeAll();
-      return false;
+    s.intervalsOwner = findIdenticalIntervals(i, base + s.intervalsFileOffset);
+    if (s.intervalsOwner >= 0) {
+      s.fullIntervals = styles_[s.intervalsOwner].fullIntervals;
+    } else {
+      s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
+      if (!s.fullIntervals) {
+        LOG_ERR("SDCF", "loadFromMmap: OOM for intervals style %u", i);
+        freeAll();
+        return false;
+      }
+      memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
     }
-    memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
 
     // Kern class tables: EpdKernClassEntry is __attribute__((packed)) with only
     // uint16_t + uint8_t members. GCC emits byte-load sequences for all member

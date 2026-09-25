@@ -30,9 +30,11 @@ void SettingsSubmenuActivity::onActionSelected(int index) {
 
     auto activity = createActivityForAction(setting.action, renderer, mappedInput);
     if (activity) {
-      startActivityForResult(std::move(activity), [this](const ActivityResult&) {
+      const bool usedWifi = activity->usesWifi();
+      startActivityForResult(std::move(activity), [this, usedWifi](const ActivityResult&) {
         CrossPointSettings::normalizeDependentSettings(SETTINGS);
         SETTINGS.saveToFile();
+        if (usedWifi) restartToSettingsIfRadioLeftOn();
         needsHalfRefresh = true;
         requestUpdate();
       });
