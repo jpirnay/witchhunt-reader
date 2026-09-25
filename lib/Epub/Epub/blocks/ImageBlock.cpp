@@ -430,11 +430,26 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
     LOG_ERR("IMG", "Image file not found after extraction: %s", imagePath.c_str());
     return;
   }
-  const size_t fileSize = file.size();
+  size_t fileSize = file.size();
   file.close();
   if (fileSize == 0) {
     LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
     return;
+  }
+  // An extract on the card is trusted as-is, so one cut short (a reset mid-write, before the
+  // extract became atomic) was decoded as garbage on every visit of its page -- "no SOF marker"
+  // for a JPEG whose header sits 14 KB in (X3 2026-09-25). One central-directory lookup per
+  // first decode catches it: a size that differs from the entry's is re-extracted, once.
+  if (!epubFilePath_.empty() && !epubEntryPath_.empty()) {
+    Epub epub(epubFilePath_, "/.crosspoint");
+    size_t entrySize = 0;
+    if (epub.getItemSize(epubEntryPath_, &entrySize) && entrySize != 0 && entrySize != fileSize) {
+      LOG_ERR("IMG", "Extract is %u bytes, entry is %u: re-extracting %s", static_cast<unsigned>(fileSize),
+              static_cast<unsigned>(entrySize), epubEntryPath_.c_str());
+      Storage.remove(imagePath.c_str());
+      if (!ensureExtracted()) return;
+      fileSize = entrySize;
+    }
   }
 
   LOG_TRC("IMG", "Decoding and caching: %s", imagePath.c_str());
