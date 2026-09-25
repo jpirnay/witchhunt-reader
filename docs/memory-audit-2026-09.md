@@ -471,8 +471,12 @@ build followed a C build that died at page 67), plus the CSS-fallback and
 image-header rebuilds. So R1's payoff is on those rebuilds — which now get
 the arena-resident CSS ruleset the released path never had — and the run-3
 outcome is really R2's to fix: once the phase (b) churn leaves the heap, C
-completes and no escalation happens. Validate on the X3 with the run-3 vs
-run-4 pair as the acceptance test (reading contig after the first open).
+completes and no escalation happens. Device run 6 did not reach the
+blocking path at all (C completed), so the borrowed blocking build is still
+unexercised on hardware; it is the same code path as C's borrow, but its
+`Index start mem (secondary buffer BORROWED …)` / `Index end mem (after fb
+return)` pair should be seen once on a CSS-fallback or image-header rebuild
+before this is called validated.
 
 **R2 — take the phase (b) churn off the heap (F1).** *Done on
 `memory/audit-2026-09`, device validation pending.* The count-sorted census
@@ -521,8 +525,32 @@ candidate step 3 once the device numbers say whether it is worth it.
 On the device the acceptance test is the run-3 scenario: a Background-C
 build of *Strange Pictures* from a wiped cache must complete (no hard
 text-layout abort, no blocking escalation) with a higher minimum free heap
-than run 5's 11.3 KB, and the reader must sit near run 4's 27 KB contig
-afterwards.
+than run 5's, and the reader must not lose contig across the build.
+
+*Device run 6 (X3, 2026-09-25 19:18, same chapter from a wiped cache,
+heap pre-fragmented — the reader entered at contig 22 516 after a failed
+first-open realloc):*
+
+| | run 4 | run 5 | run 6 |
+|---|---|---|---|
+| reader entry free / contig | 48 204 / 45 044 | 47 480 / 38 900 | 43 188 / 22 516 |
+| min free during the C build | 16 524 | 16 068 | 13 392 |
+| … relative to entry | −31.7 KB | −31.4 KB | −29.8 KB |
+| contig while reading afterwards | 27 636 | 18 420 | 22 516 |
+| contig lost across the build | −17.4 KB | −20.5 KB | **0** |
+| arena high-water / failedAlloc / releaseFails | 45 884 / 0 / 0 | 45 884 / 0 / 0 | 45 884 / 0 / 0 |
+
+The build completed (157 pages → header walk from the region → 180, run
+5's sequence), with no hard-gate abort, no escalation and no page-block
+refusal. The build **no longer costs contig**: identical before and after,
+where runs 4 and 5 each lost 17–20 KB to it. Min free improved only ~1.6 KB
+relative to entry: the ~6 KB of layout scratch now resident for the build
+(step 1) offsets most of what the page block moved out (step 2) at the
+low-water point — a wash on bytes, a large gain on allocation count.
+`lowHeapSkips` rose to 215 (from 82) because free spends longer under the
+24 KB lean floor; harmless with the arena-resident ruleset. The candidate
+next step, if the min-free gain is wanted too, is to take that resident
+scratch from the lent region in B/C builds — for the R3 re-measurement.
 
 **R3 — one declared budget per build, not thirty gates.** Once R1 and R2
 land, the lent region has a known layout: resident lane (ruleset + SAX +
