@@ -84,7 +84,8 @@ struct PixelCache {
   //     caches carry the black band baked in, so they have to be re-decoded.
   // v4: JPEG downscaling area-averages instead of sampling one pixel, so thin lines
   //     survive. A v3 cache replays the nearest-neighbour picture forever otherwise.
-  static constexpr uint16_t PXC_MAGIC = 0x8004;
+  // v5: progressive JPEGs are fully decoded instead of shown from their 1/8-resolution DC scan.
+  static constexpr uint16_t PXC_MAGIC = 0x8005;
   static constexpr size_t PXC_HEADER_BYTES = 6;  // magic + width + height
 
   // Rows begin() gives the band for a w x h image whose tallest decode block is maxBlockDstRows.

@@ -48,6 +48,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/ProgressiveJpegDc/ProgressiveJpegDc.cpp
+  ${REPO_ROOT}/lib/ProgressiveJpeg/ProgressiveJpeg.cpp
   ${REPO_ROOT}/lib/PngToBmpConverter/PngToBmpConverter.cpp
   ${REPO_ROOT}/lib/PngDecoder/PngStreamDecoder.cpp
   ${REPO_ROOT}/lib/TJpgDec/src/tjpgd.c
@@ -81,6 +82,7 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/PngToBmpConverter
   ${REPO_ROOT}/lib/PngDecoder
   ${REPO_ROOT}/lib/ProgressiveJpegDc
+  ${REPO_ROOT}/lib/ProgressiveJpeg
   ${REPO_ROOT}/lib/TJpgDec/src
 )
 

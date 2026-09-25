@@ -21,6 +21,8 @@
 
 #include "Epub/converters/JpegToFramebufferConverter.h"
 #include "GfxRenderer.h"
+#include "HalStorage.h"
+#include "ProgressiveJpeg.h"
 
 namespace fs = std::filesystem;
 
@@ -150,6 +152,44 @@ TEST_F(JpegDownscaleFixture, WhiteBetweenLinesStaysWhite) {
     }
   }
   EXPECT_GT(checked, kDstLength / 4);
+}
+
+// Progressive JPEGs used to render from their first (DC) scan only: 1/8 resolution, upscaled,
+// which wipes out every one of these lines. Through the full decoder they come out like the
+// baseline file above.
+TEST_F(JpegDownscaleFixture, ProgressiveLinesSurviveTheFullDecoder) {
+  const Levels img = decode("thin_lines_prog.jpg", kDstLength, kDstBreadth);
+  ASSERT_EQ(img.px.size(), static_cast<size_t>(kDstLength) * kDstBreadth);
+  const auto lost = lostLines([&](const int i) { return img.at(i, kDstBreadth / 2); });
+  EXPECT_TRUE(lost.empty()) << "source columns " << join(lost) << "vanished";
+}
+
+// With no arena and too little heap for even the 1/8 workspace, the decode must fall back to the
+// DC-only preview rather than fail: a blurred picture beats a placeholder. The preview averages
+// each 8x8 block, so a 1-px line never gets darker than ~3/4 white there -- no pixel reaches the
+// two darkest levels, which the full decode draws every line with. That is how the test knows
+// which decoder ran.
+TEST_F(JpegDownscaleFixture, ProgressiveFallsBackToThePreviewWhenTheWorkspaceDoesNotFit) {
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(JPEG_FIXTURE_DIR "/thin_lines_prog.jpg"));
+  ProgressiveJpeg::ImageInfo info;
+  ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+  file.close();
+  auto darkPixels = [](const Levels& img) {
+    return std::count_if(img.px.begin(), img.px.end(), [](uint8_t v) { return v <= 1; });
+  };
+
+  const Levels full = decode("thin_lines_prog.jpg", kDstLength, kDstBreadth);
+  ASSERT_GT(darkPixels(full), 0) << "the full decode draws the lines dark";
+
+  const uint32_t savedHeap = ESP.getFreeHeap();
+  // One byte short of the smallest workspace plus its 20 KB floor; still enough for the cache.
+  ESP.setFreeHeap(static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3) + 20 * 1024 - 1));
+  const Levels preview = decode("thin_lines_prog.jpg", kDstLength, kDstBreadth);
+  ESP.setFreeHeap(savedHeap);
+
+  ASSERT_EQ(preview.px.size(), static_cast<size_t>(kDstLength) * kDstBreadth) << "the preview must still render";
+  EXPECT_EQ(darkPixels(preview), 0) << "expected the 1/8 preview, got a full decode";
 }
 
 }  // namespace

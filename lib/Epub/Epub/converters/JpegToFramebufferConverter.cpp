@@ -10,6 +10,7 @@
 #include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
+#include <ProgressiveJpeg.h>
 #include <ProgressiveJpegDc.h>
 #include <ZipFile.h>
 #include <tjpgd.h>
@@ -337,20 +338,22 @@ size_t tjpgInput(JDEC* jd, uint8_t* buff, size_t ndata) {
 // we fail gracefully if an unusual image needs more.)
 constexpr size_t TJPG_WORK_POOL_SIZE = 12 * 1024;
 
-// TJpgDec's work pool, drawn from the pass scratch arena when one is installed (see
-// image_scratch) and otherwise from the heap. At 12 KB it is the largest per-decode block on
-// the JPEG path, and a warm pass allocates it once per decode AND once per tone analysis — the
-// churn rule 4 in docs/memory-allocation-strategy.md exists to stop.
+// A decoder's working block (TJpgDec's work pool, or the progressive decoder's workspace), drawn
+// from the pass scratch arena when one is installed (see image_scratch) and otherwise from the
+// heap. At 12-20 KB it is the largest per-decode block on the JPEG path, and a warm pass
+// allocates it once per decode AND once per tone analysis — the churn rule 4 in
+// docs/memory-allocation-strategy.md exists to stop.
 //
 // RAII so every early return below releases the arena scope; the arena release is newest-first,
-// which holds because the pool is the only thing this scope allocates.
+// which holds because the pool is the only thing this scope allocates. `heapFloor`: free heap
+// that must remain after a heap fallback, or none is attempted (the arena is always tried).
 class JpegWorkPool {
  public:
-  JpegWorkPool() {
+  explicit JpegWorkPool(const size_t size, const size_t heapFloor = 0) {
     if (BuildArena* arena = image_scratch::get(); arena && arena->valid()) {
       block_ = arena->reserveBlock();
       if (block_.valid()) {
-        if (auto* p = static_cast<uint8_t*>(arena->alloc(TJPG_WORK_POOL_SIZE))) {
+        if (auto* p = static_cast<uint8_t*>(arena->alloc(size))) {
           ptr_ = p;
           arena_ = arena;
           return;
@@ -358,7 +361,8 @@ class JpegWorkPool {
         arena->release(block_);  // too small for this pass — fall back to the heap
       }
     }
-    heap_ = makeUniqueNoThrow<uint8_t[]>(TJPG_WORK_POOL_SIZE);
+    if (heapFloor > 0 && ESP.getFreeHeap() < size + heapFloor) return;
+    heap_ = makeUniqueNoThrow<uint8_t[]>(size);
     ptr_ = heap_.get();
   }
   ~JpegWorkPool() {
@@ -408,6 +412,11 @@ size_t minFreeHeapForJpeg() {
 #ifndef JPEG_CACHE_HEAP_FLOOR
 #define JPEG_CACHE_HEAP_FLOOR (8 * 1024)
 #endif
+
+// Heap that must remain when the progressive workspace cannot come from the scratch arena: the
+// rest of the decode's working set (JPEG_CACHE_POST_GATE_BYTES) plus the floor for everything
+// else. Below it the workspace steps down a scale, and finally the DC-only preview runs.
+constexpr size_t PROGRESSIVE_WORKSPACE_HEAP_FLOOR = JPEG_CACHE_POST_GATE_BYTES + JPEG_CACHE_HEAP_FLOOR;
 
 // Arena-aware (via minFreeHeapForJpeg): otherwise a borrowed-framebuffer decode
 // silently drops from Atkinson to Bayer dithering on every image — a visible quality regression
@@ -1000,10 +1009,53 @@ bool progressiveOutput(void* user, uint16_t y, const uint8_t* grayscale, uint16_
   return emitGrayBlock(*ctx, grayscale, 0, y, width, 1, width) != 0;
 }
 
+// Full progressive decoder: each band is a full-width block at 1/2^s scale, exactly what
+// TJpgDec's MCU rows are, so it takes the same resample/dither/cache path.
+struct FullProgressiveSink {
+  JpegContext* ctx;
+  bool emitted;
+};
+
+bool fullProgressiveOutput(void* user, uint16_t y, const uint8_t* gray, uint16_t width, uint16_t rows,
+                           uint16_t stride) {
+  auto* sink = static_cast<FullProgressiveSink*>(user);
+  sink->emitted = true;
+  return emitGrayBlock(*sink->ctx, gray, 0, y, width, rows, stride) != 0;
+}
+
 bool progressiveShouldAbort(void*) {
   if (!CooperativeAbort::shouldAbortLongTask()) return false;
   CooperativeAbort::markAborted();
   return true;
+}
+
+// The full progressive decoder reads the whole file before its first band (emitGrayBlock feeds
+// the watchdog per band, but not before one exists), so its abort hook feeds it too.
+bool fullProgressiveShouldAbort(void* user) {
+  HalSystem::feedWatchdog();
+  return progressiveShouldAbort(user);
+}
+
+// Fine-scale factors for scaledSrc* -> dst*, and whether the downscale area-averages. Area
+// averaging covers pure downscales (see emitGrayBlock); the carry that makes it exact across
+// block edges costs 2 x 3 bytes per output column. Re-run when a decode falls back to the DC
+// preview, which resizes to the destination itself.
+void configureResample(JpegContext& ctx, const bool allowAreaAverage) {
+  ctx.fineScaleFPX = (int32_t)((int64_t)ctx.dstWidth * FP_ONE / ctx.scaledSrcWidth);
+  ctx.invScaleFPX = (int32_t)((int64_t)ctx.scaledSrcWidth * FP_ONE / ctx.dstWidth);
+  ctx.fineScaleFPY = (int32_t)((int64_t)ctx.dstHeight * FP_ONE / ctx.scaledSrcHeight);
+  ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / ctx.dstHeight);
+  ctx.areaAverage = allowAreaAverage && ctx.fineScaleFPX <= FP_ONE && ctx.fineScaleFPY <= FP_ONE &&
+                    (ctx.fineScaleFPX < FP_ONE || ctx.fineScaleFPY < FP_ONE) && ctx.invScaleFPX < MAX_AREA_INV_FP &&
+                    ctx.invScaleFPY < MAX_AREA_INV_FP;
+  ctx.areaCarry.reset();
+  if (ctx.areaAverage) {
+    ctx.areaCarry = makeUniqueNoThrow<AreaCarry>();
+    if (!ctx.areaCarry || !ctx.areaCarry->allocate(ctx.dstWidth)) {
+      LOG_DBG("JPG", "No heap for the %d-column area carry; block edges average per block", ctx.dstWidth);
+      ctx.areaCarry.reset();
+    }
+  }
 }
 
 // Draw a simple bordered placeholder where an undecodable (non-baseline) JPEG would
@@ -1173,8 +1225,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.screenHeight = renderer.getScreenHeight();
   ctx.effectiveDitherMode = config.ditherMode;
 
-  // TJpgDec handles baseline JPEGs; the progressive fallback reconstructs a
-  // low-memory preview from the initial DC scan.
+  // TJpgDec handles baseline JPEGs. Progressive ones go to ProgressiveJpeg (every scan, band by
+  // band) when the frame and its workspace allow, else to the DC-only preview (1/8 resolution).
   JpegMode mode = JpegMode::Baseline;
   if (!getModeFromHeader(imagePath, mode)) {
     LOG_ERR("JPG", "Could not determine JPEG mode (no SOF marker): %s", imagePath.c_str());
@@ -1208,18 +1260,26 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   JRESULT jr = JDR_OK;
   int srcWidth = 0;
   int srcHeight = 0;
+  ProgressiveJpeg::ImageInfo progressiveInfo;
+  bool fullProgressive = false;
   if (mode == JpegMode::Progressive) {
-    ProgressiveJpegDc::ImageInfo info;
-    const auto probeResult = ProgressiveJpegDc::probe(file, info);
-    if (probeResult != ProgressiveJpegDc::Result::Ok) {
-      LOG_ERR("JPG", "Progressive JPEG probe failed: %s", ProgressiveJpegDc::resultName(probeResult));
-      file.close();
-      return false;
+    fullProgressive = ProgressiveJpeg::probe(file, progressiveInfo) == ProgressiveJpeg::Result::Ok;
+    if (fullProgressive) {
+      srcWidth = progressiveInfo.width;
+      srcHeight = progressiveInfo.height;
+    } else {
+      ProgressiveJpegDc::ImageInfo info;
+      const auto probeResult = ProgressiveJpegDc::probe(file, info);
+      if (probeResult != ProgressiveJpegDc::Result::Ok) {
+        LOG_ERR("JPG", "Progressive JPEG probe failed: %s", ProgressiveJpegDc::resultName(probeResult));
+        file.close();
+        return false;
+      }
+      srcWidth = info.width;
+      srcHeight = info.height;
     }
-    srcWidth = info.width;
-    srcHeight = info.height;
   } else {
-    pool = makeUniqueNoThrow<JpegWorkPool>();
+    pool = makeUniqueNoThrow<JpegWorkPool>(TJPG_WORK_POOL_SIZE);
     if (!pool || !*pool) {
       LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
       file.close();
@@ -1258,17 +1318,43 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     destHeight = (int)(srcHeight * targetScale);
   }
 
-  // Coarse DCT downscale via TJpgDec's built-in 1/1..1/8 scaling; the fine resampler
-  // in emitGrayBlock covers the residual ratio.
+  // Coarse DCT downscale (TJpgDec's built-in 1/1..1/8, or the progressive decoder's reduced
+  // IDCT); the fine resampler in emitGrayBlock covers the residual ratio.
   uint8_t tjpgScale = 0;
-  const int jpegScaleDenom = mode == JpegMode::Progressive ? 1 : chooseJpegScale(targetScale, tjpgScale);
+  int jpegScaleDenom = 1;
+  std::unique_ptr<JpegWorkPool> progressiveWorkspace;
+  size_t progressiveWorkspaceBytes = 0;
+  if (mode == JpegMode::Baseline) {
+    jpegScaleDenom = chooseJpegScale(targetScale, tjpgScale);
+  } else if (fullProgressive) {
+    // A coarser scale keeps fewer coefficients per block: step down until the workspace fits.
+    chooseJpegScale(targetScale, tjpgScale);
+    for (; tjpgScale <= 3; ++tjpgScale) {
+      progressiveWorkspaceBytes = ProgressiveJpeg::workspaceBytes(progressiveInfo, tjpgScale);
+      progressiveWorkspace =
+          makeUniqueNoThrow<JpegWorkPool>(progressiveWorkspaceBytes, PROGRESSIVE_WORKSPACE_HEAP_FLOOR);
+      if (progressiveWorkspace && *progressiveWorkspace) break;
+      progressiveWorkspace.reset();
+    }
+    if (progressiveWorkspace) {
+      jpegScaleDenom = 1 << tjpgScale;
+    } else {
+      LOG_INF("JPG", "No room for a progressive workspace (%u free); DC-only preview",
+              static_cast<unsigned>(ESP.getFreeHeap()));
+      fullProgressive = false;
+      tjpgScale = 0;
+    }
+  }
+  // The DC-only preview resizes to the destination itself.
+  const bool dcPreview = mode == JpegMode::Progressive && !fullProgressive;
 
   // TJpgDec descales by floor(dim / 2^scale): each MCU side (8 or 16 px) is a multiple of
   // the scale denominator, so its per-MCU shifts sum to exactly the floor. Match that here
   // (not ceil) so scaledSrc* equals the decoder's true output extent — the fine-scale
-  // factors and the right/bottom edge snapping below are derived from these.
-  ctx.scaledSrcWidth = mode == JpegMode::Progressive ? destWidth : srcWidth / jpegScaleDenom;
-  ctx.scaledSrcHeight = mode == JpegMode::Progressive ? destHeight : srcHeight / jpegScaleDenom;
+  // factors and the right/bottom edge snapping below are derived from these. ProgressiveJpeg
+  // emits the same floor extent.
+  ctx.scaledSrcWidth = dcPreview ? destWidth : srcWidth / jpegScaleDenom;
+  ctx.scaledSrcHeight = dcPreview ? destHeight : srcHeight / jpegScaleDenom;
 
   // Validate memory footprint against the post-scaling decode size, not raw dimensions.
   // A 1447x2200 image decoded at 1/4 scale is only ~362x550 — well within limits.
@@ -1283,32 +1369,15 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     file.close();
     return false;
   }
-  ctx.fineScaleFPX = (int32_t)((int64_t)destWidth * FP_ONE / ctx.scaledSrcWidth);
-  ctx.invScaleFPX = (int32_t)((int64_t)ctx.scaledSrcWidth * FP_ONE / destWidth);
-  ctx.fineScaleFPY = (int32_t)((int64_t)destHeight * FP_ONE / ctx.scaledSrcHeight);
-  ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / destHeight);
-
-  // Area averaging covers pure downscales (see emitGrayBlock); the carry that makes it exact
-  // across block edges costs 2 x 3 bytes per output column.
-  ctx.areaAverage = mode != JpegMode::Progressive && ctx.fineScaleFPX <= FP_ONE && ctx.fineScaleFPY <= FP_ONE &&
-                    (ctx.fineScaleFPX < FP_ONE || ctx.fineScaleFPY < FP_ONE) && ctx.invScaleFPX < MAX_AREA_INV_FP &&
-                    ctx.invScaleFPY < MAX_AREA_INV_FP;
-  if (ctx.areaAverage) {
-    ctx.areaCarry = makeUniqueNoThrow<AreaCarry>();
-    if (!ctx.areaCarry || !ctx.areaCarry->allocate(destWidth)) {
-      LOG_DBG("JPG", "No heap for the %d-column area carry; block edges average per block", destWidth);
-      ctx.areaCarry.reset();
-    }
-  }
+  configureResample(ctx, !dcPreview);
 
   LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
           destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);
 
-  // A TJpgDec MCU is at most 16 scaled-source rows tall, which our fine scale maps
-  // to this many output rows — the tallest span either the disk cache band or the
-  // dither row band (below) ever needs to hold in one piece.
-  const int maxBlockDstRows =
-      mode == JpegMode::Progressive ? 1 : (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
+  // A TJpgDec MCU is at most 16 scaled-source rows tall (a ProgressiveJpeg band at most 8), which
+  // our fine scale maps to this many output rows — the tallest span either the disk cache band or
+  // the dither row band (below) ever needs to hold in one piece. The DC preview emits single rows.
+  const int maxBlockDstRows = dcPreview ? 1 : (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
 
   // Start streaming the pixel cache to disk.
   // (See PixelCache for why streaming replaced a full-image buffer; ported from
@@ -1417,13 +1486,39 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   jpgCheckHeap("jpg_before_decode");
   unsigned long decodeStart = millis();
   ProgressiveJpegDc::Result progressiveResult = ProgressiveJpegDc::Result::Ok;
-  if (mode == JpegMode::Progressive) {
+  bool runDcPreview = dcPreview;
+  if (fullProgressive) {
+    ProgressiveJpeg::DecodeOptions options;
+    options.scaleShift = tjpgScale;
+    options.shouldAbort = fullProgressiveShouldAbort;
+    options.workspace = progressiveWorkspace->get();
+    options.workspaceSize = progressiveWorkspaceBytes;
+    FullProgressiveSink sink{&ctx, false};
+    const auto result = ProgressiveJpeg::decode(file, options, fullProgressiveOutput, &sink);
+    progressiveWorkspace.reset();
+    if (result == ProgressiveJpeg::Result::Aborted) {
+      progressiveResult = ProgressiveJpegDc::Result::Aborted;
+    } else if (result != ProgressiveJpeg::Result::Ok) {
+      LOG_ERR("JPG", "Progressive JPEG full decode failed (%s)%s: %s", ProgressiveJpeg::resultName(result),
+              sink.emitted ? "" : ", trying the DC preview", imagePath.c_str());
+      if (sink.emitted) {
+        progressiveResult = ProgressiveJpegDc::Result::InvalidData;
+      } else {
+        // Nothing was drawn or cached yet, so the preview can start over on the same context.
+        ctx.scaledSrcWidth = destWidth;
+        ctx.scaledSrcHeight = destHeight;
+        configureResample(ctx, false);
+        runDcPreview = true;
+      }
+    }
+  }
+  if (runDcPreview) {
     ProgressiveJpegDc::DecodeOptions options;
     options.outputWidth = destWidth;
     options.outputHeight = destHeight;
     options.shouldAbort = progressiveShouldAbort;
     progressiveResult = ProgressiveJpegDc::decode(file, options, progressiveOutput, &ctx);
-  } else {
+  } else if (mode == JpegMode::Baseline) {
     jr = jd_decomp(&jdec, tjpgOutput, tjpgScale);
   }
   unsigned long decodeTime = millis() - decodeStart;
