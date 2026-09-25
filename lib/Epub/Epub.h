@@ -288,7 +288,7 @@ class Epub {
   // from, or nullptr to use the heap — see EpubImageManifest::resolvePending.
   bool persistImageManifest(BuildArena* walkArena = nullptr) {
     if (!imageManifest) return false;
-    const bool resolvedDeferred = imageManifest->resolvePending(walkArena) > 0;
+    const bool resolvedDeferred = imageManifest->resolvePending(walkArena, getPath()) > 0;
     imageManifest->persistIfDirty();
     return resolvedDeferred;
   }

@@ -1747,11 +1747,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
             }
             if (!dimsOk && self->imageManifest) {
               // Resolve + cache on a miss: each image's header is read at most once ever.
-              const ImageManifestEntry* entry = nullptr;
-              switch (self->imageManifest->resolve(self->epub->getPath(), resolvedPath, entry)) {
+              switch (self->imageManifest->resolve(self->epub->getPath(), resolvedPath, dims)) {
                 case EpubImageManifest::Resolve::Resolved:
-                  dims.width = entry->width;
-                  dims.height = entry->height;
                   dimsOk = true;
                   manifestAnswered = true;
                   break;
@@ -1772,15 +1769,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   // 54 of a 58-page chapter and the alt text was cached as if the file were
                   // corrupt.
                   using Walk = EpubImageManifest::Walk;
-                  Walk walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, entry,
+                  Walk walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
                                                                       self->imageWalkBudget());
                   if (walk == Walk::NeedsHeap && self->recoverHeapForImageHeader()) {
-                    walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, entry,
+                    walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
                                                                    self->imageWalkBudget());
                   }
                   if (walk == Walk::Resolved) {
-                    dims.width = entry->width;
-                    dims.height = entry->height;
                     dimsOk = true;
                   } else {
                     // The ring did not fit, or the walk found nothing: both are retried at the
@@ -3790,12 +3785,7 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildCellImage(const std::str
   ImageDimensions dims = {0, 0};
   bool dimsOk = false;
   if (imageManifest) {
-    const ImageManifestEntry* entry = imageManifest->ensureResolved(epub->getPath(), resolvedPath);
-    if (entry) {
-      dims.width = entry->width;
-      dims.height = entry->height;
-      dimsOk = true;
-    }
+    dimsOk = imageManifest->ensureResolved(epub->getPath(), resolvedPath, dims);
   }
   if (!dimsOk) {
     dimsOk = ImageDecoderFactory::getDimensionsFromZipEntry(epub->getPath(), resolvedPath, dims);

@@ -6,10 +6,13 @@
 #include <HalStorage.h>
 #include <InflateReader.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <algorithm>
+#include <cstring>
 
+#include "HashUtils.h"
 #include "ImageFormatDetector.h"
 #include "converters/GifToFramebufferConverter.h"
 #include "converters/JpegToFramebufferConverter.h"
@@ -17,6 +20,8 @@
 
 namespace {
 constexpr const char* kImagesBinFile = "/images.bin";
+constexpr const char* kPendingFile = "/images.pending";
+constexpr const char* kPendingTempFile = "/images.pending.tmp";
 // Enough to find any PNG IHDR chunk or GIF logical-screen header, and the SOF of a JPEG that
 // carries no more than a thumbnail's worth of metadata. Anything larger is deferred to a
 // streaming walk (see resolve()).
@@ -26,6 +31,9 @@ constexpr size_t kWalkChunkBytes = 512;
 // Largest-free-block readings land a few bytes under the round number (allocator bookkeeping),
 // so the walk gate does not sit exactly on the ring size.
 constexpr size_t kWalkHeapSlack = 64;
+// The record array grows by at least this many records at a time (12 B each).
+constexpr uint16_t kRecordGrowth = 32;
+constexpr size_t kRecordBytes = 12;
 
 // Parse image dimensions by detecting format and delegating to the appropriate converter.
 // needMore (JPEG only) reports a header that continues past the buffer, as distinct from one
@@ -45,13 +53,38 @@ bool parseImageDimensions(const uint8_t* buf, size_t n, ImageDimensions& dims, b
   }
   return false;
 }
+
+// Pending-file record I/O. Fixed layout, little-endian pods, no strings.
+void writePending(FsFile& f, const uint64_t key, const ZipFile::FileStatSlim& stat) {
+  serialization::writePod(f, key);
+  serialization::writePod(f, stat.method);
+  serialization::writePod(f, stat.compressedSize);
+  serialization::writePod(f, stat.uncompressedSize);
+  serialization::writePod(f, stat.localHeaderOffset);
+}
+
+bool readPending(FsFile& f, uint64_t& key, ZipFile::FileStatSlim& stat) {
+  if (f.available() < static_cast<int>(8 + 2 + 4 + 4 + 4)) return false;
+  serialization::readPod(f, key);
+  serialization::readPod(f, stat.method);
+  serialization::readPod(f, stat.compressedSize);
+  serialization::readPod(f, stat.uncompressedSize);
+  serialization::readPod(f, stat.localHeaderOffset);
+  return true;
+}
 }  // namespace
+
+uint64_t EpubImageManifest::keyFor(const std::string& epubEntryPath) { return HashUtils::fnvHash64(epubEntryPath); }
+
+std::string EpubImageManifest::pendingPath() const { return cachePath_ + kPendingFile; }
 
 bool EpubImageManifest::load(const std::string& cachePath) {
   loaded_ = false;
   dirty_ = false;
-  entries_.clear();
-  pending_.clear();
+  records_.reset();
+  count_ = 0;
+  capacity_ = 0;
+  pendingLive_ = 0;
   cachePath_ = cachePath;
   // Drop any ZipFile bound to a previous book; resolve() lazily recreates it.
   resolveZip_.reset();
@@ -59,60 +92,114 @@ bool EpubImageManifest::load(const std::string& cachePath) {
 
   const std::string path = cachePath + kImagesBinFile;
   FsFile f;
-  if (!Storage.openFileForRead("IMF", path, f)) {
-    // No cache yet — start empty; resolve() fills it incrementally.
-    loaded_ = true;
-    return true;
-  }
-
-  uint8_t version = 0;
-  serialization::readPod(f, version);
-  if (version != VERSION) {
-    // Stale format — ignore its contents and start empty; first persist overwrites it.
+  if (Storage.openFileForRead("IMF", path, f)) {
+    uint8_t version = 0;
+    serialization::readPod(f, version);
+    uint16_t count = 0;
+    if (version == VERSION) serialization::readPod(f, count);
+    // A corrupt/truncated images.bin must not steer the array into a huge allocation: a count
+    // that cannot fit in the bytes left in the file is garbage, and a bad header means the rest
+    // is untrustworthy too. Drop the whole cache and start empty; the next persist overwrites it.
+    const int remaining = f.available();
+    const uint32_t maxPlausible = remaining > 0 ? static_cast<uint32_t>(remaining) / kRecordBytes : 0u;
+    if (version != VERSION) {
+      count = 0;  // stale format: start empty, first persist overwrites it
+    } else if (count > maxPlausible) {
+      LOG_ERR("IMF", "images.bin count %u exceeds file capacity %u; ignoring cache", count, maxPlausible);
+      count = 0;
+    }
+    if (count > 0 && reserveRecords(count)) {
+      for (uint16_t i = 0; i < count; ++i) {
+        Record& r = records_[i];
+        serialization::readPod(f, r.keyLo);
+        serialization::readPod(f, r.keyHi);
+        serialization::readPod(f, r.width);
+        serialization::readPod(f, r.height);
+      }
+      count_ = count;
+    } else if (count > 0) {
+      LOG_ERR("IMF", "images.bin: no heap for %u records; starting empty", count);
+    }
     f.close();
-    entries_.clear();
-    loaded_ = true;
-    return true;
   }
 
-  uint16_t count = 0;
-  serialization::readPod(f, count);
-  // A corrupt/truncated images.bin must not steer reserve() into a multi-MB allocation that aborts
-  // the firmware (uncaught bad_alloc, -fno-exceptions). The smallest possible on-disk entry is one
-  // u32 string-length prefix (empty key) + width + height (two int16) = 8 B, so a count that can't
-  // fit in the bytes left in the file is garbage. A bad header means the rest is untrustworthy too:
-  // drop the whole cache and start empty — resolve() refills it and the next persist
-  // overwrites the corrupt file.
-  const int remaining = f.available();
-  const uint32_t maxPlausible = remaining > 0 ? static_cast<uint32_t>(remaining) / 8u : 0u;
-  if (count > maxPlausible) {
-    LOG_ERR("IMF", "images.bin count %u exceeds file capacity %u; ignoring cache", count, maxPlausible);
-    f.close();
-    entries_.clear();
-    loaded_ = true;
-    return true;
+  // Live queue length: records whose image is not already known (a record resolved inline stays
+  // in the file until the next compaction).
+  FsFile pf;
+  if (Storage.openFileForRead("IMF", pendingPath(), pf)) {
+    uint64_t key = 0;
+    ZipFile::FileStatSlim stat = {};
+    while (readPending(pf, key, stat)) {
+      if (!findRecord(key)) ++pendingLive_;
+    }
+    pf.close();
   }
-  entries_.reserve(count);
-
-  for (uint16_t i = 0; i < count; ++i) {
-    ImageManifestEntry e;
-    if (!serialization::readString(f, e.epubEntryPath)) break;
-    serialization::readPod(f, e.width);
-    serialization::readPod(f, e.height);
-    entries_.push_back(std::move(e));
-  }
-
-  f.close();
   loaded_ = true;
-  LOG_DBG("IMF", "Loaded image manifest: %u entries", static_cast<unsigned>(entries_.size()));
+  LOG_DBG("IMF", "Loaded image manifest: %u entries, %u pending", static_cast<unsigned>(count_),
+          static_cast<unsigned>(pendingLive_));
   return true;
 }
 
-const ImageManifestEntry* EpubImageManifest::ensureResolved(const std::string& epubPath,
-                                                            const std::string& epubEntryPath) {
-  const ImageManifestEntry* entry = nullptr;
-  resolve(epubPath, epubEntryPath, entry);
-  return entry;
+bool EpubImageManifest::reserveRecords(const uint16_t wanted) {
+  if (wanted <= capacity_) return true;
+  auto grown = makeUniqueNoThrow<Record[]>(wanted);
+  if (!grown) return false;
+  if (count_ > 0) memcpy(grown.get(), records_.get(), static_cast<size_t>(count_) * sizeof(Record));
+  records_ = std::move(grown);
+  capacity_ = wanted;
+  return true;
+}
+
+const EpubImageManifest::Record* EpubImageManifest::findRecord(const uint64_t key) const {
+  // records_ is sorted by key (guaranteed by load() order and insertEntry).
+  const Record* first = records_.get();
+  const Record* last = first + count_;
+  const Record* it = std::lower_bound(first, last, key, [](const Record& r, const uint64_t k) { return keyOf(r) < k; });
+  if (it != last && keyOf(*it) == key) return it;
+  return nullptr;
+}
+
+bool EpubImageManifest::find(const std::string& epubEntryPath, ImageDimensions& out) const {
+  const Record* r = findRecord(keyFor(epubEntryPath));
+  if (!r) return false;
+  out.width = r->width;
+  out.height = r->height;
+  return true;
+}
+
+bool EpubImageManifest::insertEntry(const uint64_t key, const ImageDimensions& dims) {
+  if (count_ == capacity_) {
+    if (capacity_ == 0xFFFF) return false;
+    const uint32_t grown = std::min<uint32_t>(0xFFFF, capacity_ + std::max<uint32_t>(kRecordGrowth, capacity_ / 2));
+    if (!reserveRecords(static_cast<uint16_t>(grown))) {
+      LOG_ERR("IMF", "No heap to remember image %u of this book (%u records); resolved for this build only",
+              static_cast<unsigned>(count_ + 1), static_cast<unsigned>(capacity_));
+      return false;
+    }
+  }
+  // Insert keeping records_ sorted so findRecord()'s binary search stays valid.
+  Record* first = records_.get();
+  Record* pos =
+      std::lower_bound(first, first + count_, key, [](const Record& r, const uint64_t k) { return keyOf(r) < k; });
+  if (pos != first + count_ && keyOf(*pos) == key) {
+    pos->width = dims.width;  // re-resolved: keep one record per image
+    pos->height = dims.height;
+    dirty_ = true;
+    return true;
+  }
+  memmove(pos + 1, pos, static_cast<size_t>((first + count_) - pos) * sizeof(Record));
+  pos->keyLo = static_cast<uint32_t>(key);
+  pos->keyHi = static_cast<uint32_t>(key >> 32);
+  pos->width = dims.width;
+  pos->height = dims.height;
+  ++count_;
+  dirty_ = true;
+  return true;
+}
+
+bool EpubImageManifest::ensureResolved(const std::string& epubPath, const std::string& epubEntryPath,
+                                       ImageDimensions& out) {
+  return resolve(epubPath, epubEntryPath, out) == Resolve::Resolved;
 }
 
 bool EpubImageManifest::openResolveZip(const std::string& epubPath) {
@@ -143,9 +230,13 @@ bool EpubImageManifest::openResolveZip(const std::string& epubPath) {
 }
 
 EpubImageManifest::Resolve EpubImageManifest::resolve(const std::string& epubPath, const std::string& epubEntryPath,
-                                                      const ImageManifestEntry*& out) {
-  out = find(epubEntryPath);
-  if (out) return Resolve::Resolved;
+                                                      ImageDimensions& out) {
+  const uint64_t key = keyFor(epubEntryPath);
+  if (const Record* r = findRecord(key)) {
+    out.width = r->width;
+    out.height = r->height;
+    return Resolve::Resolved;
+  }
 
   // Miss: read just this one image's header by its central-dir offset. One image, on demand —
   // not the whole book.
@@ -165,7 +256,7 @@ EpubImageManifest::Resolve EpubImageManifest::resolve(const std::string& epubPat
     LOG_ERR("IMF", "resolve: header buffer alloc failed (%u bytes)", static_cast<unsigned>(kHeaderBufSize));
     // A moment's heap, not a verdict on the image: same treatment as a header that outruns the
     // window, so the build's end (or a later build) gets to answer it.
-    return deferFor(epubEntryPath, stat);
+    return deferFor(key, stat);
   }
   const size_t bytesRead = zf.readBytesFromStat(stat, headerBuf, kHeaderBufSize);
   ImageDimensions dims = {0, 0};
@@ -174,7 +265,10 @@ EpubImageManifest::Resolve EpubImageManifest::resolve(const std::string& epubPat
   free(headerBuf);
 
   if (ok && dims.width > 0 && dims.height > 0) {
-    out = insertEntry(epubEntryPath, dims);
+    insertEntry(key, dims);
+    LOG_DBG("IMF", "Resolved %s -> %dx%d (%u cached)", epubEntryPath.c_str(), dims.width, dims.height,
+            static_cast<unsigned>(count_));
+    out = dims;
     return Resolve::Resolved;
   }
   // The whole entry fitted in the window and still showed no SOF: a truncated file, which no
@@ -182,41 +276,55 @@ EpubImageManifest::Resolve EpubImageManifest::resolve(const std::string& epubPat
   if (needMore && bytesRead >= stat.uncompressedSize) needMore = false;
   if (needMore || bytesRead == 0) {
     // needMore: a valid JPEG whose SOF lies beyond the window (Exif/IPTC/XMP/ICC ahead of it —
-    // ~29 KB per image in the #249 book). bytesRead == 0: the bounded read itself found no room
-    // or no bytes. Neither says anything about the image; both are answered by the streaming
-    // walk, whose inflate ring the parser gates against the heap (deferredWalkBytes) and which
-    // resolvePending() retries at the build's end.
-    return deferFor(epubEntryPath, stat);
+    // 10-29 KB per image in the books this was measured on). bytesRead == 0: the bounded read
+    // itself found no room or no bytes. Neither says anything about the image; both are answered
+    // by the streaming walk (resolveDeferredNow mid-parse, resolvePending at a build's end).
+    LOG_DBG("IMF", "resolve: header beyond %u B window, deferred: %s", static_cast<unsigned>(kHeaderBufSize),
+            epubEntryPath.c_str());
+    return deferFor(key, stat);
   }
   LOG_DBG("IMF", "resolve: no dimensions for %s", epubEntryPath.c_str());
   return Resolve::Unreadable;
 }
 
-EpubImageManifest::Resolve EpubImageManifest::deferFor(const std::string& epubEntryPath,
-                                                       const ZipFile::FileStatSlim& stat) {
-  if (!findPending(epubEntryPath)) {
-    if (pending_.size() >= kMaxPending) {
-      // Still Deferred for the caller's purposes (an inline walk may resolve it); only the
-      // build-end retry is forgone for this one.
-      LOG_DBG("IMF", "resolve: pending queue full; %s left to the parser", epubEntryPath.c_str());
-      return Resolve::Deferred;
-    }
-    if (pending_.capacity() == 0) pending_.reserve(kMaxPending);  // once, and only for a book that needs it
-    pending_.push_back({epubEntryPath, stat});
-    LOG_DBG("IMF", "resolve: header beyond %u B window, deferred: %s (%u pending)",
-            static_cast<unsigned>(kHeaderBufSize), epubEntryPath.c_str(), static_cast<unsigned>(pending_.size()));
+EpubImageManifest::Resolve EpubImageManifest::deferFor(const uint64_t key, const ZipFile::FileStatSlim& stat) {
+  if (findPending(key, nullptr)) return Resolve::Deferred;
+  // Append to the queue on the card: no per-image memory, no cap, and it outlives the session.
+  FsFile f;
+  const std::string path = pendingPath();
+  bool opened = Storage.exists(path.c_str()) && Storage.openFileForUpdate("IMF", path, f);
+  if (opened && !f.seek(f.size())) {
+    f.close();
+    opened = false;
   }
+  if (!opened && !Storage.openFileForWrite("IMF", path, f)) {
+    LOG_ERR("IMF", "defer: cannot open %s; image stays unqueued for this build", path.c_str());
+    return Resolve::Deferred;  // still deferred for the caller; the next build's miss retries
+  }
+  writePending(f, key, stat);
+  f.flush();
+  f.close();
+  ++pendingLive_;
   return Resolve::Deferred;
 }
 
-const EpubImageManifest::PendingImage* EpubImageManifest::findPending(const std::string& epubEntryPath) const {
-  for (const auto& p : pending_) {
-    if (p.epubEntryPath == epubEntryPath) return &p;
+bool EpubImageManifest::findPending(const uint64_t key, ZipFile::FileStatSlim* stat) const {
+  if (pendingLive_ == 0) return false;
+  FsFile f;
+  if (!Storage.openFileForRead("IMF", pendingPath(), f)) return false;
+  uint64_t k = 0;
+  ZipFile::FileStatSlim s = {};
+  bool found = false;
+  while (readPending(f, k, s)) {
+    if (k == key) {
+      found = true;
+      if (stat) *stat = s;
+      break;
+    }
   }
-  return nullptr;
+  f.close();
+  return found;
 }
-
-bool EpubImageManifest::hasPending() const { return !pending_.empty(); }
 
 size_t EpubImageManifest::walkBytesFor(const ZipFile::FileStatSlim& stat, const size_t outputCap) {
   // EntryReader::open(stat, cap): the read chunk, plus — for a deflated entry — a ring sized to
@@ -228,8 +336,8 @@ size_t EpubImageManifest::walkBytesFor(const ZipFile::FileStatSlim& stat, const 
 }
 
 size_t EpubImageManifest::deferredWalkBytes(const std::string& epubEntryPath) const {
-  const PendingImage* p = findPending(epubEntryPath);
-  return p ? walkBytesFor(p->stat, kWalkStageBytes) : 0;
+  ZipFile::FileStatSlim stat = {};
+  return findPending(keyFor(epubEntryPath), &stat) ? walkBytesFor(stat, kWalkStageBytes) : 0;
 }
 
 EpubImageManifest::Walk EpubImageManifest::walkEntry(const ZipFile::FileStatSlim& stat, ImageDimensions& dims,
@@ -273,92 +381,115 @@ EpubImageManifest::Walk EpubImageManifest::walkEntry(const ZipFile::FileStatSlim
 }
 
 EpubImageManifest::Walk EpubImageManifest::resolveDeferredNow(const std::string& epubPath,
-                                                              const std::string& epubEntryPath,
-                                                              const ImageManifestEntry*& out, const size_t heapBudget) {
-  out = nullptr;
-  const PendingImage* p = findPending(epubEntryPath);
-  if (!p) return Walk::Unreadable;
+                                                              const std::string& epubEntryPath, ImageDimensions& out,
+                                                              const size_t heapBudget) {
+  const uint64_t key = keyFor(epubEntryPath);
+  ZipFile::FileStatSlim stat = {};
+  if (!findPending(key, &stat)) return Walk::Unreadable;
   if (!openResolveZip(epubPath)) return Walk::NeedsHeap;
   ImageDimensions dims = {0, 0};
-  const Walk walk = walkEntry(p->stat, dims, nullptr, heapBudget);
+  const Walk walk = walkEntry(stat, dims, nullptr, heapBudget);
   if (walk != Walk::Resolved) return walk;
-  out = insertEntry(epubEntryPath, dims);
-  pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
-                                [&](const PendingImage& q) { return q.epubEntryPath == epubEntryPath; }),
-                 pending_.end());
+  insertEntry(key, dims);
+  LOG_DBG("IMF", "Resolved %s -> %dx%d by walk (%u cached)", epubEntryPath.c_str(), dims.width, dims.height,
+          static_cast<unsigned>(count_));
+  out = dims;
+  // Its record stays in images.pending as a dead entry until the next compaction.
+  if (pendingLive_ > 0) --pendingLive_;
   return Walk::Resolved;
 }
 
-size_t EpubImageManifest::resolvePending(BuildArena* walkArena) {
+size_t EpubImageManifest::resolvePending(BuildArena* walkArena, const std::string& epubPath) {
+  const std::string path = pendingPath();
+  if (!Storage.exists(path.c_str())) {
+    pendingLive_ = 0;
+    return 0;
+  }
+  const std::string& bookPath = epubPath.empty() ? resolveEpubPath_ : epubPath;
+  if (bookPath.empty() || !openResolveZip(bookPath)) {
+    LOG_ERR("IMF", "resolvePending: no book to walk %u queued image(s) in", static_cast<unsigned>(pendingLive_));
+    return 0;
+  }
+  FsFile in;
+  if (!Storage.openFileForRead("IMF", path, in)) return 0;
+  // Walks short of memory are kept -- written to a temp file as we go, so the working set is one
+  // record whatever the queue's length -- and copied back over the queue afterwards.
+  const std::string tempPath = cachePath_ + kPendingTempFile;
+  FsFile keep;
+  bool keeping = Storage.openFileForWrite("IMF", tempPath, keep);
   size_t resolved = 0;
-  std::vector<PendingImage> still;  // walks short of memory: kept for a caller with a bigger region
-  for (const auto& p : pending_) {
+  uint16_t kept = 0;
+  uint64_t key = 0;
+  ZipFile::FileStatSlim stat = {};
+  while (readPending(in, key, stat)) {
+    if (findRecord(key)) continue;  // resolved inline earlier: dead record
     // Largest-free-block readings land a few bytes under the round number (allocator
     // bookkeeping), so the heap budget sits just under what the allocator reports.
     const uint32_t maxAlloc = ESP.getMaxAllocHeap();
     const size_t heapBudget = maxAlloc > kWalkHeapSlack ? maxAlloc - kWalkHeapSlack : 1;
     ImageDimensions dims = {0, 0};
-    switch (walkEntry(p.stat, dims, walkArena, heapBudget)) {
+    switch (walkEntry(stat, dims, walkArena, heapBudget)) {
       case Walk::Resolved:
-        insertEntry(p.epubEntryPath, dims);
+        insertEntry(key, dims);
         ++resolved;
         break;
       case Walk::NeedsHeap:
-        LOG_DBG("IMF", "resolvePending: %s: no room for its walk (have %u contiguous); still pending",
-                p.epubEntryPath.c_str(), static_cast<unsigned>(maxAlloc));
-        if (still.size() < kMaxPending) still.push_back(p);
+        LOG_DBG("IMF", "resolvePending: no room for a walk (have %u contiguous); still pending",
+                static_cast<unsigned>(maxAlloc));
+        // An image only memory stood in the way of stays queued: the reader retries it from the
+        // borrowed framebuffer (the one region of full-ring size it can always get), so a walk is
+        // never quietly dropped between builds.
+        if (keeping) {
+          writePending(keep, key, stat);
+          ++kept;
+        }
         break;
       case Walk::Unreadable:
-        LOG_DBG("IMF", "resolvePending: no dimensions for %s", p.epubEntryPath.c_str());
+        // Dropped; the next build's miss re-probes it and decides again.
+        LOG_DBG("IMF", "resolvePending: no dimensions for a queued image");
         break;
     }
   }
-  // An image only memory stood in the way of stays queued: the reader retries it from the borrowed
-  // framebuffer (the one region of full-ring size it can always get) before its next build, so a
-  // walk is never quietly dropped between builds. An unreadable one is dropped; the next build's
-  // miss re-probes it.
-  pending_ = std::move(still);
+  in.close();
+  if (keeping) {
+    keep.flush();
+    keep.close();
+  }
+
+  // Compact: the queue becomes exactly the kept records. Without a rename on this storage the
+  // temp is streamed back over a truncated queue file.
+  if (!keeping) {
+    // Could not write the temp: leave the queue as it was (dead and unresolved records both stay,
+    // and the count still excludes the dead ones).
+    LOG_ERR("IMF", "resolvePending: cannot write %s; queue left uncompacted", tempPath.c_str());
+    return resolved;
+  }
+  if (kept == 0) {
+    Storage.remove(path.c_str());
+  } else {
+    FsFile src;
+    FsFile dst;
+    if (Storage.openFileForRead("IMF", tempPath, src) && Storage.openFileForWrite("IMF", path, dst)) {
+      uint8_t buf[128];
+      int n = 0;
+      while ((n = src.read(buf, sizeof(buf))) > 0) dst.write(buf, static_cast<size_t>(n));
+      dst.flush();
+      dst.close();
+      src.close();
+    } else {
+      LOG_ERR("IMF", "resolvePending: cannot rewrite %s", path.c_str());
+      if (src) src.close();
+    }
+  }
+  Storage.remove(tempPath.c_str());
+  pendingLive_ = kept;
   return resolved;
-}
-
-const ImageManifestEntry* EpubImageManifest::insertEntry(const std::string& epubEntryPath,
-                                                         const ImageDimensions& dims) {
-  ImageManifestEntry e;
-  e.epubEntryPath = epubEntryPath;  // caller passes the normalised key
-  e.width = dims.width;
-  e.height = dims.height;
-
-  // Insert keeping entries_ sorted so find()'s binary search stays valid.
-  auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
-                             [](const ImageManifestEntry& a, const std::string& k) { return a.epubEntryPath < k; });
-  const ImageManifestEntry* result = &*entries_.insert(it, std::move(e));
-  dirty_ = true;
-  LOG_DBG("IMF", "Resolved %s -> %dx%d (%u cached)", epubEntryPath.c_str(), result->width, result->height,
-          static_cast<unsigned>(entries_.size()));
-  return result;
 }
 
 void EpubImageManifest::closeResolveHandle() {
   // Release the SD descriptor the resolve loop held open across this build's images. The
   // ZipFile object itself is kept (cheap) and reused for the next build, which reopens lazily.
   if (resolveZip_) resolveZip_->close();
-}
-
-void EpubImageManifest::releaseMemory() {
-  persistIfDirty();
-  std::vector<ImageManifestEntry>().swap(entries_);
-  std::vector<PendingImage>().swap(pending_);
-  resolveZip_.reset();
-  std::string().swap(resolveEpubPath_);
-  loaded_ = false;
-}
-
-const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {
-  // entries_ is sorted by epubEntryPath (guaranteed by load() order and insertEntry).
-  auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
-                             [](const ImageManifestEntry& e, const std::string& key) { return e.epubEntryPath < key; });
-  if (it != entries_.end() && it->epubEntryPath == epubEntryPath) return &*it;
-  return nullptr;
 }
 
 void EpubImageManifest::persistIfDirty() {
@@ -380,16 +511,27 @@ void EpubImageManifest::persistIfDirty() {
   }
 
   serialization::writePod(f, VERSION);
-  const uint16_t count = static_cast<uint16_t>(entries_.size());
-  serialization::writePod(f, count);
-  for (const auto& e : entries_) {
-    serialization::writeString(f, e.epubEntryPath);
-    serialization::writePod(f, e.width);
-    serialization::writePod(f, e.height);
+  serialization::writePod(f, count_);
+  for (uint16_t i = 0; i < count_; ++i) {
+    const Record& r = records_[i];
+    serialization::writePod(f, r.keyLo);
+    serialization::writePod(f, r.keyHi);
+    serialization::writePod(f, r.width);
+    serialization::writePod(f, r.height);
   }
   f.flush();
   f.close();
 
   dirty_ = false;
-  LOG_DBG("IMF", "Persisted image manifest: %u entries", static_cast<unsigned>(entries_.size()));
+  LOG_DBG("IMF", "Persisted image manifest: %u entries", static_cast<unsigned>(count_));
+}
+
+void EpubImageManifest::releaseMemory() {
+  persistIfDirty();
+  records_.reset();
+  count_ = 0;
+  capacity_ = 0;
+  resolveZip_.reset();
+  std::string().swap(resolveEpubPath_);
+  loaded_ = false;
 }
