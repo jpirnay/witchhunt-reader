@@ -802,10 +802,9 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   // used for the stateless Bayer path where pixel order doesn't matter).
   auto sinkPixel = [&](int dstX, int dstY, int outX, int outY, uint8_t gray) {
     if (useBand) {
-      // ditherBandCapacityRows is sized for the documented "MCU is at most 16
-      // scaled-source rows tall" bound (matching PixelCache's identical assumption);
-      // this guard is a defensive backstop against that ever being violated by an
-      // unusual sampling factor, trading a dropped row for a heap overflow.
+      // ditherBandCapacityRows is sized from the decoder's real block height (see
+      // maxBlockDstRows, shared with PixelCache); this guard is a defensive backstop
+      // against that ever being violated, trading a dropped row for a heap overflow.
       const int bandRow = dstY - ctx->ditherBandTop;
       if (bandRow < 0 || bandRow >= ctx->ditherBandCapacityRows) return;
       ctx->ditherBand[static_cast<size_t>(bandRow) * static_cast<size_t>(ctx->dstWidth) + static_cast<size_t>(dstX)] =
@@ -1374,10 +1373,15 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
           destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);
 
-  // A TJpgDec MCU is at most 16 scaled-source rows tall (a ProgressiveJpeg band at most 8), which
-  // our fine scale maps to this many output rows — the tallest span either the disk cache band or
-  // the dither row band (below) ever needs to hold in one piece. The DC preview emits single rows.
-  const int maxBlockDstRows = dcPreview ? 1 : (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
+  // The tallest block the decoder emits, in scaled-source rows: a TJpgDec MCU row is 8 * msy
+  // source rows (8 for grayscale/4:4:4, 16 for 4:2:0) descaled by the DCT step, a ProgressiveJpeg
+  // band one block row at its output scale. Our fine scale maps it to this many output rows --
+  // the tallest span either the disk cache band or the dither row band (below) ever needs to hold
+  // in one piece. The DC preview emits single rows. It used to be a flat 16: at 0.95 residual
+  // scale on the X3 that is 17 rows at 512 px, over the 8 KB dither-band budget, and the BW
+  // rendition silently fell back to Bayer (and lost its companion cache with it).
+  const int srcBlockRows = fullProgressive ? (8 >> tjpgScale) : ((8 * jdec.msy) >> tjpgScale);
+  const int maxBlockDstRows = dcPreview ? 1 : (int)(((int64_t)srcBlockRows * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
 
   // Start streaming the pixel cache to disk.
   // (See PixelCache for why streaming replaced a full-image buffer; ported from
