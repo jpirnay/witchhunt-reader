@@ -1535,9 +1535,18 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
 
   // Companion rendition: needs the raster-order band (see JpegContext::Companion) and its own
-  // streaming cache band, gated like the primary's.
-  if (!config.companionCachePath.empty() && ctx.ditherBand && ctx.caching &&
-      shouldEnableJpegCache(config, destWidth, destHeight, maxBlockDstRows)) {
+  // streaming cache band. Gated on that band alone over the floor: the decode's working set is
+  // already allocated and was charged by the primary's gate. Re-running that gate here charged it
+  // again and refused the companion by 248 bytes on the X3 -- a full second decode (1.5 s) for a
+  // 2 KB band.
+  const size_t companionBand = PixelCache::bandBytesFor(destWidth, destHeight, maxBlockDstRows);
+  const bool companionFits = ESP.getFreeHeap() >= companionBand + JPEG_CACHE_HEAP_FLOOR;
+  if (!config.companionCachePath.empty() && ctx.ditherBand && ctx.caching && !companionFits) {
+    LOG_DBG("JPG", "Skipping companion cache: free heap %u < %u (band %u bytes)",
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(companionBand + JPEG_CACHE_HEAP_FLOOR),
+            static_cast<unsigned>(companionBand));
+  }
+  if (!config.companionCachePath.empty() && ctx.ditherBand && ctx.caching && companionFits) {
     ctx.companion = makeUniqueNoThrow<JpegContext::Companion>();
     if (ctx.companion && !config.monochromeOutput) {
       ctx.companion->atkinson1Bit = makeUniqueNoThrow<Atkinson1BitDitherer>(destWidth);
