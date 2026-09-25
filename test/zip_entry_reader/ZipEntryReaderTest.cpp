@@ -1,3 +1,4 @@
+#include <InflateReader.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -130,6 +131,43 @@ TEST_F(ZipEntryReaderTest, CloseResetsState) {
 // Arena-backed reader (readBuf + inflate ring carved from a BuildArena) must
 // produce byte-identical output, reclaim its whole scope on close, and never
 // touch malloc for the ring (plan Phase 2, EntryReader site).
+// open(stat, cap): the first `cap` bytes exactly, then done -- from a ring sized to the cap, not
+// to the entry. This is what lets a JPEG header walk over a 400 KB entry cost a 16 KB ring: a
+// deflate back-reference never reaches further back than the bytes produced so far.
+TEST_F(ZipEntryReaderTest, OutputCapStopsAtTheCapFromACapSizedRing) {
+  VectorSink ref;
+  ASSERT_TRUE(zip_.readFileToStream(kTestEntry, ref, 1024));
+  constexpr size_t kCap = 3000;
+  ASSERT_GT(ref.data.size(), 2 * kCap) << "the entry must be much larger than the cap";
+
+  ZipFile::FileStatSlim stat = {};
+  ASSERT_TRUE(zip_.loadFileStatSlim(kTestEntry, &stat));
+
+  BuildArena arena(40 * 1024);
+  ASSERT_TRUE(arena.valid());
+  {
+    ZipFile::EntryReader reader(zip_, 512, &arena);
+    ASSERT_TRUE(reader.open(stat, kCap));
+    // 512 B chunk + a ring for 3000 B of output (+ alignment): nowhere near the 32 KB ring.
+    EXPECT_LE(arena.highWater(), 512u + InflateReader::ringSizeFor(kCap) + 64u);
+
+    std::vector<uint8_t> got;
+    ASSERT_TRUE(drain(reader, got));
+    ASSERT_EQ(got.size(), kCap);
+    EXPECT_TRUE(std::equal(got.begin(), got.end(), ref.data.begin())) << "the capped read is an exact prefix";
+    EXPECT_EQ(reader.bytesProduced(), kCap);
+    EXPECT_EQ(reader.inflatedSize(), ref.data.size()) << "the entry's real size is still reported";
+  }
+  EXPECT_EQ(arena.used(), 0u);
+
+  // A cap past the end changes nothing.
+  ZipFile::EntryReader whole(zip_, 512);
+  ASSERT_TRUE(whole.open(stat, ref.data.size() * 2));
+  std::vector<uint8_t> all;
+  ASSERT_TRUE(drain(whole, all));
+  EXPECT_EQ(all, ref.data);
+}
+
 TEST_F(ZipEntryReaderTest, ArenaBackedOutputMatchesAndReclaims) {
   VectorSink ref;
   ASSERT_TRUE(zip_.readFileToStream(kTestEntry, ref, 1024));

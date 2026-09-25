@@ -56,6 +56,8 @@ inline constexpr size_t estimatePagesForSpine(const size_t inflatedSize) {
   return pages;
 }
 
+class BuildArena;  // lib/Memory -- see setBuildArena
+
 class ChapterHtmlSlimParser final : public Print {
   std::shared_ptr<Epub> epub;
   GfxRenderer& renderer;
@@ -293,9 +295,13 @@ class ChapterHtmlSlimParser final : public Print {
   // innermost such width, so a width:100% image inside a narrow box stays small
   // (matches KOReader) instead of filling the viewport. depth = parser depth at push
   // (pre-increment); popped in endElement when that scope closes.
+  // fixedWidth: the innermost absolute (px/em/pt) width at or above this entry, 0 if every
+  // wrapper up the chain is a percentage. That is the column a block image falls back to
+  // when a percentage wrapper would shrink it below its native size (see the image path).
   struct ContainerWidthEntry {
     int depth;
     int16_t width;
+    int16_t fixedWidth;
   };
   std::vector<ContainerWidthEntry> containerWidthStack_;
 
@@ -403,6 +409,7 @@ class ChapterHtmlSlimParser final : public Print {
   // image breaks) can call saxParser_.byteOffset() without threading the parser through
   // every call site.
   SaxParser saxParser_;
+  BuildArena* buildArena_ = nullptr;  // see setBuildArena
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -484,7 +491,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Gate for the streaming header walk of a deferred image: walkBytes is what the walk will
   // allocate (EpubImageManifest::deferredWalkBytes — one contiguous inflate ring of up to 32 KB
   // plus its read chunk), so contiguous heap is the hard bar.
-  bool heapAllowsImageWalk(size_t walkBytes) const;
+  // Contiguous heap a deferred image's walk may take right now (never 0: 0 would mean "no
+  // limit" to the manifest). See EpubImageManifest::resolveDeferredNow.
+  size_t imageWalkBudget() const;
   // Last resort before an image degrades to alt text: drop the rebuildable SD-font
   // glyph caches, which are usually what is holding the contiguous space the header
   // read needs. One shot per parse — once they are gone there is nothing left to
@@ -639,6 +648,13 @@ class ChapterHtmlSlimParser final : public Print {
   // Streaming makes the cost O(1) in the number of anchors. The bytes written here are exactly
   // the section cache's anchor-map encoding, so the finalizer copies them in verbatim.
   void setAnchorSpillPath(std::string path) { anchorSpillPath = std::move(path); }
+  // The build's arena, when the caller has one worth the space (the borrowed secondary
+  // framebuffer): setup() places the SAX parser's ~10 KB state in it instead of the heap. A
+  // background build runs with ~46 KB of heap, and this state plus the build's other
+  // long-lived buffers left ~16 KB for layout, which fragmented to a low-heap abort mid-chapter
+  // (X3 2026-09-25, page 67 of 180). Plain bump allocation, never released: the arena is the
+  // build's and is rewound by its owner after the parser is gone.
+  void setBuildArena(BuildArena* arena) { buildArena_ = arena; }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   const std::vector<std::pair<uint16_t, std::string>>& getPageBreakLabels() const { return pageBreakLabels; }
   const std::vector<ParagraphLutEntry>& getParagraphLutPerPage() const { return paragraphLutPerPage; }

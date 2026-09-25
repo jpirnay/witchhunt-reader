@@ -1,0 +1,10 @@
+{
+  "name": "ProgressiveJpeg",
+  "version": "1.0.0",
+  "description": "Banded full-resolution grayscale decoder for progressive JPEG images",
+  "license": "MIT",
+  "keywords": ["jpeg", "progressive", "decoder"],
+  "build": {
+    "includeDir": "."
+  }
+}

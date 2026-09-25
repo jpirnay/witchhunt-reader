@@ -16,6 +16,10 @@ What this fixture pins:
     allocation the device fails on. A stored entry could seek for free and would not
     exercise the path at all.
   - the <img> carries no width/height, so the parser must resolve the dimensions itself.
+  - photo_big.jpg (96x64, not referenced by the chapter) has 12 KB of metadata before SOF and
+    a 40 KB APP2 (ICC-shaped) segment after it, so the entry is ~53 KB: an entry-sized ring is
+    the full 32 KB, but the first 16 KB of output already holds the SOF. It pins the staged walk
+    (EpubImageManifest): a 16 KB ring must resolve it where a 32 KB one would not fit.
   - 64x48 pixels: small enough that the layout result is trivial and the golden stays
     readable, distinct enough that a 0x0 fallback is unmistakable.
 
@@ -37,21 +41,30 @@ WIDTH, HEIGHT = 64, 48
 METADATA_BYTES = 20 * 1024  # > kHeaderBufSize (4 KB); the entry-sized ring (~21 KB) then sits between the 8 KB header gate and a 16 KB contig
 
 
-def make_jpeg():
+def make_jpeg(width=WIDTH, height=HEIGHT, metadata_bytes=METADATA_BYTES, seed=249, trailing_bytes=0):
     # A flat gradient keeps the entropy-coded part tiny; the fixture is about the header.
-    img = Image.new("L", (WIDTH, HEIGHT))
-    img.putdata([(x * 4) & 0xFF for y in range(HEIGHT) for x in range(WIDTH)])
+    img = Image.new("L", (width, height))
+    img.putdata([(x * 4) & 0xFF for y in range(height) for x in range(width)])
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=50)
     data = buf.getvalue()
     assert data[:2] == b"\xff\xd8"
 
     # Seeded, so the fixture is reproducible byte for byte across regenerations.
-    rng = random.Random(249)
-    payload = b"Exif\x00\x00" + bytes(rng.getrandbits(8) for _ in range(METADATA_BYTES - 6))
+    rng = random.Random(seed)
+    payload = b"Exif\x00\x00" + bytes(rng.getrandbits(8) for _ in range(metadata_bytes - 6))
     app1 = b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
     # Insert right after SOI: everything the encoder wrote (APP0, DQT, SOF, DHT, SOS) follows.
-    return data[:2] + app1 + data[2:]
+    data = data[:2] + app1 + data[2:]
+    if trailing_bytes:
+        # An ICC-shaped APP2 after SOF (legal anywhere before SOS): bulk that a header walk never
+        # has to read, but that sizes the entry -- and with it an entry-sized inflate ring.
+        sof = data.find(b"\xff\xc0")
+        seg_end = sof + 2 + struct.unpack(">H", data[sof + 2:sof + 4])[0]
+        icc = b"ICC_PROFILE\x00\x01\x01" + bytes(rng.getrandbits(8) for _ in range(trailing_bytes - 14))
+        app2 = b"\xff\xe2" + struct.pack(">H", len(icc) + 2) + icc
+        data = data[:seg_end] + app2 + data[seg_end:]
+    return data
 
 
 CONTAINER = """<?xml version="1.0" encoding="UTF-8"?>
@@ -72,6 +85,7 @@ OPF = """<?xml version="1.0" encoding="utf-8"?>
   <manifest>
     <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
     <item id="photo" href="images/photo.jpg" media-type="image/jpeg"/>
+    <item id="photo_big" href="images/photo_big.jpg" media-type="image/jpeg"/>
   </manifest>
   <spine>
     <itemref idref="chapter"/>
@@ -98,6 +112,10 @@ def main():
     jpeg = make_jpeg()
     sof = jpeg.find(b"\xff\xc0")
     assert sof > 4096, f"SOF at {sof}: must lie beyond the 4 KB probe window"
+    big = make_jpeg(96, 64, 12 * 1024, seed=250, trailing_bytes=40 * 1024)
+    big_sof = big.find(b"\xff\xc0")
+    assert 4096 < big_sof < 16 * 1024, f"photo_big SOF at {big_sof}: must sit inside the 16 KB walk stage"
+    assert len(big) > 40 * 1024, f"photo_big is {len(big)} bytes: must exceed the 32 KB ring window"
 
     # Fixed timestamps: a regenerated fixture with unchanged content stays byte-identical.
     stamp = (2026, 9, 22, 0, 0, 0)
@@ -113,8 +131,10 @@ def main():
         add(zf, "OEBPS/content.opf", OPF.encode(), zipfile.ZIP_DEFLATED)
         add(zf, "OEBPS/chapter.xhtml", CHAPTER.encode(), zipfile.ZIP_DEFLATED)
         add(zf, "OEBPS/images/photo.jpg", jpeg, zipfile.ZIP_DEFLATED)
+        add(zf, "OEBPS/images/photo_big.jpg", big, zipfile.ZIP_DEFLATED)
 
-    print(f"wrote {OUT}: photo.jpg {len(jpeg)} bytes, SOF at offset {sof}")
+    print(f"wrote {OUT}: photo.jpg {len(jpeg)} bytes, SOF at offset {sof}; "
+          f"photo_big.jpg {len(big)} bytes, SOF at offset {big_sof}")
 
 
 if __name__ == "__main__":

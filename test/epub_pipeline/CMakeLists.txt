@@ -48,6 +48,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/ProgressiveJpegDc/ProgressiveJpegDc.cpp
+  ${REPO_ROOT}/lib/ProgressiveJpeg/ProgressiveJpeg.cpp
   ${REPO_ROOT}/lib/PngToBmpConverter/PngToBmpConverter.cpp
   ${REPO_ROOT}/lib/PngDecoder/PngStreamDecoder.cpp
   ${REPO_ROOT}/lib/TJpgDec/src/tjpgd.c
@@ -81,6 +82,7 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/PngToBmpConverter
   ${REPO_ROOT}/lib/PngDecoder
   ${REPO_ROOT}/lib/ProgressiveJpegDc
+  ${REPO_ROOT}/lib/ProgressiveJpeg
   ${REPO_ROOT}/lib/TJpgDec/src
 )
 
@@ -97,6 +99,9 @@ add_executable(EpubPipelineTest
   AnchorPageAccuracyTest.cpp
   ImageExtractionTest.cpp
   ImageManifestTest.cpp
+  ImageWrapperWidthTest.cpp
+  SaxStateInArenaTest.cpp
+  JpegDownscaleTest.cpp
   CompanionCacheTest.cpp
   StoredEntryDecodeTest.cpp
   PixelCacheWriteTest.cpp
@@ -112,6 +117,7 @@ target_include_directories(EpubPipelineTest PRIVATE ${PIPELINE_INCLUDES})
 target_compile_definitions(EpubPipelineTest PRIVATE
   CORPUS_DIR="${REPO_ROOT}/test/epubs"
   GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens"
+  JPEG_FIXTURE_DIR="${REPO_ROOT}/test/jpeg_decoder/fixtures"
   ENABLE_SERIAL_LOG=1
   LOG_LEVEL=2
 )

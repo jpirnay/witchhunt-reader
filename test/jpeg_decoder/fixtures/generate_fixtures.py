@@ -25,6 +25,27 @@ Fixtures:
   progressive_wide.jpg   Progressive, 1920x16 (240 DC columns) with a horizontal gradient.
                      Same overflow on the COLUMN axis: at 382 output columns it wrapped
                      from column 275 on.
+  thin_lines_gray.jpg    Baseline grayscale, 600x32, white with a 1-px black vertical
+                     line every 7 px (x = 3, 10, 17, ...). Downscaled to 420 wide, the
+                     residual 0.7 scale runs at 1/1 DCT, and nearest-neighbour sampling
+                     never lands on ~30% of the lines -- they vanish. Guards the area-
+                     average downscale in JpegToFramebufferConverter (epub_pipeline test).
+  prog_full_420.jpg      Progressive 4:2:0 colour, 203x141 (not a multiple of the 16-px MCU),
+                     libjpeg's successive-approximation scan script (DC and AC refinement
+                     scans, per-scan optimised Huffman tables). prog_full_420.y.pgm is its
+                     exact luma, decoded by libjpeg in YCbCr mode: the reference for the
+                     full progressive decoder (ProgressiveJpeg) at every 1/2^n scale.
+  prog_full_420_base.jpg The same picture as prog_full_420.jpg encoded BASELINE: through the
+                     thumbnail converter both must come out alike (JpegToBmpConverter test).
+  prog_full_gray.jpg     The same script on a one-component (grayscale) frame, 157x99, where
+                     every scan is non-interleaved. Reference: prog_full_gray.y.pgm.
+  prog_full_444_rst.jpg  4:4:4, 150x90, restart marker every 3 blocks/MCUs, so every scan
+                     crosses restart boundaries inside and between bands.
+  thin_lines_prog.jpg    thin_lines_gray.jpg's picture as a progressive JPEG (libjpeg script).
+                     Through JpegToFramebufferConverter it must keep every line: the DC-only
+                     preview it replaced shows 1/8 resolution, where they all blur away.
+  thin_hlines_gray.jpg   The same, transposed (32x600, horizontal lines): lines in the last
+                     row of an MCU row need the carry across MCU rows, not just blocks.
 """
 import os
 from PIL import Image, ImageDraw
@@ -93,6 +114,58 @@ d = ImageDraw.Draw(im)
 for x in range(W):
     d.line([(x, 0), (x, H - 1)], fill=int(255 * x / (W - 1)))
 save_progressive(im, "progressive_wide.jpg")
+
+# --- thin_lines_gray.jpg : 1-px strokes a point-sampling downscale drops ---
+W, H = 600, 32
+im = Image.new("L", (W, H), 255)
+d = ImageDraw.Draw(im)
+for x in range(3, W, 7):
+    d.line([(x, 0), (x, H - 1)], fill=0)
+im.save(os.path.join(HERE, "thin_lines_gray.jpg"), "JPEG", quality=95, progressive=False, optimize=False)
+im.save(os.path.join(HERE, "thin_lines_prog.jpg"), "JPEG", quality=95, progressive=True, optimize=True)
+im.transpose(Image.Transpose.TRANSPOSE).save(os.path.join(HERE, "thin_hlines_gray.jpg"), "JPEG", quality=95,
+                                             progressive=False, optimize=False)
+
+# --- prog_full_*.jpg : full progressive decode references ---
+def busy_picture(w, h, mode="RGB"):
+    """Hard edges, 1-px strokes, text, a gradient and noise: every frequency gets used."""
+    import random
+    rnd = random.Random(7)
+    im = Image.new("RGB", (w, h), (250, 248, 240))
+    d = ImageDraw.Draw(im)
+    for x in range(w):
+        d.line([(x, h * 2 // 3), (x, h - 1)], fill=(x * 255 // w, 90, 255 - x * 255 // w))
+    for i in range(12):
+        x0, y0 = rnd.randrange(w), rnd.randrange(h * 2 // 3)
+        d.rectangle([x0, y0, x0 + rnd.randrange(8, 40), y0 + rnd.randrange(4, 24)],
+                    outline=(0, 0, 0), fill=(rnd.randrange(256), rnd.randrange(256), rnd.randrange(256)))
+    for x in range(3, w, 7):
+        d.line([(x, 0), (x, h // 4)], fill=(0, 0, 0))
+    d.text((6, h // 3), "Real alibi period 14:00", fill=(0, 0, 0))
+    px = im.load()
+    for _ in range(w * h // 20):
+        x, y = rnd.randrange(w), rnd.randrange(h)
+        px[x, y] = tuple(rnd.randrange(256) for _ in range(3))
+    return im.convert(mode)
+
+def save_reference(jpg, pgm):
+    ref = Image.open(os.path.join(HERE, jpg))
+    if ref.mode != "L":
+        ref.draft("YCbCr", ref.size)  # libjpeg's own luma, no RGB round trip
+        ref = ref.getchannel(0)
+    ref.save(os.path.join(HERE, pgm))
+
+busy_picture(203, 141).save(os.path.join(HERE, "prog_full_420.jpg"), "JPEG", quality=90, subsampling=2,
+                             progressive=True, optimize=True)
+save_reference("prog_full_420.jpg", "prog_full_420.y.pgm")
+busy_picture(203, 141).save(os.path.join(HERE, "prog_full_420_base.jpg"), "JPEG", quality=90, subsampling=2,
+                             progressive=False, optimize=False)
+busy_picture(157, 99, "L").save(os.path.join(HERE, "prog_full_gray.jpg"), "JPEG", quality=90,
+                                 progressive=True, optimize=True)
+save_reference("prog_full_gray.jpg", "prog_full_gray.y.pgm")
+busy_picture(150, 90).save(os.path.join(HERE, "prog_full_444_rst.jpg"), "JPEG", quality=85, subsampling=0,
+                            progressive=True, optimize=True, restart_marker_blocks=3)
+save_reference("prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm")
 
 print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):

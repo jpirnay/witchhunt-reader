@@ -209,10 +209,20 @@ static void fireStart(SaxParserImpl* impl) {
 // SaxParser implementation
 // ---------------------------------------------------------------------------
 
+size_t SaxParser::stateBytes() { return sizeof(SaxParserImpl); }
+
+void SaxParser::setExternalState(void* storage, const size_t bytes) {
+  externalState_ = storage;
+  externalBytes_ = bytes;
+}
+
 void SaxParser::reset() {
   if (!impl_) return;
-  delete static_cast<SaxParserImpl*>(impl_);
+  // SaxParserImpl is plain data (arrays, pointers, counters): external state needs no destructor
+  // call, and must get none -- the arena it sits in may already have been rewound.
+  if (!implExternal_) delete static_cast<SaxParserImpl*>(impl_);
   impl_ = nullptr;
+  implExternal_ = false;
 }
 
 SaxParser::~SaxParser() { reset(); }
@@ -228,7 +238,16 @@ bool SaxParser::init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxChar
   // would abort() on OOM instead of letting init() honour its "returns false on
   // allocation failure" contract. SaxParserImpl is ~10 KB (attr table + stacks),
   // large enough to fail under heap fragmentation during a section build.
-  auto* impl = new (std::nothrow) SaxParserImpl;
+  SaxParserImpl* impl = nullptr;
+  if (externalState_ && externalBytes_ >= sizeof(SaxParserImpl) &&
+      (reinterpret_cast<uintptr_t>(externalState_) % alignof(SaxParserImpl)) == 0) {
+    impl = new (externalState_) SaxParserImpl;
+    implExternal_ = true;
+  } else {
+    impl = new (std::nothrow) SaxParserImpl;
+  }
+  externalState_ = nullptr;  // one init per offer
+  externalBytes_ = 0;
   if (!impl) {
     errorString_ = "SaxParser: out of memory allocating parser state";
     return false;

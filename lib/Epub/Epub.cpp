@@ -1620,9 +1620,14 @@ class BufferedExtractSink : public Print {
 }  // namespace
 
 bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
+  // Written under a temporary name and renamed once complete, so a reset or power loss mid-way
+  // never leaves a short file under the real name. Consumers trust an existing extract as-is
+  // (ImageBlock::ensureExtracted), and a truncated JPEG read as "no SOF marker" on every visit
+  // of its page -- an image lost until someone deleted the file by hand (X3 2026-09-25).
+  const std::string partPath = destPath + ".part";
   FsFile destFile;
-  if (!Storage.openFileForWrite("EBP", destPath, destFile)) {
-    LOG_ERR("EBP", "Failed to open dest for extract: %s", destPath.c_str());
+  if (!Storage.openFileForWrite("EBP", partPath, destFile)) {
+    LOG_ERR("EBP", "Failed to open dest for extract: %s", partPath.c_str());
     return false;
   }
   // The write buffer is reserved BEFORE the reader takes its own block, because BuildArena is
@@ -1653,8 +1658,18 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
 
   destFile.flush();
   destFile.close();
-  if (!ok) Storage.remove(destPath.c_str());
-  return ok;
+  if (!ok) {
+    Storage.remove(partPath.c_str());
+    return false;
+  }
+  // FAT cannot rename onto an existing name; a stale extract gives way to the fresh one.
+  if (Storage.exists(destPath.c_str())) Storage.remove(destPath.c_str());
+  if (!Storage.rename(partPath.c_str(), destPath.c_str())) {
+    LOG_ERR("EBP", "Failed to move extract into place: %s", destPath.c_str());
+    Storage.remove(partPath.c_str());
+    return false;
+  }
+  return true;
 }
 
 bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {

@@ -3568,6 +3568,11 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   buildParams.viewportWidth = layout.viewportWidth;
   buildParams.viewportHeight = layout.viewportHeight;
 
+  // Image headers an earlier build could not size (a walk short of memory keeps its image queued
+  // in the manifest) are resolved now, from the framebuffer, before this build carves up the
+  // heap: whatever it lays out from here on is answered from the manifest with no ring at all.
+  if (!secondaryBorrowed_) resolvePendingImageHeadersFromFramebuffer();
+
   // Prefer to build WITHOUT releasing the secondary buffer when heap is ample, so the chapter's
   // first page keeps a valid fast-refresh baseline. The in-place attempt defers image decode to
   // the lazy per-page path, so a failure here is a graceful parser abort (not a corruption-prone
@@ -3624,19 +3629,39 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     checkHeapIntegrity("after_createSectionFile_retry");
   }
 
-  // An image dropped to alt text because its header walk was deferred (#249) is resolved now,
-  // while the buffer is still released: the walk's ring needs ~33 KB contiguous, which this
-  // reader heap only has with the buffer gone (X3 steady state tops out ~31.7 KB). Only a
-  // resolve earns the one rebuild — the manifest then answers with no ring at all — so a walk
-  // that still fails leaves the build as it is.
-  if (createOk && section->isImageHeaderDegraded() && epub->persistImageManifest()) {
-    LOG_INF("ERS", "Section %d: image headers resolved after the build; rebuilding once", currentSpineIndex);
-    section->clearCache();
-    const uint32_t rebuildStart = millis();
-    createOk = runCreate();
-    LOG_INF("ERS", "createSectionFile image rebuild returned %d in %ums (free=%lu)", createOk ? 1 : 0,
-            millis() - rebuildStart, esp_get_free_heap_size());
-    checkHeapIntegrity("after_createSectionFile_image_rebuild");
+  // An image dropped to alt text because its header walk was deferred (#249) is resolved now.
+  // First from the heap, where the staged walk (16 KB ring) mostly fits with the buffer released;
+  // what is still short of memory then comes from the framebuffer itself: reclaim the freed hole
+  // as the one 52 KB block (a plain realloc), borrow it for the walk, and free it again so the
+  // restore below runs exactly as before. That is the region an X3 heap can never offer
+  // otherwise -- after a fragmented build not even released (2026-09-25: 28,660 contig against a
+  // 33,280 walk left a chapter cached with none of its 27 images). Only a resolve earns the one
+  // rebuild -- the manifest then answers with no ring at all -- so a walk that finds nothing
+  // leaves the build as it is.
+  if (createOk && section->isImageHeaderDegraded()) {
+    bool imagesResolved = epub->persistImageManifest();
+    const EpubImageManifest* manifest = epub->getImageManifest();
+    if (manifest && manifest->hasPending()) {
+      if (released) {
+        if (renderer.reallocSecondaryBuffer()) {
+          imagesResolved = resolvePendingImageHeadersFromFramebuffer() || imagesResolved;
+          renderer.releaseSecondaryBuffer();
+        } else {
+          LOG_ERR("ERS", "Section %d: no block for the image header walk; images stay deferred", currentSpineIndex);
+        }
+      } else {
+        imagesResolved = resolvePendingImageHeadersFromFramebuffer() || imagesResolved;
+      }
+    }
+    if (imagesResolved) {
+      LOG_INF("ERS", "Section %d: image headers resolved after the build; rebuilding once", currentSpineIndex);
+      section->clearCache();
+      const uint32_t rebuildStart = millis();
+      createOk = runCreate();
+      LOG_INF("ERS", "createSectionFile image rebuild returned %d in %ums (free=%lu)", createOk ? 1 : 0,
+              millis() - rebuildStart, esp_get_free_heap_size());
+      checkHeapIntegrity("after_createSectionFile_image_rebuild");
+    }
   }
 
   // No eager image pre-decode here. Only the dimensions are needed to lay a section out, and
@@ -3691,6 +3716,27 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   }
   checkHeapIntegrity("after_fb_realloc");
   return outcome;
+}
+
+bool EpubReaderActivity::resolvePendingImageHeadersFromFramebuffer() {
+  EpubImageManifest* manifest = epub ? epub->getImageManifest() : nullptr;
+  if (!manifest || !manifest->hasPending() || secondaryBorrowed_ || !renderer.hasSecondaryBuffer()) return false;
+  size_t size = 0;
+  uint8_t* borrowed = renderer.borrowSecondaryBuffer(&size);
+  if (!borrowed) return false;
+  bool resolved = false;
+  {
+    // Scoped so the arena is gone before the buffer goes back (see the warm pass for the
+    // use-after-free this ordering prevents). The walk's ring is a scoped block inside it.
+    BuildArena arena(borrowed, size);
+    if (arena.valid()) {
+      resolved = epub->persistImageManifest(&arena);
+      LOG_INF("ERS", "Image header walk from the framebuffer: resolved=%d, still pending=%d", resolved ? 1 : 0,
+              manifest->hasPending() ? 1 : 0);
+    }
+  }
+  renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+  return resolved;
 }
 
 bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
@@ -3775,6 +3821,18 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   // is permanent rather than repeated on the next open.
   if (cacheHit && section->isTruncatedCache() && section->pageCount == 0) {
     LOG_INF("ERS", "Section %d: cached file is truncated with 0 pages; discarding and rebuilding", currentSpineIndex);
+    section->clearCache();
+    cacheHit = false;
+  }
+
+  // A cache whose build dropped images because the heap could not size them right then (the
+  // header walk needs ~33 KB contiguous; X3 2026-09-25: a rebuild on a fragmented heap left all 27
+  // images of a chapter out, and the heap-recovery reboot that followed would have had room for
+  // every one). The rebuild resolves them while the buffer is released. Once per spine per
+  // session: if even that build comes out degraded, reading on beats rebuilding on every entry.
+  if (cacheHit && section->isImageHeaderDegraded() && imageHeaderRebuildSpine_ != currentSpineIndex) {
+    LOG_INF("ERS", "Section %d: cached without images the heap could not size; rebuilding", currentSpineIndex);
+    imageHeaderRebuildSpine_ = currentSpineIndex;
     section->clearCache();
     cacheHit = false;
   }
