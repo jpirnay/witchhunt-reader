@@ -293,9 +293,13 @@ class ChapterHtmlSlimParser final : public Print {
   // innermost such width, so a width:100% image inside a narrow box stays small
   // (matches KOReader) instead of filling the viewport. depth = parser depth at push
   // (pre-increment); popped in endElement when that scope closes.
+  // fixedWidth: the innermost absolute (px/em/pt) width at or above this entry, 0 if every
+  // wrapper up the chain is a percentage. That is the column a block image falls back to
+  // when a percentage wrapper would shrink it below its native size (see the image path).
   struct ContainerWidthEntry {
     int depth;
     int16_t width;
+    int16_t fixedWidth;
   };
   std::vector<ContainerWidthEntry> containerWidthStack_;
 

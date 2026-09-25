@@ -97,6 +97,7 @@ add_executable(EpubPipelineTest
   AnchorPageAccuracyTest.cpp
   ImageExtractionTest.cpp
   ImageManifestTest.cpp
+  ImageWrapperWidthTest.cpp
   CompanionCacheTest.cpp
   StoredEntryDecodeTest.cpp
   PixelCacheWriteTest.cpp

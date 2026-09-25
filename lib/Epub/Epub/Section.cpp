@@ -30,7 +30,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 75;  // bumped: the reader ladder gained rungs above
+constexpr uint8_t SECTION_FILE_VERSION = 76;  // bumped: a percentage wrapper (<div
+                                              // style="width:60%">) no longer shrinks a block
+                                              // image below min(native, column), so image
+                                              // sizes baked into v75 pages are stale
+                                              // v75: the reader ladder gained rungs above
                                               // 18 pt (20/22/24/26), so a heading snaps to a
                                               // different face and residual than it did under
                                               // v74 and breaks across lines differently. The

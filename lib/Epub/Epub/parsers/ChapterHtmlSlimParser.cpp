@@ -1487,7 +1487,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
     const int w = static_cast<int>(cssStyle.imageWidth.toPixels(emSize, static_cast<float>(parentWidth)) + 0.5f);
     if (w >= 1 && w < parentWidth) {
-      self->containerWidthStack_.push_back({self->depth, static_cast<int16_t>(w)});
+      const bool relative = cssStyle.imageWidth.unit == CssUnit::Percent;
+      const int16_t parentFixed = self->containerWidthStack_.empty() ? 0 : self->containerWidthStack_.back().fixedWidth;
+      self->containerWidthStack_.push_back(
+          {self->depth, static_cast<int16_t>(w), relative ? parentFixed : static_cast<int16_t>(w)});
     }
   }
 
@@ -1820,16 +1823,21 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 if (!styleAttr.empty()) imgStyle.applyOver(self->inlineStyleFor(styleAttr));
                 const bool hasCssHeight = imgStyle.hasImageHeight();
                 const bool hasCssWidth = imgStyle.hasImageWidth();
-                int containerWidth = self->viewportWidth;
+                // The column the image would get if no percentage wrapper narrowed it.
+                int unwrappedWidth = self->viewportWidth;
+                if (self->currentTextBlock) {
+                  const int inset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
+                  if (inset > 0 && inset < self->viewportWidth) unwrappedWidth = self->viewportWidth - inset;
+                }
+                int containerWidth = unwrappedWidth;
+                bool percentWrapper = false;
                 if (!self->containerWidthStack_.empty()) {
                   // An ancestor block set an explicit width (e.g. width:100px wrapper);
                   // percentages and fit-to-container both resolve against it.
-                  containerWidth = self->containerWidthStack_.back().width;
-                } else if (self->currentTextBlock) {
-                  const int inset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
-                  if (inset > 0 && inset < self->viewportWidth) {
-                    containerWidth = self->viewportWidth - inset;
-                  }
+                  const ContainerWidthEntry& wrapper = self->containerWidthStack_.back();
+                  containerWidth = wrapper.width;
+                  percentWrapper = wrapper.fixedWidth != wrapper.width;
+                  if (wrapper.fixedWidth > 0) unwrappedWidth = wrapper.fixedWidth;
                 }
 
                 if (hasCssHeight && hasCssWidth && dims.width > 0 && dims.height > 0) {
@@ -1916,6 +1924,34 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   displayWidth = (int)(dims.width * scale);
                   displayHeight = (int)(dims.height * scale);
                   LOG_TRC("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
+                }
+
+                // A percentage wrapper (<div class="full60">) is layout for a large screen, where
+                // 60% of the column still leaves a picture near its native resolution. On a
+                // 480px column it turns a riddle diagram into a thumbnail, so it may enlarge an
+                // image but never shrink one below min(native, unwrapped column). Only images
+                // sized by the container count: an explicit px/em size or a CSS height is the
+                // publisher sizing the image itself and stays as resolved above. A float is left
+                // alone too: its percentage width is what leaves room for the text beside it.
+                const bool sizedByContainer =
+                    !hasCssHeight && (!hasCssWidth || imgStyle.imageWidth.unit == CssUnit::Percent);
+                if (percentWrapper && sizedByContainer && self->floatDepth_ == 0 && dims.width > 0 && dims.height > 0) {
+                  int floorWidth =
+                      hasCssWidth ? static_cast<int>(
+                                        imgStyle.imageWidth.toPixels(emSize, static_cast<float>(unwrappedWidth)) + 0.5f)
+                                  : unwrappedWidth;
+                  floorWidth = std::min({floorWidth, unwrappedWidth, static_cast<int>(dims.width)});
+                  int floorHeight = static_cast<int>(static_cast<int64_t>(floorWidth) * dims.height / dims.width);
+                  if (floorHeight > self->viewportHeight) {
+                    floorHeight = self->viewportHeight;
+                    floorWidth = static_cast<int>(static_cast<int64_t>(floorHeight) * dims.width / dims.height);
+                  }
+                  if (floorWidth > displayWidth) {
+                    LOG_TRC("EHP", "Percent wrapper floor: %dx%d -> %dx%d", displayWidth, displayHeight, floorWidth,
+                            floorHeight);
+                    displayWidth = std::max(1, floorWidth);
+                    displayHeight = std::max(1, floorHeight);
+                  }
                 }
 
                 // Inline image path: if inside a CSS float context and the image leaves a
