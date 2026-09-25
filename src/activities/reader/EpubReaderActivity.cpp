@@ -50,6 +50,7 @@
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
+#include "HighlightsActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
@@ -65,6 +66,7 @@
 #include "activities/home/BookInfoActivity.h"
 #include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
+#include "components/HighlightRenderer.h"
 #include "components/LinkMarkerMatch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -707,6 +709,8 @@ void EpubReaderActivity::onEnter() {
 
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
+  // Beside the bookmarks, in the same per-book cache directory and by the same call.
+  highlightStore.load(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_bookmarks_loaded");
 
   // Save current epub as last opened epub and add to recent books
@@ -808,6 +812,7 @@ void EpubReaderActivity::onExit() {
 
   // Save bookmarks before exit
   bookmarkStore.save();
+  highlightStore.save();
   if (epub) {
     GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, epub->getPath(), epub->getCachePath(), epub->getTitle(), false);
   }
@@ -2052,6 +2057,66 @@ void EpubReaderActivity::openDictionary() {
       });
 }
 
+void EpubReaderActivity::openHighlightSelect() {
+  std::unique_ptr<Page> page;
+  int spine = 0;
+  int pageIndex = 0;
+  int pageCount = 0;
+  uint16_t paragraphHint = Highlight::NO_PARAGRAPH;
+  {
+    RenderLock lock(*this);
+    if (!section) return;
+    spine = currentSpineIndex;
+    pageIndex = section->currentPage;
+    pageCount = section->hasActiveBuild() ? 0 : section->pageCount;
+    // Last <p> starting on or before this page. Only ever used to tell repeated occurrences of
+    // the same text apart.
+    if (const auto p = section->getParagraphIndexForPage(static_cast<uint16_t>(pageIndex))) paragraphHint = *p;
+    page = section->hasActiveBuild() ? section->loadPageFromActiveBuild(static_cast<uint16_t>(pageIndex))
+                                     : section->loadPageFromSectionFile();
+  }
+  if (!page) {
+    LOG_ERR("ERS", "Highlight: could not load the current page");
+    return;
+  }
+
+  const RenderLayout layout = computeRenderLayout();
+  const int effectiveFontId = getEffectiveReaderFontId();
+  suspendBackgroundWork();
+  startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(
+                             renderer, mappedInput, std::move(page), effectiveFontId, layout.marginLeft,
+                             layout.marginTop, DictionaryWordSelectActivity::Mode::Highlight),
+                         [this, spine, pageIndex, pageCount, paragraphHint](const ActivityResult& result) {
+                           resumeBackgroundWork();
+                           if (!result.isCancelled) {
+                             if (const auto* selection = std::get_if<HighlightResult>(&result.data)) {
+                               // Middle of the start page, so jumping back lands on it (see
+                               // NavigationTarget::Percent).
+                               const uint16_t progressQ =
+                                   pageCount > 0
+                                       ? static_cast<uint16_t>(std::min(
+                                             10000.0f, (pageIndex + 0.5f) * 10000.0f / static_cast<float>(pageCount)))
+                                       : Highlight::PROGRESS_UNKNOWN;
+                               const int tocIndex = epub->getTocIndexForSpineIndex(spine);
+                               std::string chapter = tocIndex >= 0 ? epub->getTocItem(tocIndex).title : std::string();
+                               // No popup from here: this handler runs while the overlay is being popped, and the
+                               // reader only paints from its own render pass. The underline on the page, drawn on
+                               // the next render, is the confirmation.
+                               bool saved = false;
+                               {
+                                 RenderLock lock(*this);  // the render task reads the store to draw underlines
+                                 saved = highlightStore.add(static_cast<uint16_t>(spine), paragraphHint, progressQ,
+                                                            std::move(chapter), selection->text) != 0;
+                               }
+                               saved = saved && highlightStore.save();
+                               if (!saved)
+                                 LOG_ERR("ERS", "Highlight could not be saved (store full, no clock, or SD error)");
+                             }
+                           }
+                           requestUpdate();
+                         });
+}
+
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
@@ -2095,6 +2160,28 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::DICTIONARY:
       openDictionary();
       break;
+    case EpubReaderMenuActivity::MenuAction::HIGHLIGHT_TEXT:
+      openHighlightSelect();
+      break;
+    case EpubReaderMenuActivity::MenuAction::HIGHLIGHTS: {
+      // The list edits highlightStore directly. Background pre-rendering reads it to draw
+      // underlines, so it is paused for as long as the list is open.
+      suspendBackgroundWork();
+      startActivityForResult(std::make_unique<HighlightsActivity>(renderer, mappedInput, highlightStore),
+                             [this](const ActivityResult& result) {
+                               resumeBackgroundWork();
+                               if (!result.isCancelled) {
+                                 if (const auto* jump = std::get_if<HighlightJumpResult>(&result.data)) {
+                                   RenderLock lock(*this);
+                                   currentSpineIndex = jump->spineIndex;
+                                   navTarget = NavigationTarget::makePercent(jump->progressQ / 10000.0f);
+                                   section.reset();
+                                 }
+                               }
+                               requestUpdate();
+                             });
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
       // Show each entry's note text when the book-level cache can supply it — see
       // footnotePreviewsForCurrentPage() for when opening the list may gather it.
@@ -4741,6 +4828,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   logReaderMemSnapshot("before_bw_render");
   page->render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop, effectiveForceLoad,
                imageMonochrome);
+  // Underline this chapter's highlights (render task; the store is only edited under RenderLock).
+  if (!highlightStore.getAll().empty()) {
+    std::vector<const Highlight*> chapterHighlights;
+    for (const Highlight& h : highlightStore.getAll()) {
+      if (h.spineIndex == currentSpineIndex) chapterHighlights.push_back(&h);
+    }
+    HighlightRenderer::drawUnderlines(renderer, *page, getEffectiveReaderFontId(), orientedMarginLeft, contentTop,
+                                      chapterHighlights);
+  }
   // The BW render also touches images (placeholder/cache draws) and runs the full
   // glyph pipeline; check here too so a clean after_image_warm_pass followed by a
   // corrupt reading convicts the BW render rather than the decode.

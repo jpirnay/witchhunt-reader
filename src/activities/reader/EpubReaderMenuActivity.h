@@ -19,6 +19,8 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
     SELECT_CHAPTER,
     FOOTNOTES,
     DICTIONARY,
+    HIGHLIGHT_TEXT,
+    HIGHLIGHTS,
     EMBEDDED_STYLE,
     IMAGE_RENDERING,
     TEXT_DARKNESS,

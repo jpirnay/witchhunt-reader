@@ -24,6 +24,19 @@ template <typename T>
   file.read(reinterpret_cast<uint8_t*>(&value), sizeof(T));
 }
 
+// Checked variants: same as the above, but they say whether the whole value made it. A store
+// that must not half-write a record needs the answer; the unchecked forms above are kept for
+// the callers that do not.
+template <typename T>
+[[maybe_unused]] static bool tryWritePod(FsFile& file, const T& value) {
+  return file.write(reinterpret_cast<const uint8_t*>(&value), sizeof(T)) == sizeof(T);
+}
+
+template <typename T>
+[[maybe_unused]] static bool tryReadPod(FsFile& file, T& value) {
+  return file.read(reinterpret_cast<uint8_t*>(&value), sizeof(T)) == sizeof(T);
+}
+
 [[maybe_unused]] static void writeString(std::ostream& os, const std::string& s) {
   const uint32_t len = s.size();
   writePod(os, len);

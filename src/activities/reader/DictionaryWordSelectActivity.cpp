@@ -628,7 +628,11 @@ void DictionaryWordSelectActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !words.empty()) {
-    performLookup();
+    if (mode == Mode::Highlight) {
+      confirmHighlight();
+    } else {
+      performLookup();
+    }
     return;
   }
 
@@ -647,7 +651,11 @@ void DictionaryWordSelectActivity::loop() {
   // cursor moved by a finger as for one moved by a button.
   const WordTouch touch = consumeWordTouch();
   if (touch == WordTouch::Activate) {
-    performLookup();
+    if (mode == Mode::Highlight) {
+      confirmHighlight();
+    } else {
+      performLookup();
+    }
     return;
   }
   if (touch == WordTouch::Moved) {
@@ -676,7 +684,71 @@ void DictionaryWordSelectActivity::loop() {
   // once at the end instead of at every word passed through.
   if (selected != before) lastMoveMs = millis();
 
-  speculateForSelection();
+  if (mode == Mode::Dictionary) speculateForSelection();
+}
+
+void DictionaryWordSelectActivity::confirmHighlight() {
+  if (anchor < 0) {
+    anchor = selected;
+    snapshotIdx = -1;  // the range is drawn by the full-repaint path from here on
+    requestUpdate();
+    return;
+  }
+  const int first = std::min(anchor, selected);
+  const int last = std::max(anchor, selected);
+  std::string text;
+  text.reserve(256);
+  char word[WORD_TEXT_CAPACITY];
+  for (int i = first; i <= last && text.size() < HIGHLIGHT_TEXT_CAPACITY; i++) {
+    const size_t length = buildWordText(i, word, sizeof(word), /*dropJoinHyphen=*/true);
+    if (length == 0) continue;
+    if (!text.empty()) text.push_back(' ');
+    text.append(word, std::min(length, HIGHLIGHT_TEXT_CAPACITY - text.size()));
+  }
+  if (text.empty()) return;
+  setResult(HighlightResult{std::move(text)});
+  finish();
+}
+
+void DictionaryWordSelectActivity::drawWordInverted(const int index) {
+  const Word& word = words[index];
+  const uint8_t runBounds[3] = {
+      0, word.hyphenFragment == NO_HYPHEN ? word.fragmentCount : static_cast<uint8_t>(word.hyphenFragment + 1),
+      word.fragmentCount};
+  for (uint8_t run = 0; run < 2; run++) {
+    if (runBounds[run] >= runBounds[run + 1]) continue;
+    int left = INT_MAX, top = INT_MAX, right = INT_MIN, bottom = INT_MIN;
+    for (uint8_t f = runBounds[run]; f < runBounds[run + 1]; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      left = std::min(left, static_cast<int>(piece.x));
+      top = std::min(top, static_cast<int>(piece.y));
+      right = std::max(right, piece.x + piece.width);
+      bottom = std::max(bottom, piece.y + drawStyleOf(piece).height);
+    }
+    // Grown by 3px to the right so consecutive words read as one continuous band.
+    renderer.fillRect(left - 1, top - 1, right - left + 4, bottom - top + 2, true);
+    for (uint8_t f = runBounds[run]; f < runBounds[run + 1]; f++) {
+      const Fragment& piece = fragments[word.firstFragment + f];
+      const DrawStyle& drawStyle = drawStyleOf(piece);
+      char scratch[WORD_TEXT_CAPACITY];
+      const char* text = fragmentText(piece, scratch, sizeof(scratch));
+      if (drawStyle.scale == 1.0f) {
+        renderer.drawText(drawStyle.fontId, piece.x, piece.y, text, false, piece.style);
+      } else {
+        renderer.drawTextScaled(drawStyle.fontId, piece.x, piece.y, text, false, piece.style, drawStyle.scale);
+      }
+    }
+  }
+}
+
+void DictionaryWordSelectActivity::drawSelectedRange() {
+  const int first = std::min(anchor, selected);
+  const int last = std::max(anchor, selected);
+  for (int i = first; i <= last; i++) drawWordInverted(i);
+  // The cursor end gets an outline beyond the band so the moving end is always visible.
+  const Word& cursor = words[selected];
+  const Fragment& piece = fragments[cursor.firstFragment];
+  renderer.drawRect(cursor.x - 3, piece.y - 3, cursor.width + 8, drawStyleOf(piece).height + 6, true);
 }
 
 // Saves the pixels under words[selected]'s highlight box, then draws the
@@ -788,9 +860,11 @@ void DictionaryWordSelectActivity::drawHints() const {
   }
   // The cursor moves in all four directions; the front strip carries two of them and the side
   // buttons the other two, so the arrows have to be routed rather than fixed.
+  const char* confirmLabel = tr(STR_LOOKUP);
+  if (mode == Mode::Highlight) confirmLabel = anchor < 0 ? tr(STR_HIGHLIGHT_START) : tr(STR_SAVE);
   const auto labels =
       mappedInput
-          .mapHints(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+          .mapHints(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
           .front;
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
@@ -804,7 +878,8 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   // stale when the cursor stayed put and only the speculation verdict changed,
   // which is what repaints a word as absent a moment after landing on it.
   const bool highlightMoved = !words.empty() && (selected != snapshotIdx || speculationRepaintPending);
-  if (popup == Popup::None && snapshotIdx >= 0 && highlightMoved) {
+  const bool rangeActive = mode == Mode::Highlight && anchor >= 0;
+  if (popup == Popup::None && snapshotIdx >= 0 && highlightMoved && !rangeActive) {
     // displayBuffer() ends with a buffer swap, so the write framebuffer holds
     // the frame from TWO refreshes ago -- the reader menu the overlay was
     // opened from, or an older cursor position. Patching two word boxes into
@@ -860,7 +935,12 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   page->render(renderer, fontId, marginLeft, marginTop);
 
   speculationRepaintPending = false;
-  if (!words.empty()) drawHighlightWithSnapshot();
+  if (rangeActive && !words.empty()) {
+    drawSelectedRange();
+    snapshotIdx = -1;
+  } else if (!words.empty()) {
+    drawHighlightWithSnapshot();
+  }
   drawHints();
 
   if (popup != Popup::None) {

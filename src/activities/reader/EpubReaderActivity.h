@@ -18,6 +18,7 @@
 #include "BookmarkStore.h"
 #include "CrossPointState.h"
 #include "EpubReaderMenuActivity.h"
+#include "HighlightStore.h"
 #include "KOReaderAutoSync.h"
 #include "KOReaderSyncWorker.h"
 #include "ProgressMapper.h"
@@ -605,6 +606,11 @@ class EpubReaderActivity final : public Activity {
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
+
+  // Highlights (text ranges) for this book, kept beside its bookmarks.
+  HighlightStore highlightStore;
+  // Opens the word overlay in highlight mode; the chosen range is saved to highlightStore.
+  void openHighlightSelect();
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
