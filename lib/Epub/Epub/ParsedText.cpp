@@ -510,12 +510,19 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<size_t>().swap(ans_);
   std::vector<int16_t>().swap(lineXPosScratch_);
   std::string().swap(allText_);
-  // The word vectors carry the paragraph in progress; only an empty block can give them back.
+  // The word vectors carry the paragraph in progress: an empty block gives them back whole, a
+  // block mid-paragraph keeps its words but not the 128-entry capacity (it regrows from there,
+  // once per slice at most).
   if (words.empty()) {
     std::vector<std::string>().swap(words);
     std::vector<EpdFontFamily::Style>().swap(wordStyles);
     std::vector<bool>().swap(wordContinues);
     std::vector<uint8_t>().swap(wordSizes);
+  } else {
+    words.shrink_to_fit();
+    wordStyles.shrink_to_fit();
+    wordContinues.shrink_to_fit();
+    wordSizes.shrink_to_fit();
   }
 }
 

@@ -4377,7 +4377,16 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     // Text-only pages render cleanly without the image decode / secondary-buffer dance that the
     // lock-light build path avoids; an image target waits for the final Normal render but is
     // still marked handled so the C step stops nudging us about it.
-    auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(target));
+    // The page's TextBlock bytes come from a block on the build's lent region, opened here and
+    // closed by displayBuildPage before it releases the lock. ~7 KB of the ~10.5 KB a mid-build
+    // draw used to put on the heap, at the one moment the X3's minimum free heap is set: the
+    // draw lands next to the parse's own state (device run 8: 7,340 B). Declared before `page`
+    // so the page dies first on every path.
+    BuildArena* drawArena =
+        (secondaryBorrowed_ && buildScratch_ && buildScratch_->valid()) ? buildScratch_.get() : nullptr;
+    BuildArena::Block drawBlock;
+    if (drawArena != nullptr) drawBlock = drawArena->reserveBlock();
+    auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(target), drawArena);
     buildDisplayedPage_ = target;
     if (page && !page->hasImages()) {
       buildingPopupShown_ = false;
@@ -4385,10 +4394,13 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
       // footnote list and the menu's "has footnotes" flag kept describing whatever page was
       // displayed BEFORE the build started — the reader can open both while a build runs.
       currentPageFootnotes = std::move(page->footnotes);
-      displayBuildPage(lock, *page, layout);  // releases the lock before the waveform wait
-      return;
+      displayBuildPage(lock, *page, layout, drawBlock.valid() ? &drawBlock : nullptr);
+      return;  // the lock is already released; the page goes out of scope here
     }
-    // Image page or load failure: fall through to the popup until the build completes.
+    // Image page or load failure: fall through to the popup until the build completes. The
+    // page (and its bytes in the block) go first, then the block.
+    page.reset();
+    if (drawBlock.valid()) drawArena->release(drawBlock);
   }
 
   // Requested page not built yet (or it's an image page / non-Page target): show the indexing
@@ -5126,7 +5138,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   WakeTrace::logSummary();
 }
 
-void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout) {
+void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+                                          BuildArena::Block* drawBlock) {
   // Draws one text-only page from an in-progress Background-C build: a plain BW render + status
   // bar, no AA and no pre-render arming (those belong to the steady reading state set up by
   // renderNormalPass() once the build completes). Caller guarantees the page is text-only, so
@@ -5136,60 +5149,75 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
-  auto* fcm = renderer.getFontCacheManager();
-  // Draw this page's font slots from the build's own arena rather than the heap. Measured X3
-  // 2026-08-11: the prewarm's six blocks (~9 KB) cost contig 36852 -> 27636 here, and releasing
-  // them afterwards returned every byte and every block while contig did not move at all — the
-  // bytes were never the problem, their placement was (§9.2.4). The borrowed region they come
-  // from is the one the build already holds and is barely using (highWater 12864-28656 of
-  // 52272), and nothing else can allocate inside it.
-  //
-  // Only while the buffer is actually lent; otherwise buildScratch_ is null and the scope
-  // self-disables, leaving the heap path exactly as it was.
-  FontCacheManager::ScopedSlotArena slotArena(*fcm, secondaryBorrowed_ ? buildScratch_.get() : nullptr);
-  auto scope = fcm->createPrewarmScope();
-  page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
-  scope.endScanAndPrewarm();
+  // Everything that touches the build's arena -- the font-slot scope below and the caller's
+  // page block -- ends inside this brace, BEFORE lock.unlock(): a build slice runs on the loop
+  // task during the waveform wait, and with per-line arena allocation in the parser its lines
+  // would land above a still-open block and be rewound with it. (The slot scope used to close at
+  // function exit, after the unlock; harmless while the parser made no arena allocations in
+  // phase (b), a corruption once it did -- memory audit 2026-09, R2 step 2b.)
+  {
+    auto* fcm = renderer.getFontCacheManager();
+    // Draw this page's font slots from the build's own arena rather than the heap. Measured X3
+    // 2026-08-11: the prewarm's six blocks (~9 KB) cost contig 36852 -> 27636 here, and releasing
+    // them afterwards returned every byte and every block while contig did not move at all — the
+    // bytes were never the problem, their placement was (§9.2.4). The borrowed region they come
+    // from is the one the build already holds and is barely using (highWater 12864-28656 of
+    // 52272), and nothing else can allocate inside it.
+    //
+    // Only while the buffer is actually lent; otherwise buildScratch_ is null and the scope
+    // self-disables, leaving the heap path exactly as it was.
+    FontCacheManager::ScopedSlotArena slotArena(*fcm, secondaryBorrowed_ ? buildScratch_.get() : nullptr);
+    auto scope = fcm->createPrewarmScope();
+    page.renderTextOnly(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop);  // scan pass
+    scope.endScanAndPrewarm();
 
-  renderer.clearScreen();
-  page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
-              /*monochromeOutput=*/true);
-  publishPageLinkTargets(page, layout.marginLeft, contentTop);
-  renderStatusBar();
-  if (forceHalfRefreshAfterPopup_) {
-    // First real page after the indexing popup: establish a clean baseline (see
-    // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.
-    forceHalfRefreshAfterPopup_ = false;
-    renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
-  } else {
-    ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    renderer.clearScreen();
+    page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
+                /*monochromeOutput=*/true);
+    publishPageLinkTargets(page, layout.marginLeft, contentTop);
+    renderStatusBar();
+    if (forceHalfRefreshAfterPopup_) {
+      // First real page after the indexing popup: establish a clean baseline (see
+      // forceHalfRefreshAfterPopup_) instead of compounding onto the popup's FAST refresh.
+      forceHalfRefreshAfterPopup_ = false;
+      renderer.triggerDisplay(HalDisplay::HALF_REFRESH);
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      ReaderUtils::triggerWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    }
+    // Hand the font page slots back before the build resumes. This is THE allocation that makes a
+    // mid-build draw expensive, and it is expensive because of where it lands, not what it costs:
+    // prewarm takes ~8.9 KB of page buffer + glyph table (pageBuf 7635 + pageGlyphs 1264 measured,
+    // across the 3 style slots a page uses) out of the middle of the largest free block, while the
+    // build's working set already occupies the rest of the heap. Device-measured X3 2026-08-11:
+    // contig 40948 -> 23540 across this one draw, never recovering for the remainder of the parse,
+    // which then ran in "continuing in degraded mode" throughout and left contig 1036 bytes short
+    // of Background-B's floor afterwards.
+    //
+    // Normally the slots live on until the next prewarm replaces them, which is free — but here
+    // "until the next prewarm" spans the rest of a multi-second build. Releasing now lets the block
+    // coalesce before stepCurrentSectionBuild() resumes; nothing else allocates in between, because
+    // the lock is still held.
+    //
+    // When the slots came from the arena instead (the normal case now — see ScopedSlotArena above)
+    // this returns nothing to the heap, because they never came from it; the arena scope rewinds
+    // them on the way out of this function. Kept unconditional because it is still the right thing
+    // on the heap path, which is what runs whenever the buffer is not lent.
+    //
+    // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
+    // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
+    // page would not have redone. Safe here because every glyph consumer for this page has already
+    // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
+    // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
+    renderer.getFontCacheManager()->clearCache();
+  }  // slot scope closed
+  if (drawBlock != nullptr && drawBlock->valid() && buildScratch_) {
+    // The page's bytes are no longer read (render and link targets are done above); the caller
+    // still owns the object, whose destructor does not touch them.
+    if (!buildScratch_->release(*drawBlock)) {
+      LOG_ERR("ERS", "Mid-build draw block could not be released (out of order)");
+    }
   }
-  // Hand the font page slots back before the build resumes. This is THE allocation that makes a
-  // mid-build draw expensive, and it is expensive because of where it lands, not what it costs:
-  // prewarm takes ~8.9 KB of page buffer + glyph table (pageBuf 7635 + pageGlyphs 1264 measured,
-  // across the 3 style slots a page uses) out of the middle of the largest free block, while the
-  // build's working set already occupies the rest of the heap. Device-measured X3 2026-08-11:
-  // contig 40948 -> 23540 across this one draw, never recovering for the remainder of the parse,
-  // which then ran in "continuing in degraded mode" throughout and left contig 1036 bytes short
-  // of Background-B's floor afterwards.
-  //
-  // Normally the slots live on until the next prewarm replaces them, which is free — but here
-  // "until the next prewarm" spans the rest of a multi-second build. Releasing now lets the block
-  // coalesce before stepCurrentSectionBuild() resumes; nothing else allocates in between, because
-  // the lock is still held.
-  //
-  // When the slots came from the arena instead (the normal case now — see ScopedSlotArena above)
-  // this returns nothing to the heap, because they never came from it; the arena scope rewinds
-  // them on the way out of this function. Kept unconditional because it is still the right thing
-  // on the heap path, which is what runs whenever the buffer is not lent.
-  //
-  // Costs nothing: prewarmCache() frees and rebuilds a slot's buffer on every call anyway
-  // (FontDecompressor.cpp, "Roll back this slot only"), so no work is thrown away that the next
-  // page would not have redone. Safe here because every glyph consumer for this page has already
-  // run — the scan pass, page.render() and renderStatusBar() are all above, and a mid-build draw
-  // has no AA pass to replay later (the borrowed buffer forces secondaryBufferDegraded_).
-  renderer.getFontCacheManager()->clearCache();
 
   // Release the lock before the (blocking) waveform wait so stepCurrentSectionBuild() can run a
   // build slice on the loop task while the panel refreshes — the same hand-off renderContents()

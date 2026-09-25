@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize
+
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
@@ -51,7 +53,7 @@ class PageLine final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
-  static std::unique_ptr<PageLine> deserialize(FsFile& file);
+  static std::unique_ptr<PageLine> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 };
 
 // New PageImage class
@@ -115,7 +117,7 @@ class PageTableFragment final : public PageElement {
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
-  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
+  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file, BuildArena* scratch = nullptr);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
   uint16_t getTotalWidth() const { return totalWidth; }
@@ -187,7 +189,9 @@ class Page {
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;
-  static std::unique_ptr<Page> deserialize(FsFile& file);
+  // `scratch`: every TextBlock on the page takes its bytes from it when given (see
+  // TextBlock::deserialize); the page must then die before the caller's arena block does.
+  static std::unique_ptr<Page> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {

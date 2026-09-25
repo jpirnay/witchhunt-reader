@@ -239,7 +239,8 @@ class Section {
   // sees the latest committed pages (the writer is not synced per page). Must be called
   // between build slices, never concurrently with a slice on another task. Returns nullptr
   // on error. pageIndex must be < activeBuildPageCount().
-  std::unique_ptr<Page> loadPageFromActiveBuild(uint16_t pageIndex);
+  // `scratch`: see Page::deserialize -- the mid-build draw passes the build's lent region.
+  std::unique_ptr<Page> loadPageFromActiveBuild(uint16_t pageIndex, BuildArena* scratch = nullptr);
   // Pre-decode every image in the section into its .pxc cache. Skips images that are
   // already cached or would show as a placeholder. The decode writes pixels into the
   // framebuffer as a side effect; call renderer.clearScreen() afterward. forceLoad

@@ -17,13 +17,13 @@ bool PageLine::serialize(FsFile& file) {
   return block->serialize(file);
 }
 
-std::unique_ptr<PageLine> PageLine::deserialize(FsFile& file) {
+std::unique_ptr<PageLine> PageLine::deserialize(FsFile& file, BuildArena* scratch) {
   int16_t xPos;
   int16_t yPos;
   serialization::readPod(file, xPos);
   serialization::readPod(file, yPos);
 
-  auto tb = TextBlock::deserialize(file);
+  auto tb = TextBlock::deserialize(file, scratch);
   if (!tb) {
     LOG_ERR("PGE", "PageLine: TextBlock deserialize failed");
     return nullptr;
@@ -210,7 +210,7 @@ bool PageTableFragment::serialize(FsFile& file) {
   return true;
 }
 
-std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) {
+std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, BuildArena* scratch) {
   int16_t xPos, yPos;
   serialization::readPod(file, xPos);
   serialization::readPod(file, yPos);
@@ -265,7 +265,7 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) 
       }
       cell.lines.reserve(lineCount);
       for (uint8_t l = 0; l < lineCount; l++) {
-        auto tb = TextBlock::deserialize(file);
+        auto tb = TextBlock::deserialize(file, scratch);
         if (!tb) {
           LOG_ERR("PGE", "TableFragment: TextBlock deserialize failed at row %u cell %u line %u", r, c, l);
           return nullptr;
@@ -425,7 +425,7 @@ bool Page::serialize(FsFile& file) const {
   return true;
 }
 
-std::unique_ptr<Page> Page::deserialize(FsFile& file) {
+std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
   auto page = std::unique_ptr<Page>(new Page());
 
   uint16_t count = 0;
@@ -448,7 +448,7 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file) {
     serialization::readPod(file, tag);
 
     if (tag == TAG_PageLine) {
-      auto pl = PageLine::deserialize(file);
+      auto pl = PageLine::deserialize(file, scratch);
       if (!pl) return nullptr;
       page->elements.push_back(std::move(pl));
     } else if (tag == TAG_PageImage) {
@@ -456,7 +456,7 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file) {
       if (!pi) return nullptr;
       page->elements.push_back(std::move(pi));
     } else if (tag == TAG_PageTable) {
-      auto pt = PageTableFragment::deserialize(file);
+      auto pt = PageTableFragment::deserialize(file, scratch);
       if (!pt) return nullptr;
       page->elements.push_back(std::move(pt));
     } else if (tag == TAG_PageHR) {

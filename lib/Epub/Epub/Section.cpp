@@ -1940,7 +1940,7 @@ bool Section::activeBuildCssDegraded() const {
   return buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
 }
 
-std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex) {
+std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex, BuildArena* scratch) {
   if (!buildState_ || pageIndex >= pageCount) {
     LOG_ERR("SCT", "loadPageFromActiveBuild: page %u out of range (built=%u)", pageIndex, pageCount);
     return nullptr;
@@ -1964,7 +1964,7 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
     LOG_ERR("SCT", "loadPageFromActiveBuild: seek to %u failed", offset);
     return nullptr;
   }
-  auto page = Page::deserialize(readHandle);
+  auto page = Page::deserialize(readHandle, scratch);
   readHandle.close();
   return page;
 }

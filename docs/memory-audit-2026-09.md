@@ -471,9 +471,12 @@ build followed a C build that died at page 67), plus the CSS-fallback and
 image-header rebuilds. So R1's payoff is on those rebuilds — which now get
 the arena-resident CSS ruleset the released path never had — and the run-3
 outcome is really R2's to fix: once the phase (b) churn leaves the heap, C
-completes and no escalation happens. Device run 6 did not reach the
-blocking path at all (C completed), so the borrowed blocking build is still
-unexercised on hardware; it is the same code path as C's borrow, but its
+completes and no escalation happens. Device runs 6 and 7 did not reach the
+blocking path (C completed); run 8's second pass did, through the C-failure
+latch, and took the *released* branch as intended (`Index start mem (before
+fb release, C-failure latch)` → 98 KB free → 180 pages → realloc OK). The
+borrowed blocking build itself is still unexercised on hardware; it is the
+same code path as C's borrow, but its
 `Index start mem (secondary buffer BORROWED …)` / `Index end mem (after fb
 return)` pair should be seen once on a CSS-fallback or image-header rebuild
 before this is called validated.
@@ -569,6 +572,40 @@ and the word vectors whenever the block is empty; within a slice nothing
 regrows. Cost: a handful of allocations per slice instead of ~16 per
 paragraph. Blocking builds never yield and are unaffected. Device
 re-measurement pending.
+
+*Device run 8 (X3, 2026-09-25 21:30, step 1c flashed, clean boot, no
+capture gap):* reader entry free 47 420 / contig 38 900 — run 5's baseline
+exactly. First pass: the C build completed as before (157 → walk → 180,
+`lowHeapSkips` 123, down from 215), but **contig after the build was
+18 420 — run 5's number**. Runs 6 and 7 had started at 22 516, below what
+the build touches, so their "0 contig lost" was an artefact of the starting
+point, not a property of the build; that claim is withdrawn. The post-build
+contig is the reading state's own live objects (the deferred-AA `Page`,
+the font page slots — §5 P1/P2/P4), not build churn. The boot-wide
+watermark was **7 340 B** (run 7: 6 408; run 5: 11 272): step 1c recovered
+some, not all.
+
+Second pass from the reading state (entry free 41 788 / contig 18 420,
+which had *survived* Home → Reader, so something allocated while reading
+pins it — R3): the C build **aborted at page 146 on the contig gate**
+(`17028 free, 5620 max alloc`), the latch sent it to the released blocking
+build (R1's escalation rule, working as designed: 98 KB free, 180 pages,
+zero CSS skips), and the buffer came back. So C's margin on this chapter is
+about 5 KB of entry heap: it completes from 47 KB and dies from 42 KB.
+
+Two consequences landed as *step 2b*:
+
+1. The mid-build draw's `Page` now takes its `TextBlock` bytes from a block
+   on the build arena (`loadPageFromActiveBuild(idx, scratch)` →
+   `Page::deserialize(file, scratch)`), opened by the caller and closed by
+   `displayBuildPage` before it releases the lock: ~7 KB of the draw's
+   ~10.5 KB leave the heap at exactly the watermark moment.
+2. A pre-existing ordering hazard that step 2 had turned live: the
+   font-slot arena scope in `displayBuildPage` closed at function exit,
+   *after* the unlock that lets a build slice run during the waveform wait.
+   With per-line arena allocation in the parser, a slice's lines could land
+   above that open block and be rewound with it. Every arena scope in that
+   function now closes before the unlock. Device re-measurement pending.
 
 Run 7 also caught a pin outside the reader's scope: at Home exit the
 framebuffer realloc failed at contig 40 948 with 101 KB free, and the pin

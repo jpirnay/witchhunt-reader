@@ -771,7 +771,11 @@ class EpubReaderActivity final : public Activity {
   // Draws a single text-only page from an in-progress Background-C build (no AA, no pre-render
   // arming). Releases the lock before the waveform wait (like renderContents) so a C build
   // slice can run on the loop task during the refresh.
-  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout);
+  // `drawBlock`: the arena block the page's TextBlock bytes live in, when the caller loaded the
+  // page from the build's lent region. Released here, before the lock is, so a build slice that
+  // runs during the waveform wait finds the arena cursor where it left it.
+  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+                        BuildArena::Block* drawBlock = nullptr);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
   // that was last rendered into the buffer (needed for image AA re-render).

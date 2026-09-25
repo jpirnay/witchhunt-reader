@@ -435,7 +435,7 @@ bool TextBlock::serialize(FsFile& file) const {
   return true;
 }
 
-std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
+std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scratch) {
   uint16_t wc = 0;
   uint8_t hasSizes = 0;
   uint16_t textBytes = 0;
@@ -468,7 +468,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
 
   if (wc > 0) {
     const size_t size = arenaSize(wc, block->sizesPresent, textBytes);
-    if (!block->allocArena(size, nullptr)) {
+    if (!block->allocArena(size, scratch)) {
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
     }
