@@ -59,10 +59,19 @@ struct Source {
   }
 };
 
+// 8-bit lookahead for an AC table: entry[next 8 bits] = (code length << 8) | symbol, or 0 for a
+// code longer than 8 bits (decoded by the canonical walk from length 9). With optimised tables
+// nearly every AC symbol is 8 bits or shorter, so one lookup replaces a walk of up to 16 steps.
+// Half a KB each, so only the AC tables luma scans use get one (kMaxLookaheads).
+struct Lookahead {
+  uint16_t entry[256];
+};
+
 struct HuffmanTable {
   uint8_t count[17] = {};
   uint16_t firstCode[17] = {};
   uint16_t firstSymbol[17] = {};
+  const Lookahead* lookahead = nullptr;  // into State::lookaheads; State never moves
   uint16_t symbolCount = 0;
   uint8_t symbols[256] = {};
 
@@ -80,6 +89,19 @@ struct HuffmanTable {
     }
     symbolCount = offset;
     return offset <= 256;
+  }
+
+  void buildLookahead(Lookahead& la) {
+    memset(la.entry, 0, sizeof(la.entry));
+    for (uint8_t length = 1; length <= 8; ++length) {
+      for (uint16_t i = 0; i < count[length]; ++i) {
+        const uint32_t code = static_cast<uint32_t>(firstCode[length] + i);
+        const uint16_t value = static_cast<uint16_t>((length << 8) | symbols[firstSymbol[length] + i]);
+        const uint32_t first = code << (8 - length);
+        for (uint32_t k = 0; k < (1u << (8 - length)); ++k) la.entry[first + k] = value;
+      }
+    }
+    lookahead = &la;
   }
 
   bool sameAs(const HuffmanTable& other) const {
@@ -130,6 +152,9 @@ struct State {
 
   HuffmanTable pool[TABLE_POOL];
   uint8_t poolUsed = 0;
+  static constexpr uint8_t kMaxLookaheads = 6;  // AC tables luma scans use: ~2 (spectral selection) to ~6 (SA)
+  Lookahead lookaheads[kMaxLookaheads];
+  uint8_t lookaheadsUsed = 0;
   int8_t current[2][4] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};  // [DC/AC][id] -> pool index
 
   Scan scans[MAX_LUMA_SCANS];
@@ -254,6 +279,7 @@ Result parseHuffmanTables(State& st, uint32_t p, const uint32_t end) {
     const int slot = freeTableSlot(st);
     if (slot < 0) return Result::Unsupported;
     HuffmanTable& table = st.pool[slot];
+    table.lookahead = nullptr;  // a reclaimed slot: any lookahead described the old table
     uint8_t counts[16];
     for (uint8_t& c : counts) {
       const int value = st.source.at(p++);
@@ -354,6 +380,9 @@ Result parseScan(State& st, uint32_t p, const uint32_t end) {
     const int8_t t = st.current[1][acId];
     if (t < 0) return Result::InvalidData;
     scan.acTable = static_cast<uint8_t>(t);
+    if (!st.pool[t].lookahead && st.lookaheadsUsed < State::kMaxLookaheads) {
+      st.pool[t].buildLookahead(st.lookaheads[st.lookaheadsUsed++]);
+    }
   }
   scan.restartInterval = st.restartInterval;
   scan.dataStart = end;
@@ -480,7 +509,18 @@ struct BitReader {
 
   int symbol(const HuffmanTable& table) {
     if (c.bitCount < 16) fill();
-    for (uint8_t length = 1; length <= 16; ++length) {
+    uint8_t length = 1;
+    if (table.lookahead) {
+      const uint16_t e = table.lookahead->entry[c.bits >> 24];
+      if (e != 0) {
+        const uint8_t len = static_cast<uint8_t>(e >> 8);
+        c.bits <<= len;
+        c.bitCount = static_cast<uint8_t>(c.bitCount - len);
+        return e & 0xFF;
+      }
+      length = 9;  // every code of 8 bits or fewer is in the table
+    }
+    for (; length <= 16; ++length) {
       const uint32_t code = c.bits >> (32 - length);
       const uint32_t offset = code - table.firstCode[length];
       if (code >= table.firstCode[length] && offset < table.count[length]) {
@@ -668,6 +708,16 @@ void buildBasis(State& st, const uint8_t n) {
   }
 }
 
+// A block with no AC coefficient is one flat level: the same integer pipeline as idctBlock,
+// applied once. Line art and diagrams are mostly such blocks, and the reduced IDCT was half of
+// the decode before this shortcut.
+void fillDcBlock(const int16_t dc, const uint16_t quant0, const uint8_t n, uint8_t* out, const size_t stride) {
+  const int32_t f = std::clamp<int32_t>(dc * static_cast<int32_t>(quant0), -8191, 8191);
+  const int32_t t = (f * 362 + 64) >> 7;
+  const uint8_t level = static_cast<uint8_t>(std::clamp<int32_t>(128 + ((362 * t + (1 << 12)) >> 13), 0, 255));
+  for (int Y = 0; Y < n; ++Y) memset(out + static_cast<size_t>(Y) * stride, level, n);
+}
+
 void idctBlock(const State& st, const int16_t* coef, const uint16_t* quant, const uint8_t n, uint8_t* out,
                const size_t stride) {
   int32_t t[8][8];  // basis * F, x 8: the only full-block temporary (256 B of stack)
@@ -780,7 +830,12 @@ Result decodeBands(State& st, const Geometry& g, uint8_t* workspace, const Layou
       if (y >= outHeight) break;
       for (uint16_t col = 0; col < colsNeeded; ++col) {
         const BlockRef block = blockAt(r, col);
-        idctBlock(st, block.coef, quant, g.n, pixels + static_cast<size_t>(col) * g.n, pixelStride);
+        uint8_t* dst = pixels + static_cast<size_t>(col) * g.n;
+        if ((*block.mask & ~1ULL) == 0) {
+          fillDcBlock(block.coef[0], quant[0], g.n, dst, pixelStride);
+        } else {
+          idctBlock(st, block.coef, quant, g.n, dst, pixelStride);
+        }
       }
       const uint16_t rows = static_cast<uint16_t>(std::min<int>(g.n, outHeight - y));
       if (!callback(user, static_cast<uint16_t>(y), pixels, outWidth, rows, static_cast<uint16_t>(pixelStride))) {
