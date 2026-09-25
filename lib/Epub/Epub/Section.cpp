@@ -1038,6 +1038,9 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),
   // which is where the parser opens it.
   st.visitor->setAnchorSpillPath(getAnchorSpillPath());
+  // Only the lent framebuffer region has room for the parser's SAX state (~10 KB) on top of the
+  // build's own use; the owned heap arena is 10 KB in total and would just move the block.
+  if (st.arena && st.arena != st.ownedArena.get()) st.visitor->setBuildArena(st.arena);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
 
   // Inline footnote previews are NOT wired up here: the note text this spine needs may not be

@@ -1,6 +1,7 @@
 #include "ChapterHtmlSlimParser.h"
 
 #include <Arduino.h>
+#include <BuildArena.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -3191,6 +3192,13 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD.
   // Using DefaultHandlerExpand preserves normal entity expansion from DOCTYPE.
   // Chapter XHTML is HTML-flavored: enable bare-void-tag repair (<br>, <img>, ...).
+  if (buildArena_) {
+    const size_t bytes = SaxParser::stateBytes();
+    if (void* state = buildArena_->alloc(bytes)) {
+      saxParser_.setExternalState(state, bytes);
+      LOG_DBG("EHP", "SAX parser state (%u bytes) in the build arena", static_cast<unsigned>(bytes));
+    }
+  }
   if (!saxParser_.init(this, startElement, endElement, characterData, defaultHandlerExpand,
                        /*htmlVoidTagRepair=*/true)) {
     LOG_ERR("EHP", "Couldn't allocate memory for parser");
