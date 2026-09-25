@@ -25,6 +25,13 @@ Fixtures:
   progressive_wide.jpg   Progressive, 1920x16 (240 DC columns) with a horizontal gradient.
                      Same overflow on the COLUMN axis: at 382 output columns it wrapped
                      from column 275 on.
+  thin_lines_gray.jpg    Baseline grayscale, 600x32, white with a 1-px black vertical
+                     line every 7 px (x = 3, 10, 17, ...). Downscaled to 420 wide, the
+                     residual 0.7 scale runs at 1/1 DCT, and nearest-neighbour sampling
+                     never lands on ~30% of the lines -- they vanish. Guards the area-
+                     average downscale in JpegToFramebufferConverter (epub_pipeline test).
+  thin_hlines_gray.jpg   The same, transposed (32x600, horizontal lines): lines in the last
+                     row of an MCU row need the carry across MCU rows, not just blocks.
 """
 import os
 from PIL import Image, ImageDraw
@@ -93,6 +100,16 @@ d = ImageDraw.Draw(im)
 for x in range(W):
     d.line([(x, 0), (x, H - 1)], fill=int(255 * x / (W - 1)))
 save_progressive(im, "progressive_wide.jpg")
+
+# --- thin_lines_gray.jpg : 1-px strokes a point-sampling downscale drops ---
+W, H = 600, 32
+im = Image.new("L", (W, H), 255)
+d = ImageDraw.Draw(im)
+for x in range(3, W, 7):
+    d.line([(x, 0), (x, H - 1)], fill=0)
+im.save(os.path.join(HERE, "thin_lines_gray.jpg"), "JPEG", quality=95, progressive=False, optimize=False)
+im.transpose(Image.Transpose.TRANSPOSE).save(os.path.join(HERE, "thin_hlines_gray.jpg"), "JPEG", quality=95,
+                                             progressive=False, optimize=False)
 
 print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):

@@ -14,7 +14,9 @@
 #include <ZipFile.h>
 #include <tjpgd.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -47,6 +49,72 @@ void jpgCheckHeap(const char* checkpoint) {
 inline void jpgCheckHeap(const char*) {}
 #endif
 
+// Partial sums for area-averaged downscaling across decode-block edges. A destination pixel
+// belongs to the block its footprint ENDS in (the ownership emitGrayBlock's dst ranges already
+// encode), so the blocks its footprint starts in hand over what they saw of it:
+//   - rowSum/rowWeight: the pixel straddling the previous block's right edge, one per dst row
+//     of the current MCU row. Blocks of an MCU row arrive left to right, so one column at a time.
+//   - pending[]: the dst row straddling an MCU-row boundary, per column, as (mean, weight >> 8).
+//     Two slots, because an MCU row consumes the row its predecessor left pending while it
+//     fills its own.
+// Without the handover the straddling pixel only averaged its own block's part: a 1-px line
+// in the last column or row of an MCU was mostly dropped, i.e. every 8th source line could
+// vanish, which is the nearest-neighbour defect again at a coarser pitch.
+struct AreaCarry {
+  static constexpr int MAX_ROWS = 20;  // dst rows per MCU row: <= 16 * fine + 1 with fine <= 1
+  uint32_t rowSum[MAX_ROWS]{};
+  uint32_t rowWeight[MAX_ROWS]{};
+  int rowCol{-1};  // dst column the row carry refers to; -1 = none
+
+  struct PendingRow {
+    std::unique_ptr<uint16_t[]> weight;
+    std::unique_ptr<uint8_t[]> mean;
+    int row{-1};
+  };
+  PendingRow pending[2];
+  int width{0};
+
+  bool allocate(const int dstWidth) {
+    width = dstWidth;
+    for (PendingRow& slot : pending) {
+      slot.weight = makeUniqueNoThrow<uint16_t[]>(static_cast<size_t>(dstWidth));
+      slot.mean = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(dstWidth));
+      if (!slot.weight || !slot.mean) return false;
+      slot.row = -1;
+    }
+    return true;
+  }
+
+  PendingRow* slotFor(const int row) {
+    for (PendingRow& slot : pending) {
+      if (slot.row == row) return &slot;
+    }
+    return nullptr;
+  }
+
+  // Start collecting `row`, reusing whichever slot is not the one `consuming` still reads.
+  void open(const int row, const int consuming) {
+    if (slotFor(row)) return;
+    PendingRow& slot = (pending[0].row != consuming) ? pending[0] : pending[1];
+    memset(slot.weight.get(), 0, static_cast<size_t>(width) * sizeof(uint16_t));
+    memset(slot.mean.get(), 0, static_cast<size_t>(width));
+    slot.row = row;
+  }
+
+  // The mean comes from the exact sum/weight ratio before the weight is narrowed: dividing
+  // sum >> 8 by weight >> 8 instead overshoots 255 on near-white pixels whenever the shift
+  // drops weight bits, and the uint8 wrap turned white margins into a dotted grid.
+  static void add(PendingRow& slot, const int col, const uint32_t sum, const uint32_t weight) {
+    const uint32_t w = weight >> 8;
+    if (w == 0) return;
+    const uint32_t mean = (sum + weight / 2) / weight;
+    const uint32_t oldW = slot.weight[col];
+    const uint32_t newW = oldW + w;
+    slot.mean[col] = static_cast<uint8_t>((slot.mean[col] * oldW + mean * w + newW / 2) / newW);
+    slot.weight[col] = static_cast<uint16_t>(newW);
+  }
+};
+
 // Context struct passed through the TJpgDec callbacks (via the TJpgSession in
 // jd->device) to avoid global mutable state. The output callback uses it to resample
 // and dither each block; the input callback uses the session's FsFile* to read.
@@ -76,6 +144,12 @@ struct JpegContext {
 
   PixelCache cache;
   bool caching{false};
+
+  // Downscale by coverage-weighted averaging (see emitGrayBlock). Decided once per decode;
+  // areaCarry is null when its ~3 bytes per column could not be allocated, in which case
+  // each block averages only the part of a straddling pixel it holds.
+  bool areaAverage{false};
+  std::unique_ptr<AreaCarry> areaCarry;
 
   // See PngContext for the rationale: monochromeOutput requests a 1-bit Atkinson dither
   // emitting only 0/3 so the BW DirectPixelWriter (`pixelValue < 3` rule) maps cleanly.
@@ -510,6 +584,90 @@ constexpr int FP_SHIFT = 16;
 constexpr int32_t FP_ONE = 1 << FP_SHIFT;
 constexpr int32_t FP_MASK = FP_ONE - 1;
 
+// Largest dst->src ratio (per axis, after the DCT step) the area average handles. Weights are
+// 8.8 per axis, so a pixel's total weight is invX * invY * 2^16 and its sum at most 255 times
+// that: under 12 per axis keeps both within uint32 and the carried weight (>> 8) within
+// uint16. A residual scale below 1/12 is a thumbnail, and keeps nearest-neighbour.
+constexpr int32_t MAX_AREA_INV_FP = 12 << FP_SHIFT;
+
+// One decoded block, and where its pixels land in the destination. [xs, xe) x [ys, ye) are the
+// dst pixels whose footprint ENDS in this block (unclipped); column xe and row ye start in it
+// and end in a later block.
+struct AreaBlock {
+  const uint8_t* pixels;
+  int stride;
+  int32_t leftFP, rightFP, topFP, bottomFP;  // block extent in 16.16 source coordinates
+  int xs, xe, ys, ye;
+};
+
+// Coverage-weighted sum of the block's pixels under dst pixel (d, r)'s footprint, clamped to
+// the block. Adds to sum/weight (weights 8.8 per axis).
+void areaContribution(const JpegContext& ctx, const AreaBlock& b, const int d, const int r, uint32_t& sum,
+                      uint32_t& weight) {
+  const int32_t x0 = std::max(d * ctx.invScaleFPX, b.leftFP);
+  const int32_t x1 = std::min((d + 1) * ctx.invScaleFPX, b.rightFP);
+  const int32_t y0 = std::max(r * ctx.invScaleFPY, b.topFP);
+  const int32_t y1 = std::min((r + 1) * ctx.invScaleFPY, b.bottomFP);
+  if (x1 <= x0 || y1 <= y0) return;
+  const int blockX = b.leftFP >> FP_SHIFT;
+  const int blockY = b.topFP >> FP_SHIFT;
+  for (int32_t iy = y0 >> FP_SHIFT; (iy << FP_SHIFT) < y1; iy++) {
+    const uint32_t wy = static_cast<uint32_t>(std::min((iy + 1) << FP_SHIFT, y1) - std::max(iy << FP_SHIFT, y0)) >> 8;
+    const uint8_t* srcRow = &b.pixels[(iy - blockY) * b.stride];
+    for (int32_t ix = x0 >> FP_SHIFT; (ix << FP_SHIFT) < x1; ix++) {
+      const uint32_t wx = static_cast<uint32_t>(std::min((ix + 1) << FP_SHIFT, x1) - std::max(ix << FP_SHIFT, x0)) >> 8;
+      const uint32_t w = wx * wy;
+      sum += w * srcRow[ix - blockX];
+      weight += w;
+    }
+  }
+}
+
+// First block of an MCU row: forget the previous row's column carry and open the slot this
+// MCU row's pending dst row collects into.
+void areaBeginBlock(JpegContext& ctx, const AreaBlock& b, const bool rowStart) {
+  AreaCarry* carry = ctx.areaCarry.get();
+  if (!carry || !rowStart) return;
+  carry->rowCol = -1;
+  if (b.ye < ctx.dstHeight) carry->open(b.ye, b.ys);
+}
+
+// Hand this block's share of the pixels it does not own to the blocks that will: column xe for
+// the owned rows (the next block in this MCU row), row ye for every column it touches (the
+// next MCU row). Runs after the owned pixels were emitted, since those consumed the old carry.
+void areaEndBlock(JpegContext& ctx, const AreaBlock& b) {
+  AreaCarry* carry = ctx.areaCarry.get();
+  if (!carry) return;
+
+  if (b.xe < ctx.dstWidth) {
+    // A block that owns no column passes the carry it received on, plus its own share.
+    const bool continues = b.xs == b.xe && carry->rowCol == b.xs;
+    for (int r = std::max(b.ys, 0); r < std::min(b.ye, ctx.dstHeight); r++) {
+      const int i = r - b.ys;
+      if (i >= AreaCarry::MAX_ROWS) break;
+      uint32_t sum = continues ? carry->rowSum[i] : 0;
+      uint32_t weight = continues ? carry->rowWeight[i] : 0;
+      areaContribution(ctx, b, b.xe, r, sum, weight);
+      carry->rowSum[i] = sum;
+      carry->rowWeight[i] = weight;
+    }
+    carry->rowCol = b.xe;
+  } else {
+    carry->rowCol = -1;
+  }
+
+  if (b.ye < ctx.dstHeight) {
+    AreaCarry::PendingRow* slot = carry->slotFor(b.ye);
+    if (!slot) return;
+    for (int d = std::max(b.xs, 0); d <= std::min(b.xe, ctx.dstWidth - 1); d++) {
+      uint32_t sum = 0;
+      uint32_t weight = 0;
+      areaContribution(ctx, b, d, b.ye, sum, weight);
+      AreaCarry::add(*slot, d, sum, weight);
+    }
+  }
+}
+
 // Emit one decoded grayscale block into the framebuffer (and the streaming cache),
 // applying fine resampling and the active ditherer. Engine-neutral: it takes a raw
 // 8-bit grayscale block — densely packed at `stride`, with `validW` valid columns and
@@ -542,6 +700,20 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   int dstXStart = (int)((int64_t)blockX * fineScaleFPX >> FP_SHIFT);
   int dstXEnd = (srcXEnd >= ctx->scaledSrcWidth) ? ctx->dstWidth : (int)((int64_t)srcXEnd * fineScaleFPX >> FP_SHIFT);
 
+  // Area-average bookkeeping works on the unclipped ranges: a pixel off screen still has to
+  // pass its share on, or the visible pixel next to it would inherit a stale carry.
+  const AreaBlock area{pixels,
+                       stride,
+                       blockX << FP_SHIFT,
+                       srcXEnd << FP_SHIFT,
+                       blockY << FP_SHIFT,
+                       srcYEnd << FP_SHIFT,
+                       dstXStart,
+                       dstXEnd,
+                       dstYStart,
+                       dstYEnd};
+  areaBeginBlock(*ctx, area, blockX == 0);
+
   // Pre-clamp destination ranges to screen bounds (eliminates per-pixel screen checks)
   int clampYMax = ctx->dstHeight;
   if (ctx->screenHeight - cfgY < clampYMax) clampYMax = ctx->screenHeight - cfgY;
@@ -553,7 +725,10 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   if (dstXStart < -cfgX) dstXStart = -cfgX;
   if (dstXEnd > clampXMax) dstXEnd = clampXMax;
 
-  if (dstYStart >= dstYEnd) return 1;
+  if (dstYStart >= dstYEnd) {
+    areaEndBlock(*ctx, area);
+    return 1;
+  }
 
   // Row-band bookkeeping for the stateful ditherers (see JpegContext::ditherBand).
   // blockX == 0 marks the first MCU of this row (open a fresh band); srcXEnd
@@ -574,6 +749,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
   }
 
   if (dstXStart >= dstXEnd) {
+    areaEndBlock(*ctx, area);
     if (useBand && rowEnd) flushDitherBand(*ctx);
     return 1;
   }
@@ -746,7 +922,17 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
     return 1;
   }
 
-  // === Nearest-neighbor (downscale: fineScale < 1.0) ===
+  // === Area average (downscale: fineScale < 1.0) ===
+  // Each destination pixel is the coverage-weighted mean of the source pixels under its
+  // footprint. Nearest-neighbour took one sample per pixel, so at the typical 0.6-0.9 residual
+  // scale left after the DCT's 1/2^n step, every source column or row the sample grid skipped
+  // simply vanished: 1-px strokes in diagrams broke up and fine grid lines dropped out.
+  // Pixels straddling a block edge collect the earlier blocks' shares through AreaCarry.
+  // Nearest-neighbour remains for mixed up/down scales and for residuals below 1/12.
+  AreaCarry* carry = ctx->areaCarry.get();
+  AreaCarry::PendingRow* above = carry ? carry->slotFor(area.ys) : nullptr;
+  const bool takeRowCarry = carry && carry->rowCol == area.xs;
+
   for (int dstY = dstYStart; dstY < dstYEnd; dstY++) {
     const int outY = cfgY + dstY;
     if (!useBand) {
@@ -762,6 +948,7 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
     if (ly < 0) ly = 0;
     if (ly >= blockH) ly = blockH - 1;
     const uint8_t* row = &pixels[ly * stride];
+    const int carryIndex = dstY - area.ys;
 
     for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
       const int outX = cfgX + dstX;
@@ -771,10 +958,27 @@ int emitGrayBlock(JpegContext& ctxRef, const uint8_t* pixels, int blockX, int bl
       if (lx >= validW) lx = validW - 1;
       uint8_t gray = row[lx];
 
+      if (ctx->areaAverage) {
+        uint32_t sum = 0;
+        uint32_t weight = 0;
+        areaContribution(*ctx, area, dstX, dstY, sum, weight);
+        if (takeRowCarry && dstX == area.xs && carryIndex < AreaCarry::MAX_ROWS) {
+          sum += carry->rowSum[carryIndex];
+          weight += carry->rowWeight[carryIndex];
+        }
+        if (above && dstY == area.ys) {
+          const uint32_t w = above->weight[dstX];
+          sum += (static_cast<uint32_t>(above->mean[dstX]) * w) << 8;
+          weight += w << 8;
+        }
+        if (weight > 0) gray = static_cast<uint8_t>((sum + weight / 2) / weight);
+      }
+
       sinkPixel(dstX, dstY, outX, outY, gray);
     }
   }
 
+  areaEndBlock(*ctx, area);
   if (useBand && rowEnd) flushDitherBand(*ctx);
   return 1;
 }
@@ -1083,6 +1287,19 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.invScaleFPX = (int32_t)((int64_t)ctx.scaledSrcWidth * FP_ONE / destWidth);
   ctx.fineScaleFPY = (int32_t)((int64_t)destHeight * FP_ONE / ctx.scaledSrcHeight);
   ctx.invScaleFPY = (int32_t)((int64_t)ctx.scaledSrcHeight * FP_ONE / destHeight);
+
+  // Area averaging covers pure downscales (see emitGrayBlock); the carry that makes it exact
+  // across block edges costs 2 x 3 bytes per output column.
+  ctx.areaAverage = mode != JpegMode::Progressive && ctx.fineScaleFPX <= FP_ONE && ctx.fineScaleFPY <= FP_ONE &&
+                    (ctx.fineScaleFPX < FP_ONE || ctx.fineScaleFPY < FP_ONE) && ctx.invScaleFPX < MAX_AREA_INV_FP &&
+                    ctx.invScaleFPY < MAX_AREA_INV_FP;
+  if (ctx.areaAverage) {
+    ctx.areaCarry = makeUniqueNoThrow<AreaCarry>();
+    if (!ctx.areaCarry || !ctx.areaCarry->allocate(destWidth)) {
+      LOG_DBG("JPG", "No heap for the %d-column area carry; block edges average per block", destWidth);
+      ctx.areaCarry.reset();
+    }
+  }
 
   LOG_TRC("JPG", "JPEG %dx%d -> %dx%d (scale %.2f, jpegScale 1/%d, fineScale %.2f)", srcWidth, srcHeight, destWidth,
           destHeight, targetScale, jpegScaleDenom, (float)destWidth / ctx.scaledSrcWidth);

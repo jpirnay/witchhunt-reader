@@ -98,6 +98,7 @@ add_executable(EpubPipelineTest
   ImageExtractionTest.cpp
   ImageManifestTest.cpp
   ImageWrapperWidthTest.cpp
+  JpegDownscaleTest.cpp
   CompanionCacheTest.cpp
   StoredEntryDecodeTest.cpp
   PixelCacheWriteTest.cpp
@@ -113,6 +114,7 @@ target_include_directories(EpubPipelineTest PRIVATE ${PIPELINE_INCLUDES})
 target_compile_definitions(EpubPipelineTest PRIVATE
   CORPUS_DIR="${REPO_ROOT}/test/epubs"
   GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/goldens"
+  JPEG_FIXTURE_DIR="${REPO_ROOT}/test/jpeg_decoder/fixtures"
   ENABLE_SERIAL_LOG=1
   LOG_LEVEL=2
 )
