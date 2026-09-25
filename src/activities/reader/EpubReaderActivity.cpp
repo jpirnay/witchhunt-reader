@@ -3117,7 +3117,16 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
     LOG_INF("ERS", "Dropping Background-B section (spine=%d) for secondary realloc", backgroundBuildSpineIndex_);
     resetBackgroundBuild();
   }
-  if (renderer.reallocSecondaryBuffer()) {
+  // The image manifest keeps one path string per image a build has met, allocated during that
+  // build -- after a released one, strewn through the very hole this realloc needs (X3
+  // 2026-09-25: "OEBPS/images/..." blocks bounding the freed region). Persist and drop it, then
+  // reload it from images.bin once the buffer is placed. Only with no build holding it: the
+  // parser caches the manifest pointer at setup, and the reload replaces the object.
+  const bool evictManifest = epub && !(section && section->hasActiveBuild());
+  if (evictManifest) epub->releaseImageManifest();
+  const bool restored = renderer.reallocSecondaryBuffer();
+  if (evictManifest) epub->loadImageManifest();
+  if (restored) {
     LOG_INF("ERS", "Secondary realloc succeeded after cache eviction");
     return true;
   }

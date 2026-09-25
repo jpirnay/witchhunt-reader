@@ -312,6 +312,15 @@ void EpubImageManifest::closeResolveHandle() {
   if (resolveZip_) resolveZip_->close();
 }
 
+void EpubImageManifest::releaseMemory() {
+  persistIfDirty();
+  std::vector<ImageManifestEntry>().swap(entries_);
+  std::vector<PendingImage>().swap(pending_);
+  resolveZip_.reset();
+  std::string().swap(resolveEpubPath_);
+  loaded_ = false;
+}
+
 const ImageManifestEntry* EpubImageManifest::find(const std::string& epubEntryPath) const {
   // entries_ is sorted by epubEntryPath (guaranteed by load() order and insertEntry).
   auto it = std::lower_bound(entries_.begin(), entries_.end(), epubEntryPath,
