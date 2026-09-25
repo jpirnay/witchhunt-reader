@@ -323,22 +323,37 @@ size_t minFreeHeapForJpeg() {
 #define JPEG_ENABLE_FIRST_RENDER_NO_CACHE 1
 #endif
 
-#ifndef JPEG_CACHE_MIN_FREE_HEAP_MARGIN
-#define JPEG_CACHE_MIN_FREE_HEAP_MARGIN (24 * 1024)
+// Heap the decode still takes AFTER the cache gate, cache or not: the ditherer band (<= 8 KB, one
+// row for progressive) and error rows (~6 B per pixel column), and for progressive the decoder's
+// tables and row buffers (~6 KB). The work pool / probe state are allocated BEFORE the gate, so
+// the free-heap figure there already reflects them.
+#ifndef JPEG_CACHE_POST_GATE_BYTES
+#define JPEG_CACHE_POST_GATE_BYTES (12 * 1024)
+#endif
+// What must remain for everything else once the decode's whole working set is taken.
+#ifndef JPEG_CACHE_HEAP_FLOOR
+#define JPEG_CACHE_HEAP_FLOOR (8 * 1024)
 #endif
 
-// Arena-aware for the same reason as the cache floor: otherwise a borrowed-framebuffer decode
+// Arena-aware (via minFreeHeapForJpeg): otherwise a borrowed-framebuffer decode
 // silently drops from Atkinson to Bayer dithering on every image — a visible quality regression
 // caused by charging heap for a block the arena is serving.
 #ifndef JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP
 #define JPEG_DITHER_LOW_MEM_MIN_FREE_HEAP (minFreeHeapForJpeg() + 8 * 1024)
 #endif
 
-size_t jpegCacheBytes(int width, int height) {
-  return static_cast<size_t>((width + 3) / 4) * static_cast<size_t>(height);
-}
-
-bool shouldEnableJpegCache(const RenderConfig& config, int width, int height) {
+// Whether to stream this decode into its .pxc. Charged with what caching actually adds -- one
+// streaming band (PixelCache::bandBytesFor: 2-4 KB for a typical page image) -- on top of the
+// decode's remaining working set and a floor.
+//
+// It used to demand minFreeHeapForJpeg() + 24 KB: a margin sized in 603005c3a for the old
+// full-image cache buffer, never revisited when the streaming band replaced it, and charging the
+// decoder floor again for a pool that is already allocated here (and that progressive never
+// takes). With both framebuffers resident a reading page has ~29-38 KB free against the 41-53 KB
+// that asked for, so no JPEG was ever cached: every visit re-decoded, and a large image that
+// Confirm had loaded fell back to its placeholder on the next visit (X3 2026-09-25, "Skipping
+// cache: free heap 29060 < 40960" on every decode).
+bool shouldEnableJpegCache(const RenderConfig& config, const int width, const int height, const int maxBlockDstRows) {
   if (config.cachePath.empty()) return false;
 
 #if JPEG_ENABLE_FIRST_RENDER_NO_CACHE
@@ -347,19 +362,18 @@ bool shouldEnableJpegCache(const RenderConfig& config, int width, int height) {
   }
 #endif
 
-  const size_t cacheBytes = jpegCacheBytes(width, height);
+  const size_t bandBytes = PixelCache::bandBytesFor(width, height, maxBlockDstRows);
   const size_t freeHeap = ESP.getFreeHeap();
-  const size_t minFreeForCaching = minFreeHeapForJpeg() + JPEG_CACHE_MIN_FREE_HEAP_MARGIN;
+  const size_t minFreeForCaching = bandBytes + JPEG_CACHE_POST_GATE_BYTES + JPEG_CACHE_HEAP_FLOOR;
 
   if (freeHeap < minFreeForCaching) {
-    LOG_DBG("JPG", "Skipping cache: free heap %u < %u (cache %u bytes)", static_cast<unsigned>(freeHeap),
-            static_cast<unsigned>(minFreeForCaching), static_cast<unsigned>(cacheBytes));
+    LOG_DBG("JPG", "Skipping cache: free heap %u < %u (band %u bytes)", static_cast<unsigned>(freeHeap),
+            static_cast<unsigned>(minFreeForCaching), static_cast<unsigned>(bandBytes));
     return false;
   }
 
-  // Don't pre-check maxAlloc: the TJpgDec work pool is already allocated here so
-  // maxAlloc already reflects that. Let allocate() attempt malloc and fail gracefully
-  // rather than refusing on a conservative margin that double-counts live allocations.
+  // Don't pre-check maxAlloc: let PixelCache::begin() attempt its malloc and fall back to the
+  // no-cache path on failure.
   return true;
 }
 
@@ -1082,7 +1096,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Start streaming the pixel cache to disk.
   // (See PixelCache for why streaming replaced a full-image buffer; ported from
   // upstream commit d9bcef7a, crosspoint-reader#2230.)
-  ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight);
+  ctx.caching = shouldEnableJpegCache(config, destWidth, destHeight, maxBlockDstRows);
 #ifdef JPG_DIAG_DISABLE_CACHE
   // Diagnostic bisect: skip the streaming band-cache writer (DirectCacheWriter into
   // ctx.cache.buffer) entirely. Define in platformio.local.ini (build_flags) for a

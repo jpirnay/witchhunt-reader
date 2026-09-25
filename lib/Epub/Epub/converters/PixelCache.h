@@ -85,6 +85,28 @@ struct PixelCache {
   static constexpr uint16_t PXC_MAGIC = 0x8003;
   static constexpr size_t PXC_HEADER_BYTES = 6;  // magic + width + height
 
+  // Rows begin() gives the band for a w x h image whose tallest decode block is maxBlockDstRows.
+  static int bandRowsFor(const int w, const int h, const int maxBlockDstRows) {
+    const size_t rowBytes = static_cast<size_t>((w + 3) / 4);  // 2 bits per pixel, 4 pixels per byte
+    if (rowBytes == 0) return 0;
+
+    int wantRows = maxBlockDstRows + 2;
+    if (wantRows < MIN_BAND_ROWS) wantRows = MIN_BAND_ROWS;
+    if (wantRows > h) wantRows = h;
+
+    size_t maxRowsByMem = MAX_BAND_BYTES / rowBytes;
+    if (maxRowsByMem < 1) maxRowsByMem = 1;
+    if ((size_t)wantRows > maxRowsByMem) wantRows = (int)maxRowsByMem;
+    return wantRows;
+  }
+
+  // Heap begin() takes for the same image: the band plus its spare fill row. This, not
+  // MAX_BAND_BYTES, is what a caller's "can I afford to cache?" gate should charge.
+  static size_t bandBytesFor(const int w, const int h, const int maxBlockDstRows) {
+    const int rows = bandRowsFor(w, h, maxBlockDstRows);
+    return rows > 0 ? static_cast<size_t>(rows + 1) * static_cast<size_t>((w + 3) / 4) : 0;
+  }
+
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
   bool begin(const std::string& cachePath, int w, int h, int ox, int oy, int maxBlockDstRows) {
@@ -98,13 +120,7 @@ struct PixelCache {
 
     bytesPerRow = (w + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
 
-    int wantRows = maxBlockDstRows + 2;
-    if (wantRows < MIN_BAND_ROWS) wantRows = MIN_BAND_ROWS;
-    if (wantRows > h) wantRows = h;
-
-    size_t maxRowsByMem = MAX_BAND_BYTES / (size_t)bytesPerRow;
-    if (maxRowsByMem < 1) maxRowsByMem = 1;
-    if ((size_t)wantRows > maxRowsByMem) wantRows = (int)maxRowsByMem;
+    const int wantRows = bandRowsFor(w, h, maxBlockDstRows);
 
     // A single decode block must fit inside the band, otherwise streaming would
     // drop rows. This only fails for pathological upscales that could not be
