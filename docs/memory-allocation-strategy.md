@@ -801,6 +801,16 @@ for blocks the arena serves. X3 decoded at `free=48432-49584` against the old 53
 without the discount every image would have skipped its `.pxc` and re-decoded on every visit,
 forever. The two changes only make sense together.
 
+**Follow-up (2026-09-25): the discounted floor stopped being reachable.** Reading-time free heap
+on X3 measured 29-38 KB (an illustrated book, both framebuffers resident; not the same book or
+page as the trace above, so not a like-for-like comparison), below even the discounted 40960,
+and the log showed `Skipping cache` on every decode — so every visit re-decoded again, and a large image loaded with
+Confirm fell back to its placeholder on the next visit. The floor's 24 KB margin dated from the
+full-image cache buffer (`603005c3a`) and was never resized for the streaming band that replaced
+it. `shouldEnableJpegCache()` now charges what caching adds — `PixelCache::bandBytesFor()`,
+2-4 KB for a page image — plus the decode's remaining post-gate working set (12 KB) and an 8 KB
+floor, and no longer re-charges the decoder floor for blocks already allocated at that point.
+
 ### 9.4 The font group scratch is ELIMINATED, not pending
 
 `09b72990` implemented a shared group scratch; `bea07a3d` reverted it on device numbers

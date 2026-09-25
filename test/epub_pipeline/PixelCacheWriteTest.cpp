@@ -115,4 +115,27 @@ TEST_F(PixelCacheFixture, BlockDecoderHeadroomIsRespected) {
   EXPECT_EQ(readFile(path), expected(64, 100, 100, 2));
 }
 
+// bandBytesFor() is what the JPEG cache gate charges, so it must be exactly what begin()
+// allocates: the band plus its spare fill row. Covers the MIN_BAND_ROWS floor (progressive,
+// one-row blocks), MCU headroom, an image shorter than the band, and the MAX_BAND_BYTES cap.
+TEST_F(PixelCacheFixture, BandBytesForMatchesWhatBeginAllocates) {
+  struct Shape {
+    int w, h, maxBlockRows;
+  };
+  for (const Shape s : {Shape{512, 525, 1}, Shape{307, 356, 18}, Shape{64, 5, 1}, Shape{3000, 400, 31}}) {
+    const std::string path = (work / "band.pxc").string();
+    PixelCache cache;
+    ASSERT_TRUE(cache.begin(path, s.w, s.h, 0, 0, s.maxBlockRows)) << s.w << "x" << s.h;
+    EXPECT_EQ(PixelCache::bandBytesFor(s.w, s.h, s.maxBlockRows),
+              static_cast<size_t>(cache.bandRows + 1) * static_cast<size_t>(cache.bytesPerRow))
+        << s.w << "x" << s.h << " block " << s.maxBlockRows;
+    EXPECT_LE(PixelCache::bandBytesFor(s.w, s.h, s.maxBlockRows),
+              PixelCache::MAX_BAND_BYTES + static_cast<size_t>(cache.bytesPerRow));
+    cache.abort();
+  }
+  // A full-width page image from a progressive JPEG costs a couple of KB, not the 24 KB the gate
+  // used to charge -- the premise of the gate's sizing.
+  EXPECT_LT(PixelCache::bandBytesFor(512, 525, 1), 4096u);
+}
+
 }  // namespace
