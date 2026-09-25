@@ -35,6 +35,8 @@ Fixtures:
                      scans, per-scan optimised Huffman tables). prog_full_420.y.pgm is its
                      exact luma, decoded by libjpeg in YCbCr mode: the reference for the
                      full progressive decoder (ProgressiveJpeg) at every 1/2^n scale.
+  prog_full_420_base.jpg The same picture as prog_full_420.jpg encoded BASELINE: through the
+                     thumbnail converter both must come out alike (JpegToBmpConverter test).
   prog_full_gray.jpg     The same script on a one-component (grayscale) frame, 157x99, where
                      every scan is non-interleaved. Reference: prog_full_gray.y.pgm.
   prog_full_444_rst.jpg  4:4:4, 150x90, restart marker every 3 blocks/MCUs, so every scan
@@ -156,6 +158,8 @@ def save_reference(jpg, pgm):
 busy_picture(203, 141).save(os.path.join(HERE, "prog_full_420.jpg"), "JPEG", quality=90, subsampling=2,
                              progressive=True, optimize=True)
 save_reference("prog_full_420.jpg", "prog_full_420.y.pgm")
+busy_picture(203, 141).save(os.path.join(HERE, "prog_full_420_base.jpg"), "JPEG", quality=90, subsampling=2,
+                             progressive=False, optimize=False)
 busy_picture(157, 99, "L").save(os.path.join(HERE, "prog_full_gray.jpg"), "JPEG", quality=90,
                                  progressive=True, optimize=True)
 save_reference("prog_full_gray.jpg", "prog_full_gray.y.pgm")

@@ -3,8 +3,10 @@
 #include <CooperativeAbort.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
+#include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
 #include <Memory.h>
+#include <ProgressiveJpeg.h>
 #include <ProgressiveJpegDc.h>
 #include <tjpgd.h>
 
@@ -198,6 +200,67 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
   ctx->currentOutY++;
 }
 
+// One complete source row (srcWidth gray pixels) at source row y: scaled on X into the row
+// accumulators and flushed on Y as output rows complete, or written straight through at 1:1.
+// Shared by the TJpgDec MCU-row path and the progressive decoder's band path.
+static void processSourceRow(BmpConvertCtx* ctx, const uint8_t* srcRow, const int y) {
+  if (!ctx->needsScaling) {
+    // 1:1 — outWidth == srcWidth, write directly
+    writeOutputRow(ctx, srcRow, y);
+    return;
+  }
+  // Fixed-point area averaging on X axis
+  for (int outX = 0; outX < ctx->outWidth; outX++) {
+    const int srcXStart = (static_cast<uint32_t>(outX) * ctx->scaleX_fp) >> 16;
+    const int srcXEnd = (static_cast<uint32_t>(outX + 1) * ctx->scaleX_fp) >> 16;
+    int sum = 0;
+    int count = 0;
+    for (int srcX = srcXStart; srcX < srcXEnd && srcX < ctx->srcWidth; srcX++) {
+      sum += srcRow[srcX];
+      count++;
+    }
+    if (count == 0 && srcXStart < ctx->srcWidth) {
+      sum = srcRow[srcXStart];
+      count = 1;
+    }
+    ctx->rowAccum[outX] += sum;
+    ctx->rowCount[outX] += count;
+  }
+
+  // Flush output row(s) whose Y boundary we've crossed
+  const uint32_t srcY_fp = static_cast<uint32_t>(y + 1) << 16;
+  while (srcY_fp >= ctx->nextOutY_srcStart && ctx->currentOutY < ctx->outHeight) {
+    flushScaledRow(ctx);
+    ctx->nextOutY_srcStart = static_cast<uint32_t>(ctx->currentOutY + 1) * ctx->scaleY_fp;
+    if (srcY_fp >= ctx->nextOutY_srcStart) continue;
+    memset(ctx->rowAccum, 0, ctx->outWidth * sizeof(uint32_t));
+    memset(ctx->rowCount, 0, ctx->outWidth * sizeof(uint32_t));
+  }
+}
+
+// Full progressive decode (ProgressiveJpeg): each band is one block row of full-width gray rows
+// at the chosen 1/2^s scale, fed through the same per-row scaling as a TJpgDec MCU row.
+static bool progressiveBandOutput(void* user, uint16_t y, const uint8_t* gray, uint16_t width, uint16_t rows,
+                                  uint16_t stride) {
+  auto* ctx = static_cast<BmpConvertCtx*>(user);
+  if (!ctx || ctx->error || width != ctx->srcWidth) return false;
+  HalSystem::feedWatchdog();
+  for (uint16_t r = 0; r < rows; ++r) {
+    const int srcY = y + r;
+    if (srcY >= ctx->srcHeight) break;
+    processSourceRow(ctx, gray + static_cast<size_t>(r) * stride, srcY);
+    if (ctx->error) return false;
+  }
+  return true;
+}
+
+static bool progressiveFullShouldAbort(void*) {
+  HalSystem::feedWatchdog();  // the index pass reads the whole file before the first band
+  if (!CooperativeAbort::shouldAbortLongTask()) return false;
+  CooperativeAbort::markAborted();
+  return true;
+}
+
 // TJpgDec output callback — receives one MCU-width × MCU-height block at a time,
 // in left-to-right, top-to-bottom order (baseline JPEG). JRECT is inclusive and the
 // grayscale bitmap is packed tightly at the block width. Accumulates columns into
@@ -245,40 +308,7 @@ int tjpgBmpOutput(JDEC* jd, void* bitmap, JRECT* rect) {
   // Clamp to MAX_MCU_HEIGHT so srcRow never indexes past the populated mcuBuf rows.
   const int safeEndRow = blockY + std::min(blockH, MAX_MCU_HEIGHT);
   for (int y = blockY; y < safeEndRow && y < ctx->srcHeight; y++) {
-    const uint8_t* srcRow = ctx->mcuBuf + (y - blockY) * ctx->srcWidth;
-
-    if (!ctx->needsScaling) {
-      // 1:1 — outWidth == srcWidth, write directly
-      writeOutputRow(ctx, srcRow, y);
-    } else {
-      // Fixed-point area averaging on X axis
-      for (int outX = 0; outX < ctx->outWidth; outX++) {
-        const int srcXStart = (static_cast<uint32_t>(outX) * ctx->scaleX_fp) >> 16;
-        const int srcXEnd = (static_cast<uint32_t>(outX + 1) * ctx->scaleX_fp) >> 16;
-        int sum = 0;
-        int count = 0;
-        for (int srcX = srcXStart; srcX < srcXEnd && srcX < ctx->srcWidth; srcX++) {
-          sum += srcRow[srcX];
-          count++;
-        }
-        if (count == 0 && srcXStart < ctx->srcWidth) {
-          sum = srcRow[srcXStart];
-          count = 1;
-        }
-        ctx->rowAccum[outX] += sum;
-        ctx->rowCount[outX] += count;
-      }
-
-      // Flush output row(s) whose Y boundary we've crossed
-      const uint32_t srcY_fp = static_cast<uint32_t>(y + 1) << 16;
-      while (srcY_fp >= ctx->nextOutY_srcStart && ctx->currentOutY < ctx->outHeight) {
-        flushScaledRow(ctx);
-        ctx->nextOutY_srcStart = static_cast<uint32_t>(ctx->currentOutY + 1) * ctx->scaleY_fp;
-        if (srcY_fp >= ctx->nextOutY_srcStart) continue;
-        memset(ctx->rowAccum, 0, ctx->outWidth * sizeof(uint32_t));
-        memset(ctx->rowCount, 0, ctx->outWidth * sizeof(uint32_t));
-      }
-    }
+    processSourceRow(ctx, ctx->mcuBuf + (y - blockY) * ctx->srcWidth, y);
   }
 
   return ctx->error ? 0 : 1;
@@ -394,93 +424,14 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth
 
 }  // namespace
 
-// Internal implementation with configurable target size and bit depth
-bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
-                                                     bool oneBit, bool crop, bool eightBit) {
-  // One row per write is one file call per row (see BufferedPrint); coalesce them.
-  BufferedPrint bmpOut(sink);
-  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
-          targetWidth, targetHeight);
-
-  ProgressiveJpegDc::ImageInfo image;
-  if (ProgressiveJpegDc::probe(jpegFile, image) == ProgressiveJpegDc::Result::Ok) {
-    return decodeProgressiveJpeg(jpegFile, bmpOut, targetWidth, targetHeight, oneBit, crop, image, eightBit);
-  }
-
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(), MIN_FREE_HEAP);
-    return false;
-  }
-
-  jpegFile.seek(0);
-
-  // new[] is max-aligned, satisfying TJpgDec's word-alignment requirement.
-  std::unique_ptr<uint8_t[]> pool(new (std::nothrow) uint8_t[TJPG_WORK_POOL_SIZE]);
-  if (!pool) {
-    LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
-    return false;
-  }
-
-  BmpTjpgSession session;
-  session.file = &jpegFile;
-  session.ctx = nullptr;  // set once the context is built, just before jd_decomp
-
-  JDEC jdec;
-  JRESULT jr = jd_prepare(&jdec, tjpgBmpInput, pool.get(), TJPG_WORK_POOL_SIZE, &session);
-  if (jr != JDR_OK) {
-    LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d)", jr);
-    return false;
-  }
-
-  const int srcWidth = jdec.width;
-  const int srcHeight = jdec.height;
-  LOG_DBG("JPG", "JPEG dimensions: %dx%d", srcWidth, srcHeight);
-
-  constexpr int MAX_IMAGE_WIDTH = 2048;
-  constexpr int MAX_IMAGE_HEIGHT = 3072;
-
-  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > MAX_IMAGE_WIDTH || srcHeight > MAX_IMAGE_HEIGHT) {
-    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", srcWidth, srcHeight, MAX_IMAGE_WIDTH,
-            MAX_IMAGE_HEIGHT);
-    return false;
-  }
-
-  // Pick the largest DCT pre-scale that keeps both axes >= target so the fine scaler
-  // always downscales (never upscales) on either axis. tjpgScale is the TJpgDec scale
-  // exponent (0=1/1, 1=1/2, 2=1/4, 3=1/8). Using max(scaleX, scaleY) is safe for both
-  // crop=true (uses max scale) and crop=false (uses min scale).
-  uint8_t tjpgScale = 0;
-  int jpegScaleDenom = 1;
-  if (targetWidth > 0 && targetHeight > 0) {
-    const float scaleX = static_cast<float>(targetWidth) / srcWidth;
-    const float scaleY = static_cast<float>(targetHeight) / srcHeight;
-    const float scaleMax = scaleX > scaleY ? scaleX : scaleY;
-    if (scaleMax <= 0.125f) {
-      tjpgScale = 3;
-      jpegScaleDenom = 8;
-    } else if (scaleMax <= 0.25f) {
-      tjpgScale = 2;
-      jpegScaleDenom = 4;
-    } else if (scaleMax <= 0.5f) {
-      tjpgScale = 1;
-      jpegScaleDenom = 2;
-    }
-  }
-
-  // TJpgDec's descaled output is floor(dim / 2^scale): every MCU side (8 or 16 px) is a
-  // multiple of the scale denominator, so the per-MCU right/bottom shifts sum to exactly
-  // the floor. These MUST match TJpgDec's actual output extent — the output callback only
-  // flushes an MCU row once a block reaches `srcWidth`, so an over-estimate (e.g. ceil
-  // division on an odd dimension like 333 -> 167 vs TJpgDec's 166) means the last column
-  // never arrives and zero rows are ever written.
-  const int effectiveSrcW = srcWidth / jpegScaleDenom;
-  const int effectiveSrcH = srcHeight / jpegScaleDenom;
-
-  if (jpegScaleDenom > 1) {
-    LOG_DBG("JPG", "Using 1/%d DCT scale: %dx%d -> %dx%d", jpegScaleDenom, srcWidth, srcHeight, effectiveSrcW,
-            effectiveSrcH);
-  }
-
+// Everything after the decoder is chosen and the decoded extent (effectiveSrcW x effectiveSrcH)
+// is known: output geometry, crop window, BMP header, the row pipeline's buffers, then `run(ctx)`
+// drives whichever decoder feeds processSourceRow. needMcuBuf: the TJpgDec path assembles an
+// MCU row before it can process rows; the progressive decoder hands over whole rows.
+template <typename Run>
+static bool convertScaled(BufferedPrint& bmpOut, const int effectiveSrcW, const int effectiveSrcH,
+                          const int targetWidth, const int targetHeight, const bool oneBit, const bool crop,
+                          const bool eightBit, const bool needMcuBuf, Run&& run) {
   // Calculate output dimensions (pre-scale to fit display exactly)
   int outWidth = effectiveSrcW;
   int outHeight = effectiveSrcH;
@@ -576,12 +527,14 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     }
   } cleanup{ctx};
 
-  ctx.mcuBuf = static_cast<uint8_t*>(malloc(MAX_MCU_HEIGHT * effectiveSrcW));
-  if (!ctx.mcuBuf) {
-    LOG_ERR("JPG", "Failed to allocate MCU buffer (%d bytes)", MAX_MCU_HEIGHT * effectiveSrcW);
-    return false;
+  if (needMcuBuf) {
+    ctx.mcuBuf = static_cast<uint8_t*>(malloc(MAX_MCU_HEIGHT * effectiveSrcW));
+    if (!ctx.mcuBuf) {
+      LOG_ERR("JPG", "Failed to allocate MCU buffer (%d bytes)", MAX_MCU_HEIGHT * effectiveSrcW);
+      return false;
+    }
+    memset(ctx.mcuBuf, 0, MAX_MCU_HEIGHT * effectiveSrcW);
   }
-  memset(ctx.mcuBuf, 0, MAX_MCU_HEIGHT * effectiveSrcW);
 
   ctx.bmpRow = static_cast<uint8_t*>(malloc(bytesPerRow));
   if (!ctx.bmpRow) {
@@ -609,13 +562,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     }
   }
 
-  session.ctx = &ctx;
-  jr = jd_decomp(&jdec, tjpgBmpOutput, tjpgScale);
-
-  if (jr != JDR_OK || ctx.error) {
-    LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, ctx.error ? 1 : 0);
-    return false;
-  }
+  if (!run(ctx)) return false;
 
   if (ctx.needsScaling && ctx.currentOutY < ctx.outHeight) {
     LOG_ERR("JPG", "JPEG decode incomplete: %d/%d output rows written", ctx.currentOutY, ctx.outHeight);
@@ -626,8 +573,173 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     LOG_ERR("JPG", "Failed to flush buffered BMP output");
     return false;
   }
-  LOG_DBG("JPG", "Successfully converted JPEG to BMP");
   return true;
+}
+
+// Heap the progressive path needs beyond its decoder workspace: the row pipeline's buffers
+// (accumulators, BMP row, a ditherer -- a few KB at thumbnail widths) and a floor for the rest.
+constexpr size_t PROGRESSIVE_ROW_PIPELINE_HEAP = 16 * 1024;
+
+// Full progressive decode into the BMP pipeline. Returns false without writing anything when no
+// scale's workspace fits the heap, so the caller can fall back to the DC preview.
+static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, const ProgressiveJpeg::ImageInfo& info,
+                                   const int targetWidth, const int targetHeight, const bool oneBit, const bool crop,
+                                   const bool eightBit, bool* attempted) {
+  *attempted = false;
+  // The largest DCT pre-scale that keeps both axes >= target (as the TJpgDec path chooses), then
+  // coarser while the workspace does not fit: a coarser cover beats the 1/8 DC preview.
+  uint8_t shift = 0;
+  if (targetWidth > 0 && targetHeight > 0) {
+    const float scaleX = static_cast<float>(targetWidth) / info.width;
+    const float scaleY = static_cast<float>(targetHeight) / info.height;
+    const float scaleMax = scaleX > scaleY ? scaleX : scaleY;
+    if (scaleMax <= 0.125f) {
+      shift = 3;
+    } else if (scaleMax <= 0.25f) {
+      shift = 2;
+    } else if (scaleMax <= 0.5f) {
+      shift = 1;
+    }
+  }
+  for (; shift <= 3; ++shift) {
+    const size_t workspace = ProgressiveJpeg::workspaceBytes(info, shift);
+    if (workspace > 0 && ESP.getFreeHeap() >= workspace + PROGRESSIVE_ROW_PIPELINE_HEAP) break;
+  }
+  if (shift > 3) {
+    LOG_INF("JPG", "Progressive cover: no scale's workspace fits (%u free); DC preview",
+            static_cast<unsigned>(ESP.getFreeHeap()));
+    return false;
+  }
+  const int effectiveSrcW = info.width >> shift;
+  const int effectiveSrcH = info.height >> shift;
+  if (effectiveSrcW <= 0 || effectiveSrcH <= 0) return false;
+  *attempted = true;
+  LOG_DBG("JPG", "Progressive cover %ux%u at 1/%d -> %dx%d", info.width, info.height, 1 << shift, effectiveSrcW,
+          effectiveSrcH);
+  const uint8_t scaleShift = shift;
+  return convertScaled(bmpOut, effectiveSrcW, effectiveSrcH, targetWidth, targetHeight, oneBit, crop, eightBit,
+                       /*needMcuBuf=*/false, [&](BmpConvertCtx& ctx) {
+                         ProgressiveJpeg::DecodeOptions options;
+                         options.scaleShift = scaleShift;
+                         options.shouldAbort = progressiveFullShouldAbort;
+                         const auto result = ProgressiveJpeg::decode(jpegFile, options, progressiveBandOutput, &ctx);
+                         if (result != ProgressiveJpeg::Result::Ok || ctx.error) {
+                           LOG_ERR("JPG", "Progressive cover decode failed (%s, ctxErr=%d)",
+                                   ProgressiveJpeg::resultName(result), ctx.error ? 1 : 0);
+                           return false;
+                         }
+                         return true;
+                       });
+}
+
+// Internal implementation with configurable target size and bit depth
+bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
+                                                     bool oneBit, bool crop, bool eightBit) {
+  // One row per write is one file call per row (see BufferedPrint); coalesce them.
+  BufferedPrint bmpOut(sink);
+  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
+          targetWidth, targetHeight);
+
+  ProgressiveJpeg::ImageInfo full;
+  if (ProgressiveJpeg::probe(jpegFile, full) == ProgressiveJpeg::Result::Ok) {
+    // Every scan, at the scale the target needs. The DC-only preview below (1/8 resolution,
+    // upscaled) is what made a 221x324 progressive cover a 27x40 smear on the home screen.
+    bool attempted = false;
+    const bool ok =
+        convertFromProgressive(jpegFile, bmpOut, full, targetWidth, targetHeight, oneBit, crop, eightBit, &attempted);
+    if (attempted) return ok;
+  }
+  ProgressiveJpegDc::ImageInfo image;
+  if (ProgressiveJpegDc::probe(jpegFile, image) == ProgressiveJpegDc::Result::Ok) {
+    return decodeProgressiveJpeg(jpegFile, bmpOut, targetWidth, targetHeight, oneBit, crop, image, eightBit);
+  }
+
+  if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
+    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(), MIN_FREE_HEAP);
+    return false;
+  }
+
+  jpegFile.seek(0);
+
+  // new[] is max-aligned, satisfying TJpgDec's word-alignment requirement.
+  std::unique_ptr<uint8_t[]> pool(new (std::nothrow) uint8_t[TJPG_WORK_POOL_SIZE]);
+  if (!pool) {
+    LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
+    return false;
+  }
+
+  BmpTjpgSession session;
+  session.file = &jpegFile;
+  session.ctx = nullptr;  // set once the context is built, just before jd_decomp
+
+  JDEC jdec;
+  JRESULT jr = jd_prepare(&jdec, tjpgBmpInput, pool.get(), TJPG_WORK_POOL_SIZE, &session);
+  if (jr != JDR_OK) {
+    LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d)", jr);
+    return false;
+  }
+
+  const int srcWidth = jdec.width;
+  const int srcHeight = jdec.height;
+  LOG_DBG("JPG", "JPEG dimensions: %dx%d", srcWidth, srcHeight);
+
+  constexpr int MAX_IMAGE_WIDTH = 2048;
+  constexpr int MAX_IMAGE_HEIGHT = 3072;
+
+  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > MAX_IMAGE_WIDTH || srcHeight > MAX_IMAGE_HEIGHT) {
+    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", srcWidth, srcHeight, MAX_IMAGE_WIDTH,
+            MAX_IMAGE_HEIGHT);
+    return false;
+  }
+
+  // Pick the largest DCT pre-scale that keeps both axes >= target so the fine scaler
+  // always downscales (never upscales) on either axis. tjpgScale is the TJpgDec scale
+  // exponent (0=1/1, 1=1/2, 2=1/4, 3=1/8). Using max(scaleX, scaleY) is safe for both
+  // crop=true (uses max scale) and crop=false (uses min scale).
+  uint8_t tjpgScale = 0;
+  int jpegScaleDenom = 1;
+  if (targetWidth > 0 && targetHeight > 0) {
+    const float scaleX = static_cast<float>(targetWidth) / srcWidth;
+    const float scaleY = static_cast<float>(targetHeight) / srcHeight;
+    const float scaleMax = scaleX > scaleY ? scaleX : scaleY;
+    if (scaleMax <= 0.125f) {
+      tjpgScale = 3;
+      jpegScaleDenom = 8;
+    } else if (scaleMax <= 0.25f) {
+      tjpgScale = 2;
+      jpegScaleDenom = 4;
+    } else if (scaleMax <= 0.5f) {
+      tjpgScale = 1;
+      jpegScaleDenom = 2;
+    }
+  }
+
+  // TJpgDec's descaled output is floor(dim / 2^scale): every MCU side (8 or 16 px) is a
+  // multiple of the scale denominator, so the per-MCU right/bottom shifts sum to exactly
+  // the floor. These MUST match TJpgDec's actual output extent — the output callback only
+  // flushes an MCU row once a block reaches `srcWidth`, so an over-estimate (e.g. ceil
+  // division on an odd dimension like 333 -> 167 vs TJpgDec's 166) means the last column
+  // never arrives and zero rows are ever written.
+  const int effectiveSrcW = srcWidth / jpegScaleDenom;
+  const int effectiveSrcH = srcHeight / jpegScaleDenom;
+
+  if (jpegScaleDenom > 1) {
+    LOG_DBG("JPG", "Using 1/%d DCT scale: %dx%d -> %dx%d", jpegScaleDenom, srcWidth, srcHeight, effectiveSrcW,
+            effectiveSrcH);
+  }
+
+  const bool ok = convertScaled(bmpOut, effectiveSrcW, effectiveSrcH, targetWidth, targetHeight, oneBit, crop, eightBit,
+                                /*needMcuBuf=*/true, [&](BmpConvertCtx& ctx) {
+                                  session.ctx = &ctx;
+                                  const JRESULT jr = jd_decomp(&jdec, tjpgBmpOutput, tjpgScale);
+                                  if (jr != JDR_OK || ctx.error) {
+                                    LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, ctx.error ? 1 : 0);
+                                    return false;
+                                  }
+                                  return true;
+                                });
+  if (ok) LOG_DBG("JPG", "Successfully converted JPEG to BMP");
+  return ok;
 }
 
 // Core function: Convert JPEG file to a full-size cover BMP (2-bit, or 8-bit when

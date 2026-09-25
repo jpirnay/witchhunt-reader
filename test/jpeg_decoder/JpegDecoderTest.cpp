@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -366,6 +367,56 @@ TEST(JpegToBmpConverter, EvenDimensionThumbnailDecodesAllRows) {
   ASSERT_GE(out.buf.size(), 70u);
   EXPECT_EQ(le32(out.buf, 18), 40);
   EXPECT_EQ(le32(out.buf, 22), -26);
+}
+
+// Unpack a 2-bit BMP the converter wrote into levels 0..3, top row first.
+static std::vector<uint8_t> unpack2BitBmp(const std::vector<uint8_t>& bmp, int& w, int& h) {
+  w = le32(bmp, 18);
+  h = -le32(bmp, 22);  // top-down BMPs carry a negative height
+  const uint32_t offset = static_cast<uint32_t>(le32(bmp, 10));
+  const int bytesPerRow = (w * 2 + 31) / 32 * 4;
+  std::vector<uint8_t> px(static_cast<size_t>(w) * h);
+  for (int y = 0; y < h; ++y) {
+    const uint8_t* row = bmp.data() + offset + static_cast<size_t>(y) * bytesPerRow;
+    for (int x = 0; x < w; ++x) px[static_cast<size_t>(y) * w + x] = (row[x / 4] >> (6 - 2 * (x % 4))) & 3;
+  }
+  return px;
+}
+
+// A progressive cover used to be shown from its DC scan: 1/8 resolution, upscaled -- a 221x324
+// cover became a 27x40 smear. It is now decoded in full, so the same picture encoded progressive
+// and baseline must come out of the converter alike (only IDCT rounding and the dither's
+// response to it may differ).
+TEST(JpegToBmpConverter, ProgressiveThumbnailMatchesItsBaselineTwin) {
+  auto convert = [](const char* name) {
+    FsFile file;
+    EXPECT_TRUE(file.openForRead(fixture(name)));
+    MemoryPrint out;
+    EXPECT_TRUE(JpegToBmpConverter::jpegFileToBmpStreamWithSize(file, out, 203, 141));
+    file.close();
+    return out.buf;
+  };
+  int w1 = 0, h1 = 0, w2 = 0, h2 = 0;
+  const auto prog = unpack2BitBmp(convert("prog_full_420.jpg"), w1, h1);
+  const auto base = unpack2BitBmp(convert("prog_full_420_base.jpg"), w2, h2);
+  ASSERT_EQ(w1, 203);
+  ASSERT_EQ(h1, 141);
+  ASSERT_EQ(w2, w1);
+  ASSERT_EQ(h2, h1);
+
+  size_t same = 0;
+  long diff = 0;
+  for (size_t i = 0; i < prog.size(); ++i) {
+    const int d = std::abs(static_cast<int>(prog[i]) - static_cast<int>(base[i]));
+    same += d == 0;
+    diff += d;
+  }
+  const double identical = static_cast<double>(same) / prog.size();
+  const double meanDiff = static_cast<double>(diff) / prog.size();
+  // Measured: full decode 0.877 identical / 0.125 mean level difference (the dither reacts to
+  // +-1 gray differences on a noisy picture); the DC preview scored 0.586 / 0.521.
+  EXPECT_GT(identical, 0.80);
+  EXPECT_LT(meanDiff, 0.20);
 }
 
 TEST(JpegToBmpConverter, ProgressiveThumbnailDecodesAllRows) {
