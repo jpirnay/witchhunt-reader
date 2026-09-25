@@ -336,6 +336,12 @@ are exactly the lifetimes `reserveBlock`/`release` express. (The reverted
 `TextBlockLinePool` was a *heap-backed* pool that itself took contig below
 the 52 272 cliff; a pool carved from the idle part of the lent region cannot.)
 
+*Status: addressed by R2 (see there); 68 % of a build's allocations gone on
+the host, device validation pending. The reading of the census in this
+finding was right about the sites and wrong about the remedy: most of the
+churn was regrowth, which reuse removed with no arena at all; the page
+block took the rest of the bytes.*
+
 **F2. Three defects in the current LIFO discipline.**
 
 - *(a) SAX state rewound before its last use.* `chunkBlock` is reserved at
@@ -468,23 +474,55 @@ outcome is really R2's to fix: once the phase (b) churn leaves the heap, C
 completes and no escalation happens. Validate on the X3 with the run-3 vs
 run-4 pair as the acceptance test (reading contig after the first open).
 
-**R2 — put the phase (b) churn into scoped blocks (F1).** Two blocks, both
-carved from the ≥ 30 KB that sits idle during the parse:
+**R2 — take the phase (b) churn off the heap (F1).** *Done on
+`memory/audit-2026-09`, device validation pending.* The count-sorted census
+reshaped this recommendation before a line was written: the dominant churn
+was *growth*, not objects. Every paragraph regrew `ParsedText`'s four word
+vectors from 16 to 128 entries (up to 16 allocations per paragraph, 15 000
+per book) and the layout pass allocated another ~10 locals per paragraph
+(`wordWidths`, `lineBreakIndices`, the hyphenation triple, the plain
+breaker's four DP tables, the paragraph's text for `ensureFontReady`). None
+of that needed an arena — it needed to stop being re-created. So R2 became
+two steps:
 
-- a *paragraph block* reserved in `flushPartWordBuffer`, hosting the four
-  `ParsedText` vectors (a fixed 128-entry capacity replaces the doubling) and
-  the word strings, released when the paragraph's lines are emitted;
-- a *page block* reserved when a `Page` is opened, hosting the line records
-  and `TextBlock` flat arenas, released when the page is serialised.
+1. *Reuse.* The parser keeps one `ParsedText` across paragraphs
+   (`reset()` keeps capacity; the `shrink_to_fit` after each flush is gone —
+   a block splits at 96 words, so the vectors settle at 128 and never grow
+   again), the layout scratch lives in reused members, the three breakers
+   fill a caller vector, and a new `Page` reserves room for a typical page
+   instead of doubling eight times. Cost: ~6 KB of scratch resident for the
+   build instead of transient (class B, O(1)).
+2. *Page block.* A `TextBlock`'s flat arena (the largest of the three
+   per-line allocations) comes from a page-scoped block in the lent region:
+   `ParsedText` calls the parser's page-fit hook *before* it materialises a
+   line, so a line that overflows is allocated from the page it lands on,
+   and the parser rewinds the block once the page is serialised. Table
+   cells and the reader-side deserialize keep the heap. A full region falls
+   back to the heap per line. The CSS parser no longer reloads its ruleset
+   lazily in arena mode (that would have committed a block above an open
+   page block, L3).
 
-Prototype and measure on the host first: `epub_pipeline_dump --bench
---arena=52272` shows the heap peak and the site table before and after, and
-`arena_highWater` shows what the lane costs. The expected outcome is that
-the 7 146 + 7 145 + 4 256 per-book heap allocations of F1 disappear from the
-heap side of the census while the arena high-water stays under the 45.9 KB
-extraction peak. If a lane does not fit (a paragraph of 300 long words, a
-page of 60 lines), the block falls back to the heap exactly as the font slots
-do today — a logged number, not a failed build.
+Host census, lent-arena mode, allocations per build:
+
+| Book | before | after step 1 | after step 2 | of which per-line |
+|---|---|---|---|---|
+| Strange Pictures | 84 728 | 34 323 | 27 177 | 14 292 (object + `PageLine`) |
+| moby-dick | 204 437 | 94 595 | 67 342 | 54 536 |
+| test_tables | ~1 900 | 1 841 | 1 834 | — |
+
+Section-cache bytes are unchanged throughout (goldens byte-identical); the
+arena high-water stays at the extraction peak (45 872) because the page
+block lives in the ≥ 30 KB that was idle. What remains per line is the
+`TextBlock` object (88 B) and the `PageLine` (24 B), both held through
+`std::unique_ptr` with the default deleter; moving them into the page block
+needs an arena-aware deleter on `Page::elements` (~30 sites) and is the
+candidate step 3 once the device numbers say whether it is worth it.
+
+On the device the acceptance test is the run-3 scenario: a Background-C
+build of *Strange Pictures* from a wiped cache must complete (no hard
+text-layout abort, no blocking escalation) with a higher minimum free heap
+than run 5's 11.3 KB, and the reader must sit near run 4's 27 KB contig
+afterwards.
 
 **R3 — one declared budget per build, not thirty gates.** Once R1 and R2
 land, the lent region has a known layout: resident lane (ruleset + SAX +

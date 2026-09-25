@@ -1266,6 +1266,7 @@ void CssParser::clear() {
   // Reset Phase-2 arena config: clear() ends a build, so the shared per-epub parser must not
   // carry the lean flag or a now-dangling arena pointer into the next (possibly heap-backed) one.
   indexArena_ = nullptr;
+  arenaLoadAttempted_ = false;
   leanResolve_ = false;
 }
 
@@ -1627,6 +1628,10 @@ bool CssParser::lookupRule(const std::string& selector, CssStyle& outStyle, cons
 bool CssParser::ensureCacheIndexLoaded() const {
   if (cacheIndexLoaded_) {
     return true;
+  }
+  if (indexArena_ != nullptr) {
+    if (arenaLoadAttempted_) return false;  // see the member: one load per build, at setup
+    arenaLoadAttempted_ = true;
   }
 
   if (cachePath.empty()) {

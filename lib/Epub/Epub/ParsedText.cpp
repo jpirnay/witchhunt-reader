@@ -1259,9 +1259,20 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.first = lastBreakAt;
   range.count = lineWordCount;
 
+  // The page-fit decision runs before the line exists (see beforeLine_): the parser may emit
+  // the current page here and open the next one's arena block, so the block built just below
+  // is allocated from the page it will actually land on.
+  if (beforeLine_) {
+    uint8_t maxPct = 100;
+    for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
+      maxPct = std::max(maxPct, wordSizes[lastBreakAt + wordIdx]);
+    }
+    beforeLine_(maxPct);
+  }
+
   // TextBlock flattens the range into its arena on construct; on arena OOM the
   // block is invalid, so drop the line rather than render/serialize garbage.
-  auto block = makeUniqueNoThrow<TextBlock>(range, lineXPos, blockStyle);
+  auto block = makeUniqueNoThrow<TextBlock>(range, lineXPos, blockStyle, lineArena_);
   if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
     return LineProcessResult::Accepted;

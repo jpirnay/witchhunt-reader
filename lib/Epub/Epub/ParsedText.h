@@ -11,6 +11,7 @@
 #include "blocks/TextBlock.h"
 
 class GfxRenderer;
+class BuildArena;
 
 class ParsedText {
  public:
@@ -54,6 +55,16 @@ class ParsedText {
   std::vector<int> dp_;
   std::vector<size_t> ans_;
   std::string allText_;
+  // Where each line's TextBlock takes its bytes: the build's lent region (a page-scoped block
+  // the parser opens), or the heap when null. Set by the parser on its main text block only;
+  // table cells keep the heap. See beforeLine_ for why the two go together.
+  BuildArena* lineArena_ = nullptr;
+  // Called with the line's largest word-size percent just before the line is materialised.
+  // The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
+  // fit is then allocated from the page it lands on, not from the block of the page it
+  // overflowed -- with page-scoped arena blocks, allocating first would leave page N+1 holding
+  // bytes that die with page N.
+  std::function<void(uint8_t maxSizePct)> beforeLine_;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
   // Per-word font size, percent of the block font size (100 = block size). Kept in
@@ -141,6 +152,9 @@ class ParsedText {
   // before the first layout pass of the block; callers skip continuations.
   bool foldUniformWordSizes();
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
+  // See lineArena_ / beforeLine_. Both survive reset().
+  void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  void setBeforeLineHook(std::function<void(uint8_t maxSizePct)> hook) { beforeLine_ = std::move(hook); }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }

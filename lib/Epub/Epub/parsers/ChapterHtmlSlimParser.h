@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BufferedFileIO.h>
+#include <BuildArena.h>
 #include <HalStorage.h>
 #include <Print.h>
 #include <SaxParser/SaxParser.h>
@@ -410,6 +411,13 @@ class ChapterHtmlSlimParser final : public Print {
   // every call site.
   SaxParser saxParser_;
   BuildArena* buildArena_ = nullptr;  // see setBuildArena
+  // The page under construction's block in buildArena_: every line's TextBlock bytes are
+  // bump-allocated in it (ParsedText::lineArena_) and it is rewound once the page has been
+  // serialised, so a page's lines cost the heap nothing. Opened by the before-line hook, which
+  // is also where the page-fit test runs so the block is always the landing page's. Nested
+  // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
+  // draw's font-slot scope opens and closes between two slices): strictly LIFO.
+  BuildArena::Block pageBlock_;
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -687,4 +695,9 @@ class ChapterHtmlSlimParser final : public Print {
   // or the body-font scale path. Centralizes the layout-time sizing. Defined in the .cpp
   // because it dereferences GfxRenderer, which is only forward-declared here.
   int effectiveLineHeight(const BlockStyle& bs) const;
+  // See pageBlock_. wireTextBlock hands currentTextBlock the arena and the hook.
+  void wireTextBlock();
+  void beforeLineHook(uint8_t maxSizePct);
+  void ensurePageBlock();
+  void releasePageBlock();
 };

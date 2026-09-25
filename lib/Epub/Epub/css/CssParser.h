@@ -233,7 +233,10 @@ class CssParser {
   //     few small strings, so the lower floor stays clear of the fault zone.
   // Both are reset by clear() so the shared per-epub instance never carries them into a
   // later heap-backed build or leaves a dangling arena view.
-  void setIndexArena(BuildArena* arena) { indexArena_ = arena; }
+  void setIndexArena(BuildArena* arena) {
+    indexArena_ = arena;
+    arenaLoadAttempted_ = false;
+  }
   void setLeanResolve(bool enable) { leanResolve_ = enable; }
 
  private:
@@ -255,6 +258,12 @@ class CssParser {
   static_assert(sizeof(SelectorEntry) == CSS_INDEX_BYTES_PER_RULE,
                 "SelectorEntry size changed — update CSS_INDEX_BYTES_PER_RULE so heap gates stay calibrated");
   mutable bool cacheIndexLoaded_ = false;
+  // Arena mode loads the ruleset exactly once, at the build's setup. A lookup that finds the
+  // index missing afterwards must not reload it: the load reserves and commits a block, which
+  // mid-parse would sit above the parser's open page block and be rewound with it (memory
+  // audit 2026-09, L3) -- and a load that failed at setup would otherwise be retried, and
+  // bump-allocate again, on every lookup.
+  mutable bool arenaLoadAttempted_ = false;
   mutable size_t cachedRuleCount_ = 0;
   mutable std::vector<SelectorEntry> cacheRuleOffsets_;  // heap backing (indexArena_ == nullptr)
   mutable uint32_t totalSelectorCandidates_ = 0;

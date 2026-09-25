@@ -925,6 +925,7 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   deferredDropCapLine_ = nullptr;
   completePageFn(std::move(currentPage));
   completedPageCount++;
+  releasePageBlock();  // the page and its lines are gone: rewind their arena bytes
   currentPage.reset(new (std::nothrow) Page());
   if (currentPage) currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
   currentPageNextY = 0;
@@ -948,6 +949,47 @@ void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
   // Record the printed page label for the current rendered section page.
   // Do not alter pagination; the reader keeps its own page breaks.
   pageBreakLabels.emplace_back(static_cast<uint16_t>(completedPageCount), label);
+}
+
+void ChapterHtmlSlimParser::wireTextBlock() {
+  if (!currentTextBlock) return;
+  currentTextBlock->setLineArena(buildArena_);
+  if (buildArena_) {
+    currentTextBlock->setBeforeLineHook([this](const uint8_t maxSizePct) { beforeLineHook(maxSizePct); });
+  } else {
+    currentTextBlock->setBeforeLineHook(nullptr);
+  }
+}
+
+void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct) {
+  // The page-fit test of addLineToPage, run before the line is materialised (see
+  // ParsedText::beforeLine_): the same arithmetic, so addLineToPage's own test then finds the
+  // line fits and everything after it (anchors, footnotes, the hyphenation retry) is unchanged.
+  if (currentPage && currentTextBlock) {
+    int lineHeight = effectiveLineHeight(currentTextBlock->getBlockStyle());
+    if (maxSizePct != 100) {
+      lineHeight = lineHeight * maxSizePct / 100;
+    }
+    if (currentPageNextY + lineHeight > viewportHeight) {
+      emitPage(lastBodyChildByteOffset);
+    }
+  }
+  ensurePageBlock();
+}
+
+void ChapterHtmlSlimParser::ensurePageBlock() {
+  if (buildArena_ == nullptr || pageBlock_.valid()) return;
+  pageBlock_ = buildArena_->reserveBlock();
+}
+
+void ChapterHtmlSlimParser::releasePageBlock() {
+  if (!pageBlock_.valid()) return;
+  if (!buildArena_->release(pageBlock_)) {
+    // Out of LIFO order: something reserved above this block and is still live. Keep the
+    // token (overwriting a live one is a contract violation); later pages simply allocate
+    // above it and the region fills, at which point lines fall back to the heap.
+    LOG_ERR("EHP", "Page arena block could not be released (out of order); region stays claimed");
+  }
 }
 
 void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<std::string, std::string>> anchors) {
@@ -1285,6 +1327,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
                                                          blockStyleWithIndent, bionicReadingEnabled));
   }
+  wireTextBlock();
   wordsExtractedInBlock = 0;
 }
 
@@ -3124,7 +3167,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   }
 }
 
-ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
+ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
+  // An aborted build can leave a page open. Rewind its block now, while the arena is still the
+  // section's: BuildState tears the parser down before it releases the feed-chunk block below.
+  releasePageBlock();
+}
 
 size_t ChapterHtmlSlimParser::anchorLimit() const {
   return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
@@ -3359,6 +3406,7 @@ bool ChapterHtmlSlimParser::finalize() {
     deferredPageImage_ = nullptr;
     deferredDropCapLine_ = nullptr;
     currentPage.reset();
+    releasePageBlock();
     currentTextBlock.reset();
   }
 
