@@ -448,12 +448,25 @@ pointer to R3. Withdrawn from the original R0: "pass the real contig" to the
 restart heuristic — its post-decode callers pass 0 on purpose, because
 walking the TLSF free list on a possibly corrupt heap has crashed the IWDT.
 
-**R1 — lend the framebuffer to the blocking build (F4).** Same borrow →
-build → return the header walk already does on that path; the build runs
-with A4/A5's allocation pattern instead of A1/A2's. Validate on the X3 with
-the run-3 vs run-4 pair as the acceptance test (reading contig after a
-first-open build). This also retires the §9.2 question and most of the
-released-hole pin forensics.
+**R1 — lend the framebuffer to the blocking build (F4).** *Done on
+`memory/audit-2026-09`, device validation pending.* `compileSectionCache`
+now borrows the buffer as the build arena (the same borrow → build → return
+its header walk already did) and hands it back at the end; the build runs
+with A4/A5's allocation pattern instead of A1/A2's, and the post-build
+header walk runs from the idle region. Two cases still release: the
+Background-C failure latch (`forceBlockingBuildSpine_`), because C already
+ran borrowed and failed on the heap and its escalation *is* the +52 KB of a
+released build; and nothing to lend. A borrowed blocking build that fails
+logs the arena's high-water and last refused size, then retries released.
+
+A correction to F4's framing, found while implementing: on today's tree
+the blocking build is reached mostly *as* that escalation (run 3's blocking
+build followed a C build that died at page 67), plus the CSS-fallback and
+image-header rebuilds. So R1's payoff is on those rebuilds — which now get
+the arena-resident CSS ruleset the released path never had — and the run-3
+outcome is really R2's to fix: once the phase (b) churn leaves the heap, C
+completes and no escalation happens. Validate on the X3 with the run-3 vs
+run-4 pair as the acceptance test (reading contig after the first open).
 
 **R2 — put the phase (b) churn into scoped blocks (F1).** Two blocks, both
 carved from the ≥ 30 KB that sits idle during the parse:

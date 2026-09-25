@@ -3584,24 +3584,66 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // Prefer to build WITHOUT releasing the secondary buffer when heap is ample, so the chapter's
   // first page keeps a valid fast-refresh baseline. The in-place attempt defers image decode to
   // the lazy per-page path, so a failure here is a graceful parser abort (not a corruption-prone
-  // decode under pressure). On X3 we always release: its baseline lives in the controller, so
-  // keeping the RAM buffer buys no display benefit, only less headroom.
+  // decode under pressure). In-place is X4-only: the X3's baseline lives in the controller, so
+  // keeping the RAM buffer resident buys no display benefit, only less headroom.
+  //
+  // Otherwise the buffer is LENT to the build as its arena, not released (memory audit 2026-09,
+  // R1). The lent block never enters the heap, so nothing can pin the hole it would have left
+  // and the hand-back at the end cannot fail -- the realloc-failure / heap-recovery-restart
+  // class of outcome does not exist on this path. The build gets the Background-C allocation
+  // pattern (CSS ruleset, SAX state, feed chunk and inflate ring in the region). Measured on the
+  // X3 (Strange Pictures): the reader sits at ~27 KB contig after a borrowed build against
+  // 11.8 KB flat after a released one.
+  //
+  // Release stays for two cases. (1) The Background-C failure latch: C already ran borrowed and
+  // failed on the heap, so borrowing again would repeat exactly that; its escalation is the
+  // +52 KB of a released build, and it must not be re-decided here (observed on-device: a
+  // low-heap abort whose "blocking" retry rebuilt in place ground through the whole spine at
+  // <8 KB min free). (2) Nothing to lend: no secondary buffer, or one already lent elsewhere.
+  // A borrowed build that fails escalates to a released rebuild the same way (below).
   bool released = false;
-  // Honour the Background-C failure latch: its whole point is retrying with the buffer RELEASED
-  // (~52 KB more headroom). Re-consulting heapAllowsInPlaceBuild here would happily go resident
-  // again — heap recovers between the abort and this retry — and repeat exactly the starvation
-  // that failed (observed on-device: low-heap abort -> "blocking" retry rebuilt in place and
-  // ground through the whole spine at <8 KB min free).
+  bool borrowedHere = false;  // lent by THIS call, handed back before it returns
   size_t inflatedSize = 0;
   epub->getSpineItemInflatedSize(currentSpineIndex, &inflatedSize);
-  const bool inPlace = !renderer.isX3() && renderer.hasSecondaryBuffer() &&
-                       forceBlockingBuildSpine_ != currentSpineIndex &&
+  const bool escalated = forceBlockingBuildSpine_ == currentSpineIndex;
+  const bool inPlace = !renderer.isX3() && renderer.hasSecondaryBuffer() && !escalated &&
                        heapAllowsInPlaceBuild(embeddedStyle, inflatedSize);
+  const auto lendSecondaryBuffer = [&]() {
+    size_t borrowedSize = 0;
+    uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
+    if (!borrowed) return false;
+    buildScratch_ = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+    if (!buildScratch_ || !buildScratch_->valid()) {
+      buildScratch_.reset();
+      renderer.returnSecondaryBuffer();
+      return false;
+    }
+    section->setExternalBuildScratch(buildScratch_.get());
+    secondaryBorrowed_ = true;
+    secondaryBufferDegraded_ = true;  // AA needs a resident buffer; nothing renders until it is back
+    borrowedHere = true;
+    return true;
+  };
+  // Hand a borrow taken above back to the display. The return cannot fail; it re-seeds the
+  // baseline exactly like a realloc does.
+  const auto handBackBorrow = [&]() {
+    section->setExternalBuildScratch(nullptr);
+    buildScratch_.reset();
+    renderer.returnSecondaryBuffer();
+    secondaryBorrowed_ = false;
+    secondaryBufferDegraded_ = false;
+    borrowedHere = false;
+  };
   if (inPlace) {
     LOG_INF("ERS", "Building section in place (secondary buffer kept): free=%lu contig=%lu", esp_get_free_heap_size(),
             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  } else if (!escalated && !secondaryBorrowed_ && renderer.hasSecondaryBuffer() && lendSecondaryBuffer()) {
+    LOG_INF("ERS", "Index start mem (secondary buffer BORROWED as the build arena, %u bytes): free=%lu contig=%lu",
+            static_cast<unsigned>(buildScratch_->capacity()), esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   } else {
-    LOG_INF("ERS", "Index start mem (before fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
+    LOG_INF("ERS", "Index start mem (before fb release%s): free=%lu contig=%lu", escalated ? ", C-failure latch" : "",
+            esp_get_free_heap_size(),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
     released = true;
@@ -3636,6 +3678,26 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
             esp_get_free_heap_size());
     checkHeapIntegrity("after_createSectionFile_retry");
   }
+  if (!createOk && borrowedHere) {
+    // The borrowed build failed. Say whether the REGION or the heap ran out (failedAllocSize is
+    // the last refused arena size; highWater only counts successes), then escalate exactly as
+    // Background-C does: hand the block back and rebuild released, with the heap 52 KB bigger.
+    LOG_ERR("ERS",
+            "Borrowed blocking build spine=%d failed: arena highWater=%u/%u failedAlloc=%u releaseFails=%lu "
+            "free=%lu -- retrying released",
+            currentSpineIndex, static_cast<uint32_t>(buildScratch_->highWater()),
+            static_cast<uint32_t>(buildScratch_->capacity()), static_cast<uint32_t>(buildScratch_->failedAllocSize()),
+            static_cast<unsigned long>(buildScratch_->releaseFailures()),
+            static_cast<unsigned long>(esp_get_free_heap_size()));
+    handBackBorrow();
+    renderer.releaseSecondaryBuffer();
+    released = true;
+    const uint32_t retryStart = millis();
+    createOk = runCreate();
+    LOG_INF("ERS", "createSectionFile released retry returned %d in %ums (free=%lu)", createOk ? 1 : 0,
+            millis() - retryStart, esp_get_free_heap_size());
+    checkHeapIntegrity("after_createSectionFile_released_retry");
+  }
 
   // An image dropped to alt text because its header walk was deferred (#249) is resolved now.
   // First from the heap, where the staged walk (16 KB ring) mostly fits with the buffer released;
@@ -3647,9 +3709,12 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // rebuild -- the manifest then answers with no ring at all -- so a walk that finds nothing
   // leaves the build as it is.
   if (createOk && section->isImageHeaderDegraded()) {
-    bool imagesResolved = epub->persistImageManifest();
+    // A borrowed build's region is idle now (its build state is gone): walk from it directly,
+    // as Background-C does at its end. Nothing below can offer more room than that.
+    if (borrowedHere) buildScratch_->reset();
+    bool imagesResolved = epub->persistImageManifest(borrowedHere ? buildScratch_.get() : nullptr);
     const EpubImageManifest* manifest = epub->getImageManifest();
-    if (manifest && manifest->hasPending()) {
+    if (manifest && manifest->hasPending() && !borrowedHere) {
       if (released) {
         if (renderer.reallocSecondaryBuffer()) {
           imagesResolved = resolvePendingImageHeadersFromFramebuffer() || imagesResolved;
@@ -3694,6 +3759,15 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // leaves the buffer — and the baseline — untouched, so the first page uses a normal fast
   // refresh.
   const BuildOutcome outcome = createOk ? BuildOutcome::Built : BuildOutcome::Failed;
+  if (borrowedHere) {
+    handBackBorrow();
+    // Symmetric with the released path below: a prior IncrementalReleased build may have left
+    // single-buffer fast-diff opted in; clear it now that the double buffer is back. No RED-RAM
+    // sync here either -- the return re-seeded the baseline exactly as a realloc does.
+    renderer.setSingleBufferFastDiff(false);
+    LOG_INF("ERS", "Index end mem (after fb return): free=%lu contig=%lu", esp_get_free_heap_size(),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+  }
   if (released) {
     if (!reallocSecondaryEvictingCaches()) {
       LOG_ERR("ERS", "Failed to reallocate secondary display buffer — display quality degraded");
