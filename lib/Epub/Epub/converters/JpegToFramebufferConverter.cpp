@@ -1549,9 +1549,15 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     options.shouldAbort = fullProgressiveShouldAbort;
     options.workspace = progressiveWorkspace->get();
     options.workspaceSize = progressiveWorkspaceBytes;
+    ProgressiveJpeg::DecodeStats stats;
+    options.stats = &stats;
+    options.clock = []() -> uint32_t { return millis(); };
     FullProgressiveSink sink{&ctx, false};
     const auto result = ProgressiveJpeg::decode(file, options, fullProgressiveOutput, &sink);
     progressiveWorkspace.reset();
+    LOG_DBG("JPG", "Progressive %dx%d at 1/%d: index %lu ms, bands %lu ms, %lu reads / %lu bytes", srcWidth, srcHeight,
+            1 << tjpgScale, static_cast<unsigned long>(stats.indexMs), static_cast<unsigned long>(stats.bandsMs),
+            static_cast<unsigned long>(stats.reads), static_cast<unsigned long>(stats.bytesRead));
     if (result == ProgressiveJpeg::Result::Aborted) {
       progressiveResult = ProgressiveJpegDc::Result::Aborted;
     } else if (result != ProgressiveJpeg::Result::Ok) {

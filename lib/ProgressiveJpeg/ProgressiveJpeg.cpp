@@ -36,6 +36,8 @@ struct Source {
   uint32_t start = 0;
   uint16_t length = 0;
   bool ioError = false;
+  uint32_t reads = 0;
+  uint32_t bytesRead = 0;
 
   // -1 past the end of the file (or on a read error, which sets ioError). A seek past the end
   // fails on SdFat: that is end of data too, which the bit reader pads with zeros like libjpeg.
@@ -43,6 +45,8 @@ struct Source {
     if (pos - start >= length) {
       if (!file->seek(pos)) return -1;
       const int count = file->read(buffer, sizeof(buffer));
+      ++reads;
+      if (count > 0) bytesRead += static_cast<uint32_t>(count);
       if (count <= 0) {
         if (count < 0) ioError = true;
         length = 0;
@@ -887,7 +891,9 @@ Result decode(FsFile& file, const DecodeOptions& options, const BandCallback cal
   auto* st = new (workspace) State();
   st->source.file = &file;
   buildBasis(*st, g.n);
+  const uint32_t t0 = options.clock ? options.clock() : 0;
   Result result = indexFile(*st, options);
+  const uint32_t t1 = options.clock ? options.clock() : 0;
   if (result == Result::Ok) {
     // The probe and the full index read the same SOF; disagreeing means the file changed shape.
     if (st->width != info.width || st->height != info.height || st->compCount != info.componentCount) {
@@ -895,6 +901,13 @@ Result decode(FsFile& file, const DecodeOptions& options, const BandCallback cal
     } else {
       result = decodeBands(*st, g, workspace, layout, options, callback, user);
     }
+  }
+  if (options.stats) {
+    const uint32_t t2 = options.clock ? options.clock() : 0;
+    options.stats->indexMs = t1 - t0;
+    options.stats->bandsMs = t2 - t1;
+    options.stats->reads = st->source.reads;
+    options.stats->bytesRead = st->source.bytesRead;
   }
   st->~State();
   file.seek(0);
