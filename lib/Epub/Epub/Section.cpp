@@ -1577,25 +1577,25 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
 
   buildTocBoundaries(anchors);
 
-  // Populate in-memory pageBreakLabels from the just-completed parse so the status bar
-  // can show printed-page labels without having to reload the section cache from disk.
-  // Without this, labels only appear after a subsequent open (via buildPageBreakLabelsFromFile).
-  this->pageBreakLabels.clear();
-  for (const auto& entry : visitor.getPageBreakLabels()) {
-    this->pageBreakLabels.emplace_back(entry.first, entry.second);
-  }
+  // The labels were just written to the cache; the first query reads them back from there
+  // (see pageBreakLabelsPending_ for why they are not copied from the parser here). Swap, not
+  // clear(), so a rebuilt section also gives back the previous build's block.
+  std::vector<std::pair<uint16_t, std::string>>().swap(this->pageBreakLabels);
+  pageBreakLabelsPending_ = !visitor.getPageBreakLabels().empty();
 
   file.close();
 
   // The spill has been copied into the cache; it is scratch and nothing reads it again.
   Storage.remove(getAnchorSpillPath().c_str());
 
-  // Cache the LUT in memory and open the file for reading so that
-  // subsequent loadPageFromSectionFile() calls can seek directly without re-opening.
-  if (!Storage.openFileForRead("SCT", filePath, file)) {
-    LOG_ERR("SCT", "Failed to open section file for reading after creation");
-    return BuildPhaseResult::Failed;
-  }
+  // Cache the LUT in memory. The read handle is NOT reopened here: HalFile heap-allocates its
+  // FsFile (~92 B) on every open, and this one lives as long as the section. Taken now, while a
+  // released build still has the secondary framebuffer's hole open, it pins the hole's low edge
+  // (X3 2026-09-25, pin forensics: the FsFile vtable at the bottom of the freed region). The
+  // first loadPageFromSectionFile() opens it instead, after the reader has re-taken the buffer.
+  // Drop the closed write handle too: close() keeps HalFile's heap Impl, which was allocated at
+  // build setup -- inside that same hole.
+  file = HalFile();
   truncatedCache = !parseComplete;
   this->lut = std::move(st.lut);
   const uint32_t finalizeMs = millis() - phaseFinalizeStart;
@@ -1854,8 +1854,8 @@ std::unique_ptr<Page> Section::loadPageFromSectionFile() {
   }
 
   if (!file) {
-    // Safety fallback: file was closed unexpectedly; reopen
-    LOG_ERR("SCT", "loadPageFromSectionFile: file not open, reopening");
+    // Normal after a build (finalize leaves the read handle for here, see runBuildFinalize);
+    // otherwise a fallback for a handle that was closed unexpectedly.
     if (!Storage.openFileForRead("SCT", filePath, file)) {
       return nullptr;
     }
@@ -2111,7 +2111,18 @@ void Section::buildTocBoundariesFromFile(FsFile& f) {
             [](const TocBoundary& a, const TocBoundary& b) { return a.startPage < b.startPage; });
 }
 
-void Section::buildPageBreakLabelsFromFile(FsFile& f) {
+void Section::ensurePageBreakLabels() const {
+  if (!pageBreakLabelsPending_) return;
+  pageBreakLabelsPending_ = false;  // one attempt: a failed read leaves the labels empty
+  // A private handle, so a const query never moves the shared page-reading position.
+  FsFile f;
+  if (!Storage.openFileForRead("SCT", filePath, f)) return;
+  buildPageBreakLabelsFromFile(f);
+  f.close();
+}
+
+void Section::buildPageBreakLabelsFromFile(FsFile& f) const {
+  pageBreakLabelsPending_ = false;
   pageBreakLabels.clear();
   f.seek(header::kPageBreakMap);
   uint32_t pageBreakMapOffset;
@@ -2123,6 +2134,7 @@ void Section::buildPageBreakLabelsFromFile(FsFile& f) {
   f.seek(pageBreakMapOffset);
   uint16_t count;
   serialization::readPod(f, count);
+  pageBreakLabels.reserve(count);
   for (uint16_t i = 0; i < count; i++) {
     uint16_t page;
     std::string label;
@@ -2274,6 +2286,7 @@ std::optional<std::string> Section::getNearestPrintedPageLabelAtOrBefore(uint16_
   // pageBreakLabels is built in document order (i.e. ascending pageIndex), so the last
   // entry whose page is <= `page` is the "you're currently reading at or after this
   // printed page" hint. Returns the raw label (no parens, no slash-collapsing).
+  ensurePageBreakLabels();
   std::optional<std::string> best;
   for (const auto& [labelPage, label] : pageBreakLabels) {
     if (labelPage > page) break;
@@ -2287,6 +2300,7 @@ std::optional<std::string> Section::getPrintedPageLabelForPage(uint16_t page) co
   // Multiple labels can co-occur when a short device page contains more than one EPUB
   // pagebreak marker (e.g. printed pages 7 and 8 both starting within the same device page).
   // pageBreakLabels is recorded in document order, so we can short-circuit once we pass `page`.
+  ensurePageBreakLabels();
   std::vector<std::string> labels;
   for (const auto& [labelPage, label] : pageBreakLabels) {
     if (labelPage == page) {

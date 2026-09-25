@@ -78,6 +78,13 @@ class EpubImageManifest {
   // each build's end, which is also when the run of ensureResolved() resolves is finished.
   void persistIfDirty();
 
+  // Persist, then give back every heap block the manifest holds (entries, pending queue, the
+  // kept resolve handle) and mark it unloaded; Epub::loadImageManifest() rebuilds it from
+  // images.bin. For a caller that needs contiguous heap: the entries are one path string per
+  // image, created as builds first meet each image, so a released build strews them through
+  // the secondary framebuffer's hole. No build may hold the manifest across this call.
+  void releaseMemory();
+
  private:
   // Close the SD descriptor that ensureResolved() keeps open across a build's images. Run from
   // persistIfDirty() regardless of dirty state, so a build that resolved nothing new (or only

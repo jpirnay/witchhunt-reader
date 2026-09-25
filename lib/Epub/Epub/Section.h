@@ -54,11 +54,21 @@ class Section {
     uint16_t startPage = 0;
   };
   std::vector<TocBoundary> tocBoundaries;
-  std::vector<std::pair<uint16_t, std::string>> pageBreakLabels;
+  // Loaded lazily after a build (see pageBreakLabelsPending_), hence mutable: the const label
+  // queries are what trigger the load.
+  mutable std::vector<std::pair<uint16_t, std::string>> pageBreakLabels;
+  // Set by a build's finalize instead of copying the parser's labels into pageBreakLabels.
+  // Finalize runs while a released build still has the secondary framebuffer's hole open, and a
+  // session-lifetime block taken there splits it: 128 x 28 B = 3584 B landed mid-hole on an
+  // illustrated book (one pagebreak per printed page), leaving 36 KB contiguous where the
+  // framebuffer needs 52 KB, so it could never come back (X3, 2026-09-25). The first label query
+  // runs at render time, after the reader has re-taken the framebuffer.
+  mutable bool pageBreakLabelsPending_ = false;
 
   void buildTocBoundaries(const std::vector<std::pair<std::string, uint16_t>>& anchors);
   void buildTocBoundariesFromFile(FsFile& f);
-  void buildPageBreakLabelsFromFile(FsFile& f);
+  void buildPageBreakLabelsFromFile(FsFile& f) const;
+  void ensurePageBreakLabels() const;
 
   // Live state of an in-progress section build, shared by the blocking path and the
   // sliceable stepSectionBuild() path. Holds exactly the locals that must survive across
