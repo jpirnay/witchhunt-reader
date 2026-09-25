@@ -7,6 +7,7 @@
 #include <memory>
 #include <regex>
 
+#include "BuildArena.h"
 #include "Epub.h"
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Page.h"
@@ -102,8 +103,16 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
 }  // namespace
 
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
-                const SpineStatFn& spineStat) {
+                const SpineStatFn& spineStat, const ArenaStatFn& arenaStat) {
   GfxRenderer renderer;
+  std::unique_ptr<BuildArena> lentArena;
+  if (profile.lentArenaBytes > 0) {
+    lentArena = std::make_unique<BuildArena>(profile.lentArenaBytes);
+    if (!lentArena->valid()) {
+      out << "ERROR lent arena allocation failed\n";
+      return false;
+    }
+  }
 
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
   if (!epub->load(true)) {
@@ -120,6 +129,10 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     const auto spineStart = std::chrono::steady_clock::now();
     Section section(epub, i, renderer);
+    if (lentArena) {
+      lentArena->reset();
+      section.setExternalBuildScratch(lentArena.get());
+    }
     Section::BuildParams p;
     p.fontId = profile.fontId;
     p.lineCompression = profile.lineCompression;
@@ -137,6 +150,7 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
       out << "SPINE " << i << " ERROR build failed\n";
       return false;
     }
+    if (lentArena && arenaStat) arenaStat(i, lentArena->highWater(), lentArena->capacity());
     if (!section.loadSectionFile(p)) {
       out << "SPINE " << i << " ERROR load failed\n";
       return false;
