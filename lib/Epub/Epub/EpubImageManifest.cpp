@@ -291,6 +291,7 @@ EpubImageManifest::Walk EpubImageManifest::resolveDeferredNow(const std::string&
 
 size_t EpubImageManifest::resolvePending(BuildArena* walkArena) {
   size_t resolved = 0;
+  std::vector<PendingImage> still;  // walks short of memory: kept for a caller with a bigger region
   for (const auto& p : pending_) {
     // Largest-free-block readings land a few bytes under the round number (allocator
     // bookkeeping), so the heap budget sits just under what the allocator reports.
@@ -303,17 +304,20 @@ size_t EpubImageManifest::resolvePending(BuildArena* walkArena) {
         ++resolved;
         break;
       case Walk::NeedsHeap:
-        LOG_DBG("IMF", "resolvePending: %s: no room for its walk (have %u contiguous); left for a later build",
+        LOG_DBG("IMF", "resolvePending: %s: no room for its walk (have %u contiguous); still pending",
                 p.epubEntryPath.c_str(), static_cast<unsigned>(maxAlloc));
+        if (still.size() < kMaxPending) still.push_back(p);
         break;
       case Walk::Unreadable:
         LOG_DBG("IMF", "resolvePending: no dimensions for %s", p.epubEntryPath.c_str());
         break;
     }
   }
-  // Unresolved ones are re-queued by the next build's miss; holding them here would only keep
-  // their keys resident between builds.
-  pending_.clear();
+  // An image only memory stood in the way of stays queued: the reader retries it from the borrowed
+  // framebuffer (the one region of full-ring size it can always get) before its next build, so a
+  // walk is never quietly dropped between builds. An unreadable one is dropped; the next build's
+  // miss re-probes it.
+  pending_ = std::move(still);
   return resolved;
 }
 

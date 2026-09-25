@@ -167,17 +167,19 @@ TEST_F(ImageManifestFixture, TheHeapBudgetAdmitsExactlyTheStagesThatFit) {
 
   // 18 KB of contiguous heap: the 16 KB first stage fits, so photo_big (SOF at 12 KB) resolves.
   // photo.jpg's SOF sits at 20.5 KB: its first stage ends short with the header still running,
-  // and the second stage -- the whole 20.9 KB entry -- does not fit. It must be left for later,
-  // not written off.
+  // and the second stage -- the whole 20.9 KB entry -- does not fit. It must stay queued, not be
+  // written off: the reader retries the queue from the borrowed framebuffer before its next
+  // build, and a walk dropped here would be a chapter cached without that image.
   ESP.setMaxAllocHeap(18 * 1024);
   EXPECT_EQ(manifest.resolvePending(), 1u);
   EXPECT_NE(manifest.find(kBigEntry), nullptr);
   EXPECT_EQ(manifest.find(kEntry), nullptr);
+  EXPECT_TRUE(manifest.hasPending()) << "a walk short of memory must stay queued";
 
-  // Re-queued by the next miss, and resolved once the heap can host its second stage.
-  ASSERT_EQ(manifest.resolve(kBook, kEntry, entry), EpubImageManifest::Resolve::Deferred);
+  // Resolved once a caller can host its second stage.
   ESP.setMaxAllocHeap(100 * 1024);
   EXPECT_EQ(manifest.resolvePending(), 1u);
+  EXPECT_FALSE(manifest.hasPending());
   const ImageManifestEntry* found = manifest.find(kEntry);
   ASSERT_NE(found, nullptr);
   EXPECT_EQ(found->width, kPhotoWidth);

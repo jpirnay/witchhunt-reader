@@ -79,8 +79,8 @@ class EpubImageManifest {
   // Walk every deferred entry through the streaming header reader and record what it finds.
   // Returns how many were resolved. Meant for a build's end, with the build's now-idle arena
   // (the borrowed secondary framebuffer) as ring storage when the caller has one — on the C3 the
-  // heap alone never holds a 32 KB ring while reading. Clears the queue either way: an image
-  // that still could not be walked is re-queued by the next build's miss.
+  // heap alone never holds a 32 KB ring while reading. An image whose walk was short of memory
+  // stays queued (hasPending) for a caller with a bigger region; an unreadable one is dropped.
   size_t resolvePending(BuildArena* walkArena = nullptr);
 
   // Returns nullptr when the entry is not (yet) in the manifest.

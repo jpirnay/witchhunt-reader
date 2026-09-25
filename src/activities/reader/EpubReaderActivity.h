@@ -636,6 +636,11 @@ class EpubReaderActivity final : public Activity {
   // retrying once before reporting failure. Shared by the post-build and opportunistic
   // recovery paths.
   bool reallocSecondaryEvictingCaches();
+  // Walk the image headers the manifest still has queued (walks that were short of memory) from
+  // the borrowed secondary framebuffer, the one region of full-ring size a reader session can
+  // always get. No-op without a resident buffer, a queue, or while a background build holds the
+  // borrow. Returns true when at least one image was resolved.
+  bool resolvePendingImageHeadersFromFramebuffer();
   // Note text for each of currentPageFootnotes, for the footnote list activity (empty strings
   // where the store has no entry). A pure read: note text is resolved by the section build that
   // needs it, never by opening the list.
