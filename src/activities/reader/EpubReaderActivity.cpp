@@ -157,6 +157,11 @@ constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 // floor mid-parse. Below this, B refuses (stays in WaitHeap) and lets Background-C build the
 // section released — with ~120 KB free — when the reader navigates into it. (X3 docs note CSS
 // builds are "impossible" resident below ~68 KB free; this is that line, with a small margin.)
+//
+// STALE PREMISE (memory audit 2026-09, F3): every section build has run the resolver in lean
+// mode since Section::runBuildSetup set it unconditionally, so the floor it self-protects at is
+// 24 KB, not 40 KB -- and the HEAP_GATE trace never saw this gate admit on any spine. It stays
+// as it is until the figures are re-measured after R0-R2 (audit R3); do not derive from it.
 #ifndef BG_BUILD_CSS_MIN_FREE_HEAP_BYTES
 #define BG_BUILD_CSS_MIN_FREE_HEAP_BYTES (72 * 1024)
 #endif
@@ -303,6 +308,8 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 // the resolve runs with the ring gone, so a higher free floor keeps it clear of 40 KB; contig is
 // pinned at the inflate-ring size (≤32 KB) for the extraction phase. A miss is still caught by
 // isCssLowHeapDegraded() and rebuilt with the buffer released.
+// STALE PREMISE: the resolver floor is 24 KB on every build now (lean mode); see the note on
+// BG_BUILD_CSS_MIN_FREE_HEAP_BYTES. Re-derive after audit R0-R2 (R3), not before.
 #ifndef IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES
 #define IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES (66 * 1024)
 #endif
@@ -1430,11 +1437,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
 
   // Background A re-arm (one retry per displayed page): A's pass runs right after the
   // page render, while the deferred AA still holds the just-rendered page (~10 KB) —
-  // its heap floor can refuse at that moment (measured 55.9 KB free vs the 56 KB floor)
-  // and nothing retries it. Done HERE, under the render lock, because it dereferences
-  // section state the render task mutates — an earlier unlocked version in
-  // serviceBackgroundWork() raced buildSection's reassignment of `section`. B keeps
-  // waiting behind pendingPreRender until the retry has run, preserving A's priority.
+  // its heap floor (PRE_RENDER_MIN_FREE_HEAP_BYTES) can refuse at that moment (first seen as
+  // 55.9 KB free against what was then a 56 KB floor) and nothing retries it. Done HERE, under the render lock, because
+  // it dereferences section state the render task mutates — an earlier unlocked version in serviceBackgroundWork()
+  // raced buildSection's reassignment of `section`. B keeps waiting behind pendingPreRender until the retry has run,
+  // preserving A's priority.
   const uint32_t preRenderFree = esp_get_free_heap_size();
   // Everything except the heap floor, so the floor can be reported on its own. Pre-render is a
   // nice-to-have (page-turn latency), not correctness — but a floor that rejects it constantly is
@@ -3117,9 +3124,10 @@ bool EpubReaderActivity::reallocSecondaryEvictingCaches() {
     LOG_INF("ERS", "Dropping Background-B section (spine=%d) for secondary realloc", backgroundBuildSpineIndex_);
     resetBackgroundBuild();
   }
-  // The image manifest keeps one path string per image a build has met, allocated during that
-  // build -- after a released one, strewn through the very hole this realloc needs (X3
-  // 2026-09-25: "OEBPS/images/..." blocks bounding the freed region). Persist and drop it, then
+  // The image manifest's record array and its kept resolve handle are allocated during a build
+  // -- after a released one, inside the very hole this realloc needs (X3 2026-09-25: the then
+  // per-image "OEBPS/images/..." path strings were found bounding the freed region; manifest v5
+  // replaced them with 12-byte records, which grow in the same place). Persist and drop it, then
   // reload it from images.bin once the buffer is placed. Only with no build holding it: the
   // parser caches the manifest pointer at setup, and the reload replaces the object.
   const bool evictManifest = epub && !(section && section->hasActiveBuild());
@@ -4457,12 +4465,16 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   // Reboot-based defrag should only run when the failure clearly looks like
   // fragmentation (plenty of total heap, but contiguous block too small).
   constexpr uint32_t RESTART_MIN_FREE_HEAP_BYTES = 96 * 1024;
-  constexpr uint32_t SECONDARY_BUFFER_BYTES = 52 * 1024;
+  // The block the realloc needs: one framebuffer (52,272 B on the X3, 48,000 B on the X4). A
+  // constant 52 KB here used to sit 976 B under the X3's real size, so a heap with a block just
+  // too small for the buffer could read as "not fragmented" and stay degraded.
+  const uint32_t secondaryBufferBytes =
+      static_cast<uint32_t>(renderer.getDisplayWidthBytes()) * static_cast<uint32_t>(renderer.getDisplayHeight());
 
   if (fragmentationRecoveryRestartAttempted_) {
     return false;
   }
-  if (freeHeap < RESTART_MIN_FREE_HEAP_BYTES || contigHeap >= SECONDARY_BUFFER_BYTES) {
+  if (freeHeap < RESTART_MIN_FREE_HEAP_BYTES || contigHeap >= secondaryBufferBytes) {
     return false;
   }
 

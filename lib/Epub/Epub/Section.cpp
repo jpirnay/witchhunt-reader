@@ -783,6 +783,11 @@ struct Section::BuildState {
   ~BuildState() {
     if (extractGrowBlock.valid()) arena->release(extractGrowBlock);
     reader.reset();
+    // The note-preview resolver reserves its ring block ABOVE chunkBlock and holds it across
+    // slices; as a later-declared member it would otherwise be destroyed after this body, so an
+    // abort mid-resolve released chunkBlock out of order (refused, block leaked until the next
+    // reset -- memory audit 2026-09, F2b).
+    previewResolver.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
   }
   bool parseStarted = false;

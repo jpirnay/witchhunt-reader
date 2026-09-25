@@ -76,7 +76,12 @@ TEST_F(SaxStateInArenaFixture, ALentArenaHoldsTheSaxParserStateDuringTheParse) {
   ASSERT_TRUE(arena.valid());
   const size_t used = arenaUsedDuringParse(&arena);
   EXPECT_GE(used, SaxParser::stateBytes()) << "the parser state must come out of the lent arena, not the heap";
-  EXPECT_EQ(arena.used(), 0u) << "the build rewinds everything it took";
+  // The state is a plain allocation below every scoped block -- the part of the arena a build
+  // never rewinds (the next build's initArena() resets the whole region). It used to sit inside
+  // the feed-chunk block's scope and be rewound before finalize() last used it (memory audit
+  // 2026-09, F2a); a cursor back at 0 here would mean that defect is back.
+  EXPECT_GE(arena.used(), SaxParser::stateBytes()) << "the parser state must survive the build's block releases";
+  EXPECT_LT(arena.used(), SaxParser::stateBytes() + 64) << "nothing but the parser state stays behind";
 }
 
 TEST_F(SaxStateInArenaFixture, NoArenaStillBuilds) { EXPECT_EQ(arenaUsedDuringParse(nullptr), 0u); }

@@ -209,7 +209,7 @@ discarded, rather than kept silently).
 | `heapAllowsInPlaceBuild` (`:3445-3499`) | CSS: max(67 584, 51 200 + ring) / max(32 768, ring + 8 192); else 61 440 / 28 672 | released build | X4 only; CSS floor derived from the 40 KB premise |
 | C `residentAbort` (`:1865-1874`) | 30 720 / 16 384 | released rebuild | resident C only |
 | B discard cap (`:1478`) | 3 discarded runs | B off for the book | — |
-| `maybeRestartForFragmentedHeap` (`:4456-4507`) | free ≥ 98 304 and contig < 53 248 | silent restart | `SECONDARY_BUFFER_BYTES = 52*1024`, not the real 52 272 / 48 000; two of three callers pass contig = 0 |
+| `maybeRestartForFragmentedHeap` (`:4456-4507`) | free ≥ 98 304 and contig < the framebuffer size | silent restart | was a constant `52*1024` (976 B under the X3's 52 272) — **fixed in R0**; two of three callers deliberately pass contig = 0 because the heap may be corrupt after decode failures and walking the TLSF free list there has crashed the IWDT |
 | warm-pass borrow, secondary realloc | no threshold: try, evict caches, retry | degraded (AA off), then restart heuristic | — |
 
 ## 4. Inventory C — fixed-capacity and unbounded structures
@@ -362,6 +362,11 @@ the 52 272 cliff; a pool carved from the idle part of the lent region cannot.)
   into the display buffer — and a 128-byte malloc fails precisely in the
   low-heap mid-build draw the slot arena exists for.
 
+*Status: all three fixed in R0 (branch `memory/audit-2026-09`): the SAX
+state is taken in `ChapterHtmlSlimParser::setBuildArena`, at wiring time and
+below every scoped block; `~BuildState` resets the resolver before releasing
+`chunkBlock`; the rollback frees only heap-backed slots.*
+
 Two further fragilities with no failing path found: a lazy CSS index reload
 during phase (b) would commit a block above `chunkBlock` and be rewound by
 `dropChunk()` (`CssParser.cpp:1558`), and `CssParser::indexArena_` dangles
@@ -376,8 +381,9 @@ build has used since every build became lean (`Section.cpp:983`); the 44 KB
 embedded-style floor is "derived, not measured" by its own comment
 (`Section.cpp:163`); six contig floors are exact round numbers without the
 16-byte slack the parser file says every content-dropping floor needs
-(`ChapterHtmlSlimParser.cpp:138-141`); the restart heuristic hard-codes
-`52*1024` and is fed contig = 0 by two of its three callers. Four refusals
+(`ChapterHtmlSlimParser.cpp:138-141`); the restart heuristic hard-coded
+`52*1024` (fixed in R0; the contig = 0 its post-decode callers pass is
+deliberate — the heap may be corrupt there). Four refusals
 bake a degraded result into a cache with nothing to trigger a rebuild: table
 rows demoted to paragraphs, CSS lookups skipped during a foreground blocking
 build, a progressive JPEG decoded at a coarser scale or as a DC preview into
@@ -430,14 +436,17 @@ walk, which the dump runs from the heap.
 Ordered by payoff per line of code; the first group is small enough to go in
 one PR.
 
-**R0 — fix the three F2 defects and the stale numbers.**
-`prewarmCache`: guard the two `free()`s with `!slot.arenaBacked`. SAX state:
-allocate it in `runBuildSetup` next to the CSS ruleset (below `chunkBlock`),
-or finalize the SAX parser before `dropChunk()`. `~BuildState`: reset
-`previewResolver` before releasing `chunkBlock`. Replace `52*1024` in the
-restart heuristic with the panel's buffer size and pass the real contig from
-`compileSectionCache` and `renderContents`. Update the three stale comments
-(manifest pin, 55.9 KB, resolver-floor premise).
+**R0 — fix the three F2 defects and the stale numbers.** *Done on
+`memory/audit-2026-09`.* `prewarmCache`: the two `free()`s are guarded with
+`!slot.arenaBacked`. SAX state: taken in `setBuildArena` (called from
+`runBuildSetup`, next to the CSS ruleset and below `chunkBlock`), so no
+rewind can reach it. `~BuildState`: resets `previewResolver` before
+releasing `chunkBlock`. The restart heuristic compares against the panel's
+real buffer size instead of `52*1024`. The three stale comments (manifest
+pin, 55.9 KB, resolver-floor premise) are corrected or marked stale with a
+pointer to R3. Withdrawn from the original R0: "pass the real contig" to the
+restart heuristic — its post-decode callers pass 0 on purpose, because
+walking the TLSF free list on a possibly corrupt heap has crashed the IWDT.
 
 **R1 — lend the framebuffer to the blocking build (F4).** Same borrow →
 build → return the header walk already does on that path; the build runs
