@@ -141,6 +141,13 @@ class ParsedText {
   // ~3 KB of heap traffic per paragraph, 15,000 allocations per book on the host census, the
   // single largest churn of a section build (memory audit 2026-09, R2).
   void reset(const BlockStyle& blockStyle);
+  // Give the layout scratch (and the word vectors, when the block is empty) back to the heap.
+  // The parser calls this when an incremental build yields a slice: that is the one moment a
+  // mid-build page draw can run, and its ~10.5 KB Page sits on the heap next to whatever the
+  // parse holds. Keeping ~8 KB of scratch resident across that moment cost the X3 5 KB of
+  // minimum free heap (watermark 11.3 KB -> 6.4 KB, device run 7); dropping it at the yield
+  // keeps the no-churn behaviour within a slice and the old floor across it.
+  void releaseLayoutScratch();
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT);

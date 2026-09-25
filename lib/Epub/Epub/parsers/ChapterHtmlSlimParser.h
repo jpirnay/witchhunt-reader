@@ -670,6 +670,11 @@ class ChapterHtmlSlimParser final : public Print {
   // block only after finalize() -- Section::runBuildParse does, and its BuildState tears the
   // parser down before the block (memory audit 2026-09, F2a).
   void setBuildArena(BuildArena* arena) { buildArena_ = arena; }
+  // The section is about to yield this slice of an incremental build: a mid-build page draw
+  // may run before the next feed. See ParsedText::releaseLayoutScratch.
+  void onSliceYield() {
+    if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
+  }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   const std::vector<std::pair<uint16_t, std::string>>& getPageBreakLabels() const { return pageBreakLabels; }
   const std::vector<ParagraphLutEntry>& getParagraphLutPerPage() const { return paragraphLutPerPage; }

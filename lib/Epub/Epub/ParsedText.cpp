@@ -493,6 +493,32 @@ void ParsedText::layoutAndExtractLines(
   }
 }
 
+void ParsedText::releaseLayoutScratch() {
+  // Pure scratch: recomputed by every layout, so safe to drop at any point between feeds.
+  std::vector<uint16_t>().swap(wordWidths_);
+  std::vector<size_t>().swap(lineBreakIndices_);
+  std::vector<bool>().swap(lineEndsWithHyphenatedWord_);
+  std::vector<int>().swap(splitPrefixWordIndexes_);
+  std::vector<bool>().swap(splitInsertedHyphen_);
+  std::vector<size_t>().swap(suffixBreaks_);
+  std::vector<bool>().swap(suffixLineEndsWithHyphenatedWord_);
+  std::vector<int>().swap(suffixSplitPrefixWordIndexes_);
+  std::vector<bool>().swap(suffixSplitInsertedHyphen_);
+  std::vector<int>().swap(interWordGaps_);
+  std::vector<int>().swap(lineIndexForWord_);
+  std::vector<int>().swap(dp_);
+  std::vector<size_t>().swap(ans_);
+  std::vector<int16_t>().swap(lineXPosScratch_);
+  std::string().swap(allText_);
+  // The word vectors carry the paragraph in progress; only an empty block can give them back.
+  if (words.empty()) {
+    std::vector<std::string>().swap(words);
+    std::vector<EpdFontFamily::Style>().swap(wordStyles);
+    std::vector<bool>().swap(wordContinues);
+    std::vector<uint8_t>().swap(wordSizes);
+  }
+}
+
 void ParsedText::reset(const BlockStyle& newBlockStyle) {
   // clear() keeps each vector's capacity; the strings inside `words` are destroyed here.
   words.clear();

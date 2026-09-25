@@ -1070,6 +1070,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   const auto overBudget = [&] { return budgetMs != 0 && millis() - sliceStart >= budgetMs; };
   const auto yieldSlice = [&] {
     st.parseMs += millis() - sliceStart;
+    // A mid-build page draw can run before the next slice; let the parser drop what it can.
+    if (st.visitor) st.visitor->onSliceYield();
     return BuildPhaseResult::More;
   };
   bool streamFailed = false;

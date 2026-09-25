@@ -548,9 +548,37 @@ relative to entry: the ~6 KB of layout scratch now resident for the build
 (step 1) offsets most of what the page block moved out (step 2) at the
 low-water point — a wash on bytes, a large gain on allocation count.
 `lowHeapSkips` rose to 215 (from 82) because free spends longer under the
-24 KB lean floor; harmless with the arena-resident ruleset. The candidate
-next step, if the min-free gain is wanted too, is to take that resident
-scratch from the lent region in B/C builds — for the R3 re-measurement.
+24 KB lean floor; harmless with the arena-resident ruleset.
+
+*Device run 7 (X3, 2026-09-25 19:29, same chapter after a heap-recovery
+restart, reader entry free 43 200 / contig 32 756):* build sequence and
+contig behaviour as in run 6, but the boot-wide watermark told the rest of
+the story: **minimum free during the C build was 6 408 B** (run 5 on the
+old firmware: 11 272). The "Low heap" samples are taken at layout time; the
+true minimum is a *mid-build page draw* — its ~10.5 KB `Page` is heap (§5
+P1) — landing on whatever the parse holds at a slice boundary. Step 1 made
+~8 KB of that resident (the 128-entry word vectors and the layout scratch),
+where the old code held nothing between paragraphs; the page block's gain
+did not cover it at that moment. So R2 as first landed traded 68 % of the
+churn for a 5 KB lower floor at the one moment that matters.
+
+*Fix (step 1c):* `ParsedText::releaseLayoutScratch()`, called from the
+parser's `onSliceYield()` when `Section::runBuildParse` yields a slice —
+the only point a draw can interleave. Pure scratch is dropped every yield
+and the word vectors whenever the block is empty; within a slice nothing
+regrows. Cost: a handful of allocations per slice instead of ~16 per
+paragraph. Blocking builds never yield and are unaffected. Device
+re-measurement pending.
+
+Run 7 also caught a pin outside the reader's scope: at Home exit the
+framebuffer realloc failed at contig 40 948 with 101 KB free, and the pin
+forensics showed two **task stacks** (`a5a5a5a5` fill: 10 752 B and 2 176 B)
+bounding the hole — the lazily created `KOSyncWorker` (`WORKER_STACK_BYTES`
+10 240, `ensureTask()` on the first sync job) and the button sampler (2 048).
+A task created while the buffer is released pins the hole for the session;
+that is what held reading-time contig at ~22.5 KB in runs 6 and 7 and made
+the KOReader sync fail its 26 624 B TLS gate. Belongs with F6/R3: create
+long-lived tasks before the first release (or give them static stacks).
 
 **R3 — one declared budget per build, not thirty gates.** Once R1 and R2
 land, the lent region has a known layout: resident lane (ruleset + SAX +
