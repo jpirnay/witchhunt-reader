@@ -192,4 +192,47 @@ TEST_F(JpegDownscaleFixture, ProgressiveFallsBackToThePreviewWhenTheWorkspaceDoe
   EXPECT_EQ(darkPixels(preview), 0) << "expected the 1/8 preview, got a full decode";
 }
 
+// One decode, both caches (RenderConfig::companionCachePath). The reader's BW-primary decode used
+// to be followed by a second full decode for the grey cache -- 2.35 s each for a progressive
+// diagram on the X3. The merge is only sound as a pure optimisation: the two files must be byte
+// for byte what two separate decodes write.
+class JpegCompanionCache : public JpegDownscaleFixture, public testing::WithParamInterface<const char*> {
+ protected:
+  std::vector<uint8_t> decodeTo(const char* primary, const bool monochrome, const char* companion = nullptr) {
+    RenderConfig config;
+    config.x = 0;
+    config.y = 0;
+    // 600 -> 570 is a residual scale of 0.95, as on the X3 diagram that exposed it: charging a
+    // progressive band TJpgDec's 16 source rows (17 output rows) overran the 8 KB dither-band
+    // budget (14 rows at this width), dropping the band -- and with it the companion.
+    config.maxWidth = 570;
+    config.maxHeight = 30;
+    config.useExactDimensions = true;
+    config.monochromeOutput = monochrome;
+    config.cachePath = (work / primary).string();
+    if (companion) config.companionCachePath = (work / companion).string();
+    JpegToFramebufferConverter converter;
+    EXPECT_TRUE(converter.decodeToFramebuffer(std::string(JPEG_FIXTURE_DIR "/") + GetParam(), renderer, config));
+    return read(primary);
+  }
+  std::vector<uint8_t> read(const char* name) const {
+    std::ifstream in((work / name).string(), std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  }
+};
+
+TEST_P(JpegCompanionCache, MergedDecodeMatchesTwoSeparateOnes) {
+  const auto bw = decodeTo("sep_bw.pxc", true);
+  const auto grey = decodeTo("sep_grey.pxc", false);
+  ASSERT_FALSE(bw.empty());
+  ASSERT_FALSE(grey.empty());
+  ASSERT_NE(bw, grey) << "the two variants must differ, or this test proves nothing";
+
+  EXPECT_EQ(decodeTo("merged_bw.pxc", true, "merged_grey.pxc"), bw) << "the drawn variant must not change";
+  EXPECT_EQ(read("merged_grey.pxc"), grey) << "the companion must equal its own separate decode";
+}
+
+INSTANTIATE_TEST_SUITE_P(ProgressiveAndBaseline, JpegCompanionCache,
+                         testing::Values("thin_lines_prog.jpg", "thin_lines_gray.jpg"));
+
 }  // namespace

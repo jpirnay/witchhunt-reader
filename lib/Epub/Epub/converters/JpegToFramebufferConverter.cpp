@@ -146,6 +146,18 @@ struct JpegContext {
   PixelCache cache;
   bool caching{false};
 
+  // The other dither variant of the same decode (RenderConfig::companionCachePath), cache only.
+  // The reader wants both .pxc per image; without this each one cost a full decode -- 2.35 s
+  // apiece for a progressive diagram on the X3. Written from flushDitherBand, the one place
+  // pixels pass in raster order, so it exists only when the primary uses the dither band (the
+  // reader's BW-primary decode). Otherwise the caller's second decode covers it, as before.
+  struct Companion {
+    std::unique_ptr<Atkinson1BitDitherer> atkinson1Bit;  // null => stateless 4-level Bayer
+    PixelCache cache;
+    int row{-1};
+  };
+  std::unique_ptr<Companion> companion;
+
   // Downscale by coverage-weighted averaging (see emitGrayBlock). Decided once per decode;
   // areaCarry is null when its ~3 bytes per column could not be allocated, in which case
   // each block averages only the part of a straddling pixel it holds.
@@ -294,6 +306,18 @@ void flushDitherBand(JpegContext& ctx) {
     }
   }
 
+  JpegContext::Companion* companion = ctx.companion.get();
+  DirectCacheWriter companionWriter;
+  if (companion) {
+    if (!companion->cache.advanceTo(bandTop)) {
+      ctx.companion.reset();  // a failed flush drops the partial file; the caller decodes again
+      companion = nullptr;
+    } else {
+      companionWriter.init(companion->cache.buffer, companion->cache.bytesPerRow, companion->cache.originX,
+                           cfgY + companion->cache.bandStart, companion->cache.width, companion->cache.bandRows);
+    }
+  }
+
   for (int dstY = bandTop; dstY < bandTop + bandRows; dstY++) {
     const int outY = cfgY + dstY;
     prepareOneBitDitherRow(ctx, dstY);
@@ -302,12 +326,24 @@ void flushDitherBand(JpegContext& ctx) {
 #endif
     pw.beginRow(outY);
     if (caching) cw.beginRow(outY);
+    if (companion) {
+      if (companion->atkinson1Bit && companion->row >= 0) companion->atkinson1Bit->nextRow();
+      companion->row = dstY;
+      companionWriter.beginRow(outY);
+    }
     const uint8_t* rowBuf = &ctx.ditherBand[static_cast<size_t>(dstY - bandTop) * static_cast<size_t>(ctx.dstWidth)];
     for (int dstX = xStart; dstX < xEnd; dstX++) {
       const int outX = cfgX + dstX;
       uint8_t dithered = ditherGray(ctx, rowBuf[dstX], dstX, outX, outY);
       pw.writePixel(outX, dithered);
       if (caching) cw.writePixel(outX, dithered);
+      if (companion) {
+        // Same tone step ditherGray applies, so both variants dither one grey stream.
+        const uint8_t gray = adaptive_tone::apply(ctx.config->adaptiveTone, rowBuf[dstX]);
+        const uint8_t value = companion->atkinson1Bit ? (companion->atkinson1Bit->processPixel(gray, dstX) ? 3 : 0)
+                                                      : applyBayerDither4Level(gray, outX, outY);
+        companionWriter.writePixel(outX, value);
+      }
     }
   }
 }
@@ -1487,6 +1523,22 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     ctx.ditherBandCapacityRows = 0;
   }
 
+  // Companion rendition: needs the raster-order band (see JpegContext::Companion) and its own
+  // streaming cache band, gated like the primary's.
+  if (!config.companionCachePath.empty() && ctx.ditherBand && ctx.caching &&
+      shouldEnableJpegCache(config, destWidth, destHeight, maxBlockDstRows)) {
+    ctx.companion = makeUniqueNoThrow<JpegContext::Companion>();
+    if (ctx.companion && !config.monochromeOutput) {
+      ctx.companion->atkinson1Bit = makeUniqueNoThrow<Atkinson1BitDitherer>(destWidth);
+      if (!ctx.companion->atkinson1Bit) ctx.companion.reset();
+    }
+    if (ctx.companion && !ctx.companion->cache.begin(config.companionCachePath, destWidth, destHeight, config.x,
+                                                     config.y, maxBlockDstRows)) {
+      LOG_ERR("JPG", "Failed to start companion cache stream, continuing with one variant");
+      ctx.companion.reset();
+    }
+  }
+
   jpgCheckHeap("jpg_before_decode");
   unsigned long decodeStart = millis();
   ProgressiveJpegDc::Result progressiveResult = ProgressiveJpegDc::Result::Ok;
@@ -1535,21 +1587,31 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     LOG_ERR("JPG", "Progressive JPEG decode failed (%s): %s", ProgressiveJpegDc::resultName(progressiveResult),
             imagePath.c_str());
     if (ctx.caching) ctx.cache.abort();
+    if (ctx.companion) ctx.companion->cache.abort();
     drawUnsupportedPlaceholder(renderer, config);
     return true;
   }
   if (mode == JpegMode::Baseline && jr != JDR_OK) {
     LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
     if (ctx.caching) ctx.cache.abort();
+    if (ctx.companion) ctx.companion->cache.abort();
     return false;
   }
 
-  LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms", decodeTime);
+  LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms%s", decodeTime, ctx.companion ? " (both variants)" : "");
 
   // Finalize the streamed cache file. Note: a flush failure mid-decode clears
   // ctx.caching (the partial file is dropped), so re-read the flag here.
   if (ctx.caching) {
     ctx.cache.finalize();
+  }
+  // Only alongside a complete primary: a companion without it would be a cache nobody asked for.
+  if (ctx.companion) {
+    if (ctx.caching) {
+      ctx.companion->cache.finalize();
+    } else {
+      ctx.companion->cache.abort();
+    }
   }
 
   return true;
