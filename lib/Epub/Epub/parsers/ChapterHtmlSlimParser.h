@@ -410,8 +410,6 @@ class ChapterHtmlSlimParser final : public Print {
   // every call site.
   SaxParser saxParser_;
   BuildArena* buildArena_ = nullptr;  // see setBuildArena
-  void* saxState_ = nullptr;          // the SAX state's arena bytes, taken by setBuildArena
-  size_t saxStateBytes_ = 0;
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -651,18 +649,19 @@ class ChapterHtmlSlimParser final : public Print {
   // the section cache's anchor-map encoding, so the finalizer copies them in verbatim.
   void setAnchorSpillPath(std::string path) { anchorSpillPath = std::move(path); }
   // The build's arena, when the caller has one worth the space (the borrowed secondary
-  // framebuffer): the SAX parser's ~10 KB state goes in it instead of the heap. A background
-  // build runs with ~46 KB of heap, and this state plus the build's other long-lived buffers
-  // left ~16 KB for layout, which fragmented to a low-heap abort mid-chapter (X3 2026-09-25,
-  // page 67 of 180).
+  // framebuffer): setup() places the SAX parser's ~10 KB state in it instead of the heap. A
+  // background build runs with ~46 KB of heap, and this state plus the build's other
+  // long-lived buffers left ~16 KB for layout, which fragmented to a low-heap abort mid-chapter
+  // (X3 2026-09-25, page 67 of 180).
   //
-  // The state is taken HERE, at wiring time, not in setup(): setup() runs after the section has
-  // reserved its feed-chunk block, and a plain allocation made inside that block's scope is
-  // rewound by the block's release -- which happens before finalize() last uses the parser. It
-  // only worked because nothing else allocated in between (memory audit 2026-09, F2a). Taken
-  // now, below every scoped block, it lives with the CSS ruleset in the part of the arena the
-  // build never rewinds.
-  void setBuildArena(BuildArena* arena);
+  // Taken in setup(), i.e. at the start of phase (b), and not here at wiring time: wiring
+  // happens before extraction, and 10 KB taken then leaves the region too small for the
+  // inflate ring plus its grow buffer on a big chapter, which pushes a 33 KB ring onto the
+  // heap (host census: arena high-water 45,872 -> 28,576 with the ring evicted). The state is
+  // a plain allocation inside the feed-chunk block's scope, so the section must release that
+  // block only after finalize() -- Section::runBuildParse does, and its BuildState tears the
+  // parser down before the block (memory audit 2026-09, F2a).
+  void setBuildArena(BuildArena* arena) { buildArena_ = arena; }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
   const std::vector<std::pair<uint16_t, std::string>>& getPageBreakLabels() const { return pageBreakLabels; }
   const std::vector<ParagraphLutEntry>& getParagraphLutPerPage() const { return paragraphLutPerPage; }

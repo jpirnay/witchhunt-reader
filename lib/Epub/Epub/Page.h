@@ -139,6 +139,10 @@ class Page {
  public:
   // the list of block index and line numbers on this page
   std::vector<std::unique_ptr<PageElement>> elements;
+  // What the parser reserves for a fresh page: a text page holds ~28 lines plus the odd image
+  // or rule. Left to grow by doubling, `elements` cost eight allocations per page on the host
+  // census (memory audit 2026-09, R2); a denser page still grows past this normally.
+  static constexpr size_t TYPICAL_ELEMENTS = 32;
   std::vector<FootnoteEntry> footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
 

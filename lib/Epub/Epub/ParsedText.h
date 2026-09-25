@@ -36,6 +36,24 @@ class ParsedText {
   // one book: 16258 allocations at extractLine against 14459 rendered lines, essentially one
   // each, in the 16-32 byte classes that dominate the allocation count.
   std::vector<int16_t> lineXPosScratch_;
+  // Layout scratch kept across paragraphs (the parser reuses one ParsedText, see reset()).
+  // Each of these was a per-block local before: one allocation per paragraph apiece, ~30,000
+  // per book on the host census once the word vectors stopped regrowing (memory audit
+  // 2026-09, R2). clear() keeps their capacity, so a chapter allocates them once.
+  std::vector<uint16_t> wordWidths_;
+  std::vector<size_t> lineBreakIndices_;
+  std::vector<bool> lineEndsWithHyphenatedWord_;
+  std::vector<int> splitPrefixWordIndexes_;
+  std::vector<bool> splitInsertedHyphen_;
+  std::vector<size_t> suffixBreaks_;
+  std::vector<bool> suffixLineEndsWithHyphenatedWord_;
+  std::vector<int> suffixSplitPrefixWordIndexes_;
+  std::vector<bool> suffixSplitInsertedHyphen_;
+  std::vector<int> interWordGaps_;
+  std::vector<int> lineIndexForWord_;  // computeLineBreaks' DP tables
+  std::vector<int> dp_;
+  std::vector<size_t> ans_;
+  std::string allText_;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
   // Per-word font size, percent of the block font size (100 = block size). Kept in
@@ -59,22 +77,25 @@ class ParsedText {
   // (no float zones active) that returns pageWidth unchanged.
   int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY, int pageWidth) const;
 
-  std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                        std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                        int firstLineIndent, int16_t blockStartY, int lineHeight);
-  std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                                  std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                                  std::vector<bool>& lineEndsWithHyphenatedWord,
-                                                  std::vector<int>& splitPrefixWordIndexes,
-                                                  std::vector<bool>& splitInsertedHyphen, int firstLineIndent,
-                                                  int16_t blockStartY, int lineHeight);
+  // The three breakers fill `lineBreakIndices` (cleared first) rather than returning a vector,
+  // so the caller's scratch member is reused instead of reallocated per paragraph.
+  void computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
+                         std::vector<bool>& continuesVec, int firstLineIndent, int16_t blockStartY, int lineHeight,
+                         std::vector<size_t>& lineBreakIndices);
+  void computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                   std::vector<bool>& lineEndsWithHyphenatedWord,
+                                   std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen,
+                                   int firstLineIndent, int16_t blockStartY, int lineHeight,
+                                   std::vector<size_t>& lineBreakIndices);
   // Recompute hyphenated breaks for a suffix that starts at startIndex.
   // Used after a single-line retry so later lines keep normal hyphenation.
-  std::vector<size_t> computeHyphenatedLineBreaksFromIndex(
-      const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
-      std::vector<bool>& continuesVec, size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
-      std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen, int16_t blockStartY = 0,
-      int lineHeight = 0, int startLineIdx = 0);
+  void computeHyphenatedLineBreaksFromIndex(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                            std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                            size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
+                                            std::vector<int>& splitPrefixWordIndexes,
+                                            std::vector<bool>& splitInsertedHyphen, int16_t blockStartY, int lineHeight,
+                                            int startLineIdx, std::vector<size_t>& lineBreakIndices);
   // Compute exactly one line break without hyphenating words.
   // Used only for the page-boundary retry line.
   size_t computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, int fontId, int pageWidth,
@@ -90,8 +111,9 @@ class ParsedText {
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
       int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
-  std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer,
-                                            int fontId);  // uses blockStyle.fontSizeMultiplier internally
+  // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally.
+  void calculateWordWidths(const GfxRenderer& renderer, int fontId,
+                           std::vector<uint16_t>& out);  // uses blockStyle.fontSizeMultiplier internally
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
@@ -101,6 +123,13 @@ class ParsedText {
         hyphenationEnabled(hyphenationEnabled),
         bionicReadingEnabled(bionicReadingEnabled) {}
   ~ParsedText() = default;
+
+  // Start a new, empty block in this object under `blockStyle`, keeping the word vectors'
+  // capacity. The parser reuses one ParsedText across a chapter's paragraphs: a fresh object
+  // per paragraph regrew four vectors from 16 to 128 entries each time -- ~16 allocations and
+  // ~3 KB of heap traffic per paragraph, 15,000 allocations per book on the host census, the
+  // single largest churn of a section build (memory audit 2026-09, R2).
+  void reset(const BlockStyle& blockStyle);
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT);

@@ -926,6 +926,7 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   completePageFn(std::move(currentPage));
   completedPageCount++;
   currentPage.reset(new (std::nothrow) Page());
+  if (currentPage) currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
 
@@ -947,19 +948,6 @@ void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
   // Record the printed page label for the current rendered section page.
   // Do not alter pagination; the reader keeps its own page breaks.
   pageBreakLabels.emplace_back(static_cast<uint16_t>(completedPageCount), label);
-}
-
-void ChapterHtmlSlimParser::setBuildArena(BuildArena* arena) {
-  buildArena_ = arena;
-  saxState_ = nullptr;
-  saxStateBytes_ = 0;
-  if (!buildArena_) return;
-  const size_t bytes = SaxParser::stateBytes();
-  if (void* state = buildArena_->alloc(bytes)) {
-    saxState_ = state;
-    saxStateBytes_ = bytes;
-    LOG_DBG("EHP", "SAX parser state (%u bytes) in the build arena", static_cast<unsigned>(bytes));
-  }
 }
 
 void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<std::string, std::string>> anchors) {
@@ -1289,8 +1277,14 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
   BlockStyle blockStyleWithIndent = *effectiveBase;
   attachPendingFloatImage(blockStyleWithIndent);
-  currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent,
-                                                       bionicReadingEnabled));
+  // Reuse the laid-out (now empty) block rather than replacing it: its word vectors keep the
+  // capacity the previous paragraph grew them to. See ParsedText::reset.
+  if (currentTextBlock) {
+    currentTextBlock->reset(blockStyleWithIndent);
+  } else {
+    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
+                                                         blockStyleWithIndent, bionicReadingEnabled));
+  }
   wordsExtractedInBlock = 0;
 }
 
@@ -3205,7 +3199,13 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD.
   // Using DefaultHandlerExpand preserves normal entity expansion from DOCTYPE.
   // Chapter XHTML is HTML-flavored: enable bare-void-tag repair (<br>, <img>, ...).
-  if (saxState_) saxParser_.setExternalState(saxState_, saxStateBytes_);
+  if (buildArena_) {
+    const size_t bytes = SaxParser::stateBytes();
+    if (void* state = buildArena_->alloc(bytes)) {
+      saxParser_.setExternalState(state, bytes);
+      LOG_DBG("EHP", "SAX parser state (%u bytes) in the build arena", static_cast<unsigned>(bytes));
+    }
+  }
   if (!saxParser_.init(this, startElement, endElement, characterData, defaultHandlerExpand,
                        /*htmlVoidTagRepair=*/true)) {
     LOG_ERR("EHP", "Couldn't allocate memory for parser");
@@ -3526,7 +3526,14 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: page object");
+      layoutFailed = true;
+      currentTextBlock.reset();
+      return;
+    }
+    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
     currentPageNextY = 0;
   }
 

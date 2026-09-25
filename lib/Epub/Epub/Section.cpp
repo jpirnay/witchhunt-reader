@@ -788,6 +788,9 @@ struct Section::BuildState {
     // abort mid-resolve released chunkBlock out of order (refused, block leaked until the next
     // reset -- memory audit 2026-09, F2b).
     previewResolver.reset();
+    // The layout parser's SAX state is a plain allocation inside chunkBlock's scope, and its
+    // page block (when it holds one) is nested above it: the parser goes first.
+    visitor.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
   }
   bool parseStarted = false;
@@ -1383,7 +1386,11 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   st.reader.reset();
   st.zip.reset();
   st.dropZipArena();
-  st.dropChunk();
+  // NOT dropChunk() here: the parser's SAX state sits inside chunkBlock's scope (a plain
+  // allocation made by setup(), after the block was reserved), and finalize() below still
+  // feeds it. Releasing the block first rewound the cursor under live state; it only worked
+  // because nothing allocated from the arena in between (memory audit 2026-09, F2a). The
+  // block goes after finalize().
   if (st.tempFile) {
     st.tempFile.close();
   }
@@ -1406,6 +1413,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   LOG_INF("SCT", "spine=%d EXTRACTPROF finalize=%ums", spineIndex,
           static_cast<uint32_t>((esp_timer_get_time() - tFin) / 1000));
 #endif
+  st.dropChunk();
   st.parserStreamOk = st.visitor->streamSucceeded();
   // Latch a heap-degraded image before the visitor is torn down. Same contract as the CSS and
   // footnote latches: the cache is written either way, but a background caller can throw it away

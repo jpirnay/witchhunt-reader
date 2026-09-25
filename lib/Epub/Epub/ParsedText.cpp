@@ -310,7 +310,8 @@ void ParsedText::layoutAndExtractLines(
       if (i > 0 && !wordContinues[i]) totalSize += 1;
       totalSize += words[i].size();
     }
-    std::string allText;
+    std::string& allText = allText_;
+    allText.clear();
     allText.reserve(totalSize);
     for (size_t i = 0; i < words.size(); i++) {
       if (i > 0 && !wordContinues[i]) allText += ' ';
@@ -337,20 +338,24 @@ void ParsedText::layoutAndExtractLines(
           : 0;
   const int firstLineIndent = cssTextIndent + (isContinuation_ ? 0 : static_cast<int>(blockStyle.firstLineExtraIndent));
 
-  auto wordWidths = calculateWordWidths(renderer, fontId);
+  std::vector<uint16_t>& wordWidths = wordWidths_;
+  calculateWordWidths(renderer, fontId, wordWidths);
 
-  std::vector<size_t> lineBreakIndices;
-  std::vector<bool> lineEndsWithHyphenatedWord;
-  std::vector<int> splitPrefixWordIndexes;
-  std::vector<bool> splitInsertedHyphen;
+  std::vector<size_t>& lineBreakIndices = lineBreakIndices_;
+  std::vector<bool>& lineEndsWithHyphenatedWord = lineEndsWithHyphenatedWord_;
+  std::vector<int>& splitPrefixWordIndexes = splitPrefixWordIndexes_;
+  std::vector<bool>& splitInsertedHyphen = splitInsertedHyphen_;
+  lineEndsWithHyphenatedWord.clear();
+  splitPrefixWordIndexes.clear();
+  splitInsertedHyphen.clear();
   if (hyphenationEnabled) {
     // Use greedy layout that can split words mid-loop when a hyphenated prefix fits.
-    lineBreakIndices = computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues,
-                                                   lineEndsWithHyphenatedWord, splitPrefixWordIndexes,
-                                                   splitInsertedHyphen, firstLineIndent, blockStartY, lineHeight);
+    computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, lineEndsWithHyphenatedWord,
+                                splitPrefixWordIndexes, splitInsertedHyphen, firstLineIndent, blockStartY, lineHeight,
+                                lineBreakIndices);
   } else {
-    lineBreakIndices = computeLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, firstLineIndent,
-                                         blockStartY, lineHeight);
+    computeLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, firstLineIndent, blockStartY, lineHeight,
+                      lineBreakIndices);
     lineEndsWithHyphenatedWord.assign(lineBreakIndices.size(), false);
     splitPrefixWordIndexes.assign(lineBreakIndices.size(), -1);
     splitInsertedHyphen.assign(lineBreakIndices.size(), false);
@@ -402,7 +407,7 @@ void ParsedText::layoutAndExtractLines(
       }
 
       // Recompute widths after restoring unsplit words.
-      wordWidths = calculateWordWidths(renderer, fontId);
+      calculateWordWidths(renderer, fontId, wordWidths);
 
       // Keep previous lines fixed; recompute only this specific line without hyphenation.
       // Suppression is intentionally line-local.
@@ -431,12 +436,17 @@ void ParsedText::layoutAndExtractLines(
 
         // Resume regular hyphenation from the first word after the retried line.
         const size_t resumeIndex = lineBreakIndices[i];
-        std::vector<bool> suffixLineEndsWithHyphenatedWord;
-        std::vector<int> suffixSplitPrefixWordIndexes;
-        std::vector<bool> suffixSplitInsertedHyphen;
-        const auto hyphenatedSuffixBreaks = computeHyphenatedLineBreaksFromIndex(
-            renderer, fontId, pageWidth, wordWidths, wordContinues, resumeIndex, suffixLineEndsWithHyphenatedWord,
-            suffixSplitPrefixWordIndexes, suffixSplitInsertedHyphen, blockStartY, lineHeight, static_cast<int>(i) + 1);
+        std::vector<bool>& suffixLineEndsWithHyphenatedWord = suffixLineEndsWithHyphenatedWord_;
+        std::vector<int>& suffixSplitPrefixWordIndexes = suffixSplitPrefixWordIndexes_;
+        std::vector<bool>& suffixSplitInsertedHyphen = suffixSplitInsertedHyphen_;
+        suffixLineEndsWithHyphenatedWord.clear();
+        suffixSplitPrefixWordIndexes.clear();
+        suffixSplitInsertedHyphen.clear();
+        const std::vector<size_t>& hyphenatedSuffixBreaks = suffixBreaks_;
+        computeHyphenatedLineBreaksFromIndex(renderer, fontId, pageWidth, wordWidths, wordContinues, resumeIndex,
+                                             suffixLineEndsWithHyphenatedWord, suffixSplitPrefixWordIndexes,
+                                             suffixSplitInsertedHyphen, blockStartY, lineHeight,
+                                             static_cast<int>(i) + 1, suffixBreaks_);
 
         lineBreakIndices.insert(lineBreakIndices.end(), hyphenatedSuffixBreaks.begin(), hyphenatedSuffixBreaks.end());
         lineEndsWithHyphenatedWord.insert(lineEndsWithHyphenatedWord.end(), suffixLineEndsWithHyphenatedWord.begin(),
@@ -452,10 +462,11 @@ void ParsedText::layoutAndExtractLines(
     }
   }
 
-  // Remove consumed words so size() reflects only remaining words, then
-  // release excess capacity.  Without shrink_to_fit the vector retains a
-  // large allocation from before the flush; the next paragraph fills it
-  // back up and eventually needs an even larger contiguous realloc.
+  // Remove consumed words so size() reflects only remaining words. The capacity is kept on
+  // purpose: the parser reuses this object for the next paragraph (see reset()), and a block is
+  // split at 96 words (ChapterHtmlSlimParser::flushPartWordBuffer), so the vectors settle at
+  // 128 entries and never grow again. Shrinking here used to hand the next paragraph an empty
+  // vector to regrow through 16/32/64/128 -- the churn reset() exists to remove.
   //
   // preserveSource skips this: a caller that may have to lay the same text out a second time (the
   // table grid path, which can only discover a cell does not fit by laying it out) needs the words
@@ -466,10 +477,6 @@ void ParsedText::layoutAndExtractLines(
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
     wordSizes.erase(wordSizes.begin(), wordSizes.begin() + consumed);
-    words.shrink_to_fit();
-    wordStyles.shrink_to_fit();
-    wordContinues.shrink_to_fit();
-    wordSizes.shrink_to_fit();
     // All remaining words were already transformed before the flush; reset the
     // watermark so that words appended by addWord() are processed next time.
     bionicTransformedUpTo_ = words.size();
@@ -486,23 +493,33 @@ void ParsedText::layoutAndExtractLines(
   }
 }
 
-std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
-  std::vector<uint16_t> wordWidths;
-  wordWidths.reserve(words.size());
-
-  for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i], false, wordScale(i)));
-  }
-
-  return wordWidths;
+void ParsedText::reset(const BlockStyle& newBlockStyle) {
+  // clear() keeps each vector's capacity; the strings inside `words` are destroyed here.
+  words.clear();
+  wordStyles.clear();
+  wordContinues.clear();
+  wordSizes.clear();
+  blockStyle = newBlockStyle;
+  isContinuation_ = false;
+  bionicTransformedUpTo_ = 0;
 }
 
-std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
-                                                  std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                                  const int firstLineIndent, const int16_t blockStartY,
-                                                  const int lineHeight) {
+void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& out) {
+  out.clear();
+  out.reserve(words.size());
+
+  for (size_t i = 0; i < words.size(); ++i) {
+    out.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i], false, wordScale(i)));
+  }
+}
+
+void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
+                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                   const int firstLineIndent, const int16_t blockStartY, const int lineHeight,
+                                   std::vector<size_t>& lineBreakIndices) {
+  lineBreakIndices.clear();
   if (words.empty()) {
-    return {};
+    return;
   }
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
@@ -521,7 +538,10 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   // Pre-compute inter-word gaps once so the O(n²) DP inner loop avoids repeated
   // codepoint scanning and renderer calls for every (i,j) pair.
   // interWordGaps[j] = the spacing between words[j-1] and words[j] (0 for j==0).
-  std::vector<int> interWordGaps(totalWordCount, 0);
+  // The four tables below are members reused across paragraphs (see the header): as locals
+  // they cost four allocations per paragraph, the last per-block churn on a plain layout.
+  std::vector<int>& interWordGaps = interWordGaps_;
+  interWordGaps.assign(totalWordCount, 0);
   for (size_t j = 1; j < totalWordCount; ++j) {
     if (!continuesVec[j]) {
       interWordGaps[j] =
@@ -534,7 +554,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   // Greedy pre-pass: map each word-start index to its line number so the DP can
   // call widthForLine(lineIdx, ...) per-word-start in O(1).
-  std::vector<int> lineIndexForWord(totalWordCount, 0);
+  std::vector<int>& lineIndexForWord = lineIndexForWord_;
+  lineIndexForWord.assign(totalWordCount, 0);
   if (lineHeight > 0 && blockStyle.floatZoneCount > 0) {
     int lineIdx = 0;
     size_t cur = 0;
@@ -560,9 +581,11 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   }
 
   // DP table to store the minimum badness (cost) of lines starting at index i
-  std::vector<int> dp(totalWordCount);
+  std::vector<int>& dp = dp_;
+  dp.assign(totalWordCount, 0);
   // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
-  std::vector<size_t> ans(totalWordCount);
+  std::vector<size_t>& ans = ans_;
+  ans.assign(totalWordCount, 0);
 
   // Base Case
   dp[totalWordCount - 1] = 0;
@@ -632,7 +655,6 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   }
 
   // Stores the index of the word that starts the next line (last_word_index + 1)
-  std::vector<size_t> lineBreakIndices;
   size_t currentWordIndex = 0;
 
   while (currentWordIndex < totalWordCount) {
@@ -648,7 +670,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     currentWordIndex = nextBreakIndex;
   }
 
-  return lineBreakIndices;
+  return;
 }
 
 size_t ParsedText::computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, const int fontId, const int pageWidth,
@@ -819,16 +841,20 @@ void ParsedText::applyBionicReadingTransform() {
 }
 
 // Builds break indices while opportunistically splitting the word that would overflow the current line.
-std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(
-    const GfxRenderer& renderer, const int fontId, const int pageWidth, std::vector<uint16_t>& wordWidths,
-    std::vector<bool>& continuesVec, std::vector<bool>& lineEndsWithHyphenatedWord,
-    std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen, const int firstLineIndent,
-    const int16_t blockStartY, const int lineHeight) {
+void ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& renderer, const int fontId, const int pageWidth,
+                                             std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                             std::vector<bool>& lineEndsWithHyphenatedWord,
+                                             std::vector<int>& splitPrefixWordIndexes,
+                                             std::vector<bool>& splitInsertedHyphen, const int firstLineIndent,
+                                             const int16_t blockStartY, const int lineHeight,
+                                             std::vector<size_t>& lineBreakIndices) {
+  lineBreakIndices.clear();
   // Pre-compute inter-word gaps to avoid repeated codepoint scanning and renderer
   // calls in the inner loop. When hyphenateWordAtIndex inserts a new word, we insert
   // a placeholder gap (0) at that position to keep the vector in sync; the remainder
   // is always the first word on the next line so its spacing is never used.
-  std::vector<int> interWordGaps(wordWidths.size(), 0);
+  std::vector<int>& interWordGaps = interWordGaps_;
+  interWordGaps.assign(wordWidths.size(), 0);
   for (size_t j = 1; j < wordWidths.size(); ++j) {
     if (!continuesVec[j]) {
       interWordGaps[j] =
@@ -839,7 +865,6 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(
     }
   }
 
-  std::vector<size_t> lineBreakIndices;
   lineEndsWithHyphenatedWord.clear();
   splitPrefixWordIndexes.clear();
   splitInsertedHyphen.clear();
@@ -916,23 +941,25 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(
     ++lineIdx;
   }
 
-  return lineBreakIndices;
+  return;
 }
 
-std::vector<size_t> ParsedText::computeHyphenatedLineBreaksFromIndex(
+void ParsedText::computeHyphenatedLineBreaksFromIndex(
     const GfxRenderer& renderer, const int fontId, const int pageWidth, std::vector<uint16_t>& wordWidths,
     std::vector<bool>& continuesVec, const size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
     std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen, const int16_t blockStartY,
-    const int lineHeight, const int startLineIdx) {
+    const int lineHeight, const int startLineIdx, std::vector<size_t>& lineBreakIndices) {
   // Same greedy hyphenating breaker as the full pass, but scoped to a suffix.
+  lineBreakIndices.clear();
   if (startIndex >= wordWidths.size()) {
     lineEndsWithHyphenatedWord.clear();
     splitPrefixWordIndexes.clear();
     splitInsertedHyphen.clear();
-    return {};
+    return;
   }
 
-  std::vector<int> interWordGaps(wordWidths.size(), 0);
+  std::vector<int>& interWordGaps = interWordGaps_;
+  interWordGaps.assign(wordWidths.size(), 0);
   for (size_t j = 1; j < wordWidths.size(); ++j) {
     if (!continuesVec[j]) {
       interWordGaps[j] =
@@ -943,7 +970,6 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaksFromIndex(
     }
   }
 
-  std::vector<size_t> lineBreakIndices;
   lineEndsWithHyphenatedWord.clear();
   splitPrefixWordIndexes.clear();
   splitInsertedHyphen.clear();
@@ -1009,7 +1035,7 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaksFromIndex(
     ++lineIdx;
   }
 
-  return lineBreakIndices;
+  return;
 }
 
 // Splits words[wordIndex] into prefix (adding a hyphen only when needed) and remainder when a legal breakpoint fits the
