@@ -292,6 +292,48 @@ TEST_F(ImageHeapGateFixture, HeapRefusalIsLatchedSoTheCacheCanBeDiscarded) {
       << "a heap refusal must be latched, or the alt-text page is cached forever";
 }
 
+// The latch has to survive the build. A starved rebuild cached a chapter with all of its images
+// laid out as alt text, and nothing on the next open knew: the chapter stayed image-less even
+// after a reboot had freed the heap that would have sized them (X3 2026-09-25). The flag now
+// lives in the section header, where the reader's cache probe can see it.
+TEST_F(ImageHeapGateFixture, HeapRefusalIsReadBackFromTheCachedSection) {
+  const std::string book = makeBookWithUnresolvableImage();
+  const std::string cache = (work / "persisted").string();
+  ESP.setFreeHeap(12 * 1024);
+  ASSERT_TRUE(buildAndReportDegraded(book, cache));
+  ESP.setFreeHeap(200 * 1024);
+
+  auto epub = std::make_shared<Epub>(book, cache);
+  ASSERT_TRUE(epub->load(true));
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  GfxRenderer renderer;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.loadSectionFile(params)) << "the degraded build is still a usable cache";
+  EXPECT_TRUE(section.isImageHeaderDegraded()) << "a cold open must see that images were left out";
+  EXPECT_FALSE(section.isTruncatedCache()) << "the flag shares a byte with parseComplete";
+}
+
+TEST_F(ImageHeapGateFixture, CleanBuildIsNotReadBackAsDegraded) {
+  const std::string book = makeBookWithUnresolvableImage();
+  const std::string cache = (work / "clean").string();
+  ESP.setFreeHeap(200 * 1024);
+  ASSERT_FALSE(buildAndReportDegraded(book, cache));
+
+  auto epub = std::make_shared<Epub>(book, cache);
+  ASSERT_TRUE(epub->load(true));
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  GfxRenderer renderer;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.loadSectionFile(params));
+  EXPECT_FALSE(section.isImageHeaderDegraded());
+}
+
 TEST_F(ImageHeapGateFixture, ReleasingFontCachesRecoversARefusedHeaderRead) {
   const std::string book = makeBookWithUnresolvableImage();
 

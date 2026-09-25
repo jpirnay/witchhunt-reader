@@ -266,7 +266,8 @@ class Section {
   // right after a build.
   bool isFootnotePreviewsUnresolved() const { return footnotePreviewsUnresolved_; }
   // True when the last build dropped an image to alt text on a heap refusal — transient, unlike
-  // an unreadable image. Only meaningful right after a build.
+  // an unreadable image. Set right after a build, and also by loadSectionFile() from the cached
+  // header, so a cold open can rebuild what a starved build left out.
   bool isImageHeaderDegraded() const { return imageHeaderDegraded_; }
   // True while an incremental build is in flight and its CSS resolver has ALREADY hit a
   // low-heap skip — i.e. the in-progress result is going to be css-degraded. Lets a sliced

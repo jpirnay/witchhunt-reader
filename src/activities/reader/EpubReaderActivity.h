@@ -284,6 +284,9 @@ class EpubReaderActivity final : public Activity {
   bool showTruncatedSectionHintThisRender = false;
   uint8_t truncatedSectionHintRendersRemaining = 0;
   int lastWarnedTruncatedSpineIndex = -1;
+  // Spine whose image-degraded cache was already discarded for a rebuild this session (see the
+  // cache probe in buildSection): one retry, not one per entry.
+  int imageHeaderRebuildSpine_ = -1;
   struct RenderPhaseStats {
     unsigned long prewarmMs = 0UL;
     unsigned long bwRenderMs = 0UL;

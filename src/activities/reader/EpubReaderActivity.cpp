@@ -3779,6 +3779,18 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     cacheHit = false;
   }
 
+  // A cache whose build dropped images because the heap could not size them right then (the
+  // header walk needs ~33 KB contiguous; X3 2026-09-25: a rebuild on a fragmented heap left all 27
+  // images of a chapter out, and the heap-recovery reboot that followed would have had room for
+  // every one). The rebuild resolves them while the buffer is released. Once per spine per
+  // session: if even that build comes out degraded, reading on beats rebuilding on every entry.
+  if (cacheHit && section->isImageHeaderDegraded() && imageHeaderRebuildSpine_ != currentSpineIndex) {
+    LOG_INF("ERS", "Section %d: cached without images the heap could not size; rebuilding", currentSpineIndex);
+    imageHeaderRebuildSpine_ = currentSpineIndex;
+    section->clearCache();
+    cacheHit = false;
+  }
+
   const bool cssFallbackRebuild = cacheHit && section->isEmbeddedStyleFallback();
   const bool needBuild = resumeBackgroundBuild || !cacheHit || cssFallbackRebuild;
   // The decisive fact for wake-latency work: a probe that hits means the section cost is a
