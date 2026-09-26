@@ -796,6 +796,32 @@ a quality byte in the `.pxc` header for a coarser progressive decode.
    working set + 24 KB lean floor + 4 KB margin, replacing the 40 KB floor
    in the old sum; X4 confirmation of the new admission band pending.
 
+*Device run 12 (X3, 2026-09-26 16:13, R3/R4/R5 tip flashed):* the Chapter 3
+drill again, clean open and from the reading state after a wipe. Both
+complete in Background-C (157 → 180 each), no abort, no growth refusal, no
+escalation, no realloc failure, no cap or latch line; boot-wide watermark
+8 420 (run 11: 8 452), reading contig after the build 25 588 / 23 540, the
+lowest block the parser gate saw 13 300. **The lane figures**, four builds:
+
+| build | setup | extract | resident | parse | highWater |
+|---|---|---|---|---|---|
+| first open, ring in the arena | 2 861 | 41 984 | 13 596 | 11 753 | 45 876 |
+| rebuild pass, cached HTML | 2 861 | 0 | 13 604 | 11 161 | 24 765 |
+| reading state, ring in the arena | 2 861 | 41 984 | 13 604 | 11 991 | 45 884 |
+| its rebuild pass | 2 861 | 0 | 13 596 | 8 256 | 21 852 |
+
+The arena's high water is the extraction phase alone: ruleset 2.9 KB, then
+ring (32 KB) + grow block (8 KB) + read buffer and alignment = 42 KB. The
+layout starts from 13.6 KB resident (ruleset + chunk + SAX) and peaks 8 to
+12 KB above it, so during phase (b) — the phase where the heap is scarce —
+**27 KB of the lent region sits idle**. That is the declared budget's shape:
+a 42 KB phase-(a) lane that the layout never touches, and a phase-(b) lane
+with room for roughly twice what it holds. The obvious tenant is the
+parse's remaining heap objects (the word vectors, the per-page LUTs and
+labels, the `Page` object and its lines — R2 step 3), which would take the
+reading-state build's heap need down by their size and make the C-failure
+escalation rarer still.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
