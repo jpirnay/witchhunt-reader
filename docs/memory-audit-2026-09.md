@@ -1059,7 +1059,13 @@ Home visit after the first, so those books never got a cover at all
 (device validation pending). (1b) Home's 20 KB cover buffer (`OOM: cover
 buffer (20592 bytes)`, six times in run 15) is allocated at draw time with
 the framebuffer resident, so the region cannot serve it; that one wants a
-banded draw from the BMP file instead of a whole-cover buffer. (2) One decode per cover: the 200 × 390 grid
+banded draw from the BMP file instead of a whole-cover buffer — or the
+resident secondary framebuffer itself, idle while Home is up, as its home.
+*Run 16 (17:19) validated 1a:* the Messina and Deckhand covers generated on
+a later Home visit at ~43 KB free, the case run 15 refused every time; the
+20 KB pixel-cache refusal (1b) fired on every carousel redraw at a
+reading-state contig of 15–20 KB, 124 B short of a 20 468 block once, and
+the carousel fell back to its slower repaint each time. (2) One decode per cover: the 200 × 390 grid
 thumb is scaled from the 340 × 540 carousel thumb (a 1-bit BMP → BMP
 resample), not decoded again from the full JPEG. (3) A decode that yields
 to input resumes or is deferred, not restarted from the first scan.
