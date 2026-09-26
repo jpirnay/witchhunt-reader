@@ -901,6 +901,30 @@ peak 47 860 of 52 272). Lowest contiguous block seen by a gate: 5 108
 during a long-block split on a table page — above the arena floor, not by
 much.
 
+*Why the appendix's parse lane reads 1 383 with the rows in the arena:*
+the host census on a synthetic chapter of three 40 × 8 grids reports the
+same (`parse=1239`) and attributes no heap site to `TextBlock::allocArena`,
+so the bytes do go to the arena — a cell like "12345" is 16 bytes of flat
+text, nine rows of eight cells are ~1.2 KB, and that is the page block.
+What the census does attribute to the tables is the object graph: ~1 460
+`TextBlock` objects at 88 B, their line-vector nodes, the cell structs —
+about 160 B per cell on the heap, 11–15 KB for a page of rows, the
++320 blocks the device trace shows at pages 30–38. Moving those objects
+into the arena (a placement-constructed `TextBlock` with an arena-aware
+deleter behind the `unique_ptr`) is the table half of R2 step 3.
+
+*Run 14 also exposed a reader defect outside the memory work:* the
+chapter-list jump into Chapter 3 waited the whole 7.6 s behind the popup
+for a page that reads "Chapter Three" and existed 50 ms into the build.
+The chapter list targets a chapter by TOC index and a link by anchor; the
+mid-build draw only knew page targets, so both resolved at completion.
+Fixed the same evening: the parser answers anchor lookups from its live
+spill, `Section::activeBuildPageForTocIndex/Anchor` turn the target into
+a page target as soon as the build knows where it lands, and mid-build
+draws no longer skip pages with images (undecoded ones show an "indexing"
+placeholder, cached ones come from their `.pxc`). Device validation
+pending.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
