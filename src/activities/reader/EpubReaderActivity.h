@@ -287,6 +287,9 @@ class EpubReaderActivity final : public Activity {
   // Spine whose image-degraded cache was already discarded for a rebuild this session (see the
   // cache probe in buildSection): one retry, not one per entry.
   int imageHeaderRebuildSpine_ = -1;
+  // Same one-shot for a cache whose build demoted a table row or skipped CSS lookups on the
+  // heap (Section::isTableRowDegraded / isCssLowHeapDegraded, persisted in the status byte).
+  int degradedLayoutRebuildSpine_ = -1;
   struct RenderPhaseStats {
     unsigned long prewarmMs = 0UL;
     unsigned long bwRenderMs = 0UL;

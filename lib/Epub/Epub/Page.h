@@ -184,8 +184,9 @@ class Page {
   // alsoWarmGrayscale additionally warms the 4-level Bayer cache that the AA grayscale
   // planes replay on top of the BW frame. Both variants are needed with AA on: the BW
   // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
+  // redecodeCoarse: a .pxc stamped coarse (see ImageBlock::dropCoarseCache) counts as missing.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
-                       bool monochromeOutput = true, bool alsoWarmGrayscale = false) const;
+                       bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;

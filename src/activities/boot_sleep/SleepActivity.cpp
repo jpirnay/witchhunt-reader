@@ -72,7 +72,7 @@ bool renderSleepImageFromCache(GfxRenderer& renderer, const std::string& cachePa
     cacheFile.close();
     return false;
   }
-  if (magic != PixelCache::PXC_MAGIC) {
+  if (!PixelCache::magicIsValid(magic)) {
     cacheFile.close();
     LOG_INF("SLP", "Stale sleep pixel cache (0x%04X), deleting: %s", magic, cachePath.c_str());
     Storage.remove(cachePath.c_str());

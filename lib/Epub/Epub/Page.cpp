@@ -312,7 +312,7 @@ void Page::renderImagesFromGrayscaleCache(GfxRenderer& renderer, const int xOffs
 }
 
 void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int yOffset, const bool forceLoadLargeImages,
-                           const bool monochromeOutput, const bool alsoWarmGrayscale) const {
+                           const bool monochromeOutput, const bool alsoWarmGrayscale, const bool redecodeCoarse) const {
   // Only do the costly decode pass when there's at least one image that would
   // actually require a PNG/JPG decoder allocation. Cached and placeholder paths
   // do not need the contiguous heap headroom, so skipping the iteration entirely
@@ -327,6 +327,10 @@ void Page::warmImageCaches(GfxRenderer& renderer, const int xOffset, const int y
     const auto& ib = static_cast<const PageImage&>(*element).getImageBlock();
     if (ib.wouldShowPlaceholder(forceLoadLargeImages, monochromeOutput)) continue;
     // Check whether the appropriate cache already exists
+    if (redecodeCoarse) {
+      ib.dropCoarseCache(monochromeOutput);
+      if (alsoWarmGrayscale && monochromeOutput) ib.dropCoarseCache(false);
+    }
     const bool alreadyCached = monochromeOutput ? ib.hasPixelCache() : ib.hasGrayscaleCache();
     // Both variants missing and both wanted: ask the decoder for them in a single inflate
     // instead of paying two. Requires BOTH to be absent — if the BW cache is already on disk

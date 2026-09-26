@@ -148,7 +148,7 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
   // and would otherwise be replayed forever without re-decoding. Delete it so
   // the caller falls through to a fresh decode, which rewrites the cache.
   uint16_t magic;
-  if (cacheFile.read(&magic, 2) != 2 || magic != PixelCache::PXC_MAGIC) {
+  if (cacheFile.read(&magic, 2) != 2 || !PixelCache::magicIsValid(magic)) {
     cacheFile.close();
     LOG_INF("IMG", "Stale/unversioned pixel cache (0x%04X), deleting: %s", magic, cachePath.c_str());
     Storage.remove(cachePath.c_str());
@@ -296,6 +296,19 @@ bool ImageBlock::isLargeImage() const {
 bool ImageBlock::hasPixelCache() const { return Storage.exists(getBwCachePath(imagePath).c_str()); }
 
 bool ImageBlock::hasGrayscaleCache() const { return Storage.exists(getGrayscaleCachePath(imagePath).c_str()); }
+
+bool ImageBlock::dropCoarseCache(const bool monochromeOutput) const {
+  const std::string& cachePath = monochromeOutput ? getBwCachePath(imagePath) : getGrayscaleCachePath(imagePath);
+  FsFile cacheFile;
+  if (!Storage.exists(cachePath.c_str()) || !Storage.openFileForRead("IMG", cachePath, cacheFile)) return false;
+  uint16_t magic = 0;
+  const bool coarse = cacheFile.read(&magic, 2) == 2 && magic == PixelCache::PXC_MAGIC_COARSE;
+  cacheFile.close();
+  if (!coarse) return false;
+  LOG_INF("IMG", "Dropping coarse pixel cache for a full decode: %s", cachePath.c_str());
+  Storage.remove(cachePath.c_str());
+  return true;
+}
 
 bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) const {
   if (forceLoad) return false;

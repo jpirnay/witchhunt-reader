@@ -31,8 +31,15 @@ class Section {
   // Set by the last build when CssParser hit its own low-heap mode mid-parse
   // (lowHeapSkips > 0): some elements were cached without their styles. The cache is
   // usable but visually degraded; background callers discard it so the foreground
-  // blocking path (more headroom) rebuilds it clean.
+  // blocking path (more headroom) rebuilds it clean. Persisted in the status byte
+  // (kStatusCssDegraded) and reloaded by loadSectionFile(), so a blocking build that came
+  // out degraded -- the one path that used to write the result without looking -- is
+  // rebuilt once on a later entry instead of standing for the life of the cache.
   bool cssLowHeapDegraded_ = false;
+  // Set by the last build when a table row was emitted as paragraphs instead of a grid
+  // (ChapterHtmlSlimParser::tableRowDegraded). Same persistence and rebuild policy as the
+  // CSS flag: the pages are usable, the layout is what the heap allowed.
+  bool tableRowDegraded_ = false;
   // Set by the last build when its inline-footnote resolve pass could not complete (OOM, an
   // unreadable note document). The pages are cached under a "previews on" property hash — see
   // EpubReaderActivity::makeSectionBuildParams — but the notes this spine points at never made
@@ -261,13 +268,18 @@ class Section {
   // demand, borrowing the framebuffer as its arena. The one remaining caller is the
   // pre-reboot heap-recovery pass, which deliberately warms everything so the next boot can
   // render images with no decoder at all.
+  // redecodeCoarse: see Page::warmImageCaches -- only for passes that run with the framebuffers
+  // released, where the full progressive workspace fits.
   void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true,
-                          bool alsoWarmGrayscale = false);
+                          bool alsoWarmGrayscale = false, bool redecodeCoarse = false);
   bool isTruncatedCache() const { return truncatedCache; }
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
   // True when the last build's CSS resolution hit low-heap skips (styles silently
-  // missing from the cached pages). Only meaningful right after a build.
+  // missing from the cached pages), or when the loaded cache was written by such a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True when the last build demoted a table row to paragraphs, or the loaded cache was written
+  // by such a build. The reader rebuilds such a chapter once per session when it is entered.
+  bool isTableRowDegraded() const { return tableRowDegraded_; }
   // True when the last build's inline-footnote resolve pass failed, so some of this spine's
   // notes are missing from the store while the cache claims previews are on. Only meaningful
   // right after a build.

@@ -112,8 +112,14 @@ constexpr uint32_t kSize = kParagraphLut + sizeof(uint32_t);
 //   size it right then (see Section::isImageHeaderDegraded). Persisted so a later open -- with
 //   the fresh heap the build lacked -- can rebuild the chapter instead of caching it image-less
 //   for good.
+//   kStatusTableRowDegraded / kStatusCssDegraded: a table row was written as paragraphs, or
+//   the CSS resolver skipped lookups, because of the heap at build time (memory audit 2026-09,
+//   F3: "four refusals bake a degraded result into a cache with nothing to trigger a rebuild").
+//   Same policy as the image bit: the reader rebuilds once per spine per session on entry.
 constexpr uint8_t kStatusParseComplete = 1 << 0;
 constexpr uint8_t kStatusImageHeaderDegraded = 1 << 1;
+constexpr uint8_t kStatusTableRowDegraded = 1 << 2;
+constexpr uint8_t kStatusCssDegraded = 1 << 3;
 
 // On-disk paragraph LUT entry: u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex.
 // listItemIndex is the running <li> count at page-break time; together with
@@ -545,6 +551,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
 bool Section::loadSectionFile(const BuildParams& p) {
   truncatedCache = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
+  cssLowHeapDegraded_ = false;
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
@@ -616,6 +624,8 @@ bool Section::loadSectionFile(const BuildParams& p) {
 
     truncatedCache = (fileStatus & kStatusParseComplete) == 0;
     imageHeaderDegraded_ = (fileStatus & kStatusImageHeaderDegraded) != 0;
+    tableRowDegraded_ = (fileStatus & kStatusTableRowDegraded) != 0;
+    cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
   }
 
   serialization::readPod(file, pageCount);
@@ -667,6 +677,8 @@ bool Section::clearCache() {
   currentPage = 0;
   truncatedCache = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
+  cssLowHeapDegraded_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -983,6 +995,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   cssLowHeapDegraded_ = false;
   footnotePreviewsUnresolved_ = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1471,6 +1484,9 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   if (st.visitor->imageHeaderDegraded()) {
     imageHeaderDegraded_ = true;
   }
+  if (st.visitor->tableRowDegraded()) {
+    tableRowDegraded_ = true;
+  }
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
@@ -1639,7 +1655,8 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     return BuildPhaseResult::Failed;
   }
   const uint8_t status =
-      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0);
+      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
+      (tableRowDegraded_ ? kStatusTableRowDegraded : 0) | (cssLowHeapDegraded_ ? kStatusCssDegraded : 0);
   serialization::writePod(file, status);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);
@@ -2062,7 +2079,7 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex,
 static constexpr size_t WARM_PASS_SCRATCH_BYTES = 32 * 1024 + 2 * 4096 + 256;
 
 void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
-                                 const bool monochromeOutput, const bool alsoWarmGrayscale) {
+                                 const bool monochromeOutput, const bool alsoWarmGrayscale, const bool redecodeCoarse) {
   if (pageCount == 0) return;
 
   // Prefer the LENT framebuffer region (externalScratch_) over a fresh heap block. Asking the
@@ -2097,7 +2114,7 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
     currentPage = p;
     auto page = loadPageFromSectionFile();
     if (!page || !page->hasImages()) continue;
-    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput, alsoWarmGrayscale);
+    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput, alsoWarmGrayscale, redecodeCoarse);
     ++warmed;
     // Each image decode can take hundreds of ms; reset the WDT between pages
     // to avoid an interrupt watchdog timeout on image-heavy chapters.

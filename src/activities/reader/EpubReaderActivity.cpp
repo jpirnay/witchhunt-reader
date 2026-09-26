@@ -1615,7 +1615,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       backgroundBuildPercent_ = -1;
       if (step == Section::BuildStep::Done) {
         if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
-            backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded()) {
+            backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded() ||
+            backgroundSection_->isTableRowDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
           // (styles silently absent from the cached pages), the footnote resolve could not
           // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
@@ -1628,7 +1629,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
           const char* reason = backgroundSection_->isTruncatedCache()               ? "truncated"
                                : backgroundSection_->isCssLowHeapDegraded()         ? "css-degraded"
                                : backgroundSection_->isFootnotePreviewsUnresolved() ? "footnotes unresolved"
-                                                                                    : "image degraded";
+                               : backgroundSection_->isImageHeaderDegraded()        ? "image degraded"
+                                                                                    : "table row demoted";
           LOG_INF("ERS", "Background build spine=%d %s; discarding for foreground rebuild", targetSpine, reason);
           backgroundSection_->clearCache();
           backgroundSection_.reset();
@@ -3610,6 +3612,14 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // 33,280 walk left a chapter cached with none of its 27 images). Only a resolve earns the one
   // rebuild -- the manifest then answers with no ring at all -- so a walk that finds nothing
   // leaves the build as it is.
+  // The released build is the path with the most heap this session can offer; a result it
+  // still had to degrade is worth one loud line (the status byte carries it to the next entry,
+  // which rebuilds once -- see the cache-hit policy in buildSection).
+  if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded())) {
+    LOG_ERR("ERS", "Blocking build spine=%d came out degraded (%s%s); cached with the status bit set",
+            currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips " : "",
+            section->isTableRowDegraded() ? "table-row-demoted" : "");
+  }
   if (createOk && section->isImageHeaderDegraded()) {
     // A borrowed build's region is idle now (its build state is gone): walk from it directly,
     // as Background-C does at its end. Nothing below can offer more room than that.
@@ -3817,6 +3827,19 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   if (cacheHit && section->isImageHeaderDegraded() && imageHeaderRebuildSpine_ != currentSpineIndex) {
     LOG_INF("ERS", "Section %d: cached without images the heap could not size; rebuilding", currentSpineIndex);
     imageHeaderRebuildSpine_ = currentSpineIndex;
+    section->clearCache();
+    cacheHit = false;
+  }
+  // A cache whose layout is what the heap allowed rather than what the book says: a table row
+  // written as paragraphs, or elements cached without their styles because the resolver skipped
+  // lookups. Both used to be baked in for good (memory audit 2026-09, F3). Same policy as the
+  // image bit: one rebuild per spine per session, and if that one comes out degraded too the
+  // bit stays set and the chapter is read as it is.
+  if (cacheHit && (section->isTableRowDegraded() || section->isCssLowHeapDegraded()) &&
+      degradedLayoutRebuildSpine_ != currentSpineIndex) {
+    LOG_INF("ERS", "Section %d: cached %s under low heap; rebuilding once", currentSpineIndex,
+            section->isTableRowDegraded() ? "with a table row demoted to paragraphs" : "with CSS lookups skipped");
+    degradedLayoutRebuildSpine_ = currentSpineIndex;
     section->clearCache();
     cacheHit = false;
   }
@@ -4494,7 +4517,11 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
     if (scratch && renderer.releaseFrameBuffersWithScratch(scratch, scratchSize)) {
       LOG_ERR("ERS", "Pre-reboot image warm pass: freed primary fb, scratch=%u bytes", scratchSize);
       const bool preRebootForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
-      section->warmAllImageCaches(0, 0, preRebootForceLoad, /*monochromeOutput=*/true);
+      // Every framebuffer is released here, so this is the one pass with room for the full
+      // progressive workspace: a .pxc written at a coarser scale (or as the DC preview) because
+      // the heap was short at the time is decoded again now, not replayed as it is.
+      section->warmAllImageCaches(0, 0, preRebootForceLoad, /*monochromeOutput=*/true, /*alsoWarmGrayscale=*/false,
+                                  /*redecodeCoarse=*/true);
       // scratch is leaked intentionally — reboot follows immediately
     } else {
       free(scratch);

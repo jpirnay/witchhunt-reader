@@ -434,6 +434,9 @@ class ChapterHtmlSlimParser final : public Print {
   bool streamFailed = false;
   // Set when the heap gate refused an image-header read (see imageHeaderDegraded()).
   bool imageHeaderSkippedForHeap = false;
+  // Set when any table row was demoted to paragraphs (degradeRow), for any reason: the pages
+  // are usable but the cache holds a layout the heap chose, not the book. See tableRowDegraded().
+  bool tableRowDegradedAny_ = false;
   // Latches the one-shot font-cache release that recoverHeapForImageHeader() spends.
   bool fontCachesReleasedForImageHeader = false;
   uint32_t streamStartTimeMs = 0;
@@ -636,6 +639,11 @@ class ChapterHtmlSlimParser final : public Print {
   // are usable but incomplete, and the caller must not keep them: see the latch site in
   // startElement's image branch.
   [[nodiscard]] bool imageHeaderDegraded() const { return imageHeaderSkippedForHeap; }
+  // True when at least one table row was emitted as paragraphs instead of a grid (heap gate,
+  // row byte budget, an open-cell overflow). Latched into the section status byte so the
+  // reader can rebuild the chapter once when memory allows, instead of keeping the demoted
+  // layout for good (memory audit 2026-09, F3/R3).
+  [[nodiscard]] bool tableRowDegraded() const { return tableRowDegradedAny_; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
 
   // Print interface — fed by Epub::readItemContentsToStream.

@@ -115,6 +115,13 @@ class ImageBlock final : public Block {
   // True when the 4-level .pxc pixel cache exists (grayscale AA rendering).
   bool hasGrayscaleCache() const;
 
+  // Deletes the mode's .pxc when it was stamped coarse (PixelCache::PXC_MAGIC_COARSE: a decode
+  // that settled for a lower scale or the DC preview because the heap was short) so the next
+  // render decodes it again. Returns true when a cache was removed. Only warm passes that run
+  // with the framebuffers released call this -- at reading-time heap the decode would only
+  // come out coarse again.
+  bool dropCoarseCache(bool monochromeOutput) const;
+
   // Render the 4-level cache into the framebuffer using the renderer's current
   // mode (GRAYSCALE_LSB or GRAYSCALE_MSB). No-op if no grayscale cache exists.
   // Called by the AA grayscale passes to give images proper gray tones.

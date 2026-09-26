@@ -3997,6 +3997,7 @@ void ChapterHtmlSlimParser::degradeRow(const char* reason) {
   flushTableFragment(t.packer);
 
   t.rowDegraded = true;
+  tableRowDegradedAny_ = true;
   t.pendingRowBytes = 0;
 
   // Text first, then images, matching the order the batch fallback always used. Callers only reach
