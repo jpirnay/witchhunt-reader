@@ -1078,10 +1078,27 @@ resident secondary framebuffer itself, idle while Home is up, as its home.
 a later Home visit at ~43 KB free, the case run 15 refused every time; the
 20 KB pixel-cache refusal (1b) fired on every carousel redraw at a
 reading-state contig of 15–20 KB, 124 B short of a 20 468 block once, and
-the carousel fell back to its slower repaint each time. (2) One decode per cover: the 200 × 390 grid
-thumb is scaled from the 340 × 540 carousel thumb (a 1-bit BMP → BMP
-resample), not decoded again from the full JPEG. (3) A decode that yields
-to input resumes or is deferred, not restarted from the first scan.
+the carousel fell back to its slower repaint each time. (2) One decode per cover. *Not* by scaling the
+200 × 390 grid thumb from the 340 × 540 carousel thumb — a dithered 1-bit
+image must never be rescaled (the thumb-grid artefact lesson of July) — but
+by a dual-sink decode: one JPEG pass at the DCT scale the larger target
+needs, feeding two `BmpConvertCtx` pipelines (each with its own fine
+resampler, ditherer and BMP output) from the same source rows. That is a
+change in all three thumbnail-converter paths (baseline MCU callback, full
+progressive band sink, DC preview) plus a two-size entry point in
+`Epub::generateThumbBmp` and Home's cover pass; about a day's careful work,
+worth ~45 % of a cold Home. The alternative of decoding once to an 8-bit
+intermediate on SD and dithering both sizes from it respects the invariant
+but saves only ~20 %. (3) A decode that yields to input resumes or is
+deferred, not restarted from the first scan.
+
+*R3 residual, the `KOSyncWorker` stack (F6):* re-examined 2026-09-26. The
+worker task is created by `post()` before its job releases the framebuffer
+for the network session, so the 10 KB stack is allocated while the buffer
+still occupies its block and never lands inside the freed hole; it bounds
+the hole (the `0x3fcbc778` pin) but does not split it. Since R1b Home lends
+rather than releases, and the post-sync silent restart re-lays the heap
+anyway, this stack is no longer on any failure path. Left as is.
 
 ## 8. Appendix — where the numbers come from
 
