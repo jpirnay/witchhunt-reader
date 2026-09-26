@@ -775,11 +775,6 @@ void EpubReaderActivity::onExit() {
     ReaderUtils::enforceExitFullRefresh(renderer);
   }
 
-  // Flush the reading-stats session before tearing down the epub: end() needs
-  // no live epub reference and persists the JSON. Sleep paths that bypass
-  // onExit() still end up here on resume because the activity is recreated.
-  globalReadingSessionTracker().end();
-
 #if CROSSPOINT_KOREADER_AUTOSYNC
   maybeAutoPushOnSleep();
   releaseAutoSyncSlot();
@@ -839,6 +834,14 @@ void EpubReaderActivity::onExit() {
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
+
+  // Flush the reading-stats session LAST: end() loads the whole history to merge one entry and
+  // rewrite the file, and it needs nothing of the reader (the tracker copied the id, title and
+  // author at begin()). Before the teardown it ran with the section, the page and the epub still
+  // resident -- run 17 loaded an 18-book store at 25 KB free / 9.7 KB contiguous, the tightest
+  // point of the whole exit path; here it has the ~18 KB the teardown just freed. Sleep paths
+  // that bypass onExit() still end up here on resume because the activity is recreated.
+  globalReadingSessionTracker().end();
 }
 
 void EpubReaderActivity::loop() {
