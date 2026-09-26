@@ -884,6 +884,23 @@ flash-resident. The parser's compiled-out per-page heap trace
 (`SCT_HEAP_TRACE`) is the instrument for it: the next device run carries
 it.
 
+*Device run 14 (16:53, memo cap + arena header walk + per-page heap
+trace):* **both regressions closed on the device.** Appendix-b from a wiped
+cache: no row refused, no escalation, 67 pages of grids in one pass; and
+the trace answers the run-13 question — free heap is flat at ~27 KB
+through the 29 text pages (run 13: 24 KB by page 25, 12 KB at the first
+row), so the style memos were the 26 KB. The table pages themselves still
+cost heap: at pages 30–38 free sits at 12–15 KB and the block count jumps
+from 387 to ~700–750, which is the fragment's *object* graph (a TextBlock
+object, a cell and a lines vector per cell, ~100 B each) — the bytes are
+in the arena, the objects are not, the next candidate for the phase-(b)
+lane. Chapter 3 from a wiped cache: **one pass, 180 pages in 7.6 s**
+(before: 157 → walk → 180, 6.5 s + 5.2 s), heap flat at 20–25 KB across
+all 180 pages, the walk's ring stages visible in the parse lane (34 264,
+peak 47 860 of 52 272). Lowest contiguous block seen by a gate: 5 108
+during a long-block split on a table page — above the arena floor, not by
+much.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
