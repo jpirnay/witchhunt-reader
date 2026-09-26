@@ -1892,11 +1892,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   // 54 of a 58-page chapter and the alt text was cached as if the file were
                   // corrupt.
                   using Walk = EpubImageManifest::Walk;
+                  // The walk's ring comes from the build arena when it has the room (the entry
+                  // reader scopes its block above the page block and releases it before returning),
+                  // else from the heap within imageWalkBudget().
                   Walk walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
-                                                                      self->imageWalkBudget());
+                                                                      self->imageWalkBudget(), self->buildArena_);
                   if (walk == Walk::NeedsHeap && self->recoverHeapForImageHeader()) {
                     walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
-                                                                   self->imageWalkBudget());
+                                                                   self->imageWalkBudget(), self->buildArena_);
                   }
                   if (walk == Walk::Resolved) {
                     dimsOk = true;
