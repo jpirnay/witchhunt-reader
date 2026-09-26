@@ -167,7 +167,8 @@ discarded, rather than kept silently).
 | Gate | Threshold (free / contig) | On refusal | Latched? |
 |---|---|---|---|
 | text layout, soft (`:654-691`) | 18 432 / 12 288 | log only | — |
-| text layout, hard (`:679-697`) | 9 216 / 6 128 | stop parse, keep partial cache if pages > 0 | status bit; auto-rebuilt only when pageCount == 0 |
+| text layout, hard (`:679-697`) | 9 216 / 6 128 heap builds; **3 568 arena builds (5 104 with bionic)** since run 10 | stop parse, keep partial cache if pages > 0 | status bit; auto-rebuilt only when pageCount == 0 |
+| word-vector growth (`ParsedText::addWord`, run 10) | largest block ≥ the four reserves | word dropped, parse stops at the next layout gate (partial cache) | — |
 | table row layout (`:727-753`) | 18 432 / 6 128 | row emitted as paragraphs | **no — baked into the cache** |
 | row buffer budget (`:180-188`) | 12 KB attributed bytes (not a heap sample) | row degrades | no — baked |
 | image header read (`:755-764`), only without a manifest | 16 384 / 8 192 | alt text | status bit |
@@ -209,7 +210,7 @@ discarded, rather than kept silently).
 | `heapAllowsInPlaceBuild` (`:3445-3499`) | CSS: max(67 584, 51 200 + ring) / max(32 768, ring + 8 192); else 61 440 / 28 672 | released build | X4 only; CSS floor derived from the 40 KB premise |
 | C `residentAbort` (`:1865-1874`) | 30 720 / 16 384 | released rebuild | resident C only |
 | B discard cap (`:1478`) | 3 discarded runs | B off for the book | — |
-| `maybeRestartForFragmentedHeap` (`:4456-4507`) | free ≥ 98 304 and contig < the framebuffer size | silent restart | was a constant `52*1024` (976 B under the X3's 52 272) — **fixed in R0**; two of three callers deliberately pass contig = 0 because the heap may be corrupt after decode failures and walking the TLSF free list there has crashed the IWDT |
+| `maybeRestartForFragmentedHeap` (`:4456-4507`) | free ≥ framebuffer + 32 768 (was a fixed 98 304 — run 10) and contig < the framebuffer size | silent restart | was a constant `52*1024` (976 B under the X3's 52 272) — **fixed in R0**; two of three callers deliberately pass contig = 0 because the heap may be corrupt after decode failures and walking the TLSF free list there has crashed the IWDT |
 | warm-pass borrow, secondary realloc | no threshold: try, evict caches, retry | degraded (AA off), then restart heuristic | — |
 
 ## 4. Inventory C — fixed-capacity and unbounded structures
@@ -649,6 +650,66 @@ A task created while the buffer is released pins the hole for the session;
 that is what held reading-time contig at ~22.5 KB in runs 6 and 7 and made
 the KOReader sync fail its 26 624 B TLS gate. Belongs with F6/R3: create
 long-lived tasks before the first release (or give them static stacks).
+
+*Device run 9 (X3, 2026-09-26 morning, step 2b flashed):* the drill from a
+wiped cache completed in Background-C; then the reader got stuck on one
+image page, recovered to Home, and the next open rendered it — with the
+serial capture dead for that window the stall is unattributed. Afterwards
+the buffer was gone for good: realloc failing at contig 36 852–40 948 with
+96 KB free, under the restart gate's 98 304 floor. That session is what
+prompted R1b.
+
+*Device run 10 (X3, 2026-09-26 11:00, R1b flashed):* R1b works — Home
+covers and first-open indexing log `Lent … / Returned …`, no realloc, no
+"drop the ePub and retry". Chapter 3 then came up **empty**, and the log
+shows a chain of four defects, all fixed in `1e9c2b4d6`:
+
+1. **The C build aborted at page 146 on the hard contig floor** — `14092
+   free, 3956 max alloc` against 6 128. Same page as run 8's second pass,
+   so it is where this chapter's heap bottoms out, not a random dip. The
+   6 KB floor was sized when every line's `TextBlock` bytes came from the
+   heap; with them in the page block, the largest phase-(b) heap request
+   is the 128-entry word vector of a 97-word block (`128 × 24 = 3 072 B`).
+   Arena builds now use 3 584 (5 120 with bionic, which builds a
+   transformed copy of the block's tail). To make that safe, `addWord`
+   checks the largest free block before its four `reserve`s — unchecked
+   `std::vector` growth is an `abort()` under `-fno-exceptions` — and a
+   refusal ends the parse on the partial-cache path.
+2. **Why contig was 3 956 with 14 KB free:** step 1c's
+   `releaseLayoutScratch` `shrink_to_fit` the word vectors at every slice
+   yield, and a yield lands mid-paragraph almost always (the 1 KB feed
+   chunk ends inside a `<p>`). Each slice therefore reallocated the vectors
+   to an odd exact size and the next words regrew them by doubling from
+   there — 40 → 80 → 160, a 3 840 B request *above* the 128-entry steady
+   state — a free/alloc pair per slice. Mid-paragraph the vectors now keep
+   their capacity (at most ~3.6 KB, reached once); an empty block still
+   gives them back, so the run-7 watermark fix stands.
+3. **The escalation could not place its inflate ring.** After the release
+   the hole was 53 236 contiguous; by the time `runBuildParse` asked for
+   the 33 824 B ring, the 10 KB owned arena and ~8.5 KB of setup had gone
+   into it (`Failed to allocate ZIP arena (33824 bytes, free=75432)`),
+   twice (the no-CSS retry too) → 0 pages → "showing empty chapter". The
+   forensics afterwards: `free 41116` + a 92 B path string + a 24 B block +
+   `free 10012`, i.e. two session-lifetime allocations made during that
+   failed build pin the hole, and the framebuffer never came back (contig
+   40 948, every refresh a half refresh, for every later chapter — spines
+   4 and 5 also failed the ring). A build on the owned arena now claims
+   the ring *first*, before the arena and before setup (skipped when the
+   inflated XHTML is already cached).
+4. **The recovery restart never fired:** 96 268–97 188 free against a
+   fixed 98 304 floor, 1.1–2 KB short, with 1.8× the buffer free. The
+   floor is now the buffer plus 32 KB (85 040 on the X3).
+
+Also from this run: `estimatePagesForSpine` assumed 1 024 B of XHTML per
+page; this chapter is 634 B/page (114 201 B → 180 pages), so both page
+LUTs doubled at page 112 — now 512 B/page. And the same 10 752 B task
+stack at `0x3fcbc778` bounds the hole again (run 7's `KOSyncWorker`
+finding, still R3). Run 8's "C's margin is about 5 KB of entry heap"
+should now read as: the floor, not the heap, ended those builds — the
+device had 14 KB free when it gave up. Device re-measurement pending:
+the drill from the reading state must complete in C (no `aborting parse`),
+and if it does escalate, no `Failed to allocate ZIP arena` and a resident
+buffer afterwards.
 
 **R3 — one declared budget per build, not thirty gates.** Once R1 and R2
 land, the lent region has a known layout: resident lane (ruleset + SAX +
