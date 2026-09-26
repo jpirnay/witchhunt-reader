@@ -3709,6 +3709,17 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
       // causes an interrupt WDT crash. Pass 0 for contigHeap — the restart heuristic treats 0 as
       // "contiguous block definitely too small", which is correct: malloc for ~52 KB just failed.
       LOG_ERR("ERS", "Heap after index: free=%lu", freeAfterIndex);
+      // Same one-shot forensics as the AA-path failure: run 13 lost the buffer here (53 236
+      // free after the release, 34 804 / 40 948 largest after the build) with nothing to say
+      // what the build had left in the hole.
+      {
+        static bool dumpedHeapOnce = false;
+        if (!dumpedHeapOnce) {
+          dumpedHeapOnce = true;
+          LOG_ERR("ERS", "Heap pin forensics (one-shot, free spans >= 1 KB and their neighbours):");
+          logHeapPinForensics();
+        }
+      }
       if (maybeRestartForFragmentedHeap(freeAfterIndex, 0)) {
         return BuildOutcome::Restarting;
       }

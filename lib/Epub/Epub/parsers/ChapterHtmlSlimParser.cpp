@@ -783,8 +783,11 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   // the hard text-layout floor plus a margin. The 18 KB soft bar was sized for heap-resident
   // lines; kept there it demoted every row of the Roosevelt appendix on the X3 at 11-18 KB free
   // while 38 KB of the arena sat idle (memory audit 2026-09, run 12).
-  const uint32_t freeFloor =
-      buildArena_ ? MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD + 3 * 1024 : MIN_FREE_HEAP_FOR_TEXT_LAYOUT;
+  // Device run 13: with the rows in the arena the first row of the Roosevelt appendix was still
+  // refused, 192 bytes under a 12 KB bar, and that one refusal cost a released rebuild. A grid
+  // row's heap share is now the TextBlock objects and the row/cell vectors, ~2-3 KB, so the bar
+  // sits one KB above the floor at which the parse itself gives up.
+  const uint32_t freeFloor = buildArena_ ? MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD + 1024 : MIN_FREE_HEAP_FOR_TEXT_LAYOUT;
   const uint32_t contigFloor =
       (buildArena_ ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA : MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) -
       LARGEST_FREE_BLOCK_SLACK;
