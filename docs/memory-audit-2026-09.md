@@ -438,6 +438,24 @@ unbuffered stdio the harness reproduces the device's arena high-water to
 4 bytes and names every heap site with counts; the one gap is the header
 walk, which the dump runs from the heap.
 
+**F8. The reading-stats store grows without bound, and the point where it
+stops fitting wipes it.** (Found 2026-09-26 while resolving R6.) No cap
+anywhere: `recordSession` creates a book entry before it checks
+`sessionSeconds > 0`, so every book ever opened gets a permanent entry;
+each book keeps one `[dayIndex, seconds]` bucket per calendar day it was
+read, for ever (read only by the web export); the global day buckets grow
+one per reading day for ever (the UI needs the last 30 days and the
+current streak). The load materialises three copies — the file as a
+`String`, the ArduinoJson document, the vectors — so 18 books cost a
+~27 KB transient today (startup minimum 39 224 from 66 416), about 1.5 KB
+per book, and the same load runs inside the reader at session end with
+the framebuffer resident and 35–45 KB free. At roughly twice today's file
+it fails there first — and `loadFromFile` sets `loaded_ = true` *before*
+parsing, so a `NoMemory` (or a corrupt file) leaves the store "loaded and
+empty", the session end records one session, and `saveToFile` writes that
+as the whole history (`ReadingStats.cpp:233`, `JsonSettingsIO.cpp:815`).
+The "store not loaded, would erase history" guard cannot catch it.
+
 ## 7. Recommendations
 
 Ordered by payoff per line of code; the first group is small enough to go in
@@ -872,6 +890,17 @@ reading position (the `images.pending` queue already knows which ones),
 and rank it above B's look-ahead when a pending image lies within a few
 pages. The lane borrows the same region the builds do, so it is exclusive
 with them by construction; the scheduler decision is the new part.
+
+**R8 — bound the reading-stats store (F8).** *Follow-up, agreed
+2026-09-26; not started.* (1) Mark the store loaded only when the parse
+succeeded or the file is genuinely absent, and refuse to save otherwise —
+this is the data-loss fix and comes first. (2) No entry for a zero-second
+session. (3) Drop per-book day buckets from RAM, or keep them for the web
+export only; trim the global buckets to the last ~400 days at save time.
+(4) Cap the book list by last-read date (~100). (5) Deserialize from the
+file stream instead of a `String`, which removes one of the three copies
+from the load peak. The Home-entry cost (R6's residual) falls out of (3)
+and (4).
 
 ## 8. Appendix — where the numbers come from
 
