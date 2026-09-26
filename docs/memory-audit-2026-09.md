@@ -925,6 +925,25 @@ draws no longer skip pages with images (undecoded ones show an "indexing"
 placeholder, cached ones come from their `.pxc`). Device validation
 pending.
 
+*Device run 15 (17:11, full cache wipe, chapter-jump fix flashed):* the
+jump into Chapter 3 now draws its page **650 ms** after the jump
+(`target resolved mid-build to page 1` at +480 ms through the spill
+lookup, the draw at +650 ms with the page's image as an "indexing"
+placeholder), against 7.6 s the run before; the full render follows the
+build's end. The cold Home is the other half of what the wipe showed, and
+it belongs to R1b's follow-ups rather than the reader: with four uncached
+covers the carousel took 23 s to settle. Strange Pictures' 1.3 MB
+progressive cover costs 4.7 s to extract and then **two** decodes from the
+full-resolution JPEG (340 × 540 for the carousel at DCT 1/2, 200 × 390 for
+the grid at 1/4), ~4.5 s each, and a decode that "yields to input" starts
+over from zero (three attempts for one size). On the second Home visit two
+heap refusals on the lent buffer: the thumbnail converter's row pipeline
+(`Not enough heap for JPEG decoder (28528 free, need 28672)`, 144 B short)
+and Home's own `OOM: cover buffer (20592 bytes)`. Both allocations can come
+from the lent region, which is idle by ~30 KB during a thumb decode; and
+the grid thumb should be derived from the carousel thumb, not decoded a
+second time from the JPEG.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
@@ -1030,6 +1049,15 @@ export only; trim the global buckets to the last ~400 days at save time.
 file stream instead of a `String`, which removes one of the three copies
 from the load peak. The Home-entry cost (R6's residual) falls out of (3)
 and (4).
+
+**R9 — the cold Home's cover pipeline (R1b follow-up).** *Filed 2026-09-26,
+not started.* (1) The thumbnail converter's row pipeline (MCU strip, row
+buffers, ditherers, ~28 KB reserve) and Home's 20 KB cover buffer take the
+lent region when it is there, so the two refusals of run 15 cannot happen
+with 30 KB of the region idle. (2) One decode per cover: the 200 × 390 grid
+thumb is scaled from the 340 × 540 carousel thumb (a 1-bit BMP → BMP
+resample), not decoded again from the full JPEG. (3) A decode that yields
+to input resumes or is deferred, not restarted from the first scan.
 
 ## 8. Appendix — where the numbers come from
 
