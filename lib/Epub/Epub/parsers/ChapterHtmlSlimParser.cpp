@@ -109,6 +109,22 @@ constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
 #endif
 
+// The hard contiguous floor for a build whose line bytes live in the build arena (setBuildArena):
+// there the largest heap request phase (b) still makes is the word vector of a 97-word block
+// (the long-block split bound) at its 128-entry capacity, 128 * sizeof(std::string) = 3,072 B,
+// and everything else per paragraph is smaller. The 6 KB floor above was sized when every
+// line's TextBlock bytes came from the heap too; keeping it for arena builds aborted Strange
+// Pictures' Chapter 3 at page 146 with 3,956 B contiguous and 14 KB free (device run 10), and
+// the released rebuild that followed is what fragments the heap for the rest of the session.
+// Bionic reading doubles the word count of the layout scratch and builds a transformed copy of
+// the block's tail (up to 2 * 97 entries), so it keeps a higher floor.
+#ifndef EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA
+#define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA (3584)
+#endif
+#ifndef EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC
+#define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC (5 * 1024)
+#endif
+
 // Reading an image header straight out of the ZIP
 // (ImageDecoderFactory::getDimensionsFromZipEntry) — the only allocation in image handling big
 // enough to be worth gating, see the image branch in startElement.
@@ -145,6 +161,8 @@ constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_FREE_H
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_ALLOC;
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC;
+constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA;
+constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA_BIONIC = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC;
 
 // heapAllowsTableRowLayout() guards the row-layout allocations (cell wrapping allocates
 // TextBlock vectors). It deliberately reuses the TEXT LAYOUT thresholds above rather than
@@ -651,8 +669,19 @@ CssStyle ChapterHtmlSlimParser::resolvedImgStyle(const std::string& classAttr) {
   return resolved;
 }
 
-bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
+bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase, const ParsedText* block) {
   if (streamFailed) {
+    return false;
+  }
+
+  // A block that could not grow its word vectors is already missing words; laying it out would
+  // write a silently truncated paragraph into the cache. Same exit as the floors below.
+  if (block != nullptr && block->wordGrowthRefused()) {
+    LOG_ERR("EHP", "Word vector growth refused (%u free, %u max alloc), aborting parse before %s", ESP.getFreeHeap(),
+            ESP.getMaxAllocHeap(), phase);
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
     return false;
   }
 
@@ -676,8 +705,12 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   // 6132 against a 6144 floor. Free heap was 16596, nearly double its own floor of 9216; nothing
   // was actually exhausted. Losing half a chapter to twelve bytes of allocator bookkeeping is the
   // one outcome this gate exists to prevent.
-  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD &&
-      maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK) {
+  // See EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA: with line bytes in the arena the heap floor
+  // only has to cover the per-paragraph vectors.
+  const size_t hardContigFloor = buildArena_ == nullptr ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD
+                                 : bionicReadingEnabled ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA_BIONIC
+                                                        : MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA;
+  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD && maxAllocHeap >= hardContigFloor - LARGEST_FREE_BLOCK_SLACK) {
     // Deliberately does NOT latch image handling off any more. This gate trips on a transient dip
     // — and trips often, because the soft floor (12 * 1024) is a value the allocator can never
     // report: every largest-free-block it returns is 512k - 12, so the neighbours are 12276 and
@@ -857,7 +890,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
 
     if (currentTextBlock->size() > 96) {
-      if (!ensureHeapForTextLayout("long-block split")) {
+      if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
         partWordBufferIndex = 0;
         nextWordContinues = false;
         return false;
@@ -994,6 +1027,10 @@ void ChapterHtmlSlimParser::releasePageBlock() {
 
 void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<std::string, std::string>> anchors) {
   externalPageBreakAnchors.clear();
+  externalPageBreakAnchors.reserve(anchors.size());
+  // One label per matched anchor plus the top-of-file one: size it here so the per-page record
+  // never doubles mid-parse (inline pagebreak markers past this hint still grow it normally).
+  pageBreakLabels.reserve(anchors.size() + 1);
   topOfFilePageLabel.clear();
   topOfFilePageLabelEmitted = false;
   for (auto& [id, label] : anchors) {
@@ -3618,7 +3655,7 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
-  if (!ensureHeapForTextLayout("paragraph layout")) {
+  if (!ensureHeapForTextLayout("paragraph layout", currentTextBlock.get())) {
     layoutFailed = true;
     currentTextBlock.reset();
     return;
@@ -4164,7 +4201,7 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
   if (text && !text->isEmpty()) {
     // Guard here rather than once per table: in streaming mode this is the only gate the
     // cells pass through, and layoutAndExtractLines below is the allocation that fails.
-    if (!ensureHeapForTextLayout("table cell paragraph")) {
+    if (!ensureHeapForTextLayout("table cell paragraph", text.get())) {
       return false;  // parse already stopped; cell text freed on return
     }
     auto cellBlockStyle = BlockStyle();

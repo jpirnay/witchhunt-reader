@@ -1,5 +1,6 @@
 #include "ParsedText.h"
 
+#include <Arduino.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -194,6 +195,7 @@ static std::vector<TokenSpan> tokenizeBionicWord(const std::string& word) {
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious, const uint8_t sizePct) {
   if (word.empty()) return;
+  if (wordGrowthRefused_) return;  // the parse is being aborted; see wordGrowthRefused()
 
   word = utf8NfcNorm(std::move(word));
 
@@ -203,6 +205,19 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     size_t newCapacity = std::max<size_t>(16, words.capacity());
     while (newCapacity < requiredSize) {
       newCapacity *= 2;
+    }
+    // The four reserves below are unchecked heap growth (abort() on failure under
+    // -fno-exceptions). Require the largest free block to hold all four, plus a header
+    // each -- conservative, since they need not share a block, but this only bites when the
+    // heap is nearly gone, and then a partial-cache abort beats a crash.
+    {
+      constexpr size_t ALLOC_HEADER_SLACK = 16;
+      const size_t needed = newCapacity * (sizeof(std::string) + sizeof(EpdFontFamily::Style) + sizeof(uint8_t)) +
+                            newCapacity / 8 + 4 * ALLOC_HEADER_SLACK;
+      if (ESP.getMaxAllocHeap() < needed) {
+        wordGrowthRefused_ = true;
+        return;
+      }
     }
     words.reserve(newCapacity);
     wordStyles.reserve(newCapacity);
@@ -510,19 +525,18 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<size_t>().swap(ans_);
   std::vector<int16_t>().swap(lineXPosScratch_);
   std::string().swap(allText_);
-  // The word vectors carry the paragraph in progress: an empty block gives them back whole, a
-  // block mid-paragraph keeps its words but not the 128-entry capacity (it regrows from there,
-  // once per slice at most).
+  // The word vectors carry the paragraph in progress: an empty block gives them back whole; a
+  // block mid-paragraph keeps them AS THEY ARE. This used to shrink_to_fit them, and a slice
+  // yields inside a paragraph almost always (the 1 KB feed chunk ends mid-<p>), so every yield
+  // reallocated the vectors to their exact size and the next words regrew them by doubling
+  // from there -- 40 -> 80 -> 160 entries, a 3,840 B request above the 128-entry steady state,
+  // and a free/alloc pair per slice that left the heap at 3,956 B contiguous with 14 KB free
+  // (device run 10). The capacity kept here is at most 128 entries, ~3.6 KB, reached once.
   if (words.empty()) {
     std::vector<std::string>().swap(words);
     std::vector<EpdFontFamily::Style>().swap(wordStyles);
     std::vector<bool>().swap(wordContinues);
     std::vector<uint8_t>().swap(wordSizes);
-  } else {
-    words.shrink_to_fit();
-    wordStyles.shrink_to_fit();
-    wordContinues.shrink_to_fit();
-    wordSizes.shrink_to_fit();
   }
 }
 

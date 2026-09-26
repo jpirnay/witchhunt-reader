@@ -49,8 +49,14 @@ class Epub;
 // Erring low is cheap here because MAX_RESERVED_PAGES bounds the whole downside: even a spine
 // that saturates it reserves only 2 KB (Section's u32 LUT) and 4 KB (the 8-byte paragraph LUT).
 // Past the cap the vector grows normally.
+//
+// 512 bytes of XHTML per rendered page, not 1024: Strange Pictures' Chapter 3 is 114,201 bytes
+// and lays out to 180 pages (634 B/page), so the old estimate (111 pages) had both LUTs doubling
+// at page 112 -- a 1.8 KB and a 0.9 KB allocation mid-parse, on a heap that a borrowed build
+// runs down to ~4 KB contiguous by then (device run 10). Overestimating costs 4 B + 8 B per
+// unused entry; underestimating costs a doubling while the heap is at its lowest.
 inline constexpr size_t estimatePagesForSpine(const size_t inflatedSize) {
-  constexpr size_t XHTML_BYTES_PER_PAGE = 1024;
+  constexpr size_t XHTML_BYTES_PER_PAGE = 512;
   constexpr size_t MAX_RESERVED_PAGES = 512;
   const size_t pages = inflatedSize / XHTML_BYTES_PER_PAGE;
   if (pages > MAX_RESERVED_PAGES) return MAX_RESERVED_PAGES;
@@ -491,7 +497,10 @@ class ChapterHtmlSlimParser final : public Print {
   void initializeFontSizeBaseline();
   void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
   CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;
-  bool ensureHeapForTextLayout(const char* phase);
+  // `block` is the ParsedText about to be laid out (null when there is none): a block whose word
+  // vectors could not grow (ParsedText::wordGrowthRefused) aborts the parse here, on the same
+  // partial-cache path as the heap floors, instead of laying out a truncated paragraph.
+  bool ensureHeapForTextLayout(const char* phase, const ParsedText* block);
   // Whether the heap can afford the ~32 KB inflate ring a ZIP image-header read needs. Checked at
   // the call site, never latched: the heap recovers between pages, and a single dip must not
   // disable images for the rest of the chapter (that result gets baked into the section cache).

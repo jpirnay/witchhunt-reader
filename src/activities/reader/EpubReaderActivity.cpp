@@ -4548,19 +4548,23 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 }
 
 bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, const uint32_t contigHeap) {
-  // Reboot-based defrag should only run when the failure clearly looks like
-  // fragmentation (plenty of total heap, but contiguous block too small).
-  constexpr uint32_t RESTART_MIN_FREE_HEAP_BYTES = 96 * 1024;
   // The block the realloc needs: one framebuffer (52,272 B on the X3, 48,000 B on the X4). A
   // constant 52 KB here used to sit 976 B under the X3's real size, so a heap with a block just
   // too small for the buffer could read as "not fragmented" and stay degraded.
   const uint32_t secondaryBufferBytes =
       static_cast<uint32_t>(renderer.getDisplayWidthBytes()) * static_cast<uint32_t>(renderer.getDisplayHeight());
+  // Reboot-based defrag should only run when the failure clearly looks like fragmentation:
+  // the buffer plus a reading session's working set is free, yet no block holds the buffer.
+  // Stated relative to the buffer, not as a fixed 96 KB: the X3 sat at 96.3 KB free with a
+  // 40.9 KB largest block for the rest of a session (device run 10) -- 1.8x the buffer free,
+  // every refresh degraded, and the old absolute floor 2 KB out of reach.
+  constexpr uint32_t RESTART_READING_MARGIN_BYTES = 32 * 1024;
+  const uint32_t restartMinFreeHeap = secondaryBufferBytes + RESTART_READING_MARGIN_BYTES;
 
   if (fragmentationRecoveryRestartAttempted_) {
     return false;
   }
-  if (freeHeap < RESTART_MIN_FREE_HEAP_BYTES || contigHeap >= secondaryBufferBytes) {
+  if (freeHeap < restartMinFreeHeap || contigHeap >= secondaryBufferBytes) {
     return false;
   }
 

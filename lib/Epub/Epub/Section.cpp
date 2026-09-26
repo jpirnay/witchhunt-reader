@@ -272,6 +272,12 @@ constexpr size_t EXTRACT_CHUNK_BYTES = 8192;
 // (PARSE_CHUNK_BYTES base + EXTRACT_CHUNK_BYTES extraction scope) + alignment.
 constexpr size_t SCT_PARSE_ARENA_BYTES = 10 * 1024;
 
+// Size of the heap-backed arena that hosts the EntryReader's readBuf + inflate ring for an entry
+// of `inflatedSize` bytes, when the main arena cannot (see runBuildParse).
+static size_t zipArenaBytesFor(const size_t inflatedSize) {
+  return PARSE_CHUNK_BYTES + InflateReader::ringSizeFor(inflatedSize) + 2 * alignof(std::max_align_t);
+}
+
 // Bump when preview expansion semantics change. This is hashed only for preview-enabled
 // variants, leaving the much more common preview-off section caches untouched.
 constexpr uint8_t INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION = 2;
@@ -689,6 +695,7 @@ struct Section::BuildState {
   // per-spine linear central-directory scan that dominated the compile. Valid when statValid.
   ZipFile::FileStatSlim spineStat = {};
   bool statValid = false;
+  bool statResolved = false;  // resolveSpineStat ran (statValid/inflatedSize are meaningful)
   CssParser* cssParser = nullptr;
   std::vector<uint32_t> lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
@@ -901,6 +908,31 @@ void Section::finishInlineFootnotePreviewResolve(BuildState& st) {
   }
 }
 
+bool Section::resolveSpineStat(BuildState& st) {
+  if (st.statResolved) return true;
+  st.inflatedSize = 0;
+  st.statValid = epub->getSpineItemStat(spineIndex, &st.spineStat);
+  if (st.statValid) {
+    st.inflatedSize = st.spineStat.uncompressedSize;
+  } else if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
+    LOG_ERR("SCT", "Failed to get inflated size for %s", epub->getSpineItem(spineIndex).href.c_str());
+    return false;
+  }
+  st.statResolved = true;
+  return true;
+}
+
+bool Section::htmlCacheReusable(const BuildState& st) const {
+  if (st.inflatedSize == 0) return false;
+  const std::string htmlCachePath = getSectionHtmlCachePath();
+  if (!Storage.exists(htmlCachePath.c_str())) return false;
+  FsFile probe;
+  if (!Storage.openFileForRead("SCT", htmlCachePath, probe)) return false;
+  const bool reusable = probe.size() == st.inflatedSize;
+  probe.close();
+  return reusable;
+}
+
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
   st.propertyHash = calculatePropertyHash(p);
@@ -923,12 +955,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // spine open (the compile's dominant cost, measured). uncompressedSize doubles as the
   // inflated size — no separate getSpineItemInflatedSize scan.
   const uint32_t phaseSetupStart = millis();
-  st.inflatedSize = 0;
-  st.statValid = epub->getSpineItemStat(spineIndex, &st.spineStat);
-  if (st.statValid) {
-    st.inflatedSize = st.spineStat.uncompressedSize;
-  } else if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
-    LOG_ERR("SCT", "Failed to get inflated size for %s", st.localPath.c_str());
+  if (!resolveSpineStat(st)) {
     return BuildPhaseResult::Failed;
   }
 
@@ -1099,6 +1126,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         st.extractDone = true;  // phase (a) inflation skipped
         st.reusedHtml = true;   // keep the cache on cleanup rather than deleting it
         st.tempPath = htmlCachePath;
+        st.dropZipArena();  // a ring claimed early in startBuild is not needed on this path
         LOG_INF("SCT", "createSectionFile spine=%d reusing cached HTML (%u bytes, free=%lu)", spineIndex,
                 static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
       } else {
@@ -1118,8 +1146,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
       st.zip.reset(new (std::nothrow) ZipFile(epub->getPath()));
       if (st.zip) {
         epub->primeZip(*st.zip);  // reuse the book's cached EOCD details (skip the rescan)
-        const size_t zipArenaBytes =
-            PARSE_CHUNK_BYTES + InflateReader::ringSizeFor(st.inflatedSize) + 2 * alignof(std::max_align_t);
+        const size_t zipArenaBytes = zipArenaBytesFor(st.inflatedSize);
         // External region (borrowed framebuffer) with room for the ZIP scope:
         // host readBuf + ring directly in the main arena — the whole extract
         // phase then touches the heap not at all.
@@ -1130,7 +1157,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         } else {
           // Heap-backed: one entry-sized block for the reader's readBuf + ring,
           // alive only through phase (a) — a single scope the reader releases.
-          st.zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
+          // Usually claimed already, first thing in startBuild (see there).
+          if (!st.zipArena) st.zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
           if (st.zipArena && st.zipArena->valid()) {
             st.reader.reset(new (std::nothrow) ZipFile::EntryReader(*st.zip, PARSE_CHUNK_BYTES, st.zipArena.get()));
           } else {
@@ -1755,6 +1783,32 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
   if (!buildState_) {
     LOG_ERR("SCT", "Failed to allocate build state (free=%lu)", esp_get_free_heap_size());
     return false;
+  }
+  if (!resolveSpineStat(*buildState_)) {
+    buildState_.reset();
+    return false;
+  }
+  // A build on the owned heap arena claims its inflate ring FIRST -- before that arena and
+  // before every setup allocation. The ring is the largest heap block a released build needs
+  // (33,824 B for a 32 KB ring), and a released build is mostly reached as the escalation after
+  // a borrowed build ran out of heap: the moment the freed framebuffer is the only hole that
+  // size. Device run 10 (X3): the 10 KB arena and ~8.5 KB of setup went into that hole first,
+  // the ring no longer fit, the chapter came up empty, and the pins left behind kept the
+  // framebuffer from ever coming back. Skipped when the inflated XHTML is already cached (no
+  // ring needed) and on the lent arena (the ring lives inside it, see runBuildParse). A failure
+  // here is not fatal: runBuildParse retries the allocation after setup, as before.
+  if (!arenaBacked && !htmlCacheReusable(*buildState_)) {
+    const size_t zipArenaBytes = zipArenaBytesFor(buildState_->inflatedSize);
+    buildState_->zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
+    if (buildState_->zipArena && buildState_->zipArena->valid()) {
+      LOG_INF("SCT", "createSectionFile spine=%d claimed the inflate ring first (%u bytes, free=%lu contig=%lu)",
+              spineIndex, static_cast<uint32_t>(zipArenaBytes), static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    } else {
+      buildState_->zipArena.reset();
+      LOG_ERR("SCT", "createSectionFile spine=%d could not claim the inflate ring first (%u bytes, free=%lu)",
+              spineIndex, static_cast<uint32_t>(zipArenaBytes), static_cast<unsigned long>(esp_get_free_heap_size()));
+    }
   }
   if (!buildState_->initArena(externalScratch_)) {
     LOG_ERR("SCT", "Failed to allocate build arena (free=%lu)", esp_get_free_heap_size());

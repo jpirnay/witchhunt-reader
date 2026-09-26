@@ -75,7 +75,12 @@ class ParsedText {
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
-  bool isContinuation_ = false;       ///< true after an intermediate flush; suppresses re-applying paragraph indent
+  bool isContinuation_ = false;  ///< true after an intermediate flush; suppresses re-applying paragraph indent
+  // Set (and never cleared) when addWord could not grow the word vectors within the largest
+  // free heap block: the word was dropped and the parser must abort the parse at its next
+  // layout gate. std::vector growth cannot fail gracefully under -fno-exceptions, so the
+  // check has to happen before the reserve.
+  bool wordGrowthRefused_ = false;
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
   void applyParagraphIndent(const GfxRenderer& renderer, int fontId);
@@ -151,6 +156,10 @@ class ParsedText {
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT);
+  // True once addWord had to drop a word because the word vectors could not grow (see
+  // wordGrowthRefused_). ChapterHtmlSlimParser::ensureHeapForTextLayout turns it into a
+  // partial-cache abort.
+  bool wordGrowthRefused() const { return wordGrowthRefused_; }
   // If every word shares one non-100% size (a span wrapping the whole paragraph, e.g.
   // Alice's mouse-tale lines), fold that percent into the block-level fontSizeMultiplier
   // and reset the per-word sizes to 100. This routes whole-paragraph spans through the

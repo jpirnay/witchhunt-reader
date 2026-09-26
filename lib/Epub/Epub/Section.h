@@ -88,6 +88,12 @@ class Section {
   // CSS/heap fallback recursion lives in the entry function, not here), which is what lets
   // them be called either back-to-back (blocking) or with Parse re-entered across ticks.
   BuildPhaseResult runBuildSetup(BuildState& st);
+  // Resolves the spine's ZIP stat (inflated size) into the build state once; setup and the
+  // parse's EntryReader::open reuse it. False when the entry cannot be sized at all.
+  bool resolveSpineStat(BuildState& st);
+  // True when the book-keyed inflated-XHTML cache for this spine exists with the expected size,
+  // i.e. runBuildParse will feed the parser from it and never needs an inflate ring.
+  bool htmlCacheReusable(const BuildState& st) const;
   // Feeds the chapter XHTML to the parser. budgetMs == 0 (blocking path): streams the
   // ZIP entry directly and consumes it in one call. budgetMs != 0 (sliced path): runs in
   // two budget-sliced phases — (a) inflate the entry to a temp SD file, release all ZIP
