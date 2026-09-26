@@ -784,7 +784,8 @@ stack pinning the hole at Home (F6), and the lend-vs-release revisit for
 the C-failure escalation once the parse's remaining heap objects move into
 the page block.
 
-**R4 — give every cap a defined behaviour past the cap (F5).** The rule to
+**R4 — give every cap a defined behaviour past the cap (F5).** *Done on
+`memory/audit-2026-09` (2026-09-26).* The rule to
 apply to §4: a cap is acceptable when (i) it is provably above any input and
 the bound is written next to it, or (ii) exceeding it is logged at `LOG_ERR`
 once and latched in the section status byte so the reader can say "chapter
@@ -801,6 +802,28 @@ build side (split the page, or fail the build with the truncated status) so
 nothing is ever built that cannot be loaded. For §4.4, the R2 lanes give the
 per-paragraph and per-page containers a fixed capacity with a logged
 fallback; `scanByFont_` gets a bounded scan buffer.
+
+*What landed for R4 (2026-09-26):* the SAX depth cap now flattens the tree
+past 64 levels instead of shifting it (the excess elements are unreported,
+their text goes to the deepest reported ancestor; host test); footnotes per
+page 16 → 64 with the refusal reported (the `test_spine_toc_edges` goldens
+change by exactly the four links the old cap dropped); a footnote href too
+long to navigate is refused rather than stored truncated;
+`ChapterHtmlSlimParser::noteCapOverflow` logs each cap once at ERR and the
+union lands in the section status byte as `kStatusSimplified`, which the
+reader logs on a cache hit and never rebuilds on (deterministic);
+`Page::MAX_ELEMENTS` and `Page::MAX_PAGES_PER_SECTION` now bind on the
+build side too (§4.2: serialize clamps and reports, the parse stops
+truncated at 10 000 pages), the printed-page label count stops at the
+`uint16`; `MAX_RULES` overflow writes a cache stamped truncated in the
+existing flags byte (`CssParser::rulesTruncated()`, logged on every load)
+instead of no cache and a re-parse per open; the font prewarm scan buffer
+is bounded at 4 KB per (font, style). Left as they are, documented as
+bounded or time-only: SAX attributes (names/values the layout does not
+use), `partWordBuffer` 200 B, float nesting, `FootnotePreviews` 256/512,
+ZIP entry names, SD font families, nested footnote jumps, `anchorsAwaitingLine_`.
+Not done: a UI hint for `kStatusSimplified` (a product decision; the
+truncated-chapter hint is the model if wanted).
 
 **R5 — keep the census honest.** Commit the `--arena` mode and
 `WH_HOST_STDIO_UNBUFFERED` (in the working tree at the time of writing:
