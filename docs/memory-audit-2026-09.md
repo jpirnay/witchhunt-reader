@@ -849,6 +849,17 @@ byte-identical for the three table fixtures. This is the first piece of
 R2 step 3 (the parse's remaining heap objects into the phase-(b) lane);
 device validation pending on appendix-b.
 
+*Run 12, a second item the tables pointed at:* every image chapter was
+being laid out **twice** on a borrowed build. The log for Chapter 3 shows
+each image's header "beyond the 4 KB window", the first walk stage wanting
+16 896 B of heap against a budget of ~14 KB, and every image deferred to
+the build's end — where the walk resolved them all from the idle arena and
+the chapter was rebuilt (157 → 180 pages, 6.5 s + 5.2 s, on every open).
+`resolveDeferredNow` now hands the build arena to `walkEntry` (which
+already knew how to stage a walk from one; the entry reader scopes its
+block above the page block), so headers resolve inline and the second
+pass disappears. Device validation pending (`3b6f28dbc`).
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
