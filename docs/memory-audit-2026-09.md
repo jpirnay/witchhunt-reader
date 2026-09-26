@@ -844,15 +844,23 @@ bytes, heap-only / arena): moby-dick 62 933 / 54 697, test_large_css
 61 555 / 41 388, table_streaming 56 809 / 36 164, inline_footnotes
 42 805 / 29 121. `UPDATE_HEAP_BASELINE=1` re-baselines on purpose.
 
-**R6 — audit the warm-boot footprint.** *Added 2026-09-26 from run 11.*
-The post-sync silent restart (`Silent restart (target=home)`,
-`RTC_SW_CPU_RST`) came up at `setup_complete` with **52 908 free /
-34 804 largest** against the cold boot's 62 280 / 53 236 half an hour
-earlier, and its startup minimum was 39 204 (cold: 57 160). Something on
-the restart-to-Home path costs ~9 KB of heap and ~18 KB of contiguity
-before Home draws — and every post-sync reboot, whose whole purpose is to
-restore the baseline, starts from there. Trace the `Startup[...]` phases of
-a warm boot against a cold one and find the allocation.
+**R6 — audit the warm-boot footprint.** *Resolved 2026-09-26: a
+measurement artefact, no warm-boot-specific cost.* The post-sync silent
+restart (`RTC_SW_CPU_RST`) read 52 908 free / 34 804 largest at
+`setup_complete` against the cold boot's 62 280 / 53 236 — but on the warm
+boot Home enters *before* the mark (no boot splash), on the cold boot
+*after* it. Home's entry loads the reading-stats store for its history line
+(`ScopedLoad`, 18 books), and that is the whole difference: cold boot,
+right after Home enters, 54 348 free / 32 756 largest; warm boot 57 936 /
+34 804. Ten seconds in, both sit at 30.6 KB free at Home. What the
+comparison does show is the cost of that load itself: a ~17 KB transient
+(startup minimum 39 224) that takes the boot heap's largest block from
+~55 KB to ~34 KB before the first Home draw, and the store is released
+afterwards, so the contiguity loss is fragmentation from the transient.
+Home's later needs — the cover lend/return leaves it at 11–15 KB largest,
+and the KOReader sync's 26 624 B TLS gate has failed at Home before (F6) —
+make that worth a smaller projection for the history line (per-book totals
+only) rather than the whole store. Filed under R3's Home-time pins.
 
 **R7 — schedule image work ahead of far look-ahead.** *User direction,
 2026-09-26.* The background lanes today parse the next section (B) or the
