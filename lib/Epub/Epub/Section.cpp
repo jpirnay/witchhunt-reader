@@ -182,6 +182,10 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
+// The allocator reports its largest free block a few bytes under the round number (the block
+// header), so a floor sitting exactly on a power of two is refused by a heap that has the
+// memory. Same constant and reason as ChapterHtmlSlimParser's LARGEST_FREE_BLOCK_SLACK.
+constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
 
 // --- Heap-analysis instrumentation (temporary; heap-analysis branch) ------------------------
 // The fragmented-heap restart fires because a 52 KB framebuffer realloc cannot find one
@@ -733,6 +737,15 @@ struct Section::BuildState {
   std::unique_ptr<BuildArena> zipArena;
   // Peak use of the (destroyed-by-log-time) zipArena, for the done-telemetry.
   uint32_t zipArenaHighWater = 0;
+  // Per-lane arena use for the done-telemetry (BuildArena::beginLane): what setup left
+  // resident, the extraction phase's peak above that (ring + grow, sharedZipScope builds
+  // only), what phase (b) started from once the SAX state was in, and the parse's peak
+  // above that (page blocks, font slots, draw block). These are the numbers a declared
+  // per-phase budget is derived from (memory audit 2026-09, R3).
+  uint32_t laneSetup = 0;
+  uint32_t laneExtract = 0;
+  uint32_t laneResident = 0;
+  uint32_t laneParse = 0;
   std::unique_ptr<ZipFile> zip;
   std::unique_ptr<ZipFile::EntryReader> reader;
   // Raw view of the feed buffer, backed by the build arena. Managed exclusively
@@ -1086,6 +1099,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // resolve that runs between the phases needs a SAX parser of its own; initialising this one
   // first would put both on the heap at once for no reason. See runBuildParse.
   st.setupMs = millis() - phaseSetupStart;
+  if (st.arena) st.laneSetup = static_cast<uint32_t>(st.arena->used());
   SCT_TRACE_HEAP(spineIndex, "after_setup");
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
           static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
@@ -1111,6 +1125,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
       LOG_ERR("SCT", "Failed to allocate parse chunk buffer (free=%lu)", esp_get_free_heap_size());
       streamFailed = true;
     }
+    if (st.arena) st.arena->beginLane();  // extraction lane: ring + grow block, on top of setup
 
     // Book-keyed unzipped-HTML cache (adapted from crosspoint-reader PR #2452 by GitHub user
     // itsthisjustin): the spine's
@@ -1249,6 +1264,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     st.reader.reset();
     st.zip.reset();
     st.dropZipArena();
+    if (st.arena) st.laneExtract = static_cast<uint32_t>(st.arena->laneHighWater());
     st.tempFile.flush();
     st.tempFile.close();
     st.extractDone = true;
@@ -1330,6 +1346,10 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         st.cssParser->clear();
       }
       return BuildPhaseResult::Failed;
+    }
+    if (st.arena) {
+      st.laneResident = static_cast<uint32_t>(st.arena->used());
+      st.arena->beginLane();  // parse lane: page blocks, font slots, the mid-build draw block
     }
   }
 
@@ -1466,6 +1486,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     cssLowHeapDegraded_ = !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
+  if (st.arena) st.laneParse = static_cast<uint32_t>(st.arena->laneHighWater());
   SCT_TRACE_HEAP(spineIndex, "after_parse");
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
@@ -1670,12 +1691,18 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   LOG_INF("SCT",
           "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
           spineIndex, totalMs, streamMs, st.setupMs, st.parseMs, finalizeMs, pageCount, fileSize);
-  // Arena telemetry: how much of the budgets a build actually used. zipHW is the
-  // entry-sized phase-(a) arena's peak (0 = reused-HTML path, no ZIP state).
-  LOG_INF("SCT", "createSectionFile spine=%d arena: cap=%u highWater=%u failedAlloc=%u zipHW=%u", spineIndex,
-          st.arena ? static_cast<uint32_t>(st.arena->capacity()) : 0,
-          st.arena ? static_cast<uint32_t>(st.arena->highWater()) : 0,
-          st.arena ? static_cast<uint32_t>(st.arena->failedAllocSize()) : 0, st.zipArenaHighWater);
+  // Arena telemetry: how much of the budgets a build actually used, and per lane -- setup =
+  // resident after setup (ruleset), extract = the extraction phase's peak above that (ring +
+  // grow; 0 when the ring was heap-backed or the HTML cache was reused), resident = what phase
+  // (b) started from (setup + chunk + SAX state), parse = the parse's peak above that (page
+  // blocks, font slots, draw block). zipHW is the entry-sized heap zipArena's peak (0 = ring in
+  // the main arena, or no ZIP state).
+  LOG_INF("SCT",
+          "createSectionFile spine=%d arena: cap=%u highWater=%u lanes(setup=%u extract=%u resident=%u parse=%u) "
+          "failedAlloc=%u zipHW=%u",
+          spineIndex, st.arena ? static_cast<uint32_t>(st.arena->capacity()) : 0,
+          st.arena ? static_cast<uint32_t>(st.arena->highWater()) : 0, st.laneSetup, st.laneExtract, st.laneResident,
+          st.laneParse, st.arena ? static_cast<uint32_t>(st.arena->failedAllocSize()) : 0, st.zipArenaHighWater);
   return BuildPhaseResult::Done;
 }
 
@@ -1751,7 +1778,8 @@ bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool aren
                          static_cast<uint32_t>(cssRuleCount * CssParser::CSS_INDEX_BYTES_PER_RULE) + 8 * 1024);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;
+  // Output-changing refusal (a no-CSS variant), so the contig bar carries the allocator slack.
+  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap + LARGEST_FREE_BLOCK_SLACK >= requiredContig;
 }
 
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,

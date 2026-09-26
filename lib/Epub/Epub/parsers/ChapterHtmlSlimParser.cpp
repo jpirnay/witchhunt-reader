@@ -788,7 +788,10 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
 bool ChapterHtmlSlimParser::heapAllowsImageHeaderRead() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
-  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER && maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER;
+  // Content-dropping floor (alt text instead of the image), so it carries the allocator slack
+  // like every other one in this file: a largest-free-block reading is never the round number.
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER &&
+                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER - LARGEST_FREE_BLOCK_SLACK;
   if (!ok) {
     LOG_DBG("EHP", "Skipping ZIP image-header read (%u free, %u max alloc); image falls back to alt text", freeHeap,
             maxAllocHeap);

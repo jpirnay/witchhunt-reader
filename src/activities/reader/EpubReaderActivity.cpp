@@ -129,56 +129,33 @@ constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
 // transient is also held under RenderLock, so no other reader work can allocate into the dip.
 constexpr uint32_t PRE_RENDER_MIN_FREE_HEAP_BYTES = 44 * 1024;
 
-// Background B (next-section pre-build) heap gates. Unlike the foreground indexing path,
-// B runs with the secondary framebuffer live (~52 KB less headroom). Refuse rather than
-// risk OOM — the foreground blocking path remains the fallback. Overridable for tuning.
+// Background B (next-section pre-build) builds ONLY inside the borrowed secondary framebuffer.
+// It used to carry a second, heap-backed admission path (BG_BUILD_PARSE_MIN_FREE / EXTRACT_BASE /
+// MIN_CONTIG and a 72 KB CSS floor, derived from a 40 KB resolver floor no build has used since
+// every build went lean) for the case where there is no buffer to lend. The HEAP_GATE trace never
+// saw those gates admit on any spine of any book on either device -- ~57 KB free / ~25 KB contig
+// is the reading steady state and the floors started at 63 KB / 41 KB -- so the path was dead
+// code that cost a central-directory scan per target spine. Deleted (memory audit 2026-09, R3):
+// with no buffer to lend, B waits; Background-C builds the section on navigation.
 //
-// The sliced build runs in two phases with disjoint peaks (see Section::runBuildParse):
-//   extract — holds the inflate ring (sized to the entry, ≤32 KB) + ~2 KB scratch, but
-//             no layout working set yet;
-//   parse   — holds the parser's layout working set (~20 KB), with no ZIP state.
-// Floors derived from measured X3 numbers (2026-06-11 serial logs): setup ≈ 12 KB (CSS
-// index + visitor), observed safe min-free ≈ 15 KB → ~16 KB reserve.
-// Required free heap = max(BG_BUILD_PARSE_MIN_FREE, BG_BUILD_EXTRACT_BASE + ring).
-#ifndef BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES (48 * 1024)  // setup + working set + reserve
-#endif
-#ifndef BG_BUILD_EXTRACT_BASE_HEAP_BYTES
-#define BG_BUILD_EXTRACT_BASE_HEAP_BYTES (30 * 1024)  // setup + scratch + reserve (ring added per target)
-#endif
-#ifndef BG_BUILD_MIN_CONTIG_HEAP_BYTES
-#define BG_BUILD_MIN_CONTIG_HEAP_BYTES (24 * 1024)  // parse-phase floor; raised to ring+8 KB while extracting
-#endif
-// Extra free-heap floor for a CSS section built with the secondary buffer RESIDENT (which B
-// always is — it can't release while displaying). The runtime CSS resolver self-protects below
-// ~40 KB free (MIN_FREE_HEAP_FOR_CSS) by skipping disk lookups, producing a css-degraded cache
-// the foreground must rebuild — so B grinds for seconds then discards. The parse working set
-// peaks at ~25-28 KB, so B must start a CSS build with ≥ ~68 KB free to stay above the resolver
-// floor mid-parse. Below this, B refuses (stays in WaitHeap) and lets Background-C build the
-// section released — with ~120 KB free — when the reader navigates into it. (X3 docs note CSS
-// builds are "impossible" resident below ~68 KB free; this is that line, with a small margin.)
-//
-// STALE PREMISE (memory audit 2026-09, F3): every section build has run the resolver in lean
-// mode since Section::runBuildSetup set it unconditionally, so the floor it self-protects at is
-// 24 KB, not 40 KB -- and the HEAP_GATE trace never saw this gate admit on any spine. It stays
-// as it is until the figures are re-measured after R0-R2 (audit R3); do not derive from it.
-#ifndef BG_BUILD_CSS_MIN_FREE_HEAP_BYTES
-#define BG_BUILD_CSS_MIN_FREE_HEAP_BYTES (72 * 1024)
-#endif
 // Floors for the BORROWED-buffer B build (beginBackgroundBorrow). The gates above size a build
 // that allocates from the heap; a borrowed build does not — its parse working set, inflate ring
 // and CSS index all bump-allocate inside the lent ~48 KB region (see Section::runBuildParse's
 // sharedZipScope and runBuildSetup's setIndexArena/setLeanResolve). What still comes from the
 // heap is the small fixed setup (parser object, file handles, std::string paths) plus whatever
 // the CSS resolver needs above the LEAN floor it drops to in arena mode. These floors cover that
-// remainder with reserve, and are reachable from the ~57 KB reading steady state — which the
-// heap-backed floors above are not, on either device.
+// remainder with reserve, and are reachable from the ~57 KB reading steady state.
 #ifndef BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_FREE_HEAP_BYTES (40 * 1024)
 #endif
 #ifndef BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES
 #define BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES (12 * 1024)
 #endif
+// The allocator reports its largest free block a few bytes under the round number (the block
+// header), so a contig floor sitting exactly on a power of two is refused by a heap that has the
+// memory -- the parser file documents the same 12-bytes-short refusals. Every contig floor in
+// this file whose refusal changes the build path subtracts it.
+constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
 // Added to the free-heap floor (either path) for a target that still owes the inline-footnote
 // resolve. That pass holds a SAX parser (~9 KB), a 1 KB stream chunk and the store's index on the
 // HEAP for as long as it runs — and because it runs in slices, that is across every page render
@@ -278,9 +255,8 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
 #endif
 // Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
-// so here the sum is correct). Kept as its own name rather than reusing Background-B's
-// BG_BUILD_EXTRACT_BASE_HEAP_BYTES so the two can diverge without silently retuning each other —
-// and they have: B reaches its extract from the borrow-first path, this one from a page turn.
+// so here the sum is correct). Its own name: this floor is reached from a page turn, not from
+// Background-B's borrow-first path (whose heap-backed twin was deleted in the 2026-09 audit).
 //
 // 30 -> 50 KB (2026-09-01), device-measured on Small Gods spine 1 — the whole book in one
 // 583991-byte entry — which the 30 KB version admitted to a resident build that could not
@@ -308,8 +284,8 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 // the resolve runs with the ring gone, so a higher free floor keeps it clear of 40 KB; contig is
 // pinned at the inflate-ring size (≤32 KB) for the extraction phase. A miss is still caught by
 // isCssLowHeapDegraded() and rebuilt with the buffer released.
-// STALE PREMISE: the resolver floor is 24 KB on every build now (lean mode); see the note on
-// BG_BUILD_CSS_MIN_FREE_HEAP_BYTES. Re-derive after audit R0-R2 (R3), not before.
+// STALE PREMISE: the resolver floor is 24 KB on every build now (lean mode, set unconditionally
+// in Section::runBuildSetup). Re-derived in audit R3 -- see the derivation below the define.
 #ifndef IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES
 #define IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES (66 * 1024)
 #endif
@@ -350,15 +326,9 @@ constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | 
 // RESOLVED for that gate (2026-08-15): heapAllowsInPlaceBuild now takes max(parse, extract+ring)
 // instead of parse+ring — see the derivation there, and the X4 trace that measured it.
 //
-// STILL UNREACHABLE, deliberately not touched in the same change: the two Background-B
-// heap-backed gates. Same X4 trace, ~20 evaluations across one reading session:
-//   gate=bgB_waitheap     REJECT free=~57000(floor=63488) contig=25588(floor=40960)
-//   gate=bgB_cssResident  REJECT free=~56500(floor=73728) contig=25588(floor=0)
-// Neither ever admitted, on any spine, at any point. B works anyway because the BORROW gates
-// (BG_BUILD_BORROW_*, 40960/12288) are reachable and are what it actually uses — so these two
-// only bind when there is no buffer to lend, and then they refuse unconditionally. Re-deriving
-// them wants its own measurement of a heap-backed B build, which this device cannot produce
-// while the borrow keeps succeeding.
+// The two Background-B heap-backed gates (bgB_waitheap, bgB_cssResident) that the same trace
+// showed never admitting on any spine were deleted in the 2026-09 memory audit (R3); B now builds
+// only in the borrowed buffer. See the note above the BG_BUILD_BORROW_* floors.
 //
 // HEAP_GATE_TRACE=0 compiles it out. Default OFF (2026-08-11). It did its job twice over — the
 // unreachable in-place floor above and B's contig-floor miss were both found with it — so it
@@ -1330,7 +1300,6 @@ void EpubReaderActivity::resetBackgroundBuild() {
   endBackgroundBorrow();       // returns the lent buffer (and aborts the build) if B held it
   backgroundSection_.reset();  // ~Section aborts a partial build and deletes its partial file
   backgroundBuildSpineIndex_ = -1;
-  backgroundBuildInflatedSize_ = 0;
   backgroundBuildNeedsResolve_ = false;
   backgroundBuildGateCheckMs_ = 0;
   backgroundBuildState_ = BackgroundBuildState::Probe;
@@ -1529,10 +1498,6 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
         // across those slices, and a resolve that fails anyway is discarded below, not cached.
         backgroundBuildNeedsResolve_ =
             getEffectiveInlineFootnotePreviews() && !FootnotePreviews::spineResolved(epub->getCachePath(), targetSpine);
-        // The inflate ring is sized to the entry, so the extraction heap gate needs the
-        // uncompressed size (one central-dir scan, once per target spine).
-        backgroundBuildInflatedSize_ = 0;
-        epub->getItemSize(epub->getSpineItem(targetSpine).href, &backgroundBuildInflatedSize_);
         backgroundBuildState_ = BackgroundBuildState::WaitHeap;
       }
       return;  // one bounded step per tick
@@ -1584,49 +1549,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       if (!inputQueued && (now - lastActivityMs) >= BG_BUILD_BORROW_QUIET_MS &&
           esp_get_free_heap_size() >= borrowFreeFloor &&
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >=
-              BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES &&
+              BG_BUILD_BORROW_MIN_CONTIG_HEAP_BYTES - LARGEST_FREE_BLOCK_SLACK &&
           beginBackgroundBorrow()) {
         backgroundBuildState_ = BackgroundBuildState::Building;
         return;
       }
-      const uint32_t ringBytes =
-          static_cast<uint32_t>(std::min<size_t>(32768, std::max<size_t>(backgroundBuildInflatedSize_, 512)));
-      const uint32_t freeHeap = esp_get_free_heap_size();
-      const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-      const uint32_t bgFreeFloor =
-          std::max<uint32_t>(BG_BUILD_PARSE_MIN_FREE_HEAP_BYTES, BG_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes) +
-          (backgroundBuildNeedsResolve_ ? BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES : 0);
-      const uint32_t bgContigFloor = std::max<uint32_t>(BG_BUILD_MIN_CONTIG_HEAP_BYTES, ringBytes + 8 * 1024);
-      if (freeHeap < bgFreeFloor || contigHeap < bgContigFloor) {
-        HEAP_GATE("bgB_waitheap", false, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
-        return;
-      }
-      // Refuse — don't let startBuild silently downgrade — when the book wants embedded
-      // CSS but the heap can't fit it: a no-CSS background build would only produce the
-      // fallback variant and the foreground would still rebuild with CSS on entry.
-      // (Silent: state=waitheap + free/contig in the 5 s BG debug line tell the story.)
-      if (lastRenderStats.embeddedStyle) {
-        const CssParser* css = epub->getCssParser();
-        if (!Section::heapAllowsEmbeddedStyle(css ? css->ruleCount() : 0)) {
-          // Delegated predicate (Section::heapAllowsEmbeddedStyle) rather than a local floor —
-          // 0 floors print as the raw heap state so the trace still shows where it stood.
-          HEAP_GATE("bgB_embeddedCss", false, freeHeap, 0, contigHeap, 0);
-          return;
-        }
-        // Reached only when the borrow above was unavailable, i.e. B is building RESIDENT out of
-        // the heap: a CSS parse below ~68 KB free would then dip under the runtime CSS-resolve
-        // floor mid-parse and come out css-degraded — seconds of work B discards. Refuse here and
-        // let Background-C build it released (clean) on navigation. (A borrowed build resolves CSS
-        // from the arena at the lower lean floor, so it never consults this gate.)
-        if (freeHeap < BG_BUILD_CSS_MIN_FREE_HEAP_BYTES) {
-          HEAP_GATE("bgB_cssResident", false, freeHeap, BG_BUILD_CSS_MIN_FREE_HEAP_BYTES, contigHeap, 0);
-          return;
-        }
-      }
-      // Log the PASS too: knowing how much margin a successful gate had is what tells us whether
-      // a floor is merely conservative or actively wrong.
-      HEAP_GATE("bgB_waitheap", true, freeHeap, bgFreeFloor, contigHeap, bgContigFloor);
-      backgroundBuildState_ = BackgroundBuildState::Building;
+      // No buffer to lend (a C build holds it, or a realloc never came back), or the reader is
+      // not settled: wait. There is no heap-backed B any more (see the BG_BUILD_BORROW_* note).
       return;
     }
 
@@ -1665,35 +1594,6 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       }
       checkHeapIntegrity("after_b_slice");
       if (step == Section::BuildStep::More) {
-        // Proactive low-heap guard, the mirror of Background-C's residentAbort. Only a build
-        // that is NOT in the borrowed arena allocates its working set from the heap; a borrowed
-        // one bump-allocates inside the lent region and can ride the same numbers out safely.
-        // B reaches the resident case whenever there was no buffer to lend (already released for
-        // a C build, or a realloc that never came back), and until now nothing re-checked heap
-        // between the WaitHeap entry gate and completion — so a build admitted at 48 KB could
-        // grind all the way into the fault zone. Same floors as C: this is the same situation
-        // (buffer resident in the heap, build heap-backed), and a second set of numbers for it
-        // would be a second thing to keep tuned.
-        //
-        // The action differs from C's, though, and deliberately: C rebuilds on the released path
-        // because the reader is waiting on that section. Nothing waits on B, so it discards and
-        // settles, exactly as the css-degraded case below does — Background-C builds the section
-        // released (clean) if and when the reader navigates into it.
-        if (!backgroundBorrowActive_) {
-          const uint32_t bFree = esp_get_free_heap_size();
-          const uint32_t bContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-          if (bFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES || bContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES) {
-            HEAP_GATE("bgB_residentAbort", false, bFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, bContig,
-                      RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
-            LOG_INF("ERS", "Background build spine=%d low heap mid-build (free=%lu contig=%lu); discarding",
-                    targetSpine, static_cast<unsigned long>(bFree), static_cast<unsigned long>(bContig));
-            backgroundSection_->abortSectionBuild();
-            backgroundSection_.reset();
-            backgroundBuildPercent_ = -1;
-            backgroundBuildState_ = BackgroundBuildState::Settled;
-            return;
-          }
-        }
         // Heap can drop after the WaitHeap gate passed (an interleaved page render allocates).
         // The moment the CSS resolver starts skipping lookups the result is doomed to be
         // css-degraded and discarded — bail now instead of grinding through the rest of the
@@ -1871,11 +1771,12 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     // a build already running released has that headroom and should ride it out.
     const uint32_t residentFree = esp_get_free_heap_size();
     const uint32_t residentContig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+    constexpr uint32_t residentAbortContigFloor = RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES - LARGEST_FREE_BLOCK_SLACK;
     const bool residentAbort = !secondaryBufferDegraded_ && (residentFree < RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES ||
-                                                             residentContig < RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+                                                             residentContig < residentAbortContigFloor);
     if (residentAbort) {
       HEAP_GATE("residentAbort", false, residentFree, RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES, residentContig,
-                RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES);
+                residentAbortContigFloor);
       fallbackToReleasedRebuild("low heap mid-build", /*retryIncremental=*/true);
       return;
     }
@@ -3488,9 +3389,10 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   const uint32_t freeFloor =
       std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
                          IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
-  const uint32_t contigFloor = std::max<uint32_t>(
-      embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
-      ringBytes + 8 * 1024);
+  const uint32_t contigFloor = std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES
+                                                                : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
+                                                  ringBytes + 8 * 1024) -
+                               LARGEST_FREE_BLOCK_SLACK;
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   const bool ok = freeHeap >= freeFloor && contigHeap >= contigFloor;
