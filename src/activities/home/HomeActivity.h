@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <PngToBmpConverter.h>
 
 #include <cstddef>
@@ -31,10 +32,15 @@ class HomeActivity final : public Activity {
   bool hasOpdsServers = false;
   bool coverRendered = false;
   bool coverBufferStored = false;
-  // True while the ~48 KB secondary framebuffer has been released to give the
-  // cold-cache cover decode/extract pipeline headroom (mirrors the reader's pattern).
-  // Restored once all covers are loaded, and on exit. See loadRecentCovers().
-  bool secondaryBufferReleased = false;
+  // True while the ~52 KB secondary framebuffer is LENT to the cold-cache cover pipeline as
+  // its scratch region (coverScratch_): the OPF inflate ring, the cover extraction ring and the
+  // decoders' working memory bump-allocate inside it instead of the heap. It used to be
+  // RELEASED for the same headroom; a task stack or a book-lifetime block landing in the freed
+  // hole then left the realloc short and the device without its buffer (memory audit 2026-09).
+  // The lent block never enters the heap, and the return cannot fail. Returned once all covers
+  // are loaded, and on exit. See loadRecentCovers() / restoreSecondaryBuffer().
+  bool secondaryBufferLent = false;
+  std::unique_ptr<BuildArena> coverScratch_;
   size_t nextRecentCoverIndex = 0;
   size_t nextThumbSizeIndex = 0;  // which thumb size within the current book is next
 

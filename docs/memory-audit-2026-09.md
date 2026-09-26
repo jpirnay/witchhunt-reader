@@ -481,6 +481,39 @@ same code path as C's borrow, but its
 return)` pair should be seen once on a CSS-fallback or image-header rebuild
 before this is called validated.
 
+**R1b — lend, don't release, on the two remaining phase-scoped release
+sites.** *Done on `memory/audit-2026-09` (2026-09-26), device validation
+pending.* Prompted by the run-6/7/9 failures, which were all one mechanism:
+release → a long-lived block lands in the freed hole → realloc fails →
+degraded / recovery restart. A lent block never enters the heap, so the
+hole cannot be pinned and the return cannot fail.
+
+- *First-open indexing* (`ReaderActivity`): its own comment already said
+  "lend"; the code released. Now `borrowSecondaryBuffer` → `Epub::load(…,
+  scratch)` → `returnSecondaryBuffer`. The load's stream reads (container,
+  OPF, NCX, nav, page-map, CSS) take their read buffer and inflate ring
+  from the region (`readItemContentsToStream` decides before any byte is
+  written, so a region without room falls back to the heap); the spine
+  tables keep the heap, which without the ring has room for them. The
+  "drop the ePub and realloc again" dance is gone.
+- *Home cover loading* (`HomeActivity`): the buffer is lent for the whole
+  cover pass as `coverScratch_`, threaded through `ensureCoverThumb`,
+  `beginCoverExtractSession` (the extraction ring, held across slices),
+  `beginPngThumbSession` (the PNG decoder's ring and scanlines, held across
+  slices) and `Epub::loadForCover` (the OPF ring). `JpegToBmpConverter`
+  takes an optional region for its TJpgDec pool or progressive workspace,
+  with the free-heap gate reduced to the row pipeline when it does. Sessions
+  are strictly sequential, so the blocks stay LIFO; `restoreSecondaryBuffer`
+  resets any abandoned session before it gives the region back.
+
+Still releasing, on purpose: the Background-C failure escalation (C fails
+on heap contig; +52 KB of general heap is the cure until the parse's
+per-page heap objects move into the page block — R2 step 3), the warm-pass
+fallback when there is nothing to lend, and the session-ending paths
+(sleep, network trim, serial transfer). **Revisit after R2 step 3 and R3**:
+the same conversion may then apply to the escalation and to the pre-reboot
+warm pass.
+
 **R2 — take the phase (b) churn off the heap (F1).** *Done on
 `memory/audit-2026-09`, device validation pending.* The count-sorted census
 reshaped this recommendation before a line was written: the dominant churn

@@ -10,10 +10,12 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <PngToBmpConverter.h>
 #include <Txt.h>
 #include <Utf8.h>
 #include <Xtc.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -218,20 +220,26 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   // releases that buffer before decoding for the same reason; do the same here for the
   // duration of loading and reallocate it once every cover is resolved (see end of this
   // function) or on exit. Release under the render lock so we never free it mid-render.
-  if (!secondaryBufferReleased && renderer.hasSecondaryBuffer()) {
+  if (!secondaryBufferLent && renderer.hasSecondaryBuffer()) {
     RenderLock lock;
-    if (renderer.releaseSecondaryBuffer()) {
-      secondaryBufferReleased = true;
-      // Keep X4 fast-differential refresh alive while the secondary buffer is gone:
-      // the controller still holds the last home frame in RED RAM and displayBuffer()
-      // re-seeds it after every refresh (syncRedRamFromFrameBuffer), so carousel/menu
-      // navigation diffs against that baseline instead of downgrading to a full/half
-      // waveform on every press. Precondition holds: we release right after the first
-      // home render (gate requires firstRenderDone) and only issue plain BW redraws
-      // until restore. Same pattern as KOReaderSyncActivity. No-op on X3.
-      renderer.setSingleBufferFastDiff(true);
-      LOG_DBG("HOME", "Released secondary framebuffer for cover loading (free=%lu)",
-              static_cast<unsigned long>(esp_get_free_heap_size()));
+    size_t lentSize = 0;
+    if (uint8_t* lent = renderer.borrowSecondaryBuffer(&lentSize)) {
+      coverScratch_ = makeUniqueNoThrow<BuildArena>(lent, lentSize);
+      if (coverScratch_ && coverScratch_->valid()) {
+        secondaryBufferLent = true;
+        // Keep X4 fast-differential refresh alive while the secondary buffer is lent: the
+        // controller still holds the last home frame in RED RAM and displayBuffer() re-seeds it
+        // after every refresh (syncRedRamFromFrameBuffer), so carousel/menu navigation diffs
+        // against that baseline instead of downgrading to a full/half waveform on every press.
+        // Precondition holds: we lend right after the first home render (gate requires
+        // firstRenderDone) and only issue plain BW redraws until the return. No-op on X3.
+        renderer.setSingleBufferFastDiff(true);
+        LOG_DBG("HOME", "Lent secondary framebuffer for cover loading (%u bytes, free=%lu)",
+                static_cast<unsigned>(lentSize), static_cast<unsigned long>(esp_get_free_heap_size()));
+      } else {
+        coverScratch_.reset();
+        renderer.returnSecondaryBuffer();
+      }
     }
   }
 
@@ -420,7 +428,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
           // Try synchronous decode first (handles JPEG and cached covers).
           CooperativeAbort::clearAborted();
-          const ThumbResult res = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second);
+          const ThumbResult res = ReaderActivity::ensureCoverThumb(book.path, sz.first, sz.second, coverScratch_.get());
           LOG_DBG("HOME", "ensureCoverThumb(%dx%d) for %s: %s", sz.first, sz.second, book.path.c_str(),
                   res == ThumbResult::Ok                   ? "ok"
                   : res == ThumbResult::StructurallyAbsent ? "absent"
@@ -442,10 +450,11 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
             // transient failure walks the session ladder.
             if (res == ThumbResult::TransientFail && !pngSessionFailed) {
               // Try sliced PNG decode (succeeds when cover.img is already cached).
-              pngSession = ReaderActivity::beginPngThumbSession(book.path, sz.first, sz.second, pngSessionFiles);
+              pngSession = ReaderActivity::beginPngThumbSession(book.path, sz.first, sz.second, pngSessionFiles,
+                                                                coverScratch_.get());
               if (!pngSession) {
                 // cover.img not yet cached — try sliced ZIP extraction first.
-                extractSession = ReaderActivity::beginCoverExtractSession(book.path);
+                extractSession = ReaderActivity::beginCoverExtractSession(book.path, coverScratch_.get());
                 if (extractSession) {
                   LOG_DBG("HOME", "Started cover extract session for %s (%zu bytes)", book.path.c_str(),
                           extractSession->totalBytes());
@@ -535,7 +544,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         // Cover decode needs ~42 KB contiguous heap — free the frame cache first.
         invalidateFrameCacheSafely();
         CooperativeAbort::clearAborted();
-        const ThumbResult res = ReaderActivity::ensureCoverThumb(book.path, coverHeight);
+        const ThumbResult res = ReaderActivity::ensureCoverThumb(book.path, coverHeight, coverScratch_.get());
         LOG_DBG("HOME", "ensureCoverThumb(h=%d) for %s: %s", coverHeight, book.path.c_str(),
                 res == ThumbResult::Ok                   ? "ok"
                 : res == ThumbResult::StructurallyAbsent ? "absent"
@@ -565,14 +574,15 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
         //     drain at the top of loadRecentCovers re-runs this ladder once it lands.
         if (res == ThumbResult::TransientFail) {
           if (!pngSessionFailed) {
-            pngSession = ReaderActivity::beginPngThumbSession(book.path, coverHeight, pngSessionFiles);
+            pngSession =
+                ReaderActivity::beginPngThumbSession(book.path, coverHeight, pngSessionFiles, coverScratch_.get());
             if (pngSession) {
               LOG_DBG("HOME", "Started PNG session for %s (single-height, %u rows)", book.path.c_str(),
                       pngSession->totalRows());
               recentsLoading = false;
               return;
             }
-            extractSession = ReaderActivity::beginCoverExtractSession(book.path);
+            extractSession = ReaderActivity::beginCoverExtractSession(book.path, coverScratch_.get());
             if (extractSession) {
               LOG_DBG("HOME", "Started cover extract session for %s (single-height)", book.path.c_str());
               recentsLoading = false;
@@ -614,22 +624,23 @@ void HomeActivity::restoreSecondaryBuffer(bool callerHoldsRenderLock) {
   // ActivityManager::exitActivity), so it must pass callerHoldsRenderLock=true — taking
   // a second RenderLock there self-deadlocks and hangs the Home→Reader transition. The
   // end-of-loading caller runs from loop() with no lock held and passes false.
-  if (!secondaryBufferReleased) return;
+  if (!secondaryBufferLent) return;
   const auto doRestore = [this]() {
-    if (renderer.reallocSecondaryBuffer()) {
-      secondaryBufferReleased = false;
-      // Two-buffer differential is available again — turn off the single-buffer
-      // RED-RAM-baseline mode so normal fast refresh resumes against the secondary.
-      renderer.setSingleBufferFastDiff(false);
-      // Do NOT syncRedRamFromFrameBuffer() here: reallocSecondaryBuffer() fills the new secondary
-      // with WHITE, and syncRedRamFromFrameBuffer() copies that white buffer into RED RAM —
-      // overwriting the correct baseline. RED already holds the home frame (synced before the
-      // release; the controller retains it through release/realloc, which don't touch RED). The
-      // white reseed made the next FAST refresh (e.g. Home->Settings) diff against white, ghosting
-      // the home screen through. Leave RED intact.
-      LOG_DBG("HOME", "Restored secondary framebuffer after cover loading (free=%lu)",
-              static_cast<unsigned long>(esp_get_free_heap_size()));
-    }
+    // Anything still holding a block in the lent region goes first: an abandoned extract or
+    // PNG session at exit would otherwise release into a region the display owns again.
+    extractSession.reset();
+    pngSession.reset();
+    coverScratch_.reset();
+    renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    secondaryBufferLent = false;
+    // Two-buffer differential is available again — turn off the single-buffer RED-RAM-baseline
+    // mode so normal fast refresh resumes against the secondary. No syncRedRamFromFrameBuffer()
+    // here: the return re-seeds the baseline exactly as a realloc does, and RED already holds the
+    // home frame.
+    renderer.setSingleBufferFastDiff(false);
+    LOG_DBG("HOME", "Returned secondary framebuffer after cover loading (free=%lu contig=%lu)",
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   };
   if (callerHoldsRenderLock) {
     doRestore();
@@ -679,7 +690,7 @@ void HomeActivity::onEnter() {
   pngSessionFailed = false;
   coverTransientAttempts.clear();
   coverRendered = false;
-  secondaryBufferReleased = false;
+  secondaryBufferLent = false;
   freeCoverBuffer();
 
   const auto& metrics = UITheme::getInstance().getMetrics();

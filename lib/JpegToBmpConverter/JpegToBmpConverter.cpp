@@ -1,5 +1,6 @@
 #include "JpegToBmpConverter.h"
 
+#include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
@@ -582,9 +583,28 @@ constexpr size_t PROGRESSIVE_ROW_PIPELINE_HEAP = 16 * 1024;
 
 // Full progressive decode into the BMP pipeline. Returns false without writing anything when no
 // scale's workspace fits the heap, so the caller can fall back to the DC preview.
+// One scoped block in a lent region, released on every way out of the decode that took it.
+struct ArenaBlockScope {
+  BuildArena* arena = nullptr;
+  BuildArena::Block block;
+  // Reserve a block and take `bytes` from it; null when there is no region or it is full (the
+  // block is then released again so the caller can fall back to the heap).
+  uint8_t* take(BuildArena* a, const size_t bytes) {
+    if (a == nullptr || !a->valid()) return nullptr;
+    arena = a;
+    block = arena->reserveBlock();
+    auto* p = static_cast<uint8_t*>(arena->alloc(bytes));
+    if (p == nullptr) arena->release(block);
+    return p;
+  }
+  ~ArenaBlockScope() {
+    if (arena != nullptr && block.valid()) arena->release(block);
+  }
+};
+
 static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, const ProgressiveJpeg::ImageInfo& info,
                                    const int targetWidth, const int targetHeight, const bool oneBit, const bool crop,
-                                   const bool eightBit, bool* attempted) {
+                                   const bool eightBit, bool* attempted, BuildArena* scratch) {
   *attempted = false;
   // The largest DCT pre-scale that keeps both axes >= target (as the TJpgDec path chooses), then
   // coarser while the workspace does not fit: a coarser cover beats the 1/8 DC preview.
@@ -601,9 +621,15 @@ static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, cons
       shift = 1;
     }
   }
+  const bool arenaBacked = scratch != nullptr && scratch->valid();
   for (; shift <= 3; ++shift) {
     const size_t workspace = ProgressiveJpeg::workspaceBytes(info, shift);
-    if (workspace > 0 && ESP.getFreeHeap() >= workspace + PROGRESSIVE_ROW_PIPELINE_HEAP) break;
+    if (workspace == 0) continue;
+    // With a lent region the workspace comes from it and the heap only owes the row pipeline.
+    const bool fits = arenaBacked ? (scratch->capacity() - scratch->used() >= workspace + alignof(std::max_align_t) &&
+                                     ESP.getFreeHeap() >= PROGRESSIVE_ROW_PIPELINE_HEAP)
+                                  : ESP.getFreeHeap() >= workspace + PROGRESSIVE_ROW_PIPELINE_HEAP;
+    if (fits) break;
   }
   if (shift > 3) {
     LOG_INF("JPG", "Progressive cover: no scale's workspace fits (%u free); DC preview",
@@ -617,11 +643,16 @@ static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, cons
   LOG_DBG("JPG", "Progressive cover %ux%u at 1/%d -> %dx%d", info.width, info.height, 1 << shift, effectiveSrcW,
           effectiveSrcH);
   const uint8_t scaleShift = shift;
+  ArenaBlockScope workspaceScope;
+  const size_t workspaceBytes = ProgressiveJpeg::workspaceBytes(info, shift);
+  uint8_t* workspace = workspaceScope.take(scratch, workspaceBytes);
   return convertScaled(bmpOut, effectiveSrcW, effectiveSrcH, targetWidth, targetHeight, oneBit, crop, eightBit,
                        /*needMcuBuf=*/false, [&](BmpConvertCtx& ctx) {
                          ProgressiveJpeg::DecodeOptions options;
                          options.scaleShift = scaleShift;
                          options.shouldAbort = progressiveFullShouldAbort;
+                         options.workspace = workspace;  // null: decode() takes one heap block
+                         options.workspaceSize = workspace != nullptr ? workspaceBytes : 0;
                          const auto result = ProgressiveJpeg::decode(jpegFile, options, progressiveBandOutput, &ctx);
                          if (result != ProgressiveJpeg::Result::Ok || ctx.error) {
                            LOG_ERR("JPG", "Progressive cover decode failed (%s, ctxErr=%d)",
@@ -634,7 +665,7 @@ static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, cons
 
 // Internal implementation with configurable target size and bit depth
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
-                                                     bool oneBit, bool crop, bool eightBit) {
+                                                     bool oneBit, bool crop, bool eightBit, BuildArena* scratch) {
   // One row per write is one file call per row (see BufferedPrint); coalesce them.
   BufferedPrint bmpOut(sink);
   LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : (eightBit ? "8-bit" : "2-bit"),
@@ -645,8 +676,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     // Every scan, at the scale the target needs. The DC-only preview below (1/8 resolution,
     // upscaled) is what made a 221x324 progressive cover a 27x40 smear on the home screen.
     bool attempted = false;
-    const bool ok =
-        convertFromProgressive(jpegFile, bmpOut, full, targetWidth, targetHeight, oneBit, crop, eightBit, &attempted);
+    const bool ok = convertFromProgressive(jpegFile, bmpOut, full, targetWidth, targetHeight, oneBit, crop, eightBit,
+                                           &attempted, scratch);
     if (attempted) return ok;
   }
   ProgressiveJpegDc::ImageInfo image;
@@ -654,18 +685,28 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     return decodeProgressiveJpeg(jpegFile, bmpOut, targetWidth, targetHeight, oneBit, crop, image, eightBit);
   }
 
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(), MIN_FREE_HEAP);
+  // The work pool comes from the lent region when there is one (its allocations are max-aligned,
+  // satisfying TJpgDec's word-alignment requirement); the heap then only owes the row pipeline.
+  ArenaBlockScope poolScope;
+  uint8_t* pool = poolScope.take(scratch, TJPG_WORK_POOL_SIZE);
+  std::unique_ptr<uint8_t[]> heapPool;
+  const size_t heapFloor = pool != nullptr ? MIN_FREE_HEAP - TJPG_WORK_POOL_SIZE : MIN_FREE_HEAP;
+  if (ESP.getFreeHeap() < heapFloor) {
+    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(),
+            static_cast<unsigned>(heapFloor));
     return false;
   }
 
   jpegFile.seek(0);
 
-  // new[] is max-aligned, satisfying TJpgDec's word-alignment requirement.
-  std::unique_ptr<uint8_t[]> pool(new (std::nothrow) uint8_t[TJPG_WORK_POOL_SIZE]);
-  if (!pool) {
-    LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
-    return false;
+  if (pool == nullptr) {
+    // new[] is max-aligned, satisfying TJpgDec's word-alignment requirement.
+    heapPool.reset(new (std::nothrow) uint8_t[TJPG_WORK_POOL_SIZE]);
+    if (!heapPool) {
+      LOG_ERR("JPG", "Failed to allocate TJpgDec work pool (%u bytes)", static_cast<unsigned>(TJPG_WORK_POOL_SIZE));
+      return false;
+    }
+    pool = heapPool.get();
   }
 
   BmpTjpgSession session;
@@ -673,7 +714,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
   session.ctx = nullptr;  // set once the context is built, just before jd_decomp
 
   JDEC jdec;
-  JRESULT jr = jd_prepare(&jdec, tjpgBmpInput, pool.get(), TJPG_WORK_POOL_SIZE, &session);
+  JRESULT jr = jd_prepare(&jdec, tjpgBmpInput, pool, TJPG_WORK_POOL_SIZE, &session);
   if (jr != JDR_OK) {
     LOG_ERR("JPG", "TJpgDec prepare failed (jr=%d)", jr);
     return false;
@@ -744,21 +785,22 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
 
 // Core function: Convert JPEG file to a full-size cover BMP (2-bit, or 8-bit when
 // the caller asks for the extra tonal range).
-bool JpegToBmpConverter::jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop, bool grayscale8Bit) {
+bool JpegToBmpConverter::jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop, bool grayscale8Bit,
+                                             BuildArena* scratch) {
   // Use runtime display dimensions (swapped for portrait cover sizing)
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
-  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop, grayscale8Bit);
+  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop, grayscale8Bit, scratch);
 }
 
 // Convert with custom target size (for thumbnails, 2-bit)
 bool JpegToBmpConverter::jpegFileToBmpStreamWithSize(FsFile& jpegFile, Print& bmpOut, int targetMaxWidth,
-                                                     int targetMaxHeight) {
-  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, false);
+                                                     int targetMaxHeight, BuildArena* scratch) {
+  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, false, true, false, scratch);
 }
 
 // Convert to 1-bit BMP (black and white only, no grays) for fast home screen rendering
 bool JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(FsFile& jpegFile, Print& bmpOut, int targetMaxWidth,
-                                                         int targetMaxHeight) {
-  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, true, true);
+                                                         int targetMaxHeight, BuildArena* scratch) {
+  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetMaxWidth, targetMaxHeight, true, true, false, scratch);
 }
