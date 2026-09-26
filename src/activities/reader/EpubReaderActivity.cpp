@@ -1696,7 +1696,12 @@ bool EpubReaderActivity::stepImageWarmLocked() {
   const unsigned long lastActivityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
   if (CooperativeAbort::shouldAbortLongTask() || now - lastActivityMs < BG_BUILD_BORROW_QUIET_MS) return false;
 
-  const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+  // Large images too, whatever the placeholder setting says: that setting exists because a
+  // decode on a page turn is slow, and this is the decode happening while nothing waits on it.
+  // Once the cache exists the image renders directly (wouldShowPlaceholder is false for a cached
+  // image), which is the whole point. Run 17: the chapter's opening illustration was skipped as
+  // a placeholder and cost 6.3 s when the reader asked for it.
+  const bool warmForceLoad = true;
   const bool warmGrayscale = getEffectiveTextAntiAliasing() && !secondaryBufferDegraded_;
   const int last = std::min<int>(static_cast<int>(section->pageCount) - 1, cur + kImageWarmLookahead);
   for (int p = cur + 1; p <= last; ++p) {
