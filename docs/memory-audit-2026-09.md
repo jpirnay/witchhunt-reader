@@ -825,13 +825,24 @@ ZIP entry names, SD font families, nested footnote jumps, `anchorsAwaitingLine_`
 Not done: a UI hint for `kStatusSimplified` (a product decision; the
 truncated-chapter hint is the model if wanted).
 
-**R5 — keep the census honest.** Commit the `--arena` mode and
+**R5 — keep the census honest.** *Done (2026-09-26).* Commit the `--arena` mode and
 `WH_HOST_STDIO_UNBUFFERED` (in the working tree at the time of writing:
 `test/epub_pipeline/{DumpMain,PipelineRunner}.*`,
 `test/zip_entry_reader/HalStorage.h`), lend the arena to
 the header walk in the harness, and add a host test that fails when the
 heap-side peak of the four fixture books rises by more than a set margin —
 the test the pending-image queue never had.
+
+*What landed for R5:* the census mode and unbuffered stdio were already
+committed (`c0a28a1e1`); the harness now runs the deferred image-header
+walk after each build from the lent region (as Background-C does), and
+`HeapPeakRegression` (ctest, `test/epub_pipeline/heap_peak_check.py`)
+compares each fixture's heap-side peak in both modes against
+`heap_peak_baseline.txt` with an 8 KB margin. Baseline at landing (heap-side
+bytes, heap-only / arena): moby-dick 62 933 / 54 697, test_large_css
+36 306 / 26 506, jpeg_images 47 489 / 28 187, jpeg_metadata_heavy
+61 555 / 41 388, table_streaming 56 809 / 36 164, inline_footnotes
+42 805 / 29 121. `UPDATE_HEAP_BASELINE=1` re-baselines on purpose.
 
 **R6 — audit the warm-boot footprint.** *Added 2026-09-26 from run 11.*
 The post-sync silent restart (`Silent restart (target=home)`,
