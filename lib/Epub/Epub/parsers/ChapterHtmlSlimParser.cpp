@@ -962,6 +962,14 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   completePageFn(std::move(currentPage));
   completedPageCount++;
   releasePageBlock();  // the page and its lines are gone: rewind their arena bytes
+  // The load side refuses a section past this many pages; stop here with the truncated status
+  // (the pages so far are kept) rather than build a cache that is rebuilt on every open.
+  if (completedPageCount >= Page::MAX_PAGES_PER_SECTION && !streamFailed) {
+    noteCapOverflow(kCapPagesPerSection, "pages per section");
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
+  }
   currentPage.reset(new (std::nothrow) Page());
   if (currentPage) currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
   currentPageNextY = 0;
@@ -977,8 +985,19 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   }
 }
 
+void ChapterHtmlSlimParser::noteCapOverflow(const uint8_t flag, const char* what) {
+  if (capOverflowFlags_ & flag) return;
+  capOverflowFlags_ |= flag;
+  LOG_ERR("EHP", "Fixed-capacity limit exceeded (%s); the chapter is cached simplified", what);
+}
+
 void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
   if (label.empty()) {
+    return;
+  }
+  // The section file stores the count as a uint16.
+  if (pageBreakLabels.size() >= 65535) {
+    noteCapOverflow(kCapPageLabels, "printed-page labels per chapter");
     return;
   }
 
@@ -1479,6 +1498,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
     if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit())) {
       self->pendingAnchorId = idAttr;
+    } else if (!isNonNavigableInlineElement(name)) {
+      self->noteCapOverflow(kCapAnchorsPerChapter, "anchors per chapter");
     }
   }
 
@@ -2251,8 +2272,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       }
       self->insideFootnoteLink = true;
       self->footnoteLinkDepth = self->depth;
-      strncpy(self->currentFootnote.href, href, sizeof(self->currentFootnote.href) - 1);
-      self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
+      if (strlen(href) >= sizeof(self->currentFootnote.href)) {
+        // A truncated href would be navigated as-is and land nowhere. Keep the link's styling,
+        // record no footnote for it (R4: refuse the entry rather than store a broken one).
+        self->currentFootnote.href[0] = '\0';
+        self->noteCapOverflow(kCapFootnoteHref, "footnote href length");
+      } else {
+        strncpy(self->currentFootnote.href, href, sizeof(self->currentFootnote.href) - 1);
+        self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
+      }
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
 
@@ -3419,6 +3447,9 @@ bool ChapterHtmlSlimParser::finalize() {
             (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
             (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0,
             (trunc & SaxParser::kVoidTagRepaired) != 0, (trunc & SaxParser::kTrailingDataIgnored) != 0);
+    // Of these, only the depth cap changes what the reader shows (the tree is flattened past
+    // 64 levels); the others truncate names and attribute values the layout does not use.
+    if (trunc & SaxParser::kTruncMaxDepth) noteCapOverflow(kCapSaxDepth, "element nesting depth");
   }
 
   // Process last page if there is still text. Done unconditionally so that a partial
@@ -3545,7 +3576,9 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   wordsExtractedInBlock += line->wordCount();
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
-    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href);
+    if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
+      noteCapOverflow(kCapFootnotesPerPage, "footnote links per page");
+    }
     ++footnoteIt;
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
@@ -3713,7 +3746,8 @@ void ChapterHtmlSlimParser::makePages() {
   // edge cases where a footnote's word index equals the exact block size.
   if (!pendingFootnotes.empty() && currentPage) {
     for (const auto& [idx, fn] : pendingFootnotes) {
-      currentPage->addFootnote(fn.number, fn.href);
+      if (!currentPage->addFootnote(fn.number, fn.href))
+        noteCapOverflow(kCapFootnotesPerPage, "footnote links per page");
     }
     pendingFootnotes.clear();
   }

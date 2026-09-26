@@ -70,7 +70,9 @@ class SaxParser {
     kTruncAttrName = 1u << 1,        // attribute name longer than kElemNameLen
     kTruncAttrValue = 1u << 2,       // attribute value longer than kAttrValueLen
     kTruncMaxAttrs = 1u << 3,        // more than kMaxAttrs attributes on one element
-    kTruncMaxDepth = 1u << 4,        // nesting deeper than kMaxDepth
+    kTruncMaxDepth = 1u << 4,        // nesting deeper than kMaxDepth: the excess elements are not
+                                     // reported (start or end); their text flows to the deepest
+                                     // reported ancestor -- the tree is flattened, never shifted
     kVoidTagRepaired = 1u << 5,      // HTML-style unclosed void tag (<br>, <hr>, ...) auto-closed
     kTrailingDataIgnored = 1u << 6,  // bytes after the root element's end tag; parse stopped there
   };

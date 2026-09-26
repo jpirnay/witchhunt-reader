@@ -844,21 +844,15 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     // Skip if this would exceed the rule limit
     const size_t ruleCount = compileModeActive_ ? compileSelectorOffsets_.size() : rulesBySelector_.size();
     if (ruleCount >= MAX_RULES) {
-      // In compile mode, falling through to a persisted cache here would look complete
-      // (hasCache() true) while silently and permanently dropping every selector past the
-      // cap — the same failure signature as the old crosspoint-reader's heap-triggered
-      // truncation, just triggered by selector count instead of heap size. Fail the compile
-      // instead: endCacheCompile() then discards the temp file and writes no cache, so the
-      // book re-parses (and hits this same cap) on the next open rather than losing styles
-      // forever.
-      if (compileModeActive_) {
-        if (!compileModeFailed_) {
-          LOG_ERR("CSS", "Reached max rules limit (%zu) mid-compile, aborting CSS cache for this book", MAX_RULES);
-        }
-        compileModeFailed_ = true;
-      } else {
-        LOG_DBG("CSS", "Reached max rules limit, stopping selector processing");
+      // The cache keeps the first MAX_RULES rules and is stamped truncated (flags bit 1), so
+      // the book is parsed once and every open logs what is missing. The compile used to fail
+      // here and write no cache at all, which re-parsed the book -- and hit this same cap --
+      // on every open: the styles were lost either way, only slower (audit R4).
+      if (!rulesTruncated_) {
+        LOG_ERR("CSS", "Reached max rules limit (%zu); the rules past it are dropped and the cache is marked truncated",
+                MAX_RULES);
       }
+      rulesTruncated_ = true;
       return;
     }
 
@@ -1072,6 +1066,7 @@ bool CssParser::beginCacheCompile() {
   compileSelectorOffsets_.clear();
   compileModeActive_ = true;
   compileModeFailed_ = false;
+  rulesTruncated_ = false;
   return true;
 }
 
@@ -1122,7 +1117,7 @@ bool CssParser::endCacheCompile() {
   outFile.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   outFile.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   outFile.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  outFile.write(static_cast<uint8_t>(hasIdSelectors_ ? 1 : 0));  // v17 flags byte
+  outFile.write(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
   // v10: index immediately after the header — write zeroed placeholder, patch below.
 
   FsFile tempFile;
@@ -1257,6 +1252,7 @@ void CssParser::clear() {
   resolveStats_ = {};
   compileModeActive_ = false;
   compileModeFailed_ = false;
+  rulesTruncated_ = false;
   compileSelectorOffsets_.clear();
   totalSelectorCandidates_ = 0;
   unsupportedSelectorSkips_ = 0;
@@ -1666,6 +1662,10 @@ bool CssParser::ensureCacheIndexLoaded() const {
     return false;
   }
   hasIdSelectors_ = (flags & 0x01) != 0;
+  rulesTruncated_ = (flags & 0x02) != 0;
+  if (rulesTruncated_) {
+    LOG_ERR("CSS", "This book's stylesheets exceed %zu rules; the rules past the cap are not applied", MAX_RULES);
+  }
 
   // v10: index is immediately after the 11-byte header — read sequentially, no seek.
   dropIndex();  // clears the heap vector and any arena view; resets cachedRuleCount_
@@ -2151,7 +2151,7 @@ bool CssParser::saveToCache() const {
   file.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
   file.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
   file.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  file.write(static_cast<uint8_t>(hasIdSelectors_ ? 1 : 0));  // v17 flags byte
+  file.write(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
   // v10: index lives immediately after the header (before rule payloads).
   // Write zeroed placeholder entries now; patch with sorted data below.
   // ensureCacheIndexLoaded() reads header + index sequentially — no seek over payloads.

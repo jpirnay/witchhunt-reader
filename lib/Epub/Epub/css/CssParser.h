@@ -127,6 +127,11 @@ class CssParser {
   // which lets them share one cached style across every element with the same tag and class
   // instead of one per id. Persisted in the rule cache; see CSS_CACHE_VERSION v17.
   [[nodiscard]] bool hasIdSelectors() const { return hasIdSelectors_; }
+  // True when the book's stylesheets had more rules than MAX_RULES: the cache holds the first
+  // MAX_RULES and the rest are missing. Persisted in the cache flags byte (bit 1), so the book is
+  // parsed once and says so on every open, instead of re-parsing on every open and hitting the
+  // cap again (memory audit 2026-09, R4).
+  [[nodiscard]] bool rulesTruncated() const { return rulesTruncated_; }
 
   [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
                                       const std::string& idAttr = {}) const;
@@ -313,7 +318,8 @@ class CssParser {
   mutable ResolveStats resolveStats_;
   // Set while parsing when a selector matches on an id, and restored from the cache header
   // otherwise. Conservative default: assume ids matter until something says they do not.
-  mutable bool hasIdSelectors_ = true;  // mutable: restored by the const cache-index load
+  mutable bool hasIdSelectors_ = true;   // mutable: restored by the const cache-index load
+  mutable bool rulesTruncated_ = false;  // see rulesTruncated(); restored by the cache load
 
   bool compileModeActive_ = false;
   bool compileModeFailed_ = false;

@@ -402,10 +402,12 @@ bool Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOf
 }
 
 bool Page::serialize(FsFile& file) const {
-  const uint16_t count = elements.size();
+  // Clamped to what deserialize() accepts; the overflow is reported by Section::onPageComplete.
+  const uint16_t count = static_cast<uint16_t>(std::min<size_t>(elements.size(), MAX_ELEMENTS));
   serialization::writePod(file, count);
 
-  for (const auto& el : elements) {
+  for (uint16_t i = 0; i < count; ++i) {
+    const auto& el = elements[i];
     // Use getTag() method to determine type
     serialization::writePod(file, static_cast<uint8_t>(el->getTag()));
 
@@ -439,9 +441,9 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file, BuildArena* scratch) {
   }
 
   // Guard a corrupt cache header from reserving an absurd number of elements. A real page is
-  // bounded by screen-height/min-line-height plus images/tables — well under this cap.
-  static constexpr uint16_t MAX_PAGE_ELEMENTS = 1024;
-  if (count > MAX_PAGE_ELEMENTS) {
+  // bounded by screen-height/min-line-height plus images/tables — well under this cap, and
+  // serialize() clamps to the same constant.
+  if (count > MAX_ELEMENTS) {
     LOG_ERR("PGE", "Deserialization failed: element count %u exceeds maximum", count);
     return nullptr;
   }

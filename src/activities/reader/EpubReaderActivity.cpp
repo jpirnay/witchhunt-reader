@@ -3851,6 +3851,13 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     cacheHit = false;
   }
 
+  // Deterministic: a fixed-capacity limit (footnotes per page, anchors per chapter, nesting
+  // depth, ...) changed what this chapter shows. Nothing to rebuild; worth a line in the log.
+  if (cacheHit && section->isSimplified()) {
+    LOG_INF("ERS", "Section %d: cached simplified (a fixed-capacity limit was exceeded at build time)",
+            currentSpineIndex);
+  }
+
   const bool cssFallbackRebuild = cacheHit && section->isEmbeddedStyleFallback();
   const bool needBuild = resumeBackgroundBuild || !cacheHit || cssFallbackRebuild;
   // The decisive fact for wake-latency work: a probe that hits means the section cost is a

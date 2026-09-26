@@ -120,6 +120,10 @@ constexpr uint8_t kStatusParseComplete = 1 << 0;
 constexpr uint8_t kStatusImageHeaderDegraded = 1 << 1;
 constexpr uint8_t kStatusTableRowDegraded = 1 << 2;
 constexpr uint8_t kStatusCssDegraded = 1 << 3;
+//   kStatusSimplified: a fixed-capacity limit changed the output (footnotes per page, anchors per
+//   chapter, page elements, nesting depth, ...; see ChapterHtmlSlimParser::CapOverflow). Not a
+//   heap condition: deterministic, so nothing rebuilds on it (audit R4).
+constexpr uint8_t kStatusSimplified = 1 << 4;
 
 // On-disk paragraph LUT entry: u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex.
 // listItemIndex is the running <li> count at page-break time; together with
@@ -443,6 +447,12 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   }
 
   const uint32_t position = file.position();
+  if (page->elements.size() > Page::MAX_ELEMENTS) {
+    // serialize() writes the first MAX_ELEMENTS; the rest of this page is lost, and said so.
+    LOG_ERR("SCT", "Page %d has %u elements, more than a page can load (%u); tail dropped", pageCount,
+            static_cast<unsigned>(page->elements.size()), static_cast<unsigned>(Page::MAX_ELEMENTS));
+    simplified_ = true;
+  }
   if (!page->serialize(file)) {
     LOG_ERR("SCT", "Failed to serialize page %d", pageCount);
     return 0;
@@ -539,6 +549,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
+  simplified_ = false;
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
@@ -612,6 +623,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     imageHeaderDegraded_ = (fileStatus & kStatusImageHeaderDegraded) != 0;
     tableRowDegraded_ = (fileStatus & kStatusTableRowDegraded) != 0;
     cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
+    simplified_ = (fileStatus & kStatusSimplified) != 0;
   }
 
   serialization::readPod(file, pageCount);
@@ -665,6 +677,7 @@ bool Section::clearCache() {
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
+  simplified_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -982,6 +995,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   footnotePreviewsUnresolved_ = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
+  simplified_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1473,6 +1487,9 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   if (st.visitor->tableRowDegraded()) {
     tableRowDegraded_ = true;
   }
+  if (st.visitor->capOverflowFlags() != 0) {
+    simplified_ = true;
+  }
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
@@ -1640,9 +1657,10 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     Storage.remove(filePath.c_str());
     return BuildPhaseResult::Failed;
   }
-  const uint8_t status =
-      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
-      (tableRowDegraded_ ? kStatusTableRowDegraded : 0) | (cssLowHeapDegraded_ ? kStatusCssDegraded : 0);
+  const uint8_t status = (parseComplete ? kStatusParseComplete : 0) |
+                         (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
+                         (tableRowDegraded_ ? kStatusTableRowDegraded : 0) |
+                         (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) | (simplified_ ? kStatusSimplified : 0);
   serialization::writePod(file, status);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);

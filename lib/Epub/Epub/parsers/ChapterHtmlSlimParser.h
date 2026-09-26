@@ -437,6 +437,12 @@ class ChapterHtmlSlimParser final : public Print {
   // Set when any table row was demoted to paragraphs (degradeRow), for any reason: the pages
   // are usable but the cache holds a layout the heap chose, not the book. See tableRowDegraded().
   bool tableRowDegradedAny_ = false;
+  // Fixed-capacity limits this parse ran into that changed its output (memory audit 2026-09,
+  // R4). Each is logged at ERR once per parse and the union is latched into the section status
+  // byte (Section::isSimplified) -- a deterministic condition, so nothing rebuilds on it; the
+  // reader can say "chapter simplified" instead of showing less than the book without a word.
+  uint8_t capOverflowFlags_ = 0;
+  void noteCapOverflow(uint8_t flag, const char* what);
   // Latches the one-shot font-cache release that recoverHeapForImageHeader() spends.
   bool fontCachesReleasedForImageHeader = false;
   uint32_t streamStartTimeMs = 0;
@@ -644,6 +650,17 @@ class ChapterHtmlSlimParser final : public Print {
   // reader can rebuild the chapter once when memory allows, instead of keeping the demoted
   // layout for good (memory audit 2026-09, F3/R3).
   [[nodiscard]] bool tableRowDegraded() const { return tableRowDegradedAny_; }
+  enum CapOverflow : uint8_t {
+    kCapFootnotesPerPage = 1u << 0,   // Page::MAX_FOOTNOTES_PER_PAGE: later links on the page dropped
+    kCapAnchorsPerChapter = 1u << 1,  // MAX_ANCHORS_PER_CHAPTER: later ids not recorded
+    kCapPageElements = 1u << 2,       // Page::MAX_ELEMENTS: a page's tail elements not written
+    kCapPageLabels = 1u << 3,         // 65535 printed-page labels: later ones not recorded
+    kCapFootnoteHref = 1u << 4,       // FOOTNOTE_HREF_LEN: a link too long to navigate, kept as text
+    kCapSaxDepth = 1u << 5,           // SaxParser kMaxDepth: nesting flattened past 64
+    kCapPagesPerSection = 1u << 6,    // Page::MAX_PAGES_PER_SECTION: parse stopped (truncated cache)
+  };
+  // Union of the CapOverflow bits this parse hit; 0 when every structure fit.
+  [[nodiscard]] uint8_t capOverflowFlags() const { return capOverflowFlags_; }
   void setInlineFootnotePreviews(FootnotePreviews::Lookup* lookup) { inlineFootnotePreviews = lookup; }
 
   // Print interface — fed by Epub::readItemContentsToStream.

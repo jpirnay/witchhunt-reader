@@ -40,6 +40,11 @@ class Section {
   // (ChapterHtmlSlimParser::tableRowDegraded). Same persistence and rebuild policy as the
   // CSS flag: the pages are usable, the layout is what the heap allowed.
   bool tableRowDegraded_ = false;
+  // Set by the last build when a fixed-capacity limit changed its output (ChapterHtmlSlimParser::
+  // capOverflowFlags, or a page past Page::MAX_ELEMENTS). Deterministic -- a rebuild would hit
+  // the same limit -- so it is persisted (kStatusSimplified) for the reader to say so, not to
+  // rebuild on.
+  bool simplified_ = false;
   // Set by the last build when its inline-footnote resolve pass could not complete (OOM, an
   // unreadable note document). The pages are cached under a "previews on" property hash — see
   // EpubReaderActivity::makeSectionBuildParams — but the notes this spine points at never made
@@ -280,6 +285,9 @@ class Section {
   // True when the last build demoted a table row to paragraphs, or the loaded cache was written
   // by such a build. The reader rebuilds such a chapter once per session when it is entered.
   bool isTableRowDegraded() const { return tableRowDegraded_; }
+  // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
+  // less than the book: see ChapterHtmlSlimParser::CapOverflow.
+  bool isSimplified() const { return simplified_; }
   // True when the last build's inline-footnote resolve pass failed, so some of this spine's
   // notes are missing from the store while the cache claims previews are on. Only meaningful
   // right after a build.

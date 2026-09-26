@@ -935,12 +935,12 @@ TEST(CssParserCache, ListStyleAndPageBreaksSurviveDiskCache) {
   std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
-// Regression for the failure class: a compile that hits MAX_RULES
-// mid-stream must not persist a cache. A truncated-but-valid-looking cache would make
-// hasCache() return true forever, permanently hiding every selector past the cap on every
-// future open of the book — the same symptom (styles silently vanish partway through the
-// book) crosspoint saw from a heap-size cutoff; ours is triggered by selector count instead.
-TEST(CssParserCache, RuleCapExceededDoesNotPersistTruncatedCache) {
+// A compile that hits MAX_RULES mid-stream persists a cache that holds the first MAX_RULES rules
+// and is STAMPED truncated (flags byte bit 1), so the book is parsed once and every later open
+// says what is missing (rulesTruncated()). It used to write no cache at all, which re-parsed the
+// book -- and hit the same cap -- on every open: the styles past the cap were lost either way,
+// only slower and silently (memory audit 2026-09, R4).
+TEST(CssParserCache, RuleCapExceededPersistsACacheMarkedTruncated) {
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
 
@@ -954,17 +954,29 @@ TEST(CssParserCache, RuleCapExceededDoesNotPersistTruncatedCache) {
   std::string cssPath;
   ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
 
-  CssParser parser(cacheDir);
-  ASSERT_TRUE(parser.beginCacheCompile());
   {
-    FsFile cssFile;
-    ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), cssFile));
-    // The CSS itself is well-formed, so the low-level parse doesn't fail; it's the compile
-    // pipeline (which tracks the MAX_RULES cap) that must reject this once the cap is hit.
-    parser.appendCompiledFromStream(cssFile);
+    CssParser parser(cacheDir);
+    ASSERT_TRUE(parser.beginCacheCompile());
+    {
+      FsFile cssFile;
+      ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), cssFile));
+      parser.appendCompiledFromStream(cssFile);
+    }
+    EXPECT_TRUE(parser.endCacheCompile());
+    EXPECT_TRUE(parser.hasCache());
+    EXPECT_TRUE(parser.rulesTruncated());
   }
-  EXPECT_FALSE(parser.endCacheCompile());
-  EXPECT_FALSE(parser.hasCache());
+
+  // A fresh parser loading that cache knows it is truncated, serves the rules that fit, and
+  // resolves nothing for the ones past the cap.
+  CssParser loaded(cacheDir);
+  ASSERT_TRUE(loaded.hasCache());
+  ASSERT_TRUE(loaded.loadFromCache());
+  EXPECT_TRUE(loaded.rulesTruncated());
+  EXPECT_EQ(loaded.ruleCount(), 1500u);
+  EXPECT_TRUE(loaded.resolveStyle("p", "rule0").defined.anySet());
+  EXPECT_TRUE(loaded.resolveStyle("p", "rule1499").defined.anySet());
+  EXPECT_FALSE(loaded.resolveStyle("p", "rule1599").defined.anySet());
 
   removePath(cacheDir);
   std::error_code rmEc;

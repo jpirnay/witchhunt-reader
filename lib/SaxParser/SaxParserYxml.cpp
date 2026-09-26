@@ -84,6 +84,12 @@ struct SaxParserImpl {
   // parent at ELEMEND time, not the element just closed).
   char elemStack[kMaxDepth][kElemNameLen];
   size_t elemDepth = 0;
+  // Elements opened past kMaxDepth. They are not reported at all (no startCb, and their ELEMEND
+  // fires no endCb), so the reported tree is the document flattened at kMaxDepth. Before this
+  // the push was skipped but the callbacks still fired: every later endCb then named the wrong
+  // element (the stack had shifted) and the last (depth - kMaxDepth) closes got no endCb at all
+  // (memory audit 2026-09, F5).
+  size_t overflowDepth = 0;
 
   // Open-element count and root-closed latch, for the trailing-data tolerance in
   // dispatchToken(). Deliberately NOT elemDepth: that one stops growing at
@@ -186,7 +192,13 @@ static void fireStart(SaxParserImpl* impl) {
     impl->elemStack[impl->elemDepth][kElemNameLen - 1] = '\0';
     ++impl->elemDepth;
   } else {
+    // Over-deep: not reported (see overflowDepth). Its character data still reaches the
+    // deepest reported element through the normal charCb path.
+    ++impl->overflowDepth;
     impl->truncFlags |= SaxParser::kTruncMaxDepth;
+    impl->attrCount = 0;
+    impl->inOpeningTag = false;
+    return;
   }
 
   if (impl->startCb) {
@@ -360,10 +372,14 @@ bool SaxParser::feed(const uint8_t* buf, size_t len) {
       case YXML_ELEMEND:
         if (impl->inOpeningTag) fireStart(impl);
         flushChar(impl);
-        if (impl->endCb && impl->elemDepth > 0) {
-          impl->endCb(impl->userData, impl->elemStack[impl->elemDepth - 1]);
+        if (impl->overflowDepth > 0) {
+          --impl->overflowDepth;  // its start was never reported; see fireStart
+        } else {
+          if (impl->endCb && impl->elemDepth > 0) {
+            impl->endCb(impl->userData, impl->elemStack[impl->elemDepth - 1]);
+          }
+          if (impl->elemDepth > 0) --impl->elemDepth;
         }
-        if (impl->elemDepth > 0) --impl->elemDepth;
         if (impl->openElems > 0 && --impl->openElems == 0) impl->rootClosed = true;
         break;
       case YXML_PISTART:
