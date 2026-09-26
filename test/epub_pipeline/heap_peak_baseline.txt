@@ -1,0 +1,13 @@
+# fixture mode heap-side-peak-bytes (see heap_peak_check.py; regenerate with UPDATE_HEAP_BASELINE=1)
+epubs/test_inline_footnotes.epub arena 29121
+epubs/test_inline_footnotes.epub heap 42805
+epubs/test_jpeg_images.epub arena 28187
+epubs/test_jpeg_images.epub heap 47489
+epubs/test_jpeg_metadata_heavy.epub arena 41388
+epubs/test_jpeg_metadata_heavy.epub heap 61555
+epubs/test_table_streaming.epub arena 36164
+epubs/test_table_streaming.epub heap 56809
+fixtures/moby-dick.epub arena 54697
+fixtures/moby-dick.epub heap 62933
+fixtures/test_large_css.epub arena 26506
+fixtures/test_large_css.epub heap 36306

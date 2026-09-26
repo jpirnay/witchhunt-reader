@@ -1,5 +1,6 @@
 #include "TextBlock.h"
 
+#include <BuildArena.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -36,8 +37,25 @@ size_t TextBlock::arenaSize(const uint16_t wordCount, const bool hasSizes, const
   return arenaOffsets(wordCount, hasSizes).text + textBytes;
 }
 
+bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
+  if (scratch != nullptr) {
+    // The two 16-bit arrays come first, so the base needs 2-byte alignment; 4 keeps the
+    // cursor tidy for whatever follows.
+    arena = static_cast<uint8_t*>(scratch->alloc(size, 4));
+    if (arena != nullptr) {
+      arenaOwned_ = false;
+      return true;
+    }
+    // Region full (a page beyond what it was sized for): fall through to the heap for this
+    // line alone. A mixed page is fine -- ownership is per block.
+  }
+  arena = new (std::nothrow) uint8_t[size];
+  arenaOwned_ = arena != nullptr;
+  return arena != nullptr;
+}
+
 void TextBlock::bindArenaPointers() {
-  const uint8_t* base = arena.get();
+  const uint8_t* base = arena;
   const ArenaOffsets o = arenaOffsets(numWords, sizesPresent);
   textOffArr = reinterpret_cast<const uint16_t*>(base);
   xposArr = reinterpret_cast<const int16_t*>(base + o.xpos);
@@ -88,8 +106,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   textBytes = static_cast<uint16_t>(totalText);
 
   const size_t size = arenaSize(numWords, sizesPresent, textBytes);
-  arena = makeUniqueNoThrow<uint8_t[]>(size);
-  if (!arena) {
+  if (!allocArena(size, nullptr)) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
     textBytes = 0;
@@ -100,7 +117,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
 
   // Pass 2: fill through mutable pointers derived from the same layout offsets
   // that bindArenaPointers() uses for the const views (bound below for reads).
-  uint8_t* base = arena.get();
+  uint8_t* base = arena;
   const ArenaOffsets o = arenaOffsets(numWords, sizesPresent);
   auto* textOff = reinterpret_cast<uint16_t*>(base);
   auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
@@ -122,7 +139,8 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   bindArenaPointers();
 }
 
-TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle)
+TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
+                     BuildArena* scratch)
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
   if (range.words == nullptr || range.styles == nullptr) {
     LOG_ERR("TXB", "Construction failed: null word range");
@@ -186,8 +204,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   textBytes = static_cast<uint16_t>(totalText);
 
   const size_t size = arenaSize(numWords, sizesPresent, textBytes);
-  arena = makeUniqueNoThrow<uint8_t[]>(size);
-  if (!arena) {
+  if (!allocArena(size, scratch)) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
     textBytes = 0;
@@ -197,7 +214,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   }
 
   // Pass 2: fill straight from the caller's arrays — no intermediate per-line vectors.
-  uint8_t* base = arena.get();
+  uint8_t* base = arena;
   const ArenaOffsets o = arenaOffsets(numWords, sizesPresent);
   auto* textOff = reinterpret_cast<uint16_t*>(base);
   auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
@@ -399,7 +416,7 @@ bool TextBlock::serialize(FsFile& file) const {
   serialization::writePod(file, textBytes);
   if (numWords > 0) {
     const size_t size = arenaSize(numWords, sizesPresent, textBytes);
-    if (file.write(arena.get(), size) != size) {
+    if (file.write(arena, size) != size) {
       LOG_ERR("TXB", "Serialization failed: arena write (%u bytes)", static_cast<uint32_t>(size));
       return false;
     }
@@ -418,7 +435,7 @@ bool TextBlock::serialize(FsFile& file) const {
   return true;
 }
 
-std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
+std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scratch) {
   uint16_t wc = 0;
   uint8_t hasSizes = 0;
   uint16_t textBytes = 0;
@@ -451,12 +468,11 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
 
   if (wc > 0) {
     const size_t size = arenaSize(wc, block->sizesPresent, textBytes);
-    block->arena = makeUniqueNoThrow<uint8_t[]>(size);
-    if (!block->arena) {
+    if (!block->allocArena(size, scratch)) {
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
     }
-    if (file.read(block->arena.get(), size) != static_cast<int>(size)) {
+    if (file.read(block->arena, size) != static_cast<int>(size)) {
       LOG_ERR("TXB", "Deserialization failed: arena read (%u bytes)", static_cast<uint32_t>(size));
       return nullptr;
     }

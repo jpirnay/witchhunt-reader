@@ -3,7 +3,7 @@ SPINE 0 href=OEBPS/cover.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=1 footnotes=0
   IMG y=0 x=0 w=460 h=686 src=<cache>/epub_<hash>/img_91f282312742c715.jpg
 SPINE 1 href=OEBPS/toc.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=21 footnotes=16
+ PAGE 0 elements=21 footnotes=20
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=3
    W x=128 s=1 z=100 t=Spine
    W x=211 s=1 z=100 t=&
@@ -135,6 +135,10 @@ SPINE 1 href=OEBPS/toc.xhtml pages=1 truncated=0 cssFallback=0
   FN n=The Whirlpool Narrows href=chapter5.xhtml#whirlpool-narrows
   FN n=Appendix A – Knot Types href=appendix.xhtml#appendix-a
   FN n=Appendix B – Signal Flags href=appendix.xhtml#appendix-b
+  FN n=Appendix C – Tidal Observatio href=appendix.xhtml#appendix-c
+  FN n=Appendix D – Errata href=appendix.xhtml#appendix-d
+  FN n=Appendix E – Acknowledgments href=appendix.xhtml#appendix-e
+  FN n=Colophon href=backmatter.xhtml#colophon
 SPINE 2 href=OEBPS/frontmatter.xhtml pages=3 truncated=0 cssFallback=0
  PAGE 0 elements=4 footnotes=0
   LINE y=27 x=0 align=2 mult=1.150 hfid=0 words=1

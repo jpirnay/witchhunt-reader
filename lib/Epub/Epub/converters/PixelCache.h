@@ -86,6 +86,17 @@ struct PixelCache {
   //     survive. A v3 cache replays the nearest-neighbour picture forever otherwise.
   // v5: progressive JPEGs are fully decoded instead of shown from their 1/8-resolution DC scan.
   static constexpr uint16_t PXC_MAGIC = 0x8005;
+  // Same layout, written by a decode that had to settle for less than the requested scale (a
+  // progressive JPEG at a coarser DCT scale, or its DC-only preview) because the heap could not
+  // hold the workspace. Readers replay it like any cache; a warm pass with the framebuffers
+  // released deletes it and decodes again (ImageBlock::dropCoarseCache). Before this the .pxc
+  // had no quality key, so a preview-grade image stood in for the book's for good (memory audit
+  // 2026-09, F3).
+  static constexpr uint16_t PXC_MAGIC_COARSE = 0x8006;
+  static bool magicIsValid(const uint16_t magic) { return magic == PXC_MAGIC || magic == PXC_MAGIC_COARSE; }
+  bool coarse = false;
+  // Flag the cache being written as a below-requested-quality decode; finalize() stamps it.
+  void markCoarse() { coarse = true; }
   static constexpr size_t PXC_HEADER_BYTES = 6;  // magic + width + height
 
   // Rows begin() gives the band for a w x h image whose tallest decode block is maxBlockDstRows.
@@ -113,6 +124,7 @@ struct PixelCache {
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
   bool begin(const std::string& cachePath, int w, int h, int ox, int oy, int maxBlockDstRows) {
+    coarse = false;
     width = w;
     height = h;
     originX = ox;
@@ -230,9 +242,17 @@ struct PixelCache {
       abort();
       return false;
     }
+    if (coarse) {
+      const uint16_t magic = PXC_MAGIC_COARSE;
+      if (!file.seekSet(0) || file.write(reinterpret_cast<const uint8_t*>(&magic), 2) != 2) {
+        LOG_ERR("IMG", "Failed to stamp coarse pixel cache: %s", cachePathStr.c_str());
+        abort();
+        return false;
+      }
+    }
     file.close();
-    LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,
-            (int)PXC_HEADER_BYTES + bytesPerRow * height);
+    LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes%s)", cachePathStr.c_str(), width, height,
+            (int)PXC_HEADER_BYTES + bytesPerRow * height, coarse ? ", coarse" : "");
     ok = false;  // file handed off; nothing left to clean up
     return true;
   }

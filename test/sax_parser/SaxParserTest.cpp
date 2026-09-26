@@ -291,6 +291,51 @@ TEST(SaxParser, TruncationFlagsReportMaxAttrs) {
   EXPECT_TRUE(p.truncationFlags() & SaxParser::kTruncMaxAttrs);
 }
 
+// Nesting past kMaxDepth (64) flattens the tree instead of shifting it. Before this, the 65th
+// level's push was skipped but its callbacks still fired, so every later endCb named the wrong
+// element and the innermost closes got no endCb at all (memory audit 2026-09, F5/R4). Now the
+// excess elements are simply not reported -- no start, no end -- and their text reaches the
+// deepest reported ancestor; the reported events stay a well-formed tree.
+TEST(SaxParser, OverDeepNestingIsFlattenedNotShifted) {
+  constexpr int kDepth = 70;  // six levels past kMaxDepth
+  std::string xml;
+  for (int i = 0; i < kDepth; ++i) xml += "<d" + std::to_string(i) + ">";
+  xml += "deep text";
+  for (int i = kDepth - 1; i >= 0; --i) xml += "</d" + std::to_string(i) + ">";
+
+  Collector c;
+  SaxParser p;
+  ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  ASSERT_TRUE(p.feed(bytes, xml.size()));
+  ASSERT_TRUE(p.finalize());
+  EXPECT_TRUE(p.truncationFlags() & SaxParser::kTruncMaxDepth);
+
+  // Exactly the first 64 levels are reported, opened and closed in order, with the text
+  // attributed to the deepest reported element.
+  std::vector<std::string> opened, closed;
+  std::string text;
+  for (const auto& e : c.events) {
+    if (e.type == Event::Type::Start) opened.push_back(e.name);
+    if (e.type == Event::Type::End) closed.push_back(e.name);
+    if (e.type == Event::Type::Char) text += e.text;
+  }
+  ASSERT_EQ(opened.size(), 64u);
+  ASSERT_EQ(closed.size(), 64u);
+  for (int i = 0; i < 64; ++i) {
+    EXPECT_EQ(opened[i], "d" + std::to_string(i));
+    EXPECT_EQ(closed[i], "d" + std::to_string(63 - i)) << "end tag " << i << " names the wrong element";
+  }
+  EXPECT_EQ(text, "deep text");
+  // Start/end pairs interleave as a proper tree: the last start precedes the first end.
+  size_t lastStart = 0, firstEnd = c.events.size();
+  for (size_t i = 0; i < c.events.size(); ++i) {
+    if (c.events[i].type == Event::Type::Start) lastStart = i;
+    if (c.events[i].type == Event::Type::End && i < firstEnd) firstEnd = i;
+  }
+  EXPECT_LT(lastStart, firstEnd);
+}
+
 // ---------------------------------------------------------------------------
 // HTML void-element repair
 //

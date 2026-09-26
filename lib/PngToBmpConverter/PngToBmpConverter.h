@@ -38,7 +38,10 @@ class PngDecodeSession {
   // are drawn 1:1 with no rescale (a fractional rescale of an already-dithered 1-bit image
   // produces a moiré grid). crop=false fits inside the target (scale to the SMALLER factor).
   // Returns false on any setup failure; the session must not be used after a false return.
-  bool begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight, bool crop = true);
+  // `scratch`: a lent region for the decoder's inflate ring and scanlines (held across the
+  // session's steps); null takes them from the heap.
+  bool begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight, bool crop = true,
+             BuildArena* scratch = nullptr);
 
   // Decode up to maxSourceRows scanlines and write the corresponding BMP rows.
   // Returns Running if more rows remain, Done when the image is complete, Error on failure.

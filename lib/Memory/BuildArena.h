@@ -19,6 +19,11 @@
 //   - failedAllocSize(): size of the last REFUSED allocation (0 = none) —
 //     distinct from highWater(), which only records successes; together they
 //     reproduce device OOM conditions exactly in host tests.
+//   - beginLane()/laneHighWater(): the peak reached above the cursor at the last
+//     beginLane(). A build calls beginLane() at each phase boundary so its
+//     summary line can say how much each phase (extract ring, parse working set)
+//     used on top of what was resident when it started -- the per-lane figures
+//     the arena budget is derived from (memory audit 2026-09, R3).
 //
 // Heap discipline: the backing buffer comes from makeUniqueNoThrow (never a
 // throwing new); valid() must be checked before use.
@@ -83,6 +88,13 @@ class BuildArena {
   size_t used() const { return cursor_; }
   size_t highWater() const { return highWater_; }
   size_t failedAllocSize() const { return failedAllocSize_; }
+  // Lane telemetry (diagnostic only): mark the cursor as a lane's floor, then read the peak
+  // reached above it. Only alloc() moves the peak; releases never lower it.
+  void beginLane() {
+    laneStart_ = cursor_;
+    laneHighWater_ = cursor_;
+  }
+  size_t laneHighWater() const { return laneHighWater_ > laneStart_ ? laneHighWater_ - laneStart_ : 0; }
   uint32_t releaseFailures() const { return releaseFailures_; }
 
   // Bump-allocate `bytes` aligned to `align` (power of two). Returns nullptr
@@ -106,6 +118,7 @@ class BuildArena {
     }
     cursor_ = aligned + bytes;
     if (cursor_ > highWater_) highWater_ = cursor_;
+    if (cursor_ > laneHighWater_) laneHighWater_ = cursor_;
     return base_ + aligned;
   }
 
@@ -162,6 +175,8 @@ class BuildArena {
   void reset() {
     cursor_ = 0;
     activeBlockId_ = 0;
+    laneStart_ = 0;
+    laneHighWater_ = 0;
   }
 
  private:
@@ -170,6 +185,8 @@ class BuildArena {
   size_t capacity_ = 0;
   size_t cursor_ = 0;
   size_t highWater_ = 0;
+  size_t laneStart_ = 0;
+  size_t laneHighWater_ = 0;
   size_t failedAllocSize_ = 0;
   uint32_t activeBlockId_ = 0;
   uint32_t nextBlockId_ = 1;

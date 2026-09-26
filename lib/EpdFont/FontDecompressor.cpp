@@ -667,8 +667,13 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
       // Roll back this slot only (other slots from prior prewarmCache calls stay valid)
       stats.pageBufferBytes -= totalBytes;
       stats.pageGlyphsBytes -= glyphCount * sizeof(PageGlyphEntry);
-      free(slot.buffer);
-      free(slot.glyphs);
+      // An arena-backed slot is an interior pointer into the lent framebuffer: its bytes go
+      // back with the slot scope, and free() on them would corrupt the heap -- on exactly the
+      // low-heap mid-build draw where a 128-byte malloc can fail (memory audit 2026-09, F2c).
+      if (!slot.arenaBacked) {
+        free(slot.buffer);
+        free(slot.glyphs);
+      }
       slot = {};
       pageSlotCount--;
       return glyphCount;

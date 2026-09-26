@@ -76,7 +76,15 @@ TEST_F(SaxStateInArenaFixture, ALentArenaHoldsTheSaxParserStateDuringTheParse) {
   ASSERT_TRUE(arena.valid());
   const size_t used = arenaUsedDuringParse(&arena);
   EXPECT_GE(used, SaxParser::stateBytes()) << "the parser state must come out of the lent arena, not the heap";
+  // A page's lines (their TextBlock bytes, ~28 x ~180 B) live in the page's block of the region
+  // too, above the parser state and the feed chunk (memory audit 2026-09, R2 step 2).
+  EXPECT_GE(used, SaxParser::stateBytes() + 1024 + 2048) << "a page's lines must come out of the lent arena";
+  // The state is a plain allocation inside the feed-chunk block's scope; the section releases
+  // that block only after finalize() has last used the parser, and every block release in the
+  // build must have been in LIFO order for the cursor to come back to 0 (memory audit
+  // 2026-09, F2a/F2b).
   EXPECT_EQ(arena.used(), 0u) << "the build rewinds everything it took";
+  EXPECT_EQ(arena.releaseFailures(), 0u) << "every block release was in order";
 }
 
 TEST_F(SaxStateInArenaFixture, NoArenaStillBuilds) { EXPECT_EQ(arenaUsedDuringParse(nullptr), 0u); }

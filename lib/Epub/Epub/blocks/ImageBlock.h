@@ -115,6 +115,13 @@ class ImageBlock final : public Block {
   // True when the 4-level .pxc pixel cache exists (grayscale AA rendering).
   bool hasGrayscaleCache() const;
 
+  // Deletes the mode's .pxc when it was stamped coarse (PixelCache::PXC_MAGIC_COARSE: a decode
+  // that settled for a lower scale or the DC preview because the heap was short) so the next
+  // render decodes it again. Returns true when a cache was removed. Only warm passes that run
+  // with the framebuffers released call this -- at reading-time heap the decode would only
+  // come out coarse again.
+  bool dropCoarseCache(bool monochromeOutput) const;
+
   // Render the 4-level cache into the framebuffer using the renderer's current
   // mode (GRAYSCALE_LSB or GRAYSCALE_MSB). No-op if no grayscale cache exists.
   // Called by the AA grayscale passes to give images proper gray tones.
@@ -152,5 +159,21 @@ class ImageBlock final : public Block {
   // Returns true if the file is ready for decoding.
   bool ensureExtracted() const;
 
-  void renderPlaceholder(GfxRenderer& renderer, int x, int y) const;
+  // `loading`: the box says the image is still being prepared (a mid-build draw) rather than
+  // "large image, press to load".
+  void renderPlaceholder(GfxRenderer& renderer, int x, int y, bool loading = false) const;
+  static bool placeholderOnly_;
+
+ public:
+  // While one of these is live, render() draws every image that is not already in its pixel
+  // cache as a "loading" placeholder instead of decoding it. The mid-build page draw uses it:
+  // a page the reader is waiting on can be shown the moment its text exists, with the
+  // decode left to the normal render once the build completes. Decoding there would run on
+  // the build's starved heap while the secondary buffer is lent to the build.
+  struct PlaceholderOnlyScope {
+    PlaceholderOnlyScope() { placeholderOnly_ = true; }
+    ~PlaceholderOnlyScope() { placeholderOnly_ = false; }
+    PlaceholderOnlyScope(const PlaceholderOnlyScope&) = delete;
+    PlaceholderOnlyScope& operator=(const PlaceholderOnlyScope&) = delete;
+  };
 };

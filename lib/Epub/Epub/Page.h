@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+class BuildArena;  // lib/Memory -- optional storage for TextBlock bytes on deserialize
+
 #include "FootnoteEntry.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
@@ -51,7 +53,7 @@ class PageLine final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
-  static std::unique_ptr<PageLine> deserialize(FsFile& file);
+  static std::unique_ptr<PageLine> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 };
 
 // New PageImage class
@@ -115,7 +117,7 @@ class PageTableFragment final : public PageElement {
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   bool serialize(FsFile& file) override;
-  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
+  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file, BuildArena* scratch = nullptr);
   PageElementTag getTag() const override { return TAG_PageTable; }
   uint16_t getTotalHeight() const { return totalHeight; }
   uint16_t getTotalWidth() const { return totalWidth; }
@@ -139,17 +141,37 @@ class Page {
  public:
   // the list of block index and line numbers on this page
   std::vector<std::unique_ptr<PageElement>> elements;
+  // What the parser reserves for a fresh page: a text page holds ~28 lines plus the odd image
+  // or rule. Left to grow by doubling, `elements` cost eight allocations per page on the host
+  // census (memory audit 2026-09, R2); a denser page still grows past this normally.
+  static constexpr size_t TYPICAL_ELEMENTS = 32;
   std::vector<FootnoteEntry> footnotes;
-  static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
+  // Footnote links kept per page. 16 -> 64 (memory audit 2026-09, R4): an endnotes page can
+  // carry a link per line, and the 17th used to be dropped without a word. A FootnoteEntry is
+  // 128 B, so a full page costs 8 KB on load -- only pages that have that many links pay it.
+  // The parser reports a refusal (addFootnote returns false) as a cap overflow, which ends up
+  // in the section's status byte.
+  static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 64;
+  // Load-side sanity bound on the element count, and now the build-side bound too: a page is
+  // laid out by height, so a real page never comes near it (~28 lines, plus images and rules).
+  // Page::serialize clamps to it and Section::onPageComplete reports the overflow, so a page
+  // can no longer be built that cannot be loaded (audit §4.2).
+  static constexpr uint16_t MAX_ELEMENTS = 1024;
+  // Load-side sanity bound on a section's page count (Section::loadSectionFile), applied at
+  // build time too: ChapterHtmlSlimParser stops the parse at this many pages with the truncated
+  // status, so a monster spine is cached once instead of rebuilt on every open (audit §4.2).
+  static constexpr uint16_t MAX_PAGES_PER_SECTION = 10000;
 
-  void addFootnote(const char* number, const char* href) {
-    if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return;  // Cap per-page footnotes
+  // False when the page already holds MAX_FOOTNOTES_PER_PAGE entries (the link is dropped).
+  bool addFootnote(const char* number, const char* href) {
+    if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return false;
     FootnoteEntry entry;
     strncpy(entry.number, number, sizeof(entry.number) - 1);
     entry.number[sizeof(entry.number) - 1] = '\0';
     strncpy(entry.href, href, sizeof(entry.href) - 1);
     entry.href[sizeof(entry.href) - 1] = '\0';
     footnotes.push_back(entry);
+    return true;
   }
 
   // monochromeOutput=true: 1-bit Atkinson BW cache (AA off); false: 4-level Bayer cache (AA on)
@@ -178,12 +200,15 @@ class Page {
   // alsoWarmGrayscale additionally warms the 4-level Bayer cache that the AA grayscale
   // planes replay on top of the BW frame. Both variants are needed with AA on: the BW
   // plane draws 1-bit Atkinson, the gray planes lift levels 1/2 back to real greys.
+  // redecodeCoarse: a .pxc stamped coarse (see ImageBlock::dropCoarseCache) counts as missing.
   void warmImageCaches(GfxRenderer& renderer, int xOffset, int yOffset, bool forceLoadLargeImages,
-                       bool monochromeOutput = true, bool alsoWarmGrayscale = false) const;
+                       bool monochromeOutput = true, bool alsoWarmGrayscale = false, bool redecodeCoarse = false) const;
   bool hasPlaceholderImages(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool allImagesArePlaceholders(bool forceLoadLargeImages, bool monochromeOutput) const;
   bool serialize(FsFile& file) const;
-  static std::unique_ptr<Page> deserialize(FsFile& file);
+  // `scratch`: every TextBlock on the page takes its bytes from it when given (see
+  // TextBlock::deserialize); the page must then die before the caller's arena block does.
+  static std::unique_ptr<Page> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 
   // Check if page contains any images (used to force full refresh)
   bool hasImages() const {

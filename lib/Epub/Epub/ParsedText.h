@@ -11,6 +11,7 @@
 #include "blocks/TextBlock.h"
 
 class GfxRenderer;
+class BuildArena;
 
 class ParsedText {
  public:
@@ -36,6 +37,36 @@ class ParsedText {
   // one book: 16258 allocations at extractLine against 14459 rendered lines, essentially one
   // each, in the 16-32 byte classes that dominate the allocation count.
   std::vector<int16_t> lineXPosScratch_;
+  // Layout scratch kept across paragraphs (the parser reuses one ParsedText, see reset()).
+  // Each of these was a per-block local before: one allocation per paragraph apiece, ~30,000
+  // per book on the host census once the word vectors stopped regrowing (memory audit
+  // 2026-09, R2). clear() keeps their capacity, so a chapter allocates them once.
+  std::vector<uint16_t> wordWidths_;
+  std::vector<size_t> lineBreakIndices_;
+  std::vector<bool> lineEndsWithHyphenatedWord_;
+  std::vector<int> splitPrefixWordIndexes_;
+  std::vector<bool> splitInsertedHyphen_;
+  std::vector<size_t> suffixBreaks_;
+  std::vector<bool> suffixLineEndsWithHyphenatedWord_;
+  std::vector<int> suffixSplitPrefixWordIndexes_;
+  std::vector<bool> suffixSplitInsertedHyphen_;
+  std::vector<int> interWordGaps_;
+  std::vector<int> lineIndexForWord_;  // computeLineBreaks' DP tables
+  std::vector<int> dp_;
+  std::vector<size_t> ans_;
+  std::string allText_;
+  // Where each line's TextBlock takes its bytes: the build's lent region (a page-scoped block
+  // the parser opens), or the heap when null. The parser sets it on its main text block (with
+  // beforeLine_, see there for why the two go together) and on table cells laid out as a grid
+  // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
+  // as a fallback paragraph keeps the heap.
+  BuildArena* lineArena_ = nullptr;
+  // Called with the line's largest word-size percent just before the line is materialised.
+  // The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
+  // fit is then allocated from the page it lands on, not from the block of the page it
+  // overflowed -- with page-scoped arena blocks, allocating first would leave page N+1 holding
+  // bytes that die with page N.
+  std::function<void(uint8_t maxSizePct)> beforeLine_;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
   // Per-word font size, percent of the block font size (100 = block size). Kept in
@@ -46,7 +77,12 @@ class ParsedText {
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
-  bool isContinuation_ = false;       ///< true after an intermediate flush; suppresses re-applying paragraph indent
+  bool isContinuation_ = false;  ///< true after an intermediate flush; suppresses re-applying paragraph indent
+  // Set (and never cleared) when addWord could not grow the word vectors within the largest
+  // free heap block: the word was dropped and the parser must abort the parse at its next
+  // layout gate. std::vector growth cannot fail gracefully under -fno-exceptions, so the
+  // check has to happen before the reserve.
+  bool wordGrowthRefused_ = false;
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
   void applyParagraphIndent(const GfxRenderer& renderer, int fontId);
@@ -59,22 +95,25 @@ class ParsedText {
   // (no float zones active) that returns pageWidth unchanged.
   int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY, int pageWidth) const;
 
-  std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                        std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                        int firstLineIndent, int16_t blockStartY, int lineHeight);
-  std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
-                                                  std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
-                                                  std::vector<bool>& lineEndsWithHyphenatedWord,
-                                                  std::vector<int>& splitPrefixWordIndexes,
-                                                  std::vector<bool>& splitInsertedHyphen, int firstLineIndent,
-                                                  int16_t blockStartY, int lineHeight);
+  // The three breakers fill `lineBreakIndices` (cleared first) rather than returning a vector,
+  // so the caller's scratch member is reused instead of reallocated per paragraph.
+  void computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
+                         std::vector<bool>& continuesVec, int firstLineIndent, int16_t blockStartY, int lineHeight,
+                         std::vector<size_t>& lineBreakIndices);
+  void computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                   std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                   std::vector<bool>& lineEndsWithHyphenatedWord,
+                                   std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen,
+                                   int firstLineIndent, int16_t blockStartY, int lineHeight,
+                                   std::vector<size_t>& lineBreakIndices);
   // Recompute hyphenated breaks for a suffix that starts at startIndex.
   // Used after a single-line retry so later lines keep normal hyphenation.
-  std::vector<size_t> computeHyphenatedLineBreaksFromIndex(
-      const GfxRenderer& renderer, int fontId, int pageWidth, std::vector<uint16_t>& wordWidths,
-      std::vector<bool>& continuesVec, size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
-      std::vector<int>& splitPrefixWordIndexes, std::vector<bool>& splitInsertedHyphen, int16_t blockStartY = 0,
-      int lineHeight = 0, int startLineIdx = 0);
+  void computeHyphenatedLineBreaksFromIndex(const GfxRenderer& renderer, int fontId, int pageWidth,
+                                            std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec,
+                                            size_t startIndex, std::vector<bool>& lineEndsWithHyphenatedWord,
+                                            std::vector<int>& splitPrefixWordIndexes,
+                                            std::vector<bool>& splitInsertedHyphen, int16_t blockStartY, int lineHeight,
+                                            int startLineIdx, std::vector<size_t>& lineBreakIndices);
   // Compute exactly one line break without hyphenating words.
   // Used only for the page-boundary retry line.
   size_t computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, int fontId, int pageWidth,
@@ -90,8 +129,9 @@ class ParsedText {
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       const GfxRenderer& renderer, int fontId, bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry,
       int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
-  std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer,
-                                            int fontId);  // uses blockStyle.fontSizeMultiplier internally
+  // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally.
+  void calculateWordWidths(const GfxRenderer& renderer, int fontId,
+                           std::vector<uint16_t>& out);  // uses blockStyle.fontSizeMultiplier internally
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
@@ -102,8 +142,26 @@ class ParsedText {
         bionicReadingEnabled(bionicReadingEnabled) {}
   ~ParsedText() = default;
 
+  // Start a new, empty block in this object under `blockStyle`, keeping the word vectors'
+  // capacity. The parser reuses one ParsedText across a chapter's paragraphs: a fresh object
+  // per paragraph regrew four vectors from 16 to 128 entries each time -- ~16 allocations and
+  // ~3 KB of heap traffic per paragraph, 15,000 allocations per book on the host census, the
+  // single largest churn of a section build (memory audit 2026-09, R2).
+  void reset(const BlockStyle& blockStyle);
+  // Give the layout scratch (and the word vectors, when the block is empty) back to the heap.
+  // The parser calls this when an incremental build yields a slice: that is the one moment a
+  // mid-build page draw can run, and its ~10.5 KB Page sits on the heap next to whatever the
+  // parse holds. Keeping ~8 KB of scratch resident across that moment cost the X3 5 KB of
+  // minimum free heap (watermark 11.3 KB -> 6.4 KB, device run 7); dropping it at the yield
+  // keeps the no-churn behaviour within a slice and the old floor across it.
+  void releaseLayoutScratch();
+
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT);
+  // True once addWord had to drop a word because the word vectors could not grow (see
+  // wordGrowthRefused_). ChapterHtmlSlimParser::ensureHeapForTextLayout turns it into a
+  // partial-cache abort.
+  bool wordGrowthRefused() const { return wordGrowthRefused_; }
   // If every word shares one non-100% size (a span wrapping the whole paragraph, e.g.
   // Alice's mouse-tale lines), fold that percent into the block-level fontSizeMultiplier
   // and reset the per-word sizes to 100. This routes whole-paragraph spans through the
@@ -112,6 +170,9 @@ class ParsedText {
   // before the first layout pass of the block; callers skip continuations.
   bool foldUniformWordSizes();
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
+  // See lineArena_ / beforeLine_. Both survive reset().
+  void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  void setBeforeLineHook(std::function<void(uint8_t maxSizePct)> hook) { beforeLine_ = std::move(hook); }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }

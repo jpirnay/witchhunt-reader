@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena bytes
+
 #include "Block.h"
 #include "BlockStyle.h"
 
@@ -87,9 +89,16 @@ class TextBlock final : public Block {
   uint16_t textBytes = 0;  // total size of the text region, including one NUL per word
   bool sizesPresent = false;
   bool isValid = true;
-  // The ONLY allocation: makeUniqueNoThrow, so OOM yields an invalid block
-  // instead of abort() (bare new is not nothrow with -fno-exceptions).
-  std::unique_ptr<uint8_t[]> arena;
+  // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
+  // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
+  // scratch region (the borrowed secondary framebuffer) hands it in through the range
+  // constructor: the bytes are then bump-allocated in the page's block of that region and are
+  // not ours to free -- the parser rewinds the block once the page is serialised. Per line
+  // this was the largest of three heap allocations, ~7,000 per book (memory audit 2026-09, R2).
+  uint8_t* arena = nullptr;
+  bool arenaOwned_ = false;
+  // Takes the arena bytes from `scratch` when given and it has room, else the heap. False on OOM.
+  bool allocArena(size_t size, BuildArena* scratch);
   // Typed views into the arena, bound once after the arena is filled. All
   // 16-bit bases sit at even offsets, so direct dereference is alignment-safe.
   const uint16_t* textOffArr = nullptr;
@@ -157,8 +166,13 @@ class TextBlock final : public Block {
   // xpos by const reference, not by value: it is only read (copied into the arena below), and
   // by-value forced the caller to hand over a vector it had just built, which meant one heap
   // allocation per rendered LINE for pure scratch. See ParsedText::extractLine.
-  TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle);
-  ~TextBlock() override = default;
+  // `scratch`: see the arena member. Null (the default, and the reader-side deserialize path)
+  // means the heap.
+  TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
+            BuildArena* scratch = nullptr);
+  ~TextBlock() override {
+    if (arenaOwned_) delete[] arena;
+  }
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
@@ -225,5 +239,7 @@ class TextBlock final : public Block {
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }
   bool serialize(FsFile& file) const;
-  static std::unique_ptr<TextBlock> deserialize(FsFile& file);
+  // `scratch`: the arena bytes come from it when given (a page drawn mid-build takes them from
+  // the build's lent region, inside a block the caller opens and closes); null means the heap.
+  static std::unique_ptr<TextBlock> deserialize(FsFile& file, BuildArena* scratch = nullptr);
 };

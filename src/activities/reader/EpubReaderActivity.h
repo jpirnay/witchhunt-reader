@@ -287,6 +287,9 @@ class EpubReaderActivity final : public Activity {
   // Spine whose image-degraded cache was already discarded for a rebuild this session (see the
   // cache probe in buildSection): one retry, not one per entry.
   int imageHeaderRebuildSpine_ = -1;
+  // Same one-shot for a cache whose build demoted a table row or skipped CSS lookups on the
+  // heap (Section::isTableRowDegraded / isCssLowHeapDegraded, persisted in the status byte).
+  int degradedLayoutRebuildSpine_ = -1;
   struct RenderPhaseStats {
     unsigned long prewarmMs = 0UL;
     unsigned long bwRenderMs = 0UL;
@@ -403,9 +406,6 @@ class EpubReaderActivity final : public Activity {
   // until buildSection() adopts it on a consecutive boundary cross or discards it on any
   // other navigation. Its destructor aborts a partial build and deletes the partial file.
   std::unique_ptr<Section> backgroundSection_;
-  // Uncompressed size of the target spine's XHTML (fetched once in the Probe step).
-  // Sizes the inflate ring share of the extraction heap gate.
-  size_t backgroundBuildInflatedSize_ = 0;
   // True when the target spine's footnote links have never been scanned, so its build will run
   // the inline-preview resolve before laying out a line. Decided once in the Probe step; the pass
   // is sliced like the rest of the build, so all this buys is the BG_BUILD_RESOLVE_EXTRA_HEAP_BYTES
@@ -413,6 +413,13 @@ class EpubReaderActivity final : public Activity {
   bool backgroundBuildNeedsResolve_ = false;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
+  // Image lane (memory audit 2026-09, R7): between page turns, decode the pixel caches of the
+  // images on the next few pages so the turn that reaches them replays a cache instead of
+  // running a 1-4 s decode. Ranked above Background-B's look-ahead build. The pair below marks a
+  // window already found clean, so an idle reader does not re-read those pages every tick.
+  static constexpr int kImageWarmLookahead = 5;
+  int imageWarmCleanSpine_ = -1;
+  int imageWarmCleanPage_ = -1;
   // Times a build of backgroundBuildSpineIndex_ was preempted (reader needed the borrowed
   // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
   // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
@@ -716,6 +723,9 @@ class EpubReaderActivity final : public Activity {
   // Serialises SD access against the render task via RenderLock; skips the tick instead of
   // blocking when the render task is busy.
   void stepBackgroundSectionBuild();
+  // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held.
+  // True when it did a page's worth of work this tick (the caller then yields to the loop).
+  bool stepImageWarmLocked();
   // Lend the secondary framebuffer to Background-B's build arena. Mirrors the Background-C
   // borrow site in buildSection(): the lent block never enters the heap, so the return cannot
   // fail on a fragmented hole, and the build's scratch — parse working set, inflate ring, CSS
@@ -771,7 +781,11 @@ class EpubReaderActivity final : public Activity {
   // Draws a single text-only page from an in-progress Background-C build (no AA, no pre-render
   // arming). Releases the lock before the waveform wait (like renderContents) so a C build
   // slice can run on the loop task during the refresh.
-  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout);
+  // `drawBlock`: the arena block the page's TextBlock bytes live in, when the caller loaded the
+  // page from the build's lent region. Released here, before the lock is, so a build slice that
+  // runs during the waveform wait finds the arena cursor where it left it.
+  void displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
+                        BuildArena::Block* drawBlock = nullptr);
   // Draws the status bar over the current frame buffer and flushes to the display.
   // Handles the refresh cycle and grayscale AA pass. page must be the same page
   // that was last rendered into the buffer (needed for image AA re-render).

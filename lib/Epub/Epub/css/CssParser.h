@@ -127,6 +127,11 @@ class CssParser {
   // which lets them share one cached style across every element with the same tag and class
   // instead of one per id. Persisted in the rule cache; see CSS_CACHE_VERSION v17.
   [[nodiscard]] bool hasIdSelectors() const { return hasIdSelectors_; }
+  // True when the book's stylesheets had more rules than MAX_RULES: the cache holds the first
+  // MAX_RULES and the rest are missing. Persisted in the cache flags byte (bit 1), so the book is
+  // parsed once and says so on every open, instead of re-parsing on every open and hitting the
+  // cap again (memory audit 2026-09, R4).
+  [[nodiscard]] bool rulesTruncated() const { return rulesTruncated_; }
 
   [[nodiscard]] CssStyle resolveStyle(const std::string& tagName, const std::string& classAttr,
                                       const std::string& idAttr = {}) const;
@@ -233,7 +238,10 @@ class CssParser {
   //     few small strings, so the lower floor stays clear of the fault zone.
   // Both are reset by clear() so the shared per-epub instance never carries them into a
   // later heap-backed build or leaves a dangling arena view.
-  void setIndexArena(BuildArena* arena) { indexArena_ = arena; }
+  void setIndexArena(BuildArena* arena) {
+    indexArena_ = arena;
+    arenaLoadAttempted_ = false;
+  }
   void setLeanResolve(bool enable) { leanResolve_ = enable; }
 
  private:
@@ -255,6 +263,12 @@ class CssParser {
   static_assert(sizeof(SelectorEntry) == CSS_INDEX_BYTES_PER_RULE,
                 "SelectorEntry size changed — update CSS_INDEX_BYTES_PER_RULE so heap gates stay calibrated");
   mutable bool cacheIndexLoaded_ = false;
+  // Arena mode loads the ruleset exactly once, at the build's setup. A lookup that finds the
+  // index missing afterwards must not reload it: the load reserves and commits a block, which
+  // mid-parse would sit above the parser's open page block and be rewound with it (memory
+  // audit 2026-09, L3) -- and a load that failed at setup would otherwise be retried, and
+  // bump-allocate again, on every lookup.
+  mutable bool arenaLoadAttempted_ = false;
   mutable size_t cachedRuleCount_ = 0;
   mutable std::vector<SelectorEntry> cacheRuleOffsets_;  // heap backing (indexArena_ == nullptr)
   mutable uint32_t totalSelectorCandidates_ = 0;
@@ -304,7 +318,8 @@ class CssParser {
   mutable ResolveStats resolveStats_;
   // Set while parsing when a selector matches on an id, and restored from the cache header
   // otherwise. Conservative default: assume ids matter until something says they do not.
-  mutable bool hasIdSelectors_ = true;  // mutable: restored by the const cache-index load
+  mutable bool hasIdSelectors_ = true;   // mutable: restored by the const cache-index load
+  mutable bool rulesTruncated_ = false;  // see rulesTruncated(); restored by the cache load
 
   bool compileModeActive_ = false;
   bool compileModeFailed_ = false;

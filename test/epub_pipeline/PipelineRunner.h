@@ -28,7 +28,14 @@ struct Profile {
   bool bionicReadingEnabled = false;
   bool inlineFootnotePreviews = true;
   uint8_t imageRendering = 0;
+  // When non-zero, every section build is lent a heap-backed BuildArena of this many bytes, the
+  // way the reader lends the borrowed secondary framebuffer to a background build. The heap
+  // census then shows what such a build keeps on the heap; the arena's own use is reported per
+  // spine (ARENA lines) when `arenaStat` is set.
+  size_t lentArenaBytes = 0;
 };
+
+using ArenaStatFn = std::function<void(int spineIndex, size_t highWater, size_t capacity)>;
 
 // Called after each spine item's build+dump with its wall-clock cost.
 // pages/elapsedUs cover the section build AND the page-by-page dump read-back.
@@ -39,6 +46,6 @@ using SpineStatFn = std::function<void(int spineIndex, uint16_t pages, int64_t e
 // `cacheDir` should be empty/fresh for a cold run; a second call over the same
 // cacheDir exercises the warm (cache-hit) path and must dump identically.
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
-                const SpineStatFn& spineStat = {});
+                const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {});
 
 }  // namespace pipeline_harness

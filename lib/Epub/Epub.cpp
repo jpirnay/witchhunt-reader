@@ -6,6 +6,7 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <InflateReader.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <PngToBmpConverter.h>
@@ -627,8 +628,14 @@ void Epub::parseCssFiles() const {
 }
 
 // load in the meta data for the epub file
-bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
+bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena* scratch) {
   LOG_DBG("EBP", "Loading ePub: %s", filepath.c_str());
+  // The lent region serves every stream read below; cleared on every way out of this function.
+  struct ScratchScope {
+    BuildArena*& slot;
+    ~ScratchScope() { slot = nullptr; }
+  } scratchScope{loadScratch_};
+  loadScratch_ = (scratch != nullptr && scratch->valid()) ? scratch : nullptr;
   tocReliability = TocReliability::Unknown;
 
   // Initialize spine/TOC cache
@@ -893,7 +900,12 @@ uint32_t coverMemoKeySize(const std::string& path) {
 
 void Epub::clearCoverMetadataMemo() { g_coverMemo = CoverMetadataMemo{}; }
 
-bool Epub::loadForCover() {
+bool Epub::loadForCover(BuildArena* scratch) {
+  struct ScratchScope {
+    BuildArena*& slot;
+    ~ScratchScope() { slot = nullptr; }
+  } scratchScope{loadScratch_};
+  loadScratch_ = (scratch != nullptr && scratch->valid()) ? scratch : nullptr;
   // Cover-only load: get coverItemHref WITHOUT building the spine/TOC book.bin (which, on a huge
   // book, is both slow and the site of the large manifest-index build). Used by RecentBooks / Home
   // cover thumbnails so showing a thumbnail never triggers a full-book parse.
@@ -1336,7 +1348,7 @@ bool Epub::openStoredCoverInPlace(FsFile& out, uint32_t* offset) const {
   return true;
 }
 
-ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
+ThumbResult Epub::generateThumbBmp(int height, bool allowExtract, BuildArena* scratch) const {
   {
     FsFile existing;
     if (Storage.openFileForRead("EBP", getThumbBmpPath(height), existing)) {
@@ -1406,7 +1418,7 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
   bool success = false;
   if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
     LOG_DBG("EBP", "Generating thumb BMP from JPEG cover image");
-    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, thumbW, height);
+    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, thumbW, height, scratch);
   } else {
     LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
     success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, thumbW, height);
@@ -1426,7 +1438,7 @@ ThumbResult Epub::generateThumbBmp(int height, bool allowExtract) const {
   return ThumbResult::Ok;
 }
 
-ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract) const {
+ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract, BuildArena* scratch) const {
   {
     FsFile existing;
     if (Storage.openFileForRead("EBP", getThumbBmpPath(width, height), existing)) {
@@ -1494,7 +1506,7 @@ ThumbResult Epub::generateThumbBmp(int width, int height, bool allowExtract) con
   bool success = false;
   if (detectedFormat == ImageFormatDetector::Format::Jpeg) {
     LOG_DBG("EBP", "Generating %dx%d thumb BMP from JPEG cover image", width, height);
-    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height);
+    success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height, scratch);
   } else {
     LOG_DBG("EBP", "Generating %dx%d thumb BMP from PNG cover image", width, height);
     success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(coverImage, thumbBmp, width, height);
@@ -1538,6 +1550,16 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   if (itemHref.empty()) {
     LOG_DBG("EBP", "Failed to read item, empty href");
     return false;
+  }
+
+  // A lent region (see load()) hosts the read buffer and the inflate ring when it has room for
+  // the largest ring; the decision is made before any byte reaches `out`, so a refusal falls
+  // through to the heap path cleanly. A missing entry fails there again, at negligible cost.
+  if (loadScratch_ != nullptr && loadScratch_->valid()) {
+    const size_t wanted = 1024 + InflateReader::ringSizeFor(0) + 2 * alignof(std::max_align_t);
+    if (loadScratch_->capacity() - loadScratch_->used() >= wanted) {
+      return readItemContentsToStreamWithArena(itemHref, out, loadScratch_);
+    }
   }
 
   const std::string path = FsHelpers::normalisePath(itemHref);

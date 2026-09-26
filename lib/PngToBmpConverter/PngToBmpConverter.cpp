@@ -317,12 +317,14 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
 // PngDecodeSession — sliced 1-bit PNG decode for use in loop()-driven contexts
 // ============================================================================
 
-bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight, bool crop) {
+bool PngDecodeSession::begin(FsFile& pngFile, FsFile& bmpFile, int targetWidth, int targetHeight, bool crop,
+                             BuildArena* scratch) {
   bmpOut_ = makeUniqueNoThrow<BufferedPrint>(bmpFile);
   if (!bmpOut_) {
     LOG_ERR("PNG", "Session begin: output buffer alloc failed");
     return false;
   }
+  decoder_.setScratchArena(scratch);
 
   PngStreamDecoder::Info info;
   if (!decoder_.begin(pngFile, info)) {

@@ -382,13 +382,13 @@ EpubImageManifest::Walk EpubImageManifest::walkEntry(const ZipFile::FileStatSlim
 
 EpubImageManifest::Walk EpubImageManifest::resolveDeferredNow(const std::string& epubPath,
                                                               const std::string& epubEntryPath, ImageDimensions& out,
-                                                              const size_t heapBudget) {
+                                                              const size_t heapBudget, BuildArena* arena) {
   const uint64_t key = keyFor(epubEntryPath);
   ZipFile::FileStatSlim stat = {};
   if (!findPending(key, &stat)) return Walk::Unreadable;
   if (!openResolveZip(epubPath)) return Walk::NeedsHeap;
   ImageDimensions dims = {0, 0};
-  const Walk walk = walkEntry(stat, dims, nullptr, heapBudget);
+  const Walk walk = walkEntry(stat, dims, arena, heapBudget);
   if (walk != Walk::Resolved) return walk;
   insertEntry(key, dims);
   LOG_DBG("IMF", "Resolved %s -> %dx%d by walk (%u cached)", epubEntryPath.c_str(), dims.width, dims.height,

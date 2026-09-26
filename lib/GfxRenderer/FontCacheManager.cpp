@@ -93,9 +93,14 @@ void FontCacheManager::resetStats() {
 bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
 
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
-  // Accumulate per fontId AND per base style so a page that mixes fonts (heading + body)
-  // prewarms each, and each style is later warmed with only its own glyphs.
-  scanByFont_[fontId].textByStyle[static_cast<uint8_t>(style) & 0x03] += text;
+  // Bounded: this is every drawn string of a page, concatenated per (font, style), and it used
+  // to grow by doubling for as long as the page had text (audit §4.4). A page's distinct glyphs
+  // fit in far less than this; text past the cap is simply not prewarmed and loads on demand.
+  constexpr size_t SCAN_BYTES_PER_STYLE = 4096;
+  std::string& scan = scanByFont_[fontId].textByStyle[static_cast<uint8_t>(style) & 0x03];
+  if (scan.size() >= SCAN_BYTES_PER_STYLE) return;
+  if (scan.capacity() < SCAN_BYTES_PER_STYLE) scan.reserve(SCAN_BYTES_PER_STYLE);
+  scan.append(text, std::min(strlen(text), SCAN_BYTES_PER_STYLE - scan.size()));
 }
 
 // --- PrewarmScope implementation ---

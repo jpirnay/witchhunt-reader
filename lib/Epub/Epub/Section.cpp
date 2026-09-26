@@ -112,8 +112,18 @@ constexpr uint32_t kSize = kParagraphLut + sizeof(uint32_t);
 //   size it right then (see Section::isImageHeaderDegraded). Persisted so a later open -- with
 //   the fresh heap the build lacked -- can rebuild the chapter instead of caching it image-less
 //   for good.
+//   kStatusTableRowDegraded / kStatusCssDegraded: a table row was written as paragraphs, or
+//   the CSS resolver skipped lookups, because of the heap at build time (memory audit 2026-09,
+//   F3: "four refusals bake a degraded result into a cache with nothing to trigger a rebuild").
+//   Same policy as the image bit: the reader rebuilds once per spine per session on entry.
 constexpr uint8_t kStatusParseComplete = 1 << 0;
 constexpr uint8_t kStatusImageHeaderDegraded = 1 << 1;
+constexpr uint8_t kStatusTableRowDegraded = 1 << 2;
+constexpr uint8_t kStatusCssDegraded = 1 << 3;
+//   kStatusSimplified: a fixed-capacity limit changed the output (footnotes per page, anchors per
+//   chapter, page elements, nesting depth, ...; see ChapterHtmlSlimParser::CapOverflow). Not a
+//   heap condition: deterministic, so nothing rebuilds on it (audit R4).
+constexpr uint8_t kStatusSimplified = 1 << 4;
 
 // On-disk paragraph LUT entry: u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex.
 // listItemIndex is the running <li> count at page-break time; together with
@@ -133,39 +143,25 @@ namespace {
 constexpr uint32_t FNV_PRIME = 0x01000193;         // 16777619
 constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
-// On constrained targets, parsing with embedded CSS adds heap pressure and increases
-// parse truncation risk. Allow compile-time override for tuning.
+// Free-heap pre-filter for a HEAP-BACKED build with embedded CSS (an arena-backed build takes
+// its ruleset from the lent region and is exempt -- see heapAllowsEmbeddedStyle). It is not the
+// safety mechanism: that is the contig check below (a failed std::vector reserve aborts under
+// -fno-exceptions, so contig must be real), the resolver's own lean floor, and the css-degraded
+// status bit, which now persists and earns the chapter one rebuild (audit R3 step 4).
 //
-// Floor sizing (measured, X3, 2026-06-11): since the sparse disk-backed CSS cache the
-// resident cost is small — selector index ≈ ruleCount × 16 B (~4.6 KB for a measured
-// 290-rule book, 24 KB at the 1500-rule cap), plus the bounded hot/negative caches
-// (≤ ~32 KB absolute worst, typically ~10 KB). CssParser::resolveStyle additionally
-// self-protects below CSS_MIN_FREE_HEAP_FOR_CSS (40 KB) by skipping disk lookups.
-// The original 96 KB predates trusting those bounds and made background (Background-B)
-// CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
-// Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
-//
-// Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
-// ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
-// 2026-08-11: 56 KB -> 44 KB, because the component it was covering no longer exists.
-//
-// The 56 KB was index + hot/negative caches + margin, sized against the resolver's 40 KB
-// self-protection floor. Lean resolve is now unconditional (see runBuildSetup), so the hot LRU
-// never allocates — that is the "typically ~10 KB" term above — and the resolver's floor is
-// LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB), not 40 KB. Both halves of the arithmetic moved down.
-//
-// It also had to move for the gate to mean anything. On X3 free heap peaks at ~72 KB at reader
-// entry and sits at 50-60 KB while reading, so a 56 KB floor rejected essentially every
-// heap-backed CSS build — and Background-B, whose fallback path this gates, simply stopped
-// pre-building on CSS books. A floor that no reachable heap state satisfies is not a safety
-// margin, it is a disabled feature.
-//
-// This is DERIVED, not measured: 56 minus the ~10 KB hot cache, rounded down. It is a
-// pre-filter, not a guarantee, and it is not the safety mechanism — that is the contig check
-// below (a failed std::vector reserve aborts under -fno-exceptions, so contig must be real)
-// plus the resolver's own 24 KB floor and isCssLowHeapDegraded(), which lets a caller discard a
-// degraded result rather than ship it. Watch lowHeapSkips: if heap-backed builds start
-// degrading, this is the number that moved.
+// Re-derived 2026-09-26 (memory audit R3) from measured terms, replacing the 2026-06-11 figure
+// (56 KB: index + hot/negative caches + margin against a 40 KB resolver floor) and its 2026-08-11
+// trim to 44 KB (the hot LRU never allocates in lean mode). What a heap-backed CSS parse holds
+// on the heap at its peak, on top of the owned 10 KB arena that is already allocated when this
+// gate runs:
+//   resolver lean floor (CSS_LEAN_MIN_FREE_HEAP_FOR_CSS, below which lookups are skipped)  24 KB
+//   SAX parser state on the heap (9,704 B, device log; in the arena only on lent builds)  ~10 KB
+//   selector index, 8 B/rule (~2.3 KB at 290 rules; the dynamic contig term covers it)     ~4 KB
+//   per-page/per-paragraph heap objects (host census, heap-only mode, CSS fixture)          ~6 KB
+//                                                                                        = 44 KB
+// The number did not move; its derivation now does not rest on the 40 KB floor or the hot cache.
+// Watch lowHeapSkips (Section::isCssLowHeapDegraded): if heap-backed builds start degrading,
+// this is the term that moved.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
 #define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (44 * 1024)
 #endif
@@ -182,6 +178,10 @@ constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
 constexpr uint32_t EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES;
 constexpr uint32_t EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES = SCT_EMBEDDED_STYLE_MIN_CONTIG_HEAP_BYTES;
+// The allocator reports its largest free block a few bytes under the round number (the block
+// header), so a floor sitting exactly on a power of two is refused by a heap that has the
+// memory. Same constant and reason as ChapterHtmlSlimParser's LARGEST_FREE_BLOCK_SLACK.
+constexpr uint32_t LARGEST_FREE_BLOCK_SLACK = 16;
 
 // --- Heap-analysis instrumentation (temporary; heap-analysis branch) ------------------------
 // The fragmented-heap restart fires because a 52 KB framebuffer realloc cannot find one
@@ -271,6 +271,12 @@ constexpr size_t EXTRACT_CHUNK_BYTES = 8192;
 // One up-front allocation backing the build's scratch buffers: chunk feed buffer
 // (PARSE_CHUNK_BYTES base + EXTRACT_CHUNK_BYTES extraction scope) + alignment.
 constexpr size_t SCT_PARSE_ARENA_BYTES = 10 * 1024;
+
+// Size of the heap-backed arena that hosts the EntryReader's readBuf + inflate ring for an entry
+// of `inflatedSize` bytes, when the main arena cannot (see runBuildParse).
+static size_t zipArenaBytesFor(const size_t inflatedSize) {
+  return PARSE_CHUNK_BYTES + InflateReader::ringSizeFor(inflatedSize) + 2 * alignof(std::max_align_t);
+}
 
 // Bump when preview expansion semantics change. This is hashed only for preview-enabled
 // variants, leaving the much more common preview-off section caches untouched.
@@ -441,6 +447,12 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   }
 
   const uint32_t position = file.position();
+  if (page->elements.size() > Page::MAX_ELEMENTS) {
+    // serialize() writes the first MAX_ELEMENTS; the rest of this page is lost, and said so.
+    LOG_ERR("SCT", "Page %d has %u elements, more than a page can load (%u); tail dropped", pageCount,
+            static_cast<unsigned>(page->elements.size()), static_cast<unsigned>(Page::MAX_ELEMENTS));
+    simplified_ = true;
+  }
   if (!page->serialize(file)) {
     LOG_ERR("SCT", "Failed to serialize page %d", pageCount);
     return 0;
@@ -535,6 +547,9 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
 bool Section::loadSectionFile(const BuildParams& p) {
   truncatedCache = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
+  cssLowHeapDegraded_ = false;
+  simplified_ = false;
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
@@ -606,6 +621,9 @@ bool Section::loadSectionFile(const BuildParams& p) {
 
     truncatedCache = (fileStatus & kStatusParseComplete) == 0;
     imageHeaderDegraded_ = (fileStatus & kStatusImageHeaderDegraded) != 0;
+    tableRowDegraded_ = (fileStatus & kStatusTableRowDegraded) != 0;
+    cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
+    simplified_ = (fileStatus & kStatusSimplified) != 0;
   }
 
   serialization::readPod(file, pageCount);
@@ -657,6 +675,9 @@ bool Section::clearCache() {
   currentPage = 0;
   truncatedCache = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
+  cssLowHeapDegraded_ = false;
+  simplified_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -689,6 +710,7 @@ struct Section::BuildState {
   // per-spine linear central-directory scan that dominated the compile. Valid when statValid.
   ZipFile::FileStatSlim spineStat = {};
   bool statValid = false;
+  bool statResolved = false;  // resolveSpineStat ran (statValid/inflatedSize are meaningful)
   CssParser* cssParser = nullptr;
   std::vector<uint32_t> lut;
   std::unique_ptr<ChapterHtmlSlimParser> visitor;
@@ -726,6 +748,15 @@ struct Section::BuildState {
   std::unique_ptr<BuildArena> zipArena;
   // Peak use of the (destroyed-by-log-time) zipArena, for the done-telemetry.
   uint32_t zipArenaHighWater = 0;
+  // Per-lane arena use for the done-telemetry (BuildArena::beginLane): what setup left
+  // resident, the extraction phase's peak above that (ring + grow, sharedZipScope builds
+  // only), what phase (b) started from once the SAX state was in, and the parse's peak
+  // above that (page blocks, font slots, draw block). These are the numbers a declared
+  // per-phase budget is derived from (memory audit 2026-09, R3).
+  uint32_t laneSetup = 0;
+  uint32_t laneExtract = 0;
+  uint32_t laneResident = 0;
+  uint32_t laneParse = 0;
   std::unique_ptr<ZipFile> zip;
   std::unique_ptr<ZipFile::EntryReader> reader;
   // Raw view of the feed buffer, backed by the build arena. Managed exclusively
@@ -783,6 +814,14 @@ struct Section::BuildState {
   ~BuildState() {
     if (extractGrowBlock.valid()) arena->release(extractGrowBlock);
     reader.reset();
+    // The note-preview resolver reserves its ring block ABOVE chunkBlock and holds it across
+    // slices; as a later-declared member it would otherwise be destroyed after this body, so an
+    // abort mid-resolve released chunkBlock out of order (refused, block leaked until the next
+    // reset -- memory audit 2026-09, F2b).
+    previewResolver.reset();
+    // The layout parser's SAX state is a plain allocation inside chunkBlock's scope, and its
+    // page block (when it holds one) is nested above it: the parser goes first.
+    visitor.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
   }
   bool parseStarted = false;
@@ -893,6 +932,31 @@ void Section::finishInlineFootnotePreviewResolve(BuildState& st) {
   }
 }
 
+bool Section::resolveSpineStat(BuildState& st) {
+  if (st.statResolved) return true;
+  st.inflatedSize = 0;
+  st.statValid = epub->getSpineItemStat(spineIndex, &st.spineStat);
+  if (st.statValid) {
+    st.inflatedSize = st.spineStat.uncompressedSize;
+  } else if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
+    LOG_ERR("SCT", "Failed to get inflated size for %s", epub->getSpineItem(spineIndex).href.c_str());
+    return false;
+  }
+  st.statResolved = true;
+  return true;
+}
+
+bool Section::htmlCacheReusable(const BuildState& st) const {
+  if (st.inflatedSize == 0) return false;
+  const std::string htmlCachePath = getSectionHtmlCachePath();
+  if (!Storage.exists(htmlCachePath.c_str())) return false;
+  FsFile probe;
+  if (!Storage.openFileForRead("SCT", htmlCachePath, probe)) return false;
+  const bool reusable = probe.size() == st.inflatedSize;
+  probe.close();
+  return reusable;
+}
+
 Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const BuildParams& p = st.params;
   st.propertyHash = calculatePropertyHash(p);
@@ -915,12 +979,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // spine open (the compile's dominant cost, measured). uncompressedSize doubles as the
   // inflated size — no separate getSpineItemInflatedSize scan.
   const uint32_t phaseSetupStart = millis();
-  st.inflatedSize = 0;
-  st.statValid = epub->getSpineItemStat(spineIndex, &st.spineStat);
-  if (st.statValid) {
-    st.inflatedSize = st.spineStat.uncompressedSize;
-  } else if (!epub->getSpineItemInflatedSize(spineIndex, &st.inflatedSize)) {
-    LOG_ERR("SCT", "Failed to get inflated size for %s", st.localPath.c_str());
+  if (!resolveSpineStat(st)) {
     return BuildPhaseResult::Failed;
   }
 
@@ -935,6 +994,8 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   cssLowHeapDegraded_ = false;
   footnotePreviewsUnresolved_ = false;
   imageHeaderDegraded_ = false;
+  tableRowDegraded_ = false;
+  simplified_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
@@ -1051,6 +1112,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   // resolve that runs between the phases needs a SAX parser of its own; initialising this one
   // first would put both on the heap at once for no reason. See runBuildParse.
   st.setupMs = millis() - phaseSetupStart;
+  if (st.arena) st.laneSetup = static_cast<uint32_t>(st.arena->used());
   SCT_TRACE_HEAP(spineIndex, "after_setup");
   LOG_INF("SCT", "createSectionFile spine=%d setup done: %ums (inflatedSize=%u free=%lu)", spineIndex, st.setupMs,
           static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
@@ -1062,6 +1124,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   const auto overBudget = [&] { return budgetMs != 0 && millis() - sliceStart >= budgetMs; };
   const auto yieldSlice = [&] {
     st.parseMs += millis() - sliceStart;
+    // A mid-build page draw can run before the next slice; let the parser drop what it can.
+    if (st.visitor) st.visitor->onSliceYield();
     return BuildPhaseResult::More;
   };
   bool streamFailed = false;
@@ -1074,6 +1138,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
       LOG_ERR("SCT", "Failed to allocate parse chunk buffer (free=%lu)", esp_get_free_heap_size());
       streamFailed = true;
     }
+    if (st.arena) st.arena->beginLane();  // extraction lane: ring + grow block, on top of setup
 
     // Book-keyed unzipped-HTML cache (adapted from crosspoint-reader PR #2452 by GitHub user
     // itsthisjustin): the spine's
@@ -1089,6 +1154,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         st.extractDone = true;  // phase (a) inflation skipped
         st.reusedHtml = true;   // keep the cache on cleanup rather than deleting it
         st.tempPath = htmlCachePath;
+        st.dropZipArena();  // a ring claimed early in startBuild is not needed on this path
         LOG_INF("SCT", "createSectionFile spine=%d reusing cached HTML (%u bytes, free=%lu)", spineIndex,
                 static_cast<uint32_t>(st.inflatedSize), esp_get_free_heap_size());
       } else {
@@ -1108,8 +1174,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
       st.zip.reset(new (std::nothrow) ZipFile(epub->getPath()));
       if (st.zip) {
         epub->primeZip(*st.zip);  // reuse the book's cached EOCD details (skip the rescan)
-        const size_t zipArenaBytes =
-            PARSE_CHUNK_BYTES + InflateReader::ringSizeFor(st.inflatedSize) + 2 * alignof(std::max_align_t);
+        const size_t zipArenaBytes = zipArenaBytesFor(st.inflatedSize);
         // External region (borrowed framebuffer) with room for the ZIP scope:
         // host readBuf + ring directly in the main arena — the whole extract
         // phase then touches the heap not at all.
@@ -1120,7 +1185,8 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         } else {
           // Heap-backed: one entry-sized block for the reader's readBuf + ring,
           // alive only through phase (a) — a single scope the reader releases.
-          st.zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
+          // Usually claimed already, first thing in startBuild (see there).
+          if (!st.zipArena) st.zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
           if (st.zipArena && st.zipArena->valid()) {
             st.reader.reset(new (std::nothrow) ZipFile::EntryReader(*st.zip, PARSE_CHUNK_BYTES, st.zipArena.get()));
           } else {
@@ -1211,6 +1277,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     st.reader.reset();
     st.zip.reset();
     st.dropZipArena();
+    if (st.arena) st.laneExtract = static_cast<uint32_t>(st.arena->laneHighWater());
     st.tempFile.flush();
     st.tempFile.close();
     st.extractDone = true;
@@ -1292,6 +1359,10 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
         st.cssParser->clear();
       }
       return BuildPhaseResult::Failed;
+    }
+    if (st.arena) {
+      st.laneResident = static_cast<uint32_t>(st.arena->used());
+      st.arena->beginLane();  // parse lane: page blocks, font slots, the mid-build draw block
     }
   }
 
@@ -1378,7 +1449,11 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   st.reader.reset();
   st.zip.reset();
   st.dropZipArena();
-  st.dropChunk();
+  // NOT dropChunk() here: the parser's SAX state sits inside chunkBlock's scope (a plain
+  // allocation made by setup(), after the block was reserved), and finalize() below still
+  // feeds it. Releasing the block first rewound the cursor under live state; it only worked
+  // because nothing allocated from the arena in between (memory audit 2026-09, F2a). The
+  // block goes after finalize().
   if (st.tempFile) {
     st.tempFile.close();
   }
@@ -1401,12 +1476,19 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   LOG_INF("SCT", "spine=%d EXTRACTPROF finalize=%ums", spineIndex,
           static_cast<uint32_t>((esp_timer_get_time() - tFin) / 1000));
 #endif
+  st.dropChunk();
   st.parserStreamOk = st.visitor->streamSucceeded();
   // Latch a heap-degraded image before the visitor is torn down. Same contract as the CSS and
   // footnote latches: the cache is written either way, but a background caller can throw it away
   // and leave the spine to a build with more headroom.
   if (st.visitor->imageHeaderDegraded()) {
     imageHeaderDegraded_ = true;
+  }
+  if (st.visitor->tableRowDegraded()) {
+    tableRowDegraded_ = true;
+  }
+  if (st.visitor->capOverflowFlags() != 0) {
+    simplified_ = true;
   }
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
@@ -1423,6 +1505,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
     cssLowHeapDegraded_ = !st.cssParser->isArenaResident() && st.cssParser->getResolveStats().lowHeapSkips > 0;
   }
   st.parseMs += millis() - sliceStart;
+  if (st.arena) st.laneParse = static_cast<uint32_t>(st.arena->laneHighWater());
   SCT_TRACE_HEAP(spineIndex, "after_parse");
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
@@ -1574,8 +1657,10 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     Storage.remove(filePath.c_str());
     return BuildPhaseResult::Failed;
   }
-  const uint8_t status =
-      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0);
+  const uint8_t status = (parseComplete ? kStatusParseComplete : 0) |
+                         (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
+                         (tableRowDegraded_ ? kStatusTableRowDegraded : 0) |
+                         (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) | (simplified_ ? kStatusSimplified : 0);
   serialization::writePod(file, status);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);
@@ -1627,12 +1712,18 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   LOG_INF("SCT",
           "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
           spineIndex, totalMs, streamMs, st.setupMs, st.parseMs, finalizeMs, pageCount, fileSize);
-  // Arena telemetry: how much of the budgets a build actually used. zipHW is the
-  // entry-sized phase-(a) arena's peak (0 = reused-HTML path, no ZIP state).
-  LOG_INF("SCT", "createSectionFile spine=%d arena: cap=%u highWater=%u failedAlloc=%u zipHW=%u", spineIndex,
-          st.arena ? static_cast<uint32_t>(st.arena->capacity()) : 0,
-          st.arena ? static_cast<uint32_t>(st.arena->highWater()) : 0,
-          st.arena ? static_cast<uint32_t>(st.arena->failedAllocSize()) : 0, st.zipArenaHighWater);
+  // Arena telemetry: how much of the budgets a build actually used, and per lane -- setup =
+  // resident after setup (ruleset), extract = the extraction phase's peak above that (ring +
+  // grow; 0 when the ring was heap-backed or the HTML cache was reused), resident = what phase
+  // (b) started from (setup + chunk + SAX state), parse = the parse's peak above that (page
+  // blocks, font slots, draw block). zipHW is the entry-sized heap zipArena's peak (0 = ring in
+  // the main arena, or no ZIP state).
+  LOG_INF("SCT",
+          "createSectionFile spine=%d arena: cap=%u highWater=%u lanes(setup=%u extract=%u resident=%u parse=%u) "
+          "failedAlloc=%u zipHW=%u",
+          spineIndex, st.arena ? static_cast<uint32_t>(st.arena->capacity()) : 0,
+          st.arena ? static_cast<uint32_t>(st.arena->highWater()) : 0, st.laneSetup, st.laneExtract, st.laneResident,
+          st.laneParse, st.arena ? static_cast<uint32_t>(st.arena->failedAllocSize()) : 0, st.zipArenaHighWater);
   return BuildPhaseResult::Done;
 }
 
@@ -1708,7 +1799,8 @@ bool Section::heapAllowsEmbeddedStyle(const size_t cssRuleCount, const bool aren
                          static_cast<uint32_t>(cssRuleCount * CssParser::CSS_INDEX_BYTES_PER_RULE) + 8 * 1024);
   const uint32_t freeHeap = esp_get_free_heap_size();
   const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap >= requiredContig;
+  // Output-changing refusal (a no-CSS variant), so the contig bar carries the allocator slack.
+  return freeHeap >= EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES && contigHeap + LARGEST_FREE_BLOCK_SLACK >= requiredContig;
 }
 
 bool Section::startBuild(const BuildParams& params, const std::function<void(int)>& progressFn,
@@ -1740,6 +1832,32 @@ bool Section::startBuild(const BuildParams& params, const std::function<void(int
   if (!buildState_) {
     LOG_ERR("SCT", "Failed to allocate build state (free=%lu)", esp_get_free_heap_size());
     return false;
+  }
+  if (!resolveSpineStat(*buildState_)) {
+    buildState_.reset();
+    return false;
+  }
+  // A build on the owned heap arena claims its inflate ring FIRST -- before that arena and
+  // before every setup allocation. The ring is the largest heap block a released build needs
+  // (33,824 B for a 32 KB ring), and a released build is mostly reached as the escalation after
+  // a borrowed build ran out of heap: the moment the freed framebuffer is the only hole that
+  // size. Device run 10 (X3): the 10 KB arena and ~8.5 KB of setup went into that hole first,
+  // the ring no longer fit, the chapter came up empty, and the pins left behind kept the
+  // framebuffer from ever coming back. Skipped when the inflated XHTML is already cached (no
+  // ring needed) and on the lent arena (the ring lives inside it, see runBuildParse). A failure
+  // here is not fatal: runBuildParse retries the allocation after setup, as before.
+  if (!arenaBacked && !htmlCacheReusable(*buildState_)) {
+    const size_t zipArenaBytes = zipArenaBytesFor(buildState_->inflatedSize);
+    buildState_->zipArena = makeUniqueNoThrow<BuildArena>(zipArenaBytes);
+    if (buildState_->zipArena && buildState_->zipArena->valid()) {
+      LOG_INF("SCT", "createSectionFile spine=%d claimed the inflate ring first (%u bytes, free=%lu contig=%lu)",
+              spineIndex, static_cast<uint32_t>(zipArenaBytes), static_cast<unsigned long>(esp_get_free_heap_size()),
+              static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    } else {
+      buildState_->zipArena.reset();
+      LOG_ERR("SCT", "createSectionFile spine=%d could not claim the inflate ring first (%u bytes, free=%lu)",
+              spineIndex, static_cast<uint32_t>(zipArenaBytes), static_cast<unsigned long>(esp_get_free_heap_size()));
+    }
   }
   if (!buildState_->initArena(externalScratch_)) {
     LOG_ERR("SCT", "Failed to allocate build arena (free=%lu)", esp_get_free_heap_size());
@@ -1898,6 +2016,21 @@ uint16_t Section::activeBuildPageCount() const {
   return pageCount;  // pageCount is incremented by onPageComplete() as each page is written
 }
 
+std::optional<uint16_t> Section::activeBuildPageForAnchor(const std::string& anchor) {
+  if (!buildState_ || !buildState_->visitor || anchor.empty()) return std::nullopt;
+  uint16_t page = 0;
+  if (!buildState_->visitor->lookupAnchorInActiveBuild(anchor, page)) return std::nullopt;
+  return page;
+}
+
+std::optional<uint16_t> Section::activeBuildPageForTocIndex(const int tocIndex) {
+  if (!buildState_ || tocIndex < 0 || tocIndex >= epub->getTocItemsCount()) return std::nullopt;
+  const auto entry = epub->getTocItem(tocIndex);
+  if (entry.spineIndex != spineIndex) return std::nullopt;
+  if (entry.anchor.empty()) return static_cast<uint16_t>(0);
+  return activeBuildPageForAnchor(entry.anchor);
+}
+
 uint16_t Section::estimatedTotalPages() const {
   // No build live -> the on-disk count is exact. While building, project from how much of the
   // XHTML has been consumed (activeBuildPercent), but never below what's already laid out. At
@@ -1925,7 +2058,7 @@ bool Section::activeBuildCssDegraded() const {
   return buildState_->cssParser->getResolveStats().lowHeapSkips > 0;
 }
 
-std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex) {
+std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex, BuildArena* scratch) {
   if (!buildState_ || pageIndex >= pageCount) {
     LOG_ERR("SCT", "loadPageFromActiveBuild: page %u out of range (built=%u)", pageIndex, pageCount);
     return nullptr;
@@ -1949,7 +2082,7 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
     LOG_ERR("SCT", "loadPageFromActiveBuild: seek to %u failed", offset);
     return nullptr;
   }
-  auto page = Page::deserialize(readHandle);
+  auto page = Page::deserialize(readHandle, scratch);
   readHandle.close();
   return page;
 }
@@ -1965,7 +2098,7 @@ std::unique_ptr<Page> Section::loadPageFromActiveBuild(const uint16_t pageIndex)
 static constexpr size_t WARM_PASS_SCRATCH_BYTES = 32 * 1024 + 2 * 4096 + 256;
 
 void Section::warmAllImageCaches(const int xOffset, const int yOffset, const bool forceLoad,
-                                 const bool monochromeOutput, const bool alsoWarmGrayscale) {
+                                 const bool monochromeOutput, const bool alsoWarmGrayscale, const bool redecodeCoarse) {
   if (pageCount == 0) return;
 
   // Prefer the LENT framebuffer region (externalScratch_) over a fresh heap block. Asking the
@@ -2000,7 +2133,7 @@ void Section::warmAllImageCaches(const int xOffset, const int yOffset, const boo
     currentPage = p;
     auto page = loadPageFromSectionFile();
     if (!page || !page->hasImages()) continue;
-    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput, alsoWarmGrayscale);
+    page->warmImageCaches(renderer, xOffset, yOffset, forceLoad, monochromeOutput, alsoWarmGrayscale, redecodeCoarse);
     ++warmed;
     // Each image decode can take hundreds of ms; reset the WDT between pages
     // to avoid an interrupt watchdog timeout on image-heavy chapters.

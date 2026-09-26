@@ -60,10 +60,21 @@ class HalFile : public Print {
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
 
+  // WH_HOST_STDIO_UNBUFFERED=1 drops glibc's lazily malloc'd 4 KB buffer (one per open FILE*),
+  // which has no device counterpart: SdFat reads through the card driver's shared sector cache.
+  // The epub_pipeline heap census sets it so those buffers do not appear as allocation sites
+  // (they showed up as 4 KB x 600 under a misleading symbol). Every read is then a syscall, so
+  // it stays off by default.
+  static void applyStdioPolicy(FILE* fp) {
+    static const bool unbuffered = std::getenv("WH_HOST_STDIO_UNBUFFERED") != nullptr;
+    if (fp != nullptr && unbuffered) setvbuf(fp, nullptr, _IONBF, 0);
+  }
+
   bool openForRead(const std::string& path) {
     closeQuiet();
     hasImpl_ = true;
     fp_ = fopen(path.c_str(), "rb");
+    applyStdioPolicy(fp_);
     return fp_ != nullptr;
   }
 
@@ -77,6 +88,7 @@ class HalFile : public Print {
       if (ec) return false;
     }
     fp_ = fopen(path.c_str(), "wb");
+    applyStdioPolicy(fp_);
     return fp_ != nullptr;
   }
 
@@ -85,6 +97,7 @@ class HalFile : public Print {
     closeQuiet();
     hasImpl_ = true;
     fp_ = fopen(path.c_str(), "r+b");
+    applyStdioPolicy(fp_);
     return fp_ != nullptr;
   }
 

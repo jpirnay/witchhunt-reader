@@ -109,6 +109,22 @@ constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
 #endif
 
+// The hard contiguous floor for a build whose line bytes live in the build arena (setBuildArena):
+// there the largest heap request phase (b) still makes is the word vector of a 97-word block
+// (the long-block split bound) at its 128-entry capacity, 128 * sizeof(std::string) = 3,072 B,
+// and everything else per paragraph is smaller. The 6 KB floor above was sized when every
+// line's TextBlock bytes came from the heap too; keeping it for arena builds aborted Strange
+// Pictures' Chapter 3 at page 146 with 3,956 B contiguous and 14 KB free (device run 10), and
+// the released rebuild that followed is what fragments the heap for the rest of the session.
+// Bionic reading doubles the word count of the layout scratch and builds a transformed copy of
+// the block's tail (up to 2 * 97 entries), so it keeps a higher floor.
+#ifndef EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA
+#define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA (3584)
+#endif
+#ifndef EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC
+#define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC (5 * 1024)
+#endif
+
 // Reading an image header straight out of the ZIP
 // (ImageDecoderFactory::getDimensionsFromZipEntry) — the only allocation in image handling big
 // enough to be worth gating, see the image branch in startElement.
@@ -145,6 +161,8 @@ constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_FREE_H
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT = EHP_TEXT_LAYOUT_SOFT_MIN_MAX_ALLOC;
 constexpr size_t MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP;
 constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC;
+constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA;
+constexpr size_t MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA_BIONIC = EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA_BIONIC;
 
 // heapAllowsTableRowLayout() guards the row-layout allocations (cell wrapping allocates
 // TextBlock vectors). It deliberately reuses the TEXT LAYOUT thresholds above rather than
@@ -651,8 +669,19 @@ CssStyle ChapterHtmlSlimParser::resolvedImgStyle(const std::string& classAttr) {
   return resolved;
 }
 
-bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
+bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase, const ParsedText* block) {
   if (streamFailed) {
+    return false;
+  }
+
+  // A block that could not grow its word vectors is already missing words; laying it out would
+  // write a silently truncated paragraph into the cache. Same exit as the floors below.
+  if (block != nullptr && block->wordGrowthRefused()) {
+    LOG_ERR("EHP", "Word vector growth refused (%u free, %u max alloc), aborting parse before %s", ESP.getFreeHeap(),
+            ESP.getMaxAllocHeap(), phase);
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
     return false;
   }
 
@@ -676,8 +705,12 @@ bool ChapterHtmlSlimParser::ensureHeapForTextLayout(const char* phase) {
   // 6132 against a 6144 floor. Free heap was 16596, nearly double its own floor of 9216; nothing
   // was actually exhausted. Losing half a chapter to twelve bytes of allocator bookkeeping is the
   // one outcome this gate exists to prevent.
-  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD &&
-      maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK) {
+  // See EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC_ARENA: with line bytes in the arena the heap floor
+  // only has to cover the per-paragraph vectors.
+  const size_t hardContigFloor = buildArena_ == nullptr ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD
+                                 : bionicReadingEnabled ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA_BIONIC
+                                                        : MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA;
+  if (freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD && maxAllocHeap >= hardContigFloor - LARGEST_FREE_BLOCK_SLACK) {
     // Deliberately does NOT latch image handling off any more. This gate trips on a transient dip
     // — and trips often, because the soft floor (12 * 1024) is a value the allocator can never
     // report: every largest-free-block it returns is 512k - 12, so the neighbours are 12276 and
@@ -743,8 +776,22 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   // slack term is the allocator's own bookkeeping: largest-free-block readings land a few bytes
   // under the round number (a row was once refused at 12276 against a 12288 bar, twelve short,
   // with the memory plainly there), so neither bar sits on a power of two.
-  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
-                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK;
+  //
+  // Arena builds (buildArena_ set): the cell lines' bytes come from the lent region (layoutTableRow
+  // sets the cells' line arena), so what a grid row takes from the heap is the TextBlock objects,
+  // the row/cell vectors and the cells' layout scratch -- a few KB -- and the free bar drops to
+  // the hard text-layout floor plus a margin. The 18 KB soft bar was sized for heap-resident
+  // lines; kept there it demoted every row of the Roosevelt appendix on the X3 at 11-18 KB free
+  // while 38 KB of the arena sat idle (memory audit 2026-09, run 12).
+  // Device run 13: with the rows in the arena the first row of the Roosevelt appendix was still
+  // refused, 192 bytes under a 12 KB bar, and that one refusal cost a released rebuild. A grid
+  // row's heap share is now the TextBlock objects and the row/cell vectors, ~2-3 KB, so the bar
+  // sits one KB above the floor at which the parse itself gives up.
+  const uint32_t freeFloor = buildArena_ ? MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD + 1024 : MIN_FREE_HEAP_FOR_TEXT_LAYOUT;
+  const uint32_t contigFloor =
+      (buildArena_ ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA : MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) -
+      LARGEST_FREE_BLOCK_SLACK;
+  const bool ok = freeHeap >= freeFloor && maxAllocHeap >= contigFloor;
   if (!ok) {
     LOG_DBG("EHP", "Table row layout skipped (%u free, %u max alloc); row falls back to paragraphs", freeHeap,
             maxAllocHeap);
@@ -755,7 +802,10 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
 bool ChapterHtmlSlimParser::heapAllowsImageHeaderRead() const {
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t maxAllocHeap = ESP.getMaxAllocHeap();
-  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER && maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER;
+  // Content-dropping floor (alt text instead of the image), so it carries the allocator slack
+  // like every other one in this file: a largest-free-block reading is never the round number.
+  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_IMAGE_HEADER &&
+                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_IMAGE_HEADER - LARGEST_FREE_BLOCK_SLACK;
   if (!ok) {
     LOG_DBG("EHP", "Skipping ZIP image-header read (%u free, %u max alloc); image falls back to alt text", freeHeap,
             maxAllocHeap);
@@ -857,7 +907,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
 
     if (currentTextBlock->size() > 96) {
-      if (!ensureHeapForTextLayout("long-block split")) {
+      if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
         partWordBufferIndex = 0;
         nextWordContinues = false;
         return false;
@@ -925,7 +975,17 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   deferredDropCapLine_ = nullptr;
   completePageFn(std::move(currentPage));
   completedPageCount++;
+  releasePageBlock();  // the page and its lines are gone: rewind their arena bytes
+  // The load side refuses a section past this many pages; stop here with the truncated status
+  // (the pages so far are kept) rather than build a cache that is rebuilt on every open.
+  if (completedPageCount >= Page::MAX_PAGES_PER_SECTION && !streamFailed) {
+    noteCapOverflow(kCapPagesPerSection, "pages per section");
+    streamFailed = true;
+    layoutFailed = true;
+    saxParser_.stop();
+  }
   currentPage.reset(new (std::nothrow) Page());
+  if (currentPage) currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
   currentPageNextY = 0;
   lastBlockMarginBottom = 0;
 
@@ -939,8 +999,19 @@ void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
   }
 }
 
+void ChapterHtmlSlimParser::noteCapOverflow(const uint8_t flag, const char* what) {
+  if (capOverflowFlags_ & flag) return;
+  capOverflowFlags_ |= flag;
+  LOG_ERR("EHP", "Fixed-capacity limit exceeded (%s); the chapter is cached simplified", what);
+}
+
 void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
   if (label.empty()) {
+    return;
+  }
+  // The section file stores the count as a uint16.
+  if (pageBreakLabels.size() >= 65535) {
+    noteCapOverflow(kCapPageLabels, "printed-page labels per chapter");
     return;
   }
 
@@ -949,8 +1020,53 @@ void ChapterHtmlSlimParser::recordPageBreakLabel(const std::string& label) {
   pageBreakLabels.emplace_back(static_cast<uint16_t>(completedPageCount), label);
 }
 
+void ChapterHtmlSlimParser::wireTextBlock() {
+  if (!currentTextBlock) return;
+  currentTextBlock->setLineArena(buildArena_);
+  if (buildArena_) {
+    currentTextBlock->setBeforeLineHook([this](const uint8_t maxSizePct) { beforeLineHook(maxSizePct); });
+  } else {
+    currentTextBlock->setBeforeLineHook(nullptr);
+  }
+}
+
+void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct) {
+  // The page-fit test of addLineToPage, run before the line is materialised (see
+  // ParsedText::beforeLine_): the same arithmetic, so addLineToPage's own test then finds the
+  // line fits and everything after it (anchors, footnotes, the hyphenation retry) is unchanged.
+  if (currentPage && currentTextBlock) {
+    int lineHeight = effectiveLineHeight(currentTextBlock->getBlockStyle());
+    if (maxSizePct != 100) {
+      lineHeight = lineHeight * maxSizePct / 100;
+    }
+    if (currentPageNextY + lineHeight > viewportHeight) {
+      emitPage(lastBodyChildByteOffset);
+    }
+  }
+  ensurePageBlock();
+}
+
+void ChapterHtmlSlimParser::ensurePageBlock() {
+  if (buildArena_ == nullptr || pageBlock_.valid()) return;
+  pageBlock_ = buildArena_->reserveBlock();
+}
+
+void ChapterHtmlSlimParser::releasePageBlock() {
+  if (!pageBlock_.valid()) return;
+  if (!buildArena_->release(pageBlock_)) {
+    // Out of LIFO order: something reserved above this block and is still live. Keep the
+    // token (overwriting a live one is a contract violation); later pages simply allocate
+    // above it and the region fills, at which point lines fall back to the heap.
+    LOG_ERR("EHP", "Page arena block could not be released (out of order); region stays claimed");
+  }
+}
+
 void ChapterHtmlSlimParser::setExternalPageBreakAnchors(std::vector<std::pair<std::string, std::string>> anchors) {
   externalPageBreakAnchors.clear();
+  externalPageBreakAnchors.reserve(anchors.size());
+  // One label per matched anchor plus the top-of-file one: size it here so the per-page record
+  // never doubles mid-parse (inline pagebreak markers past this hint still grow it normally).
+  pageBreakLabels.reserve(anchors.size() + 1);
   topOfFilePageLabel.clear();
   topOfFilePageLabelEmitted = false;
   for (auto& [id, label] : anchors) {
@@ -1276,8 +1392,15 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   // The image's actual yPos will be fixed in addLineToPage once the baseline is known.
   BlockStyle blockStyleWithIndent = *effectiveBase;
   attachPendingFloatImage(blockStyleWithIndent);
-  currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyleWithIndent,
-                                                       bionicReadingEnabled));
+  // Reuse the laid-out (now empty) block rather than replacing it: its word vectors keep the
+  // capacity the previous paragraph grew them to. See ParsedText::reset.
+  if (currentTextBlock) {
+    currentTextBlock->reset(blockStyleWithIndent);
+  } else {
+    currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
+                                                         blockStyleWithIndent, bionicReadingEnabled));
+  }
+  wireTextBlock();
   wordsExtractedInBlock = 0;
 }
 
@@ -1389,6 +1512,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idAttr) != self->tocAnchors.end();
     if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount < self->anchorLimit())) {
       self->pendingAnchorId = idAttr;
+    } else if (!isNonNavigableInlineElement(name)) {
+      self->noteCapOverflow(kCapAnchorsPerChapter, "anchors per chapter");
     }
   }
 
@@ -1770,11 +1895,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   // 54 of a 58-page chapter and the alt text was cached as if the file were
                   // corrupt.
                   using Walk = EpubImageManifest::Walk;
+                  // The walk's ring comes from the build arena when it has the room (the entry
+                  // reader scopes its block above the page block and releases it before returning),
+                  // else from the heap within imageWalkBudget().
                   Walk walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
-                                                                      self->imageWalkBudget());
+                                                                      self->imageWalkBudget(), self->buildArena_);
                   if (walk == Walk::NeedsHeap && self->recoverHeapForImageHeader()) {
                     walk = self->imageManifest->resolveDeferredNow(self->epub->getPath(), resolvedPath, dims,
-                                                                   self->imageWalkBudget());
+                                                                   self->imageWalkBudget(), self->buildArena_);
                   }
                   if (walk == Walk::Resolved) {
                     dimsOk = true;
@@ -2161,8 +2289,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       }
       self->insideFootnoteLink = true;
       self->footnoteLinkDepth = self->depth;
-      strncpy(self->currentFootnote.href, href, sizeof(self->currentFootnote.href) - 1);
-      self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
+      if (strlen(href) >= sizeof(self->currentFootnote.href)) {
+        // A truncated href would be navigated as-is and land nowhere. Keep the link's styling,
+        // record no footnote for it (R4: refuse the entry rather than store a broken one).
+        self->currentFootnote.href[0] = '\0';
+        self->noteCapOverflow(kCapFootnoteHref, "footnote href length");
+      } else {
+        strncpy(self->currentFootnote.href, href, sizeof(self->currentFootnote.href) - 1);
+        self->currentFootnote.href[sizeof(self->currentFootnote.href) - 1] = '\0';
+      }
       self->currentFootnote.number[0] = '\0';
       self->currentFootnoteLinkTextLen = 0;
 
@@ -3117,7 +3252,11 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   }
 }
 
-ChapterHtmlSlimParser::~ChapterHtmlSlimParser() = default;
+ChapterHtmlSlimParser::~ChapterHtmlSlimParser() {
+  // An aborted build can leave a page open. Rewind its block now, while the arena is still the
+  // section's: BuildState tears the parser down before it releases the feed-chunk block below.
+  releasePageBlock();
+}
 
 size_t ChapterHtmlSlimParser::anchorLimit() const {
   return anchorSpillWriter.has_value() ? MAX_ANCHORS_PER_CHAPTER : MAX_RESIDENT_ANCHORS;
@@ -3141,6 +3280,40 @@ void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
     return;
   }
   anchorsAwaitingLine_.push_back(std::move(id));
+}
+
+bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) {
+  if (id.empty() || anchorCount == 0) return false;
+  if (!anchorSpillWriter.has_value()) {
+    for (const auto& [key, val] : anchorData) {
+      if (key == id) {
+        page = val;
+        return true;
+      }
+    }
+    return false;
+  }
+  // Commit the buffered tail so a second handle sees every record written so far. SdFat's
+  // flush() is a sync (sector + directory entry), the same trick Section::loadPageFromActiveBuild
+  // uses on the section file.
+  if (!anchorSpillWriter->flush()) return false;
+  anchorSpillFile.flush();
+  FsFile reader;
+  if (!Storage.openFileForRead("EHP", anchorSpillPath, reader)) return false;
+  bool found = false;
+  std::string key;
+  for (uint16_t i = 0; i < anchorCount; ++i) {
+    uint16_t recordedPage = 0;
+    if (!serialization::readString(reader, key)) break;  // short file: the tail is not there yet
+    serialization::readPod(reader, recordedPage);
+    if (key == id) {
+      page = recordedPage;
+      found = true;
+      break;
+    }
+  }
+  reader.close();
+  return found;
 }
 
 void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
@@ -3325,6 +3498,9 @@ bool ChapterHtmlSlimParser::finalize() {
             (trunc & SaxParser::kTruncAttrName) != 0, (trunc & SaxParser::kTruncAttrValue) != 0,
             (trunc & SaxParser::kTruncMaxAttrs) != 0, (trunc & SaxParser::kTruncMaxDepth) != 0,
             (trunc & SaxParser::kVoidTagRepaired) != 0, (trunc & SaxParser::kTrailingDataIgnored) != 0);
+    // Of these, only the depth cap changes what the reader shows (the tree is flattened past
+    // 64 levels); the others truncate names and attribute values the layout does not use.
+    if (trunc & SaxParser::kTruncMaxDepth) noteCapOverflow(kCapSaxDepth, "element nesting depth");
   }
 
   // Process last page if there is still text. Done unconditionally so that a partial
@@ -3352,6 +3528,7 @@ bool ChapterHtmlSlimParser::finalize() {
     deferredPageImage_ = nullptr;
     deferredDropCapLine_ = nullptr;
     currentPage.reset();
+    releasePageBlock();
     currentTextBlock.reset();
   }
 
@@ -3450,7 +3627,9 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   wordsExtractedInBlock += line->wordCount();
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
-    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href);
+    if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
+      noteCapOverflow(kCapFootnotesPerPage, "footnote links per page");
+    }
     ++footnoteIt;
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);
@@ -3519,7 +3698,14 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: page object");
+      layoutFailed = true;
+      currentTextBlock.reset();
+      return;
+    }
+    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
     currentPageNextY = 0;
   }
 
@@ -3556,7 +3742,7 @@ void ChapterHtmlSlimParser::makePages() {
   const uint16_t effectiveWidth =
       (horizontalInset < viewportWidth) ? static_cast<uint16_t>(viewportWidth - horizontalInset) : viewportWidth;
 
-  if (!ensureHeapForTextLayout("paragraph layout")) {
+  if (!ensureHeapForTextLayout("paragraph layout", currentTextBlock.get())) {
     layoutFailed = true;
     currentTextBlock.reset();
     return;
@@ -3611,7 +3797,8 @@ void ChapterHtmlSlimParser::makePages() {
   // edge cases where a footnote's word index equals the exact block size.
   if (!pendingFootnotes.empty() && currentPage) {
     for (const auto& [idx, fn] : pendingFootnotes) {
-      currentPage->addFootnote(fn.number, fn.href);
+      if (!currentPage->addFootnote(fn.number, fn.href))
+        noteCapOverflow(kCapFootnotesPerPage, "footnote links per page");
     }
     pendingFootnotes.clear();
   }
@@ -3675,20 +3862,94 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // Gate before the layout allocations rather than after: a heap dip now costs this row, not the
   // rows already packed into the fragment.
   if (!heapAllowsTableRowLayout()) {
+    tableRowDegradedAny_ = true;  // the one demotion the heap causes: latched, escalated, rebuilt
     degradeRow("low heap at row layout");
     return;
   }
 
+  // Arena builds lay the row's cell lines out in the lent region (see layoutTableRow), above the
+  // page block, inside a transient block of their own. The block is committed once the row is
+  // known to stay on this page; if the row has to open the NEXT page, the block is released,
+  // the page emitted (which rewinds its block), and the row laid out again from its preserved
+  // source text. That keeps every fragment's bytes inside the block of the page it lands on,
+  // which is what lets the page's rewind reclaim them (memory audit 2026-09, run 12: the whole
+  // Roosevelt appendix demoted for want of 18 KB of heap while 38 KB of the arena sat idle).
+  ensurePageBlock();
   LayoutRow lr;
+  BuildArena::Block rowBlock;
+  if (buildArena_) rowBlock = buildArena_->reserveBlock();
+  const auto dropRowLayout = [&] {
+    lr.cells.clear();
+    if (rowBlock.valid() && !buildArena_->release(rowBlock)) {
+      LOG_ERR("EHP", "Table row arena block could not be released (out of order); region stays claimed");
+    }
+  };
   if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
+    dropRowLayout();
     degradeRow("row cannot be a grid row");
     return;
   }
   t.columnCount = columnCount;
 
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
+
+  // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
+  if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
+    flushTableFragment(t.packer);
+  }
+  if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
+
+  const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
+  // The fragment's closing border line, counted in the fit test so a packed fragment always fits
+  // the page it was packed on: flushTableFragment then never has to move it to the next page --
+  // which an arena build could not do, its bytes being in this page's block.
+  const uint16_t closingBorder = t.packer.hasBorder ? 1 : 0;
+
+  // Height the repeated header adds when this row is the one that opens a continuation fragment.
+  // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
+  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
+  const uint16_t headerContrib =
+      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
+                       : 0;
+
+  // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
+  // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
+  // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
+  // it. The viewport check below reaches it first at any realistic row height; this is the
+  // invariant, not the working limit.
+  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
+                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
+    flushTableFragment(t.packer);
+    t.packer.cols = lr.renderCols;
+  }
+
+  // If what is left of the page cannot hold even this one row, break now. Without this the row
+  // opens a fragment in the few pixels left at the bottom, the next row immediately has to flush
+  // it, and the table arrives on the next page split into a one-row box followed by the rest --
+  // two bordered boxes where the reader should see one continuous table. Only reachable now that
+  // tables span pages as grids rather than flattening at 48 rows.
+  if (t.packer.rows.empty() && currentPageNextY > 0 &&
+      currentPageNextY + headerContrib + rowContrib + closingBorder > viewportHeight) {
+    dropRowLayout();  // its bytes were in the page about to be emitted
+    emitPage(lastBodyChildByteOffset);
+    ensurePageBlock();
+    if (buildArena_) rowBlock = buildArena_->reserveBlock();
+    if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
+      dropRowLayout();
+      degradeRow("row cannot be a grid row");
+      return;
+    }
+  }
+  // The row stays on this page: its bytes now belong to the page block's scope.
+  if (rowBlock.valid()) buildArena_->commit(rowBlock);
+
   // Capture the table's leading header row for the continuation fragments below. Only a row that
   // OPENS the table qualifies (in practice a <thead> row), and only while it is short enough that
-  // repeating it does not eat the page it exists to make readable.
+  // repeating it does not eat the page it exists to make readable. After the placement above,
+  // because a re-layout needs the buffered row this takes.
   if (!t.repeatHeaderResolved) {
     t.repeatHeaderResolved = true;
     if (lr.isHeaderRow && lr.height <= viewportHeight / 3) {
@@ -3708,51 +3969,12 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     }
   }
 
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
-  }
-
-  // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
-  if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
-    flushTableFragment(t.packer);
-  }
-  if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
-
-  const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
-
-  // Height the repeated header adds when this row is the one that opens a continuation fragment.
-  // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
-  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
-  const uint16_t headerContrib =
-      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
-                       : 0;
-
-  // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
-  // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
-  // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
-  // it. The viewport check below reaches it first at any realistic row height; this is the
-  // invariant, not the working limit.
-  if (!t.packer.rows.empty() &&
-      (t.packer.rows.size() >= MAX_TABLE_ROWS || currentPageNextY + t.packer.height + rowContrib > viewportHeight)) {
-    flushTableFragment(t.packer);
-    t.packer.cols = lr.renderCols;
-  }
-
-  // If what is left of the page cannot hold even this one row, break now. Without this the row
-  // opens a fragment in the few pixels left at the bottom, the next row immediately has to flush
-  // it, and the table arrives on the next page split into a one-row box followed by the rest --
-  // two bordered boxes where the reader should see one continuous table. Only reachable now that
-  // tables span pages as grids rather than flattening at 48 rows.
-  if (t.packer.rows.empty() && currentPageNextY > 0 && currentPageNextY + headerContrib + rowContrib > viewportHeight) {
-    emitPage(lastBodyChildByteOffset);
-  }
-
   // Reopen a continuation fragment with the table's header row, so the reader still has column
   // labels on every page the table covers rather than only the first.
   if (repeatHeaderHere && t.packer.rows.empty()) {
-    // Laid out afresh for this fragment. A failure here is not fatal -- the continuation simply
-    // opens without a header, which is what every table did before this existed.
+    // Laid out afresh for this fragment (into this page's block on an arena build). A failure here
+    // is not fatal -- the continuation simply opens without a header, which is what every table
+    // did before this existed.
     LayoutRow hdrLayout;
     if (layoutTableRow(*t.repeatHeader, columnCount, hdrLayout) && hdrLayout.renderCols == lr.renderCols) {
       TableRow hdr;
@@ -4007,6 +4229,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // Count past the cap rather than stopping at it: the overflow itself is the signal, and
       // the grid cannot represent this cell either way.
       size_t producedLines = 0;
+      // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
+      // a whole by the caller, inside a block it commits or releases (see the row emission).
+      bufCell.text->setLineArena(buildArena_);
+      bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
           renderer, fontId, renderInnerWidth,
           [&cell, &producedLines](std::unique_ptr<TextBlock> tb, bool, bool) {
@@ -4102,7 +4328,7 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
   if (text && !text->isEmpty()) {
     // Guard here rather than once per table: in streaming mode this is the only gate the
     // cells pass through, and layoutAndExtractLines below is the allocation that fails.
-    if (!ensureHeapForTextLayout("table cell paragraph")) {
+    if (!ensureHeapForTextLayout("table cell paragraph", text.get())) {
       return false;  // parse already stopped; cell text freed on return
     }
     auto cellBlockStyle = BlockStyle();

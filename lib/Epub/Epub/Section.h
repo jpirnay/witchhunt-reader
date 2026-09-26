@@ -31,8 +31,20 @@ class Section {
   // Set by the last build when CssParser hit its own low-heap mode mid-parse
   // (lowHeapSkips > 0): some elements were cached without their styles. The cache is
   // usable but visually degraded; background callers discard it so the foreground
-  // blocking path (more headroom) rebuilds it clean.
+  // blocking path (more headroom) rebuilds it clean. Persisted in the status byte
+  // (kStatusCssDegraded) and reloaded by loadSectionFile(), so a blocking build that came
+  // out degraded -- the one path that used to write the result without looking -- is
+  // rebuilt once on a later entry instead of standing for the life of the cache.
   bool cssLowHeapDegraded_ = false;
+  // Set by the last build when a table row was emitted as paragraphs instead of a grid
+  // (ChapterHtmlSlimParser::tableRowDegraded). Same persistence and rebuild policy as the
+  // CSS flag: the pages are usable, the layout is what the heap allowed.
+  bool tableRowDegraded_ = false;
+  // Set by the last build when a fixed-capacity limit changed its output (ChapterHtmlSlimParser::
+  // capOverflowFlags, or a page past Page::MAX_ELEMENTS). Deterministic -- a rebuild would hit
+  // the same limit -- so it is persisted (kStatusSimplified) for the reader to say so, not to
+  // rebuild on.
+  bool simplified_ = false;
   // Set by the last build when its inline-footnote resolve pass could not complete (OOM, an
   // unreadable note document). The pages are cached under a "previews on" property hash — see
   // EpubReaderActivity::makeSectionBuildParams — but the notes this spine points at never made
@@ -88,6 +100,12 @@ class Section {
   // CSS/heap fallback recursion lives in the entry function, not here), which is what lets
   // them be called either back-to-back (blocking) or with Parse re-entered across ticks.
   BuildPhaseResult runBuildSetup(BuildState& st);
+  // Resolves the spine's ZIP stat (inflated size) into the build state once; setup and the
+  // parse's EntryReader::open reuse it. False when the entry cannot be sized at all.
+  bool resolveSpineStat(BuildState& st);
+  // True when the book-keyed inflated-XHTML cache for this spine exists with the expected size,
+  // i.e. runBuildParse will feed the parser from it and never needs an inflate ring.
+  bool htmlCacheReusable(const BuildState& st) const;
   // Feeds the chapter XHTML to the parser. budgetMs == 0 (blocking path): streams the
   // ZIP entry directly and consumes it in one call. budgetMs != 0 (sliced path): runs in
   // two budget-sliced phases — (a) inflate the entry to a temp SD file, release all ZIP
@@ -227,6 +245,14 @@ class Section {
   // Increases monotonically as the build progresses; 0 when no build is live.
   // Pages [0, activeBuildPageCount()) are safe to read via loadPageFromActiveBuild().
   uint16_t activeBuildPageCount() const;
+  // Where a navigation target lands in the build in progress, once known: a TOC entry of this
+  // spine without a fragment is page 0 immediately; one with a fragment, or a bare anchor, is
+  // answered as soon as the parser has recorded it (ChapterHtmlSlimParser::
+  // lookupAnchorInActiveBuild). nullopt while unknown or when no build is live. The answer is
+  // the same one the finished cache gives (tocBoundaries / the anchor map are built from the
+  // same records), so the reader can turn the target into a page target and draw it mid-build.
+  std::optional<uint16_t> activeBuildPageForTocIndex(int tocIndex);
+  std::optional<uint16_t> activeBuildPageForAnchor(const std::string& anchor);
   // Best-known total page count: the exact pageCount when no build is live (finalized) or once
   // the stream is consumed, otherwise a byte-based projection (pages so far scaled by the
   // consumed fraction) so a "page X of ~Y" display doesn't read off the small build watermark.
@@ -239,7 +265,8 @@ class Section {
   // sees the latest committed pages (the writer is not synced per page). Must be called
   // between build slices, never concurrently with a slice on another task. Returns nullptr
   // on error. pageIndex must be < activeBuildPageCount().
-  std::unique_ptr<Page> loadPageFromActiveBuild(uint16_t pageIndex);
+  // `scratch`: see Page::deserialize -- the mid-build draw passes the build's lent region.
+  std::unique_ptr<Page> loadPageFromActiveBuild(uint16_t pageIndex, BuildArena* scratch = nullptr);
   // Pre-decode every image in the section into its .pxc cache. Skips images that are
   // already cached or would show as a placeholder. The decode writes pixels into the
   // framebuffer as a side effect; call renderer.clearScreen() afterward. forceLoad
@@ -254,13 +281,21 @@ class Section {
   // demand, borrowing the framebuffer as its arena. The one remaining caller is the
   // pre-reboot heap-recovery pass, which deliberately warms everything so the next boot can
   // render images with no decoder at all.
+  // redecodeCoarse: see Page::warmImageCaches -- only for passes that run with the framebuffers
+  // released, where the full progressive workspace fits.
   void warmAllImageCaches(int xOffset, int yOffset, bool forceLoad, bool monochromeOutput = true,
-                          bool alsoWarmGrayscale = false);
+                          bool alsoWarmGrayscale = false, bool redecodeCoarse = false);
   bool isTruncatedCache() const { return truncatedCache; }
   bool isEmbeddedStyleFallback() const { return embeddedStyleFallback; }
   // True when the last build's CSS resolution hit low-heap skips (styles silently
-  // missing from the cached pages). Only meaningful right after a build.
+  // missing from the cached pages), or when the loaded cache was written by such a build.
   bool isCssLowHeapDegraded() const { return cssLowHeapDegraded_; }
+  // True when the last build demoted a table row to paragraphs, or the loaded cache was written
+  // by such a build. The reader rebuilds such a chapter once per session when it is entered.
+  bool isTableRowDegraded() const { return tableRowDegraded_; }
+  // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
+  // less than the book: see ChapterHtmlSlimParser::CapOverflow.
+  bool isSimplified() const { return simplified_; }
   // True when the last build's inline-footnote resolve pass failed, so some of this spine's
   // notes are missing from the store while the cache claims previews are on. Only meaningful
   // right after a build.

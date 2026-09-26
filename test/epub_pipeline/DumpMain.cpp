@@ -35,10 +35,13 @@ static uintmax_t dirBytes(const std::string& dir) {
 
 int main(const int argc, char** argv) {
   bool bench = false;
+  size_t lentArenaBytes = 0;
   std::string epubPath, cacheDir;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--bench") == 0) {
       bench = true;
+    } else if (std::strncmp(argv[i], "--arena=", 8) == 0) {
+      lentArenaBytes = static_cast<size_t>(std::strtoul(argv[i] + 8, nullptr, 10));
     } else if (epubPath.empty()) {
       epubPath = argv[i];
     } else {
@@ -46,7 +49,7 @@ int main(const int argc, char** argv) {
     }
   }
   if (epubPath.empty()) {
-    std::fprintf(stderr, "usage: %s <book.epub> [cacheDir] [--bench]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s <book.epub> [cacheDir] [--bench] [--arena=BYTES]\n", argv[0]);
     return 2;
   }
   if (cacheDir.empty()) {
@@ -65,7 +68,15 @@ int main(const int argc, char** argv) {
 
   if (bench) heapTrackBegin();
   const auto start = std::chrono::steady_clock::now();
-  const bool ok = pipeline_harness::runAndDump(epubPath, cacheDir, pipeline_harness::Profile{}, std::cout, spineStat);
+  pipeline_harness::Profile profile;
+  profile.lentArenaBytes = lentArenaBytes;
+  pipeline_harness::ArenaStatFn arenaStat;
+  if (bench && lentArenaBytes > 0) {
+    arenaStat = [](const int spine, const size_t highWater, const size_t capacity) {
+      std::fprintf(stderr, "BENCHMARK spine_%d arena_highWater=%zu capacity=%zu\n", spine, highWater, capacity);
+    };
+  }
+  const bool ok = pipeline_harness::runAndDump(epubPath, cacheDir, profile, std::cout, spineStat, arenaStat);
   const auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
   std::fprintf(stderr, "BENCHMARK pipeline_%s time=%lldus", ok ? "ok" : "FAILED", static_cast<long long>(us.count()));
   if (bench) {

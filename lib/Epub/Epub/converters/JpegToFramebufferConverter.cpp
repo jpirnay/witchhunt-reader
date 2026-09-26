@@ -1099,6 +1099,9 @@ void drawUnsupportedPlaceholder(GfxRenderer& renderer, const RenderConfig& confi
   const int w = config.maxWidth;
   const int h = config.maxHeight;
   if (w <= 0 || h <= 0) return;
+  // A cache-only decode (the reader's image lane) must leave the displayed frame alone; the raw
+  // pixel writers already see a zero-row window, this box would not.
+  if (renderer.getWriteRows() == 0) return;
   if (config.x < 0 || config.y < 0 || config.x + w > renderer.getScreenWidth() ||
       config.y + h > renderer.getScreenHeight()) {
     return;
@@ -1367,6 +1370,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Coarse DCT downscale (TJpgDec's built-in 1/1..1/8, or the progressive decoder's reduced
   // IDCT); the fine resampler in emitGrayBlock covers the residual ratio.
   uint8_t tjpgScale = 0;
+  uint8_t wantedProgressiveScale = 0;  // the scale the target asked for, before the workspace loop
   int jpegScaleDenom = 1;
   std::unique_ptr<JpegWorkPool> progressiveWorkspace;
   size_t progressiveWorkspaceBytes = 0;
@@ -1375,6 +1379,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   } else if (fullProgressive) {
     // A coarser scale keeps fewer coefficients per block: step down until the workspace fits.
     chooseJpegScale(targetScale, tjpgScale);
+    wantedProgressiveScale = tjpgScale;
     for (; tjpgScale <= 3; ++tjpgScale) {
       progressiveWorkspaceBytes = ProgressiveJpeg::workspaceBytes(progressiveInfo, tjpgScale);
       progressiveWorkspace =
@@ -1393,6 +1398,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   }
   // The DC-only preview resizes to the destination itself.
   const bool dcPreview = mode == JpegMode::Progressive && !fullProgressive;
+  // Below the requested quality because of the heap: the cache written from this decode is
+  // stamped coarse so a later pass with room can replace it (PixelCache::PXC_MAGIC_COARSE).
+  const bool coarseDecode = dcPreview || (fullProgressive && tjpgScale > wantedProgressiveScale);
 
   // TJpgDec descales by floor(dim / 2^scale): each MCU side (8 or 16 px) is a multiple of
   // the scale denominator, so its per-MCU shifts sum to exactly the floor. Match that here
@@ -1444,6 +1452,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {
       LOG_ERR("JPG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
+    } else if (coarseDecode) {
+      ctx.cache.markCoarse();
     }
   }
 
@@ -1556,6 +1566,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
                                                      config.y, maxBlockDstRows)) {
       LOG_ERR("JPG", "Failed to start companion cache stream, continuing with one variant");
       ctx.companion.reset();
+    } else if (ctx.companion && coarseDecode) {
+      ctx.companion->cache.markCoarse();
     }
   }
 
@@ -1591,6 +1603,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
         ctx.scaledSrcHeight = destHeight;
         configureResample(ctx, false);
         runDcPreview = true;
+        if (ctx.caching) ctx.cache.markCoarse();  // a preview is standing in for the full decode
+        if (ctx.companion) ctx.companion->cache.markCoarse();
       }
     }
   }
