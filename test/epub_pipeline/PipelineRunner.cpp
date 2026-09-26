@@ -151,6 +151,12 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
       return false;
     }
     if (lentArena && arenaStat) arenaStat(i, lentArena->highWater(), lentArena->capacity());
+    // The deferred image-header walk, as the reader runs it at the end of a Background-C build:
+    // ring storage from the lent region when there is one (its build state is gone now), else
+    // the heap. Until this the harness never ran the walk, so the census had no figure for it
+    // (memory audit 2026-09, F7/R5). A no-op when the build resolved every header inline.
+    if (lentArena) lentArena->reset();
+    epub->persistImageManifest(lentArena.get());
     if (!section.loadSectionFile(p)) {
       out << "SPINE " << i << " ERROR load failed\n";
       return false;
