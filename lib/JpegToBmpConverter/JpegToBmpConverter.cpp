@@ -432,7 +432,7 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth
 template <typename Run>
 static bool convertScaled(BufferedPrint& bmpOut, const int effectiveSrcW, const int effectiveSrcH,
                           const int targetWidth, const int targetHeight, const bool oneBit, const bool crop,
-                          const bool eightBit, const bool needMcuBuf, Run&& run) {
+                          const bool eightBit, const bool needMcuBuf, BuildArena* scratch, Run&& run) {
   // Calculate output dimensions (pre-scale to fit display exactly)
   int outWidth = effectiveSrcW;
   int outHeight = effectiveSrcH;
@@ -515,37 +515,85 @@ static bool convertScaled(BufferedPrint& bmpOut, const int effectiveSrcW, const 
 
   // RAII guard: frees all heap resources on any return path (the TJpgDec work pool is
   // owned by the `pool` unique_ptr above and freed on scope exit).
+  // The row pipeline -- the MCU strip (up to 16 rows of the source width, 16+ KB on a wide
+  // cover), the BMP row and the scaling accumulators -- comes from the lent region when there is
+  // one, in a block of its own released on every return path; the heap only when there is not.
+  // Home's later visits run this with the reading state's ~35 KB free, and the 28 KB heap
+  // reserve for these buffers refused every remaining cover ("Not enough heap for JPEG decoder
+  // (27528 free, need 28672)", X3 2026-09-26) while 30 KB of the region sat idle. Each buffer
+  // remembers where it came from, so a region that runs out mid-way falls back to the heap for
+  // the rest and the cleanup frees exactly what it owns.
+  const size_t mcuBytes = needMcuBuf ? static_cast<size_t>(MAX_MCU_HEIGHT) * effectiveSrcW : 0;
+  const size_t accumBytes = needsScaling ? static_cast<size_t>(outWidth) * sizeof(uint32_t) : 0;
+  struct RowScope {
+    BuildArena* arena = nullptr;
+    BuildArena::Block block;
+    ~RowScope() {
+      if (arena != nullptr && block.valid()) arena->release(block);
+    }
+  } rowScope;
+  if (scratch != nullptr && scratch->valid() &&
+      scratch->capacity() - scratch->used() >=
+          mcuBytes + bytesPerRow + 2 * accumBytes + 4 * alignof(std::max_align_t)) {
+    rowScope.arena = scratch;
+    rowScope.block = scratch->reserveBlock();
+  }
+  bool mcuOnHeap = false, rowOnHeap = false, accumOnHeap = false;
   struct Cleanup {
     BmpConvertCtx& ctx;
+    const bool& mcuOnHeap;
+    const bool& rowOnHeap;
+    const bool& accumOnHeap;
     ~Cleanup() {
-      delete[] ctx.rowAccum;
-      delete[] ctx.rowCount;
+      if (accumOnHeap) {
+        delete[] ctx.rowAccum;
+        delete[] ctx.rowCount;
+      }
       delete ctx.atkinsonDitherer;
       delete ctx.fsDitherer;
       delete ctx.atkinson1BitDitherer;
-      free(ctx.mcuBuf);
-      free(ctx.bmpRow);
+      if (mcuOnHeap) free(ctx.mcuBuf);
+      if (rowOnHeap) free(ctx.bmpRow);
     }
-  } cleanup{ctx};
+  } cleanup{ctx, mcuOnHeap, rowOnHeap, accumOnHeap};
+  const auto fromRegion = [&](const size_t bytes) -> uint8_t* {
+    return rowScope.arena != nullptr ? static_cast<uint8_t*>(rowScope.arena->alloc(bytes)) : nullptr;
+  };
 
   if (needMcuBuf) {
-    ctx.mcuBuf = static_cast<uint8_t*>(malloc(MAX_MCU_HEIGHT * effectiveSrcW));
+    ctx.mcuBuf = fromRegion(mcuBytes);
+    if (ctx.mcuBuf == nullptr) {
+      ctx.mcuBuf = static_cast<uint8_t*>(malloc(mcuBytes));
+      mcuOnHeap = ctx.mcuBuf != nullptr;
+    }
     if (!ctx.mcuBuf) {
       LOG_ERR("JPG", "Failed to allocate MCU buffer (%d bytes)", MAX_MCU_HEIGHT * effectiveSrcW);
       return false;
     }
-    memset(ctx.mcuBuf, 0, MAX_MCU_HEIGHT * effectiveSrcW);
+    memset(ctx.mcuBuf, 0, mcuBytes);
   }
 
-  ctx.bmpRow = static_cast<uint8_t*>(malloc(bytesPerRow));
+  ctx.bmpRow = fromRegion(bytesPerRow);
+  if (ctx.bmpRow == nullptr) {
+    ctx.bmpRow = static_cast<uint8_t*>(malloc(bytesPerRow));
+    rowOnHeap = ctx.bmpRow != nullptr;
+  }
   if (!ctx.bmpRow) {
     LOG_ERR("JPG", "Failed to allocate BMP row buffer");
     return false;
   }
 
   if (needsScaling) {
-    ctx.rowAccum = new (std::nothrow) uint32_t[outWidth]();
-    ctx.rowCount = new (std::nothrow) uint32_t[outWidth]();
+    ctx.rowAccum = reinterpret_cast<uint32_t*>(fromRegion(accumBytes));
+    ctx.rowCount = ctx.rowAccum != nullptr ? reinterpret_cast<uint32_t*>(fromRegion(accumBytes)) : nullptr;
+    if (ctx.rowAccum != nullptr && ctx.rowCount != nullptr) {
+      memset(ctx.rowAccum, 0, accumBytes);
+      memset(ctx.rowCount, 0, accumBytes);
+    } else {
+      ctx.rowAccum = new (std::nothrow) uint32_t[outWidth]();
+      ctx.rowCount = new (std::nothrow) uint32_t[outWidth]();
+      accumOnHeap = true;
+    }
     if (!ctx.rowAccum || !ctx.rowCount) {
       LOG_ERR("JPG", "Failed to allocate scaling buffers");
       return false;
@@ -647,7 +695,7 @@ static bool convertFromProgressive(FsFile& jpegFile, BufferedPrint& bmpOut, cons
   const size_t workspaceBytes = ProgressiveJpeg::workspaceBytes(info, shift);
   uint8_t* workspace = workspaceScope.take(scratch, workspaceBytes);
   return convertScaled(bmpOut, effectiveSrcW, effectiveSrcH, targetWidth, targetHeight, oneBit, crop, eightBit,
-                       /*needMcuBuf=*/false, [&](BmpConvertCtx& ctx) {
+                       /*needMcuBuf=*/false, scratch, [&](BmpConvertCtx& ctx) {
                          ProgressiveJpeg::DecodeOptions options;
                          options.scaleShift = scaleShift;
                          options.shouldAbort = progressiveFullShouldAbort;
@@ -690,7 +738,15 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
   ArenaBlockScope poolScope;
   uint8_t* pool = poolScope.take(scratch, TJPG_WORK_POOL_SIZE);
   std::unique_ptr<uint8_t[]> heapPool;
-  const size_t heapFloor = pool != nullptr ? MIN_FREE_HEAP - TJPG_WORK_POOL_SIZE : MIN_FREE_HEAP;
+  // With the pool in the region, convertScaled takes the row pipeline from it too when the room
+  // is there (MCU strip 16 KB at most + rows; see there), and the heap then owes only the
+  // ditherers and the BMP output buffering -- a few KB. The full reserve applies otherwise.
+  constexpr size_t ROWS_IN_REGION_MIN_FREE_HEAP = 8 * 1024;
+  const bool rowsInRegion =
+      pool != nullptr && scratch->capacity() - scratch->used() >= static_cast<size_t>(MAX_MCU_HEIGHT) * 1200 + 8 * 1024;
+  const size_t heapFloor = rowsInRegion      ? ROWS_IN_REGION_MIN_FREE_HEAP
+                           : pool != nullptr ? MIN_FREE_HEAP - TJPG_WORK_POOL_SIZE
+                                             : MIN_FREE_HEAP;
   if (ESP.getFreeHeap() < heapFloor) {
     LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(),
             static_cast<unsigned>(heapFloor));
@@ -770,7 +826,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
   }
 
   const bool ok = convertScaled(bmpOut, effectiveSrcW, effectiveSrcH, targetWidth, targetHeight, oneBit, crop, eightBit,
-                                /*needMcuBuf=*/true, [&](BmpConvertCtx& ctx) {
+                                /*needMcuBuf=*/true, scratch, [&](BmpConvertCtx& ctx) {
                                   session.ctx = &ctx;
                                   const JRESULT jr = jd_decomp(&jdec, tjpgBmpOutput, tjpgScale);
                                   if (jr != JDR_OK || ctx.error) {
