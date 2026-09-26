@@ -278,16 +278,23 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
 #define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (50 * 1024)
 #endif
-// CSS books need more margin to build in place: the parse resolves embedded styles, which
-// self-degrade below the runtime CSS-resolve floor (CSS_MIN_FREE_HEAP_FOR_CSS ≈ 40 KB). Since
-// every build is now two-phase (the inflate ring is released BEFORE the CSS-resolving parse),
-// the resolve runs with the ring gone, so a higher free floor keeps it clear of 40 KB; contig is
-// pinned at the inflate-ring size (≤32 KB) for the extraction phase. A miss is still caught by
-// isCssLowHeapDegraded() and rebuilt with the buffer released.
-// STALE PREMISE: the resolver floor is 24 KB on every build now (lean mode, set unconditionally
-// in Section::runBuildSetup). Re-derived in audit R3 -- see the derivation below the define.
+// CSS books need more margin to build in place: the parse resolves embedded styles, and the lean
+// resolver skips lookups below its floor, which yields a css-degraded cache and (since audit R3
+// step 4) one released rebuild -- seconds of resident work thrown away. Since every build is
+// two-phase (the inflate ring is released BEFORE the CSS-resolving parse), the resolve runs with
+// the ring gone; contig stays pinned at the ring size (<=32 KB) for the extraction phase.
+//
+// Re-derived 2026-09-26 (memory audit R3). The old 66 KB was "parse working set ~25-28 KB + the
+// 40 KB resolver floor"; the resolver has run lean on every build since Section::runBuildSetup
+// set it unconditionally, so the floor it protects is CSS_LEAN_MIN_FREE_HEAP_FOR_CSS:
+//   parse working set of a heap-backed CSS build (SAX ~10 KB, index, page/paragraph heap)  28 KB
+//   resolver lean floor                                                                   24 KB
+//   margin                                                                                 4 KB
+//                                                                                       = 56 KB
+// The residentAbort guard (RESIDENT_BUILD_ABORT_*) still catches a build that dips further. X4
+// device confirmation of the new admission band (56-66 KB free) is pending.
 #ifndef IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES
-#define IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES (66 * 1024)
+#define IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES (56 * 1024)
 #endif
 #ifndef IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES
 #define IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES (32 * 1024)

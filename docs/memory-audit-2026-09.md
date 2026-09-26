@@ -729,8 +729,9 @@ correct sizing for arena builds. Boot-wide watermark **8 452 B** (run 8:
 18 420). The escalation path (fix 3) and the relative restart gate (fix 4)
 were therefore not exercised in this run.
 
-**R3 — one declared budget per build, not thirty gates.** Once R1 and R2
-land, the lent region has a known layout: resident lane (ruleset + SAX +
+**R3 — one declared budget per build, not thirty gates.** *Steps 1-5 done
+on `memory/audit-2026-09` (2026-09-26), device validation pending.* Once R1
+and R2 land, the lent region has a known layout: resident lane (ruleset + SAX +
 chunk, ~12 KB), phase-a lane (ring + grow, ≤ 41 KB, freed before phase b),
 phase-b lanes (paragraph + page + font slots). `BuildArena` should report
 high-water *per lane* in the existing `SCT` summary line, and the gates that
@@ -741,6 +742,47 @@ embedded-style floor from a trace; add the 16-byte slack to the six exact
 contig floors. Every remaining refusal that changes output must latch: a
 status bit for a demoted table row and for CSS skips on a blocking build, and
 a quality byte in the `.pxc` header for a coarser progressive decode.
+
+*What landed for R3 (2026-09-26):*
+
+1. *Per-lane telemetry* (`646887768`): `BuildArena::beginLane()` /
+   `laneHighWater()`, and the build's summary line now reads
+   `arena: cap=… highWater=… lanes(setup=… extract=… resident=… parse=…)
+   failedAlloc=… zipHW=…` — setup = resident after setup (ruleset),
+   extract = the extraction phase's peak above it (ring + grow), resident =
+   what phase (b) starts from (setup + chunk + SAX), parse = the parse's
+   peak above that (page blocks, font slots, draw block). The next device
+   run gives the per-lane numbers the declared budget is derived from.
+2. *Dead gates deleted* (same commit): `bgB_waitheap`, `bgB_cssResident`,
+   `bgB_embeddedCss`, the `bgB_residentAbort` mirror, their four floors and
+   the central-directory scan per target spine. Background-B builds only
+   in the borrowed buffer; with nothing to lend it waits and Background-C
+   builds on navigation — which is what happened anyway.
+3. *The 16-byte slack* on every contig floor whose refusal changes the
+   build path or the output: the image-header read, the embedded-style
+   gate, B's borrow gate, `heapAllowsInPlaceBuild`, C's `residentAbort`.
+4. *Latches* (`404e000bc`): a demoted table row and CSS skips now persist
+   in the section status byte (`kStatusTableRowDegraded`,
+   `kStatusCssDegraded`) and earn the spine one rebuild per session on
+   entry, B discards such a build, and a blocking build that still came out
+   degraded says so at ERR. A progressive JPEG decoded coarser than asked
+   (or as the DC preview) is stamped `PXC_MAGIC_COARSE`; readers replay it,
+   the pre-reboot warm pass — the one pass with every framebuffer released
+   — drops it and decodes again. That closes all four of F3's silent bakes
+   except the outright decode refusal, which was never cached.
+5. *Re-derived floors*: `SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES` stays at
+   44 KB, now as 24 KB lean resolver floor + ~10 KB SAX on the heap + ~4 KB
+   index + ~6 KB page/paragraph heap (host census, heap-only mode: 37 KB
+   whole-process peak on the CSS fixture) instead of "56 minus the hot
+   cache". `IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES` 66 → 56 KB: 28 KB
+   working set + 24 KB lean floor + 4 KB margin, replacing the 40 KB floor
+   in the old sum; X4 confirmation of the new admission band pending.
+
+Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
+deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
+stack pinning the hole at Home (F6), and the lend-vs-release revisit for
+the C-failure escalation once the parse's remaining heap objects move into
+the page block.
 
 **R4 — give every cap a defined behaviour past the cap (F5).** The rule to
 apply to §4: a cap is acceptable when (i) it is provably above any input and
@@ -767,6 +809,27 @@ fallback; `scanByFont_` gets a bounded scan buffer.
 the header walk in the harness, and add a host test that fails when the
 heap-side peak of the four fixture books rises by more than a set margin —
 the test the pending-image queue never had.
+
+**R6 — audit the warm-boot footprint.** *Added 2026-09-26 from run 11.*
+The post-sync silent restart (`Silent restart (target=home)`,
+`RTC_SW_CPU_RST`) came up at `setup_complete` with **52 908 free /
+34 804 largest** against the cold boot's 62 280 / 53 236 half an hour
+earlier, and its startup minimum was 39 204 (cold: 57 160). Something on
+the restart-to-Home path costs ~9 KB of heap and ~18 KB of contiguity
+before Home draws — and every post-sync reboot, whose whole purpose is to
+restore the baseline, starts from there. Trace the `Startup[...]` phases of
+a warm boot against a cold one and find the allocation.
+
+**R7 — schedule image work ahead of far look-ahead.** *User direction,
+2026-09-26.* The background lanes today parse the next section (B) or the
+current one (C) and leave image decode to the page turn that reaches the
+image. A reader five pages from an undecoded image should not be spending
+its idle time laying out a section fifty pages away. Add a background lane
+that decodes and scales the not-yet-processed images nearest to the
+reading position (the `images.pending` queue already knows which ones),
+and rank it above B's look-ahead when a pending image lies within a few
+pages. The lane borrows the same region the builds do, so it is exclusive
+with them by construction; the scheduler decision is the new part.
 
 ## 8. Appendix — where the numbers come from
 

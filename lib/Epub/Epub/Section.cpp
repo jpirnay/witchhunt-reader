@@ -139,39 +139,25 @@ namespace {
 constexpr uint32_t FNV_PRIME = 0x01000193;         // 16777619
 constexpr uint32_t FNV_OFFSET_BASIS = 0x811C9DC5;  // 2166136261
 
-// On constrained targets, parsing with embedded CSS adds heap pressure and increases
-// parse truncation risk. Allow compile-time override for tuning.
+// Free-heap pre-filter for a HEAP-BACKED build with embedded CSS (an arena-backed build takes
+// its ruleset from the lent region and is exempt -- see heapAllowsEmbeddedStyle). It is not the
+// safety mechanism: that is the contig check below (a failed std::vector reserve aborts under
+// -fno-exceptions, so contig must be real), the resolver's own lean floor, and the css-degraded
+// status bit, which now persists and earns the chapter one rebuild (audit R3 step 4).
 //
-// Floor sizing (measured, X3, 2026-06-11): since the sparse disk-backed CSS cache the
-// resident cost is small — selector index ≈ ruleCount × 16 B (~4.6 KB for a measured
-// 290-rule book, 24 KB at the 1500-rule cap), plus the bounded hot/negative caches
-// (≤ ~32 KB absolute worst, typically ~10 KB). CssParser::resolveStyle additionally
-// self-protects below CSS_MIN_FREE_HEAP_FOR_CSS (40 KB) by skipping disk lookups.
-// The original 96 KB predates trusting those bounds and made background (Background-B)
-// CSS builds impossible (~68 KB free while reading). Build telemetry (lowHeapSkips →
-// Section::isCssLowHeapDegraded) lets callers discard a degraded result instead.
-//
-// Applies to HEAP-BACKED builds only. An arena-backed build (borrowed framebuffer) takes the
-// ruleset from the arena and is exempt — see heapAllowsEmbeddedStyle(..., arenaBacked).
-// 2026-08-11: 56 KB -> 44 KB, because the component it was covering no longer exists.
-//
-// The 56 KB was index + hot/negative caches + margin, sized against the resolver's 40 KB
-// self-protection floor. Lean resolve is now unconditional (see runBuildSetup), so the hot LRU
-// never allocates — that is the "typically ~10 KB" term above — and the resolver's floor is
-// LEAN_MIN_FREE_HEAP_FOR_CSS (24 KB), not 40 KB. Both halves of the arithmetic moved down.
-//
-// It also had to move for the gate to mean anything. On X3 free heap peaks at ~72 KB at reader
-// entry and sits at 50-60 KB while reading, so a 56 KB floor rejected essentially every
-// heap-backed CSS build — and Background-B, whose fallback path this gates, simply stopped
-// pre-building on CSS books. A floor that no reachable heap state satisfies is not a safety
-// margin, it is a disabled feature.
-//
-// This is DERIVED, not measured: 56 minus the ~10 KB hot cache, rounded down. It is a
-// pre-filter, not a guarantee, and it is not the safety mechanism — that is the contig check
-// below (a failed std::vector reserve aborts under -fno-exceptions, so contig must be real)
-// plus the resolver's own 24 KB floor and isCssLowHeapDegraded(), which lets a caller discard a
-// degraded result rather than ship it. Watch lowHeapSkips: if heap-backed builds start
-// degrading, this is the number that moved.
+// Re-derived 2026-09-26 (memory audit R3) from measured terms, replacing the 2026-06-11 figure
+// (56 KB: index + hot/negative caches + margin against a 40 KB resolver floor) and its 2026-08-11
+// trim to 44 KB (the hot LRU never allocates in lean mode). What a heap-backed CSS parse holds
+// on the heap at its peak, on top of the owned 10 KB arena that is already allocated when this
+// gate runs:
+//   resolver lean floor (CSS_LEAN_MIN_FREE_HEAP_FOR_CSS, below which lookups are skipped)  24 KB
+//   SAX parser state on the heap (9,704 B, device log; in the arena only on lent builds)  ~10 KB
+//   selector index, 8 B/rule (~2.3 KB at 290 rules; the dynamic contig term covers it)     ~4 KB
+//   per-page/per-paragraph heap objects (host census, heap-only mode, CSS fixture)          ~6 KB
+//                                                                                        = 44 KB
+// The number did not move; its derivation now does not rest on the 40 KB floor or the hot cache.
+// Watch lowHeapSkips (Section::isCssLowHeapDegraded): if heap-backed builds start degrading,
+// this is the term that moved.
 #ifndef SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES
 #define SCT_EMBEDDED_STYLE_MIN_FREE_HEAP_BYTES (44 * 1024)
 #endif
