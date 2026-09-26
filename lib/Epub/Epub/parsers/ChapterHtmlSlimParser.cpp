@@ -776,8 +776,19 @@ bool ChapterHtmlSlimParser::heapAllowsTableRowLayout() const {
   // slack term is the allocator's own bookkeeping: largest-free-block readings land a few bytes
   // under the round number (a row was once refused at 12276 against a 12288 bar, twelve short,
   // with the memory plainly there), so neither bar sits on a power of two.
-  const bool ok = freeHeap >= MIN_FREE_HEAP_FOR_TEXT_LAYOUT &&
-                  maxAllocHeap >= MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD - LARGEST_FREE_BLOCK_SLACK;
+  //
+  // Arena builds (buildArena_ set): the cell lines' bytes come from the lent region (layoutTableRow
+  // sets the cells' line arena), so what a grid row takes from the heap is the TextBlock objects,
+  // the row/cell vectors and the cells' layout scratch -- a few KB -- and the free bar drops to
+  // the hard text-layout floor plus a margin. The 18 KB soft bar was sized for heap-resident
+  // lines; kept there it demoted every row of the Roosevelt appendix on the X3 at 11-18 KB free
+  // while 38 KB of the arena sat idle (memory audit 2026-09, run 12).
+  const uint32_t freeFloor =
+      buildArena_ ? MIN_FREE_HEAP_FOR_TEXT_LAYOUT_HARD + 3 * 1024 : MIN_FREE_HEAP_FOR_TEXT_LAYOUT;
+  const uint32_t contigFloor =
+      (buildArena_ ? MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD_ARENA : MIN_MAX_ALLOC_FOR_TEXT_LAYOUT_HARD) -
+      LARGEST_FREE_BLOCK_SLACK;
+  const bool ok = freeHeap >= freeFloor && maxAllocHeap >= contigFloor;
   if (!ok) {
     LOG_DBG("EHP", "Table row layout skipped (%u free, %u max alloc); row falls back to paragraphs", freeHeap,
             maxAllocHeap);
@@ -3811,20 +3822,94 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // Gate before the layout allocations rather than after: a heap dip now costs this row, not the
   // rows already packed into the fragment.
   if (!heapAllowsTableRowLayout()) {
+    tableRowDegradedAny_ = true;  // the one demotion the heap causes: latched, escalated, rebuilt
     degradeRow("low heap at row layout");
     return;
   }
 
+  // Arena builds lay the row's cell lines out in the lent region (see layoutTableRow), above the
+  // page block, inside a transient block of their own. The block is committed once the row is
+  // known to stay on this page; if the row has to open the NEXT page, the block is released,
+  // the page emitted (which rewinds its block), and the row laid out again from its preserved
+  // source text. That keeps every fragment's bytes inside the block of the page it lands on,
+  // which is what lets the page's rewind reclaim them (memory audit 2026-09, run 12: the whole
+  // Roosevelt appendix demoted for want of 18 KB of heap while 38 KB of the arena sat idle).
+  ensurePageBlock();
   LayoutRow lr;
+  BuildArena::Block rowBlock;
+  if (buildArena_) rowBlock = buildArena_->reserveBlock();
+  const auto dropRowLayout = [&] {
+    lr.cells.clear();
+    if (rowBlock.valid() && !buildArena_->release(rowBlock)) {
+      LOG_ERR("EHP", "Table row arena block could not be released (out of order); region stays claimed");
+    }
+  };
   if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
+    dropRowLayout();
     degradeRow("row cannot be a grid row");
     return;
   }
   t.columnCount = columnCount;
 
+  if (!currentPage) {
+    currentPage.reset(new Page());
+    currentPageNextY = 0;
+  }
+
+  // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
+  if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
+    flushTableFragment(t.packer);
+  }
+  if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
+
+  const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
+  // The fragment's closing border line, counted in the fit test so a packed fragment always fits
+  // the page it was packed on: flushTableFragment then never has to move it to the next page --
+  // which an arena build could not do, its bytes being in this page's block.
+  const uint16_t closingBorder = t.packer.hasBorder ? 1 : 0;
+
+  // Height the repeated header adds when this row is the one that opens a continuation fragment.
+  // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
+  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
+  const uint16_t headerContrib =
+      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
+                       : 0;
+
+  // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
+  // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
+  // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
+  // it. The viewport check below reaches it first at any realistic row height; this is the
+  // invariant, not the working limit.
+  if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
+                                 currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
+    flushTableFragment(t.packer);
+    t.packer.cols = lr.renderCols;
+  }
+
+  // If what is left of the page cannot hold even this one row, break now. Without this the row
+  // opens a fragment in the few pixels left at the bottom, the next row immediately has to flush
+  // it, and the table arrives on the next page split into a one-row box followed by the rest --
+  // two bordered boxes where the reader should see one continuous table. Only reachable now that
+  // tables span pages as grids rather than flattening at 48 rows.
+  if (t.packer.rows.empty() && currentPageNextY > 0 &&
+      currentPageNextY + headerContrib + rowContrib + closingBorder > viewportHeight) {
+    dropRowLayout();  // its bytes were in the page about to be emitted
+    emitPage(lastBodyChildByteOffset);
+    ensurePageBlock();
+    if (buildArena_) rowBlock = buildArena_->reserveBlock();
+    if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
+      dropRowLayout();
+      degradeRow("row cannot be a grid row");
+      return;
+    }
+  }
+  // The row stays on this page: its bytes now belong to the page block's scope.
+  if (rowBlock.valid()) buildArena_->commit(rowBlock);
+
   // Capture the table's leading header row for the continuation fragments below. Only a row that
   // OPENS the table qualifies (in practice a <thead> row), and only while it is short enough that
-  // repeating it does not eat the page it exists to make readable.
+  // repeating it does not eat the page it exists to make readable. After the placement above,
+  // because a re-layout needs the buffered row this takes.
   if (!t.repeatHeaderResolved) {
     t.repeatHeaderResolved = true;
     if (lr.isHeaderRow && lr.height <= viewportHeight / 3) {
@@ -3844,51 +3929,12 @@ void ChapterHtmlSlimParser::commitPendingRow() {
     }
   }
 
-  if (!currentPage) {
-    currentPage.reset(new Page());
-    currentPageNextY = 0;
-  }
-
-  // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
-  if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
-    flushTableFragment(t.packer);
-  }
-  if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
-
-  const uint16_t rowContrib = t.packer.hasBorder ? static_cast<uint16_t>(lr.height + 1) : lr.height;
-
-  // Height the repeated header adds when this row is the one that opens a continuation fragment.
-  // Zero for the header row itself, which would otherwise be emitted twice at the top of the table.
-  const bool repeatHeaderHere = t.repeatHeader && !lr.isHeaderRow && t.repeatHeaderHeight > 0;
-  const uint16_t headerContrib =
-      repeatHeaderHere ? (t.packer.hasBorder ? static_cast<uint16_t>(t.repeatHeaderHeight + 1) : t.repeatHeaderHeight)
-                       : 0;
-
-  // MAX_TABLE_ROWS used to bound the whole table, which is what kept PageTableFragment::deserialize
-  // from ever seeing an over-long fragment (Page.cpp rejects rowCount > MAX_TABLE_ROWS). Tables are
-  // no longer bounded, so the cap has to live here, on the fragment that actually has to satisfy
-  // it. The viewport check below reaches it first at any realistic row height; this is the
-  // invariant, not the working limit.
-  if (!t.packer.rows.empty() &&
-      (t.packer.rows.size() >= MAX_TABLE_ROWS || currentPageNextY + t.packer.height + rowContrib > viewportHeight)) {
-    flushTableFragment(t.packer);
-    t.packer.cols = lr.renderCols;
-  }
-
-  // If what is left of the page cannot hold even this one row, break now. Without this the row
-  // opens a fragment in the few pixels left at the bottom, the next row immediately has to flush
-  // it, and the table arrives on the next page split into a one-row box followed by the rest --
-  // two bordered boxes where the reader should see one continuous table. Only reachable now that
-  // tables span pages as grids rather than flattening at 48 rows.
-  if (t.packer.rows.empty() && currentPageNextY > 0 && currentPageNextY + headerContrib + rowContrib > viewportHeight) {
-    emitPage(lastBodyChildByteOffset);
-  }
-
   // Reopen a continuation fragment with the table's header row, so the reader still has column
   // labels on every page the table covers rather than only the first.
   if (repeatHeaderHere && t.packer.rows.empty()) {
-    // Laid out afresh for this fragment. A failure here is not fatal -- the continuation simply
-    // opens without a header, which is what every table did before this existed.
+    // Laid out afresh for this fragment (into this page's block on an arena build). A failure here
+    // is not fatal -- the continuation simply opens without a header, which is what every table
+    // did before this existed.
     LayoutRow hdrLayout;
     if (layoutTableRow(*t.repeatHeader, columnCount, hdrLayout) && hdrLayout.renderCols == lr.renderCols) {
       TableRow hdr;
@@ -4031,7 +4077,6 @@ void ChapterHtmlSlimParser::degradeRow(const char* reason) {
   flushTableFragment(t.packer);
 
   t.rowDegraded = true;
-  tableRowDegradedAny_ = true;
   t.pendingRowBytes = 0;
 
   // Text first, then images, matching the order the batch fallback always used. Callers only reach
@@ -4144,6 +4189,10 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // Count past the cap rather than stopping at it: the overflow itself is the signal, and
       // the grid cannot represent this cell either way.
       size_t producedLines = 0;
+      // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
+      // a whole by the caller, inside a block it commits or releases (see the row emission).
+      bufCell.text->setLineArena(buildArena_);
+      bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
           renderer, fontId, renderInnerWidth,
           [&cell, &producedLines](std::unique_ptr<TextBlock> tb, bool, bool) {

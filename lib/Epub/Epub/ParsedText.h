@@ -56,8 +56,10 @@ class ParsedText {
   std::vector<size_t> ans_;
   std::string allText_;
   // Where each line's TextBlock takes its bytes: the build's lent region (a page-scoped block
-  // the parser opens), or the heap when null. Set by the parser on its main text block only;
-  // table cells keep the heap. See beforeLine_ for why the two go together.
+  // the parser opens), or the heap when null. The parser sets it on its main text block (with
+  // beforeLine_, see there for why the two go together) and on table cells laid out as a grid
+  // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
+  // as a fallback paragraph keeps the heap.
   BuildArena* lineArena_ = nullptr;
   // Called with the line's largest word-size percent just before the line is materialised.
   // The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
