@@ -1435,6 +1435,12 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     requestUpdate();
     return;
   }
+  // Images the reader is about to reach outrank a section fifty pages away: warm them first,
+  // then let B look ahead. Only while B is not holding the borrow -- a build in progress
+  // finishes its slices; the next page turn hands the buffer back anyway.
+  if (backgroundBuildState_ != BackgroundBuildState::Building && stepImageWarmLocked()) {
+    return;
+  }
 
   const int spineCount = epub->getSpineItemsCount();
   // Re-anchor the lookahead window whenever the reading position moves (any navigation):
@@ -1677,6 +1683,58 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       return;
     }
   }
+}
+
+bool EpubReaderActivity::stepImageWarmLocked() {
+  if (!section || section->hasActiveBuild() || section->pageCount == 0) return false;
+  if (secondaryBorrowed_ || backgroundBorrowActive_ || !renderer.hasSecondaryBuffer()) return false;
+  const int cur = section->currentPage;
+  if (imageWarmCleanSpine_ == currentSpineIndex && imageWarmCleanPage_ == cur) return false;
+  // Same settle rule as B's borrow: not within 1.5 s of a turn or a draw, and no button queued --
+  // a decode holds the lock for seconds and only yields to input by aborting.
+  const unsigned long now = millis();
+  const unsigned long lastActivityMs = std::max(lastPageTurnTime, lastPageOnScreenMs_);
+  if (CooperativeAbort::shouldAbortLongTask() || now - lastActivityMs < BG_BUILD_BORROW_QUIET_MS) return false;
+
+  const bool warmForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
+  const bool warmGrayscale = getEffectiveTextAntiAliasing() && !secondaryBufferDegraded_;
+  const int last = std::min<int>(static_cast<int>(section->pageCount) - 1, cur + kImageWarmLookahead);
+  for (int p = cur + 1; p <= last; ++p) {
+    section->currentPage = p;
+    auto page = section->loadPageFromSectionFile();
+    section->currentPage = cur;
+    if (!page || !page->hasUncachedImages(warmForceLoad, /*monochromeOutput=*/true, warmGrayscale)) continue;
+
+    // The lent secondary buffer is the decoders' scratch (work pool, bands, progressive
+    // workspace), exactly as the page-turn warm borrows it; the framebuffer is not written at
+    // all (ScopedCacheOnlyImageWrites), so the page on screen is untouched and no clearScreen
+    // or redraw follows. One page per tick.
+    size_t borrowedSize = 0;
+    uint8_t* borrowed = renderer.borrowSecondaryBuffer(&borrowedSize);
+    if (!borrowed) return false;
+    auto scratch = makeUniqueNoThrow<BuildArena>(borrowed, borrowedSize);
+    const unsigned long t0 = millis();
+    imageProcessingActive_ = true;
+    {
+      image_scratch::ScopedArena scratchScope(scratch && scratch->valid() ? scratch.get() : nullptr);
+      GfxRenderer::ScopedCacheOnlyImageWrites cacheOnly(renderer);
+      page->warmImageCaches(renderer, 0, 0, warmForceLoad, /*monochromeOutput=*/true, warmGrayscale);
+    }
+    imageProcessingActive_ = false;
+    scratch.reset();
+    renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    const bool complete = !page->hasUncachedImages(warmForceLoad, true, warmGrayscale);
+    LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", currentSpineIndex, p,
+            millis() - t0, complete ? "" : " -- incomplete, will retry",
+            static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+    checkHeapIntegrity("after_image_lane");
+    return true;
+  }
+  // Nothing to warm in the window: remember that until the position changes.
+  imageWarmCleanSpine_ = currentSpineIndex;
+  imageWarmCleanPage_ = cur;
+  return false;
 }
 
 void EpubReaderActivity::stepCurrentSectionBuild() {

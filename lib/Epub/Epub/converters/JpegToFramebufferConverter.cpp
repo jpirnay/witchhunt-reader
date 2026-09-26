@@ -1099,6 +1099,9 @@ void drawUnsupportedPlaceholder(GfxRenderer& renderer, const RenderConfig& confi
   const int w = config.maxWidth;
   const int h = config.maxHeight;
   if (w <= 0 || h <= 0) return;
+  // A cache-only decode (the reader's image lane) must leave the displayed frame alone; the raw
+  // pixel writers already see a zero-row window, this box would not.
+  if (renderer.getWriteRows() == 0) return;
   if (config.x < 0 || config.y < 0 || config.x + w > renderer.getScreenWidth() ||
       config.y + h > renderer.getScreenHeight()) {
     return;

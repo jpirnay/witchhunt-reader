@@ -1029,7 +1029,19 @@ make that worth a smaller projection for the history line (per-book totals
 only) rather than the whole store. Filed under R3's Home-time pins.
 
 **R7 — schedule image work ahead of far look-ahead.** *User direction,
-2026-09-26.* The background lanes today parse the next section (B) or the
+2026-09-26; implemented the same evening, device validation pending.* What
+landed: `GfxRenderer::ScopedCacheOnlyImageWrites` gives the raw pixel
+writers a zero-row window, so a decode writes its `.pxc` caches and not
+one framebuffer byte; the reader's `stepImageWarmLocked()` runs from the
+background scheduler after the pre-render arm and before B's state machine
+(never while B holds the borrow), waits for the same 1.5 s settle as B,
+loads the next five pages one per tick, and for the first one with an
+uncached image borrows the secondary buffer as the decoders' scratch and
+warms that page cache-only. A window found clean is remembered until the
+position changes. The page turn that reaches the image then replays the
+cache (the 4 s decode of Chapter 3's first illustration in run 15 becomes a
+cache read). The design as written below stands; the lane does not yet
+preempt a B build already in progress. The background lanes today parse the next section (B) or the
 current one (C) and leave image decode to the page turn that reaches the
 image. A reader five pages from an undecoded image should not be spending
 its idle time laying out a section fifty pages away. Add a background lane
@@ -1039,8 +1051,9 @@ and rank it above B's look-ahead when a pending image lies within a few
 pages. The lane borrows the same region the builds do, so it is exclusive
 with them by construction; the scheduler decision is the new part.
 
-**R8 — bound the reading-stats store (F8).** *Follow-up, agreed
-2026-09-26; not started.* (1) Mark the store loaded only when the parse
+**R8 — bound the reading-stats store (F8).** *Done 2026-09-26 evening
+(all five items), device validation pending: a session end rewrites the
+file.* (1) Mark the store loaded only when the parse
 succeeded or the file is genuinely absent, and refuse to save otherwise —
 this is the data-loss fix and comes first. (2) No entry for a zero-second
 session. (3) Drop per-book day buckets from RAM, or keep them for the web

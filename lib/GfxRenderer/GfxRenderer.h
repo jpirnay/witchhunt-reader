@@ -60,10 +60,11 @@ class GfxRenderer {
   // rendering. See drawMaskFor2BitMode() in GfxRenderer.cpp for the per-level
   // pixel breakdown and a worked example glyph.
   mutable uint8_t* frameBuffer = nullptr;
-  uint16_t panelWidth = 0;       // set in begin()
-  uint16_t panelHeight = 0;      // set in begin()
-  uint16_t panelWidthBytes = 0;  // set in begin()
-  uint32_t frameBufferSize = 0;  // set in begin()
+  mutable bool cacheOnlyImageWrites_ = false;  // see ScopedCacheOnlyImageWrites
+  uint16_t panelWidth = 0;                     // set in begin()
+  uint16_t panelHeight = 0;                    // set in begin()
+  uint16_t panelWidthBytes = 0;                // set in begin()
+  uint32_t frameBufferSize = 0;                // set in begin()
   uint16_t bwSnapshotRowStart = 0;
   uint16_t bwSnapshotRowEnd = 0;
   size_t bwSnapshotSizeBytes = 0;
@@ -905,7 +906,20 @@ class GfxRenderer {
 
   uint8_t* getWriteTarget() const { return frameBuffer; }
   int getWriteOriginY() const { return 0; }
-  int getWriteRows() const { return static_cast<int>(panelHeight); }
+  int getWriteRows() const { return cacheOnlyImageWrites_ ? 0 : static_cast<int>(panelHeight); }
+  // While one of these is live the raw pixel writers see a zero-row write window and touch no
+  // framebuffer byte, while the decoders' pixel caches are written as usual: an image can be
+  // decoded into its .pxc without the displayed frame changing. The reader's image lane uses it
+  // to warm the caches of the next few pages between page turns (memory audit 2026-09, R7).
+  struct ScopedCacheOnlyImageWrites {
+    explicit ScopedCacheOnlyImageWrites(const GfxRenderer& r) : renderer_(r) { renderer_.cacheOnlyImageWrites_ = true; }
+    ~ScopedCacheOnlyImageWrites() { renderer_.cacheOnlyImageWrites_ = false; }
+    ScopedCacheOnlyImageWrites(const ScopedCacheOnlyImageWrites&) = delete;
+    ScopedCacheOnlyImageWrites& operator=(const ScopedCacheOnlyImageWrites&) = delete;
+
+   private:
+    const GfxRenderer& renderer_;
+  };
   bool isStripActive() const { return false; }
   bool glyphIntersectsStrip(int, int, int, int) const { return true; }
 

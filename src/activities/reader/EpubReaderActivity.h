@@ -413,6 +413,13 @@ class EpubReaderActivity final : public Activity {
   bool backgroundBuildNeedsResolve_ = false;
   // Last WaitHeap gate evaluation; the heap-walk checks re-run at most ~1×/s.
   unsigned long backgroundBuildGateCheckMs_ = 0;
+  // Image lane (memory audit 2026-09, R7): between page turns, decode the pixel caches of the
+  // images on the next few pages so the turn that reaches them replays a cache instead of
+  // running a 1-4 s decode. Ranked above Background-B's look-ahead build. The pair below marks a
+  // window already found clean, so an idle reader does not re-read those pages every tick.
+  static constexpr int kImageWarmLookahead = 5;
+  int imageWarmCleanSpine_ = -1;
+  int imageWarmCleanPage_ = -1;
   // Times a build of backgroundBuildSpineIndex_ was preempted (reader needed the borrowed
   // buffer back) before reaching Done. Bounds the retry loop: a spine whose parse cannot fit
   // between two page turns would otherwise re-inflate and re-parse forever, burning CPU, SD
@@ -716,6 +723,9 @@ class EpubReaderActivity final : public Activity {
   // Serialises SD access against the render task via RenderLock; skips the tick instead of
   // blocking when the render task is busy.
   void stepBackgroundSectionBuild();
+  // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held.
+  // True when it did a page's worth of work this tick (the caller then yields to the loop).
+  bool stepImageWarmLocked();
   // Lend the secondary framebuffer to Background-B's build arena. Mirrors the Background-C
   // borrow site in buildSection(): the lent block never enters the heap, so the return cannot
   // fail on a fragmented hole, and the build's scratch — parse working set, inflate ring, CSS
