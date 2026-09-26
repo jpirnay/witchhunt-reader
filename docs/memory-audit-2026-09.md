@@ -860,6 +860,30 @@ already knew how to stage a walk from one; the entry reader scopes its
 block above the page block), so headers resolve inline and the second
 pass disappears. Device validation pending (`3b6f28dbc`).
 
+*Device run 13 (16:42, arena row layout flashed), appendix-b from a wiped
+cache:* the rows are in the arena — `lanes(setup=756 extract=41984
+resident=11492 parse=8896)` against run 12's `parse=1383`, and the chapter
+came out **68 pages of grids** instead of 75 of paragraphs. But the very
+first row was still refused: `12096 free` against the new 12 KB bar, 192
+bytes short. That single refusal escalated the chapter to the released
+rebuild (67 pages), whose realloc then failed on a pinned hole (53 236
+free after the release, 34 804 / 40 948 largest after the build) and the
+relative restart gate took it straight back into the reader — correct
+output after an ugly detour. Two small changes: the arena row bar is now
+the hard floor + 1 KB (a grid row takes ~2–3 KB of heap now), and the
+blocking path's realloc failure runs the pin forensics too.
+
+The open question is the heap itself: entry 40.3 KB, 38.0 KB after
+extraction, 24 KB by page 25 (twenty long-block splits, no mid-build draw
+in between), 12 KB at the first row — and 44.9 KB free again once the
+build state was torn down. Some 26 KB of *transient* heap is held across
+the text pages of this chapter. The host does not reproduce it (a
+synthetic 40 × 150-word chapter peaks within 1 KB of its 100 × 60-word
+twin), there is no word-width memo any more, and the fonts are
+flash-resident. The parser's compiled-out per-page heap trace
+(`SCT_HEAP_TRACE`) is the instrument for it: the next device run carries
+it.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
