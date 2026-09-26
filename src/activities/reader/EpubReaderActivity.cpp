@@ -1790,6 +1790,23 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
       return;
     }
     backgroundBuildPercent_ = static_cast<int8_t>(section->activeBuildPercent());
+    // A chapter-list jump (TocIndex) or a link into this spine (Anchor) used to resolve only when
+    // the build completed, so the reader sat behind the popup for the whole build even when its
+    // page was the first one laid out (device run 14: 7.6 s for "Chapter Three"). Ask the live
+    // build where the target lands; once known it becomes a page target, which the draw below
+    // and the completion path both understand -- and the answer is the one the finished cache
+    // would give.
+    if (navTarget.kind == NavigationTarget::Kind::TocIndex || navTarget.kind == NavigationTarget::Kind::Anchor) {
+      const std::optional<uint16_t> landed = navTarget.kind == NavigationTarget::Kind::TocIndex
+                                                 ? section->activeBuildPageForTocIndex(navTarget.tocIndex)
+                                                 : section->activeBuildPageForAnchor(navTarget.anchorStr);
+      if (landed) {
+        LOG_INF("ERS", "Background-C spine=%d: target resolved mid-build to page %u", currentSpineIndex,
+                static_cast<unsigned>(*landed));
+        section->currentPage = *landed;
+        navTarget = NavigationTarget::makePage(*landed);
+      }
+    }
     // If the page the user is waiting on just became readable, ask the render task to draw it.
     const int want = section->currentPage;
     if (navTarget.kind == NavigationTarget::Kind::Page && want >= 0 &&
@@ -4350,7 +4367,11 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     if (drawArena != nullptr) drawBlock = drawArena->reserveBlock();
     auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(target), drawArena);
     buildDisplayedPage_ = target;
-    if (page && !page->hasImages()) {
+    // Image pages are drawn too, their undecoded images as "indexing" placeholders (see
+    // ImageBlock::PlaceholderOnlyScope in displayBuildPage). They used to be skipped -- and the
+    // target marked handled -- so a page with an ornament sat behind the popup for the whole
+    // build. The normal render redraws the page with its images once the build completes.
+    if (page) {
       buildingPopupShown_ = false;
       // This page is now the one on screen, so it owns the footnote state too. Without this the
       // footnote list and the menu's "has footnotes" flag kept describing whatever page was
@@ -4361,7 +4382,6 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     }
     // Image page or load failure: fall through to the popup until the build completes. The
     // page (and its bytes in the block) go first, then the block.
-    page.reset();
     if (drawBlock.valid()) drawArena->release(drawBlock);
   }
 
@@ -5110,12 +5130,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
-  // Draws one text-only page from an in-progress Background-C build: a plain BW render + status
-  // bar, no AA and no pre-render arming (those belong to the steady reading state set up by
-  // renderNormalPass() once the build completes). Caller guarantees the page is text-only, so
-  // no image decode / secondary-buffer release is needed. The lock is released before the
-  // waveform wait — exactly like renderContents() — so a C build slice can run on the loop task
-  // during the refresh.
+  // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
+  // AA and no pre-render arming (those belong to the steady reading state set up by
+  // renderNormalPass() once the build completes). Images come from their pixel cache when they
+  // have one and are drawn as "indexing" placeholders otherwise (ImageBlock::PlaceholderOnlyScope
+  // below), so no decode runs on the build's heap and no secondary-buffer release is needed. The lock is released
+  // before the waveform wait — exactly like renderContents() — so a C build slice can run on the loop task during the
+  // refresh.
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
 
@@ -5142,8 +5163,11 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
     scope.endScanAndPrewarm();
 
     renderer.clearScreen();
-    page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop, /*forceLoadLargeImages=*/false,
-                /*monochromeOutput=*/true);
+    {
+      ImageBlock::PlaceholderOnlyScope placeholders;
+      page.render(renderer, getEffectiveReaderFontId(), layout.marginLeft, contentTop,
+                  /*forceLoadLargeImages=*/false, /*monochromeOutput=*/true);
+    }
     publishPageLinkTargets(page, layout.marginLeft, contentTop);
     renderStatusBar();
     if (forceHalfRefreshAfterPopup_) {

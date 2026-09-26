@@ -159,5 +159,21 @@ class ImageBlock final : public Block {
   // Returns true if the file is ready for decoding.
   bool ensureExtracted() const;
 
-  void renderPlaceholder(GfxRenderer& renderer, int x, int y) const;
+  // `loading`: the box says the image is still being prepared (a mid-build draw) rather than
+  // "large image, press to load".
+  void renderPlaceholder(GfxRenderer& renderer, int x, int y, bool loading = false) const;
+  static bool placeholderOnly_;
+
+ public:
+  // While one of these is live, render() draws every image that is not already in its pixel
+  // cache as a "loading" placeholder instead of decoding it. The mid-build page draw uses it:
+  // a page the reader is waiting on can be shown the moment its text exists, with the
+  // decode left to the normal render once the build completes. Decoding there would run on
+  // the build's starved heap while the secondary buffer is lent to the build.
+  struct PlaceholderOnlyScope {
+    PlaceholderOnlyScope() { placeholderOnly_ = true; }
+    ~PlaceholderOnlyScope() { placeholderOnly_ = false; }
+    PlaceholderOnlyScope(const PlaceholderOnlyScope&) = delete;
+    PlaceholderOnlyScope& operator=(const PlaceholderOnlyScope&) = delete;
+  };
 };

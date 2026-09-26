@@ -245,6 +245,14 @@ class Section {
   // Increases monotonically as the build progresses; 0 when no build is live.
   // Pages [0, activeBuildPageCount()) are safe to read via loadPageFromActiveBuild().
   uint16_t activeBuildPageCount() const;
+  // Where a navigation target lands in the build in progress, once known: a TOC entry of this
+  // spine without a fragment is page 0 immediately; one with a fragment, or a bare anchor, is
+  // answered as soon as the parser has recorded it (ChapterHtmlSlimParser::
+  // lookupAnchorInActiveBuild). nullopt while unknown or when no build is live. The answer is
+  // the same one the finished cache gives (tocBoundaries / the anchor map are built from the
+  // same records), so the reader can turn the target into a page target and draw it mid-build.
+  std::optional<uint16_t> activeBuildPageForTocIndex(int tocIndex);
+  std::optional<uint16_t> activeBuildPageForAnchor(const std::string& anchor);
   // Best-known total page count: the exact pageCount when no build is live (finalized) or once
   // the stream is consumed, otherwise a byte-based projection (pages so far scaled by the
   // consumed fraction) so a "page X of ~Y" display doesn't read off the small build watermark.

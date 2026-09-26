@@ -681,6 +681,14 @@ class ChapterHtmlSlimParser final : public Print {
   // setAnchorSpillPath. Non-empty only when the spill could not be opened, in which case these
   // are all the anchors there are and the finalizer writes them itself.
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  // Mid-build lookup of an anchor this parse has already recorded: the spill's buffered tail is
+  // flushed and the file scanned through a read handle (or the resident fallback vector when
+  // there is no spill). False while the anchor has not been reached -- the caller asks again
+  // after the next slice. This is what lets a chapter-list jump (a TOC entry with a fragment) or
+  // a link into an unbuilt spine show its page as soon as it exists, instead of waiting for the
+  // whole build (device run 14: 7.6 s behind the popup for a heading page that existed after
+  // 50 ms).
+  bool lookupAnchorInActiveBuild(const std::string& id, uint16_t& page);
   // Total anchors recorded, spilled and resident together. This is the count the section
   // cache's anchor map is written with.
   uint16_t getAnchorCount() const { return anchorCount; }

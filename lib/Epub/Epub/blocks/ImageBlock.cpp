@@ -330,7 +330,9 @@ std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const
   return crop;
 }
 
-void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
+bool ImageBlock::placeholderOnly_ = false;
+
+void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y, const bool loading) const {
   constexpr int BORDER = 1;
   constexpr int PADDING = 6;
 
@@ -338,12 +340,18 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const bool hasAlt = !altText.empty();
-  const int lineCount = hasAlt ? 3 : 2;
+  // Loading: the alt text (if any) and one "indexing" line. Large image: three lines as before.
+  const int lineCount = loading ? (hasAlt ? 2 : 1) : (hasAlt ? 3 : 2);
   const int totalTextH = lineH * lineCount;
 
   if (lineH > 0 && width > PADDING * 2 && height > totalTextH + PADDING * 2) {
     const int textX = x + PADDING;
     const int textY = y + (height - totalTextH) / 2;
+    if (loading) {
+      if (hasAlt) renderer.drawText(UI_10_FONT_ID, textX, textY, altText.c_str());
+      renderer.drawText(UI_10_FONT_ID, textX, textY + lineH * (lineCount - 1), tr(STR_INDEXING));
+      return;
+    }
     renderer.drawText(UI_10_FONT_ID, textX, textY, tr(STR_LARGE_IMAGE));
     if (hasAlt) {
       renderer.drawText(UI_10_FONT_ID, textX, textY + lineH, altText.c_str());
@@ -385,6 +393,13 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   }
 
   // No pixel cache — check if this is a large image that should show a placeholder
+  // A mid-build draw (PlaceholderOnlyScope): the cache above was the only cheap source; no
+  // decode on the build's heap.
+  if (placeholderOnly_) {
+    renderPlaceholder(renderer, x, y, /*loading=*/true);
+    return;
+  }
+
   if (wouldShowPlaceholder(forceLoad, monochromeOutput)) {
     LOG_DBG("IMG", "Large image placeholder at %d,%d (%dx%d): %s", x, y, width, height, imagePath.c_str());
     renderPlaceholder(renderer, x, y);

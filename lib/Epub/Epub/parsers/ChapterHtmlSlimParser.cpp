@@ -3282,6 +3282,40 @@ void ChapterHtmlSlimParser::queueAnchorForNextLine(std::string id) {
   anchorsAwaitingLine_.push_back(std::move(id));
 }
 
+bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) {
+  if (id.empty() || anchorCount == 0) return false;
+  if (!anchorSpillWriter.has_value()) {
+    for (const auto& [key, val] : anchorData) {
+      if (key == id) {
+        page = val;
+        return true;
+      }
+    }
+    return false;
+  }
+  // Commit the buffered tail so a second handle sees every record written so far. SdFat's
+  // flush() is a sync (sector + directory entry), the same trick Section::loadPageFromActiveBuild
+  // uses on the section file.
+  if (!anchorSpillWriter->flush()) return false;
+  anchorSpillFile.flush();
+  FsFile reader;
+  if (!Storage.openFileForRead("EHP", anchorSpillPath, reader)) return false;
+  bool found = false;
+  std::string key;
+  for (uint16_t i = 0; i < anchorCount; ++i) {
+    uint16_t recordedPage = 0;
+    if (!serialization::readString(reader, key)) break;  // short file: the tail is not there yet
+    serialization::readPod(reader, recordedPage);
+    if (key == id) {
+      page = recordedPage;
+      found = true;
+      break;
+    }
+  }
+  reader.close();
+  return found;
+}
+
 void ChapterHtmlSlimParser::recordAnchor(std::string id, const uint16_t page) {
   // The on-disk anchor map counts with a uint16_t, so that is the hard ceiling whatever
   // MAX_ANCHORS_PER_CHAPTER says. Silently dropping past it is the same degradation as the cap:

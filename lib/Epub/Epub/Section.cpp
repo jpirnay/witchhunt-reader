@@ -2016,6 +2016,21 @@ uint16_t Section::activeBuildPageCount() const {
   return pageCount;  // pageCount is incremented by onPageComplete() as each page is written
 }
 
+std::optional<uint16_t> Section::activeBuildPageForAnchor(const std::string& anchor) {
+  if (!buildState_ || !buildState_->visitor || anchor.empty()) return std::nullopt;
+  uint16_t page = 0;
+  if (!buildState_->visitor->lookupAnchorInActiveBuild(anchor, page)) return std::nullopt;
+  return page;
+}
+
+std::optional<uint16_t> Section::activeBuildPageForTocIndex(const int tocIndex) {
+  if (!buildState_ || tocIndex < 0 || tocIndex >= epub->getTocItemsCount()) return std::nullopt;
+  const auto entry = epub->getTocItem(tocIndex);
+  if (entry.spineIndex != spineIndex) return std::nullopt;
+  if (entry.anchor.empty()) return static_cast<uint16_t>(0);
+  return activeBuildPageForAnchor(entry.anchor);
+}
+
 uint16_t Section::estimatedTotalPages() const {
   // No build live -> the on-disk count is exact. While building, project from how much of the
   // XHTML has been consumed (activeBuildPercent), but never below what's already laid out. At
