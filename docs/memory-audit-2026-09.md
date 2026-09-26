@@ -1050,11 +1050,16 @@ file stream instead of a `String`, which removes one of the three copies
 from the load peak. The Home-entry cost (R6's residual) falls out of (3)
 and (4).
 
-**R9 — the cold Home's cover pipeline (R1b follow-up).** *Filed 2026-09-26,
-not started.* (1) The thumbnail converter's row pipeline (MCU strip, row
-buffers, ditherers, ~28 KB reserve) and Home's 20 KB cover buffer take the
-lent region when it is there, so the two refusals of run 15 cannot happen
-with 30 KB of the region idle. (2) One decode per cover: the 200 × 390 grid
+**R9 — the cold Home's cover pipeline (R1b follow-up).** *Filed
+2026-09-26; item (1a) done the same evening, the rest not started.* (1a)
+The thumbnail converter's row pipeline (MCU strip, row buffer, scaling
+accumulators) now comes from the lent region in a block of its own, with
+the heap floor at 8 KB when it does — run 15 showed this refusal on every
+Home visit after the first, so those books never got a cover at all
+(device validation pending). (1b) Home's 20 KB cover buffer (`OOM: cover
+buffer (20592 bytes)`, six times in run 15) is allocated at draw time with
+the framebuffer resident, so the region cannot serve it; that one wants a
+banded draw from the BMP file instead of a whole-cover buffer. (2) One decode per cover: the 200 × 390 grid
 thumb is scaled from the 340 × 540 carousel thumb (a 1-bit BMP → BMP
 resample), not decoded again from the full JPEG. (3) A decode that yields
 to input resumes or is deferred, not restarted from the first scan.
