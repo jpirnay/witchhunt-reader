@@ -1029,7 +1029,7 @@ make that worth a smaller projection for the history line (per-book totals
 only) rather than the whole store. Filed under R3's Home-time pins.
 
 **R7 — schedule image work ahead of far look-ahead.** *User direction,
-2026-09-26; implemented the same evening, device validation pending.* What
+2026-09-26; implemented the same evening, device-validated in run 17.* What
 landed: `GfxRenderer::ScopedCacheOnlyImageWrites` gives the raw pixel
 writers a zero-row window, so a decode writes its `.pxc` caches and not
 one framebuffer byte; the reader's `stepImageWarmLocked()` runs from the
@@ -1041,7 +1041,37 @@ warms that page cache-only. A window found clean is remembered until the
 position changes. The page turn that reaches the image then replays the
 cache (the 4 s decode of Chapter 3's first illustration in run 15 becomes a
 cache read). The design as written below stands; the lane does not yet
-preempt a B build already in progress. The background lanes today parse the next section (B) or the
+preempt a B build already in progress.
+
+*Run 17 (2026-09-26 17:43, X3, Chapter 3 from the chapter list, cache
+wiped):* the lane ran four times while the reader turned pages every
+~3.3 s and caught each illustration as it entered the window — reader on
+pages 27/29/33/39, warmed 32/33/38/44 (decodes 1.7/1.5/1.4/3.3 s, the last
+a 1034 × 1144 progressive at 1/2 writing a 72 KB cache pair); the turns
+onto 32, 33 and 38 rendered in 562, 843 and 575 ms, and the heap watermark
+did not move (min free 12 184 before and after the four decodes). Neither
+the 1.5 s settle nor the five-page horizon was binding: at a reading pace
+five pages is minutes of lead for a 1–4 s decode, and a shorter settle
+only invites the next press to land mid-decode (which restarts it, R9 3).
+What the run did show is where the lane cannot reach. The chapter's opening
+illustration (page 2, 1206 × 885 progressive, 680 KB) still cost 6.3 s: the
+reader arrived on it as the build ended, the page showed the large-image
+placeholder, and the load press ran the decode in the foreground (3 972 ms
+of it). Three reasons, one fixed: (a) the lane excluded large images
+whenever the placeholder setting was on — backwards, since the setting
+exists because a decode on a page turn is slow and the lane is the decode
+nobody waits for; it now warms them too, and a cached image renders
+directly whatever the setting says. (b) The lane cannot run while the
+current section builds (C holds the borrow, or the buffer is released), so
+the image on the target page of a chapter jump is always a foreground
+decode. (c) The lane scans from the next page and inside the current
+section only: the page on screen showing a placeholder, and the next
+chapter's opening page, lie outside its window. Candidates, not started:
+warm the on-screen page's placeholder image and redraw once its cache
+exists (a lazy load, ~4 s after landing instead of a blocking press), and
+once B has built the next section, warm its first pages across the
+boundary. (B itself sat in Probe all run — 140 pages of Chapter 3 ahead
+exceed its 50-page runway — by design.) The background lanes today parse the next section (B) or the
 current one (C) and leave image decode to the page turn that reaches the
 image. A reader five pages from an undecoded image should not be spending
 its idle time laying out a section fifty pages away. Add a background lane
@@ -1052,8 +1082,7 @@ pages. The lane borrows the same region the builds do, so it is exclusive
 with them by construction; the scheduler decision is the new part.
 
 **R8 — bound the reading-stats store (F8).** *Done 2026-09-26 evening
-(all five items), device validation pending: a session end rewrites the
-file.* (1) Mark the store loaded only when the parse
+(all five items); run 17 validated the session-end rewrite.* (1) Mark the store loaded only when the parse
 succeeded or the file is genuinely absent, and refuse to save otherwise —
 this is the data-loss fix and comes first. (2) No entry for a zero-second
 session. (3) Drop per-book day buckets from RAM, or keep them for the web
@@ -1061,7 +1090,14 @@ export only; trim the global buckets to the last ~400 days at save time.
 (4) Cap the book list by last-read date (~100). (5) Deserialize from the
 file stream instead of a `String`, which removes one of the three copies
 from the load peak. The Home-entry cost (R6's residual) falls out of (3)
-and (4).
+and (4). *Run 17:* the session end (192 s, 38 pages) loaded the 18-book
+store, merged, rewrote the file and released it in 290 ms with no
+out-of-memory or corrupt-file message, and the next Home showed the total
+advanced by exactly the session (41 283 → 41 475 s). It loaded at the
+tightest point of the whole exit path — 25 172 free / 9 716 contiguous,
+with the section, the page and the epub still resident — for a merge that
+needs none of them; the call now runs after the teardown, where the KOSync
+hand-off measured 43 556 free / 23 540 contiguous a few milliseconds later.
 
 **R9 — the cold Home's cover pipeline (R1b follow-up).** *Filed
 2026-09-26; item (1a) done the same evening, the rest not started.* (1a)
@@ -1078,7 +1114,11 @@ resident secondary framebuffer itself, idle while Home is up, as its home.
 a later Home visit at ~43 KB free, the case run 15 refused every time; the
 20 KB pixel-cache refusal (1b) fired on every carousel redraw at a
 reading-state contig of 15–20 KB, 124 B short of a 20 468 block once, and
-the carousel fell back to its slower repaint each time. (2) One decode per cover. *Not* by scaling the
+the carousel fell back to its slower repaint each time. Run 17's two Home
+visits (all five covers cached) did not hit the 20 KB refusal at all; what
+fires on every Home entry is the carousel's older whole-region allocation
+in `tryFastHomeRender` (`cover region 0 (49104 bytes, 51636 free)`), the
+same class as 1b with the same fail-soft and the same answer. (2) One decode per cover. *Not* by scaling the
 200 × 390 grid thumb from the 340 × 540 carousel thumb — a dithered 1-bit
 image must never be rescaled (the thumb-grid artefact lesson of July) — but
 by a dual-sink decode: one JPEG pass at the DCT scale the larger target
