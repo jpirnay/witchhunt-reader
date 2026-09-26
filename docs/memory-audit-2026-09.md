@@ -711,6 +711,24 @@ the drill from the reading state must complete in C (no `aborting parse`),
 and if it does escalate, no `Failed to allocate ZIP arena` and a resident
 buffer afterwards.
 
+*Device run 11 (X3, 2026-09-26 15:28, `1e9c2b4d6` flashed, clean boot):*
+**both passes complete in Background-C.** First pass from Home (entry free
+46 312, contig 38 900): 157 → walk → 180 pages, arena high-water 45 876,
+`failedAlloc=0 releaseFails=0`. Second pass from the reading state after a
+cache wipe (entry free 43 936 / contig 23 540 — the state that aborted at
+page 146 in runs 8 and 10): 157 → 180 pages, high-water 45 884, no
+`aborting parse`, no `Word vector growth refused`, no escalation, no
+`Page arena block` / draw-block refusal, the buffer never left the reader.
+The parser's gate logged 26 soft-zone passes and the **lowest contiguous
+block it ever saw was 12 788 B** (lowest free 17 260) — against run 10's
+3 956 B on the same chapter from a *better* entry state. So the
+fragmentation was the yield-time `shrink_to_fit` churn (fix 2), and the
+lowered floor (fix 1) was not needed for this chapter; it stays as the
+correct sizing for arena builds. Boot-wide watermark **8 452 B** (run 8:
+7 340; run 5: 11 272), reading contig after the build **26 612** (run 8:
+18 420). The escalation path (fix 3) and the relative restart gate (fix 4)
+were therefore not exercised in this run.
+
 **R3 — one declared budget per build, not thirty gates.** Once R1 and R2
 land, the lent region has a known layout: resident lane (ruleset + SAX +
 chunk, ~12 KB), phase-a lane (ring + grow, ≤ 41 KB, freed before phase b),
