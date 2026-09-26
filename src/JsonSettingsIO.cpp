@@ -768,11 +768,12 @@ bool JsonSettingsIO::loadOpds(OpdsServerStore& store, const char* json, bool* ne
 
 // ---- ReadingStatsStore ----
 
-bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char* path) {
+bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, HalFile& out) {
   JsonDocument doc;
   doc["totalSeconds"] = store.getGlobalTotalSeconds();
   doc["totalSessions"] = store.getGlobalTotalSessions();
   doc["totalPagesTurned"] = store.getGlobalTotalPagesTurned();
+  doc["longestStreak"] = store.getLongestStreakSeen();
 
   // Day buckets are serialised as a flat array of [dayIndex, seconds] pairs
   // to keep the file compact when many days are populated. The C++ side
@@ -807,29 +808,31 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
     writeDays(obj["days"].to<JsonArray>(), book.days);
   }
 
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(path, json);
-}
-
-bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json) {
-  JsonDocument doc;
-  auto error = deserializeJson(doc, json);
-  if (error) {
-    LOG_ERR("RST", "JSON parse error: %s", error.c_str());
+  // The document is the one in-RAM copy; it streams out through the file's write buffer.
+  const size_t written = serializeJson(doc, out);
+  if (written == 0 || doc.overflowed()) {
+    LOG_ERR("RST", "saveReadingStats: %s", doc.overflowed() ? "document overflowed (out of memory)" : "write failed");
     return false;
   }
+  return true;
+}
 
-  store.books.clear();
-  store.globalDays.clear();
-  store.globalTotalSeconds = doc["totalSeconds"] | (uint32_t)0;
-  store.globalTotalSessions = doc["totalSessions"] | (uint32_t)0;
-  store.globalTotalPagesTurned = doc["totalPagesTurned"] | (uint32_t)0;
+JsonSettingsIO::ReadingStatsLoad JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, HalFile& in) {
+  JsonDocument doc;
+  // Streamed from the file: the JSON text never sits in RAM as a whole, only the document does.
+  const auto error = deserializeJson(doc, in);
+  if (error) {
+    LOG_ERR("RST", "JSON parse error: %s", error.c_str());
+    return error == DeserializationError::NoMemory ? ReadingStatsLoad::NoMemory : ReadingStatsLoad::Corrupt;
+  }
 
-  // Reads [dayIndex, seconds] pairs into a DayBucket vector, dropping
-  // malformed entries. We don't re-sort because saver writes in order; the
-  // result of accidentally hand-edited unsorted input is just degraded
-  // streak/sparkline accuracy, not a crash.
+  std::vector<BookReadingStats> books;
+  std::vector<DayBucket> globalDays;
+  const uint32_t totalSeconds = doc["totalSeconds"] | (uint32_t)0;
+  const uint32_t totalSessions = doc["totalSessions"] | (uint32_t)0;
+  const uint32_t totalPagesTurned = doc["totalPagesTurned"] | (uint32_t)0;
+  const uint16_t longestStreak = doc["longestStreak"] | (uint16_t)0;
+
   auto readDays = [](JsonArray in, std::vector<DayBucket>& out) {
     for (JsonArray pair : in) {
       if (pair.size() < 2) continue;
@@ -841,7 +844,7 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     }
   };
 
-  readDays(doc["globalDays"].as<JsonArray>(), store.globalDays);
+  readDays(doc["globalDays"].as<JsonArray>(), globalDays);
 
   JsonArray arr = doc["books"].as<JsonArray>();
   for (JsonObject obj : arr) {
@@ -856,9 +859,6 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     book.firstReadEpoch = static_cast<time_t>(obj["firstReadEpoch"] | (int64_t)0);
     book.lastReadEpoch = static_cast<time_t>(obj["lastReadEpoch"] | (int64_t)0);
     book.progress = obj["progress"] | (uint8_t)0;
-    // finishedCount is the canonical field. Old files that only have the
-    // bool "finished" land here as 1 so the per-book screen still shows the
-    // book as having been finished at least once.
     if (!obj["finishedCount"].isNull()) {
       book.finishedCount = obj["finishedCount"] | (uint16_t)0;
     } else if (obj["finished"] | false) {
@@ -866,9 +866,12 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     }
     book.lastFinishedEpoch = static_cast<time_t>(obj["lastFinishedEpoch"] | (int64_t)0);
     readDays(obj["days"].as<JsonArray>(), book.days);
-    store.books.push_back(std::move(book));
+    books.push_back(std::move(book));
   }
 
-  LOG_DBG("RST", "Reading stats loaded (%zu books, %u s total)", store.books.size(), store.globalTotalSeconds);
-  return true;
+  const size_t bookCount = books.size();
+  store.replaceLoaded(std::move(books), std::move(globalDays), totalSeconds, totalSessions, totalPagesTurned,
+                      longestStreak);
+  LOG_DBG("RST", "Reading stats loaded (%zu books, %u s total)", bookCount, totalSeconds);
+  return ReadingStatsLoad::Ok;
 }

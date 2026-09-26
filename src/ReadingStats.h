@@ -39,11 +39,6 @@ struct BookReadingStats {
   std::vector<DayBucket> days;
 };
 
-class ReadingStatsStore;
-namespace JsonSettingsIO {
-bool loadReadingStats(ReadingStatsStore& store, const char* json);
-}  // namespace JsonSettingsIO
-
 // Singleton store for per-book + global reading stats.
 //
 // Persistence model (mirrors RecentBooksStore):
@@ -64,8 +59,10 @@ class ReadingStatsStore {
   // Global per-day reading time, sorted ascending. Same shape as per-book.
   // Used to compute streaks and the sparkline on the stats screen.
   std::vector<DayBucket> globalDays;
-
-  friend bool JsonSettingsIO::loadReadingStats(ReadingStatsStore&, const char*);
+  // Longest run of consecutive reading days ever seen, persisted. globalDays keeps only the
+  // newest kMaxGlobalDays buckets (memory audit 2026-09, R8), so a streak that started before
+  // that window would otherwise be forgotten; recordSession() folds each session's run into it.
+  uint16_t longestStreak_ = 0;
 
  public:
   static ReadingStatsStore& getInstance() { return instance; }
@@ -112,6 +109,19 @@ class ReadingStatsStore {
   uint32_t estimateRemainingSeconds(const std::string& docId, float remainingPercent) const;
 
   const std::vector<BookReadingStats>& getBooks() const { return books; }
+  // Bounds (memory audit 2026-09, R8). The store used to grow without limit -- an entry per
+  // book ever opened, a day bucket per reading day per book and globally, for ever -- and its
+  // load (file + JSON document + vectors) ran inside the reader at session end with ~35-45 KB
+  // free: ~1.5 KB per book. Past these caps the least recently read book goes, and the oldest
+  // day buckets go; the sparkline needs 30 days and the streak walk needs the current run, both
+  // well inside the global window, and the longest streak is kept as a number.
+  static constexpr size_t kMaxBooks = 100;
+  static constexpr size_t kMaxBookDays = 60;
+  static constexpr size_t kMaxGlobalDays = 400;
+  uint16_t getLongestStreakSeen() const { return longestStreak_; }
+  // Loader entry point (JsonSettingsIO::loadReadingStats): replaces the whole in-memory history.
+  void replaceLoaded(std::vector<BookReadingStats>&& loadedBooks, std::vector<DayBucket>&& loadedGlobalDays,
+                     uint32_t totalSeconds, uint32_t totalSessions, uint32_t totalPagesTurned, uint16_t longestStreak);
   uint32_t getGlobalTotalSeconds() const { return globalTotalSeconds; }
   uint32_t getGlobalTotalSessions() const { return globalTotalSessions; }
   uint32_t getGlobalTotalPagesTurned() const { return globalTotalPagesTurned; }
@@ -135,7 +145,16 @@ class ReadingStatsStore {
   // Longest run of consecutive days with any reading.
   uint16_t computeLongestStreak() const;
 
+  // Atomic: serialised straight into a temporary file that replaces the store's file only when
+  // complete, so a power loss mid-write leaves the previous history intact. Refused while the
+  // store is not loaded (see loadFromFile).
   bool saveToFile() const;
+  // Streams the file into the store. The store counts as loaded only when the parse succeeded or
+  // the file is genuinely absent or empty: a parse that failed for want of memory leaves it NOT
+  // loaded (so saveToFile() refuses, and the next ScopedLoad simply tries again with whatever
+  // heap it has), and a file that is corrupt is set aside as reading-stats.corrupt.json and the
+  // store starts empty. It used to mark itself loaded before parsing, so a failed parse left an
+  // empty "loaded" store that the next session end saved as the whole history.
   bool loadFromFile();
 
   // Lazy lifecycle. The store used to be loaded at boot and kept resident for the whole session;

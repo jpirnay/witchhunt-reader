@@ -15,7 +15,7 @@ constexpr char READING_STATS_FILE[] = "/.crosspoint/reading-stats.json";
 // position if absent. dayIndex == 0 ("unknown day") is silently skipped here —
 // the caller decides whether to credit unknown-day reading to a sentinel
 // bucket or drop it entirely.
-void mergeDay(std::vector<DayBucket>& days, uint16_t dayIndex, uint32_t seconds) {
+void mergeDay(std::vector<DayBucket>& days, uint16_t dayIndex, uint32_t seconds, const size_t maxDays) {
   if (dayIndex == 0 || seconds == 0) return;
   auto it = std::lower_bound(days.begin(), days.end(), dayIndex,
                              [](const DayBucket& b, uint16_t v) { return b.dayIndex < v; });
@@ -24,6 +24,23 @@ void mergeDay(std::vector<DayBucket>& days, uint16_t dayIndex, uint32_t seconds)
   } else {
     days.insert(it, {dayIndex, seconds});
   }
+  // Sorted ascending, so the oldest buckets are at the front.
+  if (days.size() > maxDays) days.erase(days.begin(), days.begin() + static_cast<long>(days.size() - maxDays));
+}
+
+// Length of the run of consecutive reading days that ends on `day`, from a sorted day map.
+uint16_t runEndingAt(const std::vector<DayBucket>& days, const uint16_t day) {
+  auto it =
+      std::lower_bound(days.begin(), days.end(), day, [](const DayBucket& b, uint16_t v) { return b.dayIndex < v; });
+  if (it == days.end() || it->dayIndex != day) return 0;
+  uint16_t run = 1;
+  while (it != days.begin()) {
+    const auto prev = it - 1;
+    if (prev->dayIndex + 1 != it->dayIndex) break;
+    ++run;
+    it = prev;
+  }
+  return run;
 }
 
 uint16_t dayIndexFromLocaltime(const struct tm& t) {
@@ -65,12 +82,26 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
                                       uint32_t sessionSeconds, uint32_t sessionPagesTurned, uint8_t progress,
                                       time_t walltimeEpoch) {
   if (docId.empty()) {
-    // Title-update-only flows go through a different path.
     return;
   }
 
   auto it = std::find_if(books.begin(), books.end(), [&docId](const BookReadingStats& b) { return b.docId == docId; });
   if (it == books.end()) {
+    // A book opened and closed without reading is not history: no entry for a zero-second
+    // session (it used to get one, for ever). An existing entry still takes the progress below.
+    if (sessionSeconds == 0) return;
+    if (books.size() >= kMaxBooks) {
+      // Evict the least recently read book. An entry that was never read with the clock set
+      // (lastReadEpoch 0) sorts as the oldest.
+      auto victim =
+          std::min_element(books.begin(), books.end(), [](const BookReadingStats& a, const BookReadingStats& b) {
+            if (a.lastReadEpoch != b.lastReadEpoch) return a.lastReadEpoch < b.lastReadEpoch;
+            return a.totalSeconds < b.totalSeconds;
+          });
+      LOG_INF("RST", "Book cap (%u) reached; dropping the least recently read: %s", static_cast<unsigned>(kMaxBooks),
+              victim->title.c_str());
+      books.erase(victim);
+    }
     BookReadingStats fresh;
     fresh.docId = docId;
     fresh.title = title;
@@ -78,8 +109,6 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
     books.push_back(std::move(fresh));
     it = books.end() - 1;
   } else {
-    // Update title/author opportunistically — they may have been blank if the
-    // book was first opened before metadata was indexed.
     if (!title.empty()) it->title = title;
     if (!author.empty()) it->author = author;
   }
@@ -87,9 +116,6 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
   it->totalSeconds += sessionSeconds;
   it->pagesTurned += sessionPagesTurned;
   it->progress = progress;
-  // A zero-second call is a progress-flush from silentRestart(): we want the
-  // updated progress/title persisted but the session counter must not tick.
-  // Otherwise every heap-defrag reboot would inflate sessions by one.
   if (sessionSeconds > 0) {
     it->sessions += 1;
     globalTotalSessions += 1;
@@ -97,12 +123,13 @@ void ReadingStatsStore::recordSession(const std::string& docId, const std::strin
   if (walltimeEpoch != 0) {
     if (it->firstReadEpoch == 0) it->firstReadEpoch = walltimeEpoch;
     it->lastReadEpoch = walltimeEpoch;
-    // Credit the local-day buckets on both the book and the global map.
-    // We only do this when the clock is trustworthy; unknown-day sessions
-    // still contribute to the running totals above but not to streaks.
     const uint16_t day = localDayIndexFromEpoch(walltimeEpoch);
-    mergeDay(it->days, day, sessionSeconds);
-    mergeDay(globalDays, day, sessionSeconds);
+    mergeDay(it->days, day, sessionSeconds, kMaxBookDays);
+    mergeDay(globalDays, day, sessionSeconds, kMaxGlobalDays);
+    // Fold this day's run into the persisted longest streak while the whole run is still in the
+    // window (a run longer than the window is already the record).
+    const uint16_t run = runEndingAt(globalDays, day);
+    if (run > longestStreak_) longestStreak_ = run;
   }
 
   globalTotalSeconds += sessionSeconds;
@@ -136,8 +163,8 @@ uint16_t ReadingStatsStore::computeCurrentStreak(uint16_t today) const {
 }
 
 uint16_t ReadingStatsStore::computeLongestStreak() const {
-  if (globalDays.empty()) return 0;
-  uint16_t longest = 1;
+  if (globalDays.empty()) return longestStreak_;
+  uint16_t longest = std::max<uint16_t>(1, longestStreak_);
   uint16_t run = 1;
   for (size_t i = 1; i < globalDays.size(); ++i) {
     if (globalDays[i].dayIndex == globalDays[i - 1].dayIndex + 1) {
@@ -217,27 +244,72 @@ uint32_t ReadingStatsStore::estimateRemainingSeconds(const std::string& docId, f
 }
 
 bool ReadingStatsStore::saveToFile() const {
-  // Refuse to write from a released store: books/globalDays are empty then, and a save would
-  // truncate the file to "no history". Every mutator goes through ensureLoaded() first, so
-  // reaching here unloaded is a bug in the caller, not a state to persist.
   if (!loaded_) {
     LOG_ERR("RST", "saveToFile refused: store not loaded (would erase history)");
     return false;
   }
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveReadingStats(*this, READING_STATS_FILE);
+  // Straight into a temporary file (no in-RAM copy of the JSON), then rename over the store's
+  // file: a power loss mid-write leaves the previous history intact.
+  const std::string tmpPath = std::string(READING_STATS_FILE) + ".tmp";
+  {
+    FsFile out;
+    if (!Storage.openFileForWrite("RST", tmpPath.c_str(), out)) return false;
+    const bool ok = JsonSettingsIO::saveReadingStats(*this, out);
+    out.close();
+    if (!ok) {
+      Storage.remove(tmpPath.c_str());
+      return false;
+    }
+  }
+  Storage.remove(READING_STATS_FILE);
+  if (!Storage.rename(tmpPath.c_str(), READING_STATS_FILE)) {
+    LOG_ERR("RST", "saveToFile: could not rename %s into place", tmpPath.c_str());
+    return false;
+  }
+  return true;
 }
 
 bool ReadingStatsStore::loadFromFile() {
-  loaded_ = true;  // an absent or empty file is a legitimately empty history, not a failure to load
+  loaded_ = false;
   if (!Storage.exists(READING_STATS_FILE)) {
+    loaded_ = true;  // an absent file is a legitimately empty history, not a failure to load
+    return true;
+  }
+  FsFile in;
+  if (!Storage.openFileForRead("RST", READING_STATS_FILE, in)) {
+    LOG_ERR("RST", "History file could not be opened; the store stays unloaded (no save will overwrite it)");
     return false;
   }
-  String json = Storage.readFile(READING_STATS_FILE);
-  if (json.isEmpty()) {
-    return false;
+  if (in.size() == 0) {
+    in.close();
+    loaded_ = true;
+    return true;
   }
-  return JsonSettingsIO::loadReadingStats(*this, json.c_str());
+  const JsonSettingsIO::ReadingStatsLoad result = JsonSettingsIO::loadReadingStats(*this, in);
+  in.close();
+  switch (result) {
+    case JsonSettingsIO::ReadingStatsLoad::Ok:
+      loaded_ = true;
+      return true;
+    case JsonSettingsIO::ReadingStatsLoad::NoMemory:
+      // Transient: the heap could not hold the document. Not loaded, so nothing saves over the
+      // file; the next ScopedLoad tries again.
+      LOG_ERR("RST", "History not loaded (out of memory parsing it); it is kept as is until it loads");
+      return false;
+    case JsonSettingsIO::ReadingStatsLoad::Corrupt:
+    default: {
+      // Permanent: set the file aside for forensics rather than lose it or stall on it for ever,
+      // and start an empty history.
+      const std::string asidePath = "/.crosspoint/reading-stats.corrupt.json";
+      Storage.remove(asidePath.c_str());
+      const bool moved = Storage.rename(READING_STATS_FILE, asidePath.c_str());
+      LOG_ERR("RST", "History file unreadable; %s and starting an empty history",
+              moved ? "set aside as reading-stats.corrupt.json" : "could not even be set aside");
+      loaded_ = moved;  // if it cannot be moved, refuse to save over it
+      return moved;
+    }
+  }
 }
 
 bool ReadingStatsStore::ensureLoaded() {
@@ -249,6 +321,29 @@ bool ReadingStatsStore::ensureLoaded() {
           static_cast<unsigned long>(esp_get_free_heap_size()),
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   return loaded_;
+}
+
+void ReadingStatsStore::replaceLoaded(std::vector<BookReadingStats>&& loadedBooks,
+                                      std::vector<DayBucket>&& loadedGlobalDays, const uint32_t totalSeconds,
+                                      const uint32_t totalSessions, const uint32_t totalPagesTurned,
+                                      const uint16_t longestStreak) {
+  books = std::move(loadedBooks);
+  globalDays = std::move(loadedGlobalDays);
+  globalTotalSeconds = totalSeconds;
+  globalTotalSessions = totalSessions;
+  globalTotalPagesTurned = totalPagesTurned;
+  longestStreak_ = longestStreak;
+  // Files written before the caps existed: trim once here, the next save persists it.
+  for (auto& book : books) {
+    if (book.days.size() > kMaxBookDays)
+      book.days.erase(book.days.begin(), book.days.begin() + static_cast<long>(book.days.size() - kMaxBookDays));
+  }
+  if (globalDays.size() > kMaxGlobalDays) {
+    // The record streak may live in the buckets about to go: measure before trimming.
+    const uint16_t scanned = computeLongestStreak();
+    if (scanned > longestStreak_) longestStreak_ = scanned;
+    globalDays.erase(globalDays.begin(), globalDays.begin() + static_cast<long>(globalDays.size() - kMaxGlobalDays));
+  }
 }
 
 void ReadingStatsStore::release() {
@@ -263,6 +358,7 @@ void ReadingStatsStore::release() {
   globalTotalSeconds = 0;
   globalTotalSessions = 0;
   globalTotalPagesTurned = 0;
+  longestStreak_ = 0;
   loaded_ = false;
   LOG_DBG("RST", "Store released (free=%lu contig=%lu)", static_cast<unsigned long>(esp_get_free_heap_size()),
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
