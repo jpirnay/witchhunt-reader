@@ -822,6 +822,33 @@ labels, the `Page` object and its lines — R2 step 3), which would take the
 reading-state build's heap need down by their size and make the C-failure
 escalation rarer still.
 
+*Run 12, second book (Roosevelt, appendix-b — the table chapter):* **a
+regression, found and fixed the same afternoon.** The borrowed build of
+the appendix read 11–18 KB free through the tables; the row gate wants
+18 432, so every row was demoted to paragraphs and, because the R2 work
+made the build survive, nothing escalated and that layout was cached:
+
+```
+lanes(setup=756 extract=41984 resident=11484 parse=1383)
+```
+
+1.4 KB of the arena used while the rows starved for heap. Before R2 the
+same build ran out of heap and the released rebuild (95 KB free) laid the
+tables out — the escalation was rescuing tables by accident. Two fixes:
+(1) `07251eedb`: a Background-C build with a heap-demoted row escalates on
+purpose, like a css-degraded one (restores the output at the cost of the
+release cycle); (2) the lasting one: table rows lay their cell lines out in
+the arena. Each row is laid out in a transient block above the page block,
+committed when it stays on the page, released and re-laid out from its
+preserved source when it has to open the next page — so a fragment's bytes
+always live in the block of the page it lands on, as the arena's LIFO
+discipline requires. The closing border pixel now counts in the fit test.
+With the bytes off the heap the row gate on an arena build drops to the
+hard floor + 3 KB. Host: goldens unchanged, heap and arena dumps
+byte-identical for the three table fixtures. This is the first piece of
+R2 step 3 (the parse's remaining heap objects into the phase-(b) lane);
+device validation pending on appendix-b.
+
 Still open under R3: the reading-time pins (S13 scaled-glyph cache, P1
 deferred-AA `Page`, P4 font slots), the lazily created `KOSyncWorker`
 stack pinning the hole at Home (F6), and the lend-vs-release revisit for
