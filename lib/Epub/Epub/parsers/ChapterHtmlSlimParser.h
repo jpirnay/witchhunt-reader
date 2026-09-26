@@ -475,9 +475,17 @@ class ChapterHtmlSlimParser final : public Print {
   // element -- ~120 KB on a 66 KB chapter of Deckhand, 70% of the build's peak, against ~29 KB
   // of contiguous heap while reading on the C3. The node cost is the key string plus the
   // CssStyle payload, so it does not shrink on a 32-bit target.
+  //
+  // On an arena build the cap is much lower. Two full memos are up to 32 KB of heap held for the
+  // whole chapter, and a borrowed build has ~40 KB to begin with: the Roosevelt appendix (many
+  // class combinations and per-cell inline styles) went from 38 KB free after extraction to
+  // 12 KB at its first table row with nothing else growing (device run 13). The memo buys little
+  // there anyway -- the ruleset is arena-resident and a resolve is an in-RAM hash lookup -- so
+  // eight entries keep the common keys hot and bound the heap at a few KB.
   static constexpr size_t kStyleMemoMaxEntries = 64;
+  static constexpr size_t kStyleMemoMaxEntriesArena = 8;
   bool styleMemoHasRoom(const std::unordered_map<std::string, CssStyle>& memo) const {
-    return memo.size() < kStyleMemoMaxEntries;
+    return memo.size() < (buildArena_ != nullptr ? kStyleMemoMaxEntriesArena : kStyleMemoMaxEntries);
   }
   // parseInlineStyle(styleAttr), memoised while there is room. Returned by value: CssStyle is a
   // flat struct with no heap members, and a reference into the memo would dangle on the
