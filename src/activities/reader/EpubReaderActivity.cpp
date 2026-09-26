@@ -1801,10 +1801,22 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
 
   backgroundBuildPercent_ = -1;
 
-  // Failed, or finished but truncated / CSS-degraded: discard and retry on the released path. The
-  // latch (set inside the helper) stops buildSection from re-entering Background-C for this spine.
-  if (step == Section::BuildStep::Failed || section->isTruncatedCache() || section->isCssLowHeapDegraded()) {
-    fallbackToReleasedRebuild(step == Section::BuildStep::Failed ? "failed" : "incomplete",
+  // Failed, or finished but truncated / CSS-degraded / with a table row demoted to paragraphs:
+  // discard and retry on the released path. The latch (set inside the helper) stops buildSection
+  // from re-entering Background-C for this spine.
+  //
+  // The demoted row counts here because the borrowed build cannot lay a grid out: the row gate
+  // wants 18 KB of free heap and a borrowed build reads 11-18 KB through a table chapter (X3,
+  // Roosevelt appendix-b, 2026-09-26: every row of the appendix demoted, 40 KB of the lent region
+  // idle). Before the R2 work that build ran out of heap and escalated anyway, and the released
+  // rebuild -- 95 KB free -- was what laid the tables out; a build that survives must escalate
+  // on purpose or the demoted layout is what gets cached. The lasting fix is the row layout in
+  // the arena (docs/memory-audit-2026-09.md, run 12); until then this keeps the tables.
+  if (step == Section::BuildStep::Failed || section->isTruncatedCache() || section->isCssLowHeapDegraded() ||
+      section->isTableRowDegraded()) {
+    fallbackToReleasedRebuild(step == Section::BuildStep::Failed ? "failed"
+                              : section->isTableRowDegraded()    ? "table row demoted"
+                                                                 : "incomplete",
                               /*retryIncremental=*/false);
     return;
   }
