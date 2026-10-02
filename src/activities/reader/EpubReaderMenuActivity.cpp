@@ -121,6 +121,8 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   // the picker, which is more useful than hiding the feature from the person
   // who has not found the setting yet.
   navigationItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_HIGHLIGHT_TEXT, SettingAction::None));
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_HIGHLIGHTS, SettingAction::None));
 
   auto* self = this;
   // Orientation: straightforward 0-3 cycle
@@ -362,6 +364,10 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::FOOTNOTES;
     case StrId::STR_DICTIONARY:
       return MenuAction::DICTIONARY;
+    case StrId::STR_HIGHLIGHT_TEXT:
+      return MenuAction::HIGHLIGHT_TEXT;
+    case StrId::STR_HIGHLIGHTS:
+      return MenuAction::HIGHLIGHTS;
     case StrId::STR_AUTO_TURN_PAGES_PER_MIN:
       return MenuAction::AUTO_PAGE_TURN;
     case StrId::STR_EMBEDDED_STYLE:
