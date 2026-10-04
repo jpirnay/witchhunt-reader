@@ -69,18 +69,18 @@ ButtonEventManager::PressLog ButtonEventManager::pressLog(const Button button) c
   return {s.pressCount, s.loggedPressMs, s.priorLoggedPressMs};
 }
 
-void ButtonEventManager::pushEvent(const Button button, const PressType type) {
+void ButtonEventManager::pushEvent(const Button button, const PressType type, const unsigned long pressMs) {
   const int next = (eventTail + 1) % EVENT_BUF;
   if (next == eventHead) return;  // buffer full, drop oldest not possible — just drop newest
-  eventBuf[eventTail] = {button, type};
+  eventBuf[eventTail] = {button, type, pressMs};
   eventTail = next;
 }
 
-void ButtonEventManager::pushEventFront(const Button button, const PressType type) {
+void ButtonEventManager::pushEventFront(const ButtonEvent& event) {
   const int prev = (eventHead - 1 + EVENT_BUF) % EVENT_BUF;
   if (prev == eventTail) return;  // buffer full
   eventHead = prev;
-  eventBuf[eventHead] = {button, type};
+  eventBuf[eventHead] = event;
 }
 
 bool ButtonEventManager::isShortPending(const Button button) const {
@@ -146,7 +146,7 @@ void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool p
       if (!pressed) {
         const unsigned long heldMs = t - s.pressDownTime;
         if (heldMs >= LONG_PRESS_MS) {
-          pushEvent(btn, PressType::Long);
+          pushEvent(btn, PressType::Long, s.pressDownTime);
           s.state = State::Idle;
         } else if (hasDoubleAction(btn)) {
           // Delay short-press decision until double-click window expires.
@@ -154,7 +154,7 @@ void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool p
           s.state = State::ReleasedOnce;
         } else {
           // No double action configured — fire immediately.
-          pushEvent(btn, PressType::Short);
+          pushEvent(btn, PressType::Short, s.pressDownTime);
           s.state = State::Idle;
         }
       }
@@ -165,7 +165,7 @@ void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool p
         if (t - s.releaseTime >= DOUBLE_WINDOW_MS) {
           // Window already elapsed before this press arrived (e.g. the loop task
           // was blocked past it): the first press was a Short, this starts fresh.
-          pushEvent(btn, PressType::Short);
+          pushEvent(btn, PressType::Short, s.pressDownTime);
           s.state = State::Pressed;
           s.pressDownTime = t;
         } else {
@@ -178,7 +178,7 @@ void ButtonEventManager::applyEdge(const int idx, const Button btn, const bool p
 
     case State::DoublePressed:
       if (!pressed) {
-        pushEvent(btn, PressType::Double);
+        pushEvent(btn, PressType::Double, s.pressDownTime);
         s.state = State::Idle;
       }
       break;
@@ -192,7 +192,7 @@ void ButtonEventManager::applyTimeout(const int idx, const Button btn, const uns
       if (heldNow && now - s.pressDownTime >= LONG_PRESS_MS) {
         // Fire Long as soon as the hold threshold passes, without waiting for
         // release. The eventual release edge lands in Idle and is ignored.
-        pushEvent(btn, PressType::Long);
+        pushEvent(btn, PressType::Long, s.pressDownTime);
         s.state = State::Idle;
       }
       break;
@@ -200,7 +200,7 @@ void ButtonEventManager::applyTimeout(const int idx, const Button btn, const uns
     case State::ReleasedOnce:
       if (now - s.releaseTime >= DOUBLE_WINDOW_MS) {
         // Window expired without a second press — it was a Short.
-        pushEvent(btn, PressType::Short);
+        pushEvent(btn, PressType::Short, s.pressDownTime);
         s.state = State::Idle;
       }
       break;

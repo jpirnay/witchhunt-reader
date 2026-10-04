@@ -1,13 +1,14 @@
 #pragma once
 #include <OpdsParser.h>
 
+#include <atomic>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "../Activity.h"
+#include "../ListController.h"
 #include "OpdsServerStore.h"
-#include "util/ButtonNavigator.h"
 
 /**
  * Activity for browsing and downloading books from an OPDS server.
@@ -30,7 +31,6 @@ class OpdsBookBrowserActivity final : public Activity {
   explicit OpdsBookBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, OpdsServer server,
                                    std::string initialQuery = {})
       : Activity("OpdsBookBrowser", renderer, mappedInput),
-        buttonNavigator(),
         server(std::move(server)),
         initialQuery_(std::move(initialQuery)) {}
 
@@ -40,28 +40,22 @@ class OpdsBookBrowserActivity final : public Activity {
   // Tap on a row -> move the selection there; ActivityManager synthesizes Confirm. Serves
   // BOTH of this screen's lists (the entry list and the format picker), keyed on state.
   ListRowTap::Result selectListRow(int index) override;
-  // A swipe must not reach Left/Right, which are Search and Info here. Consumed without effect.
+  // A swipe pages whichever list is on screen; it never reaches Left/Right (Search and Info).
   bool pageList(ListPageDirection direction) override;
   void loop() override;
   void render(RenderLock&&) override;
 
  private:
-  ButtonNavigator buttonNavigator;
   BrowserState state = BrowserState::LOADING;
   std::vector<uint32_t> entryOffsets;
   std::vector<std::string> navigationHistory;
   std::string currentPath;
   std::string searchTemplate;
-  bool consumeConfirm = false;
-  bool consumeBack = false;
   bool memoryTrimmed = false;
   bool coverAvailable = false;
   int selectorIndex = 0;
   int selectedBookIndex = -1;
   int formatSelectorIndex = 0;
-  // The format picker's own navigator: a navigator keeps per-list press and double-tap state, so
-  // the picker must not step with the entry list's one (#342).
-  ButtonNavigator formatNavigator;
   std::vector<std::string> formatSelectionLabels;
   std::string errorMessage;
   std::string statusMessage;
@@ -86,4 +80,48 @@ class OpdsBookBrowserActivity final : public Activity {
   void performSearch(const std::string& query);
   void fetchCoverForEntry(const OpdsEntry& entry);
   bool preventAutoSleep() override;
+
+  int catalogRowsPerPage() const;
+  // Rows per page as the last render drew them. Paging runs on the loop task, where the renderer's
+  // orientation can be mid-flip to Portrait for a hint strip, so input reads what render published.
+  std::atomic<int> catalogPageRows{1};
+  std::atomic<int> formatPageRows{1};
+  void showBookDetail(const OpdsEntry& entry);
+  void closeFormatPicker();
+
+  // Short Left/Right on the catalog: Search where the feed offers one, Info on a book, and never a
+  // step (an action that does not apply leaves its side doing nothing). The format picker keeps
+  // the default pair.
+  static constexpr ListDeclaration kCatalogDeclaration{{true, StrId::STR_SEARCH}, {true, StrId::STR_INFO}};
+  static constexpr ListDeclaration kFormatDeclaration{};
+
+  struct CatalogHost final : ListHost {
+    explicit CatalogHost(OpdsBookBrowserActivity& browser) : browser(browser) {}
+    int listCount() const override;
+    int listPageRows() const override;
+    bool listActionAvailable(ListGrammar::Side side, int row) const override;
+    void onListSelectionChanged() override;
+    void onListActivate(int row, bool longPress) override;
+    void onListBack() override;
+    void onListHome() override;
+    void onListAction(ListGrammar::Side side, int row) override;
+    OpdsBookBrowserActivity& browser;
+  };
+
+  struct FormatHost final : ListHost {
+    explicit FormatHost(OpdsBookBrowserActivity& browser) : browser(browser) {}
+    int listCount() const override;
+    int listPageRows() const override;
+    void onListSelectionChanged() override;
+    void onListActivate(int row, bool longPress) override;
+    void onListBack() override;
+    void onListHome() override;
+    OpdsBookBrowserActivity& browser;
+  };
+
+  // Declared after selectorIndex / formatSelectorIndex, which they hold references to.
+  CatalogHost catalogHost{*this};
+  FormatHost formatHost{*this};
+  ListController catalogList{mappedInput, buttonEvents, catalogHost, selectorIndex, kCatalogDeclaration};
+  ListController formatList{mappedInput, buttonEvents, formatHost, formatSelectorIndex, kFormatDeclaration};
 };
