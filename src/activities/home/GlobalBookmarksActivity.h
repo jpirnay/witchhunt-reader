@@ -27,6 +27,8 @@ class GlobalBookmarksActivity final : public Activity {
   void onExit() override;
   // Tap on a list row -> move the selection there; ActivityManager then synthesizes Confirm.
   ListRowTap::Result selectListRow(int index) override;
+  // A swipe must not reach Left/Right, which are Rename and Delete here. Consumed without effect.
+  bool pageList(ListPageDirection direction) override;
   void loop() override;
   void render(RenderLock&&) override;
 

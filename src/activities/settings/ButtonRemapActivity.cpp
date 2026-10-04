@@ -33,6 +33,8 @@ void ButtonRemapActivity::onEnter() {
 
 void ButtonRemapActivity::onExit() { Activity::onExit(); }
 
+bool ButtonRemapActivity::pageList(ListPageDirection /*direction*/) { return true; }
+
 void ButtonRemapActivity::loop() {
   // Clear any temporary warning after its timeout.
   if (errorUntil > 0 && millis() > errorUntil) {

@@ -42,6 +42,9 @@ class ButtonEventManager {
   struct ButtonEvent {
     Button button;
     PressType type;
+    // When the key went down for this gesture, on the sampler's clock (the second press of a
+    // Double). A list times a double-tap from it: the loop may handle the event much later.
+    unsigned long pressMs = 0;
   };
 
   // Timing constants (milliseconds)
@@ -72,7 +75,7 @@ class ButtonEventManager {
 
   // Preserve a default event for activity processing after main loop dispatch.
   // This is used when the configured action is BTN_DEFAULT.
-  void pushEventFront(Button button, PressType type);
+  void pushEventFront(const ButtonEvent& event);
 
   // Returns true while a button's first release is waiting for the
   // double-click decision window to expire (i.e. a Short is pending).
@@ -150,7 +153,7 @@ class ButtonEventManager {
 
   MappedInputManager& input;
 
-  void pushEvent(Button button, PressType type);
+  void pushEvent(Button button, PressType type, unsigned long pressMs);
   // The other logical name for the same physical button (Up<->PageBack,
   // Down<->PageForward); the button itself when it has no alias.
   static Button pairedAlias(Button button);

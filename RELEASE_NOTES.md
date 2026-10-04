@@ -4,6 +4,14 @@ User-facing changes only. Full commit history is in git log.
 
 ## Unreleased
 
+### Touch
+
+- **Fix: a swipe on Bookmarks, Starred pages, Wi-Fi or the OPDS catalog no longer acts on the selected row.** A vertical swipe over these lists was passed on as a Left/Right press. Swiping up on Bookmarks or Starred pages deleted the highlighted entry, and on Wi-Fi it started a rescan. On Bookmarks, Starred pages and Wi-Fi a swipe now does nothing, while the OPDS catalog pages (see OPDS below). On other lists it still pages.
+
+### OPDS
+
+- **OPDS catalogs can be paged, and their buttons do what the hints say** (#374). Hold **Left** / **Right**, or swipe, to page through a catalog; **Up** / **Down** move one row, and two quick taps jump a page. A short **Left** is **Search** and a short **Right** is **Info** for a book. Where those do not apply, the hint shows only « or », instead of "Up" / "Down" labels on buttons that did nothing. Holding **Back** returns to the Home screen, and holding **Up** / **Down** jumps to the first / last entry. A long catalog in landscape no longer runs off the bottom of the screen. The side Up/Down hints also appear when choosing a download format, so the T5 S3 can move up there.
+
 ### Buttons
 
 - **Lists that wait for a double press no longer lag behind Left and Right.** Outside a book, the file browser, the pickers and the chapter lists waited 0.3 s after every Left/Right press to see whether a double press would follow, because the double press is bound to a reading action by default. Two quick presses then moved nothing at all in the file browser. The wait now happens only in the reader, where the double press means something.

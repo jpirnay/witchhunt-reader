@@ -2046,7 +2046,7 @@ void loop() {
     }
 
     for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
-      buttonEventManager.pushEventFront(it->button, it->type);
+      buttonEventManager.pushEventFront(*it);
     }
 
     // Gestures. In the reader every gesture is live; elsewhere only swipes and

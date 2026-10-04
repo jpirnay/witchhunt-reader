@@ -33,7 +33,12 @@
 #include "util/UrlUtils.h"
 
 namespace {
-constexpr int PAGE_ITEMS = 23;
+// The catalog draws CATALOG_ROW_HEIGHT rows from CATALOG_LIST_TOP down to the foot of the content
+// area; catalogRowsPerPage() turns that into the page both the render and paging use.
+constexpr int CATALOG_LIST_TOP = 60;
+constexpr int CATALOG_ROW_HEIGHT = 30;
+// Entries reserved before a fetch: about one portrait page, plus the prev/next navigation entries.
+constexpr size_t FEED_RESERVE_ENTRIES = 25;
 
 // Hard ceiling on entries held from a single feed. Each entry costs 4 bytes in
 // the in-RAM entryOffsets index; the bodies live on the SD cache file. Well-behaved
@@ -238,8 +243,6 @@ void OpdsBookBrowserActivity::onEnter() {
   selectedBookIndex = -1;
   formatSelectorIndex = 0;
   formatSelectionLabels.clear();
-  consumeConfirm = false;
-  consumeBack = false;
   memoryTrimmed = false;
   errorMessage.clear();
   statusMessage = tr(STR_CHECKING_WIFI);
@@ -292,121 +295,58 @@ void OpdsBookBrowserActivity::loop() {
     return;
   }
 
-  if (consumeConfirm && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    consumeConfirm = false;
-    return;
-  }
-  if (consumeBack && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    consumeBack = false;
-    return;
-  }
-
-  if (state == BrowserState::ERROR) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
-        state = BrowserState::LOADING;
-        statusMessage = tr(STR_LOADING);
-        requestUpdate();
-        fetchFeed(currentPath);
-      } else {
-        launchWifiSelection();
-      }
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      navigateBack();
-    }
-    return;
-  }
-
-  if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      state == BrowserState::CHECK_WIFI ? onGoHome() : navigateBack();
-    }
-    return;
-  }
-
-  if (state == BrowserState::DOWNLOADING) return;
-
-  if (state == BrowserState::BOOK_DETAIL) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
-        mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
-      state = BrowserState::BROWSING;
-      requestUpdate();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      const auto entry = getEntry(selectorIndex);
-      state = BrowserState::BROWSING;
-      requestUpdate();
-      chooseBookFormat(entry);
-    }
+  if (state == BrowserState::BROWSING) {
+    catalogList.update();
     return;
   }
 
   if (state == BrowserState::FORMAT_SELECTION) {
-    if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(entryOffsets.size())) {
-      state = BrowserState::BROWSING;
-      requestUpdate();
+    if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(entryOffsets.size()) ||
+        getEntry(selectedBookIndex).acquisitionLinks.empty()) {
+      closeFormatPicker();
       return;
     }
-
-    const auto entry = getEntry(selectedBookIndex);
-    if (entry.acquisitionLinks.empty()) {
-      state = BrowserState::BROWSING;
-      selectedBookIndex = -1;
-      formatSelectionLabels.clear();
-      requestUpdate();
-      return;
-    }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      state = BrowserState::BROWSING;
-      selectedBookIndex = -1;
-      formatSelectionLabels.clear();
-      requestUpdate();
-      return;
-    }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      downloadBook(entry, entry.acquisitionLinks[formatSelectorIndex]);
-      return;
-    }
-
-    formatNavigator.onNextList(ButtonNavigator::getStepNextButtons(), formatSelectorIndex,
-                               static_cast<int>(entry.acquisitionLinks.size()), [this] { requestUpdate(); });
-    formatNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), formatSelectorIndex,
-                                   static_cast<int>(entry.acquisitionLinks.size()), [this] { requestUpdate(); });
+    formatList.update();
     return;
   }
 
-  if (state == BrowserState::BROWSING) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (!entryOffsets.empty()) {
-        const auto entry = getEntry(selectorIndex);
-        entry.type == OpdsEntryType::BOOK ? chooseBookFormat(entry) : navigateToEntry(entry);
+  // The states below are not lists, but they read button events too, never levels: every press is
+  // also queued as an event, and a list reads that queue once it is back on screen, so a press read
+  // here by level would be handled a second time there.
+  ButtonEventManager::ButtonEvent event;
+  while (buttonEvents.consumeEvent(event)) {
+    const auto button = event.button;
+    if (state == BrowserState::ERROR) {
+      if (button == MappedInputManager::Button::Confirm) {
+        checkAndConnectWifi();
+        return;
       }
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      navigateBack();
-    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
-      if (!searchTemplate.empty()) launchSearch();
-    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
-      if (!entryOffsets.empty()) {
+      if (button == MappedInputManager::Button::Back) {
+        navigateBack();
+        return;
+      }
+    } else if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING) {
+      if (button == MappedInputManager::Button::Back) {
+        state == BrowserState::CHECK_WIFI ? onGoHome() : navigateBack();
+        return;
+      }
+    } else if (state == BrowserState::BOOK_DETAIL) {
+      if (button == MappedInputManager::Button::Back ||
+          MappedInputManager::isDirection(button, MappedInputManager::Direction::Right)) {
+        state = BrowserState::BROWSING;
+        requestUpdate();
+        return;
+      }
+      if (button == MappedInputManager::Button::Confirm) {
         const auto entry = getEntry(selectorIndex);
-        if (entry.type == OpdsEntryType::BOOK) {
-          state = BrowserState::LOADING;
-          statusMessage = tr(STR_LOADING);
-          requestUpdateAndWait();
-          fetchCoverForEntry(entry);
-          state = BrowserState::BOOK_DETAIL;
-          requestUpdate();
-        }
+        state = BrowserState::BROWSING;
+        requestUpdate();
+        chooseBookFormat(entry);
+        return;
       }
     }
-
-    if (!entryOffsets.empty()) {
-      // Logical Left/Right are reserved for Search and Info, so restrict to logical Up/Down only.
-      buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectorIndex,
-                                 static_cast<int>(entryOffsets.size()), [this] { requestUpdate(); });
-      buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectorIndex,
-                                     static_cast<int>(entryOffsets.size()), [this] { requestUpdate(); });
-    }
+    // DOWNLOADING never has presses to read here: the download runs inside loop(), reads Back by level
+    // to abort, and drains the queue when it returns.
   }
 }
 
@@ -432,12 +372,83 @@ bool OpdsBookBrowserActivity::preventAutoSleep() {
   return false;
 }
 
+int OpdsBookBrowserActivity::catalogRowsPerPage() const {
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+  const int rows = (contentRect.y + contentRect.height - CATALOG_LIST_TOP) / CATALOG_ROW_HEIGHT;
+  return std::max(1, std::min(rows, ListTouchBand::kMaxRows));
+}
+
+void OpdsBookBrowserActivity::showBookDetail(const OpdsEntry& entry) {
+  state = BrowserState::LOADING;
+  statusMessage = tr(STR_LOADING);
+  requestUpdateAndWait();
+  fetchCoverForEntry(entry);
+  state = BrowserState::BOOK_DETAIL;
+  requestUpdate();
+}
+
+void OpdsBookBrowserActivity::closeFormatPicker() {
+  state = BrowserState::BROWSING;
+  selectedBookIndex = -1;
+  formatSelectionLabels.clear();
+  requestUpdate();
+}
+
+int OpdsBookBrowserActivity::CatalogHost::listCount() const { return static_cast<int>(browser.entryOffsets.size()); }
+
+int OpdsBookBrowserActivity::CatalogHost::listPageRows() const { return browser.catalogPageRows.load(); }
+
+bool OpdsBookBrowserActivity::CatalogHost::listActionAvailable(const ListGrammar::Side side, const int row) const {
+  if (side == ListGrammar::Side::Left) return !browser.searchTemplate.empty();
+  // Bounds first: an empty feed has no entry to read.
+  return row >= 0 && row < listCount() && browser.getEntry(row).type == OpdsEntryType::BOOK;
+}
+
+void OpdsBookBrowserActivity::CatalogHost::onListSelectionChanged() { browser.requestUpdate(); }
+
+void OpdsBookBrowserActivity::CatalogHost::onListActivate(const int row, bool /*longPress*/) {
+  if (row < 0 || row >= listCount()) return;
+  const auto entry = browser.getEntry(row);
+  entry.type == OpdsEntryType::BOOK ? browser.chooseBookFormat(entry) : browser.navigateToEntry(entry);
+}
+
+void OpdsBookBrowserActivity::CatalogHost::onListBack() { browser.navigateBack(); }
+
+void OpdsBookBrowserActivity::CatalogHost::onListHome() { browser.onGoHome(); }
+
+void OpdsBookBrowserActivity::CatalogHost::onListAction(const ListGrammar::Side side, const int row) {
+  if (side == ListGrammar::Side::Left) {
+    browser.launchSearch();
+    return;
+  }
+  browser.showBookDetail(browser.getEntry(row));
+}
+
+int OpdsBookBrowserActivity::FormatHost::listCount() const {
+  return static_cast<int>(browser.formatSelectionLabels.size());
+}
+
+int OpdsBookBrowserActivity::FormatHost::listPageRows() const { return browser.formatPageRows.load(); }
+
+void OpdsBookBrowserActivity::FormatHost::onListSelectionChanged() { browser.requestUpdate(); }
+
+void OpdsBookBrowserActivity::FormatHost::onListActivate(const int row, bool /*longPress*/) {
+  const auto entry = browser.getEntry(browser.selectedBookIndex);
+  if (row < 0 || row >= static_cast<int>(entry.acquisitionLinks.size())) return;
+  browser.downloadBook(entry, entry.acquisitionLinks[row]);
+}
+
+void OpdsBookBrowserActivity::FormatHost::onListBack() { browser.closeFormatPicker(); }
+
+void OpdsBookBrowserActivity::FormatHost::onListHome() { browser.onGoHome(); }
+
 void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  // Only the browsing list labels its side buttons (see below); every other state uses Back and
-  // Confirm alone, so it keeps the full width.
-  const Rect contentRect = UITheme::getContentRect(renderer, true, state == BrowserState::BROWSING);
+  // The two lists, the catalog and the format picker, label their side buttons; every other state
+  // uses Back and Confirm alone, so it keeps the full width.
+  const bool showsList = state == BrowserState::BROWSING || state == BrowserState::FORMAT_SELECTION;
+  const Rect contentRect = UITheme::getContentRect(renderer, true, showsList);
   const int midY = contentRect.y + contentRect.height / 2;
 
   // Show server name in header if available, otherwise generic title
@@ -498,6 +509,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
     const int listTop = midY + 20;
     const int itemsPerPage = formatItemsPerPage(contentRect);
+    formatPageRows.store(itemsPerPage);
     const int pageStartIndex = formatSelectorIndex / itemsPerPage * itemsPerPage;
     // Format rows published for touch. This screen has TWO lists in two different states, and
     // only one is on screen at a time; the recorders are cleared at the top of each render pass,
@@ -515,8 +527,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
                         item.c_str(), i != formatSelectorIndex);
     }
 
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    formatList.drawHints(renderer, tr(STR_BACK), tr(STR_DOWNLOAD));
     renderer.displayBuffer();
     return;
   }
@@ -592,19 +603,10 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     return;
   }
 
-  // Browsing state
-  // Show appropriate button hint based on selected entry type.
-  // Read the selected entry once so its type drives both button labels.
+  // Browsing state. The selected entry's type decides the Confirm label; the Left/Right labels
+  // come from the catalog's declaration (Search / Info, or the page glyph alone).
   const bool selectedIsBook = !entryOffsets.empty() && getEntry(selectorIndex).type == OpdsEntryType::BOOK;
-  const char* confirmLabel = selectedIsBook ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
-  const char* searchLabel = !searchTemplate.empty() ? tr(STR_SEARCH) : tr(STR_DIR_UP);
-  // Search/Info ride logical Left/Right, the step rides logical Up/Down: rotating the device moves
-  // each pair between the front strip and the side buttons, and the hints follow them there.
-  const auto hints =
-      mappedInput.mapHints(tr(STR_BACK), confirmLabel, searchLabel, selectedIsBook ? tr(STR_INFO) : tr(STR_DIR_DOWN),
-                           tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
-  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
+  catalogList.drawHints(renderer, tr(STR_BACK), selectedIsBook ? tr(STR_DOWNLOAD) : tr(STR_OPEN));
 
   if (entryOffsets.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, midY, tr(STR_NO_ENTRIES));
@@ -612,15 +614,18 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     return;
   }
 
-  const auto pageStartIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS;
-  // Entry rows published for touch. The y here is a bare 60, NOT contentRect.y + 60 as the
-  // chapter selectors use — matched to the fill below rather than "corrected", because the fill
-  // is where the row visibly is.
-  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, 60 - 2, 30, pageStartIndex,
-                                   std::min<int>(PAGE_ITEMS, static_cast<int>(entryOffsets.size()) - pageStartIndex));
-  renderer.fillRect(contentRect.x, 60 + (selectorIndex % PAGE_ITEMS) * 30 - 2, contentRect.width - 1, 30);
+  const int rowsPerPage = catalogRowsPerPage();
+  catalogPageRows.store(rowsPerPage);
+  const auto pageStartIndex = selectorIndex / rowsPerPage * rowsPerPage;
+  // Entry rows published for touch. The top is a bare CATALOG_LIST_TOP, NOT contentRect.y + it as
+  // the chapter selectors use — matched to the fill below, which is where the row visibly is.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, CATALOG_LIST_TOP - 2, CATALOG_ROW_HEIGHT,
+                                   pageStartIndex,
+                                   std::min<int>(rowsPerPage, static_cast<int>(entryOffsets.size()) - pageStartIndex));
+  renderer.fillRect(contentRect.x, CATALOG_LIST_TOP + (selectorIndex % rowsPerPage) * CATALOG_ROW_HEIGHT - 2,
+                    contentRect.width - 1, CATALOG_ROW_HEIGHT);
 
-  for (size_t i = pageStartIndex; i < entryOffsets.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS);
+  for (size_t i = pageStartIndex; i < entryOffsets.size() && i < static_cast<size_t>(pageStartIndex + rowsPerPage);
        i++) {
     const auto entry = getEntry(i);
 
@@ -637,8 +642,8 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     }
 
     auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), contentRect.width - 40);
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 60 + (i % PAGE_ITEMS) * 30, item.c_str(),
-                      i != static_cast<size_t>(selectorIndex));
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, CATALOG_LIST_TOP + (i % rowsPerPage) * CATALOG_ROW_HEIGHT,
+                      item.c_str(), i != static_cast<size_t>(selectorIndex));
   }
 
   renderer.displayBuffer();
@@ -663,7 +668,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   // Reserve up front so the per-entry push_back loop doesn't repeatedly realloc
   // (2x grow + copy) and fragment the heap mid-fetch. One page-ish worth covers
   // the common case; larger feeds grow once or twice up to MAX_FEED_ENTRIES.
-  entryOffsets.reserve(PAGE_ITEMS + 2);  // +2 for prev/next nav entries
+  entryOffsets.reserve(FEED_RESERVE_ENTRIES);
   bool feedCapped = false;
 
   // Root feed: path is empty (first open or back-to-root navigation).
@@ -847,6 +852,9 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
         return !mappedInput.wasPressed(MappedInputManager::Button::Back);
       },
       server.username, server.password);
+  // The download read Back by level to abort. Drop the events it left behind, or that same press
+  // would reach the catalog afterwards as an event and leave the feed.
+  buttonEvents.drain();
 
   if (result == HttpDownloader::OK) {
     FsFile downloadedFile;
@@ -909,6 +917,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
               return !mappedInput.wasPressed(MappedInputManager::Button::Back);
             },
             server.username, server.password);
+        buttonEvents.drain();
         if (coverDlResult != HttpDownloader::OK) {
           LOG_ERR("OPDS", "Failed to download cover from %s (err %d)", coverUrl.c_str(), (int)coverDlResult);
           Storage.remove(sidecarPath.c_str());
@@ -985,7 +994,6 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
 }
 
 void OpdsBookBrowserActivity::launchSearch() {
-  consumeConfirm = true;
   state = BrowserState::SEARCH_INPUT;
   requestUpdate();
 
@@ -1107,14 +1115,19 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
 }
 
 ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
-  // Two lists, two states, two selection members. `state` is read on the loop task and may have
-  // moved on since the render that recorded the band, so it decides which one a tap means.
-  if (state == BrowserState::FORMAT_SELECTION) {
-    const auto entry = getEntry(selectorIndex);
-    return ListRowTap::apply(index, static_cast<int>(entry.acquisitionLinks.size()), formatSelectorIndex);
-  }
-  if (state == BrowserState::BROWSING) {
-    return ListRowTap::apply(index, static_cast<int>(entryOffsets.size()), selectorIndex);
-  }
+  // Two lists, two states. `state` is read on the loop task and may have moved on since the render
+  // that recorded the band, so it decides which list a tap means.
+  if (state == BrowserState::FORMAT_SELECTION) return formatList.tapRow(index);
+  if (state == BrowserState::BROWSING) return catalogList.tapRow(index);
   return ListRowTap::Result::Rejected;
+}
+
+bool OpdsBookBrowserActivity::pageList(const ListPageDirection direction) {
+  const int step = direction == ListPageDirection::Forward ? 1 : -1;
+  if (state == BrowserState::BROWSING) {
+    catalogList.page(step);
+  } else if (state == BrowserState::FORMAT_SELECTION) {
+    formatList.page(step);
+  }
+  return true;
 }

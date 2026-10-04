@@ -17,6 +17,8 @@ class ButtonRemapActivity final : public Activity {
   // display, not a chooser. Accepting a tap would move currentStep AND have
   // ActivityManager synthesize a Confirm press -- which is exactly the input this screen
   // exists to capture, so a tap would record itself as the user's chosen button.
+  // Same reason for swipes: an injected Left/Right press would be captured as an assignment.
+  bool pageList(ListPageDirection direction) override;
 
   void loop() override;
   void render(RenderLock&&) override;

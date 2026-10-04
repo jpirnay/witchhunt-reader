@@ -1402,3 +1402,5 @@ void WifiSelectionActivity::onComplete(const bool connected) {
 ListRowTap::Result WifiSelectionActivity::selectListRow(const int index) {
   return ListRowTap::apply(index, static_cast<int>(networks.size()), selectedNetworkIndex);
 }
+
+bool WifiSelectionActivity::pageList(ListPageDirection /*direction*/) { return true; }

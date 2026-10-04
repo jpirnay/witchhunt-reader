@@ -5,6 +5,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
 - [Witch Reader User Guide](#witch-reader-user-guide)
   - [1. Hardware Overview](#1-hardware-overview)
     - [Button Layout](#button-layout)
+    - [Moving through lists](#moving-through-lists)
   - [2. Power \& Startup](#2-power--startup)
     - [Power On / Off](#power-on--off)
     - [First Launch](#first-launch)
@@ -69,14 +70,42 @@ touchscreen:
 | **X4 Pro** | Up, Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
 | **LilyGo T5 S3** | Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
 
-The T5 S3 has no **Up** key at all, so paging a list backward is done by tapping the scroll
-bar or swiping — see **[Touch Controls](#5-touch-controls)**.
+The T5 S3 has no **Up** key at all. On lists that follow **[Moving through lists](#moving-through-lists)**
+the side **Up** box stands in for it, and any list pages backward with a swipe — see
+**[Touch Controls](#5-touch-controls)**.
 
 Button layout can be customized in the **[Controls Settings](#373-controls)**.
 
 On the touch devices everything can also be driven by finger — see
 **[Touch Controls](#5-touch-controls)**. Touch never replaces a button: every key keeps its
 function, and all touch behaviour can be switched off.
+
+### Moving through lists
+
+The firmware's lists are moving to one set of buttons, a screen at a time. So far the **OPDS
+catalog** works this way; other lists still behave as their own sections describe.
+
+| Button | Press | Hold |
+| --- | --- | --- |
+| **Up / Down** | Move one row; tap twice quickly to jump a page | Jump to the first / last row |
+| **Left / Right** | Move one row, or the action the screen shows | Page back / forward; keep holding to keep paging |
+| **Confirm** | Open the selected row | The same as a press |
+| **Back** | Go back | Return to the Home screen |
+
+The hints show which is which. **«** on the Left box and **»** on the Right box mean *hold to
+page*. The word after the arrow is what a short press does: **« Up** / **» Down** where Left and
+Right move the selection, or the screen's own action, such as **« Search** / **» Info**. A box
+showing only **«** or **»** has no action for the selected row right now. A short press does
+nothing there, and holding it still pages.
+
+A button action you set yourself under **Settings → Controls** comes first: give a long Left or
+Right press an action of its own and holding it no longer pages, and a short-press action on the
+page-turn keys (Up/Down) runs as well as the move.
+
+On the **X4 Pro** and the **LilyGo T5 S3**, tap a hint box to press that button and hold the box
+to hold it. A held **«** or **»** box pages once rather than over and over, so swipe to move through
+a long list quickly. Lists that work this way always show the side boxes **Up** and **Down**, so the
+T5 S3, which has no Up key, can always move up.
 
 ### Taking a Screenshot
 When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
@@ -389,6 +418,14 @@ You can also manage OPDS servers from the web interface while in File Transfer m
 3. Use the **OPDS Servers** card to add, edit, or delete entries.
 For web-based WiFi network management, see [Web Settings (WiFi + OPDS)](#376-web-settings-wifi--opds).
 
+**Browsing a catalog.** The catalog follows **[Moving through lists](#moving-through-lists)**.
+A short **Left** opens **Search** when the catalog offers one, and a short **Right** opens **Info**
+for the selected book. Where either does not apply, that button does nothing on a short press,
+and its hint shows only the arrow. Hold **Left** / **Right**, or swipe on a touch screen, to page
+through a long catalog; **Up** / **Down** move one row. **Confirm** opens a folder or downloads a
+book. When a book comes in several formats, you choose one from a short list that works the same
+way.
+
 #### 3.7.6 Web Settings (WiFi + OPDS)
 
 While in **File Transfer** mode, the web settings page includes management cards for both **WiFi Networks** and **OPDS Servers**.
@@ -610,7 +647,7 @@ you have configured. *Holding* a hint is the same as holding that button.
 | --- | --- |
 | Tap a row, cover, folder or button hint | Select it; tap again to open it |
 | Hold a button hint | The same as holding that button |
-| Swipe up / down over a list | Page the list |
+| Swipe up / down over a list | Page the list (on Bookmarks, Starred pages and Wi-Fi networks, a swipe does nothing for now) |
 | **Tap the scroll bar** above / below the thumb | Page back / forward |
 | Swipe **right from the left edge** | Back |
 | Swipe **down from the top edge** | Reading light panel |
