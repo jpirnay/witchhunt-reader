@@ -833,6 +833,58 @@ TEST(CssParserCache, FontSizeMultiplierSurvivesDiskCache) {
   std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
 }
 
+// Class and id names are case-sensitive in XHTML. Both sides used to be lowercased, so The
+// Anarchy's paragraph rule `.Dial` (display:block, 0.75em, a hanging indent) also styled every
+// `<span class="dial">` speaker name inside those paragraphs. Only the tag name folds.
+TEST(CssParserCache, ClassAndIdNamesMatchCaseSensitively) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+
+  const std::string css =
+      ".Dial { display: block; font-size: 0.75em; }\n"
+      ".dial { padding-right: 0.75em; }\n"
+      "#Note { text-align: right; }\n"
+      "P.Big { font-weight: bold; }\n";
+  std::string cssPath;
+  ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
+
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(compileCache(parser, cssPath));
+
+  // The heap path, then the arena-resident one: they key the rules differently.
+  BuildArena arena(64 * 1024);
+  ASSERT_TRUE(arena.valid());
+  for (const bool resident : {false, true}) {
+    SCOPED_TRACE(resident ? "arena-resident" : "heap");
+    parser.clear();
+    if (resident) {
+      parser.setIndexArena(&arena);
+      parser.setLeanResolve(true);
+    }
+    ASSERT_TRUE(parser.loadFromCache());
+
+    const CssStyle speaker = parser.resolveStyle("span", "dial");
+    EXPECT_FALSE(speaker.hasDisplay()) << ".Dial reached class=\"dial\"";
+    EXPECT_FALSE(speaker.hasFontSizeMultiplier()) << ".Dial reached class=\"dial\"";
+    EXPECT_TRUE(speaker.hasPaddingRight());
+
+    const CssStyle paragraph = parser.resolveStyle("p", "Dial");
+    EXPECT_TRUE(paragraph.hasDisplay());
+    EXPECT_FALSE(paragraph.hasPaddingRight()) << ".dial reached class=\"Dial\"";
+
+    EXPECT_TRUE(parser.resolveStyle("div", "", "Note").hasTextAlign());
+    EXPECT_FALSE(parser.resolveStyle("div", "", "note").hasTextAlign()) << "#Note reached id=\"note\"";
+
+    // The tag part still folds: `P.Big` is `p.Big`.
+    EXPECT_TRUE(parser.resolveStyle("p", "Big").hasFontWeight());
+    EXPECT_FALSE(parser.resolveStyle("p", "big").hasFontWeight());
+  }
+  parser.clear();
+  removePath(cacheDir);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
+}
+
 // Regression (cache v14): list-style-type:none and page-break-before/after from
 // stylesheets must survive the disk-cache round trip. Same defect class as the
 // v13 font-size fix — parsed correctly, then dropped by write/readCssStylePayload.
@@ -987,9 +1039,10 @@ TEST(CssParserBackground, CompiledPicturesSurviveAFreshParser) {
   EXPECT_EQ(nullptr, parser.backgroundImageFor("div", "tiled"));
   EXPECT_EQ(nullptr, parser.backgroundImageFor("p", "cancelled"));
   EXPECT_EQ(nullptr, parser.backgroundImageFor("table", ""));  // the rule was table.rabbithole
-  const std::string* hero = parser.backgroundImageFor("div", "", "HERO");
+  const std::string* hero = parser.backgroundImageFor("div", "", "hero");
   ASSERT_NE(nullptr, hero);
   EXPECT_EQ("OEBPS/Styles/hero.png", *hero);
+  EXPECT_EQ(nullptr, parser.backgroundImageFor("div", "", "HERO"));  // id names keep their case
 
   // clear() ends a build; the next one reads the side file again.
   parser.clear();

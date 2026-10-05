@@ -156,8 +156,33 @@ bool isSelectorUsableByResolver(std::string_view selector) {
   return dotPos + 1 < selector.size() && selector.find('.', dotPos + 1) == std::string_view::npos;
 }
 
+// Selector form of CssParser::normalizedInto: collapses whitespace the same way, but folds case
+// only up to the first '.' or '#'. Tag names are case-insensitive; class and id names are not
+// (XHTML), and folding them let `.Dial` style `class="dial"`.
+void normalizedSelectorInto(const std::string_view s, std::string& out) {
+  out.clear();
+  out.reserve(s.size());
+  bool inSpace = true;  // Start true to skip leading space
+  bool inName = false;
+  for (const char c : s) {
+    if (isCssWhitespace(c)) {
+      if (!inSpace) {
+        out.push_back(' ');
+        inSpace = true;
+      }
+      continue;
+    }
+    if (c == '.' || c == '#') inName = true;
+    out.push_back(inName ? c : static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    inSpace = false;
+  }
+  if (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+}
+
 template <typename Fn>
-void forEachNormalizedClassToken(const std::string& classAttr, std::string& normalizedBuf, Fn&& fn) {
+void forEachClassToken(const std::string& classAttr, std::string& tokenBuf, Fn&& fn) {
   size_t i = 0;
   while (i < classAttr.size()) {
     while (i < classAttr.size() && isCssWhitespace(classAttr[i])) {
@@ -172,14 +197,8 @@ void forEachNormalizedClassToken(const std::string& classAttr, std::string& norm
       ++i;
     }
 
-    normalizedBuf.clear();
-    normalizedBuf.reserve(i - start);
-    for (size_t j = start; j < i; ++j) {
-      normalizedBuf.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(classAttr[j]))));
-    }
-    if (!normalizedBuf.empty()) {
-      fn(normalizedBuf);
-    }
+    tokenBuf.assign(classAttr, start, i - start);
+    fn(tokenBuf);
   }
 }
 
@@ -828,7 +847,7 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     const std::string_view rawPart(selectorGroup.data() + partStart, i - partStart);
     partStart = i + 1;
 
-    normalizedInto(rawPart, selectorKeyBuf_);
+    normalizedSelectorInto(rawPart, selectorKeyBuf_);
     if (selectorKeyBuf_.empty()) continue;  // splitOnChar dropped empties too
 
     totalSelectorCandidates_++;
@@ -2103,7 +2122,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     std::string combinedKey;
     combinedKey.reserve(tag.size() + 1 + 32);
 
-    forEachNormalizedClassToken(classAttr, classToken, [&](const std::string& cls) {
+    forEachClassToken(classAttr, classToken, [&](const std::string& cls) {
       classKey.clear();
       classKey.push_back('.');
       classKey.append(cls);
@@ -2139,9 +2158,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     std::string idKey;
     idKey.reserve(1 + idAttr.size());
     idKey.push_back('#');
-    for (const char c : idAttr) {
-      idKey.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
+    idKey.append(idAttr);
 
     CssStyle idStyle;
     if (lookupRule(idKey, idStyle, !lowHeapMode)) {
@@ -2153,9 +2170,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     tagIdKey.reserve(tag.size() + 1 + idAttr.size());
     tagIdKey.append(tag);
     tagIdKey.push_back('#');
-    for (const char c : idAttr) {
-      tagIdKey.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
+    tagIdKey.append(idAttr);
 
     CssStyle tagIdStyle;
     if (lookupRule(tagIdKey, tagIdStyle, !lowHeapMode)) {
@@ -2254,7 +2269,7 @@ void CssParser::recordBackgroundImage(const std::string_view selectorGroup, cons
   size_t partStart = 0;
   for (size_t i = 0; i <= selectorGroup.size(); ++i) {
     if (i != selectorGroup.size() && selectorGroup[i] != ',') continue;
-    normalizedInto(selectorGroup.substr(partStart, i - partStart), key);
+    normalizedSelectorInto(selectorGroup.substr(partStart, i - partStart), key);
     partStart = i + 1;
     if (key.empty() || key.size() > MAX_SELECTOR_LENGTH || !isSelectorUsableByResolver(key)) continue;
     auto existing = std::find_if(backgroundImages_.begin(), backgroundImages_.end(),
@@ -2342,7 +2357,7 @@ const std::string* CssParser::backgroundImageFor(const std::string& tagName, con
   if (!classAttr.empty()) {
     std::string token;
     std::string key;
-    forEachNormalizedClassToken(classAttr, token, [&](const std::string& cls) {
+    forEachClassToken(classAttr, token, [&](const std::string& cls) {
       key = "." + cls;
       if (const auto* p = find(key)) result = p;
       key = tag + "." + cls;
@@ -2350,8 +2365,7 @@ const std::string* CssParser::backgroundImageFor(const std::string& tagName, con
     });
   }
   if (!idAttr.empty()) {
-    std::string id = "#";
-    for (const char c : idAttr) id.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    const std::string id = "#" + idAttr;
     if (const auto* p = find(id)) result = p;
     if (const auto* p = find(tag + id)) result = p;
   }

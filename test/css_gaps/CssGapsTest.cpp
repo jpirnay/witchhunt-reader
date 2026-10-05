@@ -227,14 +227,17 @@ TEST(CssGapsIdSelector, CascadesOverTag) {
   ASSERT_EQ(style.textAlign, CssTextAlign::Center);
 }
 
-TEST(CssGapsIdSelector, CaseNormalized) {
-  // CSS id selectors are case-sensitive by spec, but we normalize to lowercase
-  // consistently (same as class selectors) to avoid common EPUB authoring issues.
+TEST(CssGapsIdSelector, CaseSensitive) {
+  // Id (and class) names are case-sensitive in XHTML, as every other reader matches them. They
+  // used to be folded to lowercase, which let one rule reach a differently-cased name: The
+  // Anarchy's paragraph rule `.Dial` styled its `class="dial"` speaker names. No book in a
+  // 109-book survey needed the folding.
   CssParser parser("");
   loadCssFromString(parser, "#MyID { font-style: italic; }");
-  const CssStyle style = parser.resolveStyle("span", "", "myid");
-  ASSERT_TRUE(style.hasFontStyle());
-  ASSERT_EQ(style.fontStyle, CssFontStyle::Italic);
+  const CssStyle exact = parser.resolveStyle("span", "", "MyID");
+  ASSERT_TRUE(exact.hasFontStyle());
+  ASSERT_EQ(exact.fontStyle, CssFontStyle::Italic);
+  ASSERT_FALSE(parser.resolveStyle("span", "", "myid").hasFontStyle());
 }
 
 TEST(CssGapsIdSelector, DoesNotAffectUnrelatedElement) {

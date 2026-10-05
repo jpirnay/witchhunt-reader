@@ -93,7 +93,9 @@ class CssParser {
   //      a book whose picture is a CSS background (Alice's rabbit hole) kept showing none.
   // v21: `display` keeps Inline apart from Block (#388). A v20 cache stored display:inline as
   //      Block, which would now lay those spans out as blocks.
-  static constexpr uint8_t CSS_CACHE_VERSION = 21;
+  // v22: class and id names in selectors keep their case (only the tag name folds). A v21 cache
+  //      stores them lowercased, so a mixed-case class would no longer match its own rule.
+  static constexpr uint8_t CSS_CACHE_VERSION = 22;
   // Bytes before the sorted offset index: version(1) + ruleCount(2) + totalSelectorCandidates(4)
   // + unsupportedSelectorSkips(4) + flags(1).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 12;
