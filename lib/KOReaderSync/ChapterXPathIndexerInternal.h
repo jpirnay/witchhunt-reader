@@ -16,6 +16,10 @@ bool isWhitespaceOnly(const char* text, int len);
 // Block-level tags, as crengine renders them (CSS display above inline). One list for all three
 // uses: R1's parent, R3's siblings, and which text gets a text point.
 bool isBlockTag(const std::string& tag);
+// False for the elements crengine keeps no text in (table, thead, tbody, tfoot, tr: allow_text=false
+// in fb2def.h; lvtinydom.cpp moves stray text out before the table). A text point under one of
+// them is a null XPointer (R4), so the push names the element instead.
+bool allowsTextChildren(const std::string& tag);
 
 size_t countVisibleBytes(const char* text, int len);
 // Codepoints of one character-data chunk as crengine stores them (R2): with `collapse`, a run of

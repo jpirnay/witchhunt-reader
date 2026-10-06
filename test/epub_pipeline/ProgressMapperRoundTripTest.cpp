@@ -28,6 +28,7 @@
 #include "Epub.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "KOReaderSync/ChapterXPathIndexer.h"
 #include "KOReaderSync/ProgressMapper.h"
 
 namespace fs = std::filesystem;
@@ -204,10 +205,13 @@ TEST_P(RoundTripFixture, ChapterStartStaysOnFirstPageWhateverThePercentageSays) 
 }
 
 // A page start that pushes as a text point comes back on exactly that offset; one that pushes as
-// an element path comes back on or before it. This is the counting agreement between the parser's
-// LUT and the two mappers, with no allowance.
+// an element path resolves on or before it. This is the counting agreement between the parser's
+// LUT and the two mappers, with no allowance. An element match is anchored at its first direct
+// text or its END tag, which is no page start, so toCrossPoint does not hand its offset to the
+// reader (the paragraph LUT or the estimate lands it); its anchor is checked at the resolver.
 TEST_P(RoundTripFixture, EveryTextPointComesBackExactly) {
   const int spineCount = epub->getSpineItemsCount();
+  int textPoints = 0;
   for (int spine = 0; spine < spineCount; ++spine) {
     const auto section = build(spine);
     const int pages = section->pageCount;
@@ -221,15 +225,24 @@ TEST_P(RoundTripFixture, EveryTextPointComesBackExactly) {
       pos.visibleTextOffset = *start;
       pos.hasVisibleTextOffset = true;
       const auto ko = ProgressMapper::toKOReader(epub, pos);
+      if (ko.xpath.find("/text()[") == std::string::npos) {
+        float intra = 0.0f;
+        bool exact = false;
+        uint32_t anchor = 0;
+        ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, spine, ko.xpath, intra, exact, nullptr, &anchor))
+            << "spine " << spine << " page " << page << " via " << ko.xpath;
+        EXPECT_LE(anchor, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
+        EXPECT_FALSE(ProgressMapper::toCrossPoint(epub, ko).hasVisibleTextOffset)
+            << "spine " << spine << " page " << page << " via " << ko.xpath;
+        continue;
+      }
+      ++textPoints;
       const auto back = ProgressMapper::toCrossPoint(epub, ko);
       ASSERT_TRUE(back.hasVisibleTextOffset) << "spine " << spine << " page " << page << " via " << ko.xpath;
-      if (ko.xpath.find("/text()[") != std::string::npos) {
-        EXPECT_EQ(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
-      } else {
-        EXPECT_LE(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
-      }
+      EXPECT_EQ(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
     }
   }
+  EXPECT_GT(textPoints, 0);
 }
 
 INSTANTIATE_TEST_SUITE_P(Corpus, RoundTripFixture, testing::ValuesIn(corpusBooks()),

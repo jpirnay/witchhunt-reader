@@ -72,9 +72,9 @@ struct KOReaderSyncSessionState {
   // Preferred over resultParagraphIndex when the deepest target element is /li[N].
   uint16_t resultListItemIndex = 0;
   bool resultHasListItemIndex = false;
-  // The remote position as a visible-text offset in resultSpineIndex (exact matches only), which
-  // EpubReaderActivity turns into the exact page via Section::getPageForVisibleTextOffset.
-  // Preferred over both LUT indices above.
+  // The remote position as a visible-text offset in resultSpineIndex (only for a KOReader text
+  // point matched to the codepoint), which EpubReaderActivity turns into the exact page via
+  // Section::getPageForVisibleTextOffset. Preferred over both LUT indices above.
   uint32_t resultVisibleOffset = 0;
   bool resultHasVisibleOffset = false;
   // Where to land once this sync (and its reboot) completes. Defaults to Reader so auto-push-on-
@@ -88,6 +88,19 @@ struct KOReaderSyncSessionState {
   // before rendering its first page. Stored by EPUB path so the flag cannot leak across books.
   std::string autoPullEpubPath;
 
+  // Every result* field: where an applied remote position lands. One list, so a new result field
+  // cannot be missed by one of the sites that reset them.
+  void clearResult() {
+    resultSpineIndex = 0;
+    resultPage = 0;
+    resultParagraphIndex = 0;
+    resultHasParagraphIndex = false;
+    resultListItemIndex = 0;
+    resultHasListItemIndex = false;
+    resultVisibleOffset = 0;
+    resultHasVisibleOffset = false;
+  }
+
   void clear() {
     active = false;
     epubPath.clear();
@@ -99,14 +112,7 @@ struct KOReaderSyncSessionState {
     paragraphIndexBefore = 0;
     intent = KOReaderSyncIntentState::COMPARE;
     outcome = KOReaderSyncOutcomeState::NONE;
-    resultSpineIndex = 0;
-    resultPage = 0;
-    resultParagraphIndex = 0;
-    resultHasParagraphIndex = false;
-    resultListItemIndex = 0;
-    resultHasListItemIndex = false;
-    resultVisibleOffset = 0;
-    resultHasVisibleOffset = false;
+    clearResult();
     postAction = KOReaderSyncPostAction::Reader;
     postActionTarget.clear();
     autoPullEpubPath.clear();

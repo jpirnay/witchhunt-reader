@@ -66,6 +66,15 @@ TEST_F(TextNodeRules, PreKeepsRawWhitespaceAndItsLeadingRun) {
 TEST_F(TextNodeRules, MixedContentDropsWhitespaceNextToBlocks) {
   EXPECT_EQ(push("<div>\n<p>a</p>\n<span>s</span>\nloose text</div>", 2), kP + "div[1]/text()[1].1");
   EXPECT_EQ(push("<div>\n<span>s</span>\nloose <em>e</em> text\n<p>later</p></div>", 7), kP + "div[1]/text()[2].1");
+  // The space between the spans has inline neighbours on both sides: it stays as text()[1].
+  EXPECT_EQ(push("<div><p>c</p><span>a</span> <span>b</span>tail</div>", 3), kP + "div[1]/text()[2].0");
+}
+
+// table, thead, tbody, tfoot and tr keep no text in crengine: stray text there names the element,
+// because a text point would be a null XPointer (R4). A cell keeps its text point.
+TEST_F(TextNodeRules, StrayTableTextPushesAsTheElementPath) {
+  EXPECT_EQ(push("<table>stray<tr><td>x</td></tr></table>", 0), kP + "table[1]");
+  EXPECT_EQ(push("<table><tr><td>cell text</td></tr></table>", 0), kP + "table[1]/tr[1]/td[1]/text()[1].0");
 }
 
 // NBSP is a character, not whitespace, on both sides.
@@ -82,6 +91,7 @@ TEST_F(TextNodeRules, ThePullUsesTheSameRules) {
 // A 3-byte codepoint (U+2014) split by the SAX buffer's flush still names, and resolves to, the
 // word after it. Sweeps the filler so the split lands wherever the parser's flush falls.
 TEST_F(TextNodeRules, ACodepointSplitAtTheChunkBoundaryStillLandsExactly) {
+  // The range brackets the SAX parser's 256-byte content flush; widen it if that buffer changes.
   for (int n = 240; n <= 272; ++n) {
     // "\xE2\x80\x94" is U+2014; the literal ends before "Dword" so D is not read as a hex digit.
     const std::string body = "<p>" + std::string(n, 'a') + "\xE2\x80\x94" + "Dword</p>";

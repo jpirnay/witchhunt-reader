@@ -16,7 +16,8 @@ namespace ChapterXPathIndexerInternal {
 // Forward mapper: the XPath of the text at a visible-byte offset.
 //
 // Where the cursor lands in text that is a direct child of a BLOCK element (isBlockTag: p, li,
-// headings, div, td, ...) the result is .../block[K]/text()[N].M: N the text node within the
+// headings, div, td, ...; not table/thead/tbody/tfoot/tr, which keep no text in crengine, see
+// allowsTextChildren) the result is .../block[K]/text()[N].M: N the text node within the
 // block, M the codepoint within the node. That is the shape KOReader emits itself, and the shape
 // our reverse mapper resolves at its text-node-exact tier. Inside an inline element (em, span, a,
 // ...) the element path is emitted: crengine merges and renumbers inline runs, and the deep
@@ -78,7 +79,7 @@ struct ForwardState : StackState {
     // Offset path: a page's start is a byte of text and names the chunk that CONTAINS it.
     const bool reached = inclusive ? totalTextBytes + visible >= targetOffset : totalTextBytes + visible > targetOffset;
     if (reached) {
-      if (textPointsInBlocks ? isBlockTag(parent.tag) : parent.tag == "body") {
+      if ((textPointsInBlocks ? isBlockTag(parent.tag) : parent.tag == "body") && allowsTextChildren(parent.tag)) {
         const size_t targetVisibleByteInChunk = targetOffset - totalTextBytes;
         const size_t cpInChunk =
             collapsedCodepointAtVisibleByte(text, len, targetVisibleByteInChunk, preDepth == 0, run.spaceBefore);

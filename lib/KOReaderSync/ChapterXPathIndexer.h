@@ -58,15 +58,20 @@ class ChapterXPathIndexer {
    *                 is /li[N], receives the running <li> count at the matched element so the
    *                 caller can snap to the precise page via Section::getPageForListItemIndex().
    *                 Set to 0 if the target wasn't <li>-anchored.
-   * @param outVisibleOffset Optional. When non-null, receives the matched position as a
+   * @param outVisibleOffset Optional. When non-null, receives the match's anchor as a
    *                 visible-text offset in the chapter, the coordinate of
-   *                 Section::getPageForVisibleTextOffset(). A position only when outExactMatch
-   *                 is true. Set to 0 when no match was found.
+   *                 Section::getPageForVisibleTextOffset(). A position only when
+   *                 *outIsTextPoint is true. Set to 0 when no match was found.
+   * @param outIsTextPoint Optional. When non-null, true only when the match is a
+   *                 /text()[N].M point resolved to the codepoint. An element match, exact or
+   *                 not, is anchored at its first direct text or, lacking any, at its END tag
+   *                 (a Calibre <p><span>text</span></p>), which is no page start.
    * @return true if any match was resolved; false means caller should fallback
    */
   static bool findProgressForXPath(const std::shared_ptr<Epub>& epub, int spineIndex, const std::string& xpath,
                                    float& outIntraSpineProgress, bool& outExactMatch,
-                                   uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr);
+                                   uint16_t* outListItemIndex = nullptr, uint32_t* outVisibleOffset = nullptr,
+                                   bool* outIsTextPoint = nullptr);
 
   /**
    * Parse DocFragment index from KOReader-style path segment:

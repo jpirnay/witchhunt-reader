@@ -383,13 +383,9 @@ void KOReaderSyncActivity::performFetchAndCompare() {
   // Prepare remote mapping state for the next step.
   hasRemoteProgress = false;
   remotePositionMapped = false;
+  remotePosition = CrossPointPosition{};
   remotePosition.spineIndex = -1;
   remotePosition.pageNumber = -1;
-  remotePosition.totalPages = 0;
-  remotePosition.paragraphIndex = 0;
-  remotePosition.hasParagraphIndex = false;
-  remotePosition.listItemIndex = 0;
-  remotePosition.hasListItemIndex = false;
   remoteChapterLabel.clear();
 
   if (syncIntent == KOReaderSyncIntentState::PULL_REMOTE || syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
@@ -768,14 +764,7 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
     // Only zero the result fields when not resuming an already-applied remote
     // position. The PULL_REMOTE path pre-saves the mapped result into APP_STATE
     // before entering APPLY_COMPLETE; zeroing here would overwrite it.
-    sync.resultSpineIndex = 0;
-    sync.resultPage = 0;
-    sync.resultParagraphIndex = 0;
-    sync.resultHasParagraphIndex = false;
-    sync.resultListItemIndex = 0;
-    sync.resultHasListItemIndex = false;
-    sync.resultVisibleOffset = 0;
-    sync.resultHasVisibleOffset = false;
+    sync.clearResult();
   }
   // Capture the destination before touching the session, since onExit() still needs it after the
   // reboot decision. What may be cleared here depends entirely on who consumes the session next:

@@ -87,10 +87,7 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   }
   sync.intent = syncIntent;
   sync.outcome = KOReaderSyncOutcomeState::PENDING;
-  sync.resultSpineIndex = 0;
-  sync.resultPage = 0;
-  sync.resultParagraphIndex = 0;
-  sync.resultHasParagraphIndex = false;
+  sync.clearResult();
   // Reset here (rather than trusting whatever the struct already held) so a stale destination
   // from a prior run cannot steal the user to the wrong place; every caller states what it wants,
   // defaulting to Reader (the pre-existing behavior for reader-menu-triggered syncs).

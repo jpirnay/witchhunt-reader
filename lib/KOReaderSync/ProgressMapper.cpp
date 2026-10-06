@@ -192,8 +192,9 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     float intraFromXPath = 0.0f;
     uint16_t liIndexFromXPath = 0;
     uint32_t offsetFromXPath = 0;
+    bool textPointFromXPath = false;
     if (ChapterXPathIndexer::findProgressForXPath(epub, xpathSpineIndex, koPos.xpath, intraFromXPath, xpathExactMatch,
-                                                  &liIndexFromXPath, &offsetFromXPath)) {
+                                                  &liIndexFromXPath, &offsetFromXPath, &textPointFromXPath)) {
       result.spineIndex = xpathSpineIndex;
       result.hasResolvedSpineIndex = true;
       resolvedIntraSpineProgress = intraFromXPath;
@@ -202,9 +203,12 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
         result.listItemIndex = liIndexFromXPath;
         result.hasListItemIndex = true;
       }
-      // Only an exact match is a position; an ancestor or index-insensitive match is a stand-in
-      // whose offset (a wrapper's end, a sibling's start) must not be mistaken for one.
-      if (xpathExactMatch) {
+      // Only a text point matched to the codepoint is a position. An ancestor or index-insensitive
+      // match is a stand-in whose offset (a wrapper's end, a sibling's start) must not be mistaken
+      // for one, and so is an exact ELEMENT match: it sits at the element's first direct text, or
+      // at its END tag when it has none (<p><span>text</span></p>), so the offset would land the
+      // reader where the paragraph ends. Those keep the paragraph/li LUT, then the percentage.
+      if (textPointFromXPath) {
         result.visibleTextOffset = offsetFromXPath;
         result.hasVisibleTextOffset = true;
       }

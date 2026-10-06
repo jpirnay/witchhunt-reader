@@ -52,6 +52,15 @@ bool isBlockTag(const std::string& tag) {
   return false;
 }
 
+bool allowsTextChildren(const std::string& tag) {
+  // fb2def.h: allow_text=false. Still block tags for R1/R3, never a text point's parent.
+  static constexpr std::string_view kNoText[] = {"table", "thead", "tbody", "tfoot", "tr"};
+  for (const std::string_view t : kNoText) {
+    if (tag == t) return false;
+  }
+  return true;
+}
+
 namespace {
 
 // Walks one character-data chunk codepoint by codepoint as crengine stores it (R2), calling

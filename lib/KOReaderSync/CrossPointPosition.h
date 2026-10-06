@@ -18,8 +18,8 @@ struct CrossPointPosition {
   bool hasListItemIndex = false;   // True when listItemIndex is valid
   // The page's start as a visible-text offset in the chapter (Section::getVisibleTextOffsetForPage;
   // VisibleText.h's rule). Exact: a push names the text at this offset to the character, a pull
-  // resolves to the page this offset falls on. Absent when the chapter is not laid out or the
-  // match was inexact.
+  // resolves to the page this offset falls on. Absent when the chapter is not laid out, or when the
+  // pull did not resolve a /text()[N].M point to the codepoint (an element or inexact match).
   uint32_t visibleTextOffset = 0;
   bool hasVisibleTextOffset = false;
   // True when spineIndex came from the record's own DocFragment (or from local state), not from

@@ -49,6 +49,10 @@ struct ReverseState : StackState {
   int bestDepth = -1;
   size_t bestOffset = 0;
   bool bestExact = false;
+  // The best match is a /text()[N].M point matched to the codepoint. Only then is bestOffset a
+  // position: an element match sits at the element's first direct text, or at its END tag when it
+  // has none (<p><span>text</span></p>).
+  bool bestIsTextPoint = false;
   // The text-node match was at its chunk's END. The next chunk of the same node starts at the same
   // codepoint and takes over: if it opens with the tail of a codepoint the SAX buffer's flush
   // split, only that chunk knows the visible bytes before the target.
@@ -159,6 +163,7 @@ struct ReverseState : StackState {
             bestDepth = pathDepth(xpath);
             bestOffset = pos;
             bestExact = true;
+            bestIsTextPoint = true;
             bestTierName = "text-node-exact";
             bestLiIndex = liCount;
           }
@@ -215,6 +220,7 @@ struct ReverseState : StackState {
       bestDepth = depth;
       bestOffset = totalTextBytes;
       bestExact = isExact;
+      bestIsTextPoint = false;
       bestTierName = tierName;
       bestLiIndex = liCount;
     }
@@ -225,7 +231,7 @@ struct ReverseState : StackState {
 
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
                                   float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
-                                  uint32_t* outVisibleOffset) {
+                                  uint32_t* outVisibleOffset, bool* outIsTextPoint) {
   outIntraSpineProgress = 0.0f;
   outExactMatch = false;
   if (outListItemIndex) {
@@ -233,6 +239,9 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
   if (outVisibleOffset) {
     *outVisibleOffset = 0;
+  }
+  if (outIsTextPoint) {
+    *outIsTextPoint = false;
   }
 
   if (xpath.empty()) {
@@ -261,6 +270,9 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   outExactMatch = state.bestExact;
   if (outVisibleOffset) {
     *outVisibleOffset = static_cast<uint32_t>(state.bestOffset);
+  }
+  if (outIsTextPoint) {
+    *outIsTextPoint = state.bestIsTextPoint;
   }
   if (state.totalTextBytes == 0) {
     outIntraSpineProgress = 0.0f;

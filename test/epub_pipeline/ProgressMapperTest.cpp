@@ -35,9 +35,11 @@
 #include "Epub.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "KOReaderSync/ChapterXPathIndexer.h"
 #include "KOReaderSync/ChapterXPathIndexerInternal.h"
 #include "KOReaderSync/ProgressMapper.h"
 #include "StoredZipWriter.h"
+#include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
 
@@ -390,19 +392,22 @@ TEST_F(ProgressMapperFixture, UnparseableChapterUploadsAsItsRoot) {
 // With the chapter laid out, a page's start is a visible-text offset in the section cache. The
 // push names the text at that offset to the character, in the shape KOReader itself emits.
 
+// Lays `spine` out with the stub renderer and loads the section cache, LUTs included.
+std::unique_ptr<Section> buildSection(const std::shared_ptr<Epub>& epub, const int spine, GfxRenderer& renderer) {
+  Section::BuildParams p;
+  p.viewportWidth = 480;
+  p.viewportHeight = 800;
+  p.fontSizeNormalization = false;
+  auto section = std::make_unique<Section>(epub, spine, renderer);
+  EXPECT_TRUE(section->createSectionFile(p, {}, true));
+  EXPECT_TRUE(section->loadSectionFile(p));
+  return section;
+}
+
 struct OffsetPushFixture : ProgressMapperFixture {
   GfxRenderer renderer;
 
-  std::unique_ptr<Section> build(const int spine) {
-    Section::BuildParams p;
-    p.viewportWidth = 480;
-    p.viewportHeight = 800;
-    p.fontSizeNormalization = false;
-    auto section = std::make_unique<Section>(epub, spine, renderer);
-    EXPECT_TRUE(section->createSectionFile(p, {}, true));
-    EXPECT_TRUE(section->loadSectionFile(p));
-    return section;
-  }
+  std::unique_ptr<Section> build(const int spine) { return buildSection(epub, spine, renderer); }
 
   CrossPointPosition pageWithOffset(const Section& section, const int spine, const int page) const {
     CrossPointPosition pos{};
@@ -473,9 +478,10 @@ TEST_F(OffsetPushFixture, AParagraphAfterAnEntityPushesToTheExactCodepoint) {
 
 // --- Pull by content offset ---------------------------------------------------------------------
 //
-// An exact match names a point in the chapter's visible text; the reader turns that offset into
-// the page it falls on through the section's LUT. An inexact match is only a stand-in for the
-// element KOReader named, and carries no offset.
+// A text point matched exactly names a point in the chapter's visible text; the reader turns that
+// offset into the page it falls on through the section's LUT. Nothing else carries an offset: an
+// inexact match is only a stand-in for the element KOReader named, and an element matched exactly
+// is anchored at its first direct text or, lacking any, at its END tag, which is no page start.
 
 TEST_F(ProgressMapperFixture, AnExactMatchCarriesItsOffset) {
   const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5f));
@@ -495,8 +501,14 @@ TEST_F(ProgressMapperFixture, TheChapterHeadingCarriesOffsetZero) {
 }
 
 TEST_F(ProgressMapperFixture, AnInexactMatchCarriesNoOffset) {
-  EXPECT_FALSE(map("/body/DocFragment[2]/body/section/div[4]/p[2]/text().0", percentageInto(kSectionSpine, 0.4f))
-                   .hasVisibleTextOffset);
+  const std::string xpath = "/body/DocFragment[2]/body/section/div[4]/p[2]/text().0";
+  // The chapter has no div: the resolver does match, but only through a stand-in.
+  float intra = 0.0f;
+  bool exact = true;
+  ASSERT_TRUE(ChapterXPathIndexer::findProgressForXPath(epub, kSectionSpine, xpath, intra, exact));
+  ASSERT_FALSE(exact);
+
+  EXPECT_FALSE(map(xpath, percentageInto(kSectionSpine, 0.4f)).hasVisibleTextOffset);
 }
 
 TEST_F(ProgressMapperFixture, AFailedResolveCarriesNoOffset) {
@@ -517,7 +529,7 @@ TEST_F(OffsetPushFixture, AMidParagraphPageStartPullsBackToItsOffset) {
   EXPECT_EQ(section->getPageForVisibleTextOffset(back.visibleTextOffset), std::optional<uint16_t>(1));
 }
 
-TEST_F(OffsetPushFixture, EntityAtThePageStartPullsBackToItsOffset) {
+TEST_F(OffsetPushFixture, AParagraphAfterAnEntityPullsBackToItsOffset) {
   const auto section = build(kFlatSpine);
   ASSERT_GT(section->pageCount, 1);
   const auto pos = pageWithOffset(*section, kFlatSpine, 1);
@@ -528,6 +540,80 @@ TEST_F(OffsetPushFixture, EntityAtThePageStartPullsBackToItsOffset) {
   ASSERT_TRUE(back.hasVisibleTextOffset) << ko.xpath;
   EXPECT_EQ(back.visibleTextOffset, pos.visibleTextOffset) << ko.xpath;
   EXPECT_EQ(section->getPageForVisibleTextOffset(back.visibleTextOffset), std::optional<uint16_t>(1));
+}
+
+// Calibre's shape: every paragraph's text sits in a <span>, so a <p> has no direct text and its
+// element match is anchored at its END tag.
+struct ElementPullFixture : testing::Test {
+  fs::path work;
+  int bookCount = 0;
+  GfxRenderer renderer;
+
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("element_pull_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+  }
+  void TearDown() override { fs::remove_all(work); }
+
+  std::shared_ptr<Epub> book(const std::string& body) { return syntheticBook(work, bookCount++, body); }
+
+  static CrossPointPosition pull(const std::shared_ptr<Epub>& epub, const std::string& xpath) {
+    return ProgressMapper::toCrossPoint(epub, KOReaderPosition{xpath, 0.5f});
+  }
+
+  // The page the reader lands on: applyPendingSyncSession's order of preference (offset, list
+  // item, paragraph, estimate), each resolved as NavigationTarget::resolveInto resolves it.
+  static int landingPage(const CrossPointPosition& pos, const Section& section) {
+    if (pos.hasVisibleTextOffset) {
+      if (const auto p = section.getPageForVisibleTextOffset(pos.visibleTextOffset)) return *p;
+      return pos.pageNumber;
+    }
+    if (pos.hasListItemIndex) {
+      if (const auto p = section.getPageForListItemIndex(pos.listItemIndex)) return *p;
+      if (const auto p = section.getPageForParagraphIndex(pos.listItemIndex)) return *p;
+      return pos.pageNumber;
+    }
+    if (pos.hasParagraphIndex) {
+      if (const auto p = section.getPageForParagraphIndex(pos.paragraphIndex)) return *p;
+    }
+    return pos.pageNumber;
+  }
+};
+
+const char* const kSpanParagraphs = "<p><span>first paragraph text</span></p><p><span>second paragraph text</span></p>";
+
+TEST_F(ElementPullFixture, AnElementMatchCarriesNoOffset) {
+  const auto epub = book(kSpanParagraphs);
+
+  const auto paragraph = pull(epub, "/body/DocFragment[1]/body/p[2]");
+  EXPECT_EQ(paragraph.spineIndex, 0);
+  EXPECT_FALSE(paragraph.hasVisibleTextOffset) << paragraph.visibleTextOffset;
+  // The paragraph LUT lands it, as it did before offsets.
+  EXPECT_TRUE(paragraph.hasParagraphIndex);
+  EXPECT_EQ(paragraph.paragraphIndex, 2);
+
+  // The chapter's root is matched at </body>, the chapter's last byte.
+  EXPECT_FALSE(pull(epub, "/body/DocFragment[1]/body").hasVisibleTextOffset);
+}
+
+TEST_F(ElementPullFixture, ATextPointInsideTheSpanCarriesItsOffset) {
+  const auto pos = pull(book(kSpanParagraphs), "/body/DocFragment[1]/body/p[2]/span[1]/text().3");
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+  // "firstparagraphtext" is 18 visible bytes, "sec" 3 more.
+  EXPECT_EQ(pos.visibleTextOffset, 21u);
+}
+
+TEST_F(ElementPullFixture, AnElementPullOfALongParagraphLandsWhereItStarts) {
+  std::string text;
+  for (int i = 0; i < 80; ++i) text += "The second paragraph runs on with ordinary words for a while. ";
+  const auto epub = book("<p><span>first paragraph text</span></p><p><span>" + text + "</span></p>");
+  const auto section = buildSection(epub, 0, renderer);
+  ASSERT_GT(section->pageCount, 1);
+
+  // Landing on the element's anchor would be the paragraph's last page.
+  EXPECT_EQ(landingPage(pull(epub, "/body/DocFragment[1]/body/p[2]"), *section), 0);
 }
 
 }  // namespace
