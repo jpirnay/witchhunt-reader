@@ -13,104 +13,81 @@
 
 namespace ChapterXPathIndexerInternal {
 
+// Forward mapper: the XPath of the text at a visible-byte offset.
+//
+// Where the cursor lands in text that is a direct child of a BLOCK element (p, li, headings,
+// div, td, ...) the result is .../block[K]/text()[N].M: N the text node within the block, M the
+// codepoint within the node. That is the shape KOReader emits itself, and the shape our reverse
+// mapper resolves at its text-node-exact tier. Inside an inline element (em, span, a, ...) the
+// element path is emitted: crengine merges and renumbers inline runs, and the deep text-point
+// forms of 1.43 did not survive it (see git history of this file).
+//
+// The fraction path (no page offset) keeps the form it had before: the element path, so the
+// paragraph rather than a character in it, since its target is a byte fraction of the chapter and
+// not a page's start. Only text directly in <body>, which has no element of its own to name, gets
+// a text point there (1.42's rule).
 namespace {
 
-// Forward mapper: translate intra-spine progress to a KOReader-compatible XPath.
-// Strategy:
-// 1) Count total visible text bytes in chapter.
-// 2) Stream parse again and stop when target byte offset is reached.
-// 3) Emit either /text()[N].M when the cursor is at a direct text child of
-//    <body>, or the bare element path otherwise.
-//
-// Why body-level only (and not deep nested /p[i]/span[j]/text()[k].M):
-//   KOReader's crengine normalises the DOM differently than expat — it merges
-//   adjacent inline elements, drops empty wrappers, and renumbers text nodes
-//   inside <p>/<span>/<em>. A deep XPath we emit (e.g. /p[17]/span[1]/text()[1].26)
-//   often fails to match crengine's tree, and KOReader stores a degraded
-//   fallback position (start-of-wrapper-div or off-by-N text node) that
-//   round-trips back to the wrong page on pull. Body-level text-point XPaths
-//   have a much higher round-trip success rate even though they sacrifice
-//   character-precision inside paragraphs. The Section paragraph LUT then
-//   snaps the pulled position to the correct page anyway, so the precision
-//   loss is invisible to users.
-//
-// This matches the 1.42 behavior. The pre-1.43 forward mapper only emitted
-// text-point XPaths when the cursor was a direct text child of <body>; the
-// 1.43 change to deep emission is the regression we're undoing here.
+bool isBlockTag(const std::string& tag) {
+  static constexpr const char* kBlocks[] = {"p",          "li",  "h1",      "h2",      "h3",         "h4", "h5",
+                                            "h6",         "div", "td",      "th",      "blockquote", "dd", "dt",
+                                            "figcaption", "pre", "section", "article", "body"};
+  for (const char* b : kBlocks) {
+    if (tag == b) return true;
+  }
+  return false;
+}
 
 struct ForwardState : StackState {
   int spineIndex;
   size_t targetOffset;
+  // The fraction path's target can equal the chapter's total (intra 1.0) and must name the chunk
+  // that ENDS there; a page's start is a byte of text and must name the chunk that CONTAINS it.
+  bool inclusive = true;
+  // Which text is named to the character: in any block element (a page's start), or only directly
+  // in <body> (the fraction path; see the header comment).
+  bool textPointsInBlocks = false;
   std::string result;
   bool found = false;
   SaxParser* saxParser = nullptr;
 
-  // Body-level text-node bookkeeping: only counts text nodes that are direct
-  // children of <body>. Inline-element text contributes to totalTextBytes via
-  // the StackState base, but does not advance bodyTextNodeCount because
-  // KOReader can't round-trip a deep text-node XPath reliably.
-  int bodyTextNodeCount = 0;
-  size_t codepointsInBodyTextNode = 0;
-  bool inBodyTextNode = false;
-
   ForwardState(const int spineIndex, const size_t targetOffset) : spineIndex(spineIndex), targetOffset(targetOffset) {}
 
-  void onStartElement(const char* rawName) {
-    inBodyTextNode = false;
-    pushElement(rawName);
-  }
-
-  void onEndElement() {
-    inBodyTextNode = false;
-    popElement();
-  }
+  void onStartElement(const char* rawName) { pushElement(rawName); }
+  void onEndElement() { popElement(); }
 
   void onCharData(const char* text, const int len) {
-    if (shouldSkipText(len) || found) {
+    if (shouldSkipText(len) || found || stack.empty()) {
       return;
     }
-
-    const bool atBodyLevel = bodyIdx() + 1 == static_cast<int>(stack.size());
-    if (atBodyLevel && !inBodyTextNode) {
-      inBodyTextNode = true;
-      bodyTextNodeCount++;
-      codepointsInBodyTextNode = 0;
+    StackNode& parent = stack.back();
+    if (!parent.inTextNode) {
+      parent.inTextNode = true;
+      parent.textNodeCount++;
+      parent.codepointsInTextNode = 0;
     }
-
     if (isWhitespaceOnly(text, len)) {
-      if (atBodyLevel) {
-        codepointsInBodyTextNode += countUtf8Codepoints(text, len);
-      }
+      parent.codepointsInTextNode += countUtf8Codepoints(text, len);
       return;
     }
-
     const size_t visible = countVisibleBytes(text, len);
-    if (totalTextBytes + visible >= targetOffset) {
-      if (atBodyLevel && bodyTextNodeCount > 0) {
-        // KOReader/crengine text-point semantics use codepoint offsets.
+    const bool reached = inclusive ? totalTextBytes + visible >= targetOffset : totalTextBytes + visible > targetOffset;
+    if (reached) {
+      // The target is inside this chunk (totalTextBytes <= target < totalTextBytes + visible).
+      if (textPointsInBlocks ? isBlockTag(parent.tag) : parent.tag == "body") {
         const size_t targetVisibleByteInChunk = targetOffset - totalTextBytes;
         const size_t cpInChunk = codepointAtVisibleByte(text, len, targetVisibleByteInChunk);
-        const size_t charOff = codepointsInBodyTextNode + cpInChunk;
-        result =
-            currentXPath(spineIndex) + "/text()[" + std::to_string(bodyTextNodeCount) + "]." + std::to_string(charOff);
+        result = currentXPath(spineIndex) + "/text()[" + std::to_string(parent.textNodeCount) + "]." +
+                 std::to_string(parent.codepointsInTextNode + cpInChunk);
       } else {
-        // Cursor is inside a nested element. Emit the element path without a
-        // text-point suffix — KOReader will treat this as a position at the
-        // start of the named element, which is good enough for paragraph-level
-        // accuracy. Don't emit a deep text() index here: see header comment.
         result = currentXPath(spineIndex);
       }
       found = true;
-      if (saxParser) {
-        saxParser->stop();
-      }
+      if (saxParser) saxParser->stop();
       return;
     }
-
     totalTextBytes += visible;
-    if (atBodyLevel) {
-      codepointsInBodyTextNode += countUtf8Codepoints(text, len);
-    }
+    parent.codepointsInTextNode += countUtf8Codepoints(text, len);
   }
 };
 
@@ -167,6 +144,7 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
   const size_t targetOffset = static_cast<size_t>(clamped * static_cast<float>(totalTextBytes));
 
   ForwardState state(spineIndex, targetOffset);
+  state.inclusive = true;
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
                       parserDefaultCb<ForwardState>)) {
@@ -182,6 +160,23 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
 
   LOG_DBG("KOX", "Forward: spine=%d progress=%.3f target=%zu/%zu -> %s", spineIndex, intraSpineProgress, targetOffset,
           totalTextBytes, state.result.c_str());
+  return state.result;
+}
+
+std::string findXPathForVisibleOffsetInternal(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                              const uint32_t visibleOffset) {
+  ForwardState state(spineIndex, visibleOffset);
+  state.inclusive = false;
+  state.textPointsInBlocks = true;
+  SaxParser saxParser;
+  if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
+                      parserDefaultCb<ForwardState>)) {
+    return "";
+  }
+  state.saxParser = &saxParser;
+  streamSpine(epub, spineIndex, saxParser);
+  LOG_DBG("KOX", "Forward: spine=%d offset=%u -> %s", spineIndex, visibleOffset,
+          state.result.empty() ? "(not found)" : state.result.c_str());
   return state.result;
 }
 

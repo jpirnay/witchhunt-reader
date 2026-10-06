@@ -48,6 +48,10 @@ KOReaderPosition EpubReaderActivity::currentKoPosition(const int page, const int
   pos.pageNumber = page;
   pos.totalPages = pageCount;
   if (section) {
+    if (const auto off = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) {
+      pos.visibleTextOffset = *off;
+      pos.hasVisibleTextOffset = true;
+    }
     if (const auto paragraph = section->getParagraphIndexForPage(static_cast<uint16_t>(page))) {
       pos.paragraphIndex = *paragraph;
       pos.hasParagraphIndex = true;

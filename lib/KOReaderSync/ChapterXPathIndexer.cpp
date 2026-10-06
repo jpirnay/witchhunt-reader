@@ -21,6 +21,11 @@ std::string ChapterXPathIndexer::findXPathForProgress(const std::shared_ptr<Epub
   return findXPathForProgressInternal(epub, spineIndex, intraSpineProgress);
 }
 
+std::string ChapterXPathIndexer::findXPathForVisibleOffset(const std::shared_ptr<Epub>& epub, const int spineIndex,
+                                                           const uint32_t visibleOffset) {
+  return findXPathForVisibleOffsetInternal(epub, spineIndex, visibleOffset);
+}
+
 bool ChapterXPathIndexer::findProgressForXPath(const std::shared_ptr<Epub>& epub, const int spineIndex,
                                                const std::string& xpath, float& outIntraSpineProgress,
                                                bool& outExactMatch, uint16_t* outListItemIndex) {

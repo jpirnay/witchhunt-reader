@@ -18,6 +18,12 @@ struct StackNode {
   int index = 1;
   // Reserved for future text-node heuristics; intentionally unused for now.
   bool hasText = false;
+  // Text-node bookkeeping for the element: how many text nodes (runs of character data between
+  // child element boundaries) it has had, and the codepoints into the current one. The forward
+  // mapper emits /text()[N].M from these; the reverse mapper counts the same way.
+  int textNodeCount = 0;
+  size_t codepointsInTextNode = 0;
+  bool inTextNode = false;
 };
 
 struct StackState {
@@ -48,6 +54,7 @@ struct StackState {
     // per element, a major fragmentation source. Lookup into the parent's
     // sibling counter map then uses the stable in-place string with no extra
     // allocation.
+    if (!stack.empty()) stack.back().inTextNode = false;
     StackNode& node = stack.emplace_back();
     node.tag.assign(rawName ? rawName : "");
     for (char& c : node.tag) {
@@ -76,6 +83,7 @@ struct StackState {
       siblingCounters[childDepth].clear();
     }
     stack.pop_back();
+    if (!stack.empty()) stack.back().inTextNode = false;
   }
 
   void onCharData(const char*, int) {}

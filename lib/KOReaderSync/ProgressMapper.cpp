@@ -140,11 +140,14 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   // Calculate overall book progress (0.0-1.0)
   result.percentage = epub->calculateProgress(pos.spineIndex, intraSpineProgress);
 
-  // Generate XPath for the current position via byte-offset scan. Targeting the
-  // paragraph LUT entry instead would snap to the start of the paragraph the user
-  // is inside, which causes pulled positions to land at the start of the chapter
-  // when an opening paragraph spans many pages.
-  result.xpath = ChapterXPathIndexer::findXPathForProgress(epub, pos.spineIndex, intraSpineProgress);
+  // The page's content offset names the text to the character; the byte fraction is the fallback
+  // for a position without one (the finished-book sentinel, a chapter not laid out yet).
+  if (pos.hasVisibleTextOffset) {
+    result.xpath = ChapterXPathIndexer::findXPathForVisibleOffset(epub, pos.spineIndex, pos.visibleTextOffset);
+  }
+  if (result.xpath.empty()) {
+    result.xpath = ChapterXPathIndexer::findXPathForProgress(epub, pos.spineIndex, intraSpineProgress);
+  }
   if (result.xpath.empty()) {
     result.xpath = generateXPath(pos.spineIndex);
   }
@@ -153,8 +156,9 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   const int tocIndex = epub->getTocIndexForSpineIndex(pos.spineIndex);
   const std::string chapterName = (tocIndex >= 0) ? epub->getTocItem(tocIndex).title : "unknown";
 
-  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d -> %.2f%% at %s", chapterName.c_str(),
-          pos.pageNumber, pos.totalPages, result.percentage * 100, result.xpath.c_str());
+  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d off=%u/%d -> %.2f%% at %s",
+          chapterName.c_str(), pos.pageNumber, pos.totalPages, pos.visibleTextOffset, pos.hasVisibleTextOffset,
+          result.percentage * 100, result.xpath.c_str());
 
   return result;
 }

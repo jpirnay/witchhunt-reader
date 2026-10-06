@@ -6,7 +6,8 @@
 // inflated-XHTML bytes. A gap of a percent or two between the two percentages is normal.
 //
 // The book:
-//   spine 0  ch12  40 paragraphs as direct children of <body>  (the shape the paragraph LUT keys on)
+//   spine 0  ch12  40 paragraphs as direct children of <body>  (the shape the paragraph LUT keys on);
+//                  the first ends in an entity, &mdash;
 //   spine 1  ch13  a linked chapter number in <section><header><hgroup><h1><span><a><span>, then
 //                  60 paragraphs inside the <section>  (the reporter's book in issue #268)
 //   spine 2  ch14  60 body-child paragraphs, then a tag that is not XML, so the XPath resolver fails
@@ -31,6 +32,8 @@
 #include <string>
 
 #include "Epub.h"
+#include "Epub/Section.h"
+#include "GfxRenderer.h"
 #include "KOReaderSync/ProgressMapper.h"
 #include "StoredZipWriter.h"
 
@@ -43,11 +46,12 @@ constexpr int kSectionSpine = 1;   // DocFragment[2]
 constexpr int kBrokenSpine = 2;    // DocFragment[3]
 constexpr int kPagesInSpine = 40;  // the reader's page count for whichever chapter is current
 
-std::string paragraphs(const char* label, const int count) {
+// `tail` is appended to the first paragraph's text.
+std::string paragraphs(const char* label, const int count, const char* tail = "") {
   std::string out;
   for (int i = 1; i <= count; ++i) {
     out += "<p>" + std::string(label) + " paragraph " + std::to_string(i) +
-           " carries enough ordinary words to give it some weight on the page.</p>\n";
+           " carries enough ordinary words to give it some weight on the page." + (i == 1 ? tail : "") + "</p>\n";
   }
   return out;
 }
@@ -84,7 +88,7 @@ struct ProgressMapperFixture : testing::Test {
             "<item id=\"c3\" href=\"ch14.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
             "</manifest>\n<spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/><itemref idref=\"c3\"/></spine>\n"
             "</package>\n");
-    zip.add("ch12.xhtml", xhtml(paragraphs("Earlier", 40)));
+    zip.add("ch12.xhtml", xhtml(paragraphs("Earlier", 40, " &mdash;")));
     zip.add("ch13.xhtml", xhtml("<section><header><hgroup><h1><span><a href=\"toc.xhtml\"><span>Chapter 13</span></a>"
                                 "</span><span>The Title</span></h1></hgroup></header>\n" +
                                 paragraphs("Target", 60) + "</section>"));
@@ -377,6 +381,80 @@ TEST_F(ProgressMapperFixture, UnparseableChapterUploadsAsItsRoot) {
 
   EXPECT_EQ(ko.xpath, "/body/DocFragment[3]/body");
   EXPECT_FLOAT_EQ(ko.percentage, percentageInto(kBrokenSpine, 20.0f / (kPagesInSpine - 1)));
+}
+
+// --- Push by content offset ---------------------------------------------------------------------
+//
+// With the chapter laid out, a page's start is a visible-text offset in the section cache. The
+// push names the text at that offset to the character, in the shape KOReader itself emits.
+
+struct OffsetPushFixture : ProgressMapperFixture {
+  GfxRenderer renderer;
+
+  std::unique_ptr<Section> build(const int spine) {
+    Section::BuildParams p;
+    p.viewportWidth = 480;
+    p.viewportHeight = 800;
+    p.fontSizeNormalization = false;
+    auto section = std::make_unique<Section>(epub, spine, renderer);
+    EXPECT_TRUE(section->createSectionFile(p, {}, true));
+    EXPECT_TRUE(section->loadSectionFile(p));
+    return section;
+  }
+
+  CrossPointPosition pageWithOffset(const Section& section, const int spine, const int page) const {
+    CrossPointPosition pos{};
+    pos.spineIndex = spine;
+    pos.pageNumber = page;
+    pos.totalPages = section.pageCount;
+    if (const auto off = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) {
+      pos.visibleTextOffset = *off;
+      pos.hasVisibleTextOffset = true;
+    }
+    return pos;
+  }
+};
+
+TEST_F(OffsetPushFixture, AMidParagraphPageStartPushesAsATextPoint) {
+  const auto section = build(kSectionSpine);
+  ASSERT_GT(section->pageCount, 3);
+  // 60 equal paragraphs over 4 pages with the stub renderer: page 1 starts inside a paragraph,
+  // not at its first word (page 2 happens to start at one).
+  const auto pos = pageWithOffset(*section, kSectionSpine, 1);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  EXPECT_NE(ko.xpath.find("/section[1]/p["), std::string::npos) << ko.xpath;
+  ASSERT_NE(ko.xpath.find("/text()[1]."), std::string::npos) << ko.xpath;
+  EXPECT_GT(std::stoul(ko.xpath.substr(ko.xpath.rfind('.') + 1)), 0u) << ko.xpath;
+}
+
+TEST_F(OffsetPushFixture, TheChapterStartPushesAsOffsetZeroOfItsFirstText) {
+  const auto section = build(kSectionSpine);
+  const auto ko = ProgressMapper::toKOReader(epub, pageWithOffset(*section, kSectionSpine, 0));
+  // The heading's text sits inside inline elements (span/a/span): the element path, as today.
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/header[1]/hgroup[1]/h1[1]/span[1]/a[1]/span[1]");
+}
+
+TEST_F(OffsetPushFixture, WithoutAnOffsetThePushUsesTheFraction) {
+  CrossPointPosition pos{};
+  pos.spineIndex = kSectionSpine;
+  pos.pageNumber = 20;
+  pos.totalPages = 40;
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  EXPECT_EQ(ko.xpath.rfind("/body/DocFragment[2]/body/section[1]/p[", 0), 0u) << ko.xpath;
+  EXPECT_EQ(ko.xpath.find("/text()"), std::string::npos) << ko.xpath;
+}
+
+TEST_F(OffsetPushFixture, EntityAtThePageStartPushesAsATextPoint) {
+  // p[1] ends in &mdash;: the section counts it as its expansion, and so must the push.
+  const auto section = build(kFlatSpine);
+  ASSERT_GT(section->pageCount, 1);
+  const auto pos = pageWithOffset(*section, kFlatSpine, 1);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  EXPECT_FALSE(ko.xpath.empty());
+  EXPECT_NE(ko.xpath.find("/text()"), std::string::npos) << ko.xpath;
 }
 
 }  // namespace
