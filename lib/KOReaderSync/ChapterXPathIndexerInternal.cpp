@@ -1,5 +1,6 @@
 #include "ChapterXPathIndexerInternal.h"
 
+#include <Epub/VisibleText.h>
 #include <Epub/htmlEntities.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <unordered_map>
 #include <vector>
 
@@ -19,25 +21,12 @@ std::string toLowerStr(std::string value) {
   return value;
 }
 
-bool isSkippableTag(const std::string& tag) { return tag == "head" || tag == "script" || tag == "style"; }
+bool isSkippableTag(const std::string& tag) { return VisibleText::isNonVisibleTag(tag.c_str()); }
 
-bool isWhitespaceOnly(const char* text, const int len) {
-  for (int i = 0; i < len; i++) {
-    if (!std::isspace(static_cast<unsigned char>(text[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
+bool isWhitespaceOnly(const char* text, const int len) { return VisibleText::visibleBytes(text, len) == 0; }
 
 static size_t countVisibleBytesInUtf8String(const char* str) {
-  size_t count = 0;
-  for (const unsigned char* ptr = reinterpret_cast<const unsigned char*>(str); *ptr != 0; ++ptr) {
-    if (!std::isspace(*ptr)) {
-      count++;
-    }
-  }
-  return count;
+  return VisibleText::visibleBytes(str, static_cast<int>(strlen(str)));
 }
 
 size_t countVisibleBytes(const char* text, const int len) {
@@ -47,14 +36,7 @@ size_t countVisibleBytes(const char* text, const int len) {
       return countVisibleBytesInUtf8String(resolved);
     }
   }
-
-  size_t count = 0;
-  for (int i = 0; i < len; i++) {
-    if (!std::isspace(static_cast<unsigned char>(text[i]))) {
-      count++;
-    }
-  }
-  return count;
+  return VisibleText::visibleBytes(text, len);
 }
 
 size_t countUtf8Codepoints(const char* text, const int len) {

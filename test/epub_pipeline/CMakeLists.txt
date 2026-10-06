@@ -119,6 +119,7 @@ add_executable(EpubPipelineTest
   ProgressMapperTest.cpp
   ProgressMapperRoundTripTest.cpp
   XPathExtractionTest.cpp
+  VisibleTextTest.cpp
   # lib/KOReaderSync position mapping: needs only the Epub and the SAX parser, not the network.
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathIndexer.cpp
