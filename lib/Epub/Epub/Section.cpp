@@ -31,7 +31,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 79;  // v79: a <span> styled display:block is a block,
+constexpr uint8_t SECTION_FILE_VERSION = 80;  // v80: class and id selectors match case-
+                                              // sensitively; v79 pages took `.Dial` for `.dial`
+                                              // v79: a <span> styled display:block is a block,
                                               // and every block in a heading keeps its centring
                                               // and size (#388); v78 pages run them together
                                               // v78: a span indent (poem line shape) gives way
