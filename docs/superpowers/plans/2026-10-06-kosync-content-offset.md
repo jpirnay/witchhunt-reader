@@ -1449,6 +1449,410 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
+### Task 5b: The text-node counter follows crengine's DOM
+
+**Why this task exists.** Task 5's push emits `/p[K]/text()[N].M`, and the pull resolves the same form. Both counted N and M the way our own SAX stream looks, not the way KOReader's crengine builds its DOM. Verified in `koreader/crengine` source (`crengine/src/lvtinydom.cpp`, `lvxml.cpp`) on 2026-10-06:
+
+- **R1** `ldomElementWriter::onText`: the first whitespace-only text run of a non-`pre` block element (`_isBlock && childCount==0 && IsEmptySpace`) is dropped at parse time. `<p>\n  <em>x</em> rest</p>` has ONE text node in crengine: `" rest"` is `text()[1]`. We numbered it `text()[2]`. 293 of 3,733 `<p>` in the test corpus (moby-dick: 287 of 2,774) hit this.
+- **R2** `PreProcessXmlString` (non-pre): CR, LF and TAB become spaces, and a run of spaces is stored as ONE space (the first one, even at node start; the EPUB writer sets no TXTFLG_TRIM, so nothing is trimmed). `.M` indexes this stored, collapsed text in codepoints. `<p>Hello\n      world</p>` stores `"Hello world"`: `w` is at M=6, not 12. 3,211 of 3,733 corpus `<p>` are hard-wrapped.
+- **R3** `ldomNode::removeStandaloneWhitespaceTextChildrenInMixedContent`: when an element has BOTH block children and inline content, its whitespace-only text nodes are deleted unless they sit between two inline-ish siblings (an inline element or a text node). Elements with only inline content (an ordinary `<p>`) are untouched.
+- **R4** `createXPointerV1/V2`: a `text()[N]` that does not exist yields a null XPointer, and `LVDocView::getBookmarkPage(null)` returns 0. A push with N one too high sends the KOReader user to the FIRST PAGE OF THE BOOK.
+- **R5** `<pre>` (TXTFLG_PRE, inherited by descendants): R1 and R2 do not apply; text is stored raw.
+- **R6** (accepted gap) a comment splits a text node in crengine; our yxml SAX reports no comment event. Not handled.
+- Whitespace for R1-R3 is crengine's `IsEmptySpace` set: space, CR, LF, TAB only. NBSP (U+00A0, also from `&nbsp;`) is a visible character to crengine and to us.
+
+One counter, in `StackState`, used by both mappers, replaces the two private copies (forward `StackNode` fields, reverse `inParentTextNode`/`currentTextNodeCount`/`codepointsInCurrentTextNode`). Host tests pin the rules above and our own round trip; only a push to a live KOReader can pin crengine itself, so the PR checklist (Task 8) gets a device step: push from a pretty-printed book (moby-dick) and confirm KOReader lands mid-paragraph.
+
+**Files:**
+- Modify: `lib/KOReaderSync/ChapterXPathIndexerState.h` (`StackNode`, `StackState::pushElement/popElement`, new `onTextChunk`/`closeTextRun`)
+- Modify: `lib/KOReaderSync/ChapterXPathIndexerInternal.h`, `lib/KOReaderSync/ChapterXPathIndexerInternal.cpp` (collapsed-codepoint helpers, `isBlockTag` moves here)
+- Modify: `lib/KOReaderSync/ChapterXPathForwardMapper.cpp` (`ForwardState` uses the shared counter; header comment states the rules)
+- Modify: `lib/KOReaderSync/ChapterXPathReverseMapper.cpp` (`ReverseState` uses the shared counter; its three private fields go)
+- Create: `test/epub_pipeline/SyntheticBook.h` (the one-chapter STORED book builder, extracted from `VisibleTextOffsetLutTest.cpp`'s `book()`)
+- Modify: `test/epub_pipeline/VisibleTextOffsetLutTest.cpp` (`book()` calls the extracted builder)
+- Create: `test/epub_pipeline/TextNodeRulesTest.cpp` (registered the same way `VisibleTextOffsetLutTest.cpp` is in the test CMake list)
+- Modify: `test/epub_pipeline/ProgressMapperRoundTripTest.cpp` (text-point exactness invariant)
+- Modify: `test/epub_pipeline/ProgressMapperTest.cpp` (Task 5's three expected `.M` values, recomputed under R2 and justified by hand in the commit message)
+
+**Interfaces:**
+- Consumes: `isWhitespaceOnly`, `countVisibleBytes`, `isEntityRef`, `lookupHtmlEntity`, `VisibleText::isSpace` (Task 1); `ChapterXPathIndexer::findXPathForVisibleOffset` (Task 5); `ProgressMapper::toCrossPoint` filling `CrossPointPosition::visibleTextOffset` for exact matches (Task 6).
+- Produces: `StackState::onTextChunk`, `StackState::closeTextRun`, `isBlockTag` (shared), `collapsedCodepoints`, `collapsedCodepointAtVisibleByte`, `visibleBytesBeforeCollapsedCodepoint`. Deletes `countUtf8Codepoints`, `codepointAtVisibleByte`, `visibleBytesBeforeCodepoint` once nothing calls them (grep first; only the two mappers do today).
+
+**Heap discipline:** `StackNode` grows by five `bool`s, laid out together after the integers (no padding waste); the stack is under 40 deep. `isBlockTag` is a `static constexpr` table. No new allocations; the per-chunk `std::string` work that exists today in the reverse mapper's text-node branch is out of scope (note it in the report if you see it).
+
+- [ ] **Step 1: Extract the synthetic book builder**
+
+Create `test/epub_pipeline/SyntheticBook.h`:
+```cpp
+#pragma once
+// A one-chapter EPUB built from a <body> fragment: STORED zip at work/book<index>.epub, loaded,
+// cache directory set up. One file per book: the cache is keyed on the path.
+#include <Epub/Epub.h>
+
+#include <filesystem>
+#include <memory>
+#include <string>
+
+#include "StoredZipWriter.h"
+
+inline std::shared_ptr<Epub> syntheticBook(const std::filesystem::path& work, const int index,
+                                           const std::string& body) {
+  // body of VisibleTextOffsetLutTest's book(), verbatim: mimetype, container.xml, content.opf,
+  // chapter.xhtml = "<?xml ...?><html ...><head><title>C</title></head><body>\n" + body + "\n</body></html>\n"
+  // then zip.write(path); Epub(path, work/"cache"); load(true); setupCacheDir(); return it.
+}
+```
+Move the body of `VisibleTextOffsetLutTest.cpp`'s `book()` into it unchanged (same OPF, same chapter wrapper, same `EXPECT_TRUE(epub->load(true))`), and make `book()` a one-line call: `return syntheticBook(work, bookCount++, body);`. Run `EpubPipelineTest --gtest_filter='*LutFixture*'`: unchanged results.
+
+- [ ] **Step 2: Write the failing rule tests**
+
+Create `test/epub_pipeline/TextNodeRulesTest.cpp`:
+```cpp
+// The text() numbering and .M offsets we push and pull follow crengine's DOM, not our SAX stream.
+// Rules R1-R5 and the crengine functions they come from are in ChapterXPathForwardMapper.cpp's
+// header comment. Offsets below are visible bytes before the target word (Task 1's rule: every
+// non-whitespace byte counts; NBSP from &nbsp; is two).
+#include <KOReaderSync/ChapterXPathIndexer.h>
+#include <KOReaderSync/ProgressMapper.h>
+#include <gtest/gtest.h>
+
+#include <filesystem>
+
+#include "SyntheticBook.h"
+
+namespace {
+namespace fs = std::filesystem;
+
+struct TextNodeRules : testing::Test {
+  fs::path work;
+  int bookCount = 0;
+  void SetUp() override {
+    work = fs::temp_directory_path() /
+           (std::string("text_node_rules_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    fs::remove_all(work);
+    fs::create_directories(work);
+  }
+  void TearDown() override { fs::remove_all(work); }
+
+  std::string push(const std::string& body, const uint32_t offset) {
+    return ChapterXPathIndexer::findXPathForVisibleOffset(syntheticBook(work, bookCount++, body), 0, offset);
+  }
+  // The visible offset the pull lands on for a KOReader text point, or UINT32_MAX when inexact.
+  uint32_t pull(const std::string& body, const std::string& xpath) {
+    const auto pos = ProgressMapper::toCrossPoint(syntheticBook(work, bookCount++, body), KOReaderPosition{xpath, 0.5f});
+    return pos.hasVisibleTextOffset ? pos.visibleTextOffset : UINT32_MAX;
+  }
+};
+
+const std::string kP = "/body/DocFragment[1]/body/";
+
+// R1: the leading whitespace of a block is not a text node.
+TEST_F(TextNodeRules, LeadingWhitespaceOfABlockIsNotANode) {
+  EXPECT_EQ(push("<p>\n  <em>x</em> rest of it</p>", 1), kP + "p[1]/text()[1].1");
+}
+
+// R2: a whitespace run is one codepoint.
+TEST_F(TextNodeRules, HardWrappedParagraphCountsCollapsedCodepoints) {
+  EXPECT_EQ(push("<p>Hello\n      world\n      again</p>", 10), kP + "p[1]/text()[1].12");
+}
+
+// R2 across SAX chunks: a run longer than any parser buffer is still one codepoint.
+TEST_F(TextNodeRules, AWhitespaceRunSplitAcrossChunksIsStillOneCodepoint) {
+  const std::string run(3000, ' ');
+  EXPECT_EQ(push("<p>Hello" + run + "world</p>", 5), kP + "p[1]/text()[1].6");
+  EXPECT_EQ(push("<p>" + run + "<em>x</em> rest</p>", 1), kP + "p[1]/text()[1].1");
+}
+
+// R5: pre keeps everything.
+TEST_F(TextNodeRules, PreKeepsRawWhitespaceAndItsLeadingRun) {
+  EXPECT_EQ(push("<pre>Hello\n      world</pre>", 5), kP + "pre[1]/text()[1].12");
+  EXPECT_EQ(push("<pre>\n  <b>x</b> y</pre>", 1), kP + "pre[1]/text()[2].1");
+}
+
+// R3: whitespace next to a block sibling is gone in mixed content; between inlines it stays.
+TEST_F(TextNodeRules, MixedContentDropsWhitespaceNextToBlocks) {
+  EXPECT_EQ(push("<div>\n<p>a</p>\n<span>s</span>\nloose text</div>", 2), kP + "div[1]/text()[1].1");
+  EXPECT_EQ(push("<div>\n<span>s</span>\nloose <em>e</em> text\n<p>later</p></div>", 7), kP + "div[1]/text()[2].1");
+}
+
+// NBSP is a character, not whitespace, on both sides.
+TEST_F(TextNodeRules, NbspIsACharacter) {
+  EXPECT_EQ(push("<p>a&nbsp;&nbsp;b</p>", 5), kP + "p[1]/text()[1].3");
+}
+
+// The pull resolves the same numbering, so a KOReader text point lands where crengine meant.
+TEST_F(TextNodeRules, ThePullUsesTheSameRules) {
+  EXPECT_EQ(pull("<p>\n  <em>x</em> rest of it</p>", kP + "p[1]/text()[1].1"), 1u);
+  EXPECT_EQ(pull("<p>Hello\n      world\n      again</p>", kP + "p[1]/text()[1].12"), 10u);
+  EXPECT_EQ(pull("<pre>Hello\n      world</pre>", kP + "pre[1]/text()[1].12"), 5u);
+  EXPECT_EQ(pull("<div>\n<p>a</p>\n<span>s</span>\nloose text</div>", kP + "div[1]/text()[1].1"), 2u);
+}
+}  // namespace
+```
+If `toCrossPoint` only fills `visibleTextOffset` with a laid-out section present (check Task 6's `ProgressMapper.cpp`), build one in `pull()` the way `VisibleTextOffsetLutTest::build` does, with a `GfxRenderer` member, before mapping.
+
+Append to `test/epub_pipeline/ProgressMapperRoundTripTest.cpp`, in the `RoundTripFixture` suite:
+```cpp
+// A page start that pushes as a text point comes back on exactly that offset; one that pushes as
+// an element path comes back on or before it. This is the counting agreement between the parser's
+// LUT and the two mappers, with no allowance.
+TEST_P(RoundTripFixture, EveryTextPointComesBackExactly) {
+  const int spineCount = epub->getSpineItemsCount();
+  for (int spine = 0; spine < spineCount; ++spine) {
+    auto section = loadSection(spine);  // whatever the fixture already uses to get a laid-out Section
+    const int pages = section->getPageCount();
+    for (int page = 0; page < pages; ++page) {
+      const auto start = section->getVisibleTextOffsetForPage(page);
+      if (!start) continue;
+      CrossPointPosition pos;  // fill spineIndex, pageNumber, totalPages, visibleTextOffset/has as the existing round-trip test does
+      const auto ko = ProgressMapper::toKOReader(epub, pos);
+      const auto back = ProgressMapper::toCrossPoint(epub, ko);
+      ASSERT_TRUE(back.hasVisibleTextOffset) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      if (ko.xpath.find("/text()[") != std::string::npos) {
+        EXPECT_EQ(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      } else {
+        EXPECT_LE(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      }
+    }
+  }
+}
+```
+Adapt the fixture plumbing (how it obtains the Section and fills `CrossPointPosition`) from the existing `EveryPageComesBackOnOrShortlyBeforeItself`; the assertions above are the requirement.
+
+- [ ] **Step 3: Run them to see them fail**
+
+Build `test/build` and run `EpubPipelineTest --gtest_filter='TextNodeRules.*:Corpus/RoundTripFixture.EveryTextPointComesBackExactly/*'`. Expected: `LeadingWhitespaceOfABlockIsNotANode` fails with `text()[2]`, `HardWrapped...` with `.24`, the pre and mixed tests fail, `ThePullUsesTheSameRules` fails; the corpus exactness test fails on hard-wrapped books.
+
+- [ ] **Step 4: The helpers**
+
+In `ChapterXPathIndexerInternal.h` add, and implement in the `.cpp` beside `countVisibleBytes`:
+```cpp
+// Block-level tags, as crengine renders them (CSS display above inline). One list for all three
+// uses: R1's parent, R3's siblings, and which text gets a text point.
+bool isBlockTag(const std::string& tag);
+
+// Codepoints of one character-data chunk as crengine stores them (R2): with `collapse`, a run of
+// space/CR/LF/TAB is ONE codepoint, and a run continuing from the previous chunk (`lastWasSpace`
+// in) adds none; without it every codepoint counts. Entity references count by their expansion.
+// `lastWasSpace` leaves holding the chunk's final state.
+size_t collapsedCodepoints(const char* text, int len, bool collapse, bool& lastWasSpace);
+// The collapsed codepoint index, within the chunk, of the codepoint holding the chunk's
+// targetVisibleByte-th (0-based) visible byte. The chunk must hold that byte.
+size_t collapsedCodepointAtVisibleByte(const char* text, int len, size_t targetVisibleByte, bool collapse,
+                                       bool lastWasSpace);
+// Visible bytes of the chunk before its k-th collapsed codepoint (k may equal the chunk's count).
+size_t visibleBytesBeforeCollapsedCodepoint(const char* text, int len, size_t k, bool collapse,
+                                            bool lastWasSpace);
+```
+Implement all three over one private walker: resolve an entity chunk to its expansion exactly as `codepointAtVisibleByte` does today, then step codepoints with `utf8NextCodepoint`; for each codepoint, `ws = collapse && (c == ' ' || c == '\r' || c == '\n' || c == '\t')`; a `ws` codepoint contributes 1 collapsed codepoint only when `!lastWasSpace`, then sets it; any other codepoint contributes 1 and clears it; its visible bytes are its bytes for which `!VisibleText::isSpace`. `isBlockTag`'s table: `p li h1 h2 h3 h4 h5 h6 div td th blockquote dd dt figcaption pre section article body ul ol dl table thead tbody tfoot tr caption hr figure nav aside header footer main address fieldset form details summary center`. Move it out of `ChapterXPathForwardMapper.cpp`'s anonymous namespace.
+
+- [ ] **Step 5: The counter in StackState**
+
+In `ChapterXPathIndexerState.h`, `StackNode` becomes (bools together, after the integers):
+```cpp
+struct StackNode {
+  std::string tag;
+  int index = 1;
+  // Text-node bookkeeping that mirrors crengine's DOM (rules R1-R5 in ChapterXPathForwardMapper.cpp).
+  int textNodeCount = 0;            // text nodes materialised so far under this element
+  size_t codepointsInTextNode = 0;  // collapsed codepoints of the open (or provisional) run so far
+  bool hasText = false;             // reverse mapper: the element has had visible text
+  bool inTextNode = false;          // a node is open: visible text since the last child boundary
+  bool pendingWhitespace = false;   // a whitespace-only run is open and not yet a node
+  bool lastWasSpace = false;        // the open run ends in whitespace (R2 carry across chunks)
+  bool childSeen = false;           // crengine childCount != 0: an element or a materialised node
+  bool blockChildSeen = false;      // a block child has started: R3 applies from here on
+  bool prevSiblingIsBlock = false;  // the last child boundary was a block element's end
+};
+```
+`StackState` gains `int preDepth = 0;` and:
+```cpp
+  struct TextRun {
+    bool counts;              // false: whitespace-only and still provisional, no node yet
+    int nodeIndex;            // 1-based text() index of the node the chunk belongs to
+    size_t codepointsBefore;  // collapsed codepoints of that node before this chunk
+    bool spaceBefore;         // the node's text before this chunk ends in whitespace
+  };
+
+  // Account for one character-data chunk under stack.back(). Called for EVERY chunk inside <body>
+  // that shouldSkipText() lets through, whitespace-only ones included.
+  TextRun onTextChunk(const char* text, const int len) {
+    StackNode& n = stack.back();
+    const bool collapse = preDepth == 0;
+    if (!n.inTextNode) {
+      if (isWhitespaceOnly(text, len)) {
+        if (!n.pendingWhitespace) {
+          n.pendingWhitespace = true;
+          n.codepointsInTextNode = 0;
+          n.lastWasSpace = false;
+        }
+        n.codepointsInTextNode += collapsedCodepoints(text, len, collapse, n.lastWasSpace);
+        return {false, n.textNodeCount + 1, 0, false};
+      }
+      // Visible text: the run is a node, and a provisional whitespace prefix is part of it.
+      n.inTextNode = true;
+      n.textNodeCount++;
+      n.childSeen = true;
+      if (!n.pendingWhitespace) {
+        n.codepointsInTextNode = 0;
+        n.lastWasSpace = false;
+      }
+      n.pendingWhitespace = false;
+    }
+    const TextRun run{true, n.textNodeCount, n.codepointsInTextNode, n.lastWasSpace};
+    n.codepointsInTextNode += collapsedCodepoints(text, len, collapse, n.lastWasSpace);
+    return run;
+  }
+
+  // A child boundary under `parent`: a child element starts (`nextIsBlock` says which kind) or the
+  // parent itself ends. Settles a provisional whitespace-only run the way crengine's DOM does.
+  void closeTextRun(StackNode& parent, const bool nextIsBlock, const bool parentEnds) {
+    if (parent.pendingWhitespace) {
+      // R1 (ldomElementWriter::onText): the first whitespace-only run of a non-pre block is dropped.
+      const bool firstOfBlock = !parent.childSeen && isBlockTag(parent.tag) && preDepth == 0;
+      // R3 (removeStandaloneWhitespaceTextChildrenInMixedContent): in mixed content a whitespace-only
+      // node survives only between two inline-ish siblings.
+      const bool mixed = parent.blockChildSeen || nextIsBlock;
+      const bool betweenInlines = parent.childSeen && !parent.prevSiblingIsBlock && !nextIsBlock && !parentEnds;
+      if (!firstOfBlock && !(mixed && !betweenInlines)) {
+        parent.textNodeCount++;
+        parent.childSeen = true;
+      }
+      parent.pendingWhitespace = false;
+    }
+    parent.inTextNode = false;
+    parent.lastWasSpace = false;
+  }
+```
+`pushElement`: delete the `if (!stack.empty()) stack.back().inTextNode = false;` line. After the tag is lowercased into `node.tag`, add:
+```cpp
+    const bool block = isBlockTag(node.tag);
+    if (depth > 0) {
+      StackNode& parent = stack[depth - 1];  // after emplace_back: the vector may have moved
+      closeTextRun(parent, block, false);
+      if (block) parent.blockChildSeen = true;
+    }
+    if (node.tag == "pre") preDepth++;
+```
+`popElement`: delete its `stack.back().inTextNode = false;` line. Before `stack.pop_back()`:
+```cpp
+    closeTextRun(stack.back(), false, true);
+    const bool block = isBlockTag(stack.back().tag);
+    if (stack.back().tag == "pre") preDepth--;
+```
+and after it:
+```cpp
+    if (!stack.empty()) {
+      StackNode& parent = stack.back();
+      parent.childSeen = true;
+      parent.prevSiblingIsBlock = block;
+      parent.inTextNode = false;
+      parent.pendingWhitespace = false;
+      parent.lastWasSpace = false;
+    }
+```
+`ChapterXPathIndexerState.h` needs `isBlockTag`, `isWhitespaceOnly`, `collapsedCodepoints` visible: include `ChapterXPathIndexerInternal.h` there if it is not already, or forward-declare the three.
+
+- [ ] **Step 6: The forward mapper on the counter**
+
+`ForwardState::onCharData` becomes:
+```cpp
+  void onCharData(const char* text, const int len) {
+    if (shouldSkipText(len) || found || stack.empty()) {
+      return;
+    }
+    StackNode& parent = stack.back();
+    const TextRun run = onTextChunk(text, len);  // every chunk, before any early return
+    const size_t visible = countVisibleBytes(text, len);
+    if (!run.counts || visible == 0) {
+      return;
+    }
+    // Fraction path: the target can equal the chapter total and names the chunk that ENDS there.
+    // Offset path: a page's start is a byte of text and names the chunk that CONTAINS it.
+    const bool reached = inclusive ? totalTextBytes + visible >= targetOffset : totalTextBytes + visible > targetOffset;
+    if (reached) {
+      if (textPointsInBlocks ? isBlockTag(parent.tag) : parent.tag == "body") {
+        const size_t targetVisibleByteInChunk = targetOffset - totalTextBytes;
+        const size_t cpInChunk =
+            collapsedCodepointAtVisibleByte(text, len, targetVisibleByteInChunk, preDepth == 0, run.spaceBefore);
+        result = currentXPath(spineIndex) + "/text()[" + std::to_string(run.nodeIndex) + "]." +
+                 std::to_string(run.codepointsBefore + cpInChunk);
+      } else {
+        result = currentXPath(spineIndex);
+      }
+      found = true;
+      if (saxParser) saxParser->stop();
+      return;
+    }
+    totalTextBytes += visible;
+  }
+```
+(On the fraction path `targetVisibleByteInChunk` can equal `visible` when the target is the chapter total; keep today's behaviour for that case: `collapsedCodepointAtVisibleByte` returns the chunk's collapsed count when the byte is one past the end.) Delete the local `isBlockTag`. Replace the header comment's text-point paragraph with rules R1-R6 above, naming the crengine functions, so the next reader does not rediscover them.
+
+- [ ] **Step 7: The reverse mapper on the counter**
+
+In `ReverseState`: delete `inParentTextNode`, `codepointsInCurrentTextNode`, `currentTextNodeCount`, and the two lines that reset `inParentTextNode` in `onStartElement`/`onEndElement`. `onCharData` becomes:
+```cpp
+  void onCharData(const char* text, const int len) {
+    if (shouldSkipText(len) || stack.empty()) {
+      return;
+    }
+    const TextRun run = onTextChunk(text, len);  // every chunk, before any early return
+    const size_t visible = countVisibleBytes(text, len);
+
+    if (targetTextNodeIndex > 0 && run.counts) {
+      const std::string xpath = normalizeXPath(currentXPath(spineIndex));
+      if (xpath == targetNorm) {
+        stack.back().hasText = true;
+        if (run.nodeIndex == targetTextNodeIndex && bestTier < MatchTier::EXACT) {
+          bool carry = run.spaceBefore;
+          const size_t codepoints = collapsedCodepoints(text, len, preDepth == 0, carry);
+          const size_t charOff = static_cast<size_t>(targetCharOffset);
+          if (charOff >= run.codepointsBefore && charOff <= run.codepointsBefore + codepoints) {
+            const size_t pos = totalTextBytes + visibleBytesBeforeCollapsedCodepoint(
+                                                   text, len, charOff - run.codepointsBefore, preDepth == 0, run.spaceBefore);
+            bestTier = MatchTier::EXACT;
+            bestDepth = pathDepth(xpath);
+            bestOffset = pos;
+            bestExact = true;
+            bestTierName = "text-node-exact";
+            bestLiIndex = liCount;
+          }
+        }
+        totalTextBytes += visible;
+        return;
+      }
+    }
+
+    if (visible == 0) {
+      return;
+    }
+    if (!stack.empty() && !stack.back().hasText) {
+      stack.back().hasText = true;
+      checkMatch();
+    }
+    totalTextBytes += visible;
+  }
+```
+Update the comment near the top of the file (`M is treated as codepoint offset`) to say collapsed codepoints as crengine stores them. Delete `countUtf8Codepoints`, `codepointAtVisibleByte`, `visibleBytesBeforeCodepoint` if `grep -rn` across `lib/ src/ test/` shows no other caller.
+
+- [ ] **Step 8: Run the suite**
+
+`EpubPipelineTest` whole, then `ctest -j 8` in `test/build` (the `dlfcn.h` build failure of `epub_build_inventory` is known and ignored). Task 5's three expectations in `ProgressMapperTest.cpp` (`p[16]/text()[1].50`, `p[33]/text()[1].0`, `p[17]/text()[1].51`) may change under R2: recompute each by hand from the fixture XHTML (collapsed codepoints before the page's first word) and put the arithmetic for at least one in the commit message. `ProgressMapperRoundTripTest`'s `allowedDrift` table must NOT be widened: if any book's drift grows, stop and report DONE_WITH_CONCERNS with the book, spine and page.
+
+- [ ] **Step 9: Firmware compile**
+
+From PowerShell at the repo root, with `PLATFORMIO_CORE_DIR` set to `C:\pio`, run `pio run -e default` (pio's full path is in the memory file `dev-tool-locations.md`; it is not on PATH). Report RAM/Flash from the summary line. Run it from the repo root, never from `test/build`.
+
+- [ ] **Step 10: Format and commit**
+
+Run clang-format (at `C:\Program Files\LLVM\bin\clang-format.exe`, not on PATH) with `-i` on every touched `.h/.cpp`. One commit:
+```
+fix(kosync): number text nodes and count codepoints the way crengine's DOM does
+
+<the rules, one line each, and the hand arithmetic for one updated expectation>
+```
+
 ### Task 6: Pull by offset; the reader lands on the exact page
 
 **Files:**

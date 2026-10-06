@@ -16,18 +16,22 @@ namespace ChapterXPathIndexerInternal {
 struct StackNode {
   std::string tag;
   int index = 1;
-  // Reserved for future text-node heuristics; intentionally unused for now.
-  bool hasText = false;
-  // Text-node bookkeeping for the element: how many text nodes (runs of character data between
-  // child element boundaries) it has had, and the codepoints into the current one. The forward
-  // mapper emits /text()[N].M from these; the reverse mapper counts the same way.
-  int textNodeCount = 0;
-  size_t codepointsInTextNode = 0;
-  bool inTextNode = false;
+  // Text-node bookkeeping that mirrors crengine's DOM (rules R1-R5 in ChapterXPathForwardMapper.cpp).
+  int textNodeCount = 0;            // text nodes materialised so far under this element
+  size_t codepointsInTextNode = 0;  // collapsed codepoints of the open (or provisional) run so far
+  bool hasText = false;             // reverse mapper: the element has had visible text
+  bool inTextNode = false;          // a node is open: visible text since the last child boundary
+  bool pendingWhitespace = false;   // a whitespace-only run is open and not yet a node
+  bool lastWasSpace = false;        // the open run ends in whitespace (R2 carry across chunks)
+  bool childSeen = false;           // crengine childCount != 0: an element or a materialised node
+  bool blockChildSeen = false;      // a block child has started: R3 applies from here on
+  bool prevSiblingIsBlock = false;  // the last child boundary was a block element's end
 };
 
 struct StackState {
   int skipDepth = -1;
+  // Open <pre> elements around the cursor: inside one, text is stored raw (R5).
+  int preDepth = 0;
   size_t totalTextBytes = 0;
   std::vector<StackNode> stack;
   // Sibling-name → count map per parent depth. Index `d` holds the counts for
@@ -54,12 +58,18 @@ struct StackState {
     // per element, a major fragmentation source. Lookup into the parent's
     // sibling counter map then uses the stable in-place string with no extra
     // allocation.
-    if (!stack.empty()) stack.back().inTextNode = false;
     StackNode& node = stack.emplace_back();
     node.tag.assign(rawName ? rawName : "");
     for (char& c : node.tag) {
       c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
+    const bool block = isBlockTag(node.tag);
+    if (depth > 0) {
+      StackNode& parent = stack[depth - 1];  // after emplace_back: the vector may have moved
+      closeTextRun(parent, block, false);
+      if (block) parent.blockChildSeen = true;
+    }
+    if (node.tag == "pre") preDepth++;
     const int sibIdx = ++siblingCounters[depth][node.tag];
     node.index = sibIdx;
     if (skipDepth < 0 && isSkippableTag(node.tag)) {
@@ -82,8 +92,75 @@ struct StackState {
     if (childDepth < siblingCounters.size()) {
       siblingCounters[childDepth].clear();
     }
+    closeTextRun(stack.back(), false, true);
+    const bool block = isBlockTag(stack.back().tag);
+    if (stack.back().tag == "pre") preDepth--;
     stack.pop_back();
-    if (!stack.empty()) stack.back().inTextNode = false;
+    if (!stack.empty()) {
+      StackNode& parent = stack.back();
+      parent.childSeen = true;
+      parent.prevSiblingIsBlock = block;
+      parent.inTextNode = false;
+      parent.pendingWhitespace = false;
+      parent.lastWasSpace = false;
+    }
+  }
+
+  struct TextRun {
+    bool counts;              // false: whitespace-only and still provisional, no node yet
+    int nodeIndex;            // 1-based text() index of the node the chunk belongs to
+    size_t codepointsBefore;  // collapsed codepoints of that node before this chunk
+    bool spaceBefore;         // the node's text before this chunk ends in whitespace
+  };
+
+  // Account for one character-data chunk under stack.back(). Called for EVERY chunk inside <body>
+  // that shouldSkipText() lets through, whitespace-only ones included.
+  TextRun onTextChunk(const char* text, const int len) {
+    StackNode& n = stack.back();
+    const bool collapse = preDepth == 0;
+    if (!n.inTextNode) {
+      if (isWhitespaceOnly(text, len)) {
+        if (!n.pendingWhitespace) {
+          n.pendingWhitespace = true;
+          n.codepointsInTextNode = 0;
+          n.lastWasSpace = false;
+        }
+        n.codepointsInTextNode += collapsedCodepoints(text, len, collapse, n.lastWasSpace);
+        return {false, n.textNodeCount + 1, 0, false};
+      }
+      // Visible text: the run is a node, and a provisional whitespace prefix is part of it.
+      n.inTextNode = true;
+      n.textNodeCount++;
+      n.childSeen = true;
+      if (!n.pendingWhitespace) {
+        n.codepointsInTextNode = 0;
+        n.lastWasSpace = false;
+      }
+      n.pendingWhitespace = false;
+    }
+    const TextRun run{true, n.textNodeCount, n.codepointsInTextNode, n.lastWasSpace};
+    n.codepointsInTextNode += collapsedCodepoints(text, len, collapse, n.lastWasSpace);
+    return run;
+  }
+
+  // A child boundary under `parent`: a child element starts (`nextIsBlock` says which kind) or the
+  // parent itself ends. Settles a provisional whitespace-only run the way crengine's DOM does.
+  void closeTextRun(StackNode& parent, const bool nextIsBlock, const bool parentEnds) {
+    if (parent.pendingWhitespace) {
+      // R1 (ldomElementWriter::onText): the first whitespace-only run of a non-pre block is dropped.
+      const bool firstOfBlock = !parent.childSeen && isBlockTag(parent.tag) && preDepth == 0;
+      // R3 (removeStandaloneWhitespaceTextChildrenInMixedContent): in mixed content a whitespace-only
+      // node survives only between two inline-ish siblings.
+      const bool mixed = parent.blockChildSeen || nextIsBlock;
+      const bool betweenInlines = parent.childSeen && !parent.prevSiblingIsBlock && !nextIsBlock && !parentEnds;
+      if (!firstOfBlock && !(mixed && !betweenInlines)) {
+        parent.textNodeCount++;
+        parent.childSeen = true;
+      }
+      parent.pendingWhitespace = false;
+    }
+    parent.inTextNode = false;
+    parent.lastWasSpace = false;
   }
 
   void onCharData(const char*, int) {}

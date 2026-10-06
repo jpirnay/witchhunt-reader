@@ -203,6 +203,35 @@ TEST_P(RoundTripFixture, ChapterStartStaysOnFirstPageWhateverThePercentageSays) 
   }
 }
 
+// A page start that pushes as a text point comes back on exactly that offset; one that pushes as
+// an element path comes back on or before it. This is the counting agreement between the parser's
+// LUT and the two mappers, with no allowance.
+TEST_P(RoundTripFixture, EveryTextPointComesBackExactly) {
+  const int spineCount = epub->getSpineItemsCount();
+  for (int spine = 0; spine < spineCount; ++spine) {
+    const auto section = build(spine);
+    const int pages = section->pageCount;
+    for (int page = 0; page < pages; ++page) {
+      const auto start = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(page));
+      if (!start) continue;
+      CrossPointPosition pos{};
+      pos.spineIndex = spine;
+      pos.pageNumber = page;
+      pos.totalPages = pages;
+      pos.visibleTextOffset = *start;
+      pos.hasVisibleTextOffset = true;
+      const auto ko = ProgressMapper::toKOReader(epub, pos);
+      const auto back = ProgressMapper::toCrossPoint(epub, ko);
+      ASSERT_TRUE(back.hasVisibleTextOffset) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      if (ko.xpath.find("/text()[") != std::string::npos) {
+        EXPECT_EQ(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      } else {
+        EXPECT_LE(back.visibleTextOffset, *start) << "spine " << spine << " page " << page << " via " << ko.xpath;
+      }
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Corpus, RoundTripFixture, testing::ValuesIn(corpusBooks()),
                          [](const testing::TestParamInfo<std::string>& info) {
                            std::string name = fs::path(info.param).stem().string();
