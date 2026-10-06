@@ -13,6 +13,7 @@
 #include <set>
 #include <vector>
 
+#include "Epub/VisibleText.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -193,7 +194,7 @@ static std::vector<TokenSpan> tokenizeBionicWord(const std::string& word) {
 }  // namespace
 
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
-                         const bool attachToPrevious, const uint8_t sizePct) {
+                         const bool attachToPrevious, const uint8_t sizePct, const uint32_t visibleOffset) {
   if (word.empty()) return;
   if (wordGrowthRefused_) return;  // the parse is being aborted; see wordGrowthRefused()
 
@@ -201,19 +202,21 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 
   const size_t requiredSize = words.size() + 1;
   if (words.capacity() < requiredSize || wordStyles.capacity() < requiredSize ||
-      wordContinues.capacity() < requiredSize || wordSizes.capacity() < requiredSize) {
+      wordContinues.capacity() < requiredSize || wordSizes.capacity() < requiredSize ||
+      wordVisibleOffsets.capacity() < requiredSize) {
     size_t newCapacity = std::max<size_t>(16, words.capacity());
     while (newCapacity < requiredSize) {
       newCapacity *= 2;
     }
-    // The four reserves below are unchecked heap growth (abort() on failure under
-    // -fno-exceptions). Require the largest free block to hold all four, plus a header
+    // The five reserves below are unchecked heap growth (abort() on failure under
+    // -fno-exceptions). Require the largest free block to hold all five, plus a header
     // each -- conservative, since they need not share a block, but this only bites when the
     // heap is nearly gone, and then a partial-cache abort beats a crash.
     {
       constexpr size_t ALLOC_HEADER_SLACK = 16;
-      const size_t needed = newCapacity * (sizeof(std::string) + sizeof(EpdFontFamily::Style) + sizeof(uint8_t)) +
-                            newCapacity / 8 + 4 * ALLOC_HEADER_SLACK;
+      const size_t needed =
+          newCapacity * (sizeof(std::string) + sizeof(EpdFontFamily::Style) + sizeof(uint8_t) + sizeof(uint32_t)) +
+          newCapacity / 8 + 5 * ALLOC_HEADER_SLACK;
       if (ESP.getMaxAllocHeap() < needed) {
         wordGrowthRefused_ = true;
         return;
@@ -223,6 +226,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     wordStyles.reserve(newCapacity);
     wordContinues.reserve(newCapacity);
     wordSizes.reserve(newCapacity);
+    wordVisibleOffsets.reserve(newCapacity);
   }
 
   words.push_back(std::move(word));
@@ -233,6 +237,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
   wordSizes.push_back(std::min(std::max(sizePct, MIN_WORD_SIZE_PCT), MAX_WORD_SIZE_PCT));
+  wordVisibleOffsets.push_back(visibleOffset);
 }
 
 bool ParsedText::foldUniformWordSizes() {
@@ -283,6 +288,7 @@ void ParsedText::layoutAndExtractLines(
   std::vector<std::string> savedWords;
   std::vector<EpdFontFamily::Style> savedStyles;
   std::vector<uint8_t> savedSizes;
+  std::vector<uint32_t> savedOffsets;
   std::vector<bool> savedContinues;
   bool savedIsContinuation = false;
   size_t savedBionicWatermark = 0;
@@ -290,6 +296,7 @@ void ParsedText::layoutAndExtractLines(
     savedWords = words;
     savedStyles = wordStyles;
     savedSizes = wordSizes;
+    savedOffsets = wordVisibleOffsets;
     savedContinues = wordContinues;
     savedIsContinuation = isContinuation_;
     savedBionicWatermark = bionicTransformedUpTo_;
@@ -441,6 +448,7 @@ void ParsedText::layoutAndExtractLines(
         wordStyles.erase(wordStyles.begin() + splitIndex + 1);
         wordContinues.erase(wordContinues.begin() + splitIndex + 1);
         wordSizes.erase(wordSizes.begin() + splitIndex + 1);
+        wordVisibleOffsets.erase(wordVisibleOffsets.begin() + splitIndex + 1);
       }
 
       // Recompute widths after restoring unsplit words.
@@ -514,6 +522,7 @@ void ParsedText::layoutAndExtractLines(
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
     wordSizes.erase(wordSizes.begin(), wordSizes.begin() + consumed);
+    wordVisibleOffsets.erase(wordVisibleOffsets.begin(), wordVisibleOffsets.begin() + consumed);
     // All remaining words were already transformed before the flush; reset the
     // watermark so that words appended by addWord() are processed next time.
     bionicTransformedUpTo_ = words.size();
@@ -524,6 +533,7 @@ void ParsedText::layoutAndExtractLines(
     words = std::move(savedWords);
     wordStyles = std::move(savedStyles);
     wordSizes = std::move(savedSizes);
+    wordVisibleOffsets = std::move(savedOffsets);
     wordContinues = std::move(savedContinues);
     isContinuation_ = savedIsContinuation;
     bionicTransformedUpTo_ = savedBionicWatermark;
@@ -559,6 +569,7 @@ void ParsedText::releaseLayoutScratch() {
     std::vector<EpdFontFamily::Style>().swap(wordStyles);
     std::vector<bool>().swap(wordContinues);
     std::vector<uint8_t>().swap(wordSizes);
+    std::vector<uint32_t>().swap(wordVisibleOffsets);
   }
 }
 
@@ -568,6 +579,7 @@ void ParsedText::reset(const BlockStyle& newBlockStyle) {
   wordStyles.clear();
   wordContinues.clear();
   wordSizes.clear();
+  wordVisibleOffsets.clear();
   blockStyle = newBlockStyle;
   isContinuation_ = false;
   bionicTransformedUpTo_ = 0;
@@ -831,16 +843,20 @@ void ParsedText::applyBionicReadingTransform() {
   std::vector<EpdFontFamily::Style> transformedSuffixStyles;
   std::vector<bool> transformedSuffixContinues;
   std::vector<uint8_t> transformedSuffixSizes;
+  // Each original word became one or two transformed words; both halves keep the word's offset.
+  std::vector<uint32_t> transformedSuffixOffsets;
   transformedSuffix.reserve((words.size() - suffixStart) * 2);
   transformedSuffixStyles.reserve(transformedSuffix.capacity());
   transformedSuffixContinues.reserve(transformedSuffix.capacity());
   transformedSuffixSizes.reserve(transformedSuffix.capacity());
+  transformedSuffixOffsets.reserve(transformedSuffix.capacity());
 
   for (size_t i = suffixStart; i < words.size(); ++i) {
     std::string source = std::move(words[i]);
     const auto originalStyle = wordStyles[i];
     const bool originalAttachToPrevious = wordContinues[i];
     const uint8_t originalSize = wordSizes[i];
+    const uint32_t originalOffset = wordVisibleOffsets[i];
 
     const auto spans = tokenizeBionicWord(source);
     if (spans.empty()) {
@@ -877,11 +893,13 @@ void ParsedText::applyBionicReadingTransform() {
             transformedSuffixStyles.push_back(boldStyle);
             transformedSuffixContinues.push_back(attachToPrevious);
             transformedSuffixSizes.push_back(originalSize);
+            transformedSuffixOffsets.push_back(originalOffset);
 
             transformedSuffix.push_back(std::move(suffix));
             transformedSuffixStyles.push_back(originalStyle);
             transformedSuffixContinues.push_back(true);
             transformedSuffixSizes.push_back(originalSize);
+            transformedSuffixOffsets.push_back(originalOffset);
             attachToPrevious = true;
             continue;
           }
@@ -892,6 +910,7 @@ void ParsedText::applyBionicReadingTransform() {
       transformedSuffixStyles.push_back(originalStyle);
       transformedSuffixContinues.push_back(attachToPrevious);
       transformedSuffixSizes.push_back(originalSize);
+      transformedSuffixOffsets.push_back(originalOffset);
       attachToPrevious = true;
     }
   }
@@ -901,11 +920,13 @@ void ParsedText::applyBionicReadingTransform() {
   wordStyles.resize(suffixStart);
   wordContinues.resize(suffixStart);
   wordSizes.resize(suffixStart);
+  wordVisibleOffsets.resize(suffixStart);
   words.insert(words.end(), std::make_move_iterator(transformedSuffix.begin()),
                std::make_move_iterator(transformedSuffix.end()));
   wordStyles.insert(wordStyles.end(), transformedSuffixStyles.begin(), transformedSuffixStyles.end());
   wordContinues.insert(wordContinues.end(), transformedSuffixContinues.begin(), transformedSuffixContinues.end());
   wordSizes.insert(wordSizes.end(), transformedSuffixSizes.begin(), transformedSuffixSizes.end());
+  wordVisibleOffsets.insert(wordVisibleOffsets.end(), transformedSuffixOffsets.begin(), transformedSuffixOffsets.end());
   bionicTransformedUpTo_ = words.size();
 }
 
@@ -1165,6 +1186,13 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   words.insert(words.begin() + wordIndex + 1, remainder);
   wordStyles.insert(wordStyles.begin() + wordIndex + 1, style);
   wordSizes.insert(wordSizes.begin() + wordIndex + 1, wordSizes[wordIndex]);
+  // The remainder starts where the prefix's visible bytes end (the hyphen is not source text).
+  wordVisibleOffsets.insert(
+      wordVisibleOffsets.begin() + wordIndex + 1,
+      wordVisibleOffsets[wordIndex] +
+          static_cast<uint32_t>(
+              VisibleText::visibleBytes(words[wordIndex].data(), static_cast<int>(words[wordIndex].size())) -
+              (chosenNeedsHyphen ? 1 : 0)));
 
   // Continuation flag handling after splitting a word into prefix + remainder.
   //
@@ -1206,6 +1234,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     const bool suppressHyphenationRetry, const int firstLineIndent, const int16_t blockStartY, const int lineHeight) {
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
+  lastLineVisibleOffset_ = lastBreakAt < wordVisibleOffsets.size() ? wordVisibleOffsets[lastBreakAt] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
 
   // Apply indent only to line 0 of the layout pass; firstLineIndent is already
