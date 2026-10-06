@@ -7,6 +7,7 @@
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"  // DocumentMatchMethod
 #include "KOReaderSyncClient.h"
+#include "LastPushCache.h"
 #include "ProgressComparison.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
@@ -111,6 +112,13 @@ class KOReaderSyncActivity final : public Activity {
   // Known once the Epub was loaded for local mapping; 0 until then. Lets a fetched record's
   // DocFragment be range-checked after the Epub has been released for TLS.
   int spineCount = 0;
+  // The book's cache directory (Epub::getCachePath), known once the Epub was loaded for mapping:
+  // where our last push is kept (LastPushCache.h). Empty until then.
+  std::string bookCachePath;
+  // WiFi was taken fully down after the GET so the remote mapping runs with the radio's memory
+  // back (a pull, or a compare against a record that is not our own last push). An upload then
+  // reconnects first (uploadLocalProgress).
+  bool radioDroppedForMapping = false;
 
   State state = WIFI_SELECTION;
   std::string statusMessage;
@@ -129,6 +137,10 @@ class KOReaderSyncActivity final : public Activity {
 
   // Local progress as KOReader format (for display)
   KOReaderPosition localProgress;
+  // localProgress and the chapter label are mapped for this session. Set by the mapping in
+  // onEnter (before WiFi), so performSync and performUpload reuse it instead of mapping again
+  // with the radio up; cleared when a mapping fails, so the next call retries.
+  bool localProgressComputed = false;
   std::string remoteChapterLabel;
   std::string localChapterLabel;
   std::optional<KOReaderMetadata> localDocumentMetadata;
@@ -186,4 +198,16 @@ class KOReaderSyncActivity final : public Activity {
   bool computeLocalProgressAndChapter();
   void computeRemoteChapter();
   bool ensureRemotePositionMapped(bool closeSessionBeforeMapping = true);
+  // End the TLS session and take WiFi fully down before the remote mapping; idempotent.
+  void dropRadioForRemoteMapping();
+  // Our last push of this book, when the server's record is exactly it: its position as the
+  // mapping would resolve it, without the mapping. nullopt otherwise (or without a cached push).
+  std::optional<CrossPointPosition> ownLastPushPosition(const std::string& remoteXPath) const;
+  // Fill the remote position from our last push when the fetched record is that push.
+  bool useOwnLastPush();
+  // Remember a successful upload as our last push (or forget an older one it replaced).
+  void saveOwnLastPush() const;
+  // performUpload, reconnecting first when the radio was dropped for the remote mapping.
+  void uploadLocalProgress();
+  void onReconnectForUpload(bool success);
 };

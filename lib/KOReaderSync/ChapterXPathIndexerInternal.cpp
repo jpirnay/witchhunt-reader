@@ -374,7 +374,8 @@ void bcDefault(void* ud, const char* text, const int len) {
 std::optional<size_t> countTotalTextBytes(const std::shared_ptr<Epub>& epub, const int spineIndex) {
   ByteCounter state;
   SaxParser saxParser;
-  if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault, /*htmlVoidTagRepair=*/true)) {
+  if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault, /*htmlVoidTagRepair=*/true,
+                      SaxParser::Profile::Lean)) {
     return std::nullopt;
   }
   if (!streamSpine(epub, spineIndex, saxParser)) {

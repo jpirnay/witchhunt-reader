@@ -168,7 +168,7 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
   state.inclusive = true;
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
-                      parserDefaultCb<ForwardState>, /*htmlVoidTagRepair=*/true)) {
+                      parserDefaultCb<ForwardState>, /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean)) {
     return "";
   }
 
@@ -197,7 +197,7 @@ std::string visibleOffsetPass(const std::shared_ptr<Epub>& epub, const int spine
   state.textPointsInBlocks = true;
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
-                      parserDefaultCb<ForwardState>, /*htmlVoidTagRepair=*/true)) {
+                      parserDefaultCb<ForwardState>, /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean)) {
     return "";
   }
   state.saxParser = &saxParser;

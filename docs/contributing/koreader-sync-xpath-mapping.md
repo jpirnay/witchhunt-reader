@@ -159,10 +159,40 @@ The implementation intentionally avoids full DOM storage.
 - The parser parses like the layout parser: bare HTML void tags (`<br>`) are repaired
   (`htmlVoidTagRepair`), so both sides see the same tree.
 
-The streamed pass trades peak for I/O. The SAX parser's state (~9.6 KB) now lives alongside the
-inflate ring (up to 32 KB) instead of after it, so the sync path's peak is ~9.6 KB higher than the
-old inflate-to-temp-file path, while the temp file and its SD write are gone. The X3 "After Task 8"
-run reads the `[KOSync] Sync mem[...]` lines around the mapping to measure it.
+The streamed pass trades peak for I/O: the SAX parser's state lives alongside the inflate ring (up
+to 32 KB) instead of after it, while the temp file and its SD write are gone. No chapter is mapped
+with WiFi up, except the two retry fallbacks (`performSync`, `performUpload`) when the pre-WiFi
+mapping failed:
+- The mappers parse with `SaxParser::Profile::Lean`, which leaves out the attribute table they never
+  read (4,672 B of state on the C3 instead of 9,712 B).
+- **The push position** is mapped in `KOReaderSyncActivity::onEnter`, after the secondary framebuffer
+  is released and before WiFi comes up, and reused for the session.
+- **A pull** (and the reader's auto-pull) maps the fetched record with the radio fully down: after the
+  GET, `HalClock::wifiOff` stops it. Nothing is sent after a pull; the reader reopens on the applied
+  position.
+- **A compare** first asks whether the record is our own last push (`LastPushCache.h`): the same
+  document id and the same XPath as the last successful upload, which `kosync_push.bin` in the book's
+  cache directory keeps with that page's spine, page and content offset.
+  - If it is, the remote position comes from that file: no mapping, and WiFi stays up for a PUT on
+    the warm session.
+  - Any other record is mapped with the radio down, as a pull is. If an upload then follows (smart
+    mode finds us ahead, or the user picks it), WiFi is brought up again through
+    `WifiSelectionActivity`. A failed or cancelled reconnect ends in "WiFi connection failed",
+    never a silent skip.
+- **The auto-push on close** never maps the remote: it compares our own last push from the cache,
+  and any other record from its XPath string.
+- **The wake pull** maps after the background worker has already turned the radio off.
+
+The first X3 run after Task 8 still mapped after WiFi with the full state. On a 174 KB chapter its
+Min Free fell to 10,880 B, against 19,048 B for the temp-file path (baseline doc, "After Task 8 (X3),
+run 1").
+
+Run 2 fixed the push: Min Free was untouched, and `after_local_mapping` read ~120 KB free. Pulls and
+compares, which then still mapped after the GET, troughed at 10.8 to 13.0 KB. Run 3 reads them
+through these `[KOSync] Sync mem[...]` lines:
+- `after_wifi_down_before_remote_mapping`
+- `after_remote_mapping`
+- `after_reconnect_for_upload`
 
 ## Paragraph Index LUT
 
