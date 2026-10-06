@@ -236,7 +236,9 @@ void EpubReaderActivity::silentApplyRemote(const KOReaderProgress& remote) {
   }
 
   NavigationTarget target;
-  if (remotePos.hasListItemIndex) {
+  if (remotePos.hasVisibleTextOffset) {
+    target = NavigationTarget::makeVisibleOffset(remotePos.visibleTextOffset, remotePos.pageNumber);
+  } else if (remotePos.hasListItemIndex) {
     target = NavigationTarget::makeListItem(remotePos.listItemIndex, remotePos.pageNumber);
   } else if (remotePos.hasParagraphIndex) {
     target = NavigationTarget::makeParagraph(remotePos.paragraphIndex, remotePos.pageNumber);

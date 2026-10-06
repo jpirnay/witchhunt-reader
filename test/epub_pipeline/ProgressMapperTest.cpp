@@ -29,11 +29,13 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "Epub.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "KOReaderSync/ChapterXPathIndexerInternal.h"
 #include "KOReaderSync/ProgressMapper.h"
 #include "StoredZipWriter.h"
 
@@ -424,14 +426,25 @@ TEST_F(OffsetPushFixture, AMidParagraphPageStartPushesAsATextPoint) {
   ASSERT_TRUE(pos.hasVisibleTextOffset);
 
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  EXPECT_NE(ko.xpath.find("/section[1]/p["), std::string::npos) << ko.xpath;
-  ASSERT_NE(ko.xpath.find("/text()[1]."), std::string::npos) << ko.xpath;
-  EXPECT_GT(std::stoul(ko.xpath.substr(ko.xpath.rfind('.') + 1)), 0u) << ko.xpath;
+  // "Target paragraph 16 carries enough ordinary words " is 50 codepoints: the page opens on "to".
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[16]/text()[1].50");
+}
+
+TEST_F(OffsetPushFixture, APageStartingAtAParagraphPushesAsItsFirstCodepoint) {
+  const auto section = build(kSectionSpine);
+  ASSERT_GT(section->pageCount, 3);
+  const auto pos = pageWithOffset(*section, kSectionSpine, 2);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[33]/text()[1].0");
 }
 
 TEST_F(OffsetPushFixture, TheChapterStartPushesAsOffsetZeroOfItsFirstText) {
   const auto section = build(kSectionSpine);
-  const auto ko = ProgressMapper::toKOReader(epub, pageWithOffset(*section, kSectionSpine, 0));
+  const auto pos = pageWithOffset(*section, kSectionSpine, 0);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
   // The heading's text sits inside inline elements (span/a/span): the element path, as today.
   EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/header[1]/hgroup[1]/h1[1]/span[1]/a[1]/span[1]");
 }
@@ -446,15 +459,75 @@ TEST_F(OffsetPushFixture, WithoutAnOffsetThePushUsesTheFraction) {
   EXPECT_EQ(ko.xpath.find("/text()"), std::string::npos) << ko.xpath;
 }
 
-TEST_F(OffsetPushFixture, EntityAtThePageStartPushesAsATextPoint) {
-  // p[1] ends in &mdash;: the section counts it as its expansion, and so must the push.
+TEST_F(OffsetPushFixture, AParagraphAfterAnEntityPushesToTheExactCodepoint) {
+  // p[1] ends in &mdash;: the section counts it as its expansion, and so must the push, or every
+  // later page's text point would be off by the entity's length.
   const auto section = build(kFlatSpine);
   ASSERT_GT(section->pageCount, 1);
   const auto pos = pageWithOffset(*section, kFlatSpine, 1);
   ASSERT_TRUE(pos.hasVisibleTextOffset);
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  EXPECT_FALSE(ko.xpath.empty());
-  EXPECT_NE(ko.xpath.find("/text()"), std::string::npos) << ko.xpath;
+  // "Earlier paragraph 17 carries enough ordinary words " is 51 codepoints: the page opens on "to".
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[1]/body/p[17]/text()[1].51");
+}
+
+// --- Pull by content offset ---------------------------------------------------------------------
+//
+// An exact match names a point in the chapter's visible text; the reader turns that offset into
+// the page it falls on through the section's LUT. An inexact match is only a stand-in for the
+// element KOReader named, and carries no offset.
+
+TEST_F(ProgressMapperFixture, AnExactMatchCarriesItsOffset) {
+  const auto pos = map("/body/DocFragment[2]/body/section/p[30]/text().0", percentageInto(kSectionSpine, 0.5f));
+  EXPECT_TRUE(pos.hasVisibleTextOffset);
+  EXPECT_GT(pos.visibleTextOffset, 0u);
+  // p[30] of 60 equal paragraphs: a little under half the chapter's text.
+  const auto total = ChapterXPathIndexerInternal::countTotalTextBytes(epub, kSectionSpine);
+  ASSERT_TRUE(total.has_value());
+  EXPECT_NEAR(static_cast<double>(pos.visibleTextOffset) / static_cast<double>(*total), 0.48, 0.02);
+}
+
+TEST_F(ProgressMapperFixture, TheChapterHeadingCarriesOffsetZero) {
+  const auto pos = map("/body/DocFragment[2]/body/section/header/hgroup/h1/span[1]/a/span/text().0",
+                       percentageInto(kSectionSpine, 0.3f));
+  EXPECT_TRUE(pos.hasVisibleTextOffset);
+  EXPECT_EQ(pos.visibleTextOffset, 0u);
+}
+
+TEST_F(ProgressMapperFixture, AnInexactMatchCarriesNoOffset) {
+  EXPECT_FALSE(map("/body/DocFragment[2]/body/section/div[4]/p[2]/text().0", percentageInto(kSectionSpine, 0.4f))
+                   .hasVisibleTextOffset);
+}
+
+TEST_F(ProgressMapperFixture, AFailedResolveCarriesNoOffset) {
+  EXPECT_FALSE(map("/body/DocFragment[3]/body/p[30]/text().0", percentageInto(kBrokenSpine, 0.4f), kBrokenSpine)
+                   .hasVisibleTextOffset);
+}
+
+TEST_F(OffsetPushFixture, AMidParagraphPageStartPullsBackToItsOffset) {
+  const auto section = build(kSectionSpine);
+  ASSERT_GT(section->pageCount, 3);
+  const auto pos = pageWithOffset(*section, kSectionSpine, 1);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  const auto back = ProgressMapper::toCrossPoint(epub, ko, kSectionSpine, section->pageCount);
+  ASSERT_TRUE(back.hasVisibleTextOffset) << ko.xpath;
+  EXPECT_EQ(back.visibleTextOffset, pos.visibleTextOffset) << ko.xpath;
+  EXPECT_EQ(section->getPageForVisibleTextOffset(back.visibleTextOffset), std::optional<uint16_t>(1));
+}
+
+TEST_F(OffsetPushFixture, EntityAtThePageStartPullsBackToItsOffset) {
+  const auto section = build(kFlatSpine);
+  ASSERT_GT(section->pageCount, 1);
+  const auto pos = pageWithOffset(*section, kFlatSpine, 1);
+  ASSERT_TRUE(pos.hasVisibleTextOffset);
+
+  const auto ko = ProgressMapper::toKOReader(epub, pos);
+  const auto back = ProgressMapper::toCrossPoint(epub, ko, kFlatSpine, section->pageCount);
+  ASSERT_TRUE(back.hasVisibleTextOffset) << ko.xpath;
+  EXPECT_EQ(back.visibleTextOffset, pos.visibleTextOffset) << ko.xpath;
+  EXPECT_EQ(section->getPageForVisibleTextOffset(back.visibleTextOffset), std::optional<uint16_t>(1));
 }
 
 }  // namespace

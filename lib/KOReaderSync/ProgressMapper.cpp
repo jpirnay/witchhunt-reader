@@ -191,8 +191,9 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   if (haveXPathSpine) {
     float intraFromXPath = 0.0f;
     uint16_t liIndexFromXPath = 0;
+    uint32_t offsetFromXPath = 0;
     if (ChapterXPathIndexer::findProgressForXPath(epub, xpathSpineIndex, koPos.xpath, intraFromXPath, xpathExactMatch,
-                                                  &liIndexFromXPath)) {
+                                                  &liIndexFromXPath, &offsetFromXPath)) {
       result.spineIndex = xpathSpineIndex;
       result.hasResolvedSpineIndex = true;
       resolvedIntraSpineProgress = intraFromXPath;
@@ -200,6 +201,12 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       if (liIndexFromXPath > 0) {
         result.listItemIndex = liIndexFromXPath;
         result.hasListItemIndex = true;
+      }
+      // Only an exact match is a position; an ancestor or index-insensitive match is a stand-in
+      // whose offset (a wrapper's end, a sibling's start) must not be mistaken for one.
+      if (xpathExactMatch) {
+        result.visibleTextOffset = offsetFromXPath;
+        result.hasVisibleTextOffset = true;
       }
 
       // An inexact match (an ancestor, or a sibling with another index) is only a stand-in for
@@ -328,9 +335,9 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   // INF, not DBG: release builds log at INF, and a sync that lands on the wrong page is
   // undiagnosable from a user's log without the mapping source.
-  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %.2f%% at %s -> spine=%d, page=%d/%d (%s, exact=%s)",
+  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %.2f%% at %s -> spine=%d, page=%d/%d off=%u/%d (%s, exact=%s)",
           koPos.percentage * 100, koPos.xpath.c_str(), result.spineIndex, result.pageNumber, result.totalPages,
-          mappingSource, xpathExactMatch ? "yes" : "no");
+          result.visibleTextOffset, result.hasVisibleTextOffset, mappingSource, xpathExactMatch ? "yes" : "no");
 
   return result;
 }

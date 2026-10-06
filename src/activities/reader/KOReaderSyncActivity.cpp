@@ -168,6 +168,8 @@ void KOReaderSyncActivity::applyRemoteAndFinish() {
   sync.resultHasParagraphIndex = remotePosition.hasParagraphIndex;
   sync.resultListItemIndex = remotePosition.listItemIndex;
   sync.resultHasListItemIndex = remotePosition.hasListItemIndex;
+  sync.resultVisibleOffset = remotePosition.visibleTextOffset;
+  sync.resultHasVisibleOffset = remotePosition.hasVisibleTextOffset;
   APP_STATE.saveToFile();
 
   if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
@@ -760,6 +762,8 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
     sync.resultHasParagraphIndex = appliedResult->hasParagraphIndex;
     sync.resultListItemIndex = appliedResult->listItemIndex;
     sync.resultHasListItemIndex = appliedResult->hasListItemIndex;
+    sync.resultVisibleOffset = appliedResult->visibleOffset;
+    sync.resultHasVisibleOffset = appliedResult->hasVisibleOffset;
   } else if (outcome != KOReaderSyncOutcomeState::APPLIED_REMOTE) {
     // Only zero the result fields when not resuming an already-applied remote
     // position. The PULL_REMOTE path pre-saves the mapped result into APP_STATE
@@ -770,6 +774,8 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
     sync.resultHasParagraphIndex = false;
     sync.resultListItemIndex = 0;
     sync.resultHasListItemIndex = false;
+    sync.resultVisibleOffset = 0;
+    sync.resultHasVisibleOffset = false;
   }
   // Capture the destination before touching the session, since onExit() still needs it after the
   // reboot decision. What may be cleared here depends entirely on who consumes the session next:
@@ -1131,9 +1137,10 @@ void KOReaderSyncActivity::loop() {
           return;
         }
         // Wifi will be turned off in onExit()
-        const SyncResult result = {remotePosition.spineIndex,     remotePosition.pageNumber,
-                                   remotePosition.paragraphIndex, remotePosition.hasParagraphIndex,
-                                   remotePosition.listItemIndex,  remotePosition.hasListItemIndex};
+        const SyncResult result = {remotePosition.spineIndex,        remotePosition.pageNumber,
+                                   remotePosition.paragraphIndex,    remotePosition.hasParagraphIndex,
+                                   remotePosition.listItemIndex,     remotePosition.hasListItemIndex,
+                                   remotePosition.visibleTextOffset, remotePosition.hasVisibleTextOffset};
         resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE, &result);
       } else if (selectedOption == 1) {
         // Upload local progress

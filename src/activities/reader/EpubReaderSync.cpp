@@ -219,7 +219,11 @@ void EpubReaderActivity::applyPendingSyncSession() {
       restoreSpineIndex = sync.resultSpineIndex;
       restorePage = sync.resultPage;
     }
-    if (sync.resultHasListItemIndex) {
+    if (sync.resultHasVisibleOffset) {
+      restoreTarget = NavigationTarget::makeVisibleOffset(sync.resultVisibleOffset, restorePage);
+      LOG_DBG("ERS", "Applied synced remote position: spine=%d page=%d offset=%u", restoreSpineIndex, restorePage,
+              sync.resultVisibleOffset);
+    } else if (sync.resultHasListItemIndex) {
       restoreTarget = NavigationTarget::makeListItem(sync.resultListItemIndex, restorePage);
       LOG_DBG("ERS", "Applied synced remote position: spine=%d page=%d li[%u]", restoreSpineIndex, restorePage,
               sync.resultListItemIndex);

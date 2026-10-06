@@ -226,11 +226,15 @@ struct ReverseState : StackState {
 }  // namespace
 
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
-                                  float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex) {
+                                  float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
+                                  uint32_t* outVisibleOffset) {
   outIntraSpineProgress = 0.0f;
   outExactMatch = false;
   if (outListItemIndex) {
     *outListItemIndex = 0;
+  }
+  if (outVisibleOffset) {
+    *outVisibleOffset = 0;
   }
 
   if (xpath.empty()) {
@@ -257,6 +261,9 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
 
   outExactMatch = state.bestExact;
+  if (outVisibleOffset) {
+    *outVisibleOffset = static_cast<uint32_t>(state.bestOffset);
+  }
   if (state.totalTextBytes == 0) {
     outIntraSpineProgress = 0.0f;
   } else {

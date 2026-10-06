@@ -79,31 +79,33 @@ class EpubReaderActivity final : public Activity {
   // cachedSpineIndex / cachedChapterTotalPageCount / pendingPercent* / pendingParagraph* fields.
   struct NavigationTarget {
     enum class Kind : uint8_t {
-      Page,       // go to page n (0-based)
-      LastPage,   // go to last page of section (was UINT16_MAX sentinel)
-      Anchor,     // href fragment (e.g. "note1")
-      TocIndex,   // TOC entry index
-      Percent,    // normalised 0.0–1.0 within spine
-      Paragraph,  // KOReader paragraph LUT index
-      ListItem,   // KOReader li-anchored LUT index
+      Page,           // go to page n (0-based)
+      LastPage,       // go to last page of section (was UINT16_MAX sentinel)
+      Anchor,         // href fragment (e.g. "note1")
+      TocIndex,       // TOC entry index
+      Percent,        // normalised 0.0–1.0 within spine
+      Paragraph,      // KOReader paragraph LUT index
+      ListItem,       // KOReader li-anchored LUT index
+      VisibleOffset,  // KOReader content offset (Section::getPageForVisibleTextOffset)
     };
     Kind kind = Kind::Page;
     union {
-      int page;             // Kind::Page
-      int tocIndex;         // Kind::TocIndex
-      float spineProgress;  // Kind::Percent
-      uint16_t lutIndex;    // Kind::Paragraph / Kind::ListItem
+      int page;                // Kind::Page
+      int tocIndex;            // Kind::TocIndex
+      float spineProgress;     // Kind::Percent
+      uint16_t lutIndex;       // Kind::Paragraph / Kind::ListItem
+      uint32_t visibleOffset;  // Kind::VisibleOffset
     };
     std::string anchorStr;  // Kind::Anchor; empty for all others
     // Cross-font rescaling: page count of this spine at save time.
     // Non-zero for Kind::Page when loaded from progress.bin or written during reflow.
-    // Also set for Kind::Paragraph / Kind::ListItem / Kind::Anchor so a LUT miss
-    // still rescales the estimated fallbackPage instead of stranding at 0.
+    // Also set for Kind::Paragraph / Kind::ListItem / Kind::VisibleOffset / Kind::Anchor so
+    // a LUT miss still rescales the estimated fallbackPage instead of stranding at 0.
     int cachedPageCount = 0;
     int cachedSpineIdx = 0;
     // Estimated page used as a baseline before LUT/anchor lookup, and as a fallback
     // when the lookup misses. Only meaningful for Kind::Paragraph / Kind::ListItem /
-    // Kind::Anchor — for Kind::Page the `page` field is the baseline.
+    // Kind::VisibleOffset / Kind::Anchor — for Kind::Page the `page` field is the baseline.
     int fallbackPage = 0;
     // Kind::Page restored from progress.bin: the paragraph LUT index of the saved page (0 = none).
     // Used only once the chapter turns out to have been laid out anew (its page count differs from
@@ -157,6 +159,13 @@ class EpubReaderActivity final : public Activity {
       NavigationTarget t;
       t.kind = Kind::ListItem;
       t.lutIndex = i;
+      t.fallbackPage = fallback;
+      return t;
+    }
+    static NavigationTarget makeVisibleOffset(uint32_t offset, int fallback = 0) {
+      NavigationTarget t;
+      t.kind = Kind::VisibleOffset;
+      t.visibleOffset = offset;
       t.fallbackPage = fallback;
       return t;
     }

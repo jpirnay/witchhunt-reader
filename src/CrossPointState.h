@@ -72,6 +72,11 @@ struct KOReaderSyncSessionState {
   // Preferred over resultParagraphIndex when the deepest target element is /li[N].
   uint16_t resultListItemIndex = 0;
   bool resultHasListItemIndex = false;
+  // The remote position as a visible-text offset in resultSpineIndex (exact matches only), which
+  // EpubReaderActivity turns into the exact page via Section::getPageForVisibleTextOffset.
+  // Preferred over both LUT indices above.
+  uint32_t resultVisibleOffset = 0;
+  bool resultHasVisibleOffset = false;
   // Where to land once this sync (and its reboot) completes. Defaults to Reader so auto-push-on-
   // close and reader-menu-triggered syncs keep their existing behavior without every call site
   // having to set it explicitly; AUTO_PUSH's caller sets it to Home, the finished-book flow sets
@@ -100,6 +105,8 @@ struct KOReaderSyncSessionState {
     resultHasParagraphIndex = false;
     resultListItemIndex = 0;
     resultHasListItemIndex = false;
+    resultVisibleOffset = 0;
+    resultHasVisibleOffset = false;
     postAction = KOReaderSyncPostAction::Reader;
     postActionTarget.clear();
     autoPullEpubPath.clear();
