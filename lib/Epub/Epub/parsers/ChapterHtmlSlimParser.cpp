@@ -858,6 +858,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     nextWordContinues = false;
     return false;
   }
+  // What this places ahead of the word (its list marker, a pending float) stands before the word,
+  // wherever in the chunk the flush happens. A table row degraded here pins its own offsets.
+  const PinnedPlacement atWord(*this, partWordVisibleOffset_);
 
   // Determine font style from depth-based tracking and CSS effective style
   const bool isBold = boldUntilDepth < depth || effectiveBold;
@@ -896,7 +899,8 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   if (currentTableCell && currentTableCell->text) {
     // text is null only for a cell already consumed by the streaming path; currentTableCell is
     // cleared alongside that, so this is belt-and-braces against a future reordering.
-    currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
+    currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
+                                    partWordVisibleOffset_);
     // Charge the word against the row budget. Only a row still headed for the grid accumulates —
     // a degraded cell is drained and freed at </td>.
     if (currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
@@ -922,7 +926,8 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     if (pendingInlineImage_.active && currentTextBlock->isEmpty()) {
       attachPendingFloatImage(currentTextBlock->getBlockStyle());
     }
-    currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct);
+    currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
+                              partWordVisibleOffset_);
 
     if (currentTextBlock->size() > 96) {
       if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
@@ -968,7 +973,8 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           renderer, fontId, effectiveWidth,
           [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
                  const bool suppressHyphenationRetry) {
-            return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry);
+            return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
+                                 currentTextBlock->lastLineVisibleOffset());
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
@@ -981,11 +987,28 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   return true;
 }
 
+void ChapterHtmlSlimParser::noteElementOnPage(const uint32_t offset) {
+  if (currentPageVisibleOffsetSet_) return;
+  currentPageVisibleOffset_ = offset;
+  currentPageVisibleOffsetSet_ = true;
+  // Empty pages emitted just before this one start where this element does.
+  for (size_t i = paragraphLutPerPage.size() - pageStartsAwaitingElement_; i < paragraphLutPerPage.size(); ++i) {
+    paragraphLutPerPage[i].visibleTextOffset = offset;
+  }
+  pageStartsAwaitingElement_ = 0;
+}
+
 // Emit the current page, keeping paragraphLutPerPage and completedPageCount in lockstep.
 // Callers must ensure currentPage is non-null and carries content; the helper resets
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.
-void ChapterHtmlSlimParser::emitPage(uint32_t xhtmlByteOffset) {
-  paragraphLutPerPage.push_back({xhtmlByteOffset, xpathParagraphIndex, xpathListItemIndex});
+void ChapterHtmlSlimParser::emitPage() {
+  // A page with no noted element (nothing but spacing) starts where the next element does, which
+  // noteElementOnPage fills in. The counter stands in only if no element ever follows; taken now,
+  // mid-chunk, it could lie past the next page's first word.
+  const uint32_t start = currentPageVisibleOffsetSet_ ? currentPageVisibleOffset_ : visibleTextOffset_;
+  if (!currentPageVisibleOffsetSet_) pageStartsAwaitingElement_++;  // bounded by MAX_PAGES_PER_SECTION
+  paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex});
+  currentPageVisibleOffsetSet_ = false;
   // Both of these borrow elements of the page being handed off, so they must be dropped
   // before it goes -- and the deferred yPos update is moot on a fresh page anyway (a drop
   // cap stays on the emitted page).
@@ -1065,7 +1088,7 @@ void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct) {
       lineHeight = lineHeight * maxSizePct / 100;
     }
     if (currentPageNextY + lineHeight > viewportHeight) {
-      emitPage(lastBodyChildByteOffset);
+      emitPage();
     }
   }
   ensurePageBlock();
@@ -1135,7 +1158,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   // has room. This avoids the fragile cross-page tile/continuation path entirely and
   // lets the whole image (with text wrapping beside it) live on a single page.
   if (imgH > static_cast<int16_t>(viewportHeight - currentPageNextY) && currentPage && !currentPage->elements.empty()) {
-    emitPage(lastBodyChildByteOffset);  // resets currentPage + currentPageNextY=0, clears stale float state
+    emitPage();  // resets currentPage + currentPageNextY=0, clears stale float state
   }
 
   const int16_t imgX = imgIsRight ? static_cast<int16_t>(viewportWidth - imgW) : 0;
@@ -1153,6 +1176,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   // the block can re-base its yPos below. emitPage() clears it before handing the page
   // on, so it never outlives the element it points at.
   deferredPageImage_ = pageImage.get();
+  noteElementOnPage(placementOffset());
   currentPage->elements.push_back(std::move(pageImage));
 
   // Attach the float zone to the originating block (the caption/first paragraph).
@@ -1260,7 +1284,8 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   if (!haveInk || capInkTop <= 0 || capWidth <= 0 || capWidth + kDropCapGapPx > viewportWidth / 2) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (haveInk=%d inkTop=%d width=%d limit=%d)", pendingDropCap_.text,
             haveInk, capInkTop, capWidth + kDropCapGapPx, viewportWidth / 2);
-    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style, false, false,
+                              ParsedText::DEFAULT_WORD_SIZE_PCT, pendingDropCap_.visibleOffset);
     nextWordContinues = true;  // "A" + "ll" form one visual word
     return;
   }
@@ -1287,7 +1312,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   }
   // A drop cap never crosses a page boundary — break first if it would not fit.
   if (zoneHeight > viewportHeight - currentPageNextY && currentPage && !currentPage->elements.empty()) {
-    emitPage(lastBodyChildByteOffset);
+    emitPage();
   }
 
   BlockStyle capBlockStyle;
@@ -1299,7 +1324,8 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
                                                std::vector<uint8_t>{});
   if (!capBlock || !capBlock->valid()) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (block alloc failed)", pendingDropCap_.text);
-    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style, false, false,
+                              ParsedText::DEFAULT_WORD_SIZE_PCT, pendingDropCap_.visibleOffset);
     nextWordContinues = true;
     return;
   }
@@ -1313,12 +1339,16 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   auto capLine = makeUniqueNoThrow<PageLine>(std::move(capBlock), capX, static_cast<int16_t>(top + dropCapYAdjust_));
   if (!capLine) {
     LOG_DBG("EHP", "dropcap '%s': inline fallback (PageLine alloc failed)", pendingDropCap_.text);
-    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style);
+    currentTextBlock->addWord(pendingDropCap_.text, pendingDropCap_.style, false, false,
+                              ParsedText::DEFAULT_WORD_SIZE_PCT, pendingDropCap_.visibleOffset);
     nextWordContinues = true;
     return;
   }
   // Borrowed, like deferredPageImage_ above: the page owns the line.
   deferredDropCapLine_ = capLine.get();
+  // Placed at the span's close, after the captured letters were counted: the cap starts at its
+  // first letter.
+  noteElementOnPage(pendingDropCap_.visibleOffset);
   currentPage->elements.push_back(std::move(capLine));
 
   BlockStyle& bs = currentTextBlock->getBlockStyle();
@@ -1341,7 +1371,9 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
 
 void ChapterHtmlSlimParser::emitPendingListMarker() {
   if (pendingListMarker_[0] == '\0') return;
-  if (currentTextBlock) currentTextBlock->addWord(pendingListMarker_, EpdFontFamily::REGULAR);
+  if (currentTextBlock)
+    currentTextBlock->addWord(pendingListMarker_, EpdFontFamily::REGULAR, false, false,
+                              ParsedText::DEFAULT_WORD_SIZE_PCT, placementOffset());
   pendingListMarker_[0] = '\0';
 }
 
@@ -1437,7 +1469,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       if (!pendingAnchorId.empty()) {
         if (std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
           if (currentPage && !currentPage->elements.empty()) {
-            emitPage(lastBodyChildByteOffset);
+            emitPage();
           }
         }
         queueAnchorForNextLine(std::move(pendingAnchorId));
@@ -1460,7 +1492,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   if (!pendingAnchorId.empty() &&
       std::find(tocAnchors.begin(), tocAnchors.end(), pendingAnchorId) != tocAnchors.end()) {
     if (currentPage && !currentPage->elements.empty()) {
-      emitPage(lastBodyChildByteOffset);
+      emitPage();
     }
   }
   // Queue the deferred anchor now that the previous block is flushed (and any TOC page break has
@@ -1487,6 +1519,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
 
 void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  if (VisibleText::isNonVisibleTag(name)) self->nonVisibleTextDepth_++;
 
   if (self->streamFailed) {
     return;
@@ -1941,7 +1974,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           self->startNewTextBlock(centeredBlockStyle);
           self->italicUntilDepth = std::min(self->italicUntilDepth, self->depth);
           self->depth += 1;
-          self->characterData(userData, alt.c_str(), alt.length());
+          self->consumeText(userData, alt.c_str(), alt.length(), self->visibleTextOffset_, /*source=*/false);
           // Skip any child content (skip until parent as we pre-advanced depth above)
           self->skipUntilDepth = self->depth - 1;
           return;
@@ -2254,7 +2287,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                     (self->currentPageNextY + totalImageHeightWithSpacing > self->viewportHeight)) {
                   LOG_TRC("EHP", "Image page break: currentY=%d needed=%d viewportH=%d", self->currentPageNextY,
                           totalImageHeightWithSpacing, self->viewportHeight);
-                  self->emitPage(self->lastBodyChildByteOffset);
+                  self->emitPage();
                   if (!self->currentPage) {
                     LOG_ERR("EHP", "Failed to create new page");
                     return;
@@ -2285,6 +2318,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   LOG_ERR("EHP", "Failed to create PageImage");
                   return;
                 }
+                self->noteElementOnPage(self->visibleTextOffset_);
                 self->currentPage->elements.push_back(std::move(pageImage));
                 self->currentPageNextY += displayHeight;
                 self->currentPageNextY += imageSpacingBottom;
@@ -2332,11 +2366,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // check so that hidden <p> elements are still counted, matching ChapterXPathIndexer's
   // counting (pure XML, no CSS). This ensures paragraph indices in the section cache LUT
   // align with KOReader's crengine XPath indices.
-  // At the same time, record the byte offset of every direct-body-child element start:
-  // the forward mapper's partial-parse heuristic requires the seek hint to land on a
-  // body-child boundary, otherwise partialBaseDepth can misidentify wrapped paragraphs.
   if (self->xpathBodyDepth >= 0 && self->depth == self->xpathBodyDepth + 1) {
-    self->lastBodyChildByteOffset = self->saxParser_.byteOffset();
     if (strcmp(name, "p") == 0) {
       self->xpathParagraphIndex++;
     }
@@ -2520,7 +2550,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   if (cssStyle.pageBreakBefore &&
       (matches(name, HEADER_TAGS, NUM_HEADER_TAGS) || matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) || opensBlockSpan) &&
       self->currentPage && !self->currentPage->elements.empty()) {
-    self->emitPage(self->lastBodyChildByteOffset);
+    self->emitPage();
   }
 
   if (opensBlockSpan) {
@@ -2667,7 +2697,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
     self->currentPageNextY += marginV;
     if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
-      self->emitPage(self->lastBodyChildByteOffset);
+      self->emitPage();
       self->currentPage.reset(new Page());
       self->currentPageNextY = 0;
     }
@@ -2676,6 +2706,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
     const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
     if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
+      self->noteElementOnPage(self->visibleTextOffset_);
       self->currentPage->elements.push_back(std::move(hr));
     }
     self->currentPageNextY += 1 + marginV;
@@ -2908,6 +2939,19 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
 void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const int len) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  const bool source = self->xpathBodyDepth >= 0 && self->nonVisibleTextDepth_ == 0;
+  const uint32_t base = self->visibleTextOffset_;
+  if (source) {
+    self->visibleTextOffset_ += static_cast<uint32_t>(VisibleText::visibleBytes(s, len));
+  }
+  consumeText(userData, s, len, base, source);
+}
+
+void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int len, const uint32_t baseOffset,
+                                        const bool source) {
+  auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  // Running offset of s[i]; advances only for source text, so synthetic words sit at baseOffset.
+  uint32_t off = baseOffset;
 
   if (self->streamFailed) {
     return;
@@ -2984,11 +3028,15 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
   if (self->pendingDropCap_.active) {
     int i = 0;
     bool overflow = false;
+    uint32_t byteOff = off;
     for (; i < len; i++) {
+      byteOff = off;
+      if (source && !VisibleText::isSpace(static_cast<unsigned char>(s[i]))) off++;
       if (isWhitespace(s[i])) continue;
       // Same reason as in the word flow below: a formatting control must not become the
       // drop cap. A watermarked chapter can open with a run of them.
       if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+        if (source) off += ignorableLen - 1;
         i += ignorableLen - 1;
         continue;
       }
@@ -2996,6 +3044,7 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
         overflow = true;
         break;
       }
+      if (self->pendingDropCap_.textLen == 0) self->pendingDropCap_.visibleOffset = byteOff;
       self->pendingDropCap_.text[self->pendingDropCap_.textLen++] = s[i];
     }
     if (!overflow) return;
@@ -3004,12 +3053,14 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
     self->pendingDropCap_.active = false;
     const int captured = self->pendingDropCap_.textLen;
     self->pendingDropCap_.textLen = 0;
-    characterData(userData, self->pendingDropCap_.text, captured);
-    characterData(userData, s + i, len - i);
+    consumeText(userData, self->pendingDropCap_.text, captured, self->pendingDropCap_.visibleOffset, source);
+    consumeText(userData, s + i, len - i, byteOff, source);
     return;
   }
 
   for (int i = 0; i < len; i++) {
+    const uint32_t byteOff = off;
+    if (source && !VisibleText::isSpace(static_cast<unsigned char>(s[i]))) off++;
     const unsigned char c = static_cast<unsigned char>(s[i]);
 
     // Fast path for plain ASCII word characters (> 0x20 and < 0x80).
@@ -3022,6 +3073,7 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
         // partial multi-byte sequence can be at the boundary.
         if (!self->flushPartWordBuffer()) return;
       }
+      if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
       self->partWordBuffer[self->partWordBufferIndex++] = s[i];
       continue;
     }
@@ -3036,8 +3088,11 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
         // empty line.  Add a single space so the block is non-empty and makePages()
         // will produce a line of the correct height instead of reusing the empty block.
         if (self->currentTextBlock->isEmpty()) {
-          self->currentTextBlock->addWord(" ", EpdFontFamily::REGULAR);
+          self->currentTextBlock->addWord(" ", EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT,
+                                          off);
         }
+        // A float the new block takes stands before the next byte of this chunk.
+        const PinnedPlacement atNextByte(*self, off);
         self->startNewTextBlock(self->currentTextBlock->getBlockStyle());
         self->nextWordContinues = false;
         continue;
@@ -3064,6 +3119,7 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
     // never been a break opportunity in this parser. Making it one is a separate improvement.
     if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
       i += ignorableLen - 1;  // loop's ++i consumes the last byte
+      if (source) off += ignorableLen - 1;
       continue;
     }
 
@@ -3093,12 +3149,14 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       self->partWordBuffer[0] = ' ';
       self->partWordBuffer[1] = '\0';
       self->partWordBufferIndex = 1;
+      self->partWordVisibleOffset_ = byteOff;
       self->nextWordContinues = true;  // Attach space to previous word (no break).
       if (!self->flushPartWordBuffer()) return;
 
       self->nextWordContinues = true;  // Next real word attaches to this space (no break).
 
       i++;  // Skip the second byte (0xA0)
+      if (source) off++;
       continue;
     }
 
@@ -3112,12 +3170,14 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       self->partWordBuffer[0] = ' ';
       self->partWordBuffer[1] = '\0';
       self->partWordBufferIndex = 1;
+      self->partWordVisibleOffset_ = byteOff;
       self->nextWordContinues = true;
       if (!self->flushPartWordBuffer()) return;
 
       self->nextWordContinues = true;
 
       i += 2;  // Skip the remaining two bytes (0x80 0xAF)
+      if (source) off += 2;
       continue;
     }
 
@@ -3130,7 +3190,8 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
       // Check if the next two bytes complete the 3-byte sequence
       if ((i + 2 < len) && (s[i + 1] == FEFF_BYTE_2) && (s[i + 2] == FEFF_BYTE_3)) {
         // Sequence 0xEF 0xBB 0xBF found!
-        i += 2;    // Skip the next two bytes
+        i += 2;  // Skip the next two bytes
+        if (source) off += 2;
         continue;  // Move to the next iteration
       }
     }
@@ -3156,11 +3217,14 @@ void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const i
           self->partWordBuffer[j] = saved[j];
         }
         self->partWordBufferIndex = overflow;
+        // The saved bytes were counted at their own positions; synthetic text never advanced.
+        self->partWordVisibleOffset_ = source ? byteOff - static_cast<uint32_t>(overflow) : byteOff;
       } else {
         if (!self->flushPartWordBuffer()) return;
       }
     }
 
+    if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
     self->partWordBuffer[self->partWordBufferIndex++] = s[i];
   }
 }
@@ -3197,6 +3261,7 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
 }
 
 void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const char* name) {
+  if (VisibleText::isNonVisibleTag(name) && self->nonVisibleTextDepth_ > 0) self->nonVisibleTextDepth_--;
   if (self->streamFailed) {
     return;
   }
@@ -3434,7 +3499,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
 
     const bool surroundingItalic = self->effectiveItalic;
     self->effectiveItalic = true;
-    characterData(self, preview.c_str(), static_cast<int>(preview.size()));
+    consumeText(self, preview.c_str(), static_cast<int>(preview.size()), self->visibleTextOffset_, /*source=*/false);
     if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) {
       self->effectiveItalic = surroundingItalic;
       return;
@@ -3737,7 +3802,7 @@ bool ChapterHtmlSlimParser::finalize() {
         pendingAnchorId.clear();
       }
       if (hasFinalPageContent) {
-        emitPage(0u);  // post-parse: no byte offset available
+        emitPage();
       }
     }
     // Both borrow elements of currentPage, and the layoutFailed / empty-final-page paths
@@ -3797,7 +3862,8 @@ int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
 
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
-                                                                   const bool suppressHyphenationRetry) {
+                                                                   const bool suppressHyphenationRetry,
+                                                                   const uint32_t lineVisibleOffset) {
   // Spacing (insets, float zones) lives on the ParsedText that produced this line,
   // not on the line itself: a TextBlock only keeps the render slice, because by the
   // time a line is resident the spacing has already been baked into its xpos/y here.
@@ -3821,7 +3887,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   }
 
   if (currentPageNextY + lineHeight > viewportHeight) {
-    emitPage(lastBodyChildByteOffset);
+    emitPage();
   }
 
   const bool noRoomForAnotherLine =
@@ -3871,6 +3937,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     LOG_ERR("EHP", "Dropping line: PageLine allocation failed");
     return ParsedText::LineProcessResult::Accepted;
   }
+  noteElementOnPage(lineVisibleOffset);
   currentPage->elements.push_back(std::move(pageLine));
 
   // On the first line of a block with a deferred inline image, fix the image's
@@ -4071,7 +4138,8 @@ void ChapterHtmlSlimParser::makePages() {
       renderer, fontId, effectiveWidth,
       [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
              const bool suppressHyphenationRetry) {
-        return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry);
+        return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
+                             currentTextBlock->lastLineVisibleOffset());
       },
       /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
 
@@ -4174,6 +4242,20 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   }
   t.columnCount = columnCount;
 
+  // The row's first word: where a fragment this row opens starts, and what a wordless fragment
+  // closed below stands before. Taken now, before the header capture further down moves the
+  // cells out.
+  uint32_t rowStart = UINT32_MAX;
+  for (const auto& cell : t.pendingRow.cells) {
+    if (cell.text) {
+      if (const auto first = cell.text->firstWordVisibleOffset()) rowStart = std::min(rowStart, *first);
+    }
+  }
+  const auto flushFragmentBeforeRow = [&] {
+    const PinnedPlacement beforeRow(*this, rowStart != UINT32_MAX ? rowStart : pinnedPlacementOffset_);
+    flushTableFragment(t.packer);
+  };
+
   if (!currentPage) {
     currentPage.reset(new Page());
     currentPageNextY = 0;
@@ -4181,7 +4263,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
 
   // A change in column count requires a new fragment; each PageTableFragment carries exactly one.
   if (!t.packer.rows.empty() && lr.renderCols != t.packer.cols) {
-    flushTableFragment(t.packer);
+    flushFragmentBeforeRow();
   }
   if (t.packer.cols == 0) t.packer.cols = lr.renderCols;
 
@@ -4205,7 +4287,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   // invariant, not the working limit.
   if (!t.packer.rows.empty() && (t.packer.rows.size() >= MAX_TABLE_ROWS ||
                                  currentPageNextY + t.packer.height + rowContrib + closingBorder > viewportHeight)) {
-    flushTableFragment(t.packer);
+    flushFragmentBeforeRow();
     t.packer.cols = lr.renderCols;
   }
 
@@ -4217,7 +4299,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   if (t.packer.rows.empty() && currentPageNextY > 0 &&
       currentPageNextY + headerContrib + rowContrib + closingBorder > viewportHeight) {
     dropRowLayout();  // its bytes were in the page about to be emitted
-    emitPage(lastBodyChildByteOffset);
+    emitPage();
     ensurePageBlock();
     if (buildArena_) rowBlock = buildArena_->reserveBlock();
     if (!layoutTableRow(t.pendingRow, columnCount, lr)) {
@@ -4273,6 +4355,7 @@ void ChapterHtmlSlimParser::commitPendingRow() {
   tr.isHeaderRow = lr.isHeaderRow;
   tr.height = lr.height;
   tr.cells = std::move(lr.cells);
+  if (t.packer.firstVisibleOffset == UINT32_MAX) t.packer.firstVisibleOffset = rowStart;
   t.packer.rows.push_back(std::move(tr));
   t.packer.height += rowContrib;
 
@@ -4387,7 +4470,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
     currentPageNextY = 0;
   }
   if (!currentPage->elements.empty() && currentPageNextY + displayHeight > viewportHeight) {
-    emitPage(lastBodyChildByteOffset);
+    emitPage();
     if (!currentPage) {
       currentPage.reset(new Page());
       currentPageNextY = 0;
@@ -4402,6 +4485,7 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       LOG_ERR("EHP", "Image dropped: PageImage allocation failed");
       return;
     }
+    noteElementOnPage(placementOffset());
     currentPage->elements.push_back(std::move(pageImage));
     currentPageNextY += displayHeight;
     LOG_TRC("EHP", "Image placed as block: %dx%d", displayWidth, displayHeight);
@@ -4432,12 +4516,13 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
       LOG_ERR("EHP", "Image slice dropped: PageImage allocation failed");
       return;
     }
+    noteElementOnPage(placementOffset());
     currentPage->elements.push_back(std::move(slice));
     currentPageNextY += sliceH;
     srcOffset += sliceH;
     LOG_DBG("EHP", "Image slice placed: offset=%d h=%d", srcOffset - sliceH, sliceH);
     if (srcOffset < displayHeight) {
-      emitPage(lastBodyChildByteOffset);
+      emitPage();
     }
   }
 }
@@ -4451,8 +4536,18 @@ void ChapterHtmlSlimParser::degradeRow(const char* reason) {
           static_cast<unsigned>(t.pendingRow.cells.size()), static_cast<unsigned>(t.pendingRowBytes));
 
   // Close the fragment first: the paragraphs about to be emitted come AFTER every row already
-  // packed, and a fragment written later would land below them on the page.
-  flushTableFragment(t.packer);
+  // packed, and a fragment written later would land below them on the page. A wordless fragment
+  // stands before this row's first word; the counter (or the caller's pin) is already past it.
+  {
+    uint32_t rowStart = placementOffset();
+    for (const auto& cell : t.pendingRow.cells) {
+      if (cell.text) {
+        if (const auto first = cell.text->firstWordVisibleOffset()) rowStart = std::min(rowStart, *first);
+      }
+    }
+    const PinnedPlacement beforeRow(*this, rowStart);
+    flushTableFragment(t.packer);
+  }
 
   t.rowDegraded = true;
   t.pendingRowBytes = 0;
@@ -4489,7 +4584,14 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   t.pendingRow.cells.pop_back();
   currentTableCell = nullptr;  // nothing may route into the detached cell during the drain
 
-  degradeRow(reason);
+  {
+    // The earlier cells' images go out ahead of the open cell's words, so they stand before its
+    // first word, not before the word whose flush brought us here.
+    std::optional<uint32_t> openStart;
+    if (open.text) openStart = open.text->firstWordVisibleOffset();
+    const PinnedPlacement beforeOpenCell(*this, openStart ? *openStart : placementOffset());
+    degradeRow(reason);
+  }
 
   // The open cell's words come after everything buffered before it, in document order. Its image
   // does NOT go out here — a degraded cell emits its image at </td>, and `open` keeps it.
@@ -4638,12 +4740,13 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
       packer.hasBorder ? static_cast<uint16_t>(packer.height + 1) : static_cast<uint16_t>(packer.height);
 
   if (currentPageNextY + fragTotalHeight > viewportHeight && currentPageNextY > 0) {
-    emitPage(lastBodyChildByteOffset);
+    emitPage();
   }
 
   if (auto fragment = makeUniqueNoThrow<PageTableFragment>(
           packer.cols, packer.totalWidth, fragTotalHeight, std::move(packer.rows),
           /*xPos=*/packer.xInset, /*yPos=*/static_cast<int16_t>(currentPageNextY), packer.hasBorder)) {
+    noteElementOnPage(packer.firstVisibleOffset != UINT32_MAX ? packer.firstVisibleOffset : placementOffset());
     currentPage->elements.push_back(std::move(fragment));
   } else {
     LOG_ERR("EHP", "Dropping table fragment: allocation failed");
@@ -4652,6 +4755,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
   packer.rows.clear();
   packer.height = 0;
   packer.cols = 0;
+  packer.firstVisibleOffset = UINT32_MAX;
 }
 
 // Greedily pack laid-out rows into fragments, page-breaking between fragments. A row whose
@@ -4687,10 +4791,11 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
     wireParagraphLines(*text);
     // Transfer words from the buffered cell text into the new currentTextBlock
     // by re-running layout directly
-    text->layoutAndExtractLines(renderer, fontId, viewportWidth,
-                                [this](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
-                                  return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry);
-                                });
+    text->layoutAndExtractLines(
+        renderer, fontId, viewportWidth,
+        [this, &text](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
+          return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry, text->lastLineVisibleOffset());
+        });
   }
   text.reset();  // free the words before the image decode below needs contiguous heap
 
