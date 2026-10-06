@@ -78,10 +78,9 @@ struct LutFixture : testing::TestWithParam<std::string> {
 TEST_P(LutFixture, StartsAreInPageOrderAndWithinTheChapter) {
   for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
     const auto section = build(spine);
-    const std::string tmp = ChapterXPathIndexerInternal::decompressToTempFile(epub, spine);
-    ASSERT_FALSE(tmp.empty());
-    const size_t total = ChapterXPathIndexerInternal::countTotalTextBytes(tmp);
-    fs::remove(tmp);
+    const auto counted = ChapterXPathIndexerInternal::countTotalTextBytes(epub, spine);
+    ASSERT_TRUE(counted.has_value()) << "spine " << spine;
+    const size_t total = *counted;
     // The chapter's first offset is on its first page, even when that page opens past it (a
     // chapter that starts with hidden text).
     if (section->pageCount > 0) {
@@ -207,10 +206,9 @@ TEST_F(SyntheticLutFixture, StyleTextInsideBodyIsNotCounted) {
   const auto styled = build(styledBook);
   // The mapper's count of the styled chapter leaves the stylesheet out; a counted stylesheet
   // would push the later starts past it.
-  const std::string tmp = ChapterXPathIndexerInternal::decompressToTempFile(styledBook, 0);
-  ASSERT_FALSE(tmp.empty());
-  const size_t total = ChapterXPathIndexerInternal::countTotalTextBytes(tmp);
-  fs::remove(tmp);
+  const auto counted = ChapterXPathIndexerInternal::countTotalTextBytes(styledBook, 0);
+  ASSERT_TRUE(counted.has_value());
+  const size_t total = *counted;
   for (uint16_t page = 0; page < styled->pageCount; ++page) {
     EXPECT_LE(*styled->getVisibleTextOffsetForPage(page), total) << "page " << page;
   }

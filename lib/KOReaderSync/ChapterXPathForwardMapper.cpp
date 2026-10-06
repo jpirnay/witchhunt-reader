@@ -1,10 +1,10 @@
 #include "ChapterXPathForwardMapper.h"
 
-#include <HalStorage.h>
 #include <Logging.h>
 #include <SaxParser/SaxParser.h>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -122,7 +122,7 @@ std::string makeSpineCacheKey(const std::shared_ptr<Epub>& epub, const int spine
   return epub->getCachePath() + "|" + std::to_string(spineIndex) + "|" + spineItem.href;
 }
 
-size_t getTotalTextBytesCached(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& tmpPath) {
+std::optional<size_t> getTotalTextBytesCached(const std::shared_ptr<Epub>& epub, const int spineIndex) {
   static std::unordered_map<std::string, size_t> sTotalBytesBySpine;
   static std::string sCachedBookPath;
 
@@ -140,9 +140,10 @@ size_t getTotalTextBytesCached(const std::shared_ptr<Epub>& epub, const int spin
     }
   }
 
-  const size_t totalTextBytes = countTotalTextBytes(tmpPath);
-  if (!key.empty()) {
-    sTotalBytesBySpine[key] = totalTextBytes;
+  // A failed read is not cached: it may be transient (heap, SD), and the next call should retry.
+  const auto totalTextBytes = countTotalTextBytes(epub, spineIndex);
+  if (totalTextBytes && !key.empty()) {
+    sTotalBytesBySpine[key] = *totalTextBytes;
   }
   return totalTextBytes;
 }
@@ -151,14 +152,12 @@ size_t getTotalTextBytesCached(const std::shared_ptr<Epub>& epub, const int spin
 
 std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, const int spineIndex,
                                          const float intraSpineProgress) {
-  const std::string tmpPath = decompressToTempFile(epub, spineIndex);
-  if (tmpPath.empty()) {
+  const auto counted = getTotalTextBytesCached(epub, spineIndex);
+  if (!counted) {
     return "";
   }
-
-  const size_t totalTextBytes = getTotalTextBytesCached(epub, spineIndex, tmpPath);
+  const size_t totalTextBytes = *counted;
   if (totalTextBytes == 0) {
-    Storage.remove(tmpPath.c_str());
     const std::string base = "/body/DocFragment[" + std::to_string(spineIndex + 1) + "]/body";
     LOG_DBG("KOX", "Forward: spine=%d no text, returning base xpath", spineIndex);
     return base;
@@ -171,13 +170,11 @@ std::string findXPathForProgressInternal(const std::shared_ptr<Epub>& epub, cons
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ForwardState>, parserEndCb<ForwardState>, parserCharCb<ForwardState>,
                       parserDefaultCb<ForwardState>)) {
-    Storage.remove(tmpPath.c_str());
     return "";
   }
 
   state.saxParser = &saxParser;
-  runParse(saxParser, tmpPath);
-  Storage.remove(tmpPath.c_str());
+  streamSpine(epub, spineIndex, saxParser);
 
   if (state.result.empty()) {
     state.result = "/body/DocFragment[" + std::to_string(spineIndex + 1) + "]/body";

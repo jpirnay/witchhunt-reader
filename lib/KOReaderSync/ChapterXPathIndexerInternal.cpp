@@ -2,7 +2,6 @@
 
 #include <Epub/VisibleText.h>
 #include <Epub/htmlEntities.h>
-#include <HalStorage.h>
 #include <Logging.h>
 #include <SaxParser/SaxParser.h>
 #include <Utf8.h>
@@ -12,6 +11,8 @@
 #include <cstring>
 #include <unordered_map>
 #include <vector>
+
+#include "SaxFeedSink.h"
 
 namespace ChapterXPathIndexerInternal {
 
@@ -283,68 +284,23 @@ bool isAncestorPath(const std::string& prefix, const std::string& path) {
   return path.size() > prefix.size() && path.compare(0, prefix.size(), prefix) == 0 && path[prefix.size()] == '/';
 }
 
-std::string decompressToTempFile(const std::shared_ptr<Epub>& epub, const int spineIndex) {
+bool streamSpine(const std::shared_ptr<Epub>& epub, const int spineIndex, SaxParser& saxParser) {
   if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) {
-    return "";
-  }
-
-  const auto spineItem = epub->getSpineItem(spineIndex);
-  if (spineItem.href.empty()) {
-    return "";
-  }
-
-  const std::string tmpPath = epub->getCachePath() + "/.tmp_kox_" + std::to_string(spineIndex) + ".html";
-  if (Storage.exists(tmpPath.c_str())) {
-    Storage.remove(tmpPath.c_str());
-  }
-
-  FsFile tmpFile;
-  if (!Storage.openFileForWrite("KOX", tmpPath, tmpFile)) {
-    LOG_ERR("KOX", "Failed to create temp file for spine=%d", spineIndex);
-    return "";
-  }
-
-  constexpr size_t kChunkSize = 1024;
-  const bool ok = epub->readItemContentsToStream(spineItem.href, tmpFile, kChunkSize);
-  tmpFile.close();
-
-  if (!ok) {
-    Storage.remove(tmpPath.c_str());
-    LOG_ERR("KOX", "Failed to decompress spine=%d to temp file", spineIndex);
-    return "";
-  }
-
-  return tmpPath;
-}
-
-namespace {
-// Pump the open `file` through `saxParser` in fixed-size chunks. Returns true on clean EOF or
-// intentional early stop (stop() called from a callback). Returns false on allocation failure
-// or any other parse error. The file is left open — caller closes it.
-bool pumpSaxParserFromFile(SaxParser& saxParser, FsFile& file) {
-  constexpr size_t kBufSize = 1024;
-  uint8_t buf[kBufSize];
-  while (file.available()) {
-    const size_t len = file.read(buf, kBufSize);
-    if (!saxParser.feed(buf, len)) {
-      return saxParser.isStopped();
-    }
-    if (saxParser.isStopped()) {
-      return true;
-    }
-  }
-  return saxParser.finalize() || saxParser.isStopped();
-}
-}  // namespace
-
-bool runParse(SaxParser& saxParser, const std::string& path) {
-  FsFile file;
-  if (!Storage.openFileForRead("KOX", path, file)) {
     return false;
   }
-  const bool ok = pumpSaxParserFromFile(saxParser, file);
-  file.close();
-  return ok;
+  const auto href = epub->getSpineItem(spineIndex).href;
+  if (href.empty()) {
+    return false;
+  }
+  SaxFeedSink sink(saxParser);
+  if (!epub->readItemContentsToStream(href, sink, 1024, sink.stopFlag())) {
+    LOG_ERR("KOX", "Failed to stream spine=%d", spineIndex);
+    return false;
+  }
+  if (sink.failed()) {
+    return false;
+  }
+  return saxParser.isStopped() || saxParser.finalize();
 }
 
 bool isEntityRef(const char* text, const int len) {
@@ -407,14 +363,16 @@ void bcDefault(void* ud, const char* text, const int len) {
 
 }  // namespace
 
-size_t countTotalTextBytes(const std::string& tmpPath) {
+std::optional<size_t> countTotalTextBytes(const std::shared_ptr<Epub>& epub, const int spineIndex) {
   ByteCounter state;
   SaxParser saxParser;
   if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault)) {
-    return 0;
+    return std::nullopt;
   }
-  const bool ok = runParse(saxParser, tmpPath);
-  return ok ? state.totalTextBytes : 0;
+  if (!streamSpine(epub, spineIndex, saxParser)) {
+    return std::nullopt;
+  }
+  return state.totalTextBytes;
 }
 
 }  // namespace ChapterXPathIndexerInternal

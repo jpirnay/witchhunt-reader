@@ -1,6 +1,5 @@
 #include "ChapterXPathReverseMapper.h"
 
-#include <HalStorage.h>
 #include <Logging.h>
 #include <SaxParser/SaxParser.h>
 
@@ -238,26 +237,19 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
     return false;
   }
 
-  const std::string tmpPath = decompressToTempFile(epub, spineIndex);
-  if (tmpPath.empty()) {
-    return false;
-  }
-
   ReverseState state(spineIndex, xpath);
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ReverseState>, parserEndCb<ReverseState>, parserCharCb<ReverseState>,
                       parserDefaultCb<ReverseState>)) {
-    Storage.remove(tmpPath.c_str());
     return false;
   }
 
-  const bool parseOk = runParse(saxParser, tmpPath);
+  const bool parseOk = streamSpine(epub, spineIndex, saxParser);
 
   if (!parseOk) {
     LOG_ERR("KOX", "XPath parse failed for spine=%d at line %d: %s", spineIndex, saxParser.errorLine(),
             saxParser.errorString());
   }
-  Storage.remove(tmpPath.c_str());
 
   if (!parseOk || state.bestTier == MatchTier::NONE) {
     LOG_DBG("KOX", "Reverse: spine=%d no match for '%s'", spineIndex, xpath.c_str());

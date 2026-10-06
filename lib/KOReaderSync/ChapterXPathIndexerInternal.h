@@ -4,6 +4,7 @@
 #include <SaxParser/SaxParser.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace ChapterXPathIndexerInternal {
@@ -28,9 +29,12 @@ void removeIndices(const std::string& xpath, std::string& out);
 int pathDepth(const std::string& xpath);
 bool isAncestorPath(const std::string& prefix, const std::string& path);
 
-std::string decompressToTempFile(const std::shared_ptr<Epub>& epub, int spineIndex);
-bool runParse(SaxParser& saxParser, const std::string& path);
+// Inflate the spine item straight into `saxParser`. True when the parse completed or the parser
+// stopped itself; false on a missing item or a parse error.
+bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, SaxParser& saxParser);
 bool isEntityRef(const char* text, int len);
-size_t countTotalTextBytes(const std::string& tmpPath);
+// Visible text bytes in the spine item; nullopt when it could not be read or parsed (distinct from
+// a chapter with no text, which is 0), so callers can avoid caching a transient failure.
+std::optional<size_t> countTotalTextBytes(const std::shared_ptr<Epub>& epub, int spineIndex);
 
 }  // namespace ChapterXPathIndexerInternal
