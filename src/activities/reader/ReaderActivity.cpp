@@ -806,6 +806,9 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
     sync.paragraphIndex = 0;
     sync.hasParagraphIndex = false;
     sync.paragraphIndexBefore = 0;
+    sync.visibleOffsetAtPage = 0;
+    sync.visibleOffsetAtNextPage = UINT32_MAX;
+    sync.hasVisibleOffset = false;
     sync.intent = KOReaderSyncIntentState::AUTO_PULL;
     sync.outcome = KOReaderSyncOutcomeState::PENDING;
     sync.clearResult();

@@ -76,6 +76,9 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   sync.paragraphIndex = 0;
   sync.hasParagraphIndex = false;
   sync.paragraphIndexBefore = 0;
+  sync.visibleOffsetAtPage = 0;
+  sync.visibleOffsetAtNextPage = UINT32_MAX;
+  sync.hasVisibleOffset = false;
   if (section && !positionOverride) {
     if (const auto pIdx = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage))) {
       sync.paragraphIndex = *pIdx;
@@ -83,6 +86,12 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     }
     if (currentPage > 0) {
       sync.paragraphIndexBefore = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage - 1)).value_or(0);
+    }
+    if (const auto start = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(currentPage))) {
+      sync.visibleOffsetAtPage = *start;
+      sync.visibleOffsetAtNextPage =
+          section->getVisibleTextOffsetAfterPage(static_cast<uint16_t>(currentPage)).value_or(UINT32_MAX);
+      sync.hasVisibleOffset = true;
     }
   }
   sync.intent = syncIntent;

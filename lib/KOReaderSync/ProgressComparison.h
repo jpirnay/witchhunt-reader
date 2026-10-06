@@ -12,6 +12,11 @@
 // The comparison therefore prefers evidence in the same units on both sides, and uses the
 // percentage only as the last resort:
 //   1. the spine, when the record names one (DocFragment) -- exact;
+//   1b. within the same spine, the content offsets when both sides have them: the remote's offset
+//      falls on the local page exactly when start(p) <= offset < end(p), where end(p) is the first
+//      later page start greater than start(p) (UINT32_MAX on the last page); on page 0 anything
+//      below start(0) counts too, as the offset lookup resolves it there -- exact for every book,
+//      laid out or not on the other side;
 //   2. within the same spine, the paragraph LUT: a remote p[K] opens on the local page p exactly
 //      when K(p-1) < K <= K(p), where K(i) is the LUT index at the end of page i -- exact for books
 //      whose paragraphs are children of <body>;
@@ -27,6 +32,12 @@ struct LocalReadingPosition {
   int page = 0;
   uint16_t paragraphAtPageEnd = 0;
   uint16_t paragraphAtPreviousPageEnd = 0;
+  // The page's start and the end of its window as visible-text offsets (Section's LUT);
+  // visibleOffsetAtNextPage is UINT32_MAX on the last page. hasVisibleOffset false when the chapter
+  // has no LUT, and the paragraph tier takes over.
+  uint32_t visibleOffsetAtPage = 0;
+  uint32_t visibleOffsetAtNextPage = UINT32_MAX;
+  bool hasVisibleOffset = false;
 };
 
 ProgressComparison compareProgress(const LocalReadingPosition& local, float localPercentage,

@@ -193,6 +193,9 @@ LocalReadingPosition KOReaderSyncActivity::localReadingPosition() const {
   local.page = currentPage;
   local.paragraphAtPageEnd = hasLocalParagraphIndex ? localParagraphIndex : 0;
   local.paragraphAtPreviousPageEnd = localParagraphIndexBefore;
+  local.visibleOffsetAtPage = localVisibleOffsetAtPage;
+  local.visibleOffsetAtNextPage = localVisibleOffsetAtNextPage;
+  local.hasVisibleOffset = hasLocalVisibleOffset;
   return local;
 }
 
@@ -1026,6 +1029,8 @@ bool KOReaderSyncActivity::computeLocalProgressAndChapter() {
 
   CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
                                  hasLocalParagraphIndex};
+  localPos.visibleTextOffset = localVisibleOffsetAtPage;
+  localPos.hasVisibleTextOffset = hasLocalVisibleOffset;
   localProgress = ProgressMapper::toKOReader(epub, localPos);
 
   const int localTocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);

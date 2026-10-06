@@ -2763,6 +2763,34 @@ std::optional<uint32_t> Section::getVisibleTextOffsetForPage(const uint16_t page
   return offset;
 }
 
+std::optional<uint32_t> Section::getVisibleTextOffsetAfterPage(const uint16_t page) const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) {
+    return std::nullopt;
+  }
+  const uint32_t fileSize = f.size();
+  std::optional<uint32_t> own;
+  for (uint16_t i = page; i < count; i++) {
+    const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, i);
+    if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > fileSize) {
+      break;
+    }
+    f.seek(entryOffset);
+    uint32_t start;
+    serialization::readPod(f, start);
+    if (i == page) {
+      own = start;
+    } else if (start > *own) {
+      f.close();
+      return start;
+    }
+  }
+  f.close();
+  return std::nullopt;
+}
+
 std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offset) const {
   FsFile f;
   uint16_t count = 0;

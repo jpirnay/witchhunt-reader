@@ -382,6 +382,12 @@ class Section {
   // (VisibleText.h's rule, counted by the layout parser). What a KOReader sync pushes for the
   // page. nullopt if the LUT is unavailable or the page is beyond it (a truncated build).
   std::optional<uint32_t> getVisibleTextOffsetForPage(uint16_t page) const;
+  // The end of the page's window of visible text: the first start of a LATER page that is strictly
+  // greater than this page's start. Page starts can tie (an empty or image-only page is back-filled
+  // with the next element's offset), so "the next page's start" would give an empty window.
+  // nullopt if the page has no start or no later page starts beyond it (the last window, which
+  // callers read as UINT32_MAX).
+  std::optional<uint32_t> getVisibleTextOffsetAfterPage(uint16_t page) const;
   // The page a visible-text offset falls on: the last page whose start is <= offset, with a run
   // of pages sharing one start answering its first page, and an offset below page 0's start (a
   // chapter that opens with hidden text) answering page 0. How a pulled KOReader position becomes

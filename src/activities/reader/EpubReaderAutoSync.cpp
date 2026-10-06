@@ -14,8 +14,9 @@
 #include "activities/ActivityManager.h"
 
 namespace {
-// The reader's position as ProgressComparison wants it: the page, and the paragraph LUT at the
-// end of this page and of the one before.
+// The reader's position as ProgressComparison wants it: the page; the paragraph LUT at the end of
+// this page and of the one before; and the page's content-offset window [start, end), where end is
+// the first later page start greater than this page's (UINT32_MAX on the last page).
 LocalReadingPosition localReadingPosition(const Section& section, const int spineIndex, const int page) {
   LocalReadingPosition local;
   local.spineIndex = spineIndex;
@@ -23,6 +24,12 @@ LocalReadingPosition localReadingPosition(const Section& section, const int spin
   local.paragraphAtPageEnd = section.getParagraphIndexForPage(static_cast<uint16_t>(page)).value_or(0);
   if (page > 0) {
     local.paragraphAtPreviousPageEnd = section.getParagraphIndexForPage(static_cast<uint16_t>(page - 1)).value_or(0);
+  }
+  if (const auto start = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) {
+    local.visibleOffsetAtPage = *start;
+    local.visibleOffsetAtNextPage =
+        section.getVisibleTextOffsetAfterPage(static_cast<uint16_t>(page)).value_or(UINT32_MAX);
+    local.hasVisibleOffset = true;
   }
   return local;
 }

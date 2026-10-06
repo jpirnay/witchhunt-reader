@@ -97,6 +97,21 @@ TEST_P(LutFixture, StartsAreInPageOrderAndWithinTheChapter) {
   }
 }
 
+TEST_P(LutFixture, EveryWindowEndsAtTheFirstLaterDistinctStart) {
+  for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
+    const auto section = build(spine);
+    for (uint16_t page = 0; page < section->pageCount; ++page) {
+      const uint32_t start = *section->getVisibleTextOffsetForPage(page);
+      std::optional<uint32_t> oracle;
+      for (uint16_t later = page + 1; later < section->pageCount && !oracle; ++later) {
+        const uint32_t laterStart = *section->getVisibleTextOffsetForPage(later);
+        if (laterStart > start) oracle = laterStart;
+      }
+      EXPECT_EQ(section->getVisibleTextOffsetAfterPage(page), oracle) << "spine " << spine << " page " << page;
+    }
+  }
+}
+
 TEST_P(LutFixture, EveryStartLooksUpItsOwnPage) {
   for (int spine = 0; spine < epub->getSpineItemsCount(); ++spine) {
     const auto section = build(spine);
@@ -248,6 +263,32 @@ TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
     EXPECT_GE(*section->getVisibleTextOffsetForPage(page), *section->getVisibleTextOffsetForPage(page - 1))
         << "page " << page;
   }
+}
+
+TEST_F(SyntheticLutFixture, OffsetAfterAPageSkipsPagesThatShareItsStart) {
+  // The window of a page is [start(p), after(p)). Pages 0 and 1 tie (the empty page is back-filled
+  // with the next element's offset), so neither may report the other's start as its end.
+  const auto section =
+      build(book("<p style=\"margin-top: 2000px\">Opening paragraph below a tall margin.</p>\n" + paragraphs(20)),
+            /*embeddedStyle=*/true);
+  ASSERT_GE(section->pageCount, 3);
+  const uint32_t tied = *section->getVisibleTextOffsetForPage(0);
+  ASSERT_EQ(*section->getVisibleTextOffsetForPage(1), tied) << "the fixture no longer produces a tie";
+  uint16_t firstBeyond = 0;
+  while (firstBeyond < section->pageCount && *section->getVisibleTextOffsetForPage(firstBeyond) == tied) ++firstBeyond;
+  ASSERT_LT(firstBeyond, section->pageCount);
+  const uint32_t beyond = *section->getVisibleTextOffsetForPage(firstBeyond);
+  ASSERT_GT(beyond, tied);
+  for (uint16_t page = 0; page < firstBeyond; ++page) {
+    EXPECT_EQ(section->getVisibleTextOffsetAfterPage(page), std::optional<uint32_t>(beyond)) << "page " << page;
+  }
+  for (uint16_t page = firstBeyond; page + 1 < section->pageCount; ++page) {
+    const auto after = section->getVisibleTextOffsetAfterPage(page);
+    ASSERT_TRUE(after.has_value()) << "page " << page;
+    EXPECT_GT(*after, *section->getVisibleTextOffsetForPage(page)) << "page " << page;
+  }
+  EXPECT_FALSE(section->getVisibleTextOffsetAfterPage(section->pageCount - 1).has_value());
+  EXPECT_FALSE(section->getVisibleTextOffsetAfterPage(section->pageCount).has_value());
 }
 
 TEST_F(SyntheticLutFixture, DropCapPageStartsAtTheCapLetter) {

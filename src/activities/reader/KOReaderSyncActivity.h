@@ -11,6 +11,20 @@
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
 
+// Where the reader was when it handed off to the sync screen, as ActivityManager reads it out of
+// APP_STATE.koReaderSyncSession. One struct rather than nine positional ints.
+struct SyncLocalPosition {
+  int spineIndex = 0;
+  int page = 0;
+  int totalPages = 0;
+  uint16_t paragraphIndex = 0;
+  bool hasParagraphIndex = false;
+  uint16_t paragraphIndexBefore = 0;
+  uint32_t visibleOffsetAtPage = 0;
+  uint32_t visibleOffsetAtNextPage = UINT32_MAX;
+  bool hasVisibleOffset = false;
+};
+
 /**
  * Activity for syncing reading progress with KOReader sync server.
  *
@@ -36,18 +50,19 @@
 class KOReaderSyncActivity final : public Activity {
  public:
   explicit KOReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& epubPath,
-                                int currentSpineIndex, int currentPage, int totalPagesInSpine,
-                                uint16_t paragraphIndex = 0, bool hasParagraphIndex = false,
-                                uint16_t paragraphIndexBefore = 0,
+                                const SyncLocalPosition& local,
                                 KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE)
       : Activity("KOReaderSync", renderer, mappedInput),
         epubPath(epubPath),
-        currentSpineIndex(currentSpineIndex),
-        currentPage(currentPage),
-        totalPagesInSpine(totalPagesInSpine),
-        localParagraphIndex(paragraphIndex),
-        hasLocalParagraphIndex(hasParagraphIndex),
-        localParagraphIndexBefore(paragraphIndexBefore),
+        currentSpineIndex(local.spineIndex),
+        currentPage(local.page),
+        totalPagesInSpine(local.totalPages),
+        localParagraphIndex(local.paragraphIndex),
+        hasLocalParagraphIndex(local.hasParagraphIndex),
+        localParagraphIndexBefore(local.paragraphIndexBefore),
+        localVisibleOffsetAtPage(local.visibleOffsetAtPage),
+        localVisibleOffsetAtNextPage(local.visibleOffsetAtNextPage),
+        hasLocalVisibleOffset(local.hasVisibleOffset),
         syncIntent(syncIntent),
         remoteProgress{},
         remotePosition{},
@@ -89,6 +104,9 @@ class KOReaderSyncActivity final : public Activity {
   uint16_t localParagraphIndex;
   bool hasLocalParagraphIndex;
   uint16_t localParagraphIndexBefore;
+  uint32_t localVisibleOffsetAtPage;
+  uint32_t localVisibleOffsetAtNextPage;
+  bool hasLocalVisibleOffset;
   KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE;
   // Known once the Epub was loaded for local mapping; 0 until then. Lets a fetched record's
   // DocFragment be range-checked after the Epub has been released for TLS.

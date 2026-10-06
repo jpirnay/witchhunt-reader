@@ -61,6 +61,13 @@ struct KOReaderSyncSessionState {
   // paragraphIndex it bounds the paragraphs that open on `page`, which is how the sync screen
   // tells "same page" from "ahead" without the section cache (ProgressComparison).
   uint16_t paragraphIndexBefore = 0;
+  // The page's start and the end of its window as content offsets (Section::getVisibleTextOffsetForPage
+  // and getVisibleTextOffsetAfterPage), for the sync screen to push the page exactly and to compare a
+  // mapped record's offset against [visibleOffsetAtPage, visibleOffsetAtNextPage). hasVisibleOffset
+  // false when the chapter has no LUT.
+  uint32_t visibleOffsetAtPage = 0;
+  uint32_t visibleOffsetAtNextPage = UINT32_MAX;
+  bool hasVisibleOffset = false;
   KOReaderSyncIntentState intent = KOReaderSyncIntentState::COMPARE;
   KOReaderSyncOutcomeState outcome = KOReaderSyncOutcomeState::NONE;
   int resultSpineIndex = 0;
@@ -110,6 +117,9 @@ struct KOReaderSyncSessionState {
     paragraphIndex = 0;
     hasParagraphIndex = false;
     paragraphIndexBefore = 0;
+    visibleOffsetAtPage = 0;
+    visibleOffsetAtNextPage = UINT32_MAX;
+    hasVisibleOffset = false;
     intent = KOReaderSyncIntentState::COMPARE;
     outcome = KOReaderSyncOutcomeState::NONE;
     clearResult();
