@@ -450,8 +450,9 @@ TEST_F(OffsetPushFixture, TheChapterStartPushesAsOffsetZeroOfItsFirstText) {
   const auto pos = pageWithOffset(*section, kSectionSpine, 0);
   ASSERT_TRUE(pos.hasVisibleTextOffset);
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  // The heading's text sits inside inline elements (span/a/span): the element path, as today.
-  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/header[1]/hgroup[1]/h1[1]/span[1]/a[1]/span[1]");
+  // The heading's text sits inside inline elements (span/a/span): a text point inside them.
+  EXPECT_EQ(ko.xpath,
+            "/body/DocFragment[2]/body/section[1]/header[1]/hgroup[1]/h1[1]/span[1]/a[1]/span[1]/text()[1].0");
 }
 
 TEST_F(OffsetPushFixture, WithoutAnOffsetThePushUsesTheFraction) {

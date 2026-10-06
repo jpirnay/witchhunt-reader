@@ -43,3 +43,24 @@ The first after-run opened Book B without a power-cycle after Book A, so its Min
 Baseline, same sync path (log 14:03): Min Free 40,868 before, **19,048** after the PUT. The sync trough is the same on both firmwares (+416 B on Task 3) and is the pre-change sync path: the 174 KB chapter inflated to a temp file and parsed twice (`countTotalTextBytes`, then `findXPathForProgress`), then the TLS handshake (troughFree 50,456 here, 50,412 baseline). Task 4 replaces the temp file with a streamed, early-stopping parse; the "after Task 4" measurement should read this same line.
 
 The build's own minimum cannot be isolated from the Min Free counter in either run (the baseline's was set by the book open at 35,176 and never lowered by the build; this run's 30,384 includes the menu overlay on top of the borrowed arena). The only Task 3 transient on the parse path is 4 B per buffered word (`wordVisibleOffsets`), bounded by the page-sized word buffer; parse time and arena high-water are unchanged. A clean A/B of the build alone (clean boot, open Book B, no interaction until `Background-C ... complete`, read the next Min Free line) on both firmwares would settle it if wanted.
+
+## After Task 8 (host)
+
+- Host suite: `100% tests passed out of 1666` (ctest registers 1666 tests; 8 report Skipped by their own conditions on this platform, none failed).
+- Goldens sha256-of-sha256s: f0b7d80e6e6c724558e253c33c7a7f6c257f2001c0ca090e71a4b345286af29f (equals the baseline).
+- Round-trip allowances, measured: test_kerning_ligature {behind 1, ahead 0}; test_spine_toc_edges {behind 1, ahead 0}; all others {0, 0} (before: table_cell_overflow {2,0}, spine_toc_edges {2,1}, others {1,0}). Pages that push a text point come back exactly.
+- Firmware `pio run -e default` (release): `RAM: 16.5% (used 53928 bytes from 327680 bytes)`, `Flash: 94.9% (used 6216755 bytes from 6553600 bytes)`; `firmware.bin` 6,230,272 B, +6,816 B against 6,223,456 B.
+
+### Task 8b (deep text points on)
+
+- Host suite: `100% tests passed out of 1666`; EpubPipelineTest 592 passed. Goldens hash unchanged (f0b7d80e...af29f).
+- Round trip: every allowance {0, 0}, then the table removed: all 30 books, every page comes back on itself.
+- Firmware: `RAM: 16.5% (used 53928 bytes from 327680 bytes)`, `Flash: 94.9% (used 6216789 bytes from 6553600 bytes)`; `firmware.bin` 6,230,304 B, +6,848 B against 6,223,456 B.
+
+### Final-review fix round (the branch's final numbers)
+
+Tied page runs resolve to their last page; the mappers parse like the layout parser (void-tag repair, case-insensitive `<body>`); a page starting at the chapter's total names the end of the last text node.
+
+- Host suite: `100% tests passed out of 1670` (8 Skipped by their own conditions, none failed); EpubPipelineTest 598 tests, 596 passed, 2 skipped. Goldens hash unchanged (f0b7d80e...af29f).
+- Round trip: all 30 books, every page comes back on itself (zero drift).
+- Firmware: `RAM: 16.5% (used 53928 bytes from 327680 bytes)`, `Flash: 94.9% (used 6216943 bytes from 6553600 bytes)`; `firmware.bin` 6,230,464 B, +7,008 B against 6,223,456 B.

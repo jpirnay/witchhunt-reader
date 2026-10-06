@@ -10,6 +10,7 @@
 #include <SaxParser/SaxParser.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
+#include <strings.h>
 
 #include <algorithm>
 #include <cctype>
@@ -2357,8 +2358,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
   }
 
-  // Track body element depth for paragraph index counting
-  if (strcmp(name, "body") == 0 && self->xpathBodyDepth < 0) {
+  // Track body element depth for paragraph index counting and for the visible-text count, which
+  // starts inside it. Case-insensitive: the KOReader mappers lowercase tag names, so text under a
+  // <BODY> is source text to them and must be here too.
+  if (strcasecmp(name, "body") == 0 && self->xpathBodyDepth < 0) {
     self->xpathBodyDepth = self->depth;
   }
 

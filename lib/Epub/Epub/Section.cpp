@@ -2799,12 +2799,11 @@ std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offs
     return std::nullopt;
   }
   const uint32_t fileSize = f.size();
-  // Starts are in page order. The answer is the last page whose start is <= offset, except that
-  // a run of pages sharing one start (an image, rule or table page followed by the text at the
-  // same offset) answers its FIRST page: the one the reader reaches first. An offset below page
-  // 0's start (a chapter that opens with hidden text) is on page 0.
+  // Starts are in page order. The answer is the last page whose start is <= offset, so a run of
+  // pages sharing one start (an image, rule or table page followed by the text at the same offset)
+  // answers its LAST page, the one holding the text at that offset. An offset below page 0's start
+  // (a chapter that opens with hidden text) is on page 0.
   std::optional<uint16_t> found;
-  uint32_t foundStart = 0;
   for (uint16_t i = 0; i < count; i++) {
     const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, i);
     if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > fileSize) {
@@ -2817,10 +2816,7 @@ std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offs
       if (i == 0) found = 0;
       break;
     }
-    if (!found || start > foundStart) {
-      found = i;
-      foundStart = start;
-    }
+    found = i;
   }
   f.close();
   return found;

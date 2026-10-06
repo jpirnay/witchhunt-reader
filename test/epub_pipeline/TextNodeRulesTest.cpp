@@ -77,6 +77,15 @@ TEST_F(TextNodeRules, StrayTableTextPushesAsTheElementPath) {
   EXPECT_EQ(push("<table><tr><td>cell text</td></tr></table>", 0), kP + "table[1]/tr[1]/td[1]/text()[1].0");
 }
 
+// Text directly inside an inline element is a text point inside it. Offset 5 is the 6th visible
+// byte, the "w" of "words" (whitespace is not counted); in the span's text node "first " is 6
+// codepoints, so the point is .6.
+TEST_F(TextNodeRules, TextInsideASpanPushesAsATextPointInsideTheSpan) {
+  const std::string body = "<p><span>first words and more words</span></p>";
+  EXPECT_EQ(push(body, 5), kP + "p[1]/span[1]/text()[1].6");
+  EXPECT_EQ(pull(body, kP + "p[1]/span[1]/text()[1].6"), 5u);
+}
+
 // NBSP is a character, not whitespace, on both sides.
 TEST_F(TextNodeRules, NbspIsACharacter) { EXPECT_EQ(push("<p>a&nbsp;&nbsp;b</p>", 5), kP + "p[1]/text()[1].3"); }
 
@@ -99,5 +108,20 @@ TEST_F(TextNodeRules, ACodepointSplitAtTheChunkBoundaryStillLandsExactly) {
     EXPECT_EQ(push(body, static_cast<uint32_t>(n + 3)), point) << "n=" << n;
     EXPECT_EQ(pull(body, point), static_cast<uint32_t>(n + 3)) << "n=" << n;
   }
+}
+
+// A page that starts at the chapter's total (a last page holding only an image or spacing) has no
+// text at or after its start: the push names the end of the last text node, which pulls back to
+// the total. "last words" is 9 visible bytes and 10 collapsed codepoints.
+TEST_F(TextNodeRules, AnOffsetAtTheChapterEndNamesTheEndOfTheLastText) {
+  EXPECT_EQ(push("<p>last words</p>", 9), kP + "p[1]/text()[1].10");
+  EXPECT_EQ(pull("<p>last words</p>", kP + "p[1]/text()[1].10"), 9u);
+}
+
+// A bare HTML <br> is not XML; the layout parser repairs it, and the mappers must parse the same
+// tree: <br> is an empty element, so "two" is the paragraph's second text node.
+TEST_F(TextNodeRules, ABareBrParsesLikeTheLayoutParser) {
+  EXPECT_EQ(push("<p>one<br>two</p>", 3), kP + "p[1]/text()[2].0");
+  EXPECT_EQ(pull("<p>one<br>two</p>", kP + "p[1]/text()[2].0"), 3u);
 }
 }  // namespace

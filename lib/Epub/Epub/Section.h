@@ -388,10 +388,11 @@ class Section {
   // nullopt if the page has no start or no later page starts beyond it (the last window, which
   // callers read as UINT32_MAX).
   std::optional<uint32_t> getVisibleTextOffsetAfterPage(uint16_t page) const;
-  // The page a visible-text offset falls on: the last page whose start is <= offset, with a run
-  // of pages sharing one start answering its first page, and an offset below page 0's start (a
-  // chapter that opens with hidden text) answering page 0. How a pulled KOReader position becomes
-  // a page. nullopt if the LUT is unavailable or empty.
+  // The page a visible-text offset falls on: the last page whose start is <= offset, so a run of
+  // pages sharing one start (an image or rule page before the text at that offset) answers its
+  // last page, the text page; an offset below page 0's start (a chapter that opens with hidden
+  // text) answers page 0. How a pulled KOReader position becomes a page. nullopt if the LUT is
+  // unavailable or empty.
   std::optional<uint16_t> getPageForVisibleTextOffset(uint32_t offset) const;
 
  private:

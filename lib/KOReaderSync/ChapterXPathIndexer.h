@@ -34,9 +34,10 @@ class ChapterXPathIndexer {
   static std::string findXPathForProgress(const std::shared_ptr<Epub>& epub, int spineIndex, float intraSpineProgress);
 
   /**
-   * The XPath of the text at a visible-text offset (Section::getVisibleTextOffsetForPage). Text
-   * that is a direct child of a block element is named to the codepoint (/text()[N].M); text
-   * inside an inline element by its element. Empty on failure.
+   * The XPath of the text at a visible-text offset (Section::getVisibleTextOffsetForPage), named
+   * to the codepoint (/text()[N].M) in a block element or inside inline elements; stray text in
+   * table rows by its element. Never an image: an offset before one names the text after it, and
+   * the chapter's total names the end of its last text node. Empty on failure.
    */
   static std::string findXPathForVisibleOffset(const std::shared_ptr<Epub>& epub, int spineIndex,
                                                uint32_t visibleOffset);

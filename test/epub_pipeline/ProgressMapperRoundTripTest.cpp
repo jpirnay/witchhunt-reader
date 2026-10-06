@@ -1,16 +1,15 @@
 // KOReader sync round trips over the whole test corpus: every page of every chapter is uploaded
 // (CrossPoint -> KOReader) and pulled back (KOReader -> CrossPoint), then snapped to a page the
-// way the reader does it, and must come back on the page it left or shortly before it.
+// way the reader does it, and must come back on exactly the page it left.
 //
 // Two directions, two parsers, two ways of counting the chapter's text; the corpus has the
 // shapes that break such pairs (wrapped paragraphs, headings, lists, tables, hidden text,
 // image-only chapters, entities, ligatures). What has to hold:
-//   1. The pull never lands AHEAD of the pushed page. Behind costs a re-read; ahead skips text.
-//   2. It lands at most one page behind, the known cost of the upload naming the paragraph
-//      rather than the character: a paragraph that starts on the previous page pulls the
-//      reader back to it.
-// Two books are allowed more, below, each for a measured reason. Anything else is a mismatch
-// between the two directions.
+//   1. Every page comes back on exactly itself, never ahead (which skips text) and never behind.
+//      A page that starts in text pushes a text point (/text()[N].M: the page's first text to the
+//      character, also inside inline elements); the pull resolves that text to its offset, and the
+//      offset is the page's own start. The push never names an image: a page that starts with one
+//      names the first text after it, which pulls back onto the page holding that text.
 //
 // The reader's snap (EpubReaderActivity::NavigationTarget::resolveInto) is mirrored here: a
 // list-item index goes through the li LUT, then the paragraph LUT; a paragraph index through the
@@ -20,7 +19,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,34 +59,11 @@ std::vector<std::string> corpusBooks() {
   return books;
 }
 
-// How far from the pushed page a pull may land, per book. One page behind is the paragraph-start
-// cost every book pays; ahead is never right. The two listed books do worse, and the numbers pin
-// what they do today so a change in either direction is noticed:
-//   test_table_cell_overflow: its paragraphs run three pages each, so the start of the one the
-//     reader is in can be two pages back.
-//   test_spine_toc_edges: the upload picks the paragraph by byte fraction of the chapter's text,
-//     and these chapters' density is uneven. The appendix is densest on its first pages, so page
-//     3's position is named as p[6], which the layout put on page 1 (two behind). The front
-//     matter and chapter 3 start with headings and a blockquote, many lines for few bytes, so
-//     half the bytes are reached a page before half the pages, and the paragraph named is the
-//     one on the NEXT page (one ahead: the reader skips a page). An upload taken from the
-//     section cache's paragraph LUT instead of the byte scan would remove both.
-struct Allowance {
-  int behind;
-  int ahead;
-};
-
-Allowance allowedDrift(const std::string& book) {
-  static const std::map<std::string, Allowance> known = {
-      {"test_table_cell_overflow.epub", {2, 0}},
-      {"test_spine_toc_edges.epub", {2, 1}},
-  };
-  const auto it = known.find(fs::path(book).filename().string());
-  return it == known.end() ? Allowance{1, 0} : it->second;
-}
-
 // The page the reader would open after applying `pos` to the chapter `section` is built for.
 int snappedPage(const CrossPointPosition& pos, const Section& section) {
+  if (pos.hasVisibleTextOffset) {
+    if (const auto p = section.getPageForVisibleTextOffset(pos.visibleTextOffset)) return *p;
+  }
   if (pos.hasListItemIndex) {
     if (const auto p = section.getPageForListItemIndex(pos.listItemIndex)) return *p;
     if (const auto p = section.getPageForParagraphIndex(pos.listItemIndex)) return *p;
@@ -98,6 +73,19 @@ int snappedPage(const CrossPointPosition& pos, const Section& section) {
     if (const auto p = section.getPageForParagraphIndex(pos.paragraphIndex)) return *p;
   }
   return pos.pageNumber;
+}
+
+// What the reader pushes from `page`: the position plus the page's content offset when the LUT has one.
+CrossPointPosition pushOf(const int spine, const int page, const int pages, const Section& section) {
+  CrossPointPosition local{};
+  local.spineIndex = spine;
+  local.pageNumber = page;
+  local.totalPages = pages;
+  if (const auto off = section.getVisibleTextOffsetForPage(static_cast<uint16_t>(page))) {
+    local.visibleTextOffset = *off;
+    local.hasVisibleTextOffset = true;
+  }
+  return local;
 }
 
 struct RoundTripFixture : testing::TestWithParam<std::string> {
@@ -137,50 +125,38 @@ struct RoundTripFixture : testing::TestWithParam<std::string> {
   }
 };
 
-TEST_P(RoundTripFixture, EveryPageComesBackOnOrShortlyBeforeItself) {
-  const Allowance allowed = allowedDrift(GetParam());
+TEST_P(RoundTripFixture, EveryPageComesBackOnItself) {
   const int spineCount = epub->getSpineItemsCount();
   ASSERT_GT(spineCount, 0);
-  int worstBehind = 0;
-  int worstAhead = 0;
   for (int spine = 0; spine < spineCount; ++spine) {
     const auto section = build(spine);
     const int pages = section->pageCount;
     ASSERT_GT(pages, 0) << "spine " << spine;
     for (int page = 0; page < pages; ++page) {
-      const auto ko = ProgressMapper::toKOReader(epub, {spine, page, pages});
+      const auto ko = ProgressMapper::toKOReader(epub, pushOf(spine, page, pages, *section));
       const auto back = ProgressMapper::toCrossPoint(epub, ko, spine, pages);
       EXPECT_EQ(back.spineIndex, spine) << "page " << page << " via " << ko.xpath;
       if (back.spineIndex != spine) continue;
       const int landed = snappedPage(back, *section);
-      worstBehind = std::max(worstBehind, page - landed);
-      worstAhead = std::max(worstAhead, landed - page);
-      EXPECT_LE(landed - page, allowed.ahead)
-          << "spine " << spine << " page " << page << "/" << pages << " came back AHEAD, as " << landed << " (estimate "
-          << back.pageNumber << ") via " << ko.xpath;
-      EXPECT_LE(page - landed, allowed.behind)
-          << "spine " << spine << " page " << page << "/" << pages << " came back as " << landed << " (estimate "
-          << back.pageNumber << ") via " << ko.xpath;
+      EXPECT_EQ(landed, page) << "spine " << spine << " page " << page << "/" << pages << " came back as " << landed
+                              << " (estimate " << back.pageNumber << ") via " << ko.xpath;
     }
   }
-  RecordProperty("worstPagesBehind", worstBehind);
-  RecordProperty("worstPagesAhead", worstAhead);
 }
 
-TEST_P(RoundTripFixture, LastPageDoesNotFallToTheChapterStart) {
+TEST_P(RoundTripFixture, LastPageComesBackAsTheLastPage) {
   // The failure that matters here is not a page of drift but a fall to page 0: the two passes
   // of the forward mapper counting the chapter's text differently would make the end of the
   // chapter unreachable, and the upload would name the chapter's root instead.
-  const int allowed = allowedDrift(GetParam()).behind;
   const int spineCount = epub->getSpineItemsCount();
   for (int spine = 0; spine < spineCount; ++spine) {
     const auto section = build(spine);
     const int pages = section->pageCount;
     if (pages < 2) continue;
-    const auto ko = ProgressMapper::toKOReader(epub, {spine, pages - 1, pages});
+    const auto ko = ProgressMapper::toKOReader(epub, pushOf(spine, pages - 1, pages, *section));
     const auto back = ProgressMapper::toCrossPoint(epub, ko, spine, pages);
     EXPECT_EQ(back.spineIndex, spine);
-    EXPECT_GE(snappedPage(back, *section), pages - 1 - allowed) << "spine " << spine << " via " << ko.xpath;
+    EXPECT_EQ(snappedPage(back, *section), pages - 1) << "spine " << spine << " via " << ko.xpath;
   }
 }
 
@@ -193,6 +169,8 @@ TEST_P(RoundTripFixture, ChapterStartStaysOnFirstPageWhateverThePercentageSays) 
   for (int spine = 0; spine < spineCount; ++spine) {
     const auto section = build(spine);
     const int pages = section->pageCount;
+    // Pushed WITHOUT the page's offset on purpose: this test guards #268 (the percentage must not
+    // override an exact XPath match), and an offset on the pull would land the page by itself.
     const auto ko = ProgressMapper::toKOReader(epub, {spine, 0, pages});
     for (const float skew : kSkews) {
       const float percentage = std::clamp(spineStartPercentage(spine) + skew, 0.0f, 1.0f);

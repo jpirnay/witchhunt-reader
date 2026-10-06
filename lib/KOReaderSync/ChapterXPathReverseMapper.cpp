@@ -251,7 +251,7 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   ReverseState state(spineIndex, xpath);
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ReverseState>, parserEndCb<ReverseState>, parserCharCb<ReverseState>,
-                      parserDefaultCb<ReverseState>)) {
+                      parserDefaultCb<ReverseState>, /*htmlVoidTagRepair=*/true)) {
     return false;
   }
 

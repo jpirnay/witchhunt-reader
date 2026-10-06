@@ -6,7 +6,8 @@
 // stream, so for every chapter the last page's start must not exceed the mapper's own count of
 // the chapter, and the starts must be in page order. Two pages can share a start (a page whose
 // first element is an image, a rule or a table fragment, followed by the text at the same
-// offset); the lookup then answers the FIRST page of the run, the one the reader reaches first.
+// offset); the lookup then answers the LAST page of the run, the one that holds the text at that
+// offset.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -17,9 +18,11 @@
 #include <vector>
 
 #include "Epub.h"
+#include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
 #include "KOReaderSync/ChapterXPathIndexerInternal.h"
+#include "KOReaderSync/ProgressMapper.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -117,10 +120,10 @@ TEST_P(LutFixture, EveryStartLooksUpItsOwnPage) {
     const auto section = build(spine);
     for (uint16_t page = 0; page < section->pageCount; ++page) {
       const uint32_t start = *section->getVisibleTextOffsetForPage(page);
-      // The first page of a run of equal starts is the one an offset resolves to.
-      uint16_t first = page;
-      while (first > 0 && *section->getVisibleTextOffsetForPage(first - 1) == start) --first;
-      EXPECT_EQ(section->getPageForVisibleTextOffset(start), std::optional<uint16_t>(first))
+      // The last page of a run of equal starts is the one an offset resolves to.
+      uint16_t last = page;
+      while (last + 1 < section->pageCount && *section->getVisibleTextOffsetForPage(last + 1) == start) ++last;
+      EXPECT_EQ(section->getPageForVisibleTextOffset(start), std::optional<uint16_t>(last))
           << "spine " << spine << " page " << page << " start " << start;
       // An offset inside the page (one byte before the next start) resolves to the page itself
       // or to the last page of its run.
@@ -165,7 +168,49 @@ struct SyntheticLutFixture : testing::Test {
   }
   void TearDown() override { fs::remove_all(work); }
 
-  std::shared_ptr<Epub> book(const std::string& body) { return syntheticBook(work, bookCount++, body); }
+  std::shared_ptr<Epub> book(const std::string& body, const std::vector<SyntheticFile>& extra = {}) {
+    return syntheticBook(work, bookCount++, body, extra);
+  }
+
+  // Each run of two or more consecutive pages sharing one start, as {first page, last page}.
+  static std::vector<std::pair<uint16_t, uint16_t>> tiedRuns(const Section& section) {
+    std::vector<std::pair<uint16_t, uint16_t>> runs;
+    for (uint16_t page = 1; page < section.pageCount; ++page) {
+      if (*section.getVisibleTextOffsetForPage(page) != *section.getVisibleTextOffsetForPage(page - 1)) continue;
+      if (!runs.empty() && runs.back().second == page - 1) {
+        runs.back().second = page;
+      } else {
+        runs.emplace_back(static_cast<uint16_t>(page - 1), page);
+      }
+    }
+    return runs;
+  }
+
+  // The page a push from `page` lands on when pulled back, as the reader resolves it.
+  static std::optional<uint16_t> roundTrip(const std::shared_ptr<Epub>& epub, const Section& section,
+                                           const uint16_t page) {
+    CrossPointPosition pos{};
+    pos.spineIndex = 0;
+    pos.pageNumber = page;
+    pos.totalPages = section.pageCount;
+    pos.visibleTextOffset = *section.getVisibleTextOffsetForPage(page);
+    pos.hasVisibleTextOffset = true;
+    const auto ko = ProgressMapper::toKOReader(epub, pos);
+    const auto back = ProgressMapper::toCrossPoint(epub, ko);
+    EXPECT_TRUE(back.hasVisibleTextOffset) << "page " << page << " via " << ko.xpath;
+    if (!back.hasVisibleTextOffset) return std::nullopt;
+    return section.getPageForVisibleTextOffset(back.visibleTextOffset);
+  }
+
+  static bool holdsImage(Section& section, const uint16_t page) {
+    section.currentPage = page;
+    const auto loaded = section.loadPageFromSectionFile();
+    if (!loaded) return false;
+    for (const auto& el : loaded->elements) {
+      if (el->getTag() == TAG_PageImage) return true;
+    }
+    return false;
+  }
 
   std::unique_ptr<Section> build(const std::shared_ptr<Epub>& epub, const bool embeddedStyle = false) {
     Section::BuildParams p = params();
@@ -334,23 +379,61 @@ TEST_F(SyntheticLutFixture, TableFragmentStartsAtItsFirstRow) {
   }
 }
 
-TEST_F(SyntheticLutFixture, TiesResolveToTheFirstPageOfTheRun) {
+TEST_F(SyntheticLutFixture, TiesResolveToTheLastPageOfTheRun) {
   // A page break forced before a paragraph gives two consecutive pages the same start only when
   // the first holds no text; a page-break rule (<hr>) before the paragraph makes a rule-only page.
-  // The lookup must answer that page, the one the reader reaches first. A single rule lands
-  // mid-page; a run of them long enough to fill a page always makes a rule-only page.
+  // The lookup must answer the last page of the run, the one holding the text at that offset:
+  // answering the rule-only page would put every position on the text page one page early. A
+  // single rule lands mid-page; a run of them long enough to fill a page always makes a rule-only
+  // page.
   std::string rules;
   for (int i = 0; i < 60; ++i) rules += "<hr/>\n";
-  const auto section = build(book(paragraphs(40) + rules + paragraphs(40)));
-  bool sawTie = false;
-  for (uint16_t page = 1; page < section->pageCount; ++page) {
-    const uint32_t start = *section->getVisibleTextOffsetForPage(page);
-    if (*section->getVisibleTextOffsetForPage(page - 1) == start) {
-      sawTie = true;
-      EXPECT_LT(*section->getPageForVisibleTextOffset(start), page);
-    }
+  const auto epub = book(paragraphs(40) + rules + paragraphs(40));
+  const auto section = build(epub);
+  const auto runs = tiedRuns(*section);
+  EXPECT_FALSE(runs.empty()) << "the rules no longer fill a page; the test checks nothing";
+  for (const auto& [first, last] : runs) {
+    const uint32_t start = *section->getVisibleTextOffsetForPage(first);
+    EXPECT_EQ(section->getPageForVisibleTextOffset(start), std::optional<uint16_t>(last))
+        << "run " << first << ".." << last;
+    // A push from the run's last page, the text page, comes back on that page.
+    EXPECT_EQ(roundTrip(epub, *section, last), std::optional<uint16_t>(last)) << "run " << first << ".." << last;
   }
-  EXPECT_TRUE(sawTie) << "the rules no longer fill a page; the test checks nothing";
+}
+
+TEST_F(SyntheticLutFixture, TheTextPageAfterAFullPageImageRoundTripsToItself) {
+  // A picture as tall as the page fills a page of its own, which starts where the text after it
+  // does. Every position on that text page must land on the text page, not on the picture.
+  const auto epub = book(paragraphs(20) + "<div><img src=\"full.png\" alt=\"\"/></div>\n" + paragraphs(20),
+                         {{"full.png", "image/png", syntheticPngHeader(480, 800)}});
+  const auto section = build(epub);
+  const auto runs = tiedRuns(*section);
+  ASSERT_EQ(runs.size(), 1u) << "the picture no longer makes one page of its own";
+  const auto [imagePage, textPage] = runs.front();
+  ASSERT_EQ(textPage, imagePage + 1);
+  EXPECT_TRUE(holdsImage(*section, imagePage)) << "page " << imagePage;
+  EXPECT_FALSE(holdsImage(*section, textPage)) << "page " << textPage;
+  const uint32_t start = *section->getVisibleTextOffsetForPage(textPage);
+  EXPECT_EQ(section->getPageForVisibleTextOffset(start), std::optional<uint16_t>(textPage));
+  EXPECT_EQ(roundTrip(epub, *section, textPage), std::optional<uint16_t>(textPage));
+}
+
+TEST_F(SyntheticLutFixture, AnUppercaseBodyIsCountedLikeALowercaseOne) {
+  // The mappers lowercase tag names, so text under <BODY> is source text to them; the layout
+  // parser's body test must agree, or every page of such a chapter would start at 0.
+  const auto document = [](const char* bodyTag) {
+    return std::string(
+               "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+               "<head><title>C</title></head><") +
+           bodyTag + ">\n" + paragraphs(80) + "\n</" + bodyTag + "></html>\n";
+  };
+  const auto lower = build(syntheticBookFromDocument(work, bookCount++, document("body")));
+  const auto upper = build(syntheticBookFromDocument(work, bookCount++, document("BODY")));
+  ASSERT_GT(lower->pageCount, 2);
+  ASSERT_EQ(upper->pageCount, lower->pageCount);
+  for (uint16_t page = 0; page < lower->pageCount; ++page) {
+    EXPECT_EQ(upper->getVisibleTextOffsetForPage(page), lower->getVisibleTextOffsetForPage(page)) << "page " << page;
+  }
 }
 
 }  // namespace
