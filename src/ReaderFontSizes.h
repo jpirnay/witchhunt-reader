@@ -17,7 +17,9 @@
 /// Fixed capacity and returned by value: the reader resolves its font through snap() while it lays
 /// out pages, where nothing may allocate.
 struct ReaderSizeList {
-  static constexpr uint8_t kCapacity = 48;
+  // A family realistically ships at most 16 sizes -- the flash font partition caches no more than
+  // that (FlashFontPartition::MAX_ENTRIES) -- plus the ladder sizes above its largest file.
+  static constexpr uint8_t kCapacity = 24;
   uint8_t points[kCapacity] = {};
   uint8_t count = 0;
 
