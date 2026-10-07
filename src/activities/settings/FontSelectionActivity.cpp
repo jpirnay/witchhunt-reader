@@ -259,7 +259,9 @@ void FontSelectionActivity::scanForMissingPreviews() {
     key.sourceSize = file->fileBytes;
     key.width = static_cast<uint16_t>(previewW);
     key.height = static_cast<uint16_t>(previewH);
-    key.pointSize = file->pointSize;
+    // The size DRAWN, as prepareSdPreview() stores it. Keyed on the file's size, a family drawn
+    // scaled (22 pt from an 18 pt file) was never found, and every visit ran the warm-up again.
+    key.pointSize = targetPt;
     key.language = language;
     if (!FontPreviewCache::available(key)) warmupQueue.push_back(row);
   }
