@@ -314,7 +314,7 @@ class HalGPIO {
   //
   // Names and signatures are copied verbatim from upstream/develop's HalGPIO so
   // the layers above stay diff-comparable; see
-  // docs/touch-input-migration-2026-08-14.md §1.
+  // docs/contributing/touch-architecture.md, "Layers".
   //
   // No FREEINK_CAP_TOUCH guards are needed: every InputManager touch method is
   // already guarded inside the SDK and compiles to an inert false/0 on non-touch

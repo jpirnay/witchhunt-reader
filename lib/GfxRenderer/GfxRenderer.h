@@ -387,7 +387,7 @@ class GfxRenderer {
   //
   // Output is clamped to the panel, so a caller always gets an on-screen point.
   // Ported verbatim from upstream/develop; see
-  // docs/touch-input-migration-2026-08-14.md phase 2.
+  // docs/contributing/touch-architecture.md, "Coordinate transform".
   void tapToLogical(float nx, float ny, int& outX, int& outY) const;
   // Same, but into an EXPLICIT orientation's frame rather than the live one. For geometry
   // that was drawn in a fixed frame regardless of how the screen is rotated -- the button
@@ -767,11 +767,12 @@ class GfxRenderer {
   // each plane to the controller immediately after rendering it. No extra allocation
   // needed — the BW framebuffer is the scratch pad for both passes.
   //
-  // After displayGrayBuffer(), cleanupGrayscaleWithPreviousBuffer() reseeds the
-  // controller's RED RAM and the in-RAM active buffer from frameBufferActive —
-  // which holds the exact full BW page (including images) that displayBuffer()
-  // left there before the grayscale pass began. This is the correct differential
-  // baseline for the next fast refresh.
+  // After displayGrayBuffer(), cleanupGrayscaleWithPreviousBuffer() hands the driver
+  // frameBufferActive -- the full BW page (including images) that displayBuffer() left
+  // there before the grayscale pass began -- as the baseline for the next fast refresh,
+  // and copies it back into the write buffer. With the secondary away (lent or released)
+  // the driver is told there is no baseline and takes a clean sync on its next push; the
+  // write buffer then keeps the last plane.
   //
   // renderFn is called twice (LSB, MSB). The RenderMode argument tells it which
   // pass is running. The caller sets setFastGrayscaleLut() before calling.
@@ -813,7 +814,7 @@ class GfxRenderer {
     const unsigned long t2 = millis();
     t.displayMs = t2 - t1;
 
-    // Reseed RED RAM and frameBufferActive from the previous-frame slot, which
+    // Restore the driver's baseline and the write buffer from frameBufferActive, which
     // holds the full BW page exactly as displayBuffer() left it. Using this
     // instead of re-rendering gives the correct baseline (images + text) and
     // costs only one SPI write.
@@ -944,20 +945,15 @@ class GfxRenderer {
   // grayscale path, which leaves the panel's gray planes loaded but the BW
   // framebuffer untouched.
   //
-  // const-correctness caveat: on X3 the underlying display call (see
-  // EInkDisplay::cleanupGrayscaleBuffers) performs an in-place Y-flip of the
-  // framebuffer bytes, sends them, and flips back. The framebuffer's logical
-  // contents are identical before and after, but during the call the bytes
-  // are transiently reordered. The method stays `const` because the renderer's
-  // observable state doesn't change; callers must not race a framebuffer
-  // reader against this call.
+  // The FreeInk drivers stream planes row-reversed (EpdBus::sendPlaneFlipped) and never
+  // modify the framebuffer, so these calls leave it untouched.
   void syncRedRamFromFrameBuffer() const;
   void cleanupGrayscaleWithFrameBuffer() const;
-  // Reseed controller RED RAM and frameBufferActive from the display's internal
-  // previous-frame buffer (frameBufferActive in EInkDisplay). This holds the
-  // exact full BW page that displayBuffer() committed before the grayscale pass
-  // — including images — giving a correct differential baseline for the next
-  // fast refresh without any re-render.
+  // Restore the driver's baseline and the write buffer from the display's previous-frame
+  // buffer (FreeInkDisplay's frameBufferActive), which holds the full BW page that
+  // displayBuffer() committed before the grayscale pass, images included. With the
+  // secondary away the driver is told there is no baseline and takes a clean sync on its
+  // next push.
   void cleanupGrayscaleWithPreviousBuffer() const;
 
   // Font helpers

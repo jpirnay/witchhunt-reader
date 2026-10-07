@@ -16,7 +16,7 @@
 // *contact* producing both a held-move and a release-activate, i.e. two refreshes for one
 // gesture. Here each refresh belongs to its own deliberate tap, and the first one is the
 // feedback — which on e-paper is the only feedback available until a localised tap-flash
-// exists (P2 in docs/touch-input-migration-2026-08-14.md).
+// exists (docs/future_work/boards-and-touch.md, "Localized tap flash").
 //
 // Kept free of Activity so the rule is exercised on the host: this is a state machine about
 // selection, and every screen in the firmware routes its taps through it.

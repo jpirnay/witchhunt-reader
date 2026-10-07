@@ -5,7 +5,7 @@
 // The button scheme every list screen follows, as pure logic: which command a button event means,
 // and what the front hint boxes say, both derived from one declaration so they cannot disagree.
 // No hardware and no Arduino here, so every rule is pinned by host tests (test/list_grammar).
-// The rules are docs/superpowers/specs/2026-10-03-list-input-harmonization-design.md §1.
+// The rules are docs/design/list-input-harmonization.md §1.
 namespace ListGrammar {
 
 // Up/Down/Left/Right are screen directions (MappedInputManager::Direction), already resolved for

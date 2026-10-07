@@ -121,8 +121,8 @@ inline PageTurnResult detectTiltPageTurn() {
 }
 
 // --- Touch page turning ------------------------------------------------------
-// Ported from upstream/develop; see docs/touch-input-migration-2026-08-14.md
-// phase 3. Header-only and inert on non-touch boards (input.hasTouch() is false
+// Ported from upstream/develop; see docs/contributing/touch-architecture.md,
+// "The reader". Header-only and inert on non-touch boards (input.hasTouch() is false
 // there), so the readers need no ifdefs.
 
 struct TouchPageTurn {

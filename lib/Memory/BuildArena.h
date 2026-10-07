@@ -1,6 +1,6 @@
 #pragma once
-// Bump arena for the section-build path (docs/compiled-book-pipeline-plan.md
-// Phase 2). One up-front allocation sized to a named budget replaces the
+// Bump arena for the section-build path (docs/memory-allocation-strategy.md §2
+// and §4). One up-front allocation sized to a named budget replaces the
 // per-site free-heap gates: allocation inside the build becomes deterministic
 // (either the arena fits the budget or the build refuses to start), so
 // mid-build OOM/fragmentation surprises — the heap-recovery-restart class of

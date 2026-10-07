@@ -70,7 +70,7 @@ struct ListDeclaration {
 };
 
 // Runs one list's buttons, hint strips and touch through ListGrammar, so every list answers the
-// same way (docs/superpowers/specs/2026-10-03-list-input-harmonization-design.md). A member of the
+// same way (docs/design/list-input-harmonization.md). A member of the
 // screen, not a base class; it holds no heap and allocates nothing per tick or per render.
 class ListController {
  public:

@@ -4,8 +4,8 @@
 
 // Ask what the board CAN DO, not what it IS.
 //
-// Why this file exists (workstream B0, see
-// docs/multiboard-bringup-handover-2026-08-15.md):
+// Why this file exists (see docs/contributing/board-support.md,
+// "Ask what the board can do"):
 //
 // `HalGPIO::deviceIsX3()` has ~38 call sites and is a stand-in for at least six
 // unrelated questions — is there a hardware RTC, is there an IMU, is the battery

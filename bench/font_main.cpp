@@ -1,7 +1,7 @@
 // ESP32-C3 font-path benchmark
 //
 // Measures the per-glyph cost of the font layer on real hardware, split the way the flash levers
-// split it (see docs/font-flash-analysis-2026-09-19.md):
+// split it (see docs/future_work/font-flash.md):
 //
 //   * UI faces are UNCOMPRESSED 1-bit. `getGlyphBitmap()` is a direct flash read, so their cost
 //     is glyph lookup + kerning + reading the bitmap through the instruction cache. Nothing in

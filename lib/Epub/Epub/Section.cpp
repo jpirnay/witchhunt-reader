@@ -14,7 +14,7 @@
 #endif
 
 // The build's scratch buffers are carved from a preallocated BuildArena
-// (docs/compiled-book-pipeline-plan.md Phase 2), device-validated 2026-07-18
+// (docs/memory-allocation-strategy.md §4, class C), device-validated 2026-07-18
 // (X3: highWater=9216/10240, failedAlloc=0, build time neutral). The former
 // per-site new/realloc path has been removed.
 #include <BuildArena.h>
@@ -278,7 +278,7 @@ constexpr size_t PARSE_CHUNK_BYTES = 1024;
 // PARSE_CHUNK_BYTES before phase (b). The grow is best-effort: on failure the 1 KB buffer is kept.
 constexpr size_t EXTRACT_CHUNK_BYTES = 8192;
 
-// Parse-scratch arena budget (Phase 2 of docs/compiled-book-pipeline-plan.md).
+// Parse-scratch arena budget for a build with nothing lent (docs/memory-allocation-strategy.md §4).
 // One up-front allocation backing the build's scratch buffers: chunk feed buffer
 // (PARSE_CHUNK_BYTES base + EXTRACT_CHUNK_BYTES extraction scope) + alignment.
 constexpr size_t SCT_PARSE_ARENA_BYTES = 10 * 1024;
@@ -511,9 +511,8 @@ uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
   //   allocBlk flat, freeBlk rising      -> pure fragmentation; the bytes come back split
   // Measured X3 2026-08-11: contig fell 40948 -> 15348 across one 17-page parse while free
   // oscillated 20-40 KB, with the arena covering the ring, the chunk feed AND the CSS ruleset
-  // (failedAlloc=0). So whatever does this is on the heap and is NOT arena-eligible — but no
-  // measurement yet names it. That is the open question in docs/memory-allocation-strategy.md
-  // section 8.4, unchanged since it was written; these three counters are what answer it.
+  // (failedAlloc=0). So whatever does this is on the heap. These three counters named it: churn
+  // and placement, not retention (docs/memory-allocation-strategy.md §8.4).
   multi_heap_info_t pageHeapInfo{};
   heap_caps_get_info(&pageHeapInfo, MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
   // The build arena beside the heap (memory audit 2026-09, allocation inventory): its cursor now,
@@ -753,7 +752,7 @@ bool Section::clearCache() {
 }
 
 // Live state of an in-progress section build. Holds exactly the locals that span build
-// phases; see docs/epubreader-control-flow-refactor.md §2.7. Held by Section as a
+// phases. Held by Section as a
 // unique_ptr so its address (and thus visitor's completePageFn lut capture) is stable
 // across phase calls and, later, across loop ticks.
 struct Section::BuildState {
