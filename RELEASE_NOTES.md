@@ -25,6 +25,10 @@ User-facing changes only. Full commit history is in git log.
 - **On/off settings on Customise Status Bar and the finished-book screen are switches** instead of "Show"/"Hide" and "On"/"Off" words.
 - **A weather city search with no matches now says so** instead of returning to the settings without a word.
 
+### Reader menu
+
+- **Sync tab: Compare is a visible entry.** Next to Pull and Push, the Sync tab now offers "Compare progress with other devices", the same compare-then-choose flow a long Confirm press starts in the reader.
+
 ### Fixes
 
 - **Fix: a chapter number and title that the book sets on separate lines no longer run together** (#388). Some publishers, St. Martin's Press among them, put the chapter number and title in one heading and use the book's style sheet to give each its own line. The reader ignored that and showed "10 The Tempest" on one line. It now shows the number centred above the title, with the spacing the book asks for. Every line of a heading the book splits this way also stays centred and at heading size, not just the first.

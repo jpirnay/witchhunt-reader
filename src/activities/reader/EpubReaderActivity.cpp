@@ -2632,6 +2632,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       }
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::COMPARE_REMOTE: {
+      // The menu's third sync entry: the same compare-then-choose flow a long Confirm press starts.
+      if (KOREADER_STORE.hasCredentials()) {
+        launchKOReaderSync(SyncLaunchMode::COMPARE);
+      }
+      break;
+    }
   }
 }
 

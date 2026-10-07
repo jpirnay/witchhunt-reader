@@ -95,7 +95,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   auto& toolsItems = tabMenuItems[static_cast<size_t>(MenuTab::Tools)];
   navigationItems.reserve(8);
   settingsItems.reserve(13);
-  syncItems.reserve(2);
+  syncItems.reserve(3);
   toolsItems.reserve(8);
 
   visibleTabs[visibleTabCount++] = MenuTab::Navigation;
@@ -332,6 +332,9 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (KOREADER_STORE.hasCredentials()) {
     syncItems.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
     syncItems.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
+    // The same comparison a long Confirm press in the reader starts: show which side is further and
+    // let the user choose, instead of forcing one direction.
+    syncItems.push_back(SettingInfo::Action(StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES, SettingAction::None));
   }
 
   toolsItems.push_back(SettingInfo::Action(StrId::STR_BOOK_INFO, SettingAction::None));
@@ -376,6 +379,8 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::PULL_REMOTE;
     case StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE:
       return MenuAction::PUSH_LOCAL;
+    case StrId::STR_COMPARE_PROGRESS_WITH_OTHER_DEVICES:
+      return MenuAction::COMPARE_REMOTE;
     case StrId::STR_SCREENSHOT_BUTTON:
       return MenuAction::SCREENSHOT;
     case StrId::STR_DISPLAY_QR:
