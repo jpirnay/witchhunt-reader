@@ -1,6 +1,5 @@
 #pragma once
-// Compiled content format (content.bin, magic "WBC1") — Phase 3 of
-// docs/compiled-book-pipeline-plan.md; layout defined in docs/compiled-content-format.md.
+// Compiled content format (content.bin, magic "WBC1"). This header is its definition.
 //
 // This is the SETTINGS-INDEPENDENT product of a one-time Stage-1 compile: parsed,
 // CSS-resolved blocks with text runs and image refs, keyed only by the book's ZIP
@@ -29,7 +28,7 @@ inline constexpr uint8_t kVersion = 1;
 
 // Per-word settings-independent data — the slice of today's TextBlock that survives
 // a relayout. No xpos: Stage-2 measurement computes it. bidiLevel is 0 for LTR books
-// and reserved for RTL (see docs/compiled-content-format.md "RTL / BiDi").
+// and reserved for RTL.
 struct Word {
   uint32_t textOff = 0;   // byte offset of the word's text within Block::text
   uint8_t styleSpan = 0;  // inline bold/italic/underline/super/sub/smallcaps bitmask
@@ -39,7 +38,7 @@ struct Word {
 
 enum class BlockType : uint8_t { Text = 0, Image = 1 };
 
-// Block::flags bits (docs/compiled-content-format.md).
+// Block::flags bits.
 enum BlockFlags : uint8_t {
   kStartsChapter = 1 << 0,
   kPageBreakBefore = 1 << 1,

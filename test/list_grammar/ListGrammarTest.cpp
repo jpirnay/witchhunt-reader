@@ -1,4 +1,4 @@
-// The list button scheme (docs/superpowers/specs/2026-10-03-list-input-harmonization-design.md §1):
+// The list button scheme (docs/design/list-input-harmonization.md §1):
 // which command each button event means, what the front hint boxes say, and the row arithmetic.
 
 #include <gtest/gtest.h>

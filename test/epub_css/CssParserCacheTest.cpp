@@ -470,7 +470,7 @@ TEST(CssParserCache, OversizedIndexEvictionReleasesIt) {
 #endif  // CSS_TEST_HEAP_HOOKS
 
 // ---------------------------------------------------------------------------
-// Phase-2 arena CSS (docs/compiled-book-pipeline-plan.md): a build running in the
+// Arena CSS: a build running in the
 // BORROWED secondary framebuffer resolves CSS out of a BuildArena — the whole
 // {hash,CssStyle} ruleset resident when it fits (in-RAM, no disk, FreeInkBook-style),
 // else an arena-backed offset index (disk payloads) — with the hot cache disabled.

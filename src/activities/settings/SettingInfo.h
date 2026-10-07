@@ -19,9 +19,8 @@ enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 // third board: on X4 Pro deviceIsX3() is false, so every X4-targeted setting
 // would silently appear there whether or not the hardware supports it, and
 // every X3-targeted one would silently vanish. Widening the enum to name four
-// boards multiplies the problem rather than fixing it. See the B0
-// capability-predicate section of
-// docs/multiboard-bringup-handover-2026-08-15.md.
+// boards multiplies the problem rather than fixing it. See
+// docs/contributing/board-support.md, "Ask what the board can do".
 //
 // Each value below names one capability, answered from the HAL or the active
 // board profile in SettingsListDetail::boardHas(). Add a value when a setting needs

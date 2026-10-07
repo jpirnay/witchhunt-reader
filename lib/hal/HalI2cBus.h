@@ -7,7 +7,7 @@
 // Serializes access to the I2C bus shared by the touch controller, the RTC and
 // the fuel gauge.
 //
-// Why this is needed (docs/touch-input-migration-2026-08-14.md §5, "P1"):
+// Why this is needed (docs/contributing/touch-architecture.md, "I2C bus and the input sampler"):
 //
 // On the X4 Pro all three peripherals sit on ONE bus — GT911 touch at 0x5D,
 // BM8563 RTC at 0x51 and the CW2017 gauge at 0x63, all on bus 0 (SDA39/SCL38).

@@ -199,7 +199,7 @@ class Section {
   // Progress of an incremental (sliceable) section build. Setup/Parse/Finalize are the
   // three temporal phases of createSectionFile; More means the current phase yielded
   // mid-way after spending its time budget and should be resumed on the next call.
-  // Done/Failed are terminal. See docs/epubreader-control-flow-refactor.md §2.6–2.7.
+  // Done/Failed are terminal. The callers are described in docs/background-rendering.md.
   enum class BuildStep : uint8_t { Setup, Parse, Finalize, More, Done, Failed };
 
   // Ctor/dtor defined in Section.cpp: both need the complete BuildState type (the

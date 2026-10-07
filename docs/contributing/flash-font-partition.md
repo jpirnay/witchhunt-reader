@@ -1,23 +1,31 @@
 # Flash Font Partition (FlashFontPartition)
 
-The device's `spiffs` partition (3.47 MB at flash address `0xc90000`) is repurposed as a raw binary font store. It is not a SPIFFS filesystem — nothing mounts it. `FlashFontPartition` writes `.cpfont` files directly into this region and memory-maps them for zero-SRAM-cost access at runtime.
+The device's `spiffs` partition (`0x360000` = 3,538,944 bytes at flash address `0xc90000`, see `partitions.csv`) is repurposed as raw storage. It is not a SPIFFS filesystem — nothing mounts it. `FlashFontPartition` (`lib/hal/FlashFontPartition.h`) copies `.cpfont` files into it and memory-maps them, so an SD-card font's tables are read from flash instead of being loaded into SRAM.
+
+**The tail of the partition is not the font cache's.** The last `LANG_RESERVED_BYTES` (64 KB) belong to `FlashLangPartition`, which keeps the decompressed UI language there. `FlashFontPartition::fontUsableSize()` returns the part below that slot, and every write is budgeted against it. 64 KB is the `esp_partition_mmap` alignment, so the language slot starts on a mappable boundary.
 
 ## Why flash storage for fonts
 
-SD card font loading allocates heap for every glyph metric table read. For a full Literata family (5 point sizes × regular/bold/italic/bold-italic = 20 styles), the kern and interval tables alone can exceed 100 KB. Flash mmap eliminates that cost: the data lives in flash address space, the CPU reads it via cache, and no SRAM is consumed beyond the metadata pointers.
+Loading an SD-card font the plain way reads its metric and kerning tables into heap arrays. For a large family the kern and interval tables alone can exceed 100 KB. A mapped font reads most of that straight from flash through the cache:
 
-Fonts written to the flash partition are written **once** at install time (via the web server update flow) and read-only thereafter — an ideal write-once, read-many pattern for NOR flash.
+- glyph records, the kern class tables and the kern matrix are read in place;
+- glyph bitmaps for a page prewarm are read from the mapping too, so the per-page glyph arena is not allocated (glyphs the prewarm missed still load from SD);
+- only the interval table and the ligature pairs are copied to the heap, because they contain `uint32_t` fields that need natural alignment.
+
+The copy happens on demand. `SdCardFontManager::loadFamily` writes a family into the partition the first time the reader loads it and the partition does not already hold it (`writeFamily`), then maps it. A transient load, such as the font preview, passes `FlashCachePolicy::ReadOnly` and reads the file from SD without touching the partition. The flash copy is only a cache: the `.cpfont` files on the SD card are the originals.
 
 ## Partition layout
 
 ```
 [4 B]  Magic: "CPFC"
-[1 B]  Entry count (0..MAX_ENTRIES=16)
+[1 B]  Entry count (1..MAX_ENTRIES=16)
 [3 B]  Reserved (zero)
-[16 × 48 B = 768 B]  Index entries (unused entries zeroed)
+[16 × 48 B = 768 B]  Index entries (unused entries left erased)
 --- HEADER_BYTES = 776 bytes total ---
 
 [variable, 4-byte aligned]  Font data blobs
+...
+[last 64 KB]  FlashLangPartition's language slot
 ```
 
 Each 48-byte index entry:
@@ -35,7 +43,7 @@ The `(familyName, pointSize)` pair is the lookup key. `MAX_ENTRIES = 16` is enou
 
 ## Write API
 
-Font files are written once per install session using three calls:
+Font files are written once per write session using three calls:
 
 ```cpp
 FlashFontPartition::beginWrite("Literata");
@@ -45,13 +53,15 @@ for (uint8_t ptSize : {10, 12, 14, 16, 18}) {
 FlashFontPartition::finaliseWrite();
 ```
 
-**`beginWrite(familyName)`** erases the entire partition upfront (`esp_partition_erase_range` on the full 3.47 MB), then initialises the write session. Erase is sector-granular (4 KB sectors); erasing the whole partition once is cheaper than per-sector erase management.
+**`beginWrite(familyName)`** erases everything below the language slot (`esp_partition_erase_range` up to `fontUsableSize()`), then starts the write session. It never erases the language slot: erasing the whole partition would wipe the UI language every time a font family was cached. Erase is sector-granular (4 KB sectors); erasing the font region once is cheaper than per-sector erase management.
 
-**`appendFile(sdPath, familyName, pointSize)`** reads the `.cpfont` file from SD in 4 KB chunks and writes it to flash via `esp_partition_write`. Data offsets are 4-byte aligned. The function records the entry in the write session but does not write the index yet.
+**`appendFile(sdPath, familyName, pointSize)`** reads the `.cpfont` file from SD in 4 KB chunks and writes it to flash via `esp_partition_write`. Data offsets are 4-byte aligned. A file that would run past the usable size is refused. The function records the entry in the write session but does not write the index yet.
 
 **`finaliseWrite()`** writes the 8-byte header (magic + count) and the packed entry table to the start of the partition. Index entries are written in order of insertion.
 
-The full partition is erased on `beginWrite`, so installing a new font family replaces all previous contents. There is no incremental update path — if you need to add a family, reinstall all families.
+Every `beginWrite` erases all font data, so the partition holds one family at a time. `writeFamily` writes every size of the family when they all fit (and fit in `MAX_ENTRIES`), and only the requested size otherwise.
+
+`readIndex()` rejects an index whose data runs past the usable size. That is the migration case: a partition written before the language reservation existed may hold font data where the language now lives, and treating it as invalid makes the next load re-cache the family from the SD card.
 
 ## Mmap read API
 
@@ -61,13 +71,13 @@ size_t sz;
 if (FlashFontPartition::mmap("Literata", 16, &ptr, &sz)) {
     SdCardFont font;
     font.loadFromMmap(ptr, sz, sdPath);
-    FlashFontPartition::unmap();
+    // keep the mapping for as long as the font is loaded
 }
 ```
 
 **`mmap(familyName, pointSize, outPtr, outSize)`** reads the index from flash, finds the matching entry, and calls `esp_partition_mmap`. The mapped region covers from partition start to `dataOffset + dataSize`, rounded up to 64 KB alignment (the minimum mmap granularity on ESP32). `outPtr` points to the start of the font data within the mapped region; `outSize` is the raw `.cpfont` file size.
 
-Only one mmap handle is active at a time. `SdCardFont::loadFromMmap` copies the metadata it needs to heap-aligned buffers (see below) before the caller unmaps.
+Only one mmap handle is active at a time.
 
 **`unmap()`** releases the mmap handle. After this call the pointer returned by `mmap` is invalid.
 
@@ -79,13 +89,15 @@ Both paths produce an `SdCardFont` in the same usable state. The difference is w
 
 `SdCardFont::loadFromMmap(base, size, sdPath)` reads the same binary format from the mmap pointer. For each style it:
 
-- **Copies** `fullIntervals` to heap — `EpdUnicodeInterval` contains `uint32_t` fields that need natural alignment, which flash cannot guarantee.
-- **Aliased directly** the kern class tables — `EpdKernClassEntry` is `__attribute__((packed))`, so byte-granular reads are safe. The pointers point into flash address space.
+- **Copies** `fullIntervals` to heap — `EpdUnicodeInterval` contains `uint32_t` fields that need natural alignment, which flash cannot guarantee. Styles with identical interval tables share one copy.
+- **Aliases** the kern class tables directly — `EpdKernClassEntry` is `__attribute__((packed))`, so byte-granular reads are safe. The pointers point into flash address space.
 - **Copies** `ligaturePairs` to heap — `EpdLigaturePair` contains `uint32_t` fields; alignment required.
-- Sets `mmapDataBase_ = base` so the kern matrix fast path works (see below).
+- Sets `mmapDataBase_ = base`, which the kern matrix, the glyph records and the prewarm's bitmap reads use.
 - Sets `metadataOwned_ = true` so the destructor knows to `delete[]` the heap copies.
 
-The key benefit: the kern **matrix** (the large int8_t grid, up to ~28 KB for Literata) stays in flash and is read via direct pointer arithmetic — no heap allocation, no SD I/O.
+The glyph records are read in place as `EpdGlyph`. That is safe because the record is 16 bytes and an interval 12, so every style's glyph section stays 4-byte aligned; a change to the `.cpfont` record size has to keep that or read records with `memcpy`.
+
+`unloadMetadata()` and `reloadMetadata()` are no-ops for a mapped font: the heap copies are small and the rest is in flash.
 
 ## Kern matrix access: mmap vs SD
 
@@ -111,12 +123,13 @@ FlashFontPartition::hasValidIndex()          // partition has been written at le
 FlashFontPartition::hasEntry("Literata", 16) // specific entry present
 FlashFontPartition::hasFamilyComplete("Literata", sizes, count) // all sizes present
 FlashFontPartition::isMapped()               // mmap currently active
+FlashFontPartition::fontUsableSize()         // bytes below the language slot
 ```
 
 These are read-only and do not require a write session or active mmap.
 
 ## Lifetime and mmap validity
 
-The mmap pointer is valid from `mmap()` to `unmap()`. `SdCardFont::loadFromMmap` must finish all reads before the caller unmaps. The aliased kern class pointers in `PerStyle` point into flash and remain valid as long as `isMapped()` — but in practice the font is fully loaded (aliased pointers and heap copies set) before unmapping, so the kern class pointers work correctly after unmap via the aliased flash address (flash address space is always accessible; only the mmap *handle* is released, not the flash itself).
+The mmap pointer is valid from `mmap()` to `unmap()`, and a mapped font keeps reading through it: the kern class pointers, the kern matrix, the glyph records and the prewarm's bitmaps all point into the mapping. So the mapping stays active for as long as the font is loaded. `SdCardFontManager` unmaps only before it loads another family (`loadFamily`) and in `unloadAll`, after the fonts that use the mapping have been removed, and when `loadFromMmap` fails.
 
-`sdPath` is stored in `filePath_` for the `reloadMetadata` path: if metadata is unloaded between chapters and needs to reload, the SD path is the fallback for fonts whose mmap is no longer active.
+`sdPath` is stored in `filePath_`. Glyphs that the page prewarm did not cover are read from the `.cpfont` on the SD card through that path.

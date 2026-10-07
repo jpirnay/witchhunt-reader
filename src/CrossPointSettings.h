@@ -326,8 +326,8 @@ class CrossPointSettings {
   };
 
   // How the reading surface responds to touch. Off leaves the page inert, so a
-  // thumb resting on the panel can never turn a page (P3 in
-  // docs/touch-input-migration-2026-08-14.md).
+  // thumb resting on the panel can never turn a page (see
+  // docs/contributing/touch-architecture.md, "Gating").
   enum TOUCH_READER_CONTROLS {
     TOUCH_READER_OFF = 0,
     TOUCH_READER_ON = 1,            // tap the outer thirds: left = back, right = forward

@@ -1,0 +1,314 @@
+# Display and refresh
+
+Status: open items as of 2026-10-07. Collected from display-baseline-audit-2026-09-23.md, display-capability-audit-2026-08-17.md, framebuffer-content-audit-2026-09-23.md, x3-sleep-ghosting-hypotheses.md, superpowers/specs/2026-09-23-framebuffer-contract-design.md, busy-indicator-handover-2026-09-21.md, background-rendering.md and grayscale-aa-rendering.md (the audits and handovers were removed in the 2026-10-07 docs cleanup; they are in git history).
+
+Background for every item: [secondary-buffer-management.md](../secondary-buffer-management.md) (what each
+framebuffer holds, and where each controller keeps its previous frame).
+
+## Greys on the glass: UC8279d and SSD1677 do not track them
+
+**Open.** After an anti-aliased page, `Uc8279Driver::cleanupGrayscaleBuffers()` and
+`Ssd1677Driver::cleanupGrayscaleBuffers()` restore controller RAM to the B/W page and report a clean
+sync, while the glass still holds grey at every AA edge. UC8253 had the same gap and it caused the X3
+sleep-cover ghost; it now tracks the state as `_grayOnGlass`. UC8179 and UC8279 X4 track it as
+`_redriveAfterGray`.
+
+**Why it matters.** A differential push after an AA page gives those grey pixels the gentle
+white-to-white cell. On UC8253 that left the page's text outline on the sleep cover.
+
+**Where.** `Uc8279Driver::displayGrayscaleBase()` (`cleanBaseNeeded`), `Uc8279Driver::displayGray()`,
+`Ssd1677Driver::cleanupGrayscaleBuffers()`.
+
+**Ruled out.** SSD1677's sleep cover is safe: its absolute pass is `GrayscaleBase::Combined` (no base
+push, the factory waveform drives every pixel), confirmed clean on an X4 on 2026-09-23. UC8279d was
+never tested; there is no unit.
+
+**Next.** On a UC8279d X3 (log tag `8279_DRF`), read a few AA pages and sleep onto a grayscale cover.
+If the text ghosts, port `_grayOnGlass` (set by the gray waveform, cleared only by a GC push or a
+revert, never by a RAM restore) with a host test in `run_uc8279.py`. An alternative for every
+UltraChip driver is UC8179's rule: a Half or Full fallback in `displayGrayscaleBase()` is a floor,
+never the differential transition.
+
+## Re-landing the reverted framebuffer fixes
+
+**Open.** Five host-buffer defects (D1-D5) were found by code reading on 2026-09-23, fixed on a branch,
+flashed, and reverted when they turned out not to cause the X3 sleep ghost. D1 was re-landed (SDK
+`4a320d6`: `cleanupGrayscaleWithPreviousBuffer()` accepts only `frameBufferActive`). D2-D5 are the four
+items below.
+
+**Why it matters.** Each one composites or saves the wrong frame in a specific state. None of them was
+the observed symptom, so none has device evidence yet.
+
+**Lesson.** The first fix was chosen from a story, not from a test that separates causes, and it
+changed nothing. Re-audit each defect against its own trigger before re-landing it.
+
+**Where the written fixes are.** Only as unreachable commits: firmware `c17d939ab`, SDK `96f031d` (D1)
+and `08222e1` (D5). No branch holds them, so `git gc` will eventually drop them.
+
+**Next.** Tag the commits if the code is wanted; otherwise rewrite from the descriptions below.
+
+## D2: the reader's exit hook repairs only the pre-render case
+
+**Open.** `EpubReaderActivity::prepareFramebufferForCapture()` calls
+`restoreCurrentPageToBufferIfPreRendered()`, which returns unless `preRenderedPage.ready`. It does not
+repair the ordinary post-swap state (the write buffer holds the previous page), nor a plane left behind
+when a grayscale pass ran with the secondary away (`cleanupGrayscaleWithPreviousBuffer()` then restores
+nothing). `LineReaderActivity` and `XtcReaderActivity` do not override the hook at all.
+
+**Why it matters.** The Overlay and Quick Resume sleep screens, the frontlight drawer and screenshots
+all draw on top of the write buffer.
+
+**Tried.** `restoreCurrentPageToBufferIfStale()`, which also fires when no displayed frame is
+available. Reverted with the rest.
+
+**Next.** Decide together with "Framebuffer contract" below, which is the structural version.
+
+## D3: goToSleep() prepares nothing (narrowed)
+
+**Open.** `ActivityManager::goToSleep()` replaces the activity and pumps `loop()` without the
+`syncWriteBufferFromDisplayed()` + `prepareFramebufferForCapture()` pair that
+`dispatchLightPanelGesture()` and the screenshot path in `main.cpp` run.
+`SleepActivity::renderOverlaySleepScreen()` and `renderLastScreenSleepScreen()` then draw onto whatever
+the write buffer holds.
+
+**Narrowed.** With AA on it is correct: every completed or aborted AA pass ends in
+`cleanupGrayscaleWithPreviousBuffer()`, which copies the displayed frame into the write buffer (X3,
+2026-09-24: Overlay sleep after two quick turns showed the current page). Still possible with AA off,
+or for a sleep in the ~0.5 s before the deferred AA pass runs.
+
+**Tried.** `goToSleep()` running the pair under a `RenderLock` before the pump. Reverted.
+
+**Next.** Repeat the test with AA off. Re-land only if it shows the previous page.
+
+## D4: Quick Resume saves the post-swap slot
+
+**Open.** `SleepActivity::renderLastScreenSleepScreen()` draws the moon and calls
+`displayBuffer(HALF_REFRESH)`, which swaps. `saveSleepFrameBuffer()` in `main.cpp` then writes
+`renderer.getFrameBuffer()`, which is now the other slot: the page without the moon (or, with AA off,
+the page before), not what the panel shows.
+
+**Why it matters.** On wake, `loadSleepFrameBuffer()` restores that frame as the reader page.
+
+**Tried.** Nothing on a device. The wake check (does the restored frame show the moon?) never ran.
+
+**Next.** Run the check. The fix is to call `syncWriteBufferFromDisplayed()` before the write.
+
+## D5: a resident secondary can hold a frame that was never displayed
+
+**Open.** `FreeInkDisplay::returnSecondaryBuffer()` and `reallocSecondaryBuffer()` seed the restored
+secondary from the write buffer, which may hold a pre-rendered page, a plane or scratch.
+`hasSecondaryBuffer()` then reports true, and `syncWriteBufferFromActive()` copies the block without
+saying whether it is the panel content. The `_redBaselineAuthoritative` one-shot protects the SSD1677's
+RED plane, not the host copy.
+
+**Why it matters.** A popup or overlay drawn with `overlayDisplayedFrame=true` between the return and
+the next full-frame refresh composites onto that frame.
+
+**Tried.** `_displayedFrameValid`, set only by `swapBuffers()` and exposed as `hasDisplayedFrame()`,
+with `syncWriteBufferFromActive()` returning whether it copied. Host-tested, reverted (SDK `08222e1`).
+
+**Next.** List the consumers that can run between a return or realloc and the next full-frame refresh.
+Re-land only if one exists.
+
+## Framebuffer contract: one routine and one hook
+
+**Open.** The rule "before drawing on top of the panel, the write buffer must hold what the panel
+shows" lives at each call site as its own `syncWriteBufferFromDisplayed()` +
+`prepareFramebufferForCapture()` pair (`ActivityManager::dispatchLightPanelGesture()`, the screenshot
+path, and every `overlayDisplayedFrame` popup).
+
+**Agreed design, not scheduled.**
+1. `Activity::ensureWriteBufferShowsPanel()` plus an `ActivityManager` delegate: run the two steps in
+   one place and return false when the frame cannot be established, so the caller repaints instead of
+   compositing.
+2. Replace `Activity::prepareFramebufferForCapture()` with `virtual bool redrawVisibleFrame()`, default
+   false. `EpubReaderActivity` answers it unconditionally; Txt and Md through
+   `TxtReaderActivity::drawCurrentPageToBuffer()`; Xtc through its own static.
+
+Neither exists in the tree. Rejected on purpose: an RAII guard (nothing to undo), new `drawPopup()`
+signatures, and an SDK type for "the displayed frame".
+
+**Next.** Mechanism 2 first, then 1 with the call-site migration. No host harness compiles
+`GfxRenderer`, so the migration is reviewed by eye.
+
+## Driver conformance test for the no-baseline contract
+
+**Open.** Every driver must treat `cleanupGrayscaleBuffers(bus, nullptr)` as "no baseline: take a clean
+sync on the next push". They all do today, each in its own way (UC8253 drops `_redRamSynced`, UC8179
+and UC8279 X4 set `_needFullClear`, UC8279d sets `_forceFullSyncNext`, SSD1677 leaves
+`_inGrayscaleMode` set, LGFX rebuilds its canvas on the next push). Only
+`test_pro.cpp::testGrayCleanupBaseline` checks it, and only for `Uc8279X4Driver`.
+
+**Why it matters.** A new controller that keeps its synced claim ships ghosting.
+
+**Next.** In the SDK host suite, for each linked driver: run a grayscale pass, call
+`cleanupGrayscaleBuffers(nullptr)`, assert that the next refresh is a clean or full sync.
+
+## Make the display state queryable
+
+**Open.** Three states decide what is safe to draw or push, and today they are implicit or private:
+1. what the write buffer holds: the panel, the next page (`preRenderedPage.ready`), a plane (nothing
+   records it), a stale frame (the post-swap default) or scratch;
+2. what the secondary holds: the panel, an unproven seed (after a return or realloc), lent
+   (`_secondaryLent`, private) or released;
+3. whether the glass carries grey the B/W baseline does not describe: per driver and private
+   (`_grayOnGlass`, `_redriveAfterGray`), absent on UC8279d and SSD1677.
+
+**Why it matters.** `ActivityManager::showBusyIndicator()` skips whenever the secondary is away, because
+`hasSecondaryBuffer()` cannot tell a borrow from a release. A consumer about to push a differential after
+a grey page (sleep cover, Home after the reader, a T5S3 FAST) cannot ask about state 3.
+
+**Not a design yet.** States 1 and 2 are host-side and cheap. State 3 decides the refresh mode and
+must be answered by each driver, so keep it separate from the other two.
+
+**Next.** Add `FreeInkDisplay::isSecondaryLent()` with `HalDisplay` and `GfxRenderer` passthroughs, and
+use it in `showBusyIndicator()`. Design state 3 when a second consumer needs it.
+
+## Split PanelSel from the baseline model
+
+**Open.** `FreeInkDisplay::PanelSel` (`X4`, `X3`, `M5`; default `X4`) picks the driver and also stands
+for "this controller keeps a host-managed previous frame", which is true of the SSD1677 only. Every
+board that is not an X3 reads as `X4`: X4 and X4 Pro units on UC8179 or UC8279, and the T5S3.
+- `resolveReleasedMode()` turns FAST into HALF while the secondary is away (unless
+  `setSingleBufferFastDiff(true)`), also on drivers that ignore `prev` and keep their own baseline.
+- `isRedRamSynced()` reports a RED plane that UC8179, UC8279 X4 and LGFX do not have.
+- `syncRedRamFromFrameBuffer()` runs there; harmless only because `seedPreviousFrame()` is a no-op
+  outside SSD1677.
+- In the firmware, `GfxRenderer::isX3()` answers several unrelated questions by board name (build
+  mode, deferred AA, whether to seed RED before a lend).
+
+The SDK's `displayCommitted()` and `abortPostRefresh()` / `postRefreshAborted()` are still unused: the
+reader hand-rolls `aaPreemptedByNavigation()`, and the refresh cadence assumes every submit commits.
+Also open: whether the PSRAM boards (X4 Pro, T5S3) need to borrow or release the secondary at all.
+
+**Why it matters.** A downgraded FAST costs a HALF waveform: on an X4, ~1755 ms instead of ~476 ms
+(2026-08-19, during a Background-B borrow).
+
+**Next.** SDK: a `PanelDriver` capability for "keeps a host-managed previous frame" (true where the
+driver consumes `prev`), and key the three facade sites on it. Firmware: convert `isX3()` sites one at
+a time, each with a device check. `EpubReaderActivity::usesDeferredAa()` is the model: one predicate
+used by both the strategy and its scheduling.
+
+## LGFX write-buffer copy before displayGrayBuffer()
+
+**Open.** `HalDisplay::displayGrayBuffer()` copies the displayed frame into the write buffer when the
+controller is `LgfxEpd`, a board-name check. Since Free-Ink/freeink-sdk#47 `LgfxEpdDriver::displayGray()`
+ignores `fb` and darkens its own canvas, so the copy no longer serves the purpose it was written for.
+
+**Why it was kept.** It touches the host write buffer, not the canvas, and whether the plane-restore
+step after it depends on it was never settled on the panel. Cost: one buffer copy per two-push AA pass
+on the T5S3, which now mostly uses single-push AA.
+
+**Next.** Remove it behind a device test that exercises the two-push overlay path on a T5S3.
+
+## Windowed refresh: capability query, alignment, baseline
+
+**Open.** `PanelDriver::displayWindow()` defaults to a whole-panel FAST. Only `Ssd1677Driver` and
+`PaperMonoDriver` override it, and both return silently on a window whose x or width is not
+byte-aligned. A caller cannot tell "refreshed the window", "refreshed the whole panel" and "did
+nothing" apart, and there is no `supportsWindowedRefresh()`. After a windowed refresh
+`frameBufferActive` still holds the old content for that rectangle (no swap), so the next FAST can
+leave those pixels as the window left them. `GfxRenderer::displayWindow()` has no caller today.
+
+**Ruled out.** On the SSD1677 a windowed refresh is not worth having. X4, 2026-09-16: 88 of 480 rows
+took 505-511 ms against 527-529 ms for a full-frame FAST, and it ghosted; built, measured, reverted.
+Free-Ink/freeink-sdk#91 measured the same on a UC8279 (32 rows 514 ms, 480 rows 556 ms).
+
+**Next.** Only if a driver turns out to save real time (next item): add `supportsWindowedRefresh()`
+(false in the base) and surface it like `supportsAsyncRefresh()`; snap to byte alignment in
+`GfxRenderer::displayWindow()`, because the constrained axis flips with orientation; fall back to a
+full refresh instead of returning; copy the refreshed rectangle into `frameBufferActive`.
+
+## displayWindow() on UC8253 and UC8179
+
+**Open.** `Uc8253X3Driver` and `Uc8179Driver` already drive the partial-window commands (PTL `0x90`,
+PTIN `0x91`, PTOUT `0x92`): UC8253 in its windowed `preconditionGrayscale()`, UC8179 as a whole-panel
+PTIN on FAST. Neither overrides `displayWindow()`.
+
+**Why it matters.** A real partial would make popups, the busy indicator, the frontlight drawer and the
+status bar cheaper.
+
+**Known constraint.** An earlier X3 (UC8253) experiment, from before the FreeInk SDK: a PTL window
+narrower than the full source range speckled about one refresh in ten, with every LUT bank; a
+full-width window limited only in gate rows was clean 9/9. In portrait only a logical left or right
+edge strip has that shape; a status bar does not.
+
+**Unmeasured.** Whether a row-limited window saves waveform time on these parts at all. The SSD1677
+and UC8279 measurements above say it may not.
+
+**Next.** Measure before writing the override: a full-width 60-row window against a whole-panel FAST,
+on an X3 and on an X4 Pro with UC8179.
+
+## PopupShip::Window
+
+**Open.** `BaseTheme::drawPopup()` and `drawBusyIndicator()` return the box `Rect`, but `PopupShip` has
+only `Blocking`, `Async` and `Caller`, so every popup ships a full-frame refresh. The busy indicator is
+limited to panels whose FAST takes under `kMaxFastRefreshMs` (1000 ms) for that reason.
+
+**Depends on.** A driver whose windowed refresh saves time (item above).
+
+**Next.** Add `PopupShip::Window`, which ships the returned `Rect` through `GfxRenderer::displayWindow()`.
+
+## Retire the PopupShip::Async drain caveat
+
+**Open.** `FreeInkDisplay::releaseSecondaryBuffer()` drains a pending refresh since SDK `d939fd1`, but
+two firmware comments still say it does not: the `PopupShip::Async` comment in `BaseTheme.h`, and the
+comment in `SleepActivity::renderCoverSleepScreen()` that explains why the popup is armed only after
+the release.
+
+**Next.** Correct both comments. The arm-after-release order is harmless and can stay.
+
+## drawImage() does not rotate bitmap bits
+
+**Open.** `GfxRenderer::drawImage()` moves the origin for the current orientation but does not rotate
+the bitmap (`// TODO: Rotate bits`). A bitmap that is not rotation-symmetric lies on its side outside
+the panel's native orientation. The busy indicator draws its hourglass with `drawLine()` to avoid this.
+
+**Where.** Callers: `BootActivity`, `SleepActivity` and `SystemInformationActivity` (`Logo120`),
+`SleepActivity::renderLastScreenSleepScreen()` (`MoonIcon`), the Quick Resume path in `main.cpp`
+(`LoadingIcon`).
+
+**Next.** Rotate the bits per orientation in `drawImage()` and check each caller in all four
+orientations.
+
+## The Fast anti-aliasing setting does nothing
+
+**Open.** `CrossPointSettings::fastAntiAliasing` (offered on every non-SSD1677 panel, see
+`hasSelectableGrayscaleLut()`) reaches `FreeInkDisplay::setFastGrayscaleLut()`, which only stores the
+flag. No driver reads it: `Uc8253X3Driver` carries a single `gc` nudge bank, and
+`HalDisplay::displayGrayBuffer()` passes no LUT. The comment above the setting in `SettingsList.h`
+still promises a choice between ~2.4 s and ~130 ms.
+
+**Next.** Either give the X3 driver a second grayscale bank selected by the flag, or remove the setting
+and its comment.
+
+## X3 reads below the pre-render heap floor
+
+**Open.** Background A (next-page pre-render) does not run on the X3. X3 (UC8253), 2026-09-23, AA on,
+17 turns: free heap after each AA pass ~42.9 KB, and `PreRender skipped: free < floor=45056` on every
+page. `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the
+X3 entered the pass at 53-55 KB free. Free returns to the same value after every pass, so this is not
+a leak: the retained baseline grew by ~10-14 KB.
+
+**Why it matters.** Without A every turn pays the page render on top of the waveform.
+
+**Ruled out.** Lowering the floor. It is derived from what the pass consumes (~23 KB transient), and
+the pass must stay clear of the reserve the sliced section build needs.
+
+**Next.** Find what grew: bisect `6f097ad77`..master on one book, using the
+`Reader mem[...] ... allocBytes=` line in `EpubReaderActivity` as the metric.
+
+## Pre-render before the deferred AA pass
+
+**Open.** `EpubReaderActivity::serviceBackgroundWork()` runs the deferred AA pass first and re-arms
+Background A only after it, because the planes and a pre-rendered page compete for heap. A quick turn
+inside the AA window pays a full render. Measured on a T5S3 on 2026-08-17, when it still deferred AA:
+AA ~605 ms (planes 80 + gray 473 + restore 52), pre-render ~53 ms; 2 of 6 quick turns found a
+pre-rendered page.
+
+**Status.** The T5S3 now sends AA as a single push in normal reading, so the measured case no longer
+happens there. The X3 is the board left on the deferred path, and A does not run there at all (item
+above).
+
+**Next.** Revisit once A runs on the X3 again. Reordering needs a C3 heap check and a device test, not
+an inference from one log.

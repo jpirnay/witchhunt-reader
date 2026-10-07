@@ -127,16 +127,11 @@ button, and it works on every screen.
 | Hold a button hint | The same as holding that button |
 | **Hold the top-left corner** | **Toggle reading light** — the same as in a book |
 | Swipe up / down over a list | Page the list |
-| **Tap the scroll bar** above / below the thumb | Page back / forward |
-| Swipe **right from the left edge** | Back |
 | Swipe **down from the top edge** | Reading light panel |
 
-The scroll-bar strip is wider than the thin bar you can see, so you do not have to hit
-it precisely. Tapping the thumb itself does nothing.
-
 > The T5S3 has a **Down** key but no **Up** key, so paging a list *backward* has no
-> physical button there. The scroll bar and the swipe are how you do it — and they work
-> on the X4 Pro too, which does have both keys.
+> physical button there. Swiping down over the list is how you do it, and it works on the
+> X4 Pro too, which does have both keys.
 
 ---
 
@@ -189,5 +184,5 @@ bottom edge returns Home.
 
 ## See also
 
-- [Touch input migration](touch-input-migration-2026-08-14.md) — the developer-facing
-  record of how this was built and why each default was chosen.
+- [Touch Architecture](contributing/touch-architecture.md) — the developer-facing account of
+  how touch input works and why each default was chosen.

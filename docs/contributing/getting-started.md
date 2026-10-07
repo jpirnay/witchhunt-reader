@@ -8,7 +8,7 @@ This guide helps you build and run CrossPoint locally.
 - Python 3.8+
 - `clang-format` 21+ in your `PATH` (CI uses clang-format 21)
 - USB-C cable
-- Xteink X4 device for hardware testing
+- A supported device for hardware testing: Xteink X3 or X4, Xteink X4 Pro or LilyGo T5S3 (see [Board Support](./board-support.md))
 
 If `./bin/clang-format-fix` fails with either of these errors, install clang-format 21:
 
@@ -43,9 +43,11 @@ The reported major version must be 21 or newer.
 ## Clone and initialize
 
 ```sh
-git clone --recursive https://github.com/crosspoint-reader/crosspoint-reader
-cd crosspoint-reader
+git clone --recursive https://github.com/jpirnay/witchhunt-reader
+cd witchhunt-reader
 ```
+
+The `freeink-sdk` submodule points at our SDK fork, `https://github.com/jpirnay/freeink-sdk` (branch `witchhunt`, see `.gitmodules`). A build against the upstream `Free-Ink/freeink-sdk` main does not compile.
 
 If you already cloned without submodules:
 
@@ -63,8 +65,20 @@ chmod +x .githooks/pre-commit
 ## Build
 
 ```sh
-pio run
+pio run                  # default env, Xteink X3 and X4
+pio run -e x4pro         # Xteink X4 Pro
+pio run -e lilygo_t5s3   # LilyGo T5S3
 ```
+
+Environments in `platformio.ini`:
+
+| Board | Development | Release | Release candidate |
+|---|---|---|---|
+| X3 and X4 (ESP32-C3, one binary) | `default` | `gh_release` | `gh_release_rc` |
+| X4 Pro (ESP32-S3) | `x4pro` | `x4pro_gh_release` | `x4pro_gh_release_rc` |
+| LilyGo T5S3 (ESP32-S3) | `lilygo_t5s3` | `lilygo_gh_release` | `lilygo_gh_release_rc` |
+
+Two more C3 environments are for measurement, not for daily use: `slim` is a release-style build with serial logging compiled out, and `bench` and `bench_font` flash a standalone benchmark that prints timings over serial (no SD card needed).
 
 ### Windows: use a short PlatformIO core directory
 
@@ -90,8 +104,19 @@ Linux and macOS are unaffected; their limits are orders of magnitude higher.
 ## Flash
 
 ```sh
-pio run --target upload
+pio run --target upload                  # default env
+pio run -e x4pro --target upload         # or the env for your board
 ```
+
+## Host tests
+
+Parsing, layout and cache code is covered by host-side gtest suites in `test/`, built with CMake and run without a device. ```sh
+cmake -S test -B build/test
+cmake --build build/test
+ctest --test-dir build/test --output-on-failure -j
+```
+
+Google Test is fetched on the first configure. `test/README` has the per-suite commands; [Testing and Debugging](./testing-debugging.md) covers how the suites fit the CI checks.
 
 ## First checks before opening a PR
 

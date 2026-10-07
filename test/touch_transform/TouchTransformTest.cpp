@@ -1,6 +1,6 @@
 // Host tests for the panel-native -> logical touch transform.
 //
-// This is the phase-2 gate from docs/touch-input-migration-2026-08-14.md: the
+// This is the gate described in docs/contributing/touch-architecture.md ("Coordinate transform"): the
 // orientation transform is pure logic and must be verifiable without hardware.
 // Getting a rotation branch wrong is the classic touch bug — taps land mirrored
 // or on the wrong axis — and it is exactly the kind of thing that is painful to

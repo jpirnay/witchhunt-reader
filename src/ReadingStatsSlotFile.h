@@ -18,7 +18,7 @@
 //
 // Updates are copy-on-write: a book goes into a slot no entry refers to, then the meta goes into the
 // copy that is not the valid newest one. Power lost at any point leaves the previous history
-// readable (docs/superpowers/specs/2026-09-28-reading-stats-slot-file-design.md). This file is the
+// readable (docs/design/reading-stats-slot-file.md). This file is the
 // layout only; the store (ReadingStats.h) owns the arithmetic and the order of the writes, and does
 // the flushing. Every field is little-endian and written field by field.
 namespace ReadingStatsSlotFile {

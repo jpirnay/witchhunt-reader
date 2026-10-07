@@ -450,7 +450,7 @@ way.
 While in **File Transfer** mode, the web settings page includes management cards for both **WiFi Networks** and **OPDS Servers**.
 
 1. On device: open **File Transfer** and connect to WiFi.
-1. In a browser, open `http://<device-ip>/settings` or `http://witchhunt.local`.
+1. In a browser, open `http://<device-ip>/settings` or `http://crosspoint.local`.
 1. In **WiFi Networks**, add, edit, or delete saved network entries (SSID + optional password).
 1. In **OPDS Servers**, add, edit, or delete OPDS catalogs.
 
@@ -866,7 +866,7 @@ Home.
 
 For the developer-facing account of how this was built and why each default was chosen, see
 [`docs/touch-gestures.md`](docs/touch-gestures.md) and
-[`docs/touch-input-migration-2026-08-14.md`](docs/touch-input-migration-2026-08-14.md).
+[`docs/contributing/touch-architecture.md`](docs/contributing/touch-architecture.md).
 
 ---
 

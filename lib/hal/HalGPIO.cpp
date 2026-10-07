@@ -349,8 +349,9 @@ void HalGPIO::sampleOnce() {
   {
     // On a touch board inputMgr.update() runs serviceTouch(), i.e. a GT911 I2C
     // transaction, and this runs on the btnsample task while HalClock and the
-    // fuel gauge drive the same bus from the loop task. Serialize them (P1 in
-    // docs/touch-input-migration-2026-08-14.md §5). No-op on non-touch boards.
+    // fuel gauge drive the same bus from the loop task. Serialize them (see
+    // docs/contributing/touch-architecture.md, "I2C bus and the input sampler").
+    // No-op on non-touch boards.
     //
     // Scoped so the lock is released before the critical section below: the
     // I2C mutex must never be held inside portENTER_CRITICAL(&inputMux_), which
@@ -580,11 +581,11 @@ void HalGPIO::startInputSampler() {
   // stack-into-heap spills).
   //
   // On a touch board inputMgr.update() also walks serviceTouch() → the GT911 I2C
-  // read path, which is considerably deeper than analogRead and has NOT been
-  // measured here. 4 KB is the SDK's own figure for a task that calls update()
-  // (InputManager::beginAsync creates "fi_input" with a 4096 stack), so we match
-  // it rather than guess. Re-measure with samplerStackHighWater() once the GT911
-  // runs on real hardware — see docs/touch-input-migration-2026-08-14.md §5.
+  // read path, which is considerably deeper than analogRead: it peaked at 2088 bytes
+  // on the T5S3 (2026-08-17), so 2 KB would overflow there. 4 KB is also the SDK's own
+  // figure for a task that calls update() (InputManager::beginAsync creates "fi_input"
+  // with a 4096 stack). See docs/contributing/touch-architecture.md, "I2C bus and the
+  // input sampler".
   // Watch the btnSampler high-water [MEM] line if changed.
   constexpr uint32_t SAMPLER_STACK_BYTES = FREEINK_CAP_TOUCH ? 4096 : 2048;
   const BaseType_t created =
@@ -754,7 +755,7 @@ unsigned long HalGPIO::getHeldTime() const {
 // interprets these. Every underlying SDK method is already #if FREEINK_CAP_TOUCH
 // guarded and inert on non-touch boards.
 //
-// NOTE (P1, docs/touch-input-migration-2026-08-14.md §5): these are all pure
+// NOTE (docs/contributing/touch-architecture.md, "I2C bus and the input sampler"): these are all pure
 // reads of state the SDK latched during inputMgr.update(). They do NOT touch
 // the I2C bus themselves — the GT911 transaction happens inside
 // serviceTouch(), which update() calls, i.e. on the btnsample task. The bus

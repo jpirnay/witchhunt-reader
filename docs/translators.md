@@ -1,7 +1,9 @@
 # Translators
 
-Below is a list of users and languages CrossPoint may support in the future.
-Note because a language is below does not mean there is official support for the language at this time.
+Below is a list of the people who have contributed translations. The languages
+the firmware ships are the files in `lib/I18n/translations/`; see [i18n.md](i18n.md)
+for how they are built. A name under a language here does not by itself mean that
+language is complete: check its YAML file for missing strings.
 
 ## Contributing
 

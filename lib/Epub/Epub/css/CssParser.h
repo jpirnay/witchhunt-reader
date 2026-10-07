@@ -228,7 +228,7 @@ class CssParser {
   };
   [[nodiscard]] ResidentFootprint getResidentFootprint() const;
 
-  // Phase-2 arena mode (docs/compiled-book-pipeline-plan.md). A section built with the
+  // Arena mode (docs/memory-allocation-strategy.md §4, class C). A section built with the
   // secondary framebuffer BORROWED (not freed) runs with ~52 KB less general heap than a
   // released build, so the resolver would otherwise self-degrade below MIN_FREE_HEAP_FOR_CSS
   // and its result gets discarded. These two knobs relocate the resolver's footprint into

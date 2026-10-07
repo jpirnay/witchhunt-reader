@@ -245,7 +245,7 @@ int MappedInputManager::getPressedFrontButton() const {
 // Thin interpretation layer over HalGPIO's raw passthrough: map panel-native
 // normalized coordinates into logical pixels via the renderer's live
 // orientation, then give the result app meaning. Ported from upstream/develop;
-// see docs/touch-input-migration-2026-08-14.md §1.
+// see docs/contributing/touch-architecture.md, "Layers".
 
 bool MappedInputManager::hasTouch() const { return gpio.hasTouch(); }
 

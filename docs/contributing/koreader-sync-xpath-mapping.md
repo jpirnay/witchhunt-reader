@@ -183,16 +183,12 @@ mapping failed:
   and any other record from its XPath string.
 - **The wake pull** maps after the background worker has already turned the radio off.
 
-The first X3 run after Task 8 still mapped after WiFi with the full state. On a 174 KB chapter its
-Min Free fell to 10,880 B, against 19,048 B for the temp-file path (baseline doc, "After Task 8 (X3),
-run 1").
-
-Run 2 fixed the push: Min Free was untouched, and `after_local_mapping` read ~120 KB free. Pulls and
-compares, which then still mapped after the GET, troughed at 10.8 to 13.0 KB. Run 3 reads them
-through these `[KOSync] Sync mem[...]` lines:
-- `after_wifi_down_before_remote_mapping`
-- `after_remote_mapping`
-- `after_reconnect_for_upload`
+Device runs on the X3 (2026-10) established the rule behind this ordering. Mapping a 174 KB chapter
+after WiFi came up, with the full parser state, drove Min Free down to about 10.9 KB, against about
+19 KB for the old temp-file path. Mapping the push position before WiFi, and pulls and compares after
+`HalClock::wifiOff`, keeps the mapper out of the WiFi peak. Each stage logs a `[KOSync] Sync mem[...]`
+line (`after_local_mapping`, `after_wifi_down_before_remote_mapping`, `after_remote_mapping`,
+`after_reconnect_for_upload`) so a regression shows in the serial log.
 
 ## Paragraph Index LUT
 
@@ -213,9 +209,13 @@ standard XPath same-name sibling counting.
 
 ## Known Limitations
 
-- Page number on reverse mapping is an estimate where the position carries no text point (renderer differences).
-  The paragraph LUT refines this but cannot guarantee exact page matching.
-- XPath mapping intentionally uses original spine XHTML while pagination comes from distilled renderer output, so page drift is possible, but only for pages that push no text point of their own. A page that pushes a text point, inside inline elements too, comes back on itself. A page that starts with an image pushes the text after it, so a push from a full-page image comes back one page late, on the text page.
+- On reverse mapping, the page is an estimate where the position carries no text point (renderer
+  differences). The paragraph LUT refines this but cannot guarantee an exact page.
+- XPath mapping uses the original spine XHTML while pagination comes from the distilled renderer
+  output, so page drift is possible, but only for pages that push no text point of their own.
+- A page that pushes a text point, inside inline elements too, comes back on itself.
+- A page that starts with an image pushes the text after it, so a push from a full-page image comes
+  back one page late, on the text page.
 - Image-only/low-text chapters may yield coarse anchors.
 - Extremely malformed XHTML can force fallback behavior.
 

@@ -2149,13 +2149,12 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // discard and retry on the released path. The latch (set inside the helper) stops buildSection
   // from re-entering Background-C for this spine.
   //
-  // The demoted row counts here because the borrowed build cannot lay a grid out: the row gate
-  // wants 18 KB of free heap and a borrowed build reads 11-18 KB through a table chapter (X3,
-  // Roosevelt appendix-b, 2026-09-26: every row of the appendix demoted, 40 KB of the lent region
-  // idle). Before the R2 work that build ran out of heap and escalated anyway, and the released
-  // rebuild -- 95 KB free -- was what laid the tables out; a build that survives must escalate
-  // on purpose or the demoted layout is what gets cached. The lasting fix is the row layout in
-  // the arena (docs/memory-audit-2026-09.md, run 12); until then this keeps the tables.
+  // The demoted row counts here because a build that survives must escalate on purpose, or the
+  // demoted layout is what gets cached. Arena builds lay a grid row's cell lines out in the lent
+  // region (ChapterHtmlSlimParser::layoutTableRow), so a borrowed build now demotes a row only
+  // when even the row's few KB of heap objects are refused (docs/memory-allocation-strategy.md
+  // §8.4a). Before that, the X3 demoted every row of the Roosevelt appendix-b at 11-18 KB free
+  // (2026-09-26); the released rebuild, with ~95 KB free, lays the table out.
   if (step == Section::BuildStep::Failed || section->isTruncatedCache() || section->isCssLowHeapDegraded() ||
       section->isTableRowDegraded()) {
     fallbackToReleasedRebuild(step == Section::BuildStep::Failed ? "failed"

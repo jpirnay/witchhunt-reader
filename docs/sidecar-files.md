@@ -138,5 +138,8 @@ also drifted: the move path derived its base name without checking for a path
 separator, so a book with no extension inside a dotted folder (`/My.Books/untitled`)
 took the dot from the folder.
 
-Deleting a book does **not** currently delete its sidecars; they are left behind
-as harmless orphans.
+Deleting a book on the device (Browse Files, Remove) removes its sidecars too
+(`SidecarFiles::removeAll`). Deleting in All Files removes only the file
+selected. Deleting through the web File Manager (`POST /delete`) or WebDAV
+removes the book and its layout cache only; its sidecars stay behind as harmless
+orphans, so delete `book.jpg` and `book.opf` yourself.

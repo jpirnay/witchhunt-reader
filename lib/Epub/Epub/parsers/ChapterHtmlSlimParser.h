@@ -98,7 +98,7 @@ class ChapterHtmlSlimParser final : public Print {
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
-  // KOReader sync content offsets (docs/superpowers/specs/2026-10-06-kosync-content-offset-design.md).
+  // KOReader sync content offsets (docs/contributing/koreader-synchronization.md).
   // visibleTextOffset_ counts VisibleText.h's visible bytes of the source text the SAX parser has
   // delivered: inside <body>, outside head/script/style, before any layout decision. The mappers
   // count the same stream with the same rule, so a page's recorded start means the same to both.
