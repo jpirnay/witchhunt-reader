@@ -913,6 +913,11 @@ void EpubReaderActivity::onExit() {
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
 
+  // The glyph caches go back before the stats flush below, which wants the heap, and so Home and
+  // Settings do not run 7-12 KB short after every book. The next onEnter takes them again, still
+  // at a stable point rather than mid-build (GfxRenderer::ensureScaledGlyphCache).
+  renderer.releaseGlyphCaches();
+
   // Flush the reading-stats session LAST: end() writes the book and the global figures in place
   // (~10 KB of heap whatever the history holds), and it needs nothing of the reader (the tracker
   // copied the id, title and author at begin()). Here it has the heap the teardown just freed.

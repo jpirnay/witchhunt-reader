@@ -1,6 +1,5 @@
 #include "NetworkMemoryTrim.h"
 
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <esp_heap_caps.h>
@@ -10,11 +9,7 @@
 #include "activities/Activity.h"  // and ActivityManager, which needs the complete Activity
 
 void trimMemoryForNetworkSession(const GfxRenderer& renderer, const char* logTag) {
-  if (auto* cache = renderer.getFontCacheManager()) {
-    cache->clearCache();
-  }
-  // Allocated on the first scaled glyph and kept (~5-8 KB); the next one allocates it again.
-  renderer.releaseScaledGlyphCache();
+  renderer.releaseGlyphCaches();
   // Reclaim the buffer first if the reader lent it out for a background page build. A lent
   // buffer reports hasSecondaryBuffer() == false, so without this the trim below would quietly
   // do nothing AND the later releaseFrameBuffers() would bail out on _secondaryLent — leaving

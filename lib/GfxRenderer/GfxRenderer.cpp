@@ -138,8 +138,9 @@ static inline uint32_t floatBits(const float f) {
 
 // Allocate the scaled-glyph cache. Call this EARLY — at reader entry, not on first scaled glyph.
 //
-// It is ~4.9 KB in two blocks (80 entries + a 3584-byte mask arena) and, once taken, it is never
-// released: a session-lifetime allocation in the strategy note's class A. Allocating it lazily
+// It is ~4.9 KB in two blocks (80 entries + a 3584-byte mask arena), taken here at reader entry and
+// given back at reader exit (releaseGlyphCaches), never released or re-taken in between: a
+// reader-lifetime allocation in the strategy note's class A. Allocating it lazily
 // meant "first use" decided where a permanent block landed, and first use is often a heading
 // inside a mid-build page draw — so it was being carved out of the middle of the largest free
 // region while a section build held the rest of the heap. Device-measured X3 2026-08-11: 5032
@@ -150,6 +151,11 @@ static inline uint32_t floatBits(const float f) {
 // stable point puts it next to the other permanent allocations instead.
 //
 // Idempotent, and failure is non-fatal: scaled text renders uncached, exactly as before.
+void GfxRenderer::releaseGlyphCaches() const {
+  if (fontCacheManager_) fontCacheManager_->clearCache();
+  releaseScaledGlyphCache();
+}
+
 bool GfxRenderer::ensureScaledGlyphCache(const int bodyFontId) const {
   // Larger when the body text is a synthesised size, because then the arena holds a whole page's
   // glyphs at up to 26 pt rather than a few CSS-scaled words. See SCALED_GLYPH_ARENA_BYTES_SYNTH.

@@ -64,6 +64,9 @@ void LineReaderActivity::onExit() {
     ReaderUtils::enforceExitFullRefresh(renderer);
   }
 
+  // Glyph caches back before the stats flush, as EpubReaderActivity::onExit() does.
+  renderer.releaseGlyphCaches();
+
   // Flush the stats session before tearing down the document — same pattern as
   // EpubReaderActivity::onExit().
   globalReadingSessionTracker().end();
