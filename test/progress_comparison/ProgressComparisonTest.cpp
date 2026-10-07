@@ -118,6 +118,77 @@ TEST(CompareProgress, UnusablePercentageDoesNotMatterWhenTheSpinesDecide) {
   EXPECT_EQ(compareProgress(reader(4, 1, 0, 2), kNaN, record(3, 40), kNaN), ProgressComparison::LocalAhead);
 }
 
+// --- content offsets within the spine -------------------------------------------------------------
+//
+// With the chapter laid out, the reader knows its page's start and the end of its window (the first
+// later page start greater than its own, UINT32_MAX on the last page) as visible-text offsets, and a mapped record
+// carries the offset its XPath resolved to. The offset decides before the paragraph LUT does: it is exact for every
+// book, wrapped ones included.
+
+LocalReadingPosition readerAtOffsets(const int spine, const int page, const uint32_t start, const uint32_t next) {
+  LocalReadingPosition local = readerWithoutLut(spine, page);
+  local.visibleOffsetAtPage = start;
+  local.visibleOffsetAtNextPage = next;
+  local.hasVisibleOffset = true;
+  return local;
+}
+
+CrossPointPosition recordAtOffset(const int spine, const uint32_t offset) {
+  CrossPointPosition remote = record(spine, 0);
+  remote.visibleTextOffset = offset;
+  remote.hasVisibleTextOffset = true;
+  return remote;
+}
+
+TEST(CompareProgress, RemoteOffsetInsideTheLocalPageIsSynchronized) {
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 5, 1000, 1400), 0.30f, recordAtOffset(2, 1000), 0.33f),
+            ProgressComparison::Synchronized);
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 5, 1000, 1400), 0.30f, recordAtOffset(2, 1399), 0.33f),
+            ProgressComparison::Synchronized);
+}
+
+TEST(CompareProgress, RemoteOffsetBeforeTheLocalPageIsLocalAhead) {
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 5, 1000, 1400), 0.30f, recordAtOffset(2, 999), 0.33f),
+            ProgressComparison::LocalAhead);
+}
+
+TEST(CompareProgress, RemoteBeforeTheFirstPageStartIsOnTheFirstPage) {
+  // A chapter that opens with text we hide but KOReader shows: offsets below start(0) resolve to page 0.
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 0, 300, 900), 0.0f, recordAtOffset(2, 120), 0.01f),
+            ProgressComparison::Synchronized);
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 1, 300, 900), 0.0f, recordAtOffset(2, 120), 0.01f),
+            ProgressComparison::LocalAhead);
+}
+
+TEST(CompareProgress, RemoteOffsetAfterTheLocalPageIsRemoteAhead) {
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 5, 1000, 1400), 0.33f, recordAtOffset(2, 1400), 0.30f),
+            ProgressComparison::RemoteAhead);
+}
+
+TEST(CompareProgress, TheLastPageRunsToTheEndOfTheChapter) {
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 9, 8000, UINT32_MAX), 0.9f, recordAtOffset(2, 123456), 0.95f),
+            ProgressComparison::Synchronized);
+}
+
+TEST(CompareProgress, OffsetsOutrankTheParagraphTier) {
+  // The paragraph tier would say "same page" (p[12] opens on page 5); the offsets know better.
+  LocalReadingPosition local = reader(2, 5, 11, 14);
+  local.visibleOffsetAtPage = 1000;
+  local.visibleOffsetAtNextPage = 1400;
+  local.hasVisibleOffset = true;
+  CrossPointPosition remote = record(2, 12);
+  remote.visibleTextOffset = 1500;
+  remote.hasVisibleTextOffset = true;
+  EXPECT_EQ(compareProgress(local, 0.3f, remote, 0.3f), ProgressComparison::RemoteAhead);
+}
+
+TEST(CompareProgress, OneSideWithoutAnOffsetFallsThrough) {
+  EXPECT_EQ(compareProgress(readerAtOffsets(2, 5, 1000, 1400), 0.30f, record(2, 0), 0.33f),
+            ProgressComparison::RemoteAhead);  // percentage decided
+  EXPECT_EQ(compareProgress(reader(2, 5, 11, 14), 0.30f, recordAtOffset(2, 999), 0.33f),
+            ProgressComparison::RemoteAhead);  // no local offset, no remote paragraph: percentage
+}
+
 // --- choosing between two remote records --------------------------------------------------------------
 
 TEST(SelectRemoteRecord, AlternateMustBeStrictlyAhead) {

@@ -1876,7 +1876,8 @@ uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size
   return content;
 }
 
-bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, const size_t chunkSize) const {
+bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, const size_t chunkSize,
+                                    const bool* stop) const {
   if (itemHref.empty()) {
     LOG_DBG("EBP", "Failed to read item, empty href");
     return false;
@@ -1888,14 +1889,14 @@ bool Epub::readItemContentsToStream(const std::string& itemHref, Print& out, con
   if (loadScratch_ != nullptr && loadScratch_->valid()) {
     const size_t wanted = 1024 + InflateReader::ringSizeFor(0) + 2 * alignof(std::max_align_t);
     if (loadScratch_->capacity() - loadScratch_->used() >= wanted) {
-      return readItemContentsToStreamWithArena(itemHref, out, loadScratch_);
+      return readItemContentsToStreamWithArena(itemHref, out, loadScratch_, stop);
     }
   }
 
   const std::string path = FsHelpers::normalisePath(itemHref);
   ZipFile zip(filepath);
   primeZip(zip);
-  const bool ok = zip.readFileToStream(path.c_str(), out, chunkSize);
+  const bool ok = zip.readFileToStream(path.c_str(), out, chunkSize, stop);
   adoptZipDetails(zip);
   return ok;
 }
@@ -1910,7 +1911,8 @@ size_t Epub::readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, c
   return got;
 }
 
-bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena) const {
+bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena,
+                                             const bool* stop) const {
   const std::string path = FsHelpers::normalisePath(itemHref);
   ZipFile zip(filepath);
   primeZip(zip);
@@ -1937,6 +1939,7 @@ bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print&
       LOG_ERR("EBP", "Failed to write all extracted bytes: %s", path.c_str());
       return false;
     }
+    if (stop && *stop) return true;
   }
   return true;
 }
@@ -2000,7 +2003,7 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
   bool ok;
   {
     BufferedExtractSink sink(destFile, writeBuf, EXTRACT_WRITE_BUFFER_BYTES);
-    ok = arena ? readItemContentsToStreamWithArena(itemHref, sink, arena)
+    ok = arena ? readItemContentsToStreamWithArena(itemHref, sink, arena, nullptr)
                : readItemContentsToStream(itemHref, sink, 1024);
     // Drain before the file is flushed/closed, and let a failed final write fail the extract:
     // a short file would otherwise pass as a complete one and be decoded as garbage.

@@ -271,7 +271,8 @@ class Epub {
                                                        BuildArena* scratch = nullptr) const;
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
-  bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
+  bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize,
+                                const bool* stop = nullptr) const;
   // Read up to maxBytes decompressed bytes from a ZIP entry — no SD write, header-only use.
   size_t readItemHeaderBytes(const std::string& itemHref, uint8_t* outBuf, size_t maxBytes) const;
   // Arena bytes one extractItemToFile() needs to keep its inflate ring off the heap:
@@ -385,7 +386,8 @@ class Epub {
   // Removes a partial destination file on failure, so the caller can simply retry.
   bool extractItemToFileOnce(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const;
   // Drain one ZIP entry into `out` through an arena-backed EntryReader.
-  bool readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena) const;
+  bool readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena,
+                                         const bool* stop) const;
   // Set for the duration of load() / a cover session: readItemContentsToStream takes its inflate
   // ring from here when the region has room, else from the heap as before. Not owned.
   BuildArena* loadScratch_ = nullptr;

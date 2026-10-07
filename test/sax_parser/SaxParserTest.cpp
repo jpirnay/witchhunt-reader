@@ -1,6 +1,8 @@
 #include <SaxParser/SaxParser.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -823,4 +825,111 @@ TEST(SaxParser, DeepNestingDoesNotLatchRootClosedEarly) {
   ASSERT_TRUE(p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar));
 
   EXPECT_FALSE(p.feed(reinterpret_cast<const uint8_t*>(xml.data()), xml.size()));
+}
+
+// ---------------------------------------------------------------------------
+// Profile::Lean: the KOReader XPath mappers never read attributes, so they parse without the
+// ~5 KB attribute table. The tree and the text they see must be the Full profile's exactly.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct ProfileCollector {
+  std::vector<Event> events;
+  std::vector<size_t> attributeCounts;  // one per start event
+
+  static void onStart(void* ud, const char* name, const char** atts) {
+    auto* self = static_cast<ProfileCollector*>(ud);
+    self->events.push_back({Event::Type::Start, name, {}});
+    size_t n = 0;
+    while (atts && atts[n * 2]) ++n;
+    self->attributeCounts.push_back(n);
+  }
+  static void onEnd(void* ud, const char* name) {
+    static_cast<ProfileCollector*>(ud)->events.push_back({Event::Type::End, name, {}});
+  }
+  static void onChar(void* ud, const char* s, int len) {
+    static_cast<ProfileCollector*>(ud)->events.push_back({Event::Type::Char, {}, std::string(s, len)});
+  }
+  static void onDefault(void* ud, const char* s, int len) {
+    static_cast<ProfileCollector*>(ud)->events.push_back({Event::Type::Default, {}, std::string(s, len)});
+  }
+};
+
+// Parses `xml` in `chunk`-byte feeds with the chapter parser's settings (void-tag repair on).
+ProfileCollector parseWith(const SaxParser::Profile profile, const std::string& xml, const size_t chunk) {
+  ProfileCollector c;
+  SaxParser p;
+  EXPECT_TRUE(p.init(&c, ProfileCollector::onStart, ProfileCollector::onEnd, ProfileCollector::onChar,
+                     ProfileCollector::onDefault, /*htmlVoidTagRepair=*/true, profile));
+  const auto* bytes = reinterpret_cast<const uint8_t*>(xml.data());
+  for (size_t i = 0; i < xml.size(); i += chunk) {
+    EXPECT_TRUE(p.feed(bytes + i, std::min(chunk, xml.size() - i)));
+  }
+  EXPECT_TRUE(p.finalize());
+  if (profile == SaxParser::Profile::Lean) {
+    // Attributes are not kept, so none can be truncated either.
+    EXPECT_EQ(
+        p.truncationFlags() & (SaxParser::kTruncMaxAttrs | SaxParser::kTruncAttrValue | SaxParser::kTruncAttrName), 0u);
+  }
+  return c;
+}
+
+const std::string kAttributeHeavyChapter =
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>T</title>"
+    "<link rel=\"stylesheet\" href=\"s.css\"></head><body class=\"b\" id=\"top\">\n"
+    "<p class=\"first\" style=\"margin: 0; text-indent: 1em\">One <span id=\"s1\" lang='en'>two</span>"
+    " three&nbsp;four<br class=\"x\">five &amp; six</p>\n"
+    "<div a1='1' a2='2' a3='3' a4='4' a5='5' a6='6' a7='7' a8='8' a9='9' a10='10' a11='11' a12='12' "
+    "a13='13'><img src=\"i.png\" alt=\"pic\"/>after the image</div>\n"
+    "<p title=\"" +
+    std::string(500, 'v') + "\">long attribute</p>\n</body></html>\n";
+
+}  // namespace
+
+TEST(SaxParser, LeanProfileReportsTheSameTreeAndTextWithEmptyAttributes) {
+  for (const size_t chunk : {size_t{1}, size_t{7}, size_t{4096}}) {
+    const ProfileCollector full = parseWith(SaxParser::Profile::Full, kAttributeHeavyChapter, chunk);
+    const ProfileCollector lean = parseWith(SaxParser::Profile::Lean, kAttributeHeavyChapter, chunk);
+    ASSERT_EQ(lean.events.size(), full.events.size()) << "chunk " << chunk;
+    for (size_t i = 0; i < full.events.size(); ++i) {
+      EXPECT_EQ(lean.events[i].type, full.events[i].type) << "chunk " << chunk << " event " << i;
+      EXPECT_EQ(lean.events[i].name, full.events[i].name) << "chunk " << chunk << " event " << i;
+      EXPECT_EQ(lean.events[i].text, full.events[i].text) << "chunk " << chunk << " event " << i;
+    }
+    // The full profile saw the attributes; the lean one gets an empty list at every start.
+    EXPECT_GT(std::count_if(full.attributeCounts.begin(), full.attributeCounts.end(), [](size_t n) { return n > 0; }),
+              0);
+    for (size_t i = 0; i < lean.attributeCounts.size(); ++i) {
+      EXPECT_EQ(lean.attributeCounts[i], 0u) << "chunk " << chunk << " start " << i;
+    }
+  }
+}
+
+TEST(SaxParser, LeanProfileStateIsAtLeast4KBSmaller) {
+  EXPECT_LE(SaxParser::stateBytes(SaxParser::Profile::Lean), SaxParser::stateBytes(SaxParser::Profile::Full) - 4096);
+  EXPECT_EQ(SaxParser::stateBytes(), SaxParser::stateBytes(SaxParser::Profile::Full));
+  RecordProperty("stateBytesFull", static_cast<int>(SaxParser::stateBytes(SaxParser::Profile::Full)));
+  RecordProperty("stateBytesLean", static_cast<int>(SaxParser::stateBytes(SaxParser::Profile::Lean)));
+}
+
+TEST(SaxParser, LeanProfileFitsAndUsesExternalStateOfItsOwnSize) {
+  // An offered block of exactly the lean size is enough for a lean parser (and too small for a
+  // full one, which then falls back to the heap): the size check follows the profile.
+  alignas(std::max_align_t) static unsigned char block[32 * 1024];
+  const size_t leanBytes = SaxParser::stateBytes(SaxParser::Profile::Lean);
+  std::memset(block, 0xAB, leanBytes);
+  ProfileCollector c;
+  SaxParser p;
+  p.setExternalState(block, leanBytes);
+  ASSERT_TRUE(p.init(&c, ProfileCollector::onStart, ProfileCollector::onEnd, ProfileCollector::onChar, nullptr,
+                     /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean));
+  EXPECT_TRUE(std::any_of(block, block + leanBytes, [](unsigned char b) { return b != 0xAB; }))
+      << "the lean state did not go into the offered block";
+  const char* xml = "<p class=\"c\">text</p>";
+  ASSERT_TRUE(p.feed(reinterpret_cast<const uint8_t*>(xml), strlen(xml)));
+  ASSERT_TRUE(p.finalize());
+  ASSERT_EQ(c.events.size(), 3u);
+  EXPECT_EQ(c.events[1].text, "text");
+  EXPECT_EQ(c.attributeCounts.front(), 0u);
 }

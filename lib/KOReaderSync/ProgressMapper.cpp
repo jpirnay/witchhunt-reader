@@ -140,11 +140,14 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   // Calculate overall book progress (0.0-1.0)
   result.percentage = epub->calculateProgress(pos.spineIndex, intraSpineProgress);
 
-  // Generate XPath for the current position via byte-offset scan. Targeting the
-  // paragraph LUT entry instead would snap to the start of the paragraph the user
-  // is inside, which causes pulled positions to land at the start of the chapter
-  // when an opening paragraph spans many pages.
-  result.xpath = ChapterXPathIndexer::findXPathForProgress(epub, pos.spineIndex, intraSpineProgress);
+  // The page's content offset names the text to the character; the byte fraction is the fallback
+  // for a position without one (the finished-book sentinel, a chapter not laid out yet).
+  if (pos.hasVisibleTextOffset) {
+    result.xpath = ChapterXPathIndexer::findXPathForVisibleOffset(epub, pos.spineIndex, pos.visibleTextOffset);
+  }
+  if (result.xpath.empty()) {
+    result.xpath = ChapterXPathIndexer::findXPathForProgress(epub, pos.spineIndex, intraSpineProgress);
+  }
   if (result.xpath.empty()) {
     result.xpath = generateXPath(pos.spineIndex);
   }
@@ -153,8 +156,9 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   const int tocIndex = epub->getTocIndexForSpineIndex(pos.spineIndex);
   const std::string chapterName = (tocIndex >= 0) ? epub->getTocItem(tocIndex).title : "unknown";
 
-  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d -> %.2f%% at %s", chapterName.c_str(),
-          pos.pageNumber, pos.totalPages, result.percentage * 100, result.xpath.c_str());
+  LOG_DBG("ProgressMapper", "CrossPoint -> KOReader: chapter='%s', page=%d/%d off=%u/%d -> %.2f%% at %s",
+          chapterName.c_str(), pos.pageNumber, pos.totalPages, pos.visibleTextOffset, pos.hasVisibleTextOffset,
+          result.percentage * 100, result.xpath.c_str());
 
   return result;
 }
@@ -187,8 +191,10 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   if (haveXPathSpine) {
     float intraFromXPath = 0.0f;
     uint16_t liIndexFromXPath = 0;
+    uint32_t offsetFromXPath = 0;
+    bool textPointFromXPath = false;
     if (ChapterXPathIndexer::findProgressForXPath(epub, xpathSpineIndex, koPos.xpath, intraFromXPath, xpathExactMatch,
-                                                  &liIndexFromXPath)) {
+                                                  &liIndexFromXPath, &offsetFromXPath, &textPointFromXPath)) {
       result.spineIndex = xpathSpineIndex;
       result.hasResolvedSpineIndex = true;
       resolvedIntraSpineProgress = intraFromXPath;
@@ -196,6 +202,15 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       if (liIndexFromXPath > 0) {
         result.listItemIndex = liIndexFromXPath;
         result.hasListItemIndex = true;
+      }
+      // Only a text point matched to the codepoint is a position. An ancestor or index-insensitive
+      // match is a stand-in whose offset (a wrapper's end, a sibling's start) must not be mistaken
+      // for one, and so is an exact ELEMENT match: it sits at the element's first direct text, or
+      // at its END tag when it has none (<p><span>text</span></p>), so the offset would land the
+      // reader where the paragraph ends. Those keep the paragraph/li LUT, then the percentage.
+      if (textPointFromXPath) {
+        result.visibleTextOffset = offsetFromXPath;
+        result.hasVisibleTextOffset = true;
       }
 
       // An inexact match (an ancestor, or a sibling with another index) is only a stand-in for
@@ -324,9 +339,9 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   // INF, not DBG: release builds log at INF, and a sync that lands on the wrong page is
   // undiagnosable from a user's log without the mapping source.
-  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %.2f%% at %s -> spine=%d, page=%d/%d (%s, exact=%s)",
+  LOG_INF("ProgressMapper", "KOReader -> CrossPoint: %.2f%% at %s -> spine=%d, page=%d/%d off=%u/%d (%s, exact=%s)",
           koPos.percentage * 100, koPos.xpath.c_str(), result.spineIndex, result.pageNumber, result.totalPages,
-          mappingSource, xpathExactMatch ? "yes" : "no");
+          result.visibleTextOffset, result.hasVisibleTextOffset, mappingSource, xpathExactMatch ? "yes" : "no");
 
   return result;
 }

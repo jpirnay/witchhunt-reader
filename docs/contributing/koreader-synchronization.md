@@ -89,8 +89,9 @@ The synchronization strategy therefore combines:
 ### Forward mapping engine
 
 - [lib/KOReaderSync/ChapterXPathForwardMapper.cpp](../../lib/KOReaderSync/ChapterXPathForwardMapper.cpp)
-  - Maps intra-spine progress to XPath.
-  - Emits /text()[N].M for body-level text-node locations.
+  - Maps a page's content offset (or, without one, intra-spine progress) to XPath.
+  - Emits /text()[N].M for the text at the offset, in a block element or inside inline elements
+    (N and M follow crengine's DOM).
 
 ### Reverse mapping engine
 
@@ -113,26 +114,27 @@ The synchronization strategy therefore combines:
 
 ### Forward (CrossPoint -> KOReader)
 
-1. Decompress one spine XHTML to a temporary file.
-2. Count total visible text bytes.
-3. Cache that total per spine (cache-path + spine index + href) so repeated
-  mappings for the same chapter can skip the expensive counting pass.
-4. Convert intra-spine progress to target visible-byte offset.
-5. Stream parse and stop at target.
-6. Emit anchor:
-   - element XPath, or
-   - /text()[N].M when in body-level text-node context.
+1. Take the page's content offset from the section LUT (`Section::getVisibleTextOffsetForPage`).
+2. Stream the spine XHTML into the SAX parser and stop at the offset.
+3. Emit `/text()[N].M` for the text at the offset, inside inline elements too
+   (`/p[K]/span[1]/text()[N].M`). The push never names an image: a page that starts with an image
+   names the first text after it, and a page that starts at the chapter's total (a last image or
+   spacing page) names the end of the last text node. The element path remains only for stray text
+   in table rows.
+4. Without an offset, count the chapter's text and scan to the byte fraction (also streamed).
 
 ### Reverse (KOReader -> CrossPoint)
 
-1. Decompress one spine XHTML to a temporary file.
-2. Stream parse chapter while evaluating candidate matches.
-3. Resolve best tier in this order:
+1. Stream the spine XHTML into the SAX parser while evaluating candidate matches.
+2. Resolve best tier in this order:
    - exact
    - exact-no-index
    - ancestor
    - ancestor-no-index
-4. Convert resolved byte offset to intra-spine progress.
+3. An exact text-point match yields the content offset; the reader resolves it to a page through the
+   section LUT (`Section::getPageForVisibleTextOffset`: the last page whose start is <= the offset,
+   so an image page and the text page after it, which share a start, resolve to the text page).
+   Other matches convert the byte offset to intra-spine progress and snap by paragraph LUT.
 
 For text-node anchors /text()[N].M:
 - N is treated as 1-based text node index.
@@ -158,15 +160,20 @@ end of the previous chapter (#268's family).
 `compareProgress()` in `ProgressComparison.cpp` ranks the evidence instead:
 
 1. **Spine**, when the record names one (`DocFragment`). Exact.
-2. **Paragraph LUT**, within the same spine. Let `K(i)` be the section cache's paragraph index at
+2. **Content offset**, within the same spine. The page's start offset and the next page's start
+   (`visibleOffsetAtPage`, `visibleOffsetAtNextPage`, from `Section::getVisibleTextOffsetForPage` and
+   `getVisibleTextOffsetAfterPage`) bound the page: a remote text point inside it is Synchronized,
+   before it behind, at or past the next page's start ahead. Exact to the character,
+   for any book. The first page's window starts at the chapter, not at its first text.
+3. **Paragraph LUT**, within the same spine. Let `K(i)` be the section cache's paragraph index at
    the end of page `i`. A remote `p[K]` opens on the local page `p` exactly when
    `K(p-1) < K <= K(p)`: Synchronized. `K <= K(p-1)`: the remote is behind. Otherwise it is ahead.
    Exact for books whose paragraphs are children of `<body>`; the handoff into the sync screen
    carries `K(p)` and `K(p-1)` (`paragraphIndex`, `paragraphIndexBefore`) so no section cache is
    needed there.
-3. **Percentages**, with a 0.001 tolerance for rounding. An estimate, now bounded to one chapter
+4. **Percentages**, with a 0.001 tolerance for rounding. An estimate, now bounded to one chapter
    by step 1.
-4. **Unknown**: neither percentage is usable. The sync screen asks; the auto paths hand off to
+5. **Unknown**: neither percentage is usable. The sync screen asks; the auto paths hand off to
    the sync screen rather than guess.
 
 The remote side of a comparison is `ProgressMapper::peekRemote()` (string-only) wherever the

@@ -687,10 +687,10 @@ void EpubReaderActivity::onEnter() {
 
   // Load the persistent baseline (progress.bin) first. Pending session state
   // (sync result, bookmark jump) is then overlaid on top — this is the only order
-  // that lets a Kind::Paragraph / Kind::ListItem navTarget set by applyPendingSyncSession
-  // survive into render(). The previous order (apply then load) clobbered the LUT
-  // target with Kind::Page from progress.bin, which is why XPath-precision sync
-  // silently degraded to the rough page estimate.
+  // that lets a Kind::Paragraph / Kind::ListItem / Kind::VisibleOffset navTarget set by
+  // applyPendingSyncSession survive into render(). The previous order (apply then load)
+  // clobbered the LUT target with Kind::Page from progress.bin, which is why XPath-precision
+  // sync silently degraded to the rough page estimate.
   FsFile f;
   bool hadSavedProgress = false;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
@@ -2632,6 +2632,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       }
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::COMPARE_REMOTE: {
+      // The menu's third sync entry: the same compare-then-choose flow a long Confirm press starts.
+      if (KOREADER_STORE.hasCredentials()) {
+        launchKOReaderSync(SyncLaunchMode::COMPARE);
+      }
+      break;
+    }
   }
 }
 
@@ -3087,6 +3094,18 @@ void EpubReaderActivity::NavigationTarget::resolveInto(Section& sec, int spineIn
         LOG_DBG("ERS", "Li LUT miss for li[%u]; paragraph LUT -> page %d", lutIndex, *pp);
       } else {
         LOG_DBG("ERS", "Li[%u] not in LUT; using fallback page %d", lutIndex, fallbackPage);
+        sec.currentPage = fallbackPage;
+        isEstimate = true;
+      }
+      break;
+    }
+
+    case Kind::VisibleOffset: {
+      if (const auto p = sec.getPageForVisibleTextOffset(visibleOffset)) {
+        sec.currentPage = *p;
+        LOG_DBG("ERS", "Resolved offset %u -> page %d", visibleOffset, *p);
+      } else {
+        LOG_DBG("ERS", "No offset LUT for offset %u; using fallback page %d", visibleOffset, fallbackPage);
         sec.currentPage = fallbackPage;
         isEstimate = true;
       }

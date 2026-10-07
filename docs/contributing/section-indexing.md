@@ -85,14 +85,14 @@ If either check fails the function calls itself recursively with `embeddedStyle=
 
 [Paragraph LUT — at paragraphLutOffset]
   u16 count
-  { u32 xhtmlByteOffset, u16 paragraphIndex, u16 listItemIndex } × count
+  { u32 visibleTextOffset, u16 paragraphIndex, u16 listItemIndex } × count
 ```
 
 The header offsets are written as placeholder zeros at file-open time and patched in-place after parse completes.
 
 ### Paragraph LUT
 
-One 8-byte entry per page. `xhtmlByteOffset` is the parser's byte position within the inflated XHTML at the moment the page break fired. It was recorded as a seek hint for KOReader XPath resolution; nothing reads it any more, and it stays only because it is part of the entry layout. `paragraphIndex` is the 1-based `<p>` sibling count; `listItemIndex` is the running `<li>` count. Together they let incoming KOReader XPath strings (`p[N]`, `li[N]`) snap to the correct page, and (`paragraphIndex` of a page and of the page before it) tell the sync whether a remote paragraph opens on the current page.
+One 8-byte entry per page. `visibleTextOffset` is the number of visible bytes of the chapter's source text before the page's first element, counted by the layout parser with the rule in `lib/Epub/Epub/VisibleText.h`, the same rule the KOReader XPath mappers count with; it is what a KOReader sync pushes for the page and how a pulled position becomes a page (`Section::getPageForVisibleTextOffset`). `paragraphIndex` is the 1-based `<p>` sibling count; `listItemIndex` is the running `<li>` count. They let incoming KOReader XPath strings (`p[N]`, `li[N]`) snap to a page when no offset could be resolved, and (`paragraphIndex` of a page and of the page before it) tell the sync whether a remote paragraph opens on the current page.
 
 ## Image warm pass
 

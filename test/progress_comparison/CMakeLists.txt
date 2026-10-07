@@ -1,5 +1,6 @@
 add_executable(ProgressComparisonTest
   ProgressComparisonTest.cpp
+  LastPushCacheTest.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ProgressComparison.cpp
 )
 

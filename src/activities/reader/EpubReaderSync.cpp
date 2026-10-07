@@ -76,6 +76,9 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   sync.paragraphIndex = 0;
   sync.hasParagraphIndex = false;
   sync.paragraphIndexBefore = 0;
+  sync.visibleOffsetAtPage = 0;
+  sync.visibleOffsetAtNextPage = UINT32_MAX;
+  sync.hasVisibleOffset = false;
   if (section && !positionOverride) {
     if (const auto pIdx = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage))) {
       sync.paragraphIndex = *pIdx;
@@ -84,13 +87,16 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     if (currentPage > 0) {
       sync.paragraphIndexBefore = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage - 1)).value_or(0);
     }
+    if (const auto start = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(currentPage))) {
+      sync.visibleOffsetAtPage = *start;
+      sync.visibleOffsetAtNextPage =
+          section->getVisibleTextOffsetAfterPage(static_cast<uint16_t>(currentPage)).value_or(UINT32_MAX);
+      sync.hasVisibleOffset = true;
+    }
   }
   sync.intent = syncIntent;
   sync.outcome = KOReaderSyncOutcomeState::PENDING;
-  sync.resultSpineIndex = 0;
-  sync.resultPage = 0;
-  sync.resultParagraphIndex = 0;
-  sync.resultHasParagraphIndex = false;
+  sync.clearResult();
   // Reset here (rather than trusting whatever the struct already held) so a stale destination
   // from a prior run cannot steal the user to the wrong place; every caller states what it wants,
   // defaulting to Reader (the pre-existing behavior for reader-menu-triggered syncs).
@@ -219,7 +225,11 @@ void EpubReaderActivity::applyPendingSyncSession() {
       restoreSpineIndex = sync.resultSpineIndex;
       restorePage = sync.resultPage;
     }
-    if (sync.resultHasListItemIndex) {
+    if (sync.resultHasVisibleOffset) {
+      restoreTarget = NavigationTarget::makeVisibleOffset(sync.resultVisibleOffset, restorePage);
+      LOG_DBG("ERS", "Applied synced remote position: spine=%d page=%d offset=%u", restoreSpineIndex, restorePage,
+              sync.resultVisibleOffset);
+    } else if (sync.resultHasListItemIndex) {
       restoreTarget = NavigationTarget::makeListItem(sync.resultListItemIndex, restorePage);
       LOG_DBG("ERS", "Applied synced remote position: spine=%d page=%d li[%u]", restoreSpineIndex, restorePage,
               sync.resultListItemIndex);

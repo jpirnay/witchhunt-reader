@@ -1,6 +1,5 @@
 #include "ChapterXPathReverseMapper.h"
 
-#include <HalStorage.h>
 #include <Logging.h>
 #include <SaxParser/SaxParser.h>
 
@@ -18,8 +17,10 @@ namespace {
 // Reverse mapper: translate KOReader XPath to intra-spine progress.
 // Matching preference order is strict and deterministic:
 //   exact > exact-no-index > ancestor > ancestor-no-index.
-// For /text()[N].M, M is treated as codepoint offset and converted back to
-// internal visible-byte progress.
+// For /text()[N].M, N and M count crengine's DOM: N the text node as crengine keeps them, M the
+// codepoint in the text as crengine stores it, whitespace runs collapsed (rules R1-R5 in
+// ChapterXPathForwardMapper.cpp; StackState counts them for both mappers). M is converted back
+// to internal visible-byte progress.
 
 enum class MatchTier : int {
   NONE = 0,
@@ -36,9 +37,6 @@ struct ReverseState : StackState {
 
   int targetTextNodeIndex = 0;
   int targetCharOffset = 0;
-  bool inParentTextNode = false;
-  size_t codepointsInCurrentTextNode = 0;
-  int currentTextNodeCount = 0;
 
   // Running <li> count at any depth. Mirrors xpathListItemIndex in ChapterHtmlSlimParser
   // so the index captured at match time can be used as a key into the section's li LUT.
@@ -51,6 +49,14 @@ struct ReverseState : StackState {
   int bestDepth = -1;
   size_t bestOffset = 0;
   bool bestExact = false;
+  // The best match is a /text()[N].M point matched to the codepoint. Only then is bestOffset a
+  // position: an element match sits at the element's first direct text, or at its END tag when it
+  // has none (<p><span>text</span></p>).
+  bool bestIsTextPoint = false;
+  // The text-node match was at its chunk's END. The next chunk of the same node starts at the same
+  // codepoint and takes over: if it opens with the tail of a codepoint the SAX buffer's flush
+  // split, only that chunk knows the visible bytes before the target.
+  bool bestExactAtChunkEnd = false;
   const char* bestTierName = nullptr;
   // Snapshot of liCount at the moment the best match was captured. The reverse
   // mapper surfaces this so the runtime can call Section::getPageForListItemIndex()
@@ -116,7 +122,6 @@ struct ReverseState : StackState {
   }
 
   void onStartElement(const char* rawName) {
-    inParentTextNode = false;
     pushElement(rawName);
     // Increment after pushElement so stack.back().tag is already lowercased and
     // matches the parser-side counter, which also fires on startElement.
@@ -130,50 +135,47 @@ struct ReverseState : StackState {
     if (!stack.empty() && !stack.back().hasText) {
       checkMatch();
     }
-    inParentTextNode = false;
     popElement();
   }
 
   void onCharData(const char* text, const int len) {
-    if (shouldSkipText(len)) {
+    if (shouldSkipText(len) || stack.empty()) {
       return;
     }
-
+    const TextRun run = onTextChunk(text, len);  // every chunk, before any early return
     const size_t visible = countVisibleBytes(text, len);
-    const size_t codepoints = countUtf8Codepoints(text, len);
 
-    if (targetTextNodeIndex > 0 && !stack.empty()) {
+    if (targetTextNodeIndex > 0 && run.counts) {
       const std::string xpath = normalizeXPath(currentXPath(spineIndex));
       if (xpath == targetNorm) {
         stack.back().hasText = true;
-        if (!inParentTextNode) {
-          inParentTextNode = true;
-          currentTextNodeCount++;
-          codepointsInCurrentTextNode = 0;
-        }
-        if (currentTextNodeCount == targetTextNodeIndex && bestTier < MatchTier::EXACT) {
-          const size_t charOff = static_cast<size_t>(targetCharOffset);
-          if (charOff >= codepointsInCurrentTextNode && charOff <= codepointsInCurrentTextNode + codepoints) {
-            const size_t cpInChunk = charOff - codepointsInCurrentTextNode;
-            const size_t pos = totalTextBytes + visibleBytesBeforeCodepoint(text, len, cpInChunk);
+        const size_t charOff = static_cast<size_t>(targetCharOffset);
+        const bool continuesEndMatch = bestExactAtChunkEnd && charOff == run.codepointsBefore;
+        if (run.nodeIndex == targetTextNodeIndex && (bestTier < MatchTier::EXACT || continuesEndMatch)) {
+          bool carry = run.spaceBefore;
+          const size_t codepoints = collapsedCodepoints(text, len, preDepth == 0, carry);
+          if (charOff >= run.codepointsBefore && charOff <= run.codepointsBefore + codepoints) {
+            bestExactAtChunkEnd = charOff == run.codepointsBefore + codepoints;
+            const size_t pos =
+                totalTextBytes + visibleBytesBeforeCollapsedCodepoint(text, len, charOff - run.codepointsBefore,
+                                                                      preDepth == 0, run.spaceBefore);
             bestTier = MatchTier::EXACT;
             bestDepth = pathDepth(xpath);
             bestOffset = pos;
             bestExact = true;
+            bestIsTextPoint = true;
             bestTierName = "text-node-exact";
             bestLiIndex = liCount;
           }
         }
-        codepointsInCurrentTextNode += codepoints;
         totalTextBytes += visible;
         return;
       }
     }
 
-    if (isWhitespaceOnly(text, len)) {
+    if (visible == 0) {
       return;
     }
-
     if (!stack.empty() && !stack.back().hasText) {
       stack.back().hasText = true;
       checkMatch();
@@ -218,6 +220,7 @@ struct ReverseState : StackState {
       bestDepth = depth;
       bestOffset = totalTextBytes;
       bestExact = isExact;
+      bestIsTextPoint = false;
       bestTierName = tierName;
       bestLiIndex = liCount;
     }
@@ -227,37 +230,37 @@ struct ReverseState : StackState {
 }  // namespace
 
 bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int spineIndex, const std::string& xpath,
-                                  float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex) {
+                                  float& outIntraSpineProgress, bool& outExactMatch, uint16_t* outListItemIndex,
+                                  uint32_t* outVisibleOffset, bool* outIsTextPoint) {
   outIntraSpineProgress = 0.0f;
   outExactMatch = false;
   if (outListItemIndex) {
     *outListItemIndex = 0;
+  }
+  if (outVisibleOffset) {
+    *outVisibleOffset = 0;
+  }
+  if (outIsTextPoint) {
+    *outIsTextPoint = false;
   }
 
   if (xpath.empty()) {
     return false;
   }
 
-  const std::string tmpPath = decompressToTempFile(epub, spineIndex);
-  if (tmpPath.empty()) {
-    return false;
-  }
-
   ReverseState state(spineIndex, xpath);
   SaxParser saxParser;
   if (!saxParser.init(&state, parserStartCb<ReverseState>, parserEndCb<ReverseState>, parserCharCb<ReverseState>,
-                      parserDefaultCb<ReverseState>)) {
-    Storage.remove(tmpPath.c_str());
+                      parserDefaultCb<ReverseState>, /*htmlVoidTagRepair=*/true, SaxParser::Profile::Lean)) {
     return false;
   }
 
-  const bool parseOk = runParse(saxParser, tmpPath);
+  const bool parseOk = streamSpine(epub, spineIndex, saxParser);
 
   if (!parseOk) {
     LOG_ERR("KOX", "XPath parse failed for spine=%d at line %d: %s", spineIndex, saxParser.errorLine(),
             saxParser.errorString());
   }
-  Storage.remove(tmpPath.c_str());
 
   if (!parseOk || state.bestTier == MatchTier::NONE) {
     LOG_DBG("KOX", "Reverse: spine=%d no match for '%s'", spineIndex, xpath.c_str());
@@ -265,6 +268,12 @@ bool findProgressForXPathInternal(const std::shared_ptr<Epub>& epub, const int s
   }
 
   outExactMatch = state.bestExact;
+  if (outVisibleOffset) {
+    *outVisibleOffset = static_cast<uint32_t>(state.bestOffset);
+  }
+  if (outIsTextPoint) {
+    *outIsTextPoint = state.bestIsTextPoint;
+  }
   if (state.totalTextBytes == 0) {
     outIntraSpineProgress = 0.0f;
   } else {

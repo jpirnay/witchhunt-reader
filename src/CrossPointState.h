@@ -61,6 +61,13 @@ struct KOReaderSyncSessionState {
   // paragraphIndex it bounds the paragraphs that open on `page`, which is how the sync screen
   // tells "same page" from "ahead" without the section cache (ProgressComparison).
   uint16_t paragraphIndexBefore = 0;
+  // The page's start and the end of its window as content offsets (Section::getVisibleTextOffsetForPage
+  // and getVisibleTextOffsetAfterPage), for the sync screen to push the page exactly and to compare a
+  // mapped record's offset against [visibleOffsetAtPage, visibleOffsetAtNextPage). hasVisibleOffset
+  // false when the chapter has no LUT.
+  uint32_t visibleOffsetAtPage = 0;
+  uint32_t visibleOffsetAtNextPage = UINT32_MAX;
+  bool hasVisibleOffset = false;
   KOReaderSyncIntentState intent = KOReaderSyncIntentState::COMPARE;
   KOReaderSyncOutcomeState outcome = KOReaderSyncOutcomeState::NONE;
   int resultSpineIndex = 0;
@@ -72,6 +79,11 @@ struct KOReaderSyncSessionState {
   // Preferred over resultParagraphIndex when the deepest target element is /li[N].
   uint16_t resultListItemIndex = 0;
   bool resultHasListItemIndex = false;
+  // The remote position as a visible-text offset in resultSpineIndex (only for a KOReader text
+  // point matched to the codepoint), which EpubReaderActivity turns into the exact page via
+  // Section::getPageForVisibleTextOffset. Preferred over both LUT indices above.
+  uint32_t resultVisibleOffset = 0;
+  bool resultHasVisibleOffset = false;
   // Where to land once this sync (and its reboot) completes. Defaults to Reader so auto-push-on-
   // close and reader-menu-triggered syncs keep their existing behavior without every call site
   // having to set it explicitly; AUTO_PUSH's caller sets it to Home, the finished-book flow sets
@@ -83,6 +95,19 @@ struct KOReaderSyncSessionState {
   // before rendering its first page. Stored by EPUB path so the flag cannot leak across books.
   std::string autoPullEpubPath;
 
+  // Every result* field: where an applied remote position lands. One list, so a new result field
+  // cannot be missed by one of the sites that reset them.
+  void clearResult() {
+    resultSpineIndex = 0;
+    resultPage = 0;
+    resultParagraphIndex = 0;
+    resultHasParagraphIndex = false;
+    resultListItemIndex = 0;
+    resultHasListItemIndex = false;
+    resultVisibleOffset = 0;
+    resultHasVisibleOffset = false;
+  }
+
   void clear() {
     active = false;
     epubPath.clear();
@@ -92,14 +117,12 @@ struct KOReaderSyncSessionState {
     paragraphIndex = 0;
     hasParagraphIndex = false;
     paragraphIndexBefore = 0;
+    visibleOffsetAtPage = 0;
+    visibleOffsetAtNextPage = UINT32_MAX;
+    hasVisibleOffset = false;
     intent = KOReaderSyncIntentState::COMPARE;
     outcome = KOReaderSyncOutcomeState::NONE;
-    resultSpineIndex = 0;
-    resultPage = 0;
-    resultParagraphIndex = 0;
-    resultHasParagraphIndex = false;
-    resultListItemIndex = 0;
-    resultHasListItemIndex = false;
+    clearResult();
     postAction = KOReaderSyncPostAction::Reader;
     postActionTarget.clear();
     autoPullEpubPath.clear();

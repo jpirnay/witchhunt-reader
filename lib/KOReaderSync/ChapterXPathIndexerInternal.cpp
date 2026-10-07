@@ -1,15 +1,18 @@
 #include "ChapterXPathIndexerInternal.h"
 
+#include <Epub/VisibleText.h>
 #include <Epub/htmlEntities.h>
-#include <HalStorage.h>
 #include <Logging.h>
 #include <SaxParser/SaxParser.h>
-#include <Utf8.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include "SaxFeedSink.h"
 
 namespace ChapterXPathIndexerInternal {
 
@@ -19,25 +22,12 @@ std::string toLowerStr(std::string value) {
   return value;
 }
 
-bool isSkippableTag(const std::string& tag) { return tag == "head" || tag == "script" || tag == "style"; }
+bool isSkippableTag(const std::string& tag) { return VisibleText::isNonVisibleTag(tag.c_str()); }
 
-bool isWhitespaceOnly(const char* text, const int len) {
-  for (int i = 0; i < len; i++) {
-    if (!std::isspace(static_cast<unsigned char>(text[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
+bool isWhitespaceOnly(const char* text, const int len) { return VisibleText::visibleBytes(text, len) == 0; }
 
 static size_t countVisibleBytesInUtf8String(const char* str) {
-  size_t count = 0;
-  for (const unsigned char* ptr = reinterpret_cast<const unsigned char*>(str); *ptr != 0; ++ptr) {
-    if (!std::isspace(*ptr)) {
-      count++;
-    }
-  }
-  return count;
+  return VisibleText::visibleBytes(str, static_cast<int>(strlen(str)));
 }
 
 size_t countVisibleBytes(const char* text, const int len) {
@@ -47,127 +37,128 @@ size_t countVisibleBytes(const char* text, const int len) {
       return countVisibleBytesInUtf8String(resolved);
     }
   }
+  return VisibleText::visibleBytes(text, len);
+}
 
-  size_t count = 0;
-  for (int i = 0; i < len; i++) {
-    if (!std::isspace(static_cast<unsigned char>(text[i]))) {
-      count++;
+bool isBlockTag(const std::string& tag) {
+  static constexpr std::string_view kBlocks[] = {
+      "p",          "li",    "h1",      "h2",         "h3",   "h4",      "h5",      "h6",     "div", "td",    "th",
+      "blockquote", "dd",    "dt",      "figcaption", "pre",  "section", "article", "body",   "ul",  "ol",    "dl",
+      "table",      "thead", "tbody",   "tfoot",      "tr",   "caption", "hr",      "figure", "nav", "aside", "header",
+      "footer",     "main",  "address", "fieldset",   "form", "details", "summary", "center"};
+  for (const std::string_view b : kBlocks) {
+    if (tag == b) return true;
+  }
+  return false;
+}
+
+bool allowsTextChildren(const std::string& tag) {
+  // fb2def.h: allow_text=false. Still block tags for R1/R3, never a text point's parent.
+  static constexpr std::string_view kNoText[] = {"table", "thead", "tbody", "tfoot", "tr"};
+  for (const std::string_view t : kNoText) {
+    if (tag == t) return false;
+  }
+  return true;
+}
+
+namespace {
+
+// Walks one character-data chunk codepoint by codepoint as crengine stores it (R2), calling
+// visit(counted, visible) for each: `counted` is 1 for a codepoint the stored text has and 0 for a
+// whitespace codepoint that continues a collapsed run; `visible` is its bytes VisibleText counts.
+// An entity reference is walked as its expansion. Stops early when visit returns false.
+//
+// Codepoints are stepped by their lead byte within [text, text + len), not with
+// utf8NextCodepoint: the SAX buffer flushes every 256 bytes, so a codepoint can straddle two
+// chunks, and utf8NextCodepoint would read past the chunk's end looking for its continuation bytes.
+// A straddling codepoint counts once, in the chunk that holds its lead byte; continuation bytes
+// opening a chunk finish the previous chunk's last codepoint and add only their visible bytes.
+template <typename Visit>
+void walkStoredCodepoints(const char* text, const int len, const bool collapse, bool& lastWasSpace, Visit&& visit) {
+  const auto* p = reinterpret_cast<const unsigned char*>(text);
+  const auto* end = p + (len > 0 ? len : 0);
+  if (isEntityRef(text, len)) {
+    if (const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len))) {
+      p = reinterpret_cast<const unsigned char*>(resolved);
+      end = p + strlen(resolved);
     }
   }
+  const auto isContinuation = [](const unsigned char c) { return (c & 0xC0) == 0x80; };
+  size_t carried = 0;
+  while (p < end && isContinuation(*p)) {
+    ++p;
+    ++carried;
+  }
+  if (carried > 0 && !visit(size_t{0}, carried)) {
+    return;
+  }
+  while (p < end) {
+    const unsigned char lead = *p;
+    const unsigned char* next = p + 1;
+    while (next < end && isContinuation(*next)) {
+      ++next;
+    }
+    size_t counted = 1;
+    if (collapse && (lead == ' ' || lead == '\r' || lead == '\n' || lead == '\t')) {
+      counted = lastWasSpace ? 0 : 1;
+      lastWasSpace = true;
+    } else {
+      lastWasSpace = false;
+    }
+    size_t visible = 0;
+    for (; p < next; ++p) {
+      if (!VisibleText::isSpace(*p)) {
+        visible++;
+      }
+    }
+    if (!visit(counted, visible)) {
+      return;
+    }
+  }
+}
+
+}  // namespace
+
+size_t collapsedCodepoints(const char* text, const int len, const bool collapse, bool& lastWasSpace) {
+  size_t count = 0;
+  walkStoredCodepoints(text, len, collapse, lastWasSpace, [&count](const size_t counted, size_t) {
+    count += counted;
+    return true;
+  });
   return count;
 }
 
-size_t countUtf8Codepoints(const char* text, const int len) {
-  if (isEntityRef(text, len)) {
-    const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
-    if (resolved) {
-      size_t count = 0;
-      const unsigned char* ptr = reinterpret_cast<const unsigned char*>(resolved);
-      while (*ptr != 0) {
-        utf8NextCodepoint(&ptr);
-        count++;
-      }
-      return count;
-    }
-  }
-
+size_t collapsedCodepointAtVisibleByte(const char* text, const int len, const size_t targetVisibleByte,
+                                       const bool collapse, bool lastWasSpace) {
   size_t count = 0;
-  for (int i = 0; i < len; i++) {
-    if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) {
-      count++;
+  size_t seen = 0;
+  walkStoredCodepoints(text, len, collapse, lastWasSpace, [&](const size_t counted, const size_t visible) {
+    // The codepoint holding the byte has the count before it as its index. (Bytes carried over
+    // from the previous chunk come first and answer 0, the closest this chunk can name; a
+    // collapsed whitespace codepoint has no visible byte to hold.)
+    if (targetVisibleByte < seen + visible) {
+      return false;
     }
-  }
+    seen += visible;
+    count += counted;
+    return true;
+  });
   return count;
 }
 
-size_t codepointAtVisibleByte(const char* text, const int len, const size_t targetVisibleByte) {
-  if (isEntityRef(text, len)) {
-    const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
-    if (resolved) {
-      size_t codepoints = 0;
-      size_t visibleBytes = 0;
-      const unsigned char* ptr = reinterpret_cast<const unsigned char*>(resolved);
-      while (*ptr != 0) {
-        const unsigned char* cpStart = ptr;
-        utf8NextCodepoint(&ptr);
-        codepoints++;
-        for (const unsigned char* it = cpStart; it < ptr; ++it) {
-          if (!std::isspace(*it)) {
-            if (visibleBytes == targetVisibleByte) {
-              return codepoints - 1;
-            }
-            visibleBytes++;
-          }
-        }
-      }
-      return codepoints;
+size_t visibleBytesBeforeCollapsedCodepoint(const char* text, const int len, const size_t k, const bool collapse,
+                                            bool lastWasSpace) {
+  size_t count = 0;
+  size_t visibleBefore = 0;
+  walkStoredCodepoints(text, len, collapse, lastWasSpace, [&](const size_t counted, const size_t visible) {
+    if (counted > 0 && count == k) {
+      return false;
     }
-  }
-
-  size_t codepoints = 0;
-  size_t visibleBytes = 0;
-  for (int i = 0; i < len; i++) {
-    const unsigned char uc = static_cast<unsigned char>(text[i]);
-    const bool isLeadByte = (uc & 0xC0) != 0x80;
-    if (isLeadByte) {
-      codepoints++;
-    }
-    if (!std::isspace(uc)) {
-      if (visibleBytes == targetVisibleByte) {
-        return codepoints - 1;
-      }
-      visibleBytes++;
-    }
-  }
-  return codepoints;
-}
-
-size_t visibleBytesBeforeCodepoint(const char* text, const int len, const size_t targetCodepointOffset) {
-  if (isEntityRef(text, len)) {
-    const char* resolved = lookupHtmlEntity(text, static_cast<size_t>(len));
-    if (resolved) {
-      size_t visibleBytes = 0;
-      size_t codepointIndex = 0;
-      const unsigned char* ptr = reinterpret_cast<const unsigned char*>(resolved);
-      while (*ptr != 0 && codepointIndex < targetCodepointOffset) {
-        const unsigned char* cpStart = ptr;
-        utf8NextCodepoint(&ptr);
-        for (const unsigned char* it = cpStart; it < ptr; ++it) {
-          if (!std::isspace(*it)) {
-            visibleBytes++;
-          }
-        }
-        codepointIndex++;
-      }
-      return visibleBytes;
-    }
-  }
-
-  size_t visibleBytes = 0;
-  size_t codepointIndex = 0;
-
-  int i = 0;
-  while (i < len) {
-    if (codepointIndex >= targetCodepointOffset) {
-      break;
-    }
-
-    const int cpStart = i;
-    i++;
-    while (i < len && (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) {
-      i++;
-    }
-
-    for (int j = cpStart; j < i; j++) {
-      if (!std::isspace(static_cast<unsigned char>(text[j]))) {
-        visibleBytes++;
-      }
-    }
-
-    codepointIndex++;
-  }
-
-  return visibleBytes;
+    count += counted;
+    visibleBefore += visible;
+    return true;
+  });
+  return visibleBefore;
 }
 
 // Thread-local-free scratch reused across normalizeXPath() invocations so the
@@ -301,68 +292,23 @@ bool isAncestorPath(const std::string& prefix, const std::string& path) {
   return path.size() > prefix.size() && path.compare(0, prefix.size(), prefix) == 0 && path[prefix.size()] == '/';
 }
 
-std::string decompressToTempFile(const std::shared_ptr<Epub>& epub, const int spineIndex) {
+bool streamSpine(const std::shared_ptr<Epub>& epub, const int spineIndex, SaxParser& saxParser) {
   if (!epub || spineIndex < 0 || spineIndex >= epub->getSpineItemsCount()) {
-    return "";
-  }
-
-  const auto spineItem = epub->getSpineItem(spineIndex);
-  if (spineItem.href.empty()) {
-    return "";
-  }
-
-  const std::string tmpPath = epub->getCachePath() + "/.tmp_kox_" + std::to_string(spineIndex) + ".html";
-  if (Storage.exists(tmpPath.c_str())) {
-    Storage.remove(tmpPath.c_str());
-  }
-
-  FsFile tmpFile;
-  if (!Storage.openFileForWrite("KOX", tmpPath, tmpFile)) {
-    LOG_ERR("KOX", "Failed to create temp file for spine=%d", spineIndex);
-    return "";
-  }
-
-  constexpr size_t kChunkSize = 1024;
-  const bool ok = epub->readItemContentsToStream(spineItem.href, tmpFile, kChunkSize);
-  tmpFile.close();
-
-  if (!ok) {
-    Storage.remove(tmpPath.c_str());
-    LOG_ERR("KOX", "Failed to decompress spine=%d to temp file", spineIndex);
-    return "";
-  }
-
-  return tmpPath;
-}
-
-namespace {
-// Pump the open `file` through `saxParser` in fixed-size chunks. Returns true on clean EOF or
-// intentional early stop (stop() called from a callback). Returns false on allocation failure
-// or any other parse error. The file is left open — caller closes it.
-bool pumpSaxParserFromFile(SaxParser& saxParser, FsFile& file) {
-  constexpr size_t kBufSize = 1024;
-  uint8_t buf[kBufSize];
-  while (file.available()) {
-    const size_t len = file.read(buf, kBufSize);
-    if (!saxParser.feed(buf, len)) {
-      return saxParser.isStopped();
-    }
-    if (saxParser.isStopped()) {
-      return true;
-    }
-  }
-  return saxParser.finalize() || saxParser.isStopped();
-}
-}  // namespace
-
-bool runParse(SaxParser& saxParser, const std::string& path) {
-  FsFile file;
-  if (!Storage.openFileForRead("KOX", path, file)) {
     return false;
   }
-  const bool ok = pumpSaxParserFromFile(saxParser, file);
-  file.close();
-  return ok;
+  const auto href = epub->getSpineItem(spineIndex).href;
+  if (href.empty()) {
+    return false;
+  }
+  SaxFeedSink sink(saxParser);
+  if (!epub->readItemContentsToStream(href, sink, 1024, sink.stopFlag())) {
+    LOG_ERR("KOX", "Failed to stream spine=%d", spineIndex);
+    return false;
+  }
+  if (sink.failed()) {
+    return false;
+  }
+  return saxParser.isStopped() || saxParser.finalize();
 }
 
 bool isEntityRef(const char* text, const int len) {
@@ -425,14 +371,17 @@ void bcDefault(void* ud, const char* text, const int len) {
 
 }  // namespace
 
-size_t countTotalTextBytes(const std::string& tmpPath) {
+std::optional<size_t> countTotalTextBytes(const std::shared_ptr<Epub>& epub, const int spineIndex) {
   ByteCounter state;
   SaxParser saxParser;
-  if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault)) {
-    return 0;
+  if (!saxParser.init(&state, bcStart, bcEnd, bcChar, bcDefault, /*htmlVoidTagRepair=*/true,
+                      SaxParser::Profile::Lean)) {
+    return std::nullopt;
   }
-  const bool ok = runParse(saxParser, tmpPath);
-  return ok ? state.totalTextBytes : 0;
+  if (!streamSpine(epub, spineIndex, saxParser)) {
+    return std::nullopt;
+  }
+  return state.totalTextBytes;
 }
 
 }  // namespace ChapterXPathIndexerInternal

@@ -31,7 +31,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 79;  // v79: a <span> styled display:block is a block,
+constexpr uint8_t SECTION_FILE_VERSION = 80;  // v80: the paragraph LUT entry carries the page's visible-text offset
+                                              // v79: a <span> styled display:block is a block,
                                               // and every block in a heading keeps its centring
                                               // and size (#388); v78 pages run them together
                                               // v78: a span indent (poem line shape) gives way
@@ -132,10 +133,11 @@ constexpr uint8_t kStatusCssDegraded = 1 << 3;
 //   heap condition: deterministic, so nothing rebuilds on it (audit R4).
 constexpr uint8_t kStatusSimplified = 1 << 4;
 
-// On-disk paragraph LUT entry: u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex.
-// listItemIndex is the running <li> count at page-break time; together with
-// paragraphIndex it lets KOReader-supplied <p>- and <li>-anchored XPaths snap to
-// the exact page on download.
+// On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex.
+// visibleTextOffset is the number of visible bytes (VisibleText.h) of the chapter's source text
+// before the page's first element: KOReader sync pushes it and resolves pulled positions to a
+// page with it. paragraphIndex and listItemIndex let <p>- and <li>-anchored XPaths snap to a
+// page when a resolver had no offset.
 constexpr uint32_t PARAGRAPH_LUT_ENTRY_SIZE = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint16_t);
 inline uint32_t paragraphLutEntryOffset(uint32_t lutStart, uint16_t page) {
   return lutStart + page * PARAGRAPH_LUT_ENTRY_SIZE;
@@ -1690,9 +1692,7 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     file.write(reinterpret_cast<const uint8_t*>(label), len);
   });
 
-  // Write per-page paragraph LUT: count + array of {xhtmlByteOffset(u32), paragraphIndex(u16),
-  // listItemIndex(u16)}. The byte offset was a seek hint for KOReader XPath generation; nothing
-  // reads it any more, it stays as part of the entry layout.
+  // Write per-page paragraph LUT: count + array of {visibleTextOffset(u32), paragraphIndex(u16), listItemIndex(u16)}.
   const uint32_t paragraphLutOffset = file.position();
   const auto& paragraphLut = visitor.getParagraphLutPerPage();
   if (paragraphLut.size() != static_cast<size_t>(pageCount)) {
@@ -1704,7 +1704,7 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   }
   serialization::writePod(file, static_cast<uint16_t>(paragraphLut.size()));
   for (const auto& entry : paragraphLut) {
-    serialization::writePod(file, entry.xhtmlByteOffset);
+    serialization::writePod(file, entry.visibleTextOffset);
     serialization::writePod(file, entry.paragraphIndex);
     serialization::writePod(file, entry.listItemIndex);
   }
@@ -2689,7 +2689,7 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
     return std::nullopt;
   }
 
-  // Seek directly to the paragraphIndex field of the requested entry (skip xhtmlByteOffset)
+  // Seek directly to the paragraphIndex field of the requested entry (skip visibleTextOffset)
   f.seek(entryOffset);
   uint16_t pIdx;
   serialization::readPod(f, pIdx);
@@ -2719,7 +2719,7 @@ std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex)
 
   // Mirror getPageForParagraphIndex: each entry stores the running li count at page-break
   // time, so the target li first appears on the smallest i where storedLiIdx[i] >= liIndex.
-  // The listItemIndex field follows xhtmlByteOffset + paragraphIndex within each entry.
+  // The listItemIndex field follows visibleTextOffset + paragraphIndex within each entry.
   for (uint16_t i = 0; i < count; i++) {
     const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, i) + sizeof(uint32_t) + sizeof(uint16_t);
     const uint64_t requiredOffset = static_cast<uint64_t>(entryOffset) + sizeof(uint16_t);
@@ -2738,4 +2738,86 @@ std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex)
 
   f.close();
   return static_cast<uint16_t>(count - 1);
+}
+
+std::optional<uint32_t> Section::getVisibleTextOffsetForPage(const uint16_t page) const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) {
+    return std::nullopt;
+  }
+  if (page >= count) {
+    f.close();
+    return std::nullopt;
+  }
+  const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, page);
+  if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > f.size()) {
+    f.close();
+    return std::nullopt;
+  }
+  f.seek(entryOffset);
+  uint32_t offset;
+  serialization::readPod(f, offset);
+  f.close();
+  return offset;
+}
+
+std::optional<uint32_t> Section::getVisibleTextOffsetAfterPage(const uint16_t page) const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) {
+    return std::nullopt;
+  }
+  const uint32_t fileSize = f.size();
+  std::optional<uint32_t> own;
+  for (uint16_t i = page; i < count; i++) {
+    const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, i);
+    if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > fileSize) {
+      break;
+    }
+    f.seek(entryOffset);
+    uint32_t start;
+    serialization::readPod(f, start);
+    if (i == page) {
+      own = start;
+    } else if (start > *own) {
+      f.close();
+      return start;
+    }
+  }
+  f.close();
+  return std::nullopt;
+}
+
+std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offset) const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) {
+    return std::nullopt;
+  }
+  const uint32_t fileSize = f.size();
+  // Starts are in page order. The answer is the last page whose start is <= offset, so a run of
+  // pages sharing one start (an image, rule or table page followed by the text at the same offset)
+  // answers its LAST page, the one holding the text at that offset. An offset below page 0's start
+  // (a chapter that opens with hidden text) is on page 0.
+  std::optional<uint16_t> found;
+  for (uint16_t i = 0; i < count; i++) {
+    const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, i);
+    if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > fileSize) {
+      break;
+    }
+    f.seek(entryOffset);
+    uint32_t start;
+    serialization::readPod(f, start);
+    if (start > offset) {
+      if (i == 0) found = 0;
+      break;
+    }
+    found = i;
+  }
+  f.close();
+  return found;
 }

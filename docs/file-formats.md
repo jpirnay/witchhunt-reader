@@ -116,6 +116,7 @@ if (parsedSize != fileSize) {
 - `parseComplete` (`bool`) inserted before `pageCount` so a truncated parse can be detected on reload.
 - `paragraphLutOffset` extended: each per-page entry is now `u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex` (added the running `<li>` count for KOReader list-item XPath sync).
 - `pageBreakMapOffset` (`u32`) added in the header between `anchorMapOffset` and `paragraphLutOffset`. The block at that offset stores printed-page labels: `u16 count`, then per entry `u16 pageIndex + String label`. Populated from inline `doc-pagebreak` markers and from the per-book `pagelist.bin` (NCX `<pageList>` / EPUB 3 `<nav epub:type="page-list">` / EPUB 2.01 `page-map.xml`). See `docs/epub-toc-navigation.md` for the source-format selection rules.
+- Version 80 replaces the paragraph LUT entry's unused XHTML byte offset with the page's visible-text offset. Same size; caches rebuild on the version bump.
 
 ### Version 21
 
@@ -237,14 +238,16 @@ struct SectionBin {
     AnchorEntry anchors[anchorCount];
 
     // === Paragraph LUT (deep entries) ===
-    // One entry per page: XHTML byte offset at the page break, 1-based <p> sibling index,
-    // running <li> count.
-    // xhtmlByteOffset is the parser's byte position within the decompressed spine XHTML at the
-    // moment the page break fired (0 on the last page, recorded post-parse). It was a seek hint
-    // for generating XPaths for upload; nothing reads it any more, it stays for the layout.
+    // One entry per page: visible-text offset of the page's first element, 1-based <p> sibling
+    // index, running <li> count.
+    // visibleTextOffset is the number of visible bytes (lib/Epub/Epub/VisibleText.h: non-whitespace
+    // bytes of character data inside <body>, outside head/script/style) of the chapter's source
+    // text before the page's first element. KOReader sync pushes it and resolves pulled
+    // positions to a page with it. Two consecutive pages may share one offset (an image or rule
+    // page followed by the text at that offset); a lookup answers the first of them.
     // paragraphIndex is 1-based, matching KOReader XPath p[N] convention; listItemIndex likewise
     // for li[N].
-    struct ParagraphLutEntry { u32 xhtmlByteOffset; u16 paragraphIndex; u16 listItemIndex; };
+    struct ParagraphLutEntry { u32 visibleTextOffset; u16 paragraphIndex; u16 listItemIndex; };
     u16 paragraphEntryCount;
     ParagraphLutEntry paragraphLut[paragraphEntryCount];
 };

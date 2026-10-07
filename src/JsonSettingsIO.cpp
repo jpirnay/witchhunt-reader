@@ -48,6 +48,9 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   sync["paragraphIndex"] = s.koReaderSyncSession.paragraphIndex;
   sync["hasParagraphIndex"] = s.koReaderSyncSession.hasParagraphIndex;
   sync["paragraphIndexBefore"] = s.koReaderSyncSession.paragraphIndexBefore;
+  sync["visibleOffsetAtPage"] = s.koReaderSyncSession.visibleOffsetAtPage;
+  sync["visibleOffsetAtNextPage"] = s.koReaderSyncSession.visibleOffsetAtNextPage;
+  sync["hasVisibleOffset"] = s.koReaderSyncSession.hasVisibleOffset;
   sync["intent"] = static_cast<uint8_t>(s.koReaderSyncSession.intent);
   sync["outcome"] = static_cast<uint8_t>(s.koReaderSyncSession.outcome);
   sync["resultSpineIndex"] = s.koReaderSyncSession.resultSpineIndex;
@@ -56,6 +59,8 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   sync["resultHasParagraphIndex"] = s.koReaderSyncSession.resultHasParagraphIndex;
   sync["resultListItemIndex"] = s.koReaderSyncSession.resultListItemIndex;
   sync["resultHasListItemIndex"] = s.koReaderSyncSession.resultHasListItemIndex;
+  sync["resultVisibleOffset"] = s.koReaderSyncSession.resultVisibleOffset;
+  sync["resultHasVisibleOffset"] = s.koReaderSyncSession.resultHasVisibleOffset;
   sync["postAction"] = static_cast<uint8_t>(s.koReaderSyncSession.postAction);
   sync["postActionTarget"] = s.koReaderSyncSession.postActionTarget;
   sync["autoPullEpubPath"] = s.koReaderSyncSession.autoPullEpubPath;
@@ -113,6 +118,9 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.koReaderSyncSession.paragraphIndex = sync["paragraphIndex"] | (uint16_t)0;
   s.koReaderSyncSession.hasParagraphIndex = sync["hasParagraphIndex"] | false;
   s.koReaderSyncSession.paragraphIndexBefore = sync["paragraphIndexBefore"] | (uint16_t)0;
+  s.koReaderSyncSession.visibleOffsetAtPage = sync["visibleOffsetAtPage"] | (uint32_t)0;
+  s.koReaderSyncSession.visibleOffsetAtNextPage = sync["visibleOffsetAtNextPage"] | (uint32_t)UINT32_MAX;
+  s.koReaderSyncSession.hasVisibleOffset = sync["hasVisibleOffset"] | false;
   s.koReaderSyncSession.intent =
       static_cast<KOReaderSyncIntentState>(sync["intent"] | static_cast<uint8_t>(KOReaderSyncIntentState::COMPARE));
   s.koReaderSyncSession.outcome =
@@ -123,6 +131,8 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.koReaderSyncSession.resultHasParagraphIndex = sync["resultHasParagraphIndex"] | false;
   s.koReaderSyncSession.resultListItemIndex = sync["resultListItemIndex"] | (uint16_t)0;
   s.koReaderSyncSession.resultHasListItemIndex = sync["resultHasListItemIndex"] | false;
+  s.koReaderSyncSession.resultVisibleOffset = sync["resultVisibleOffset"] | (uint32_t)0;
+  s.koReaderSyncSession.resultHasVisibleOffset = sync["resultHasVisibleOffset"] | false;
   s.koReaderSyncSession.postAction =
       static_cast<KOReaderSyncPostAction>(sync["postAction"] | static_cast<uint8_t>(KOReaderSyncPostAction::Reader));
   s.koReaderSyncSession.postActionTarget = sync["postActionTarget"] | std::string("");

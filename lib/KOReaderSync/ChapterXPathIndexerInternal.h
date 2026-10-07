@@ -4,6 +4,7 @@
 #include <SaxParser/SaxParser.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace ChapterXPathIndexerInternal {
@@ -12,11 +13,27 @@ std::string toLowerStr(std::string value);
 
 bool isSkippableTag(const std::string& tag);
 bool isWhitespaceOnly(const char* text, int len);
+// Block-level tags, as crengine renders them (CSS display above inline). One list for all three
+// uses: R1's parent, R3's siblings, and which text gets a text point.
+bool isBlockTag(const std::string& tag);
+// False for the elements crengine keeps no text in (table, thead, tbody, tfoot, tr: allow_text=false
+// in fb2def.h; lvtinydom.cpp moves stray text out before the table). A text point under one of
+// them is a null XPointer (R4), so the push names the element instead.
+bool allowsTextChildren(const std::string& tag);
 
 size_t countVisibleBytes(const char* text, int len);
-size_t countUtf8Codepoints(const char* text, int len);
-size_t codepointAtVisibleByte(const char* text, int len, size_t targetVisibleByte);
-size_t visibleBytesBeforeCodepoint(const char* text, int len, size_t targetCodepointOffset);
+// Codepoints of one character-data chunk as crengine stores them (R2): with `collapse`, a run of
+// space/CR/LF/TAB is ONE codepoint, and a run continuing from the previous chunk (`lastWasSpace`
+// in) adds none; without it every codepoint counts. Entity references count by their expansion.
+// `lastWasSpace` leaves holding the chunk's final state.
+size_t collapsedCodepoints(const char* text, int len, bool collapse, bool& lastWasSpace);
+// The collapsed codepoint index, within the chunk, of the codepoint holding the chunk's
+// targetVisibleByte-th (0-based) visible byte. The chunk must hold that byte; one past its last
+// visible byte answers the chunk's collapsed count.
+size_t collapsedCodepointAtVisibleByte(const char* text, int len, size_t targetVisibleByte, bool collapse,
+                                       bool lastWasSpace);
+// Visible bytes of the chunk before its k-th collapsed codepoint (k may equal the chunk's count).
+size_t visibleBytesBeforeCollapsedCodepoint(const char* text, int len, size_t k, bool collapse, bool lastWasSpace);
 
 std::string normalizeXPath(const std::string& input);
 std::string removeIndices(const std::string& xpath);
@@ -28,9 +45,12 @@ void removeIndices(const std::string& xpath, std::string& out);
 int pathDepth(const std::string& xpath);
 bool isAncestorPath(const std::string& prefix, const std::string& path);
 
-std::string decompressToTempFile(const std::shared_ptr<Epub>& epub, int spineIndex);
-bool runParse(SaxParser& saxParser, const std::string& path);
+// Inflate the spine item straight into `saxParser`. True when the parse completed or the parser
+// stopped itself; false on a missing item or a parse error.
+bool streamSpine(const std::shared_ptr<Epub>& epub, int spineIndex, SaxParser& saxParser);
 bool isEntityRef(const char* text, int len);
-size_t countTotalTextBytes(const std::string& tmpPath);
+// Visible text bytes in the spine item; nullopt when it could not be read or parsed (distinct from
+// a chapter with no text, which is 0), so callers can avoid caching a transient failure.
+std::optional<size_t> countTotalTextBytes(const std::shared_ptr<Epub>& epub, int spineIndex);
 
 }  // namespace ChapterXPathIndexerInternal
