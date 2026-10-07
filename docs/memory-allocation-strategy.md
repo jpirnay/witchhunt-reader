@@ -121,9 +121,11 @@ restarted. That pass now borrows (§9.3).
 
 - Both framebuffers (`FreeInkDisplay::begin`).
 - The font system and display init.
-- The scaled-glyph cache (about 4.75 KB), allocated at reader entry by
-  `GfxRenderer::ensureScaledGlyphCache`, not on the first scaled glyph, so it cannot land inside a
-  released hole mid-build.
+- The scaled-glyph cache (about 4.75 KB, about 9.5 KB for a synthesised body size), allocated at
+  reader entry by `GfxRenderer::ensureScaledGlyphCache`, not on the first scaled glyph, so it
+  cannot land inside a released hole mid-build. Permanent for the reader's lifetime only: reader
+  exit gives it back, with the font page slots, through `GfxRenderer::releaseGlyphCaches`, so the
+  screens after a book do not run without those bytes.
 - Long-lived task stacks. Create them before anything is released: a stack allocated inside a
   released hole pins it for the session.
 - Settings, theme, recent books: small and bounded.

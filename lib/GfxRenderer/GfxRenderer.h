@@ -102,8 +102,9 @@ class GfxRenderer {
   // distinct (glyph, scale, selector) and lets renderGlyphFastBW() — the same
   // 8-pixel-chunk blitter unscaled text uses — draw every occurrence.
   //
-  // Budget: 80 x 16B table + 3.5 KB arena ≈ 4.75 KB, two allocations made lazily
-  // on the first scaled glyph and released by releaseScaledGlyphCache(). It is
+  // Budget: 80 x 16B table + 3.5 KB arena ≈ 4.75 KB, two allocations taken at
+  // reader entry (ensureScaledGlyphCache) and given back at reader exit
+  // (releaseGlyphCaches). It is
   // a bump allocator that resets wholesale when full: no per-glyph allocation,
   // nothing to fragment, and a page whose working set overflows the arena
   // degrades toward the uncached path instead of growing.
@@ -974,6 +975,13 @@ class GfxRenderer {
     scaledGlyphCount_ = 0;
     scaledGlyphUsed_ = 0;
   }
+  // Everything glyph drawing keeps between pages: FontCacheManager's page slots and the
+  // scaled-glyph cache. Readers give it back on exit, so Home, Settings and the font selector do
+  // not run 7-12 KB short after every book (X3, 2026-10-07: 5,064 B + ~2 KB, or 10,056 B + ~2 KB
+  // after a synthesised body size); the next reader takes it again in onEnter. Network sessions
+  // give it back too (trimMemoryForNetworkSession).
+  void releaseGlyphCaches() const;
+
   // Give the ~4 KB arena back. The cache re-allocates lazily if rendering resumes.
   void releaseScaledGlyphCache() const {
     scaledGlyphEntries_.reset();
