@@ -29,6 +29,7 @@
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
+#include "Epub/VisibleText.h"
 
 // Page, PageImage and PageLine all come from ../Page.h above.
 class GfxRenderer;
@@ -97,6 +98,42 @@ class ChapterHtmlSlimParser final : public Print {
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
+  // KOReader sync content offsets (docs/superpowers/specs/2026-10-06-kosync-content-offset-design.md).
+  // visibleTextOffset_ counts VisibleText.h's visible bytes of the source text the SAX parser has
+  // delivered: inside <body>, outside head/script/style, before any layout decision. The mappers
+  // count the same stream with the same rule, so a page's recorded start means the same to both.
+  uint32_t visibleTextOffset_ = 0;
+  int nonVisibleTextDepth_ = 0;         // > 0 inside head, script or style
+  uint32_t partWordVisibleOffset_ = 0;  // offset of the byte that opened partWordBuffer
+  uint32_t currentPageVisibleOffset_ = 0;
+  bool currentPageVisibleOffsetSet_ = false;
+  // Pages emitted with no element (nothing but spacing), last in paragraphLutPerPage: they start
+  // where the next element does, which noteElementOnPage fills in.
+  uint16_t pageStartsAwaitingElement_ = 0;
+  // Records the page's start from its first element; later calls on the same page are ignored.
+  void noteElementOnPage(uint32_t offset);
+  // The offset an element placed now stands before. Between SAX chunks that is
+  // visibleTextOffset_; inside one the counter already holds the chunk's end, so the text path
+  // pins the offset of the word in hand (PinnedPlacement) while it runs code that places
+  // elements. UINT32_MAX: nothing pinned.
+  uint32_t pinnedPlacementOffset_ = UINT32_MAX;
+  uint32_t placementOffset() const {
+    return pinnedPlacementOffset_ != UINT32_MAX ? pinnedPlacementOffset_ : visibleTextOffset_;
+  }
+  struct PinnedPlacement {
+    PinnedPlacement(ChapterHtmlSlimParser& p, const uint32_t offset) : parser(p), saved(p.pinnedPlacementOffset_) {
+      p.pinnedPlacementOffset_ = offset;
+    }
+    ~PinnedPlacement() { parser.pinnedPlacementOffset_ = saved; }
+    PinnedPlacement(const PinnedPlacement&) = delete;
+    PinnedPlacement& operator=(const PinnedPlacement&) = delete;
+    ChapterHtmlSlimParser& parser;
+    uint32_t saved;
+  };
+  // The body of characterData: lays `s` out. `baseOffset` is the visible-text offset of s[0];
+  // `source` says the bytes are chapter text (the running offset advances) rather than text the
+  // parser made up (alt text, a footnote preview), whose words take baseOffset unchanged.
+  static void consumeText(void* userData, const char* s, int len, uint32_t baseOffset, bool source);
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
@@ -138,6 +175,7 @@ class ChapterHtmlSlimParser final : public Print {
     EpdFontFamily::Style style = EpdFontFamily::REGULAR;
     char text[16] = {};  // drop caps are 1 glyph, occasionally with a leading quote
     int textLen = 0;
+    uint32_t visibleOffset = 0;  // offset of the first captured byte
   };
   PendingDropCap pendingDropCap_;
   PageLine* deferredDropCapLine_ = nullptr;  // borrowed from currentPage; its yPos needs updating
@@ -257,6 +295,7 @@ class ChapterHtmlSlimParser final : public Print {
     uint16_t totalWidth = 0;
     int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
     bool hasBorder = true;
+    uint32_t firstVisibleOffset = UINT32_MAX;  // first word of the fragment's first row with words
   };
   struct BufferedTable {
     // The row currently being filled. Cleared at every <tr> and freed again at </tr> once the row
@@ -441,23 +480,16 @@ class ChapterHtmlSlimParser final : public Print {
   // page on download, the same way <p>-anchored XPaths use xpathParagraphIndex.
   uint16_t xpathListItemIndex = 0;
   int xpathBodyDepth = -1;  // depth of the <body> element (-1 = not yet seen)
-  // Byte offset of the most recent direct-body-child element start (any tag at xpathBodyDepth+1).
-  // Recorded at the same depth condition that increments xpathParagraphIndex, so the stored
-  // offset is guaranteed to land on a body-child element boundary. This keeps the XPath forward
-  // mapper's partial-parse heuristic reliable for wrapped chapters: without this, the offset
-  // could point mid-way into a nested <div>/<section>, which confuses partialBaseDepth.
-  uint32_t lastBodyChildByteOffset = 0;
 
   struct ParagraphLutEntry {
-    uint32_t xhtmlByteOffset;  // byte offset of most recent body-child element start at page break
-    uint16_t paragraphIndex;   // 1-based <p> index at page completion
-    uint16_t listItemIndex;    // running <li> count at page completion (any depth)
+    uint32_t visibleTextOffset;  // visible bytes of source text before the page's first element
+    uint16_t paragraphIndex;     // 1-based <p> index at page completion
+    uint16_t listItemIndex;      // running <li> count at page completion (any depth)
   };
   std::vector<ParagraphLutEntry> paragraphLutPerPage;  // deep LUT: one entry per page
 
-  // Active parser for streaming. Stored as a member so page-break sites (addLineToPage,
-  // image breaks) can call saxParser_.byteOffset() without threading the parser through
-  // every call site.
+  // Active parser for streaming. A member so write() can feed it and the abort paths can stop
+  // it from inside a callback.
   SaxParser saxParser_;
   BuildArena* buildArena_ = nullptr;  // see setBuildArena
   // The page under construction's block in buildArena_: every line's TextBlock bytes are
@@ -666,7 +698,7 @@ class ChapterHtmlSlimParser final : public Print {
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
-  void emitPage(uint32_t xhtmlByteOffset);
+  void emitPage();
   void recordPageBreakLabel(const std::string& label);
   // Attach the pending inline float image to `bs` and place it on the current page.
   // Clears pendingInlineImage_ on return.  No-op if pendingInlineImage_ is not active.
@@ -759,7 +791,7 @@ class ChapterHtmlSlimParser final : public Print {
   size_t write(const uint8_t* buffer, size_t size) override;
 
   ParsedText::LineProcessResult addLineToPage(std::unique_ptr<TextBlock> line, bool lineEndsWithHyphenatedWord,
-                                              bool suppressHyphenationRetry);
+                                              bool suppressHyphenationRetry, uint32_t lineVisibleOffset);
   // Anchors reach the section cache through the spill file, not through this vector: see
   // setAnchorSpillPath. Non-empty only when the spill could not be opened, in which case these
   // are all the anchors there are and the finalizer writes them itself.

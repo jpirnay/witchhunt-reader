@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -73,6 +74,14 @@ class ParsedText {
   // lockstep with `words` through every insert/erase; the sizes are handed to each
   // TextBlock line so inline font-size spans survive into the page cache.
   std::vector<uint8_t> wordSizes;
+  // Where each word begins in the chapter's visible text (VisibleText.h's rule), in lockstep with
+  // `words` through every insert/erase. The section cache records the first word of each page from
+  // it (KOReader sync, content offsets). 4 B per word; grown with the other word vectors in one
+  // step and counted in addWord's heap gate.
+  std::vector<uint32_t> wordVisibleOffsets;
+  // The first word's offset of the line most recently handed to processLine. Read by the parser's
+  // line callbacks, which only get the TextBlock.
+  uint32_t lastLineVisibleOffset_ = 0;
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
@@ -157,7 +166,7 @@ class ParsedText {
   void releaseLayoutScratch();
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
-               uint8_t sizePct = DEFAULT_WORD_SIZE_PCT);
+               uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0);
   // True once addWord had to drop a word because the word vectors could not grow (see
   // wordGrowthRefused_). ChapterHtmlSlimParser::ensureHeapForTextLayout turns it into a
   // partial-cache abort.
@@ -175,6 +184,11 @@ class ParsedText {
   void setBeforeLineHook(std::function<void(uint8_t maxSizePct)> hook) { beforeLine_ = std::move(hook); }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
+  uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }
+  std::optional<uint32_t> firstWordVisibleOffset() const {
+    if (wordVisibleOffsets.empty()) return std::nullopt;
+    return wordVisibleOffsets.front();
+  }
   bool isEmpty() const { return words.empty(); }
   bool isContinuation() const { return isContinuation_; }
 

@@ -7,9 +7,24 @@
 #include "CrossPointState.h"
 #include "KOReaderCredentialStore.h"  // DocumentMatchMethod
 #include "KOReaderSyncClient.h"
+#include "LastPushCache.h"
 #include "ProgressComparison.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
+
+// Where the reader was when it handed off to the sync screen, as ActivityManager reads it out of
+// APP_STATE.koReaderSyncSession. One struct rather than nine positional ints.
+struct SyncLocalPosition {
+  int spineIndex = 0;
+  int page = 0;
+  int totalPages = 0;
+  uint16_t paragraphIndex = 0;
+  bool hasParagraphIndex = false;
+  uint16_t paragraphIndexBefore = 0;
+  uint32_t visibleOffsetAtPage = 0;
+  uint32_t visibleOffsetAtNextPage = UINT32_MAX;
+  bool hasVisibleOffset = false;
+};
 
 /**
  * Activity for syncing reading progress with KOReader sync server.
@@ -36,18 +51,19 @@
 class KOReaderSyncActivity final : public Activity {
  public:
   explicit KOReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& epubPath,
-                                int currentSpineIndex, int currentPage, int totalPagesInSpine,
-                                uint16_t paragraphIndex = 0, bool hasParagraphIndex = false,
-                                uint16_t paragraphIndexBefore = 0,
+                                const SyncLocalPosition& local,
                                 KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE)
       : Activity("KOReaderSync", renderer, mappedInput),
         epubPath(epubPath),
-        currentSpineIndex(currentSpineIndex),
-        currentPage(currentPage),
-        totalPagesInSpine(totalPagesInSpine),
-        localParagraphIndex(paragraphIndex),
-        hasLocalParagraphIndex(hasParagraphIndex),
-        localParagraphIndexBefore(paragraphIndexBefore),
+        currentSpineIndex(local.spineIndex),
+        currentPage(local.page),
+        totalPagesInSpine(local.totalPages),
+        localParagraphIndex(local.paragraphIndex),
+        hasLocalParagraphIndex(local.hasParagraphIndex),
+        localParagraphIndexBefore(local.paragraphIndexBefore),
+        localVisibleOffsetAtPage(local.visibleOffsetAtPage),
+        localVisibleOffsetAtNextPage(local.visibleOffsetAtNextPage),
+        hasLocalVisibleOffset(local.hasVisibleOffset),
         syncIntent(syncIntent),
         remoteProgress{},
         remotePosition{},
@@ -89,10 +105,20 @@ class KOReaderSyncActivity final : public Activity {
   uint16_t localParagraphIndex;
   bool hasLocalParagraphIndex;
   uint16_t localParagraphIndexBefore;
+  uint32_t localVisibleOffsetAtPage;
+  uint32_t localVisibleOffsetAtNextPage;
+  bool hasLocalVisibleOffset;
   KOReaderSyncIntentState syncIntent = KOReaderSyncIntentState::COMPARE;
   // Known once the Epub was loaded for local mapping; 0 until then. Lets a fetched record's
   // DocFragment be range-checked after the Epub has been released for TLS.
   int spineCount = 0;
+  // The book's cache directory (Epub::getCachePath), known once the Epub was loaded for mapping:
+  // where our last push is kept (LastPushCache.h). Empty until then.
+  std::string bookCachePath;
+  // WiFi was taken fully down after the GET so the remote mapping runs with the radio's memory
+  // back (a pull, or a compare against a record that is not our own last push). An upload then
+  // reconnects first (uploadLocalProgress).
+  bool radioDroppedForMapping = false;
 
   State state = WIFI_SELECTION;
   std::string statusMessage;
@@ -111,6 +137,10 @@ class KOReaderSyncActivity final : public Activity {
 
   // Local progress as KOReader format (for display)
   KOReaderPosition localProgress;
+  // localProgress and the chapter label are mapped for this session. Set by the mapping in
+  // onEnter (before WiFi), so performSync and performUpload reuse it instead of mapping again
+  // with the radio up; cleared when a mapping fails, so the next call retries.
+  bool localProgressComputed = false;
   std::string remoteChapterLabel;
   std::string localChapterLabel;
   std::optional<KOReaderMetadata> localDocumentMetadata;
@@ -168,4 +198,16 @@ class KOReaderSyncActivity final : public Activity {
   bool computeLocalProgressAndChapter();
   void computeRemoteChapter();
   bool ensureRemotePositionMapped(bool closeSessionBeforeMapping = true);
+  // End the TLS session and take WiFi fully down before the remote mapping; idempotent.
+  void dropRadioForRemoteMapping();
+  // Our last push of this book, when the server's record is exactly it: its position as the
+  // mapping would resolve it, without the mapping. nullopt otherwise (or without a cached push).
+  std::optional<CrossPointPosition> ownLastPushPosition(const std::string& remoteXPath) const;
+  // Fill the remote position from our last push when the fetched record is that push.
+  bool useOwnLastPush();
+  // Remember a successful upload as our last push (or forget an older one it replaced).
+  void saveOwnLastPush() const;
+  // performUpload, reconnecting first when the radio was dropped for the remote mapping.
+  void uploadLocalProgress();
+  void onReconnectForUpload(bool success);
 };

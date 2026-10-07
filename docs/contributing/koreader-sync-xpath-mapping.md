@@ -37,16 +37,27 @@ via a KOReader contributor mapping spine items to DocFragment numbers.
 
 Implemented in `ProgressMapper::toKOReader`.
 
-1. Compute overall `percentage` from chapter/page.
-2. Generate XPath via byte-offset estimation (`ChapterXPathIndexer::findXPathForProgress`),
-   producing a `…/text()[K].M` anchor proportional to intra-spine progress.
-3. If XPath extraction fails, fallback to synthetic chapter path:
+1. Compute overall `percentage` from chapter/page as before.
+2. Take the page's content offset from the section cache (`Section::getVisibleTextOffsetForPage`:
+   where the page's first text starts, in visible bytes, in the chapter's text) and name that text with
+   `ChapterXPathIndexer::findXPathForVisibleOffset`: one streamed pass over the spine XHTML (a second, inclusive pass only when the page starts at the chapter's total, to name the end of the last text),
+   stopped at the offset. The result is `.../block[K]/text()[N].M` when the text is a direct child of
+   a block element (paragraph, heading, list item, table cell, div), and
+   `.../p[K]/span[1]/text()[N].M` when it sits inside an inline element (span, em, a). The push never
+   names an image: a page that starts with an image names the first text after it, which pulls back
+   onto the page holding that text (the page after the image, when the image fills a page of its
+   own). A page that starts at the chapter's total (a last page holding only an image or spacing)
+   names the end of the chapter's last text node. The element path remains only for stray text in
+   table rows, which crengine keeps no text node for.
+3. Without an offset (a section cache without one, a page past the LUT), the byte-fraction scan
+   (`ChapterXPathIndexer::findXPathForProgress`) names the paragraph proportional to intra-spine progress.
+4. If XPath extraction fails, fall back to the synthetic chapter path:
    - `/body/DocFragment[spineIndex + 1]/body`
 
-The paragraph LUT (see below) is intentionally **not** used for upload: snapping to the
-start of `p[N]` when the user is mid-paragraph causes pulled positions to land at the
-start of the paragraph (and at the start of the chapter when an opening paragraph spans
-many pages). The LUT remains in use for the reverse direction.
+The paragraph LUT is not used for upload: snapping to the start of `p[N]` when the user is
+mid-paragraph lands pulled positions at the start of the paragraph (and at the start of the chapter
+when an opening paragraph spans many pages). The content offset names the page's own first
+character instead.
 
 ### KOReader -> CrossPoint
 
@@ -54,13 +65,18 @@ Implemented in `ProgressMapper::toCrossPoint`.
 
 1. Attempt to parse `DocFragment[N]` from incoming XPath; convert N to 0-based `spineIndex = N - 1`.
 2. If valid, attempt XPath-to-offset mapping via `ChapterXPathIndexer::findProgressForXPath`.
+   (2b) An exact text-point match carries the resolved offset (`CrossPointPosition::visibleTextOffset`);
+   the reader lands on the page by `Section::getPageForVisibleTextOffset`: the last page whose start
+   is <= the offset, so pages sharing one start (an image or rule page before the text at that
+   offset) resolve to the last of them, the text page. The paragraph LUT snap below is the fallback
+   for inexact matches and failed resolves.
 3. If the match is **not exact** and disagrees with KOReader's `percentage` by more than 1% of
    the book inside the same spine, use the percentage-derived intra-spine progress instead.
    An **exact** match is never overridden. KOReader's percentage is its rendered page over its
    page count, while ours is XHTML bytes, so a gap of over 1% between them is normal.
    Overriding an exact chapter-start match moved the reader a dozen pages into the chapter (#268).
 4. Extract paragraph index from XPath via `ChapterXPathIndexer::tryExtractParagraphIndexFromXPath`
-   (e.g. `/body/DocFragment[7]/body/p[685]/text().96` → `paragraphIndex = 685`).
+   (e.g. `/body/DocFragment[7]/body/p[685]/text().96` -> `paragraphIndex = 685`).
 5. Convert resolved intra-spine progress to page estimate.
 6. If XPath path is invalid/unresolvable, fallback to percentage-based chapter/page estimation.
    A chapter-start XPath (no `p`/`li` predicate, ending in `.0`) pins the first page instead.
@@ -72,18 +88,17 @@ landing position than byte-offset-based estimation alone.
 
 ## ChapterXPathIndexer Design
 
-The module reparses **one spine XHTML** on demand using Expat and builds temporary anchors:
+The module streams one spine XHTML from the inflate straight into the SAX parser (`SaxFeedSink`);
+nothing touches the SD card, and the forward pass stops the inflate at its target.
 
 Source-of-truth note: XPath anchors are built from the original EPUB spine XHTML bytes (zip item contents), not from CrossPoint's distilled section render cache. This is intentional to preserve KOReader XPath compatibility.
 
-- anchor: `<xpath, textOffset>`
-- `textOffset` counts non-whitespace bytes
-- When multiple anchors exist for the same path, the one with the **smallest** textOffset is used
-  (start of element), not the latest periodic anchor.
-
-Forward lookup (CrossPoint → XPath): uses `upper_bound` to find the last anchor at or before the
-target text offset, ensuring the returned XPath corresponds to the element the user is currently
-inside rather than the next element.
+Each lookup is one streamed SAX pass over the chapter. `StackState` keeps the element stack, the
+visible-byte count (whitespace is not counted) and crengine's text-node counter (see "crengine's text
+nodes"). The forward pass stops the parse at the target offset and names the text there; the reverse
+pass compares the incoming path against the paths it meets, and for a `text()[N].M` point resolves the
+text-node-exact tier by collapsed codepoints, returning the visible-byte offset of that codepoint.
+No anchor list is kept.
 
 Matching for reverse lookup:
 
@@ -97,14 +112,87 @@ An element with no text of its own (a wrapper such as `section` or `div`) is mat
 **end** tag, so an ancestor-only match on a wrapper lands at the wrapper's end, often the
 chapter's last page. This is why inexact matches still defer to the percentage.
 
+## crengine's text nodes
+
+`N` and `M` in `text()[N].M` count crengine's DOM, not our SAX stream, because KOReader resolves
+the point in crengine. The rules (R1-R7 in the header comment of `ChapterXPathForwardMapper.cpp`,
+read from koreader/crengine `lvtinydom.cpp` and `lvxml.cpp`) that both mappers share through
+`StackState::onTextChunk`:
+
+- `ldomElementWriter::onText`: the first whitespace-only text run of a non-`pre` block (no child
+  yet) is dropped, so `<p>\n  <em>x</em> rest</p>` has one text node.
+- `PreProcessXmlString`: CR, LF and TAB become spaces and a run of spaces is stored as one space;
+  `M` indexes that stored text in codepoints. `<pre>` keeps its text raw.
+- `ldomNode::removeStandaloneWhitespaceTextChildrenInMixedContent`: in an element with block
+  children and inline content, a whitespace-only text node is deleted unless it sits between two
+  inline-ish siblings.
+- `createXPointerV1/V2`: a `text()[N]` that does not exist is a null XPointer, which
+  `LVDocView::getBookmarkPage` treats as page 0. `table`, `thead`, `tbody`, `tfoot` and `tr` keep
+  no text, so stray text there is pushed as the element path.
+- Accepted gap (R6): a comment splits a text node in crengine; our parser does not see comments.
+- Accepted gap (R7): crengine decides block-ness and `pre` from computed CSS (`isBlockNode`,
+  `white_space >= pre-line`); we decide from tag names. `span{display:block}`, `div{display:inline}`
+  or `white-space: pre-wrap` over pretty-printed whitespace can shift `N` or `M`.
+
+## Device evidence
+
+Three probes pushed under the 5b rules to a live KOReader (2026-10-06, account on
+`kosync.rustysoft.de`):
+
+- R2, from KOReader's own upload `/body/DocFragment[3]/body/p[31]/text()[1].851`: our collapsed
+  codepoint count lands on a word boundary, the raw count lands mid-word.
+- R1, `/body/DocFragment[7]/body/p[40]/text()[1].55` landed on "mighty Job!"; the numbering before 5b
+  named a text node that does not exist, a null XPointer, which KOReader opens at the book's first page.
+- Deep points, the Chapter 40 probe `/body/DocFragment[10]/body/p[18]/i[1]/text()[1].39`: a text point
+  inside an inline element landed on the page holding its target. crengine returns a null XPointer
+  (page 0) on any unresolved step, so the whole path resolved. The 1.43 failure was the counting
+  bug 5b fixed, and `kTextPointsInsideInlineElements` is on.
+
 ## Memory / Safety Constraints (ESP32-C3)
 
 The implementation intentionally avoids full DOM storage.
 
 - Parse one chapter only.
-- Keep anchors in transient vectors only for duration of call.
-- Free XML parser and chapter byte buffer on all success/failure paths.
+- Keep only the element stack and counters for the duration of the call.
+- Free the XML parser and the inflate state on all success/failure paths.
 - No persistent cache structures are introduced by this module.
+- The parser parses like the layout parser: bare HTML void tags (`<br>`) are repaired
+  (`htmlVoidTagRepair`), so both sides see the same tree.
+
+The streamed pass trades peak for I/O: the SAX parser's state lives alongside the inflate ring (up
+to 32 KB) instead of after it, while the temp file and its SD write are gone. No chapter is mapped
+with WiFi up, except the two retry fallbacks (`performSync`, `performUpload`) when the pre-WiFi
+mapping failed:
+- The mappers parse with `SaxParser::Profile::Lean`, which leaves out the attribute table they never
+  read (4,672 B of state on the C3 instead of 9,712 B).
+- **The push position** is mapped in `KOReaderSyncActivity::onEnter`, after the secondary framebuffer
+  is released and before WiFi comes up, and reused for the session.
+- **A pull** (and the reader's auto-pull) maps the fetched record with the radio fully down: after the
+  GET, `HalClock::wifiOff` stops it. Nothing is sent after a pull; the reader reopens on the applied
+  position.
+- **A compare** first asks whether the record is our own last push (`LastPushCache.h`): the same
+  document id and the same XPath as the last successful upload, which `kosync_push.bin` in the book's
+  cache directory keeps with that page's spine, page and content offset.
+  - If it is, the remote position comes from that file: no mapping, and WiFi stays up for a PUT on
+    the warm session.
+  - Any other record is mapped with the radio down, as a pull is. If an upload then follows (smart
+    mode finds us ahead, or the user picks it), WiFi is brought up again through
+    `WifiSelectionActivity`. A failed or cancelled reconnect ends in "WiFi connection failed",
+    never a silent skip.
+- **The auto-push on close** never maps the remote: it compares our own last push from the cache,
+  and any other record from its XPath string.
+- **The wake pull** maps after the background worker has already turned the radio off.
+
+The first X3 run after Task 8 still mapped after WiFi with the full state. On a 174 KB chapter its
+Min Free fell to 10,880 B, against 19,048 B for the temp-file path (baseline doc, "After Task 8 (X3),
+run 1").
+
+Run 2 fixed the push: Min Free was untouched, and `after_local_mapping` read ~120 KB free. Pulls and
+compares, which then still mapped after the GET, troughed at 10.8 to 13.0 KB. Run 3 reads them
+through these `[KOSync] Sync mem[...]` lines:
+- `after_wifi_down_before_remote_mapping`
+- `after_remote_mapping`
+- `after_reconnect_for_upload`
 
 ## Paragraph Index LUT
 
@@ -116,8 +204,8 @@ This enables two lookups without reparsing:
 
 - **XPath → page** (`Section::getPageForParagraphIndex`): finds the first page where the
   recorded paragraph index >= target. Used when applying remote KOReader progress.
-- **Page → XPath** (`Section::getParagraphIndexForPage`): returns the paragraph index for
-  a given page. Used when uploading local progress to KOReader.
+- **Page → paragraph** (`Section::getParagraphIndexForPage`): returns the paragraph index for
+  a given page. Used by the sync comparison; not used for upload (the content offset is).
 
 The paragraph counter in `ChapterHtmlSlimParser` counts **all** `<p>` elements at body-child
 level, including `display:none` elements. This matches `ChapterXPathIndexer` and crengine's
@@ -125,9 +213,9 @@ standard XPath same-name sibling counting.
 
 ## Known Limitations
 
-- Page number on reverse mapping is still an estimate (renderer differences).
+- Page number on reverse mapping is an estimate where the position carries no text point (renderer differences).
   The paragraph LUT refines this but cannot guarantee exact page matching.
-- XPath mapping intentionally uses original spine XHTML while pagination comes from distilled renderer output, so minor roundtrip page drift is expected.
+- XPath mapping intentionally uses original spine XHTML while pagination comes from distilled renderer output, so page drift is possible, but only for pages that push no text point of their own. A page that pushes a text point, inside inline elements too, comes back on itself. A page that starts with an image pushes the text after it, so a push from a full-page image comes back one page late, on the text page.
 - Image-only/low-text chapters may yield coarse anchors.
 - Extremely malformed XHTML can force fallback behavior.
 

@@ -22,6 +22,13 @@ class SaxParser {
   SaxParser(const SaxParser&) = delete;
   SaxParser& operator=(const SaxParser&) = delete;
 
+  // What the parser keeps of a start tag. Full: the attributes, passed to the start callback.
+  // Lean: none; the start callback always gets an empty list (one null pointer), and the ~5 KB
+  // attribute table is never allocated. The parse itself is the same: yxml still reads and checks
+  // every attribute, and depth, name stack, text buffer and void-tag repair are unchanged. For
+  // callers that only follow the element tree and its text (the KOReader XPath mappers).
+  enum class Profile : uint8_t { Full, Lean };
+
   // Initialise the parser and register callbacks. Returns false if the underlying
   // engine fails to allocate (same as XML_ParserCreate returning nullptr).
   //
@@ -33,14 +40,16 @@ class SaxParser {
   // close (a hard parse error, book fails to open). Strict-XML parsers
   // (OPF/NCX/container/page-map/OPDS) must leave this off.
   bool init(void* userData, SaxStartCb startCb, SaxEndCb endCb, SaxCharCb charCb = nullptr,
-            SaxDefaultCb defaultCb = nullptr, bool htmlVoidTagRepair = false);
+            SaxDefaultCb defaultCb = nullptr, bool htmlVoidTagRepair = false, Profile profile = Profile::Full);
 
-  // Bytes of parser state init() allocates (~10 KB: attribute table, name stack, buffers).
-  static size_t stateBytes();
+  // Bytes of parser state init() allocates for `profile` (Full ~10 KB: attribute table, name
+  // stack, buffers; Lean the same without the attribute table).
+  static size_t stateBytes(Profile profile = Profile::Full);
   // Storage for the NEXT init() to place its state in instead of the heap -- a bump allocation
   // from a build arena, for a section build that must keep the heap free. Ignored when smaller
-  // than stateBytes(). Not owned: reset() forgets it and frees nothing; the memory must simply
-  // outlive every feed()/finalize() call. Cleared by init(), so it has to be set before each.
+  // than stateBytes() of the profile init() is given. Not owned: reset() forgets it and frees
+  // nothing; the memory must simply outlive every feed()/finalize() call. Cleared by init(), so it has to be set before
+  // each.
   void setExternalState(void* storage, size_t bytes);
 
   // Feed a chunk of bytes. Returns false on parse error; errorLine()/errorString()

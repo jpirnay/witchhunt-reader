@@ -38,6 +38,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
     GO_HOME,
     PULL_REMOTE,
     PUSH_LOCAL,
+    COMPARE_REMOTE,
     STARRED_PAGES,
     STAR_PAGE,
     MARK_AS_READ,
