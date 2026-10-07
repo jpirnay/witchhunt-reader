@@ -5,9 +5,14 @@
 #include <I18n.h>
 
 #include "MappedInputManager.h"
+#include "SdCardFontGlobals.h"
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+ReaderSizeList QuickOverridesActivity::pendingSizeList() const {
+  return sdFontSystem.sizeListFor(bookSdFontFamily(pendingFontFamilyOverride, pendingSdFontFamilyOverride));
+}
 
 QuickOverridesActivity::QuickOverridesActivity(
     GfxRenderer& renderer, MappedInputManager& mappedInput, const int8_t initialEmbeddedStyleOverride,
@@ -101,17 +106,23 @@ void QuickOverridesActivity::buildMenuItems() {
         }
       }));
 
-  // Font size: default(-1) then the FONT_SIZE values in enum order, labelled with their point
-  // sizes from CrossPointSettings::FONT_SIZE_RUNGS.
+  // Font size: Default, then the sizes the pending family offers. The override is stored as a point
+  // size; option i + 1 is entry i of pendingSizeList().
   auto fontSizeItem = SettingInfo::DynamicEnumCtx(
       StrId::STR_FONT_SIZE, {}, self,
       [](const void* ctx) -> uint8_t {
         const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
-        return (s->pendingFontSizeOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingFontSizeOverride + 1);
+        if (s->pendingFontSizeOverride < 0) return 0;
+        return static_cast<uint8_t>(1 + s->pendingSizeList().indexOf(static_cast<uint8_t>(s->pendingFontSizeOverride)));
       },
       [](void* ctx, uint8_t v) {
         auto* s = static_cast<QuickOverridesActivity*>(ctx);
-        s->pendingFontSizeOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+        if (v == 0) {
+          s->pendingFontSizeOverride = -1;
+          return;
+        }
+        const ReaderSizeList sizes = s->pendingSizeList();
+        if (v - 1 < sizes.count) s->pendingFontSizeOverride = static_cast<int8_t>(sizes.points[v - 1]);
       });
   fontSizeItem.enumLabels = CrossPointSettings::fontSizeLabels(tr(STR_DEFAULT_VALUE));
   menuItems.push_back(std::move(fontSizeItem));

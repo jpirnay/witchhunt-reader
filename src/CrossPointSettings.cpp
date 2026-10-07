@@ -225,7 +225,7 @@ bool CrossPointSettings::loadFromFile() {
 
 float CrossPointSettings::getReaderLineCompression() const {
   const int effectiveFontId = getReaderFontId();
-  const int notosansId = getBuiltinReaderFontId(NOTOSANS, fontSize);
+  const int notosansId = getBuiltinReaderFontIdForPoints(NOTOSANS, fontPointSize);
 
   if (effectiveFontId == notosansId) {
     switch (lineSpacing) {
@@ -258,7 +258,7 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
 
 int CrossPointSettings::getRefreshFrequency() const { return static_cast<int>(refreshFrequencyPages); }
 
-int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, uint8_t size) {
+int CrossPointSettings::getBuiltinReaderFontId(uint8_t family, FONT_SIZE size) {
   switch (family) {
     case BOOKERLY:
     default:
@@ -339,16 +339,16 @@ int CrossPointSettings::getReaderFontId() const {
   // resolveSdCardFontId() returns 0 if the named family isn't loaded
   // (e.g. SD card removed since selection) — fall through to built-in.
   if (sdFontFamilyName[0] != '\0') {
-    int id = resolveSdCardFontId(sdFontFamilyName, fontSize);
+    int id = resolveSdCardFontId(sdFontFamilyName, fontPointSize);
     if (id != 0) return id;
   }
-  return getBuiltinReaderFontId(fontFamily, fontSize);
+  return getBuiltinReaderFontIdForPoints(fontFamily, fontPointSize);
 }
 
 int CrossPointSettings::getTxtReaderFontId() const {
   if (txtSdFontFamilyName[0] != '\0') {
-    int id = resolveSdCardFontId(txtSdFontFamilyName, txtFontSize);
+    int id = resolveSdCardFontId(txtSdFontFamilyName, txtFontPointSize);
     if (id != 0) return id;
   }
-  return getBuiltinReaderFontId(txtFontFamily, txtFontSize);
+  return getBuiltinReaderFontIdForPoints(txtFontFamily, txtFontPointSize);
 }

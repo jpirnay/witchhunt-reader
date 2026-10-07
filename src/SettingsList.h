@@ -319,12 +319,15 @@ inline void buildSettings(const RowSink& emit) {
            .withSubmenu(StrId::STR_MENU_READER_FONT)
            .withSelectorActivity());
   {
-    // Labels, not enumValues: these read "12pt", "14pt" ... straight off
-    // CrossPointSettings::FONT_SIZE_RUNGS, so a rung added or changed there needs no edit here.
-    auto row =
-        SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize, {}, "fontSize", StrId::STR_CAT_READER)
-            .withSubmenu(StrId::STR_MENU_READER_FONT)
-            .withSelectorActivity();
+    // Stored as a point size; shown as an index into the sizes the selected family offers. The
+    // getter and setter translate, and persisting() saves the point size itself under the key.
+    // The labels are the ladder's, in the same order as ReaderSizeList::builtin(), which is the
+    // list every family offers.
+    auto row = SettingInfo::DynamicEnum(StrId::STR_FONT_SIZE, {}, fontSizeDynamicGetter, fontSizeDynamicSetter,
+                                        "fontSize", StrId::STR_CAT_READER)
+                   .persisting(&CrossPointSettings::fontPointSize, "fontSize", CrossPointSettings::MAX_FONT_POINT_SIZE)
+                   .withSubmenu(StrId::STR_MENU_READER_FONT)
+                   .withSelectorActivity();
     row.enumLabels = CrossPointSettings::fontSizeLabels();
     emit(std::move(row));
   }
@@ -352,10 +355,12 @@ inline void buildSettings(const RowSink& emit) {
            .withSubmenu(StrId::STR_MENU_TXT_FONT)
            .withSelectorActivity());
   {
-    auto row = SettingInfo::Enum(StrId::STR_TXT_FONT_SIZE, &CrossPointSettings::txtFontSize, {}, "txtFontSize",
-                                 StrId::STR_CAT_READER)
-                   .withSubmenu(StrId::STR_MENU_TXT_FONT)
-                   .withSelectorActivity();
+    auto row =
+        SettingInfo::DynamicEnum(StrId::STR_TXT_FONT_SIZE, {}, txtFontSizeDynamicGetter, txtFontSizeDynamicSetter,
+                                 "txtFontSize", StrId::STR_CAT_READER)
+            .persisting(&CrossPointSettings::txtFontPointSize, "txtFontSize", CrossPointSettings::MAX_FONT_POINT_SIZE)
+            .withSubmenu(StrId::STR_MENU_TXT_FONT)
+            .withSelectorActivity();
     row.enumLabels = CrossPointSettings::fontSizeLabels();
     emit(std::move(row));
   }

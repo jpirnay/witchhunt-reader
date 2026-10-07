@@ -184,7 +184,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Stamps which generation of gesture defaults this file was written against.
   // See CrossPointSettings::GESTURE_DEFAULTS_VERSION.
   doc["gestureDefaultsV"] = s.gestureDefaultsVersion;
-  // Which numbering the fontSize / txtFontSize values below are in.
+  // Which meaning the fontSize / txtFontSize values below carry (point sizes since version 2).
   // See CrossPointSettings::FONT_SIZE_ORDER_VERSION.
   doc["fontSizeOrderV"] = CrossPointSettings::FONT_SIZE_ORDER_VERSION;
   // Same for the frontlight switch, which is a DynamicToggle because the live
@@ -370,18 +370,20 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
   const uint8_t quickResumeBeforeNormalize = s.quickResumeSleepScreen;
   CrossPointSettings::normalizeDependentSettings(s);
-  // Font sizes were renumbered into pixel order; a file written before that holds the old
-  // values. Done here rather than in the generic loop because the loop clamps against the
-  // option count (6 either way, so every legacy value survives it) and knows nothing about what
-  // an individual key means. Idempotent across boots: an unmigrated file keeps its old stamp,
-  // so the same remap is applied to the same stored values every time until it is rewritten.
+  // Reader sizes are point sizes since FONT_SIZE_ORDER_VERSION 2; older files hold FONT_SIZE
+  // values. Read from the document rather than from the fields the loop above filled: that loop
+  // bounds by persistMax and cannot tell an absent key from a stored one, and an absent key must
+  // mean the default, not whatever point size a stale enum value happens to name. Idempotent
+  // across boots: an unconverted file keeps its old stamp until it is rewritten.
   {
     const auto fileVersion = static_cast<uint8_t>(doc["fontSizeOrderV"] | 0);
-    if (fileVersion < CrossPointSettings::FONT_SIZE_ORDER_VERSION) {
-      s.fontSize = CrossPointSettings::remapLegacyFontSize(s.fontSize, fileVersion);
-      s.txtFontSize = CrossPointSettings::remapLegacyFontSize(s.txtFontSize, fileVersion);
-      if (needsResave) *needsResave = true;
-    }
+    const auto loadPointSize = [&](const char* key) -> uint8_t {
+      const uint8_t pt = CrossPointSettings::fontPointSizeFromStored(doc[key] | -1, fileVersion);
+      return pt != 0 ? pt : CrossPointSettings::DEFAULT_FONT_POINT_SIZE;
+    };
+    s.fontPointSize = loadPointSize("fontSize");
+    s.txtFontPointSize = loadPointSize("txtFontSize");
+    if (fileVersion < CrossPointSettings::FONT_SIZE_ORDER_VERSION && needsResave) *needsResave = true;
   }
 
   // The retired TIMEZONE enum, read straight out of the document because it is no longer a row
@@ -684,8 +686,8 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
 
   store.recentBooks.clear();
   JsonArray arr = doc["books"].as<JsonArray>();
-  // Which FONT_SIZE numbering the per-book overrides in this file are in. Absent (0) is every
-  // file written before the sizes were put in pixel order.
+  // Which meaning the per-book size overrides in this file carry (point sizes since version 2).
+  // Absent (0) is every file written before the sizes were put in pixel order.
   const auto fontSizeOrderV = static_cast<uint8_t>(doc["fontSizeOrderV"] | 0);
   auto clampInt8 = [](int value, int minValue, int maxValue, int8_t fallback) -> int8_t {
     if (value < minValue || value > maxValue) {
@@ -714,12 +716,11 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
       // Keep built-in and SD font overrides mutually exclusive.
       book.fontFamilyOverride = -1;
     }
-    book.fontSizeOverride = clampInt8(obj["fontSizeOverride"] | -1, -1, CrossPointSettings::FONT_SIZE_COUNT - 1, -1);
-    // -1 means "follow the default" and is not a FONT_SIZE, so it is left alone.
-    if (book.fontSizeOverride >= 0) {
-      book.fontSizeOverride = static_cast<int8_t>(
-          CrossPointSettings::remapLegacyFontSize(static_cast<uint8_t>(book.fontSizeOverride), fontSizeOrderV));
-    }
+    // -1 means "follow the default". Anything else is a size in this file's meaning; one that does
+    // not convert to a usable point size goes back to the default rather than to a guess.
+    const uint8_t overridePt =
+        CrossPointSettings::fontPointSizeFromStored(obj["fontSizeOverride"] | -1, fontSizeOrderV);
+    book.fontSizeOverride = overridePt != 0 ? static_cast<int8_t>(overridePt) : -1;
     book.bionicReadingOverride = clampInt8(obj["bionicReadingOverride"] | -1, -1, 1, -1);
     book.paragraphAlignmentOverride =
         clampInt8(obj["paragraphAlignmentOverride"] | -1, -1, CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT - 1, -1);

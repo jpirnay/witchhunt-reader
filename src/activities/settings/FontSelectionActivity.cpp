@@ -58,7 +58,7 @@ const char* FontSelectionActivity::headerTitle() const {
 }
 
 uint8_t FontSelectionActivity::selectedFontSize() const {
-  return target == Target::TXT ? SETTINGS.txtFontSize : SETTINGS.fontSize;
+  return target == Target::TXT ? SETTINGS.txtFontPointSize : SETTINGS.fontPointSize;
 }
 
 int FontSelectionActivity::previewOptionIndex(const int index) const {
@@ -86,7 +86,7 @@ bool FontSelectionActivity::previewKey(FontPreviewCache::Key& key) const {
 }
 
 int FontSelectionActivity::prepareSdPreview(const SdCardFontFamilyInfo& family) {
-  const uint8_t targetPt = SdCardFontSystem::targetPointSize(selectedFontSize());
+  const uint8_t targetPt = sdFontSystem.sizeListFor(family.name.c_str()).snap(selectedFontSize());
   const SdCardFontFileInfo* file = family.pickClosestSize(targetPt);
   if (!file) {
     previewFamily.clear();
@@ -149,7 +149,8 @@ void FontSelectionActivity::updatePreviewFontLocked(const int index) {
   if (optionIndex < CrossPointSettings::BUILTIN_FONT_COUNT) {
     previewFamily.clear();
     sdFontSystem.unload(renderer);
-    previewFontId = CrossPointSettings::getBuiltinReaderFontId(static_cast<uint8_t>(optionIndex), selectedFontSize());
+    previewFontId =
+        CrossPointSettings::getBuiltinReaderFontIdForPoints(static_cast<uint8_t>(optionIndex), selectedFontSize());
   } else {
     const auto& families = sdFontSystem.registry().getFamilies();
     const size_t familyIndex = static_cast<size_t>(optionIndex - CrossPointSettings::BUILTIN_FONT_COUNT);
@@ -162,7 +163,8 @@ void FontSelectionActivity::updatePreviewFontLocked(const int index) {
   // Also the fallback when the strip is blitted: FONT_TITLE must never name a
   // font that is not loaded, even though nothing draws with it in that case.
   if (previewFontId == 0) {
-    previewFontId = CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, selectedFontSize());
+    previewFontId =
+        CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, selectedFontSize());
   }
   uiTarget.setFont(fui::GfxRendererTarget::FONT_TITLE, previewFontId);
 
@@ -232,7 +234,6 @@ void FontSelectionActivity::scanForMissingPreviews() {
   const auto& families = sdFontSystem.registry().getFamilies();
   if (families.empty() || previewW <= 0 || previewH <= 0) return;
 
-  const uint8_t targetPt = SdCardFontSystem::targetPointSize(selectedFontSize());
   const auto language = static_cast<uint8_t>(I18N.getLanguage());
 
   // The override variant lists the inherited font as row 0 as well as in its own
@@ -251,6 +252,9 @@ void FontSelectionActivity::scanForMissingPreviews() {
     seen.push_back(optionIndex);
 
     const auto& family = families[familyIndex];
+    // Per family: each draws the selected size snapped to its own list, and that is the size
+    // prepareSdPreview() keys the preview on.
+    const uint8_t targetPt = sdFontSystem.sizeListFor(family.name.c_str()).snap(selectedFontSize());
     const SdCardFontFileInfo* file = family.pickClosestSize(targetPt);
     if (!file) continue;
 

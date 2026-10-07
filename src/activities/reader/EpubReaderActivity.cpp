@@ -2933,9 +2933,10 @@ uint8_t EpubReaderActivity::getEffectiveParagraphAlignment() const {
 }
 
 float EpubReaderActivity::getEffectiveReaderLineCompression() const {
-  const uint8_t fontSize = (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
+  const uint8_t pointSize =
+      (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
   const int effectiveFontId = getEffectiveReaderFontId();
-  const int notosansId = CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, fontSize);
+  const int notosansId = CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, pointSize);
 
   if (effectiveFontId == notosansId) {
     switch (SETTINGS.lineSpacing) {
@@ -2965,23 +2966,24 @@ int EpubReaderActivity::getEffectiveReaderFontId() const {
   // an SD card font is the global default. This makes the override predictable
   // ("override forces back to a known built-in") and avoids surprising users
   // who set the override before they had any SD fonts.
-  const uint8_t fontSize = (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
+  const uint8_t pointSize =
+      (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
   if (bookFontFamilyOverride >= 0) {
-    return CrossPointSettings::getBuiltinReaderFontId(static_cast<uint8_t>(bookFontFamilyOverride), fontSize);
+    return CrossPointSettings::getBuiltinReaderFontIdForPoints(static_cast<uint8_t>(bookFontFamilyOverride), pointSize);
   }
   if (!bookSdFontFamilyOverride.empty()) {
-    const int id = resolveSdCardFontId(bookSdFontFamilyOverride.c_str(), fontSize);
+    const int id = resolveSdCardFontId(bookSdFontFamilyOverride.c_str(), pointSize);
     if (id != 0) return id;
   }
   // No override: defer to global resolution (which honors SD card font selection).
-  // We synthesize a temporary lookup using the override fontSize if it's set; otherwise
+  // We synthesize a temporary lookup using the override size if it's set; otherwise
   // SETTINGS.getReaderFontId() is the canonical answer.
   if (bookFontSizeOverride >= 0) {
     if (SETTINGS.sdFontFamilyName[0] != '\0') {
-      const int id = resolveSdCardFontId(SETTINGS.sdFontFamilyName, fontSize);
+      const int id = resolveSdCardFontId(SETTINGS.sdFontFamilyName, pointSize);
       if (id != 0) return id;
     }
-    return CrossPointSettings::getBuiltinReaderFontId(SETTINGS.fontFamily, fontSize);
+    return CrossPointSettings::getBuiltinReaderFontIdForPoints(SETTINGS.fontFamily, pointSize);
   }
   return SETTINGS.getReaderFontId();
 }
@@ -6467,25 +6469,26 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   const uint8_t effectiveFontFamily =
       currentBook.fontFamilyOverride >= 0 ? static_cast<uint8_t>(currentBook.fontFamilyOverride) : SETTINGS.fontFamily;
   const uint8_t effectiveFontSize =
-      currentBook.fontSizeOverride >= 0 ? static_cast<uint8_t>(currentBook.fontSizeOverride) : SETTINGS.fontSize;
+      currentBook.fontSizeOverride >= 0 ? static_cast<uint8_t>(currentBook.fontSizeOverride) : SETTINGS.fontPointSize;
   int effectiveFontId = 0;
   if (hasLocalSdOverride) {
     effectiveFontId = resolveSdCardFontId(currentBook.sdFontFamilyOverride.c_str(), effectiveFontSize);
   }
   if (effectiveFontId == 0 && currentBook.fontFamilyOverride >= 0) {
-    effectiveFontId = CrossPointSettings::getBuiltinReaderFontId(effectiveFontFamily, effectiveFontSize);
+    effectiveFontId = CrossPointSettings::getBuiltinReaderFontIdForPoints(effectiveFontFamily, effectiveFontSize);
   }
   if (effectiveFontId == 0 && currentBook.fontSizeOverride >= 0 && SETTINGS.sdFontFamilyName[0] != '\0') {
     effectiveFontId = resolveSdCardFontId(SETTINGS.sdFontFamilyName, effectiveFontSize);
   }
   if (effectiveFontId == 0 && currentBook.fontSizeOverride >= 0) {
-    effectiveFontId = CrossPointSettings::getBuiltinReaderFontId(SETTINGS.fontFamily, effectiveFontSize);
+    effectiveFontId = CrossPointSettings::getBuiltinReaderFontIdForPoints(SETTINGS.fontFamily, effectiveFontSize);
   }
   if (effectiveFontId == 0) {
     effectiveFontId = SETTINGS.getReaderFontId();
   }
   const auto getEffectiveLineCompression = [&](int fontId) {
-    const int notosansId = CrossPointSettings::getBuiltinReaderFontId(CrossPointSettings::NOTOSANS, effectiveFontSize);
+    const int notosansId =
+        CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, effectiveFontSize);
 
     if (fontId == notosansId) {
       switch (SETTINGS.lineSpacing) {
@@ -6811,11 +6814,12 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_CYCLE_FONT_SIZE:
       if (epub) {
         const uint8_t current =
-            (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
-        const int8_t next = static_cast<int8_t>((current + 1) % CrossPointSettings::FONT_SIZE_COUNT);
+            (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
+        const ReaderSizeList sizes =
+            sdFontSystem.sizeListFor(bookSdFontFamily(bookFontFamilyOverride, bookSdFontFamilyOverride));
         applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-                                 bookSdFontFamilyOverride, next, bookBionicReadingOverride,
-                                 bookParagraphAlignmentOverride);
+                                 bookSdFontFamilyOverride, static_cast<int8_t>(sizes.next(current)),
+                                 bookBionicReadingOverride, bookParagraphAlignmentOverride);
         requestUpdate();
       }
       break;
@@ -6823,11 +6827,15 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_FONT_SIZE_LARGER:
       if (epub) {
         const uint8_t current =
-            (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontSize;
-        const uint8_t next = CrossPointSettings::stepFontSize(current, action == BA::BTN_FONT_SIZE_LARGER ? 1 : -1);
-        // Clamped at both ends, so at the limit this is a no-op — don't pay for a
-        // repaginate and a full repaint to show the same page again.
-        if (next != current) {
+            (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
+        const ReaderSizeList sizes =
+            sdFontSystem.sizeListFor(bookSdFontFamily(bookFontFamilyOverride, bookSdFontFamilyOverride));
+        const uint8_t next = sizes.step(current, action == BA::BTN_FONT_SIZE_LARGER ? 1 : -1);
+        // Clamped at both ends, so at the limit this is a no-op -- don't pay for a repaginate and a
+        // full repaint to show the same page again. Compared with the size SHOWN, not the one
+        // stored: a stored size the family does not offer is drawn as its nearest, and "smaller"
+        // from there can land on that same size.
+        if (next != sizes.snap(current)) {
           applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
                                    bookSdFontFamilyOverride, static_cast<int8_t>(next), bookBionicReadingOverride,
                                    bookParagraphAlignmentOverride);

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../TabbedUiListActivity.h"
+#include "ReaderFontSizes.h"
 #include "activities/settings/SettingInfo.h"
 #include "components/UITheme.h"
 
@@ -125,6 +126,9 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   int8_t pendingFontFamilyOverride = -1;
   std::string pendingSdFontFamilyOverride;
   int8_t pendingFontSizeOverride = -1;
+  // The sizes the pending font family offers. The size row lists these, and a pending size
+  // override is one of them (see ReaderSizeList).
+  ReaderSizeList pendingSizeList() const;
   uint8_t pendingTextDarkness = 1;
   bool pendingBionicReading = false;
   int8_t pendingGuideDotsOverride = -1;

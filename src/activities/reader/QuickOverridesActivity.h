@@ -4,6 +4,7 @@
 #include <string>
 
 #include "../MenuListActivity.h"
+#include "ReaderFontSizes.h"
 
 // Bottom-of-the-toolbox quick-overrides menu: shows only the per-book overrides
 // (font family, size, embedded style, image rendering, bionic, guide dots,
@@ -36,6 +37,9 @@ class QuickOverridesActivity final : public MenuListActivity {
   int8_t pendingFontFamilyOverride = -1;
   std::string pendingSdFontFamilyOverride;
   int8_t pendingFontSizeOverride = -1;
+  // The sizes the pending font family offers. The size row lists these, and a pending size
+  // override is one of them (see ReaderSizeList).
+  ReaderSizeList pendingSizeList() const;
   int8_t pendingBionicReadingOverride = -1;
   int8_t pendingGuideDotsOverride = -1;
   int8_t pendingParagraphAlignmentOverride = -1;

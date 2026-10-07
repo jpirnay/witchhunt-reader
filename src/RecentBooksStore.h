@@ -20,7 +20,7 @@ struct RecentBook {
   int8_t fontFamilyOverride = -1;
   // Empty = use global setting, otherwise explicit SD-card family name override.
   std::string sdFontFamilyOverride;
-  // -1 = use global setting, otherwise CrossPointSettings::FONT_SIZE value.
+  // -1 = use global setting, otherwise a point size (see CrossPointSettings::fontPointSize).
   int8_t fontSizeOverride = -1;
   // -1 = use global default, otherwise explicit per-book override (0 = off, 1 = on).
   int8_t bionicReadingOverride = -1;

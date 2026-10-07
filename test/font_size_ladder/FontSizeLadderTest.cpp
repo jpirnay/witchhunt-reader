@@ -19,50 +19,6 @@ TEST(FontSizeLadder, EnumValueIsLadderPosition) {
   }
 }
 
-// Walked over the table rather than spelled out: the literal list stopped at PT_20, so the scaled
-// 22/24/26 pt rungs were never stepped onto or off.
-TEST(FontSizeLadder, StepsUpThroughEveryVisualSize) {
-  for (int i = 1; i < S::FONT_SIZE_RUNG_COUNT; ++i) {
-    EXPECT_EQ(S::FONT_SIZE_RUNGS[i].size, S::stepFontSize(S::FONT_SIZE_RUNGS[i - 1].size, 1))
-        << "up from " << +S::FONT_SIZE_RUNGS[i - 1].points << "pt";
-  }
-}
-
-TEST(FontSizeLadder, StepsDownThroughEveryVisualSize) {
-  for (int i = S::FONT_SIZE_RUNG_COUNT - 1; i > 0; --i) {
-    EXPECT_EQ(S::FONT_SIZE_RUNGS[i - 1].size, S::stepFontSize(S::FONT_SIZE_RUNGS[i].size, -1))
-        << "down from " << +S::FONT_SIZE_RUNGS[i].points << "pt";
-  }
-}
-
-TEST(FontSizeLadder, ClampsRatherThanWrapping) {
-  // A pinch that has reached the end should stay there. Wrapping would turn a
-  // continued pinch-out into the smallest text on screen.
-  //
-  // The ends come from the table rather than being named: this test said PT_20 when that
-  // happened to be the largest rung, and broke the moment a larger one existed -- which is not a
-  // property of clamping, only of which size was on top that week.
-  const uint8_t top = S::FONT_SIZE_RUNGS[S::FONT_SIZE_RUNG_COUNT - 1].size;
-  const uint8_t bottom = S::FONT_SIZE_RUNGS[0].size;
-  EXPECT_EQ(top, S::stepFontSize(top, 1));
-  EXPECT_EQ(top, S::stepFontSize(top, 99));
-  EXPECT_EQ(bottom, S::stepFontSize(bottom, -1));
-  EXPECT_EQ(bottom, S::stepFontSize(bottom, -99));
-}
-
-TEST(FontSizeLadder, ZeroDeltaIsIdentity) {
-  for (const auto& rung : S::FONT_SIZE_RUNGS) {
-    EXPECT_EQ(rung.size, S::stepFontSize(rung.size, 0));
-  }
-}
-
-TEST(FontSizeLadder, AnUnknownSizeIsLeftAlone) {
-  // A hand-edited settings file, or a value from a future build. It has no place
-  // on the ladder, so guessing an end would silently resize the reader's text.
-  EXPECT_EQ(200, S::stepFontSize(200, 1));
-  EXPECT_EQ(200, S::stepFontSize(200, -1));
-}
-
 TEST(FontSizeLadder, LadderCoversEverySize) {
   EXPECT_EQ(static_cast<int>(S::FONT_SIZE_COUNT), S::FONT_SIZE_RUNG_COUNT);
   for (int v = 0; v < S::FONT_SIZE_COUNT; ++v) {
@@ -112,11 +68,12 @@ TEST(FontSizeLadder, MigrationPreservesThePointSizeTheReaderChose) {
   }
 }
 
-TEST(FontSizeLadder, MigrationIsOnlyAppliedToOlderFiles) {
-  // A file already stamped at the current version holds current values; touching them would
+TEST(FontSizeLadder, RenumberingIsOnlyAppliedToVersionZeroFiles) {
+  // A file at version 1 or later already holds pixel-order values; renumbering them again would
   // shift the reader's size by one every time the settings were rewritten.
   for (int v = 0; v < S::FONT_SIZE_COUNT; ++v) {
     const auto stored = static_cast<uint8_t>(v);
+    EXPECT_EQ(stored, S::remapLegacyFontSize(stored, 1));
     EXPECT_EQ(stored, S::remapLegacyFontSize(stored, S::FONT_SIZE_ORDER_VERSION));
   }
 }
@@ -172,6 +129,48 @@ TEST(FontSizeLadder, DefaultEntryShiftsEveryValueByOne) {
   for (int v = 0; v < S::FONT_SIZE_COUNT; ++v) {
     EXPECT_EQ(S::fontSizeLabel(static_cast<uint8_t>(v)), labels[v + 1]);
   }
+}
+
+// --- point sizes (FONT_SIZE_ORDER_VERSION 2) -----------------------------------------------------
+
+// A file from before point sizes holds FONT_SIZE values, and each must come back as the point size
+// it meant -- under both older numberings.
+TEST(FontSizeLadder, StoredEnumValuesConvertToThePointSizeTheyMeant) {
+  for (const auto& rung : S::FONT_SIZE_RUNGS) {
+    EXPECT_EQ(int{rung.points}, int{S::fontPointSizeFromStored(rung.size, 1)}) << "v1 value " << +rung.size;
+  }
+  const struct {
+    uint8_t stored;
+    uint8_t points;
+  } v0[] = {{0, 12}, {1, 14}, {2, 16}, {3, 18}, {4, 10}};
+  for (const auto& e : v0) {
+    EXPECT_EQ(int{e.points}, int{S::fontPointSizeFromStored(e.stored, 0)}) << "v0 value " << +e.stored;
+  }
+}
+
+// Sizes off the ladder are the point of storing points: an SD family built at 7 pt.
+TEST(FontSizeLadder, StoredPointSizesAreKeptAsTheyAre) {
+  for (int pt = S::MIN_FONT_POINT_SIZE; pt <= S::MAX_FONT_POINT_SIZE; ++pt) {
+    EXPECT_EQ(pt, int{S::fontPointSizeFromStored(pt, S::FONT_SIZE_ORDER_VERSION)});
+  }
+}
+
+// 0 hands the choice of fallback to the caller: a setting takes DEFAULT_FONT_POINT_SIZE, a book's
+// override goes back to Default.
+TEST(FontSizeLadder, UnusableStoredSizesConvertToZero) {
+  constexpr uint8_t v2 = S::FONT_SIZE_ORDER_VERSION;
+  EXPECT_EQ(0, S::fontPointSizeFromStored(-1, v2)) << "an absent key";
+  EXPECT_EQ(0, S::fontPointSizeFromStored(0, v2));
+  EXPECT_EQ(0, S::fontPointSizeFromStored(S::MAX_FONT_POINT_SIZE + 1, v2)) << "would not fit a book's int8_t";
+  EXPECT_EQ(0, S::fontPointSizeFromStored(1000, v2));
+  EXPECT_EQ(0, S::fontPointSizeFromStored(-1, 1));
+  EXPECT_EQ(0, S::fontPointSizeFromStored(S::FONT_SIZE_COUNT, 1)) << "a FONT_SIZE no rung carries";
+}
+
+// The overlap the stamp exists for: 8 is PT_26 in a version-1 file and 8 pt in a version-2 one.
+TEST(FontSizeLadder, TheStampDecidesWhatAnAmbiguousValueMeans) {
+  EXPECT_EQ(int{S::fontSizePoints(S::PT_26)}, int{S::fontPointSizeFromStored(S::PT_26, 1)});
+  EXPECT_EQ(int{S::PT_26}, int{S::fontPointSizeFromStored(S::PT_26, S::FONT_SIZE_ORDER_VERSION)});
 }
 
 }  // namespace
