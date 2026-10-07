@@ -51,9 +51,15 @@ preview generation elsewhere (Home idle).
   tables, the per-prewarm mapping and `needsRead` arrays, and the glyph-miss overflow bitmaps.
 - `SdCardFont::useArena(BuildArena*)` may be called only before `load`/`loadFromMmap`. The arena is
   fixed for the font's lifetime, so an array is never freed through the wrong path.
-- Short-lived buffers (kern chunk buffer, row buffer, codepoint list, kern scratch) use a reserved
-  arena block that is rewound before the function returns. That takes the transient spike off the
-  heap too. In heap mode they stay `unique_ptr`s, as today.
+- In arena mode nothing is freed one array at a time. Short-lived buffers (kern chunk buffer, row
+  buffer, codepoint list, kern scratch, prewarm mappings and read orders) are bump-allocated like
+  the rest and reclaimed when the preview's block is rewound. They cannot be rewound inside their
+  own function: prewarm allocates long-lived mini tables between them, and arena blocks rewind
+  newest-first only. One preview needs at most ~25 KB of the ~52 KB lent. In heap mode they stay
+  `unique_ptr`s, as today; the arena-mode equivalent is a `unique_ptr` whose deleter does nothing.
+- The prewarm bitmap retry sizes its prefix from `maxAllocatable()`: the arena's remaining room in
+  arena mode, `ESP.getMaxAllocHeap()` otherwise. Heap-based sizing would retry with sizes the arena
+  cannot hold, and every failed attempt leaves its tables in the arena.
 - Stays on the heap: the `SdCardFont` object itself and the renderer's map entries (both small).
 - Rule: a font must be unloaded before its arena block is rewound (same rule as
   `FontCacheManager::ScopedSlotArena`). Section 2 enforces it.
@@ -74,9 +80,9 @@ preview generation elsewhere (Home idle).
   and `advanceWarmup`. The arena then never holds more than one family, and unload always precedes
   rewind.
 - Cached strip: no font is loaded and no block is reserved (as today).
-- From a book's menu, previewing the family the reader already has loaded at that size:
-  `ensureLoaded` returns early with the reader's heap copy. The block stays empty, and
-  `dropPreviewFont()` unloads it, as `onExit` does today.
+- From a book's menu: `loadPreviewFont` always drops first, so even the family the reader has
+  loaded is reloaded into the arena. That frees the reader's heap copy (~12 KB). The reader reloads
+  its font when it is back on top, as it already must after the selector's `onExit` today.
 
 ### 3. Lending the secondary framebuffer
 
@@ -90,11 +96,18 @@ preview generation elsewhere (Home idle).
 - **Display:** the selector draws no greyscale. The X4 keeps FAST via the RED seed, and the X3 keeps
   its baseline in the controller.
 - **Async hazard (X3, X4 Pro):** while the buffer is lent, a finishing async refresh re-reads the
-  write buffer. So nothing may draw into it while a refresh is pending. The selector never draws
-  deliberately during a refresh (no grey planes; warm-up previews are ordinary frames), so it relies
-  on the framework finishing each refresh before the next frame, as Home's carousel does while
-  lending. The plan verifies this in the render path. If it does not hold, use blocking refreshes
-  while lent (`shipSleepGrayBase` rule).
+  write buffer, so nothing may draw into it while a refresh is pending. Checked while planning:
+  - Ordinary screen refreshes are blocking: `displayBuffer()` drains with `syncPendingAsync()` and
+    runs to completion. Only popups (the transition busy indicator), reader pages and the sleep
+    screen ship asynchronously. The selector draws no popups.
+  - Home's lend order is safe even with a busy-indicator waveform in flight at `onEnter`:
+    `syncWriteBufferFromDisplayed()` only reads the displayed frame; `syncRedRamFromFrameBuffer()`
+    drains first ("never touch RED while a waveform is still reading it"); `borrowSecondaryBuffer()`
+    drains too.
+  - At exit the busy indicator ships asynchronously while the buffer is still lent.
+    `returnSecondaryBuffer()` copies the write buffer into the returned buffer, and the pending
+    finish reads `frameBufferActive` (that copy). So `onExit` must draw nothing before returning,
+    and it doesn't.
 - **Docs:** add the font selector to "who borrows" in `docs/memory-allocation-strategy.md` §9.1.
 
 ### 4. Fallback and failures
@@ -109,9 +122,11 @@ preview generation elsewhere (Home idle).
 
 **Host**, a new suite beside `test/sd_font_intervals`, reusing its synthetic `.cpfont` writer:
 1. Arena-mode load and prewarm give identical glyph metadata, bitmaps and kerning to heap mode.
-2. After a load the arena is in use; after unload and block release it is back to its start with no
-   crash, so no arena pointer reaches `delete[]`.
-3. Two consecutive loads in one scope use the same amount, so transient blocks are rewound.
+2. An arena-mode load and prewarm makes no array allocation on the heap. After the font is deleted
+   and the block released, the arena is back at its start with no crash, so no arena pointer reaches
+   `delete[]`.
+3. The prewarm bitmap retry in arena mode sizes from the arena's room. With the heap reported as
+   having no free block, a prewarm that does not fit whole still loads a prefix.
 4. An arena too small for the load makes it fail cleanly with nothing leaked.
 5. The existing suites (heap mode) still pass.
 
@@ -130,5 +145,4 @@ preview generation elsewhere (Home idle).
   `unloadMetadata` is reader-only.
 - An `SdCardFont` loaded from flash (`loadFromMmap`) aliases its metadata to flash. Only the
   prewarm arrays go to the arena.
-- Confirm in the plan that the activity render path finishes a pending async refresh before drawing
-  the next frame.
+- The display behaviour was confirmed while planning (§3); an X3 device check still covers it.
