@@ -167,6 +167,27 @@ TEST(FontSizeLadder, UnusableStoredSizesConvertToZero) {
   EXPECT_EQ(0, S::fontPointSizeFromStored(S::FONT_SIZE_COUNT, 1)) << "a FONT_SIZE no rung carries";
 }
 
+// The stamps are history. Version 2 is the first that holds point sizes whatever the current version
+// is, so a later bump cannot turn a version-2 file back into enum values: 8 pt would read as 26 pt.
+TEST(FontSizeLadder, VersionTwoIsTheFirstPointSizeFile) {
+  EXPECT_EQ(2, int{S::FIRST_POINT_SIZE_VERSION});
+  EXPECT_EQ(8, int{S::fontPointSizeFromStored(8, 2)});
+  EXPECT_EQ(12, int{S::fontPointSizeFromStored(12, 2)});
+  EXPECT_EQ(0, int{S::fontPointSizeFromStored(0, 2)});
+}
+
+// The version-1 numbering written out rather than read off the table, so a rung inserted below the
+// top -- which would renumber the enum -- fails here instead of silently resizing old files.
+TEST(FontSizeLadder, VersionOneValuesMeanTheseSizes) {
+  const struct {
+    uint8_t stored;
+    uint8_t points;
+  } v1[] = {{0, 10}, {1, 12}, {2, 14}, {3, 16}, {4, 18}, {5, 20}, {6, 22}, {7, 24}, {8, 26}};
+  for (const auto& e : v1) {
+    EXPECT_EQ(int{e.points}, int{S::fontPointSizeFromStored(e.stored, 1)}) << "v1 value " << +e.stored;
+  }
+}
+
 // The overlap the stamp exists for: 8 is PT_26 in a version-1 file and 8 pt in a version-2 one.
 TEST(FontSizeLadder, TheStampDecidesWhatAnAmbiguousValueMeans) {
   EXPECT_EQ(int{S::fontSizePoints(S::PT_26)}, int{S::fontPointSizeFromStored(S::PT_26, 1)});

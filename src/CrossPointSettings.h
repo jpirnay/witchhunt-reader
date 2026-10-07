@@ -140,6 +140,9 @@ class CrossPointSettings {
   /// 2 = the values are point sizes, not FONT_SIZE values. An SD family offers the sizes it was
   ///     built at (7 pt, 13 pt), which no fixed enum can name.
   static constexpr uint8_t FONT_SIZE_ORDER_VERSION = 2;
+  /// The first stamp whose values are point sizes. A fixed 2, not FONT_SIZE_ORDER_VERSION: a later
+  /// bump must not turn every version-2 file back into enum values.
+  static constexpr uint8_t FIRST_POINT_SIZE_VERSION = 2;
 
   /// Reader sizes are stored as POINT SIZES: fontPointSize, txtFontPointSize and a book's
   /// fontSizeOverride. FONT_SIZE survives only as the built-in ladder, i.e. which faces exist.
@@ -183,7 +186,7 @@ class CrossPointSettings {
   static constexpr uint8_t fontPointSizeFromStored(const int stored, const uint8_t fileVersion) {
     if (stored < 0 || stored > 255) return 0;
     const auto value = static_cast<uint8_t>(stored);
-    if (fileVersion >= FONT_SIZE_ORDER_VERSION) {
+    if (fileVersion >= FIRST_POINT_SIZE_VERSION) {
       return value >= MIN_FONT_POINT_SIZE && value <= MAX_FONT_POINT_SIZE ? value : 0;
     }
     return fontSizePoints(remapLegacyFontSize(value, fileVersion));
@@ -198,9 +201,9 @@ class CrossPointSettings {
   /// and each failed differently and silently when missed: "one size bigger" would skip the new
   /// rung, SD fonts would load the wrong point size, the heading ladder would ignore it.
   ///
-  /// Rung order and enum value now agree, which is what lets the settings UI use the value as an
-  /// option index. Keep them in step: a rung inserted in the middle needs an
-  /// FONT_SIZE_ORDER_VERSION bump and a remapLegacyFontSize() case, exactly as PT_10 did.
+  /// FONT_SIZE values are frozen history: files stamped before FIRST_POINT_SIZE_VERSION stored them,
+  /// and fontPointSizeFromStored() reads those files by these values. Never renumber or insert a
+  /// rung in the middle -- an old file's "1" would then name a different size.
   ///
   /// Adding a size at the TOP is: append a rung here, add the case to getBuiltinReaderFontId(),
   /// generate the faces, register them in main.cpp.
