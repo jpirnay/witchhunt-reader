@@ -20,11 +20,11 @@ extern void ensureSdFontLoadedForPath(const char* path);
 // is loaded. Defined in main.cpp.
 extern void unloadSdFontIfLoaded();
 
-// Resolve the SD card font ID for the given family name and font size enum.
+// Resolve the SD card font ID for the given family name and stored point size.
 // Returns 0 if no SD font with that family name and size is currently loaded.
 // Free function (not stored as a callback in CrossPointSettings) so the linker
 // can resolve it directly without runtime indirection.
-int resolveSdCardFontId(const char* familyName, uint8_t fontSizeEnum);
+int resolveSdCardFontId(const char* familyName, uint8_t pointSize);
 
 // Trampolines used by the dynamic font-family SettingInfo. They walk
 // sdFontSystem's registry on each call to translate between
@@ -49,3 +49,16 @@ uint8_t fontFamilyOptionCount();
 // returns the family name from sdFontSystem.registry().
 #include <string>
 std::string fontFamilyOptionLabel(uint8_t i);
+
+// Trampolines for the reader font-size rows (EPUB, TXT/MD). The rows store a point size and the
+// settings UI deals in option indices; both directions go through the size list of the family
+// the row belongs to (SdCardFontSystem::sizeListFor).
+uint8_t fontSizeDynamicGetter(const void* ctx);
+void fontSizeDynamicSetter(void* ctx, uint8_t index);
+uint8_t txtFontSizeDynamicGetter(const void* ctx);
+void txtFontSizeDynamicSetter(void* ctx, uint8_t index);
+
+// The SD family a book is drawn with, given its overrides: "" when it overrides to a built-in
+// family, its own SD override when it has one, otherwise the global choice. Points into
+// `sdFamilyOverride` or SETTINGS, so use it before either changes.
+const char* bookSdFontFamily(int8_t builtinFamilyOverride, const std::string& sdFamilyOverride);

@@ -5,6 +5,8 @@
 
 #include <functional>
 
+#include "ReaderFontSizes.h"
+
 class GfxRenderer;
 
 /// Facade that owns the SD card font registry, manager, and resolver logic.
@@ -28,7 +30,7 @@ class SdCardFontSystem {
   /// Used when the reader type determines which settings field to consult.
   /// onColdLoad (if set) fires only when the font has to be written to the flash
   /// partition (genuine first load) — callers use it to show a "loading font" popup.
-  void ensureLoaded(GfxRenderer& renderer, const char* familyName, uint8_t fontSizeEnum,
+  void ensureLoaded(GfxRenderer& renderer, const char* familyName, uint8_t pointSize,
                     const std::function<void()>& onColdLoad = {},
                     FlashCachePolicy policy = FlashCachePolicy::ReadWrite);
 
@@ -36,20 +38,20 @@ class SdCardFontSystem {
   /// flash partition is still mmap'd from there; anything else is read straight
   /// from SD and the partition is left untouched. The font selection list uses
   /// this so moving the cursor cannot erase and rewrite the partition per row.
-  void ensureLoadedForPreview(GfxRenderer& renderer, const char* familyName, uint8_t fontSizeEnum) {
-    ensureLoaded(renderer, familyName, fontSizeEnum, {}, FlashCachePolicy::ReadOnly);
+  void ensureLoadedForPreview(GfxRenderer& renderer, const char* familyName, uint8_t pointSize) {
+    ensureLoaded(renderer, familyName, pointSize, {}, FlashCachePolicy::ReadOnly);
   }
 
-  /// Physical point size a fontSize enum asks for. This is the size the reader
-  /// renders at; the face actually LOADED is the family's closest
-  /// (SdCardFontFamilyInfo::pickClosestSize()), scaled to this when it differs.
-  static uint8_t targetPointSize(uint8_t fontSizeEnum);
+  /// The sizes the reader offers for a family; "" or a name not on the card gives the built-in
+  /// ladder, which is what the reader falls back to. Every reader of a stored size snaps it
+  /// through this list (see ReaderSizeList).
+  ReaderSizeList sizeListFor(const char* familyName) const;
 
-  /// Resolve an SD card font ID from family name + fontSize enum: the ID that
-  /// renders that family at that size, whether the face itself or its scaled
-  /// alias. Returns 0 if the family is not loaded or that size was not prepared
-  /// by ensureLoaded(). Used by CrossPointSettings::getReaderFontId().
-  int resolveFontId(const char* familyName, uint8_t fontSizeEnum) const;
+  /// Resolve an SD card font ID from family name + stored point size: the ID that renders that
+  /// family at sizeListFor(familyName).snap(pointSize), whether the face itself or its scaled
+  /// alias. Returns 0 if the family is not loaded or that size was not prepared by
+  /// ensureLoaded(). Used by CrossPointSettings::getReaderFontId().
+  int resolveFontId(const char* familyName, uint8_t pointSize) const;
 
   /// Unload any currently loaded SD font family, freeing its heap (intervals,
   /// kern/ligature tables, glyph cache — typically 24-60KB). The registry is

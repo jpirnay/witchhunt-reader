@@ -55,6 +55,10 @@ std::string defaultFontFamilyLabel(const SettingInfo& item) {
 }
 }  // namespace
 
+ReaderSizeList EpubReaderMenuActivity::pendingSizeList() const {
+  return sdFontSystem.sizeListFor(bookSdFontFamily(pendingFontFamilyOverride, pendingSdFontFamilyOverride));
+}
+
 EpubReaderMenuActivity::EpubReaderMenuActivity(
     GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
     const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
@@ -219,20 +223,27 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
     settingsItems.push_back(std::move(familySetting));
   }
 
-  // Reader font size: cycles default(-1) then the FONT_SIZE values in enum order, labelled with
-  // their point sizes from CrossPointSettings::FONT_SIZE_RUNGS.
-  auto fontSizeSetting =
-      SettingInfo::DynamicEnumCtx(
-          StrId::STR_FONT_SIZE, {}, self,
-          [](const void* ctx) -> uint8_t {
-            const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
-            return (s->pendingFontSizeOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingFontSizeOverride + 1);
-          },
-          [](void* ctx, uint8_t v) {
-            auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
-            s->pendingFontSizeOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
-          })
-          .withSelectorActivity();
+  // Reader font size: Default, then the sizes the pending family offers. The override is stored as
+  // a point size; option i + 1 is entry i of pendingSizeList().
+  auto fontSizeSetting = SettingInfo::DynamicEnumCtx(
+                             StrId::STR_FONT_SIZE, {}, self,
+                             [](const void* ctx) -> uint8_t {
+                               const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
+                               if (s->pendingFontSizeOverride < 0) return 0;
+                               return static_cast<uint8_t>(
+                                   1 + s->pendingSizeList().indexOf(static_cast<uint8_t>(s->pendingFontSizeOverride)));
+                             },
+                             [](void* ctx, uint8_t v) {
+                               auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
+                               if (v == 0) {
+                                 s->pendingFontSizeOverride = -1;
+                                 return;
+                               }
+                               const ReaderSizeList sizes = s->pendingSizeList();
+                               if (v - 1 < sizes.count)
+                                 s->pendingFontSizeOverride = static_cast<int8_t>(sizes.points[v - 1]);
+                             })
+                             .withSelectorActivity();
   fontSizeSetting.enumLabels = CrossPointSettings::fontSizeLabels(tr(STR_DEFAULT_VALUE));
   settingsItems.push_back(std::move(fontSizeSetting));
 
@@ -503,7 +514,8 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
       }
     }
     if (item.nameId == StrId::STR_FONT_SIZE && pendingFontSizeOverride < 0) {
-      const auto label = item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.fontSize + 1));
+      const auto label =
+          item.getEnumOptionLabel(static_cast<uint8_t>(1 + pendingSizeList().indexOf(SETTINGS.fontPointSize)));
       if (!label.empty()) return std::string(tr(STR_DEFAULT_VALUE)) + " (" + label + ")";
     }
     if (item.nameId == StrId::STR_PARA_ALIGNMENT && pendingParagraphAlignmentOverride < 0) {

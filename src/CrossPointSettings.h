@@ -132,20 +132,35 @@ class CrossPointSettings {
     FONT_SIZE_COUNT
   };
 
-  /// Bumped when FONT_SIZE values are renumbered. A settings or recent-books file stamped lower
-  /// than this holds values from the older numbering and is remapped as it loads.
+  /// Bumped when the meaning of a stored reader size changes. A settings or recent-books file
+  /// stamped lower holds values in an older meaning and is converted as it loads.
   ///
   /// 1 = PT_10 moved from 4 to 0 and everything below it shifted up one, so the enum runs in
-  /// pixel order.
-  static constexpr uint8_t FONT_SIZE_ORDER_VERSION = 1;
+  ///     pixel order.
+  /// 2 = the values are point sizes, not FONT_SIZE values. An SD family offers the sizes it was
+  ///     built at (7 pt, 13 pt), which no fixed enum can name.
+  static constexpr uint8_t FONT_SIZE_ORDER_VERSION = 2;
+  /// The first stamp whose values are point sizes. A fixed 2, not FONT_SIZE_ORDER_VERSION: a later
+  /// bump must not turn every version-2 file back into enum values.
+  static constexpr uint8_t FIRST_POINT_SIZE_VERSION = 2;
 
-  /// A persisted FONT_SIZE from a file stamped `fileVersion`, in today's numbering.
+  /// Reader sizes are stored as POINT SIZES: fontPointSize, txtFontPointSize and a book's
+  /// fontSizeOverride. FONT_SIZE survives only as the built-in ladder, i.e. which faces exist.
+  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 14;
+  /// Bounds for a stored point size. A book's override is an int8_t with -1 for "follow the
+  /// default", which caps it at 127. No .cpfont comes near that: the converter refuses a line
+  /// height over 255 px, about 100 pt at 150 DPI. 1 is what SdCardFontRegistry::parseFilename()
+  /// accepts.
+  static constexpr uint8_t MIN_FONT_POINT_SIZE = 1;
+  static constexpr uint8_t MAX_FONT_POINT_SIZE = 127;
+
+  /// A persisted FONT_SIZE from a file stamped `fileVersion` (0 or 1), in the version-1 numbering.
   ///
   /// Out-of-range input is returned untouched rather than guessed at: it is either a
   /// hand-edited file or a value from a firmware newer than this one, and both are better left
   /// for the caller's own clamp to deal with.
   static constexpr uint8_t remapLegacyFontSize(const uint8_t stored, const uint8_t fileVersion) {
-    if (fileVersion >= FONT_SIZE_ORDER_VERSION) return stored;
+    if (fileVersion >= 1) return stored;
     // v0: PT_12=0 PT_14=1 PT_16=2 PT_18=3 PT_10=4. PT_20 did not exist.
     switch (stored) {
       case 0:
@@ -163,6 +178,20 @@ class CrossPointSettings {
     }
   }
 
+  /// A reader size read from a file stamped `fileVersion`, as a point size. Returns 0 when the
+  /// stored value is unusable: absent (pass -1), out of range, or a FONT_SIZE no rung carries.
+  ///
+  /// The caller supplies the fallback because it differs: a setting falls back to
+  /// DEFAULT_FONT_POINT_SIZE, a book's override to "follow the default".
+  static constexpr uint8_t fontPointSizeFromStored(const int stored, const uint8_t fileVersion) {
+    if (stored < 0 || stored > 255) return 0;
+    const auto value = static_cast<uint8_t>(stored);
+    if (fileVersion >= FIRST_POINT_SIZE_VERSION) {
+      return value >= MIN_FONT_POINT_SIZE && value <= MAX_FONT_POINT_SIZE ? value : 0;
+    }
+    return fontSizePoints(remapLegacyFontSize(value, fileVersion));
+  }
+
   /// The reader size ladder: every rung in ASCENDING PIXEL order, paired with the point size its
   /// faces are generated at.
   ///
@@ -172,14 +201,14 @@ class CrossPointSettings {
   /// and each failed differently and silently when missed: "one size bigger" would skip the new
   /// rung, SD fonts would load the wrong point size, the heading ladder would ignore it.
   ///
-  /// Rung order and enum value now agree, which is what lets the settings UI use the value as an
-  /// option index. Keep them in step: a rung inserted in the middle needs an
-  /// FONT_SIZE_ORDER_VERSION bump and a remapLegacyFontSize() case, exactly as PT_10 did.
+  /// FONT_SIZE values are frozen history: files stamped before FIRST_POINT_SIZE_VERSION stored them,
+  /// and fontPointSizeFromStored() reads those files by these values. Never renumber or insert a
+  /// rung in the middle -- an old file's "1" would then name a different size.
   ///
   /// Adding a size at the TOP is: append a rung here, add the case to getBuiltinReaderFontId(),
   /// generate the faces, register them in main.cpp.
   struct ReaderFontRung {
-    uint8_t size;    ///< a FONT_SIZE value
+    FONT_SIZE size;
     uint8_t points;  ///< the point size its faces are generated at
   };
   static constexpr ReaderFontRung FONT_SIZE_RUNGS[] = {
@@ -204,6 +233,22 @@ class CrossPointSettings {
     return true;
   }
 
+  /// The built-in rung that draws `pt`: the closest one, ties to the smaller. Built-in faces exist
+  /// only on the ladder, so a size chosen under an SD family is drawn with the nearest of them.
+  /// Must agree with ReaderSizeList::builtin().snap(), which is what the settings row shows.
+  static constexpr FONT_SIZE builtinRungForPoints(const uint8_t pt) {
+    FONT_SIZE best = FONT_SIZE_RUNGS[0].size;
+    int bestDiff = 256;
+    for (const ReaderFontRung& r : FONT_SIZE_RUNGS) {
+      const int diff = r.points > pt ? r.points - pt : pt - r.points;
+      if (diff < bestDiff) {
+        best = r.size;
+        bestDiff = diff;
+      }
+    }
+    return best;
+  }
+
   /// What a font-size row displays: the point size itself, "14pt".
   ///
   /// Not "Tiny/Small/Medium/Large/X-Large" any more. Those stopped carrying information once the
@@ -216,9 +261,8 @@ class CrossPointSettings {
   /// Empty if `size` names no rung. Untranslated: the numeral carries the meaning and "pt" is the
   /// unit in every locale this ships with.
   ///
-  /// Inline for the same reason stepFontSize() is: the ladder is exactly the kind of thing a host
-  /// test should hold still, and linking the NVS half of CrossPointSettings.cpp to reach it would
-  /// mean it never got one.
+  /// Inline because the ladder is exactly the kind of thing a host test should hold still, and linking the NVS half of
+  /// CrossPointSettings.cpp to reach it would mean it never got one.
   static std::string fontSizeLabel(const uint8_t size) {
     const uint8_t pt = fontSizePoints(size);
     if (pt == 0) return {};
@@ -239,30 +283,6 @@ class CrossPointSettings {
     // By enum VALUE. ladderCoversEveryFontSize() guarantees that leaves no slot empty.
     for (const ReaderFontRung& r : FONT_SIZE_RUNGS) labels[r.size + shift] = fontSizeLabel(r.size);
     return labels;
-  }
-
-  // `size` moved `delta` steps along the ladder and clamped at both ends. Clamped
-  // rather than wrapped: a pinch that has reached the largest size should stay
-  // there, not jump to the smallest.
-  //
-  // Inline so it can be exercised on the host without dragging in the NVS half
-  // of CrossPointSettings.cpp — the ladder order is exactly the kind of thing a
-  // test should hold still.
-  static constexpr uint8_t stepFontSize(const uint8_t size, const int delta) {
-    int idx = -1;
-    for (int i = 0; i < FONT_SIZE_RUNG_COUNT; ++i) {
-      if (FONT_SIZE_RUNGS[i].size == size) {
-        idx = i;
-        break;
-      }
-    }
-    // An unrecognised value (a hand-edited settings file) has no place on the
-    // ladder; leave it alone rather than guessing which end it belongs at.
-    if (idx < 0) return size;
-    int target = idx + delta;
-    if (target < 0) target = 0;
-    if (target > FONT_SIZE_RUNG_COUNT - 1) target = FONT_SIZE_RUNG_COUNT - 1;
-    return FONT_SIZE_RUNGS[target].size;
   }
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
@@ -448,11 +468,13 @@ class CrossPointSettings {
   // A folder NAME, not a path: DictionaryRegistry::resolveBasePath rejects
   // separators and dot prefixes so a hand-edited value cannot escape the roots.
   char dictionaryName[32] = "";
-  uint8_t fontSize = PT_14;
+  // Point size of the EPUB reader font, persisted as "fontSize". Shown and drawn snapped to the
+  // sizes the active family offers (ReaderSizeList), never rewritten to them.
+  uint8_t fontPointSize = DEFAULT_FONT_POINT_SIZE;
   // Reader font settings (TXT / MD) — defaults to EPUB settings when not explicitly set
   uint8_t txtFontFamily = NOTOSANS;
   char txtSdFontFamilyName[32] = "";
-  uint8_t txtFontSize = PT_14;
+  uint8_t txtFontPointSize = DEFAULT_FONT_POINT_SIZE;  // persisted as "txtFontSize"
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout in minutes (0 = never sleep, 1-60).
@@ -890,11 +912,16 @@ class CrossPointSettings {
   static constexpr uint16_t getPowerWakeHoldDuration() { return 300; }
   int getReaderFontId() const;
   int getTxtReaderFontId() const;
-  // Pure built-in lookup (size enum + family enum -> font ID). Independent of
-  // SD-card font selection. Used by the per-book fontFamilyOverride path so
-  // an override forces back to a known built-in even when an SD font is the
-  // global default.
-  static int getBuiltinReaderFontId(uint8_t family, uint8_t size);
+  // Pure built-in lookup (family + ladder rung -> font ID), independent of SD-card font selection.
+  // Takes a FONT_SIZE rather than a uint8_t so a stored point size cannot be passed by mistake;
+  // those go through getBuiltinReaderFontIdForPoints().
+  static int getBuiltinReaderFontId(uint8_t family, FONT_SIZE size);
+  // The built-in face that draws a stored point size: the nearest rung (builtinRungForPoints()).
+  // Used by the per-book fontFamilyOverride path, so an override forces back to a known built-in
+  // even when an SD font is the global default.
+  static int getBuiltinReaderFontIdForPoints(const uint8_t family, const uint8_t pt) {
+    return getBuiltinReaderFontId(family, builtinRungForPoints(pt));
+  }
   // Heading sizing: return the built-in fontId `stepUp` sizes taller than `size` for
   // `family`, clamped at the largest size. Steps walk the ascending-pixel ladder
   // (PT_10<PT_12<PT_14<PT_16<PT_18), not the FONT_SIZE enum order. `actualStep`

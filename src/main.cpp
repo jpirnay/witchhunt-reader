@@ -791,7 +791,7 @@ void ensureSdFontLoadedForPath(const char* path) {
                        static_cast<bool (*)(std::string_view)>(FsHelpers::hasMarkdownExtension)(filePath);
   if (isTxtMd) {
     // TXT/MD has no per-book SD font override — use global settings directly.
-    sdFontSystem.ensureLoaded(renderer, SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontSize, onColdFontLoad);
+    sdFontSystem.ensureLoaded(renderer, SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontPointSize, onColdFontLoad);
     return;
   }
 
@@ -800,7 +800,7 @@ void ensureSdFontLoadedForPath(const char* path) {
   // RecentBooksStore already has the persisted overrides for this path.
   const RecentBook book = RECENT_BOOKS.getBookByPath(path);
   const uint8_t effectiveSize =
-      (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontSize;
+      (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontPointSize;
 
   if (!book.sdFontFamilyOverride.empty()) {
     // Per-book SD font override: load that family at the effective size.
