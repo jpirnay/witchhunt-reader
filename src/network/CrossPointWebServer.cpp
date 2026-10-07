@@ -1756,7 +1756,10 @@ void CrossPointWebServer::handlePostSettings() {
   // One row at a time, as in handleGetSettings().
   int applied = 0;
 
-  forEachSetting([&](const SettingInfo& s) {
+  const auto isFontFamilyKey = [](const char* key) {
+    return key && (std::strcmp(key, "fontFamily") == 0 || std::strcmp(key, "txtFontFamily") == 0);
+  };
+  const auto applyRow = [&](const SettingInfo& s) {
     if (!s.key) return;
     if (!doc[s.key].is<JsonVariant>()) return;
 
@@ -1775,12 +1778,11 @@ void CrossPointWebServer::handlePostSettings() {
         const int val = doc[s.key].as<int>();
         // For font-family keys the enumLabels in the static list are empty by design
         // (built lazily by handleGetSettings); use the dynamic option count instead.
-        const bool isFontFamilyKey =
-            s.key && (std::strcmp(s.key, "fontFamily") == 0 || std::strcmp(s.key, "txtFontFamily") == 0);
+        const bool familyKey = isFontFamilyKey(s.key);
         // Otherwise getEnumOptionCount(), for the same reason as the options array above: it is
         // the one definition of how many options a row has, whichever form they come in.
         const int count =
-            isFontFamilyKey ? static_cast<int>(fontFamilyOptionCount()) : static_cast<int>(s.getEnumOptionCount());
+            familyKey ? static_cast<int>(fontFamilyOptionCount()) : static_cast<int>(s.getEnumOptionCount());
         if (val >= 0 && val < count) {
           if (s.valuePtr) {
             SETTINGS.*(s.valuePtr) = static_cast<uint8_t>(val);
@@ -1818,6 +1820,16 @@ void CrossPointWebServer::handlePostSettings() {
       default:
         break;
     }
+  };
+
+  // Families last. A font-size value is an index into the sizes of the family the page was showing,
+  // which is the one selected now, so it has to be applied before this request changes that
+  // family. Two walks rather than a reordered list: rows are visited one at a time, never held.
+  forEachSetting([&](const SettingInfo& s) {
+    if (!isFontFamilyKey(s.key)) applyRow(s);
+  });
+  forEachSetting([&](const SettingInfo& s) {
+    if (isFontFamilyKey(s.key)) applyRow(s);
   });
 
   // Handle sleepTimeoutMinutes and refreshFrequencyPages posted as VALUE types.

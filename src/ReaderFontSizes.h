@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <string>
 
 #include "CrossPointSettings.h"
 
@@ -28,6 +30,24 @@ struct ReaderSizeList {
     static_assert(CrossPointSettings::FONT_SIZE_RUNG_COUNT <= kCapacity, "the ladder must fit the list");
     ReaderSizeList list;
     for (const auto& rung : CrossPointSettings::FONT_SIZE_RUNGS) list.points[list.count++] = rung.points;
+    return list;
+  }
+
+  /// What an SD family offers: every size it ships a file for, then the ladder sizes above its
+  /// largest file. Those are drawn from that file scaled up (SdCardFontManager::ensureSizeAlias),
+  /// so large print stays available whatever the family was built at. A ladder size below the
+  /// largest file is never offered: it would be drawn by shrinking a bigger face, and the family's
+  /// own smaller files are the better answer. With no usable file sizes this is builtin().
+  ///
+  /// `familyPoints` in any order, repeats allowed: it is read straight off the directory listing.
+  /// Sizes outside MIN/MAX_FONT_POINT_SIZE are skipped. Past kCapacity, the largest are dropped.
+  static ReaderSizeList forFamily(const uint8_t* familyPoints, const size_t n) {
+    ReaderSizeList list;
+    for (size_t i = 0; i < n; ++i) list.insert(familyPoints[i]);
+    const uint8_t largest = list.count > 0 ? list.points[list.count - 1] : 0;
+    for (const auto& rung : CrossPointSettings::FONT_SIZE_RUNGS) {
+      if (rung.points > largest) list.insert(rung.points);
+    }
     return list;
   }
 
@@ -61,4 +81,29 @@ struct ReaderSizeList {
 
   /// The size after snap(pt), wrapping from the largest to the smallest (BTN_CYCLE_FONT_SIZE).
   uint8_t next(const uint8_t pt) const { return count == 0 ? pt : points[(indexOf(pt) + 1) % count]; }
+
+ private:
+  // Sorted insert that skips repeats and out-of-range sizes. When full, a size smaller than the
+  // largest held displaces it, so the smallest kCapacity sizes are the ones kept.
+  void insert(const uint8_t pt) {
+    if (pt < CrossPointSettings::MIN_FONT_POINT_SIZE || pt > CrossPointSettings::MAX_FONT_POINT_SIZE) return;
+    uint8_t at = 0;
+    while (at < count && points[at] < pt) ++at;
+    if (at < count && points[at] == pt) return;
+    if (count == kCapacity) {
+      if (at == kCapacity) return;
+      --count;
+    }
+    for (uint8_t i = count; i > at; --i) points[i] = points[i - 1];
+    points[at] = pt;
+    ++count;
+  }
 };
+
+/// What a size option displays: the point size itself, "14pt". Untranslated: the numeral carries
+/// the meaning and "pt" is the unit in every locale this ships with.
+inline std::string fontPointSizeLabel(const uint8_t pt) {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%upt", static_cast<unsigned>(pt));
+  return buf;
+}

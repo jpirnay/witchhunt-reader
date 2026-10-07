@@ -58,6 +58,13 @@ void fontSizeDynamicSetter(void* ctx, uint8_t index);
 uint8_t txtFontSizeDynamicGetter(const void* ctx);
 void txtFontSizeDynamicSetter(void* ctx, uint8_t index);
 
+// Options for the same rows: the sizes the selected family offers, read when asked, so the list
+// follows a family chosen while the screen is open.
+uint8_t fontSizeOptionCount(const void* ctx);
+std::string fontSizeOptionLabel(const void* ctx, uint8_t index);
+uint8_t txtFontSizeOptionCount(const void* ctx);
+std::string txtFontSizeOptionLabel(const void* ctx, uint8_t index);
+
 // The SD family a book is drawn with, given its overrides: "" when it overrides to a built-in
 // family, its own SD override when it has one, otherwise the global choice. Points into
 // `sdFamilyOverride` or SETTINGS, so use it before either changes.

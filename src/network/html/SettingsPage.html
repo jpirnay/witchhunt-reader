@@ -584,6 +584,12 @@
         if (clear) clear.checked = false;
       });
 
+      // A size dropdown lists the selected family's sizes, so a family change leaves the ones on
+      // this page stale. Fetch them again before anything else is edited.
+      if ('fontFamily' in changes || 'txtFontFamily' in changes) {
+        await loadSettings();
+      }
+
       showMessage('Settings saved successfully!', false);
     } catch (e) {
       console.error(e);
