@@ -6,6 +6,7 @@
 #include <vector>
 
 class GfxRenderer;
+class BuildArena;
 class SdCardFont;
 struct SdCardFontFamilyInfo;
 
@@ -34,8 +35,11 @@ class SdCardFontManager {
   // flash-cache mmap hit) — callers use it to show a "loading font" popup.
   // Under FlashCachePolicy::ReadOnly that slow path is skipped entirely and
   // onColdLoad never fires.
+  // `arena`, when set, is handed to the new SdCardFont (SdCardFont::useArena): the caller owns the
+  // block and must unload this family before rewinding it. Only font previews pass one.
   bool loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize,
-                  const std::function<void()>& onColdLoad = {}, FlashCachePolicy policy = FlashCachePolicy::ReadWrite);
+                  const std::function<void()>& onColdLoad = {}, FlashCachePolicy policy = FlashCachePolicy::ReadWrite,
+                  BuildArena* arena = nullptr);
 
   // Serve targetPtSize from the face that is loaded. A size the family ships is that face; any
   // other size is an ALIAS: a second font ID bound to the same face with a base scale of

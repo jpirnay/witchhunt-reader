@@ -31,15 +31,16 @@ class SdCardFontSystem {
   /// onColdLoad (if set) fires only when the font has to be written to the flash
   /// partition (genuine first load) — callers use it to show a "loading font" popup.
   void ensureLoaded(GfxRenderer& renderer, const char* familyName, uint8_t pointSize,
-                    const std::function<void()>& onColdLoad = {},
-                    FlashCachePolicy policy = FlashCachePolicy::ReadWrite);
+                    const std::function<void()>& onColdLoad = {}, FlashCachePolicy policy = FlashCachePolicy::ReadWrite,
+                    BuildArena* arena = nullptr);
 
   /// Load a family only to show it on screen. A family already present in the
   /// flash partition is still mmap'd from there; anything else is read straight
   /// from SD and the partition is left untouched. The font selection list uses
   /// this so moving the cursor cannot erase and rewrite the partition per row.
-  void ensureLoadedForPreview(GfxRenderer& renderer, const char* familyName, uint8_t pointSize) {
-    ensureLoaded(renderer, familyName, pointSize, {}, FlashCachePolicy::ReadOnly);
+  void ensureLoadedForPreview(GfxRenderer& renderer, const char* familyName, uint8_t pointSize,
+                              BuildArena* arena = nullptr) {
+    ensureLoaded(renderer, familyName, pointSize, {}, FlashCachePolicy::ReadOnly, arena);
   }
 
   /// The sizes the reader offers for a family; "" or a name not on the card gives the built-in

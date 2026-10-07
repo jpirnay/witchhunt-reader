@@ -1,7 +1,9 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <GfxRenderer.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,6 +58,19 @@ class FontSelectionActivity final : public UiListActivity {
   void prewarmPreviewGlyphs(int fontId) const;
   void drawWarmupNotice() const;
   void drawPreviewFrame() const;
+  // The secondary framebuffer, lent for as long as the selector is open. Preview fonts load into it
+  // (loadPreviewFont) instead of the heap, which is at its lowest here: ~31 KB free with the Settings
+  // screens underneath, and a preview font takes ~12 KB plus transients (X3, 2026-10-07). Null when
+  // nothing could be borrowed -- a reader's background build holds it, or the board has none -- and
+  // previews then load on the heap as before.
+  void lendPreviewArena();
+  void returnPreviewArena();
+  // The only way the selector loads or drops a preview font. Unloading before the block is rewound
+  // is what makes the arena safe, and dropping first keeps one family in it at a time.
+  void loadPreviewFont(const SdCardFontFamilyInfo& family);
+  void dropPreviewFont();
+  std::unique_ptr<BuildArena> previewArena_;
+  BuildArena::Block previewBlock_;
 
   std::vector<std::string> rowLabels;
   std::vector<freeink::ui::ListItem> rowItems;
