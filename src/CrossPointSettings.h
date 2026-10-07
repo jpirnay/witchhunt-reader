@@ -249,41 +249,6 @@ class CrossPointSettings {
     return best;
   }
 
-  /// What a font-size row displays: the point size itself, "14pt".
-  ///
-  /// Not "Tiny/Small/Medium/Large/X-Large" any more. Those stopped carrying information once the
-  /// ladder reached six rungs -- there is no honest adjective after "extra large" -- and they were
-  /// hand-listed as StrId vectors in four separate places, indexed by enum value, which is the
-  /// same shape as the point-size copy that had already gone stale. Deriving the label from
-  /// FONT_SIZE_RUNGS means changing a rung is one edit. It also just tells a reader who needs
-  /// 20 pt what they are choosing.
-  ///
-  /// Empty if `size` names no rung. Untranslated: the numeral carries the meaning and "pt" is the
-  /// unit in every locale this ships with.
-  ///
-  /// Inline because the ladder is exactly the kind of thing a host test should hold still, and linking the NVS half of
-  /// CrossPointSettings.cpp to reach it would mean it never got one.
-  static std::string fontSizeLabel(const uint8_t size) {
-    const uint8_t pt = fontSizePoints(size);
-    if (pt == 0) return {};
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%upt", static_cast<unsigned>(pt));
-    return buf;
-  }
-
-  /// The whole label list for a font-size row, ready to assign to SettingInfo::enumLabels.
-  ///
-  /// Indexed by enum VALUE, which since the renumbering is also ladder order. `defaultLabel`, when
-  /// given, is the "Default" entry the per-book override rows carry at index 0, which shifts
-  /// every real value up by one.
-  static std::vector<std::string> fontSizeLabels(const char* const defaultLabel = nullptr) {
-    const size_t shift = defaultLabel ? 1 : 0;
-    std::vector<std::string> labels(static_cast<size_t>(FONT_SIZE_COUNT) + shift);
-    if (defaultLabel) labels[0] = defaultLabel;
-    // By enum VALUE. ladderCoversEveryFontSize() guarantees that leaves no slot empty.
-    for (const ReaderFontRung& r : FONT_SIZE_RUNGS) labels[r.size + shift] = fontSizeLabel(r.size);
-    return labels;
-  }
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
@@ -971,8 +936,8 @@ class CrossPointSettings {
 // own definition -- the class is still incomplete there.
 static_assert(CrossPointSettings::FONT_SIZE_RUNG_COUNT == static_cast<int>(CrossPointSettings::FONT_SIZE_COUNT) &&
                   CrossPointSettings::ladderCoversEveryFontSize(),
-              "every FONT_SIZE must appear exactly once in FONT_SIZE_RUNGS; the settings UI indexes its label "
-              "list by enum value and a gap would render as a blank, selectable row");
+              "every FONT_SIZE must appear exactly once in FONT_SIZE_RUNGS; a FONT_SIZE without a rung has no "
+              "point size, and builtinRungForPoints() could never choose it");
 
 // Helper macro to access settings
 #define SETTINGS CrossPointSettings::getInstance()

@@ -9,10 +9,8 @@ namespace {
 
 using S = CrossPointSettings;
 
-// The invariant the settings UI depends on: a font-size row's option INDEX is its stored value,
-// so the enum has to run in ascending pixel order or the picker lists the sizes out of order.
-// That was tolerable while the labels read "Small / Medium / Tiny"; it is not once they read
-// "12pt / 14pt / 10pt". FONT_SIZE was renumbered to make it true -- see FONT_SIZE_ORDER_VERSION.
+// The enum runs in pixel order (see FONT_SIZE_ORDER_VERSION 1). Nothing indexes by it any more, but
+// a file stamped 1 is converted by it, so the order is history that must not move.
 TEST(FontSizeLadder, EnumValueIsLadderPosition) {
   for (int i = 0; i < S::FONT_SIZE_RUNG_COUNT; ++i) {
     EXPECT_EQ(i, S::FONT_SIZE_RUNGS[i].size) << "rung " << i << " does not sit at its own enum value";
@@ -91,43 +89,10 @@ TEST(FontSizeLadder, MigrationLeavesAValueItDoesNotRecognise) {
   EXPECT_EQ(200, S::remapLegacyFontSize(200, 0));
 }
 
-// --- the labels -------------------------------------------------------------------------------
-
-TEST(FontSizeLadder, LabelsReadAsPointSizes) {
-  // Every rung's label is its own point size with "pt" appended -- checked against the table for
-  // all of them rather than spot-checking three, which is what let a stale "24pt" survive here
-  // after PT_20 was redefined as 20 pt.
-  for (const auto& rung : S::FONT_SIZE_RUNGS) {
-    EXPECT_EQ(std::to_string(rung.points) + "pt", S::fontSizeLabel(rung.size));
-  }
-  EXPECT_EQ("", S::fontSizeLabel(200)) << "a value off the ladder has no label to show";
-}
-
-// enumLabels is indexed by stored value, so a gap would render as a blank but selectable row.
-TEST(FontSizeLadder, LabelListHasNoBlanksAndIsInAscendingOrder) {
-  const auto labels = S::fontSizeLabels();
-  ASSERT_EQ(static_cast<size_t>(S::FONT_SIZE_COUNT), labels.size());
-  for (int v = 0; v < S::FONT_SIZE_COUNT; ++v) {
-    EXPECT_EQ(S::fontSizeLabel(static_cast<uint8_t>(v)), labels[v]);
-    EXPECT_FALSE(labels[v].empty());
-  }
-  // Against the table, not a literal. These were "10pt" and "24pt" hardcoded, and the second went
-  // stale the moment a size was added above it -- the exact failure mode FONT_SIZE_RUNGS exists to
-  // stop, reproduced in the test that guards it.
-  EXPECT_EQ(S::fontSizeLabel(S::FONT_SIZE_RUNGS[0].size), labels.front());
-  EXPECT_EQ(S::fontSizeLabel(S::FONT_SIZE_RUNGS[S::FONT_SIZE_RUNG_COUNT - 1].size), labels.back());
-  // And the ladder really is ascending, which is what makes front()/back() meaningful at all.
+// builtinRungForPoints() and ReaderSizeList::builtin() both assume the table runs smallest first.
+TEST(FontSizeLadder, LadderIsAscending) {
   for (int i = 1; i < S::FONT_SIZE_RUNG_COUNT; ++i) {
     EXPECT_LT(S::FONT_SIZE_RUNGS[i - 1].points, S::FONT_SIZE_RUNGS[i].points);
-  }
-}
-
-TEST(FontSizeLadder, DefaultEntryShiftsEveryValueByOne) {
-  const auto labels = S::fontSizeLabels("Default");
-  ASSERT_EQ(static_cast<size_t>(S::FONT_SIZE_COUNT) + 1, labels.size());
-  EXPECT_EQ("Default", labels[0]);
-  for (int v = 0; v < S::FONT_SIZE_COUNT; ++v) {
-    EXPECT_EQ(S::fontSizeLabel(static_cast<uint8_t>(v)), labels[v + 1]);
   }
 }
 

@@ -109,6 +109,13 @@ void setSizeFromIndex(const char* family, uint8_t& pointSize, const uint8_t inde
   const ReaderSizeList sizes = sdFontSystem.sizeListFor(family);
   if (index < sizes.count) pointSize = sizes.points[index];
 }
+
+uint8_t sizeOptionCount(const char* family) { return sdFontSystem.sizeListFor(family).count; }
+
+std::string sizeOptionLabel(const char* family, const uint8_t index) {
+  const ReaderSizeList sizes = sdFontSystem.sizeListFor(family);
+  return index < sizes.count ? fontPointSizeLabel(sizes.points[index]) : std::string();
+}
 }  // namespace
 
 uint8_t fontSizeDynamicGetter(const void* /*ctx*/) {
@@ -127,16 +134,38 @@ void txtFontSizeDynamicSetter(void* /*ctx*/, const uint8_t index) {
   setSizeFromIndex(SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontPointSize, index);
 }
 
+uint8_t fontSizeOptionCount(const void* /*ctx*/) { return sizeOptionCount(SETTINGS.sdFontFamilyName); }
+
+std::string fontSizeOptionLabel(const void* /*ctx*/, const uint8_t index) {
+  return sizeOptionLabel(SETTINGS.sdFontFamilyName, index);
+}
+
+uint8_t txtFontSizeOptionCount(const void* /*ctx*/) { return sizeOptionCount(SETTINGS.txtSdFontFamilyName); }
+
+std::string txtFontSizeOptionLabel(const void* /*ctx*/, const uint8_t index) {
+  return sizeOptionLabel(SETTINGS.txtSdFontFamilyName, index);
+}
+
 const char* bookSdFontFamily(const int8_t builtinFamilyOverride, const std::string& sdFamilyOverride) {
   if (builtinFamilyOverride >= 0) return "";
   if (!sdFamilyOverride.empty()) return sdFamilyOverride.c_str();
   return SETTINGS.sdFontFamilyName;
 }
 
-ReaderSizeList SdCardFontSystem::sizeListFor(const char* /*familyName*/) const {
-  // Every family offers the reader ladder. A size the family has no file for is drawn from its
-  // closest face, scaled (SdCardFontManager::ensureSizeAlias).
-  return ReaderSizeList::builtin();
+ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
+  if (!familyName || familyName[0] == '\0') return ReaderSizeList::builtin();
+  // Names compared in place: findFamily() takes a std::string, and this runs while pages are laid
+  // out, where building one for a long family name would allocate.
+  for (const auto& family : registry_.getFamilies()) {
+    if (family.name != familyName) continue;
+    uint8_t sizes[ReaderSizeList::kCapacity];
+    size_t n = 0;
+    for (const auto& file : family.files) {
+      if (n < ReaderSizeList::kCapacity) sizes[n++] = file.pointSize;
+    }
+    return ReaderSizeList::forFamily(sizes, n);
+  }
+  return ReaderSizeList::builtin();  // not on the card: the reader draws a built-in family
 }
 
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
