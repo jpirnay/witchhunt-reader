@@ -70,6 +70,29 @@ TEST(FontSizeLadder, LadderCoversEverySize) {
   }
 }
 
+// --- the built-in rung a point size is drawn with ----------------------------------------------
+
+TEST(FontSizeLadder, ALadderSizeIsDrawnWithItsOwnRung) {
+  for (const auto& rung : S::FONT_SIZE_RUNGS) {
+    EXPECT_EQ(rung.size, S::builtinRungForPoints(rung.points)) << +rung.points << "pt";
+  }
+}
+
+// A size chosen under an SD family has no built-in face of its own; the nearest rung draws it.
+TEST(FontSizeLadder, AnOffLadderSizeIsDrawnWithTheNearestRung) {
+  const auto& smallest = S::FONT_SIZE_RUNGS[0];
+  const auto& largest = S::FONT_SIZE_RUNGS[S::FONT_SIZE_RUNG_COUNT - 1];
+  EXPECT_EQ(smallest.size, S::builtinRungForPoints(static_cast<uint8_t>(smallest.points - 3)));
+  EXPECT_EQ(largest.size, S::builtinRungForPoints(static_cast<uint8_t>(largest.points + 10)));
+  for (int i = 1; i < S::FONT_SIZE_RUNG_COUNT; ++i) {
+    const int a = S::FONT_SIZE_RUNGS[i - 1].points;
+    const int b = S::FONT_SIZE_RUNGS[i].points;
+    if ((a + b) % 2 != 0) continue;
+    EXPECT_EQ(S::FONT_SIZE_RUNGS[i - 1].size, S::builtinRungForPoints(static_cast<uint8_t>((a + b) / 2)))
+        << "a tie between " << a << " and " << b << " goes to the smaller";
+  }
+}
+
 // --- the v0 -> v1 renumbering -----------------------------------------------------------------
 
 // What migration has to preserve is not a number but a SIZE: whatever point size a reader had

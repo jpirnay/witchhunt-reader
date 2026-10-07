@@ -179,7 +179,7 @@ class CrossPointSettings {
   /// Adding a size at the TOP is: append a rung here, add the case to getBuiltinReaderFontId(),
   /// generate the faces, register them in main.cpp.
   struct ReaderFontRung {
-    uint8_t size;    ///< a FONT_SIZE value
+    FONT_SIZE size;
     uint8_t points;  ///< the point size its faces are generated at
   };
   static constexpr ReaderFontRung FONT_SIZE_RUNGS[] = {
@@ -202,6 +202,22 @@ class CrossPointSettings {
       if (fontSizePoints(static_cast<uint8_t>(v)) == 0) return false;
     }
     return true;
+  }
+
+  /// The built-in rung that draws `pt`: the closest one, ties to the smaller. Built-in faces exist
+  /// only on the ladder, so a size chosen under an SD family is drawn with the nearest of them.
+  /// Must agree with ReaderSizeList::builtin().snap(), which is what the settings row shows.
+  static constexpr FONT_SIZE builtinRungForPoints(const uint8_t pt) {
+    FONT_SIZE best = FONT_SIZE_RUNGS[0].size;
+    int bestDiff = 256;
+    for (const ReaderFontRung& r : FONT_SIZE_RUNGS) {
+      const int diff = r.points > pt ? r.points - pt : pt - r.points;
+      if (diff < bestDiff) {
+        best = r.size;
+        bestDiff = diff;
+      }
+    }
+    return best;
   }
 
   /// What a font-size row displays: the point size itself, "14pt".
