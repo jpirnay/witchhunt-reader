@@ -1,6 +1,6 @@
 # Testing and Debugging
 
-CrossPoint runs on real hardware, so debugging usually combines local build checks and on-device logs.
+CrossPoint runs on real hardware, so debugging usually combines local build checks, host-side tests and on-device logs.
 
 ## Local checks
 
@@ -12,6 +12,85 @@ If needed, see [Getting Started](./getting-started.md).
 pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 pio run
 ```
+
+## Host tests
+
+Parsing, layout, cache and most non-UI code is covered by GoogleTest suites in `test/`, built with CMake and run on the development machine. CI runs them on every push and pull request (`.github/workflows/ci.yml`, the host test job):
+
+```sh
+cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/test
+ctest --test-dir build/test --output-on-failure -j
+```
+
+Any build directory works; `test/build` is a common local choice, and every `build*/` directory is git-ignored. To iterate from inside one:
+
+```sh
+cd test/build
+cmake --build . -j 8
+ctest -j 8 --output-on-failure
+ctest -R EpubPipeline          # one suite by name
+```
+
+GoogleTest is fetched on the first configure. `test/README` has the per-suite commands and the offline KOReader sync checks, which the host toolchain cannot build.
+
+**On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. One tool does not build on Windows: `epub_build_inventory` needs `dlfcn.h` and `execinfo.h`. Pass `-k 0` to Ninja so the rest of the suite builds anyway:
+
+```sh
+cmake --build . -j 8 -- -k 0
+```
+
+**Golden files.** `EpubPipelineTest` compares a layout dump of every book in `test/epubs` against `test/epub_pipeline/goldens`. When a change is meant to move layout, regenerate them and say why in the commit:
+
+```sh
+UPDATE_GOLDENS=1 ctest -R EpubPipeline
+```
+
+When a change should move layout but not content, compare word streams rather than whole goldens: take the `t=` field of every `W x=… s=… z=… t=…` record in the dump, in order, before and after the change. Redirect stderr to a separate file first; an interleaved `BENCHMARK` line can split a record. The dump covers table cells too, in row order, so the word stream stays the same when a table switches between grid and paragraph layout. It does not cover anchors; `AnchorMapTest` and `AnchorPageAccuracyTest` do.
+
+`HeapPeakRegression` guards the heap peak of a section build; see the next section.
+
+## Measuring memory
+
+[Memory Allocation Strategy §7](../memory-allocation-strategy.md#7-measuring-memory) explains what each tool and log line measures. To reproduce a measurement:
+
+**On the host**, from the repository root, with `B` set to your host build directory:
+
+```sh
+B=build/test
+WH_HOST_STDIO_UNBUFFERED=1 $B/epub_pipeline/epub_pipeline_dump book.epub /tmp/cache-a --bench > dump.txt 2> bench.txt
+WH_HOST_STDIO_UNBUFFERED=1 $B/epub_pipeline/epub_pipeline_dump book.epub /tmp/cache-b --bench --arena=52272 > dump.txt 2> bench.txt
+```
+
+The first run models a build with nothing lent, the second a build in the X3's borrowed framebuffer (use 48000 for the X4). Use an empty cache directory for a cold build. `bench.txt` has the per-spine times, `heap_peak`, the allocation size histogram and the largest allocation sites. `test/epub_pipeline/run_baseline.sh $B/epub_pipeline/epub_pipeline_dump` tabulates time and peak heap over the whole corpus. `epub_pipeline_dump_noheap` is the same tool without the heap tracker, for when only the layout dump is needed.
+
+`ctest -R HeapPeakRegression` checks six fixtures in both modes against `test/epub_pipeline/heap_peak_baseline.txt`. When a change lowers or raises a peak on purpose, re-baseline and explain it in the commit:
+
+```sh
+UPDATE_HEAP_BASELINE=1 ctest --test-dir $B -R HeapPeakRegression
+```
+
+For a site-by-site inventory of one build (Linux only):
+
+```sh
+$B/epub_pipeline/epub_build_inventory book.epub /tmp/cache-c /tmp/inventory --arena=52272 --spines=3
+python3 test/epub_pipeline/inventory_report.py $B/epub_pipeline/epub_build_inventory /tmp/inventory/spine_3.txt > report.md
+```
+
+**On a device**, flash `env:default` and read the `[MEM]`, `Reader mem[...]`, `FBUF` and `createSectionFile ... arena:` lines from the serial log. For a deeper trace, define a local env in `platformio.local.ini`, which is git-ignored and loaded through `extra_configs`. Name the build in `CROSSPOINT_VERSION`, which only `env:default` gets automatically and which the boot log echoes:
+
+```ini
+[env:memtrace]
+extends = base, firmware_tuned
+build_flags =
+  ${c3.build_flags}
+  -DCROSSPOINT_VERSION=\"${crosspoint.version}-memtrace\"
+  -DENABLE_SERIAL_LOG
+  -DLOG_LEVEL=2
+  -DSCT_HEAP_TRACE=1
+```
+
+Then `pio run -e memtrace --target upload`. `SCT_HEAP_TRACE=1` adds a heap and arena line per page of every section build, `HEAP_GATE_TRACE=1` makes every reader heap gate print its arithmetic, and `EHP_FORCE_BLOCKING_BUILD` pins every section to the blocking build so two runs take the same path. To compare two firmware variants, clear the book's cache before each run and compare changes across one step of a run rather than end-to-end values: the heap a run starts from varies more than many effects being measured.
 
 ## Flash and monitor
 
@@ -137,5 +216,5 @@ After a local `act` pass, a real GitHub Actions run is still required to verify:
 
 ## Common troubleshooting references
 
-- [User Guide troubleshooting section](../../USER_GUIDE.md#7-troubleshooting-issues--escaping-bootloop)
+- [User Guide troubleshooting section](../../USER_GUIDE.md#8-troubleshooting-issues--escaping-bootloop)
 - [Webserver troubleshooting](../troubleshooting.md)

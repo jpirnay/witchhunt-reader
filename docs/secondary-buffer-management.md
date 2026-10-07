@@ -1,307 +1,394 @@
-# Secondary Frame Buffer Management
+# Framebuffers, baselines and the secondary buffer
 
-## Background
+Reference for what each framebuffer holds and when, where each panel controller keeps its "previous
+frame", and how to lend or release the secondary buffer safely. Read it before writing code that
+borrows or releases the secondary, draws on top of the frame on screen, or adds a grayscale path.
 
-The X3 (UC8179) and X4 (SSD1677) controllers both use a **differential fast-refresh**
-scheme: the controller compares a new-frame bitmap against a previous-frame baseline
-and only drives pixels that changed. On X3 both bitmaps live in controller RAM (DTM1 /
-DTM2); on X4 the previous-frame baseline is held in RED RAM which the host must keep
-current.
+The display facade is `freeink::FreeInkDisplay` in the freeink-sdk submodule
+(`libs/display/FreeInkDisplay`). `EInkDisplay.h` is only a compatibility alias
+(`using EInkDisplay = freeink::FreeInkDisplay;`). The firmware reaches the facade through `HalDisplay`
+(`lib/hal`) and `GfxRenderer`. Open problems in this area are in
+[future_work/display-and-refresh.md](future_work/display-and-refresh.md).
 
-On X4, `syncRedRamFromFrameBuffer()` writes the host-side previous-frame copy into
-RED RAM after every `displayBuffer()` call, keeping the baseline current. On X3 this
-call is a no-op — the controller manages its own baseline.
+---
 
-`EInkDisplay` allocates two heap buffers at `begin()` time:
+## 1. Four things called "the previous frame"
 
-| Name | Role |
+They are different objects, and bug reports in this repo have mixed them up more than once.
+
+| Name | What it is | Owner |
+|---|---|---|
+| **Glass** | The physical particle state, the only truth. After an anti-aliased page it holds grey at every glyph edge. | Physics |
+| **Controller baseline** | What the controller diffs a new frame against. | Controller RAM (UltraChip DTM1, SSD1677 RED) or, on the T5S3, LovyanGFX's own panel buffers |
+| **Host copy** (`frameBufferActive`) | The frame the host last pushed. | `FreeInkDisplay` |
+| **Advisory flags** | Bits that claim the baseline is in sync: the facade's `_redRamSynced`, and each driver's own (`_redRamSynced`, `_oldPlaneValid`, `_needFullClear`, `_inGrayscaleMode`, ...). | The facade and each driver separately |
+
+**The host copy is the controller baseline on one controller only: the SSD1677**, which takes it as
+`prev`. Every other driver ignores `prev` and keeps its own baseline. So borrowing, releasing or
+reseeding the secondary changes what the host believes is on the panel (which is what overlays,
+popups, screenshots and Quick Resume read), and on the SSD1677 also what the next FAST diffs against.
+
+---
+
+## 2. Boards and controllers
+
+| Board | Controller | Driver | Baseline lives in | Host buffer |
+|---|---|---|---|---|
+| X3 (ESP32-C3) | UC8253; UC8279d on newer units | `Uc8253X3Driver`, `Uc8279Driver` | DTM1 ("old" plane) | 792×528, 52,272 B |
+| X4 (ESP32-C3) | SSD1677; UC8179 or UC8279 on newer units | `Ssd1677Driver`, `Uc8179Driver`, `Uc8279X4Driver` | SSD1677: RED RAM, written from `prev`. UltraChip: DTM1 | 800×480, 48,000 B |
+| X4 Pro (ESP32-S3) | same three as the X4 | same | same | 800×480, 48,000 B |
+| T5S3 (ESP32-S3) | ED047TC2 through LovyanGFX `Panel_EPD` | `LgfxEpdDriver` | LovyanGFX's 4-bpp panel buffer and step buffer | 960×540, 64,800 B |
+
+The controller is found at boot by a display-bus probe (`freeink::applyXteinkDisplayController()`,
+called from `HalGPIO::begin()` on the C3 and from `HalDisplay::begin()` on the S3), and
+`FreeInkDisplay::selectDriver()` picks the driver from `BoardConfig::ACTIVE.displayController`.
+Settings > System Information shows which controller a unit has. Controller overview:
+[contributing/eink-controllers.md](contributing/eink-controllers.md). T5S3 panel:
+[lilygo-t5s3-display-stack.md](lilygo-t5s3-display-stack.md).
+
+---
+
+## 3. The host buffers
+
+`FreeInkDisplay::begin()` allocates two framebuffer-sized heap blocks (`frameBuffer0`, `frameBuffer1`)
+with plain `malloc` (`FREEINK_FB_PSRAM` is off on all four boards). The firmware is always
+dual-buffer: it never defines `EINK_DISPLAY_SINGLE_BUFFER_MODE`.
+
+| Pointer | Meaning |
 |---|---|
-| `frameBuffer` | Active write target — glyph rendering, `clearScreen()`, etc. write here |
-| `frameBufferActive` | Previous-frame copy — written to RED RAM before each fast refresh |
+| `frameBuffer` | The write target: `clearScreen()`, glyphs and bitmaps land here. |
+| `frameBufferActive` | The secondary. After a full-frame refresh it holds the frame just pushed. |
+| `_secondaryLent` | The secondary block while it is lent out (private). |
 
-`swapBuffers()` (called inside `triggerDisplay()`) exchanges the two pointers so that
-after a refresh `frameBufferActive` holds the frame just sent to the panel, and
-`frameBuffer` points to the now-free slot ready for the next render.
+`displayBuffer()`, `triggerDisplay()` and `triggerDisplayAsync()` end in `swapBuffers()`, so right
+after a refresh:
 
-On X4, each buffer is ~48 KB. Together they are the largest single heap consumer in
-the system.
+```
+frameBufferActive = the frame just pushed (what the panel shows)
+frameBuffer       = the frame pushed before it (one generation stale)
+```
+
+These do **not** swap:
+- `displayGrayBuffer()`: the two-push AA flow relies on `frameBufferActive` still holding the base it
+  pushed.
+- `displayGrayscaleFrame()`, `triggerGrayscaleFrame()`, `displayGray8Canvas()`: the only driver that
+  supports them (LGFX) diffs against its own buffer.
+- `displayWindow()`: see "Common mistakes".
+
+`swapBuffers()` does nothing while the secondary is away, so the write buffer then also holds what
+was last pushed.
+
+The invariant every compositing consumer relies on:
+
+> **I1:** after a refresh, `frameBufferActive` is the panel content, and
+> `syncWriteBufferFromDisplayed()` can restore the write buffer from it.
+
+I1 holds only while the secondary is resident and has not been reseeded since the last full-frame
+refresh.
+
+### What else ends up in the write buffer
+
+| Producer | Write buffer afterwards | Recoverable from the secondary? |
+|---|---|---|
+| Any swapping refresh | The previous frame. | Yes |
+| Background-A pre-render (`renderPreRenderPass`) | The **next** page. The pre-render lives in the write buffer, not the secondary. | Yes |
+| Grayscale plane pass (`renderGrayscalePlanesSequential` / `Interleaved`) | The LSB, then the MSB plane, until the cleanup at its tail copies the displayed frame back. | Yes if resident. With the secondary away the plane stays. |
+| `borrowSecondaryBuffer()` | Untouched: the frame from before the last refresh. No copy of the panel exists anywhere. | No |
+| `HalDisplay::releaseSecondaryBuffer()` | The displayed frame, copied in before the free; then free for any use. | No, once overwritten |
+| `returnSecondaryBuffer()` / `reallocSecondaryBuffer()` | Untouched, but the **secondary** is now a copy of the write buffer (or white) and reports resident. | No, and it looks as if it were |
+
+### Who relies on I1
+
+- Every `syncWriteBufferFromDisplayed()` caller, including `BaseTheme::drawPopup()` and
+  `drawBusyIndicator()` with `overlayDisplayedFrame=true`. `syncWriteBufferFromActive()` underneath is
+  gated on `frameBufferActive` and silently does nothing while the secondary is away.
+- `ActivityManager::dispatchLightPanelGesture()` and the screenshot path in `main.cpp`: sync, then
+  `prepareFramebufferForCapture()`, which lets the reader re-render the current page when the write
+  buffer holds a pre-render.
+- `SleepActivity::renderOverlaySleepScreen()` and `renderLastScreenSleepScreen()`: they draw onto
+  whatever the write buffer holds.
+- `saveSleepFrameBuffer()` in `main.cpp`: saves `getFrameBuffer()` after the sleep screen's refresh.
 
 ---
 
-## Scenario 1 — Temporary release for CPU/heap-intensive work
+## 4. Per controller: baseline, refresh modes, grayscale
 
-### When to use
+### UC8253 (X3)
 
-When a render-heavy or heap-hungry operation must run while the reader is still active
-and will display more pages afterwards. Examples:
+- **Baseline:** DTM1, rewritten from `fb` in `displayFinish()` after every refresh. `prev` is ignored.
+- **FAST:** `_fast` bank, differential against DTM1.
+- **HALF:** `_half` bank, WW==BW and WB==BB: every pixel is driven toward its target regardless of
+  DTM1. One short pass, not an inverting clear.
+- **FULL:** DTM1 ← white, `_full` bank, long timing. FULL also runs for any request while
+  `_redRamSynced` is false, a resync is pending or boot full-syncs remain.
+- **Grayscale overlay** (reader AA): LSB → DTM1, MSB → DTM2, `gc` nudge bank.
+- **Grayscale absolute** (sleep cover, BMP viewer): `beginGrayscale(Absolute)` first pushes a real B/W
+  base through `displayGrayscaleBase()`; the planes then go out under a bank that leaves WW and BB
+  idle. It can add greys to a base; it cannot remove what the base left.
+- **`displayGrayscaleBase()`:** takes a clean base (a real `display()` in the fallback mode, then the
+  `_aa_pre_bw_mid` settle) when `cleanBaseNeeded`; otherwise the gentle `_aa_pre_bw_mid` differential
+  against DTM1.
+- **`_grayOnGlass`:** set by every gray waveform; cleared only by `_full`, `_half` or
+  `grayscaleRevert()`, never by a RAM restore; part of `cleanBaseNeeded`. It keeps a sleep cover after
+  AA pages from diffing against greys that are still on the glass.
+- **`cleanupGrayscaleBuffers(bw)`:** DTM1 = DTM2 = `bw`, `_redRamSynced = true`. With `nullptr`:
+  `_redRamSynced = false`, so the next push is FULL.
 
-- Section/chapter indexing (CSS parser + image decoder)
-- Per-image-page JPEG/PNG warm pass
-- OOM recovery after a failed indexing attempt
+`_redRamSynced` is false only between `displayGray()` and the cleanup that follows it. In normal
+reading every turn is `_fast`, every periodic scrub is `_half`, and `_full` does not run.
 
-### Procedure
+### UC8279d (X3, newer units)
 
-```
-1. Ensure no waveform is in flight (do not call between triggerDisplay and completeDisplay).
+- **Baseline:** DTM1, synced in `displayFinish()`. `prev` is ignored.
+- **FAST:** DU bank against DTM1, only with `_oldPlaneValid`.
+- **HALF and FULL:** GC bank diffed against the real previous frame, not a white seed (a white seed
+  left white-to-white pixels undriven, and the previous screen ghosted through).
+- **Grayscale:** XTF_AA nudge (overlay) or XTH4 (absolute). Afterwards `_oldPlaneValid = false`; an
+  absolute pass also sets `_forceFullSyncNext`.
+- **`displayGrayscaleBase()`:** the same two branches as UC8253, but no grey-on-glass state.
+- **`cleanupGrayscaleBuffers(bw)`:** both planes ← `bw`, `_oldPlaneValid = true`. With `nullptr`:
+  `_oldPlaneValid = false`, `_forceFullSyncNext = true`.
 
-2. Call syncRedRamFromFrameBuffer() BEFORE releasing the secondary buffer.
-   This writes the current last-displayed frame into RED RAM while frameBufferActive
-   is still valid. RED RAM will then retain this baseline independently of the host
-   for as long as the controller remains powered.
+### SSD1677 (X4, X4 Pro)
 
-3. Call releaseSecondaryBuffer().
-   frameBufferActive becomes nullptr. frameBuffer (the write target) is untouched.
-   ~48 KB is returned to the heap.
+- **Baseline:** RED RAM, managed by the host. FAST writes BW ← `fb` and RED ← `prev`, or keeps RED
+  when `prev` is null. HALF and FULL bypass RED (`CTRL1_BYPASS_RED`) and write both planes: absolute.
+- **After a blocking refresh with `prev == nullptr`** the driver rewrites BW and RED from `fb`. The
+  async path (`displayStart()`) skips that resync: with `prev == nullptr`, RED keeps what it held until
+  something rewrites it.
+- **`seedPreviousFrame()`** writes RED with no refresh. It is what `syncRedRamFromFrameBuffer()` reaches.
+- **Grayscale overlay:** LSB → BW RAM, MSB → RED RAM, custom LUT. `_inGrayscaleMode` then turns the
+  next FAST into HALF unless the cleanup ran.
+- **Grayscale absolute** (`_cfg.absoluteGrayscale`): `GrayscaleBase::Combined`. No base push; the
+  factory waveform drives every pixel from the two planes, and `_needsGrayClear` promotes the next FAST.
+- **`cleanupGrayscaleBuffers(bw)`:** RED ← `bw`, clears `_inGrayscaleMode`. With `nullptr`: nothing,
+  so the next FAST becomes HALF.
+- The first paint after boot or wake is promoted to HALF (`_needsInitialFull`).
 
-4. Perform the intensive work. BW display still works during this window:
-   - HALF_REFRESH and FULL_REFRESH work normally (no differential baseline needed).
-   - FAST_REFRESH requires opt-in: call setSingleBufferFastDiff(true) before any
-     display call. This leaves RED RAM unchanged and diffs against the controller's
-     retained copy. Only safe if:
-       a) syncRedRamFromFrameBuffer() was called in step 2, AND
-       b) No waveform type other than FAST has fired since step 2
-          (HALF/FULL overwrites RED RAM with the new frame, invalidating the baseline).
+### UC8179 (X4, X4 Pro)
 
-5. When work is complete, call reallocSecondaryBuffer().
-   The new buffer is initialised to white (0xFF). frameBufferActive is non-null again.
+- **Baseline:** DTM1 (OLD), synced in `displayFinish()`. `prev` is ignored.
+- **FAST:** DU partial against OLD, only with `_oldPlaneValid && !_needFullClear`.
+- **HALF:** charge scrub: OLD ← ~target, GC bank, so every pixel passes through a transition cell.
+- **FULL:** OLD ← white, GC bank.
+- **Grayscale:** `_grayBase` (a PSRAM snapshot of the B/W base; the allocation fails on the C3) restores
+  both planes after `displayGray()`, and `_redriveAfterGray` routes the next FAST through
+  `transitionGrayscaleBase()` (XTF_PRE_BW_MID, no flash) instead of a DU.
+- **`displayGrayscaleBase()`** treats a Half or Full fallback as a floor: only a Fast fallback may
+  become the differential transition.
+- **`cleanupGrayscaleBuffers(bw)`:** nothing to do if the planes were already restored from
+  `_grayBase`; otherwise both planes ← `bw`. With `nullptr`: `_needFullClear = true`.
 
-6. [X4 only] Call syncRedRamFromFrameBuffer() immediately after reallocSecondaryBuffer(),
-   before any clearScreen() for the next render. After reallocSecondaryBuffer() the new
-   frameBufferActive is white, so this call writes white into RED RAM. On the next
-   triggerDisplay(FAST_REFRESH) the controller diffs the new frame against white,
-   which drives all text pixels correctly. The first page after the realloc effectively
-   refreshes from a white baseline — acceptable for text, and avoids a slow HALF_REFRESH.
-   See "Implementation note on RED RAM reseed" below for the tradeoffs.
-   On X3 this call is a no-op and can be omitted, but calling it is harmless.
+### UC8279 800×480 (X4, X4 Pro)
 
-7. If setSingleBufferFastDiff(true) was set in step 4, call setSingleBufferFastDiff(false)
-   after reallocSecondaryBuffer() to restore normal double-buffer fast-diff behaviour.
-   (X4 only — X3 ignores this flag.)
+The same model as UC8179. After a grey page `_redriveAfterGray` makes the next FAST seed
+OLD ← ~target (a DU scrub). `displayGrayscaleBase()` promotes a Half fallback to a true Full GC.
+`cleanupGrayscaleBuffers(bw)` writes DTM1 only; with `nullptr` it sets `_needFullClear`.
 
-8. Resume normal rendering. The next triggerDisplay(FAST_REFRESH) will:
-   - Write frameBuffer (new frame) to BW RAM
-   - Write frameBufferActive (previous-frame copy) to RED RAM
-   - Fire the fast differential waveform
-```
+### ED047TC2 through LovyanGFX (T5S3)
 
-### Implementation note on RED RAM reseed after realloc
+- **Baseline:** inside LovyanGFX: `Panel_EPD`'s 4-bpp buffer and per-pixel step buffer. The driver's
+  8-bit PSRAM canvas is rebuilt from `fb` by `fillCanvasBW()` on every push. `prev` is ignored.
+- **FAST:** `epd_fast`, the differential bank. **HALF and FULL:** `epd_text`, the clean bank, after
+  `normalizeForCleanBank()` re-tags the screen so that the clean bank scrubs all of it.
+- **Reader AA:** single push (`displayGrayFrame()` / `displayGrayFrameStart()`): base and greys in one
+  waveform. The two-push overlay (`displayGray()`) darkens the canvas the base left
+  (`overlayCanvasGray()`) and refreshes under the base's bank.
+- **Sleep cover:** native 8-bit grey through `borrowGray8Canvas()` / `displayGray8Canvas()`; no planes.
+- **`cleanupGrayscaleBuffers(bw)`:** `fillCanvasBW(bw)`. The canvas is the next diff source, so a
+  wrong `bw` drives wrong pixels one refresh later. With `nullptr`: nothing; the next push rebuilds the
+  canvas anyway.
+- **Async:** `displayStart()` queues the push and returns; `displayFinish()` waits. The yield inside
+  the start is load-bearing; see the T5S3 doc.
 
-After `reallocSecondaryBuffer()` the new `frameBufferActive` is white (0xFF). Calling
-`syncRedRamFromFrameBuffer()` at this point writes white into RED RAM. The subsequent
-`triggerDisplay(FAST_REFRESH)` diffs the new frame against white, which correctly
-re-drives all text pixels. The first page after the realloc refreshes from a white
-baseline — harmless for text pages, and far cheaper (~12 ms SPI vs ~1600 ms HALF
-waveform).
+### What a grayscale pass leaves behind
 
-The strictly correct alternative is to call `syncRedRamFromFrameBuffer()` **before**
-`releaseSecondaryBuffer()`, while `frameBufferActive` still points to the previous
-frame. RED RAM would then hold the true last-displayed content throughout the release
-window. This is slightly better if a HALF_REFRESH fires during the window (because
-HALF does not overwrite RED RAM until the waveform starts), but for the typical
-text-page case the white-baseline approach is indistinguishable.
+After an AA pass on page N the glass is page N plus grey at every AA edge. What each driver believes
+after the cleanup:
+
+| Controller | Baseline after cleanup | Remembers the grey? |
+|---|---|---|
+| UC8253 | DTM1 = DTM2 = B/W page N | Yes: `_grayOnGlass` |
+| UC8279d | DTM1 = DTM2 = B/W page N | **No** |
+| SSD1677 | RED = B/W page N | **No.** Its sleep cover is still safe: the absolute pass has no base push. |
+| UC8179 | both planes = B/W page N, from `_grayBase` | Yes: `_redriveAfterGray`, the next FAST is the XTF_PRE_BW_MID transition |
+| UC8279 X4 | DTM1 = B/W page N | Yes: `_redriveAfterGray`, the next FAST seeds OLD = ~target |
+| LGFX | canvas = B/W page N | LovyanGFX knows what it pushed; the host canvas does not |
+
+Whether a missing memory shows depends on whether the next push's waveform moves a grey pixel to its
+rail. On UC8253 one `_half` clears it and the differential `_aa_pre_bw_mid` does not (X3,
+2026-09-23); that is why `_grayOnGlass` forces the clean branch.
+
+### Cross-controller facts
+
+- `prev` is consumed by the SSD1677 only.
+- HALF is a different waveform on each controller: single-pass target drive (UC8253), GC diff against
+  the real old frame (UC8279d), BYPASS_RED absolute (SSD1677), charge scrub (UC8179), invert-seed
+  scrub (UC8279 X4), clean bank (T5S3). A fix tuned on one does not carry over by mode name.
+- `cleanupGrayscaleBuffers(nullptr)` means "no baseline, take a clean sync on the next push"
+  everywhere, implemented differently: UC8253 drops `_redRamSynced`; UC8279d sets
+  `_forceFullSyncNext`; UC8179 and UC8279 X4 set `_needFullClear`; SSD1677 leaves `_inGrayscaleMode`
+  set so the next FAST becomes HALF; LGFX rebuilds its canvas on the next push.
+- `displayGrayBuffer()` hands every driver the write buffer, which holds the last plane at that point.
+  SSD1677, UC8253 and UC8279d ignore it; UC8179 and UC8279 X4 use `_grayBase`; LGFX darkens its canvas.
+  `HalDisplay::displayGrayBuffer()` still copies the displayed frame into the write buffer first, on
+  LGFX only.
+- `GfxRenderer::beginAbsoluteGrayPass()` consumes a pending refresh override (for example the HALF the
+  reader arms on exit) and hands it to the driver as the base mode.
+- The facade's `_redRamSynced` (`isRedRamSynced()`) is advisory and means something only for the
+  SSD1677; it is always false on the X3. The `redSynced=` field in `[FBUF]` log lines is this flag
+  and prints `n/a` on the X3. It says nothing about any driver's own flags.
 
 ---
 
-## Scenario 2 — Full release when no further display output is needed
+## 5. Lending the secondary
 
-### When to use
+There are three ways to get framebuffer memory back. Prefer the first.
 
-When the device is about to reboot or enter deep sleep and the display buffers are no
-longer needed. Examples:
+| | Borrow (`borrowSecondaryBuffer` / `returnSecondaryBuffer`) | Release (`releaseSecondaryBuffer` / `reallocSecondaryBuffer`) |
+|---|---|---|
+| The block | stays owned by the display; handed out as scratch (callers wrap it in a `BuildArena`) | freed to the heap |
+| Getting it back | cannot fail | realloc can fail on a fragmented heap |
+| Write buffer on entry | untouched: the frame from before the last refresh | `HalDisplay` copies the displayed frame in first |
+| Pending refresh | drained | drained |
+| On return | secondary seeded from the write buffer; one-shot RED handling armed | same |
 
-- Wi-Fi / web server session (large heap required, device reboots on exit)
-- Deep sleep entry (display put into hardware sleep, no further host-side rendering)
+The third way, releasing **both** buffers, is only for sessions that end in a reboot (Scenario 2).
 
-### Procedure
+Borrowers today: Home cover loading, File Browser titles and covers, first-open indexing in
+`ReaderActivity`, the reader's Background-B and Background-C builds, and the image-header walk.
+Releasers: `trimMemoryForNetworkSession()` (network sessions, which reboot), `SerialTransferActivity`
+under low heap, `SleepActivity` (cover and custom screens), and the reader's blocking section build.
 
-```
-1. Finish all pending display work. Ensure completeDisplay() has been called if
-   triggerDisplay() was used.
+### Scenario 1 — a temporary lend while the screen stays live
 
-2. Call display.deepSleep() to put the controller into its low-power state.
-   This powers down the panel and sends CMD_DEEP_SLEEP to the SSD1677.
-   The controller retains its last-displayed frame in non-volatile RED RAM.
+1. Hold the render lock.
+2. If you will draw on top of the current screen while the block is out, call
+   `syncWriteBufferFromDisplayed()` first. A borrow does not seed the write buffer.
+3. On a non-X3 board call `syncRedRamFromFrameBuffer()` while `frameBufferActive` still holds the
+   displayed frame. On the SSD1677 this writes it into RED; elsewhere it does nothing.
+4. Borrow (or release).
+5. If FAST refreshes will happen during the window, call `setSingleBufferFastDiff(true)`. Without it
+   every FAST on a non-X3 board becomes HALF.
+6. Do the work. B/W refreshes work; anti-aliasing does not (the reader turns AA off while
+   `hasSecondaryBuffer()` is false).
+7. Return (or realloc), then `setSingleBufferFastDiff(false)`. No reseed is needed: the return arms a
+   one-shot (`_redBaselineAuthoritative`), so the next full-frame FAST diffs against the RED plane the
+   SSD1677 kept rather than against the unproven seed.
 
-3. Call display.releaseBuffers().
-   Both frameBuffer0 and frameBuffer1 are freed. frameBuffer and frameBufferActive
-   become nullptr. ~96 KB is returned to the heap.
+Background-B seeds nothing and opts into nothing: no refresh happens while it holds the block, because
+every render takes the block back first (`recoverSecondaryBufferIfNeeded()`).
 
-4. After this point NO display methods may be called. Any attempt to render or
-   refresh will crash (null pointer write into frameBuffer).
+### Scenario 2 — releasing both buffers before a reboot
 
-5. On exit from this mode, the device MUST reboot. begin() re-allocates both
-   buffers, re-initialises the controller, and restores a known baseline.
-```
+`GfxRenderer::releaseFrameBuffers()` frees both buffers; the web server calls it after painting its
+QR screen. The panel keeps showing its last image. No display call may follow until the device
+reboots; `displayBuffer()` rejects a flush while the pointer is null. `releaseBuffers()` refuses while
+the secondary is lent, which is why `trimMemoryForNetworkSession()` returns a lent block first.
+`releaseFrameBuffersWithScratch()` installs a caller-owned scratch block as the write target, for the
+reader's pre-reboot image warm pass.
 
-### Deep sleep + QuickResume
+Deep sleep: `SleepActivity` releases the secondary for cover and custom screens and never reallocs;
+waking resets the chip. Quick Resume saves `getFrameBuffer()` to the SD card after the sleep screen
+(`saveSleepFrameBuffer()`); on wake `loadSleepFrameBuffer()` loads it and pushes it with HALF.
 
-If the intent is to resume with the screen content preserved (QuickResume):
+### Code patterns
 
-```
-1. Render the sleep screen via displayBuffer() normally.
-2. Optionally save frameBufferActive to a persistent sleep-frame file on SD for
-   restoration after wakeup.
-3. Call display.deepSleep().
-4. Call display.releaseBuffers() if additional heap is needed before sleep.
-5. On wakeup: re-init the display (begin()), load the saved sleep frame, call
-   displayBuffer(HALF_REFRESH) to restore the known-good baseline, then resume
-   normal operation.
-```
-
----
-
-## Code patterns
-
-### Pattern 1a — Temporary release, fast differential during window (X4)
+**Pattern 1a — release, keep FAST during the window** (`trimMemoryForNetworkSession()`,
+`SerialTransferActivity`):
 
 ```cpp
-// Seed RED RAM while frameBufferActive is still valid.
-if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
-
-// Free ~48 KB; allow fast differential from the controller's retained RED RAM.
-renderer.releaseSecondaryBuffer();
-renderer.setSingleBufferFastDiff(true);
-
-// ... heap-intensive work, BW page turns possible ...
-
-// Restore secondary buffer. New frameBufferActive is white.
-renderer.reallocSecondaryBuffer();
+if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();  // while the secondary holds the panel
+if (renderer.releaseSecondaryBuffer()) renderer.setSingleBufferFastDiff(true);
+// ... heap-hungry work; B/W refreshes stay FAST ...
+renderer.reallocSecondaryBuffer();           // skip when the session reboots
 renderer.setSingleBufferFastDiff(false);
-
-// X4: write white baseline into RED RAM. First post-realloc fast diff will be
-// against white, which correctly re-drives all text pixels.
-if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
 ```
 
-### Pattern 1b — Temporary release, HALF_REFRESH only during window
+**Pattern 1b — borrow as an arena** (`HomeActivity`, `FileBrowserActivity`, `ReaderActivity`):
 
 ```cpp
-// No syncRedRamFromFrameBuffer needed before release when fast diff is not required.
-renderer.releaseSecondaryBuffer();
-
-// ... work — display with HALF_REFRESH only ...
-
-renderer.reallocSecondaryBuffer();
+renderer.syncWriteBufferFromDisplayed();     // only if you will draw over the current screen
 if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+size_t size = 0;
+if (uint8_t* block = renderer.borrowSecondaryBuffer(&size)) {
+  renderer.setSingleBufferFastDiff(true);
+  // ... BuildArena arena(block, size); work ...
+  // destroy everything allocated in the arena before the block goes back
+  renderer.returnSecondaryBuffer();          // cannot fail
+  renderer.setSingleBufferFastDiff(false);
+}
 ```
 
-### Pattern 2 — Full release before reboot
+**Pattern 2 — release both before a reboot** (web server):
 
 ```cpp
-// Finish all pending display work before this point.
-renderer.deepSleep();      // power down controller, retains panel image
-renderer.releaseBuffers(); // frees both buffers (~96 KB); no display after this
-
-// ... network I/O, file operations, etc. ...
-
-esp_restart();             // reboot; begin() re-allocates buffers on next boot
+renderer.displayBuffer();        // the last frame this session shows
+renderer.releaseFrameBuffers();  // no display call until the reboot
 ```
 
----
+### Refresh-mode downgrade while the secondary is away
 
-## X3 vs X4 differences
+`FreeInkDisplay::resolveReleasedMode()` decides what a FAST request means:
 
-| Behaviour | X3 (UC8179) | X4 (SSD1677) |
-|---|---|---|
-| Previous-frame baseline | Lives in controller DTM1 RAM | Held in controller RED RAM, must be re-seeded by host via `syncRedRamFromFrameBuffer()` after every refresh |
-| Effect of releasing secondary buffer on fast differential | None — DTM1 is independent | Fast differential degrades to HALF unless `setSingleBufferFastDiff(true)` |
-| `syncRedRamFromFrameBuffer()` | No-op (returns immediately) | Writes 48 KB to controller RED RAM over SPI (~12 ms) |
-| Grayscale AA without secondary buffer | Not applicable (AA uses different path) | Unavailable — `getEffectiveTextAntiAliasing()` gates on `hasSecondaryBuffer()` |
-| `releaseSecondaryBuffer()` size freed | ~52 KB | ~48 KB |
-
----
-
-## Refresh-mode downgrade contract (while secondary is released)
-
-Releasing the secondary buffer changes what a `FAST_REFRESH` request means. The
-downgrade is applied automatically inside `triggerDisplay()` — callers do not need to
-sanitise the mode themselves — but the resulting behaviour must be understood:
-
-| State | `FAST_REFRESH` request resolves to |
+| State | A FAST request becomes |
 |---|---|
-| Secondary present (normal) | FAST — host reseeds RED RAM from `frameBufferActive` |
-| Secondary released, `setSingleBufferFastDiff(false)` (X4) | **Downgraded to HALF** — no host previous-frame copy to diff against |
-| Secondary released, `setSingleBufferFastDiff(true)` (X4) | FAST — diffs against the controller's retained RED RAM (only valid if RED RAM was seeded before release and no HALF/FULL fired since; see Scenario 1) |
-| Secondary released (X3) | FAST — DTM1 baseline lives in the controller, unaffected by the host release |
+| Secondary resident | FAST |
+| Away, opt-in off, X3 | FAST (the baseline is in DTM1) |
+| Away, opt-in off, any other board | **HALF** |
+| Away, `setSingleBufferFastDiff(true)` | FAST, diffing against what the controller kept |
 
-The invariant driving the downgrade is derived from the owning objects at refresh time
-(`hasSecondaryBuffer()` and `isRedRamSynced()`), **not** from a mirrored HAL-level mode
-flag. Do not introduce a shadow copy of this state: after a failed
-`reallocSecondaryBuffer()` the two sources would diverge, and the RED-RAM reseed
-subtleties (see "Implementation note on RED RAM reseed") make a mirrored flag likely to
-be wrong. Query the display, don't cache its state.
-
----
-
-## API reference
-
-All methods are on `EInkDisplay` (low level) and forwarded through `HalDisplay` and
-`GfxRenderer`.
-
-| Method | Layer | Description |
-|---|---|---|
-| `releaseSecondaryBuffer()` | EInkDisplay / HalDisplay / GfxRenderer | Frees `frameBufferActive`. Returns false if already null. |
-| `reallocSecondaryBuffer()` | EInkDisplay / HalDisplay / GfxRenderer | Allocates a new secondary buffer, initialised to 0xFF. Returns false on OOM. |
-| `hasSecondaryBuffer()` | EInkDisplay / HalDisplay / GfxRenderer | True when `frameBufferActive != nullptr`. |
-| `syncRedRamFromFrameBuffer()` | EInkDisplay / HalDisplay / GfxRenderer | Writes last-displayed frame to RED RAM. X4 only; no-op on X3. Call after realloc to reseed baseline. |
-| `setSingleBufferFastDiff(bool)` | EInkDisplay / HalDisplay / GfxRenderer | X4 only. Opt in to fast differential without secondary buffer. Only safe when RED RAM is known-current. No-op on X3 (DTM1 baseline is always in controller RAM). |
-| `releaseBuffers()` | EInkDisplay / HalDisplay | Frees BOTH buffers. No display operations after this. Reboot required to restore. |
-| `deepSleep()` | EInkDisplay / HalDisplay | Powers down the SSD1677 controller. Call before `releaseBuffers()` for clean shutdown. |
+The rule keys on `PanelSel::X4`, and every board that is not an X3 reads as `X4`, including the
+UC8179, UC8279 and T5S3 boards, which keep their own baseline and would not need it. On an X4
+(SSD1677) a downgraded FAST took ~1755 ms against ~476 ms (2026-08-19). Ask the display for this
+state (`hasSecondaryBuffer()`, `isRedRamSynced()`); do not mirror it in a HAL flag, because after a
+failed realloc the copy and the truth diverge.
 
 ---
 
-## Common mistakes
+## 6. API reference
 
-**Freeing `frameBuffer` instead of `frameBufferActive`**
-`swapBuffers()` alternates which of `frameBuffer0`/`frameBuffer1` is the active write
-target. After a swap, `frameBuffer` may point to either slot. Always use
-`releaseSecondaryBuffer()` — never free `frameBuffer0` or `frameBuffer1` directly,
-as the assignment may have changed since the last swap.
+On `FreeInkDisplay`, forwarded by `HalDisplay` and `GfxRenderer` unless noted.
 
-**Calling `triggerDisplay(FAST_REFRESH)` without secondary buffer and without `setSingleBufferFastDiff`**
-Without the opt-in flag, `triggerDisplay` automatically downgrades to `HALF_REFRESH`
-(~1600 ms). Enable `setSingleBufferFastDiff(true)` before the release if fast updates
-are needed during the secondary-buffer-free window.
+| Method | Notes |
+|---|---|
+| `borrowSecondaryBuffer(size_t*)` / `returnSecondaryBuffer()` | Lend the block without freeing it. Return cannot fail. |
+| `releaseSecondaryBuffer()` / `reallocSecondaryBuffer()` | Free and reallocate. Realloc returns false on OOM. `HalDisplay`'s release copies the displayed frame into the write buffer first and logs a double release. |
+| `hasSecondaryBuffer()` | `frameBufferActive != nullptr`. False both when lent and when released. |
+| `syncWriteBufferFromDisplayed()` (`GfxRenderer`) | Copy the secondary into the write buffer (`syncWriteBufferFromActive()`). No-op while the secondary is away. |
+| `syncRedRamFromFrameBuffer()` | Seed the SSD1677's RED from the displayed frame. No-op on the X3 and on drivers without `seedPreviousFrame()`. |
+| `setSingleBufferFastDiff(bool)` | Keep FAST while the secondary is away. |
+| `cleanupGrayscaleWithPreviousBuffer()` | Tail of every plane pass: hands the driver `frameBufferActive` as the baseline and copies it back into the write buffer. With the secondary away the driver is told there is no baseline. |
+| `releaseFrameBuffers()` / `releaseFrameBuffersWithScratch()` (`GfxRenderer`) | Free both buffers. A reboot must follow. |
 
-**Leaving `setSingleBufferFastDiff` enabled after realloc**
-After `reallocSecondaryBuffer()` the normal double-buffer path is correct and
-`setSingleBufferFastDiff` is redundant. Call `setSingleBufferFastDiff(false)` after
-realloc to avoid confusion and to ensure the double-buffer RED RAM reseed path runs.
+There is no public way to tell a lent secondary from a released one; `_secondaryLent` is private.
 
-**Calling any display method after `releaseBuffers()`**
-`releaseBuffers()` is a terminal operation. `frameBuffer` becomes nullptr; any
-subsequent `clearScreen()` or render call will write through a null pointer and crash.
-Only use it immediately before reboot or deep sleep.
+---
 
-**Not calling `deepSleep()` before `releaseBuffers()`**
-The controller should be put to sleep before the host releases its buffers.
-`deepSleep()` sends a final power-down command over SPI. After `releaseBuffers()` there
-is no framebuffer to construct a valid SPI payload from, so the order matters.
+## 7. Common mistakes
 
-**Assuming `displayWindow()` updates the displayed-frame buffer**
-It does not. `swapBuffers()` is reached only from `displayBuffer()` /
-`triggerDisplay()`, so after a windowed refresh the panel shows the new content while
-`frameBufferActive` — the host's model of what is on the panel — still holds the old
-content for that rectangle. The next `displayBuffer()` reseeds RED from
-`frameBufferActive` wholesale, so the stale region survives into the next diff: where
-the incoming screen matches the old content (white on white is the common case), a
-FAST differential drives nothing and the pixels stay as the window left them.
+**Freeing `frameBuffer0` or `frameBuffer1` directly.** `swapBuffers()` changes which slot is the write
+target. Always go through the API.
 
-Any caller doing a partial repaint via `displayWindow()` is exposed. The fix is to copy
-the refreshed rectangle from `frameBuffer` into `frameBufferActive` after a windowed
-refresh actually happens — conditional, because the drivers silently reject a window
-they cannot honour and return no indication that they did.
+**A FAST refresh with the secondary away and no opt-in.** On every board but the X3 it silently
+becomes HALF. Call `setSingleBufferFastDiff(true)` when FAST updates are needed during the window.
 
-**Treating a borrowed secondary and a released secondary as the same state**
-`hasSecondaryBuffer()` is false in both, but they differ in a way that matters:
+**Leaving `setSingleBufferFastDiff` on after the return.** Turn it off once the secondary is back.
 
-- `releaseSecondaryBuffer()` calls `syncWriteBufferFromActive()` *before* freeing, so
-  the write buffer holds the on-screen frame and a partial repaint onto it is correct.
-- `borrowSecondaryBuffer()` sets `frameBufferActive = nullptr` with no such seeding, so
-  the write buffer is the frame from two refreshes ago.
+**Any display call after `releaseFrameBuffers()`.** It is terminal until the reboot.
 
-`syncWriteBufferFromActive()` is gated on `frameBufferActive` being non-null and
-silently does nothing in either state, so it cannot rescue the borrowed case. There is
-currently **no public accessor for `_secondaryLent`**, so a caller that needs a known-good
-frame and finds no secondary must treat the situation conservatively rather than assume
-the released case. A one-line `isSecondaryLent()` would make that check exact.
+**Treating a borrowed and a released secondary as the same state.** `hasSecondaryBuffer()` is false in
+both. A release seeds the write buffer with the displayed frame; a borrow does not, so the write buffer
+then holds the frame from before the last refresh, and `syncWriteBufferFromDisplayed()` cannot rescue
+it. Treat "no secondary" conservatively; `ActivityManager::showBusyIndicator()` skips in both cases for
+this reason.
+
+**Expecting a grayscale cleanup to restore the write buffer while the secondary is away.** It cannot:
+the plane stays in the write buffer, and the driver takes a clean sync on its next push.
+
+**Assuming `displayWindow()` updates `frameBufferActive`.** It does not swap, so after a windowed
+refresh the host copy still holds the old content for that rectangle, and the next FAST can leave
+those pixels as the window left them. The SSD1677's window also returns silently when x or width is
+not byte-aligned. Nothing calls `GfxRenderer::displayWindow()` today.
+
+**Reading `redSynced=` in `[FBUF]` lines as a driver fact.** It is the facade's SSD1677 flag.

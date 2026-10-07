@@ -2,7 +2,7 @@
 
 ## `book.bin`
 
-### Version 7
+Written by `BookMetadataCache`. The version byte is `BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`; it is bumped when the layout changes, and an older cache is rebuilt on the next open. The pattern below matches version 11.
 
 ImHex Pattern:
 
@@ -12,7 +12,7 @@ import std.string;
 import std.core;
 
 // === Configuration ===
-#define EXPECTED_VERSION 7
+#define EXPECTED_VERSION 11
 #define MAX_STRING_LENGTH 65535
 
 // === String Structure ===
@@ -109,161 +109,60 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-### Current version
+One file per spine item and per set of render settings (the file name is the property hash). Written and read by `lib/Epub/Epub/Section.cpp`. `SECTION_FILE_VERSION` at the top of that file is bumped on every layout change, so read it there; a number quoted here would go stale within weeks. A file with another version is rejected and rebuilt.
 
-`SECTION_FILE_VERSION` is defined at the top of `lib/Epub/Epub/Section.cpp` and is bumped on every layout change, so read it there — any number quoted here goes stale within weeks. The on-disk layout has evolved well past the v21 pattern shown below; the ImHex pattern is preserved for archeology but no longer reflects all fields. Changes since v21 (read the `header::*` constants for the authoritative layout):
+The file is, in order:
 
-- `parseComplete` (`bool`) inserted before `pageCount` so a truncated parse can be detected on reload.
-- `paragraphLutOffset` extended: each per-page entry is now `u32 xhtmlByteOffset + u16 paragraphIndex + u16 listItemIndex` (added the running `<li>` count for KOReader list-item XPath sync).
-- `pageBreakMapOffset` (`u32`) added in the header between `anchorMapOffset` and `paragraphLutOffset`. The block at that offset stores printed-page labels: `u16 count`, then per entry `u16 pageIndex + String label`. Populated from inline `doc-pagebreak` markers and from the per-book `pagelist.bin` (NCX `<pageList>` / EPUB 3 `<nav epub:type="page-list">` / EPUB 2.01 `page-map.xml`). See `docs/epub-toc-navigation.md` for the source-format selection rules.
-- Version 80 replaces the paragraph LUT entry's unused XHTML byte offset with the page's visible-text offset. Same size; caches rebuild on the version bump.
-
-### Version 21
-
-ImHex Pattern:
-
-```c++
-import std.mem;
-import std.string;
-import std.core;
-
-// === Configuration ===
-#define EXPECTED_VERSION 21
-#define MAX_STRING_LENGTH 65535
-
-// === String Structure ===
-
-struct String {
-    u32 length [[hidden, comment("String byte length")]];
-    if (length > MAX_STRING_LENGTH) {
-        std::warning(std::format("Unusually large string length: {} bytes", length));
-    }
-    char data[length] [[comment("UTF-8 string data")]];
-} [[sealed, format("format_string"), comment("Length-prefixed UTF-8 string")]];
-
-fn format_string(String s) {
-    return s.data;
-};
-
-// === Page Structure ===
-
-enum StorageType : u8 {
-    PageLine = 1
-};
-
-enum WordStyle : u8 {
-    REGULAR = 0,
-    BOLD = 1,
-    ITALIC = 2,
-    BOLD_ITALIC = 3
-};
-
-enum BlockStyle : u8 {
-    JUSTIFIED = 0,
-    LEFT_ALIGN = 1,
-    CENTER_ALIGN = 2,
-    RIGHT_ALIGN = 3,
-};
-
-struct PageLine {
-  s16 xPos;
-  s16 yPos;
-  u16 wordCount;
-  String words[wordCount];
-  u16 wordXPos[wordCount];
-  WordStyle wordStyle[wordCount];
-  BlockStyle blockStyle;
-};
-
-struct PageElement {
-    u8 pageElementType;
-    if (pageElementType == 1) {
-        PageLine pageLine [[inline]];
-    } else {
-        std::error(std::format("Unknown page element type: {}", pageElementType));
-    }
-};
-
-struct Page {
-    u16 elementCount;
-    PageElement elements[elementCount] [[inline]];
-};
-
-// === Anchor Map Entry ===
-
-struct AnchorEntry {
-    String anchorId [[comment("HTML id attribute value")]];
-    u16 pageNumber [[comment("Page where the anchor appears")]];
-};
-
-// === Section Bin Structure ===
-
-struct SectionBin {
-    // Header
-    u8 version [[comment("Format version"), color("FFD93D")]];
-
-    // Version validation
-    if (version != EXPECTED_VERSION) {
-        std::error(std::format("Unsupported version: {} (expected {})", version, EXPECTED_VERSION));
-    }
-
-    // Cache busting parameters
-    s32 fontId;
-    float lineCompression;
-    bool extraParagraphSpacing;
-    u8 paragraphAlignment;
-    u16 viewportWidth;
-    u16 viewportHeight;
-    u16 pageCount;
-    bool hyphenationEnabled;
-    bool embeddedStyle;
-    u8 imageRendering;
-    u32 pageLutOffset [[comment("Offset to page offset LUT")]];
-    u32 anchorMapOffset [[comment("Offset to anchor map")]];
-    u32 paragraphLutOffset [[comment("Offset to per-page paragraph LUT (byte offset + <p> index)")]];
-
-    Page page[pageCount];
-
-    // === Page Offset LUT ===
-    // Validate LUT offset alignment
-    u32 currentOffset = $;
-    if (currentOffset != pageLutOffset) {
-        std::warning(std::format("Page LUT offset mismatch: expected 0x{:X}, got 0x{:X}", pageLutOffset, currentOffset));
-    }
-
-    u32 pageOffsets[pageCount] [[comment("File offsets to serialized pages")]];
-
-    // === Anchor Map ===
-    u16 anchorCount;
-    AnchorEntry anchors[anchorCount];
-
-    // === Paragraph LUT (deep entries) ===
-    // One entry per page: visible-text offset of the page's first element, 1-based <p> sibling
-    // index, running <li> count.
-    // visibleTextOffset is the number of visible bytes (lib/Epub/Epub/VisibleText.h: non-whitespace
-    // bytes of character data inside <body>, outside head/script/style) of the chapter's source
-    // text before the page's first element. KOReader sync pushes it and resolves pulled
-    // positions to a page with it. Two consecutive pages may share one offset (an image or rule
-    // page followed by the text at that offset); a lookup answers the first of them.
-    // paragraphIndex is 1-based, matching KOReader XPath p[N] convention; listItemIndex likewise
-    // for li[N].
-    struct ParagraphLutEntry { u32 visibleTextOffset; u16 paragraphIndex; u16 listItemIndex; };
-    u16 paragraphEntryCount;
-    ParagraphLutEntry paragraphLut[paragraphEntryCount];
-};
-
-// === File Parsing ===
-
-SectionBin book @ 0x00;
-
-// Validate we've consumed the entire file
-u32 fileSize = std::mem::size();
-u32 parsedSize = $;
-
-if (parsedSize != fileSize) {
-    std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
-}
+```text
+header                  fixed size, offsets patched in when the build ends
+pages                   page after page, each serialized by Page::serialize (lib/Epub/Epub/Page.h)
+page LUT                u32 file offset per page
+anchor map              u16 count, then (String id, u16 pageNumber) per entry
+page break label map    u16 count, then (u16 pageIndex, String label) per entry
+paragraph LUT           u16 count, then one 8-byte entry per page
 ```
+
+`String` is a `u32` byte length followed by the UTF-8 bytes. All integers are little-endian.
+
+### Header
+
+These fields are the `header::*` constants in `Section.cpp`, in file order. The `static_assert` in `Section::writeSectionFileHeader` ties their sum to `header::kSize`.
+
+| Field                  | Type    | Meaning                                                                 |
+| ---------------------- | ------- | ----------------------------------------------------------------------- |
+| `version`              | u8      | `SECTION_FILE_VERSION`                                                  |
+| `fontId`               | s32     | Render settings: they also feed the property hash                       |
+| `lineCompression`      | float   |                                                                         |
+| `extraParagraphSpacing`| bool    |                                                                         |
+| `paragraphAlignment`   | u8      |                                                                         |
+| `viewportWidth`        | u16     |                                                                         |
+| `viewportHeight`       | u16     |                                                                         |
+| `hyphenationEnabled`   | bool    |                                                                         |
+| `embeddedStyle`        | bool    |                                                                         |
+| `bionicReadingEnabled` | bool    |                                                                         |
+| `imageRendering`       | u8      |                                                                         |
+| status                 | u8      | Bit flags: parse complete, and the "degraded" flags for a build that ran short of heap (image, table row, CSS) or hit a fixed capacity (simplified). The `kStatus*` constants in `Section.cpp` name them. Written as a bool by early builds, so a flag-less file still reads correctly |
+| `pageCount`            | u16     |                                                                         |
+| page LUT offset        | u32     |                                                                         |
+| anchor map offset      | u32     |                                                                         |
+| page break map offset  | u32     |                                                                         |
+| paragraph LUT offset   | u32     |                                                                         |
+
+### Paragraph LUT entry
+
+One entry per page: `u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex`.
+
+- `visibleTextOffset` is the number of visible bytes (`lib/Epub/Epub/VisibleText.h`) of the chapter's source text before the page's first element. KOReader sync pushes it and resolves pulled positions to a page with it. Two consecutive pages may share one offset (an image or rule page followed by the text at that offset); a lookup answers the first of them.
+- `paragraphIndex` is the 1-based `<p>` sibling index, matching KOReader's XPath `p[N]`.
+- `listItemIndex` is the running `<li>` count, likewise for `li[N]`.
+
+### Page break label map
+
+Printed-page labels, from inline `doc-pagebreak` markers and from the per-book `pagelist.bin` below. See [epub-toc-navigation.md](epub-toc-navigation.md) for the source-format selection rules.
+
+## `content.bin`
+
+`content.bin` (magic `WBC1`) is the settings-independent product of the Stage-1 compile: parsed, CSS-resolved blocks keyed by the book's ZIP fingerprint. The layout is defined by the structs and the reader/writer in `lib/Epub/Epub/content/CompiledContent.h` and `CompiledContent.cpp`; read them for the fields. It is not part of the default section-cache path in this tree.
 
 ## `pagelist.bin`
 

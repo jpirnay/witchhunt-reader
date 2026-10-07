@@ -28,23 +28,29 @@ Spine items before the first TOC entry (cover pages) and after the last (appendi
 
 The result is computed once during `buildBookBin` (folded into the existing `spineIndex->tocIndex` scan, so no extra disk pass) and persisted as a single byte in book.bin's header A. `Epub::hasReliableToc()` reads `BookMetadataCache::isTocReliable()` and caches the bool in `tocReliabilityState`.
 
-This matters because the check used to recompute the answer on demand by calling `getTocEntry(i)` for every TOC entry, which does two SD-card seeks per call. On a 2858-entry web-novel TOC that was ~5700 seeks (~7 seconds) added to first-page latency. `BOOK_CACHE_VERSION` was bumped to 7 for this layout change; older caches are rebuilt on next open.
+This matters because the check used to recompute the answer on demand by calling `getTocEntry(i)` for every TOC entry, which does two SD-card seeks per call. On a 2858-entry web-novel TOC that was ~5700 seeks (~7 seconds) added to first-page latency. `BOOK_CACHE_VERSION` was bumped for this layout change; an older cache is rebuilt on next open.
 
 ## Section cache file format
 
 The section cache (`.bin`) stores pre-rendered page data for a spine item. The file layout:
 
 ```
-[header: version, render parameters, pageCount, lutOffset, anchorMapOffset]
+[header: version, render parameters, status byte (parse complete + degraded flags), pageCount,
+         pageLut / anchorMap / pageBreakMap / paragraphLut offsets]
 [serialized pages...]
 [page LUT: array of uint32_t file offsets, one per page]
 [anchor map: uint16_t count, then (string, uint16_t) pairs]
+[page break map: uint16_t count, then (uint16_t pageIndex, string label) pairs]
+[paragraph LUT: uint16_t count, then per page uint32 visibleTextOffset, uint16 paragraphIndex, uint16 listItemIndex]
 ```
 
-The header size is defined by `HEADER_SIZE` (a constexpr computed via `sizeof` sum) and validated with a `static_assert`. Three functions read this header independently and must stay in sync:
+[file-formats.md](file-formats.md#sectionbin) has the field-by-field header table.
+
+The header size is defined by `header::kSize` (computed from the per-field `header::*` offsets) and validated with a `static_assert` in `Section::writeSectionFileHeader`. Several functions read the header independently and must stay in sync:
 
 - `loadSectionFile` -- full section load, reads header + builds TOC boundaries from anchor map
 - `getPageForAnchor` -- seeks directly to anchor map offset from header
+- the page-break-map and paragraph-LUT readers -- seek to their own header offsets
 - `writeSectionFileHeader` -- writes the header during cache creation
 
 When modifying the header layout, bump `SECTION_FILE_VERSION` to invalidate stale caches and update all read paths.
@@ -54,6 +60,8 @@ When modifying the header layout, bump `SECTION_FILE_VERSION` to invalidate stal
 ### Recording anchors during parsing
 
 `ChapterHtmlSlimParser` records every HTML `id` attribute and its corresponding page number into `anchorData` (a flat `std::vector<std::pair<std::string, uint16_t>>`). Recording is deferred via `pendingAnchorId` until `startNewTextBlock()`, after the previous text block is flushed to pages via `makePages()`. This ensures `completedPageCount` reflects the correct page.
+
+On the normal path the records are spilled to a scratch file on the SD card as they are recorded, and `Section::createSectionFile` copies them into the section cache when the build ends (`copyAnchorSpill`). The resident vector only holds them if the spill file cannot be opened. The serialized map is the same either way.
 
 For TOC anchors specifically, `startNewTextBlock` also forces a page break before recording, so chapters start on fresh pages rather than mid-page. The parser receives the set of TOC anchor strings via `tocAnchors` (a `std::vector<std::string>`) from `Section::createSectionFile`.
 
@@ -198,7 +206,7 @@ The section cache file (`section.bin`) gained a `pageBreakMap` block: `uint16_t 
 
 ### Sleep overlay lookup
 
-`Section::getPrintedPageLabelFromCache(sectionsDir, spineIndex, page)` is a standalone helper used by `SleepActivity` — it reads the printed-page label directly from `section.bin`'s page-break map without instantiating a `Section` or supplying render parameters. It walks the sections cache directory, finds any cache variant for `spineIndex` (all variants share the same printed-page anchors since those are content-derived), reads its `pageBreakMap` block, and returns the same `"(42)"` formatting as the in-memory query. The function is version-guarded against `SECTION_FILE_VERSION` so a cache from a different layout is skipped silently. Cost: one extra `section.bin` open per sleep entry, skipped when no cache exists.
+`Section::getPrintedPageLabelFromCache(bookCachePath, spineIndex, page)` is a standalone helper used by `SleepActivity` — it reads the printed-page label directly from `section.bin`'s page-break map without instantiating a `Section` or supplying render parameters. It looks in that spine's bucket of the sections cache (`Epub::spineCacheDir`), finds any cache variant for `spineIndex` (all variants share the same printed-page anchors since those are content-derived), reads its `pageBreakMap` block, and returns the same `"(42)"` formatting as the in-memory query. The function is version-guarded against `SECTION_FILE_VERSION` so a cache from a different layout is skipped silently. Cost: one extra `section.bin` open per sleep entry, skipped when no cache exists.
 
 ### "Jump to printed page" navigation
 

@@ -1,12 +1,11 @@
 # LilyGo T5 S3 Pro: the panel, LovyanGFX, and what we know
 
-Reference for anyone touching the T5S3 display path. Consolidates
-`lilygo-t5s3-refresh-audit-2026-09-15.md` (waveform banks) and
-`t5s3-waveform-implementation-audit-2026-09-21.md` (vendor vs libraries) and adds what the
-2026-09-22 async/overlap work established.
+Reference for anyone touching the T5S3 display path: the waveform banks, what LovyanGFX can and
+cannot express, and what the async split established.
 
 Read this before changing anything in `LgfxEpdDriver`, the waveform generator, or any predicate
-that reads a display capability.
+that reads a display capability. How the T5S3 fits next to the other boards' framebuffers and
+baselines: [secondary-buffer-management.md](secondary-buffer-management.md).
 
 ## 1. The stack
 
@@ -69,6 +68,10 @@ Measured full-refresh durations, for calibration: FAST ~1329-1559 ms, HALF ~2582
 roughly 2-4x an X4 Pro and 3x an X3, and it is why several things that are affordable elsewhere
 are not affordable here.
 
+Frame cost is only mildly content-dependent: over the same 68 blocks, blank repair screens ran at
+~35.4 ms per frame and a content-rich screen at ~46.7 ms (T5S3, 2026-09-15). Second order; no
+correctness impact.
+
 ## 4. The waveform, and the one thing LovyanGFX cannot express
 
 The vendor blob (`ED047TC2.h` / epdiy's `epdiy_ED047TC2.h` -- same data) holds, per mode and
@@ -97,6 +100,23 @@ spectrum epdiy spans.
 
 Our generator compensates by making every column self-normalising: saturate at a rail first (which
 erases the arrival state), then walk to the target. `clean_rows()` is `3 x L[15]` frames.
+
+The DU (fast) path needs no such compromise: DU is exactly `L[15]` frames of full drive, and epdiy's
+published DU phase counts for the same blob are our `L[15]` plus one in every range (epdiy counts a
+terminating phase). Two independent decoders agree, so the fast bank is as good as the vendor's.
+
+### The LUT budget: 128 blocks, all banks together
+
+`blit_dmabuf` reads each pixel's progress word through `(int16_t)` and skips the pixel when it is
+negative, and bits 8-14 of that word select the block. So no block index may reach 128: every bank,
+terminators included, must fit in 128 rows. Overrunning it fails silently and globally (refreshes
+stop completing; the panel looks dead). `gen_ed047tc2_waveform.py` asserts the end of the last bank
+against `LUT_ROW_BUDGET = 128`, counting the 4-row `lut_eraser`; the header of the generated
+`ED047TC2Waveform.cpp` states the worst case (118 rows today), so a fourth clean phase would not fit.
+The boot line reports the budget in use (`[epd] LUT budget N/128 blocks`).
+
+`Panel_EPD::_lut_remain_table` is assigned but never read (only in commented-out logs); do not reason
+about bank lengths from it.
 
 ### What that costs, measured
 
@@ -135,18 +155,41 @@ is exactly what a destination-only LUT cannot do. Real speed needs runtime sourc
 
 ## 5. Bank identity IS the diff key
 
-From the 2026-09-15 audit, and the single most important behavioural fact about this panel:
+The single most important behavioural fact about this panel, measured on it (2026-09-15).
+`Panel_EPD` stores each pixel's request with the bank's LUT offset in its high byte, and decides
+whether to drive a pixel by comparing against it. So the bank a pixel was last driven under is part
+of its identity:
 
 | previous bank | this push | what happens |
 |---|---|---|
 | fast | clean | full-screen GC16 -- a real scrub |
 | clean | clean | only ink driven, white background skipped -> both pages at once, then an imprint |
-| clean | fast | full-screen DU, scrubs nothing -> **ghosting** |
+| clean | fast | full-screen DU, scrubs nothing. Harmless straight after a clean push (DU saturates from any state; measured); a ghost wherever a scrub was expected instead |
 | fast | fast | true differential DU -- correct for page turns |
 
 "Which waveform" and "how much of the screen" are not independent choices; they are the same
 choice. **Any change that alters how often or in what order pushes happen is a ghosting change**,
 even when it touches no waveform code.
+
+How the driver lives with it:
+
+- `epdModeFor()` maps both HALF and FULL to the clean bank (`epd_text`) and never downgrades them.
+  An earlier version sent HALF to the fast bank after a clean push; that is row 3 exactly where a
+  scrub was wanted (leaving the reader, the screen after Screen Repair).
+- Row 2 is avoided by `normalizeForCleanBank()`. When the previous push also used the clean bank, it
+  first pushes white through the no-drive `epd_fastest` bank, a single `0u` word that `blit_dmabuf`
+  reads as "this pixel is finished". That re-tags every pixel without touching the ink, so the clean
+  push that follows scrubs the whole screen. Measured at 187 ms, against ~1239 ms for the fallback
+  white flash through the fast bank (2026-09-15). It must be `epd_fastest`, not `epd_quality`: the
+  non-fast modes prepend `lut_eraser`, and the pixel would run the eraser's nudge and then stop with
+  nothing driving it home, leaving a half-inverted screen.
+- Because HALF and FAST alternate banks, the FAST after a HALF is a full-screen DU. It costs no extra
+  time, but DU is not DC-balanced; the periodic clean refresh is the vendor's remedy for that, so
+  keep it running.
+- To see which bank each push used, build with `-DLGFX_EPD_PUSH_TRACE=1` (commented out in the
+  T5S3 section of `platformio.ini`). Build that variant after any driver change: a broken trace line
+  once compiled only because the flag was off. Without it, duration alone identifies the bank
+  (roughly 1.4 s fast against 2.6 s clean at room temperature).
 
 ## 6. Async: what it buys, and what it does not
 
@@ -213,11 +256,23 @@ the code. A capability is an API contract *and* a behaviour switch.
 
 1. **The range-11 under-drive** (42 frames vs vendor 57). Cheapest real lead on residual ghosting.
    Needs the clean bank derived from the vendor GC16 phase count per range rather than from
-   `3 x L[15]`.
+   `3 x L[15]`. Measured in the generator: the vendor's from-white column after a forced rail
+   excursion lands every level exactly and runs 70 frames at range 11, so it is a correctness fix,
+   not a speed-up (3-8% faster when cold, slower at ranges 9-10).
 2. **`usesDeferredAa()` needs a real predicate.** X3 is excluded by name, and T5S3 now needs the
    same treatment for a different reason. Neither exclusion is principled; both are empirical.
-3. **The 128-block LUT budget** -- vendor constraint or LovyanGFX one? Unestablished.
-4. **VCOM is a copied default**, never measured on this panel (from the 2026-09-15 audit).
+3. **The waveform is chosen once at boot, with no temperature tracking.** `buildConfig()` samples the
+   PMIC thermistor once (`readPanelTemperature()`) and LovyanGFX expands the LUTs at panel init, so the
+   waveform matches the temperature at boot, not the temperature now. Ranges are ~3 °C wide and the
+   drive length changes by up to 3 frames between neighbours, so a panel that warms during a long
+   session (frontlight, ambient, body heat) ends up over-driven, which reads as ghosting of the
+   opposite polarity. Waking from deep sleep reboots, so it re-picks the range. Test: log the panel
+   temperature at boot and after 30+ minutes of reading; if the range index moves, re-selection
+   without a reboot is worth doing.
+4. **VCOM is a copied default.** `LilyGoT5S3LgfxConfig.cpp` sets `kDefaultVcomMv = -1600`, the
+   epdiy/LilyGo reference value, never read off this panel. A wrong VCOM leaves a standing DC offset
+   that no waveform can scrub. Test: read the value printed on the panel's FPC tail; if it differs by
+   more than ~100 mV, set it and re-test the ghosting.
 5. **Would the epdiy backend be better?** It has source-aware LUTs and real area updates, both of
-   which this panel could use. But it abandons the waveform generator, the clean/fast bank model
-   and everything the 2026-09-15 audit established. A port, not a swap, and unmeasured.
+   which this panel could use. But it abandons the waveform generator and the clean/fast bank model
+   this document describes. A port, not a swap, and unmeasured.

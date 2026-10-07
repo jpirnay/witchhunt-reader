@@ -1,7 +1,7 @@
 # Alternative sync providers (OPDS progression, BookOrbit)
 
 Status: **shelved 2026-10-07**, not started. Written so the work can be picked up without redoing the analysis.
-Related: `docs/superpowers/specs/2026-10-06-kosync-content-offset-design.md` (the position layer
+Related: `docs/contributing/koreader-synchronization.md` (the position layer
 this builds on), PR #398 (merged via #399).
 
 ## What is already in place (master, 2026-10-07)

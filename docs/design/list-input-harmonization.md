@@ -1,15 +1,11 @@
 # One button scheme for every list — design
 
-> **Status.** Agreed in conversation on 2026-10-03, section by section; this document is the
-> written form for review before an implementation plan. Started from issue **#374** (OPDS
-> front buttons labelled "Up"/"Down" that did nothing). The interim fix on
-> `fix/374-opds-front-buttons` (commits `e8d974a7e`, `6e45c08fd`, unpushed) is superseded by
-> this design and is not to be merged; #374 is closed by the OPDS pilot (PR 3 below).
->
-> **Amended 2026-10-04** (after PRs 1–3 opened as #383 / #384 / #385): row rendering is now in
-> scope (§2b). Lists move onto FreeInkUI's `list()` wherever that brings a functional or memory
-> benefit, porting upstream crosspoint-reader's FUI screens where upstream has them, with no SDK
-> change. A page is now a screenful (R3), and a swipe moves the selection with the page.
+> **Status.** Implemented for the `MenuListActivity`, `UiListActivity` and `TabbedUiListActivity`
+> families and the OPDS catalog and format picker (issue #374; PRs #383 to #387 and #392). Screens
+> that still use their own input or `drawList` are tracked in
+> `docs/future_work/list-input-harmonization.md`. Section 1 is the normative scheme: code cites it
+> by rule number (R1 to R9), so the numbering stays. Rendering moved onto FreeInkUI's `list()`
+> wherever that brings a functional or memory benefit (section 2b).
 
 ## Problem
 
@@ -71,7 +67,7 @@ The device matrix the scheme has to serve:
    memory benefit, with the legacy `drawList` implementations deleted.
 7. Less divergence from upstream crosspoint-reader: a screen upstream already draws with FUI is
    ported from upstream rather than re-invented.
-8. The series ends with less flash than `master` had before PR 1.
+8. The series ends with less flash than `master` had before it started.
 
 ## Non-goals
 
@@ -262,23 +258,12 @@ scrolling the viewport and pages the selection, like every other list.
 functional benefit (touch rows, wrapping, one paging model) or a memory benefit (less flash or
 heap). Its input always goes through `ListController` (§2); upstream's input code is not taken.
 
-**Source of the render code.** Where upstream crosspoint-reader (`upstream/develop`, pinned per
-PR to the commit ported from) already draws a screen with FUI, that screen's row building is
-ported from upstream, attributed per the repo's porting convention (source comment + commit
-message; `Co-authored-by` only where the result is mainly theirs). Where upstream has no FUI
-version, the screen follows the closest upstream pattern.
-
-| Our screen | Render source |
-|---|---|
-| NetworkModeSelection, OpdsServerList, OpdsSettings, StatusBarSettings, FontDownload, Wi-Fi, ButtonRemap, KOReaderSync | upstream's FUI version of the same screen |
-| EPUB / XTC chapter lists | upstream's FUI chapter selectors; MD TOC follows the EPUB one |
-| StarredPages | upstream `EpubReaderBookmarksActivity` |
-| FinishedBook | upstream `EndOfBookOptions` |
-| OPDS catalog + format picker | upstream's `CatalogActivity`-based OPDS screen, evaluated at that PR |
-| GlobalBookmarks, ReadingStatsBookList, Footnotes, Weather city list | ours, following the closest upstream pattern |
-| UiList / MenuList / Tabbed families, file browser | already FUI; input only |
-| Home, list layout | stays drawn by the theme (a themed launcher; no memory benefit); buttons via the controller |
-| Home carousel, cover grid, keyboard, dictionary word select | not lists; unchanged |
+**Source of the render code.** Where upstream crosspoint-reader already draws a screen with FUI,
+that screen's row building is ported from upstream, attributed per the repo's porting convention
+(source comment and commit message; `Co-authored-by` only where the result is mainly theirs).
+Where upstream has no FUI version, the screen follows the closest upstream pattern. Home's list
+layout stays drawn by the theme (a themed launcher; no memory benefit), with buttons through the
+controller. The Home carousel, cover grid, keyboard and dictionary word select are not lists.
 
 **No SDK additions; follow upstream's workarounds instead:**
 - Chapter levels are indented with leading spaces in the label, as upstream does.
@@ -322,21 +307,9 @@ render-published atomic, never a loop-task measurement — see `listWindow()` in
 | **File browser**, folder picker | New folder / Move here | — | |
 | Home, list layout | default | — | buttons only; rows stay drawn by the theme (§2b) |
 
-**Every screen that keeps a selection, and what happens to it** (complete as of 2026-10-04,
-from a search of `src/activities` for list renderers, navigators and selection indexes):
-
-| Screen | Buttons → `ListController` | Rows → `fui::list` |
-|---|---|---|
-| OPDS catalog + format picker | PR 3 (done) | PR 7 |
-| Settings, reader menu (tabbed) | PR 4 | already FUI |
-| Enum, Font, Dictionary, Keyboard-layout, Language pickers | PR 4 | already FUI |
-| File context menu, Home "More", settings submenus, Clock, Quick overrides, KOReader settings, Weather menu | PR 4 | already FUI |
-| NetworkMode, OPDS server list, OPDS settings, Status bar, Font download, Finished book, Reading-stats book list, Weather city list | PR 5 | PR 5 |
-| Starred pages, Global bookmarks, Wi-Fi network list | PR 6 | PR 6 |
-| File browser list views (Books, All files, Recents, firmware picker, folder picker) | PR 6 | already FUI |
-| Home, list layout | PR 6 | **no** — a themed launcher; moving it brings no memory benefit |
-| EPUB / XTC chapter lists, Markdown TOC, Footnotes, KOReader sync result | PR 7 | PR 7 |
-| Button-remap wizard | **no** — it exists to capture whichever physical button is pressed next; only its `pageList` is a no-op (PR 1) | PR 7, so `drawList` can be deleted |
+The rows for the screens still on their own input (Bookmarks, Starred pages, Wi-Fi, the file browser,
+Home's list layout, the chapter lists) are the target scheme. Which screens remain is in
+`docs/future_work/list-input-harmonization.md`.
 
 Not lists, so outside this design:
 
@@ -348,87 +321,7 @@ Not lists, so outside this design:
 | Frontlight panel, slider picker, printed-page input | value pickers: Left/Right change a value |
 | Dictionary definition, system information, button / gesture overviews, book info, reading-stats dashboard | read-only pagers; nothing is selected |
 
-### 4. User-visible changes
-
-Each of these goes into `USER_GUIDE.md` and `RELEASE_NOTES.md` in the PR that makes it:
-
-- Menus and settings lists: front Left/Right **step** on a short press (they paged); hold to
-  page.
-- Pickers: holding an arrow no longer repeats paging on all four; hold Left/Right to page,
-  hold Up/Down to jump to the ends.
-- Settings and the reader menu: tabs switch with a **long Up/Down** (any held arrow did).
-- File browser: **short Right opens Options** (it was a hold, or a short press only on a
-  one-screen folder); hold Right pages; short Left does nothing.
-- Bookmarks, Starred pages, Wi-Fi, OPDS: Left/Right actions unchanged; hold now pages; a
-  swipe pages instead of triggering the action.
-- OPDS catalog: can be paged (hold Left/Right or swipe); front buttons show `«` / `»` when
-  Search or Info does not apply.
-- Jump to the first / last row: 1 s instead of 1.5 s, and reachable by a long tap on the side
-  hint boxes.
-- Every list shows the side Up/Down hint boxes (a slightly narrower list on X3/X4).
-- Lists no longer lag 300 ms behind Left/Right presses.
-
-### 5. User documentation (deliverable)
-
-User documentation is part of the implementation, not a follow-up: **each PR that changes
-behaviour updates `USER_GUIDE.md` in the same PR**, and the series is not done until all of
-the following hold.
-
-- A new subsection **"Moving through lists"** under §1 Hardware Overview, after Button Layout:
-  the scheme table from §1 of this design in reader terms, how hints show it (`«`/`»` = hold to
-  page, `short` label after the glyph), and the per-device row (on the X4 Pro and T5S3 tap or
-  long-tap the hint boxes; the side boxes are the T5S3's Up).
-- Per-screen sections then describe only their declared pair and anything special, linking to
-  that subsection instead of restating the arrows:
-  - §1 Hardware Overview: the T5S3 note ("paging backward … by tapping the scroll bar or
-    swiping") — replace with the side hint box and hold/swipe paging.
-  - §3.3 Browse Files: *Navigate List* and *Options menu* bullets; *Move to folder* (New /
-    Move here on short Left/Right).
-  - §3.4 Recent Books: the keys sentence.
-  - §3.7 Settings, and §4 *System Navigation* (reader menu): tabs on long Up/Down.
-  - §3.7.5 OPDS: browsing keys (Search / Info, paging) — the section covers servers only
-    today, so this adds a short "Browsing a catalog" paragraph.
-  - §5.2 Touch: swipe pages; remove the stale **Tap the scroll bar** and **Swipe right from the
-    left edge → Back** rows (neither exists in the firmware); fix the T5S3 note under the table.
-  - §5.7 Per-device differences: hint boxes as the Left/Right/Up keys.
-  - §6 Chapter Selection: Up/Down step, hold Left/Right to page.
-- `RELEASE_NOTES.md`: one entry per PR describing the change in reader terms.
-- Developer docs: a new `docs/list-input.md` (the scheme, how to declare a list, the
-  `ListController` contract); `docs/touch-gestures.md` stale rows removed; the class comments of
-  `TabbedUiListActivity` and the OPDS format picker corrected.
-- No new translatable strings are expected: labels are composed from existing `StrId`s plus
-  the `«` / `»` glyphs. If one is needed it is added to the English YAML and regenerated per
-  `docs/i18n.md` (never a hand-run `gen_i18n.py` outside the build).
-
-### 6. Rollout
-
-One concern per PR; each builds `default`, `x4pro` and `lilygo_t5s3` and passes the host suite.
-
-1. **Swipe fix.** `pageList()` overrides that consume the swipe without effect on Bookmarks,
-   Starred pages, Wi-Fi, OPDS and the button-remap wizard. Paging by swipe on the first four
-   arrives when each moves to `ListController` (OPDS in PR 3, the rest in PR 6); none of them
-   pages by button today either. Standalone; ships first. User guide: §5.2 swipe row.
-2. **Double-press wait (R6).** Standalone.
-3. **`ListGrammar` + `ListController` + hints, piloted on OPDS** (catalog and format picker).
-   Closes #374. User guide: new "Moving through lists" subsection, §3.7.5.
-4. **The FUI bases onto the controller.** `UiListActivity`, `MenuListActivity`,
-   `TabbedUiListActivity` (with per-tab selection memory) drive input through `ListController`
-   with a `ListNav` selection adapter; R3 page-as-screenful and swipe-as-page land here, and
-   `ListGrammar::page` takes the drawn window. About 15 screens follow through their bases; the
-   file browser keeps its own input until PR 6. User guide: §3.7, §4.
-5. **The settings and network `drawList` screens onto FUI + the controller:** NetworkMode,
-   OpdsServerList, OpdsSettings, StatusBarSettings, FontDownload, ReadingStatsBookList,
-   FinishedBook, the weather city list — ported from upstream where it has them. User guide: §3.7.
-6. **Screens with declared pairs, and Home:** GlobalBookmarks, StarredPages, Wi-Fi onto FUI +
-   the controller; file browser list views and folder picker onto the controller; Home's list
-   layout onto the controller (rows stay theme-drawn). User guide: §3.1, §3.3, §3.4.
-7. **The custom painters:** chapter/TOC lists, footnotes, KOReader sync, the OPDS rendering
-   and the button-remap list onto FUI. User guide: §6.
-8. **Cleanup:** delete `drawList` (Base + Lyra), `ButtonNavigator`'s list functions and the
-   `dispatchListSwipe` injection fallback; `docs/list-input.md`, `docs/touch-gestures.md`,
-   §5.2/§5.7 final pass.
-
-### 7. Testing
+### 4. Testing
 
 - **Host (new `test/list_grammar/`):** every button × press type × declaration shape (default,
   none/action, action/none, action/action, tabbed, long-Confirm) × list shape (empty, one page,
@@ -437,28 +330,14 @@ One concern per PR; each builds `default`, `x4pro` and `lilygo_t5s3` and passes 
   selectable.
 - **Host:** R6 — the double-wait decision, extracted into a pure function if
   `ButtonEventManager` cannot run in the host suite.
-- **Device, per PR:** a checklist for the screens it touches:
-  - X3 / X4: short and long on all six buttons, hold-repeat paging.
-  - T5S3 / X4 Pro: hint-box tap and long tap, side boxes, swipe, row tap.
-  - Lists opened from the reader (chapter list, reader menu, quick overrides) in portrait and
-    both landscapes.
+- **Device:** a checklist per screen touched. X3 / X4: short and long on all six buttons,
+  hold-repeat paging. T5S3 / X4 Pro: hint-box tap and long tap, side boxes, swipe, row tap. Lists
+  opened from the reader (chapter list, reader menu, quick overrides) in portrait and both landscapes.
 
-### 8. Costs
+### 5. Costs
 
-- **Flash.** The C3 partition is about 95 % full. PR 3 may add at most ~2 KB (it added
-  2,282 B with the double-tap restore). Every later PR records its measured delta and must be
-  flash-negative, or name the function or RAM benefit it buys instead. The series must end
-  below `master`'s size before PR 1. Measured targets (2026-10-04 symbol sizes): ~15.5 KB of
-  per-screen input methods, ~2.4 KB of navigator callback lambdas, ~1.7 KB of `ButtonNavigator`
-  list code, 2.5 KB of `drawList`, ~3 KB of `drawList` row-callback thunks.
-- **Heap.** No `std::function`; labels composed in stack buffers per draw; under 100 bytes
-  per controller; nothing allocated per tick or per render; rows built on demand
-  (`rowProvider`) rather than held in per-screen windows.
-
-## Open questions
-
-- **Delete confirmation** on Bookmarks / Starred pages: separate issue to file once PR 1 has
-  removed the accidental swipe trigger.
-- **Label width.** `« ` plus a long translated label may still truncate in a hint box; check
-  the longest translations of Search, Rename, Delete, Options, Forget, Rescan during PR 3/6 and
-  shorten in the YAML if needed.
+- **Heap.** No `std::function`; labels composed in stack buffers per draw; under 100 bytes per
+  controller; nothing allocated per tick or per render; rows built on demand (`rowProvider`) rather
+  than held in per-screen windows.
+- **Flash.** The C3 partition is about 95 % full, so each step of the series had to be
+  flash-negative or name what it bought instead.

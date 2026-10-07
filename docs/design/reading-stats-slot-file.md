@@ -1,16 +1,26 @@
 # Reading stats in a fixed-slot file — design
 
-> **Status.** Agreed in conversation on 2026-09-28; this document is the written form for review
-> before an implementation plan. It replaces the **file layer** of
-> `2026-09-28-reading-stats-streamed-store-design.md` (its sections 3, 4 and 6 and the format
-> non-goal). The rest of that design — no resident history, screens that ask for one page or one
-> book, Home reading no file from `render()`, streamed web handlers — is built on
-> `feat/stats-streamed-store` and stays.
+> **Status.** Implemented (PR #353). `src/ReadingStatsSlotFile.h` is the layout layer and
+> `src/ReadingStats.h` (`ReadingStatsStore`) the store on top of it. This record also carries the
+> design of the streamed store it replaced the file layer of (no resident history, bounded reads,
+> books off the card), which is still how the store behaves.
 
 ## Problem
 
-The streamed store (the predecessor design) fixed memory: no call holds more than a few KB,
-whatever the history holds. It did not fix time, because a single JSON file can only be updated by
+**Memory first.** Every on-device consumer of the history used to load all of it: the whole
+`reading-stats.json` parsed into an ArduinoJson document, then copied into per-book vectors.
+Measured on the X3: ~1.5 KB per book transient at load (18 books cost a ~27 KB transient) and
+~420 B per book resident while a screen held it. The tightest caller is the session end, which
+loads, merges one book and saves on reader exit, after the reader's teardown: 43 556 B free and
+23 540 B contiguous. The load stopped fitting at roughly 25 to 30 books, the store stayed unloaded,
+the save refused to overwrite, and the session that had just ended was silently lost.
+
+Nothing on the device needs the whole history at once. A book screen needs one book, Home its
+recent books (at most 10, `MAX_RECENT_BOOKS` in RecentBooksStore) and the global pace, the summary a few numbers per book, the list one page.
+So the store stopped holding the history (section 8) and became stateless over the file.
+
+**Then time.** The first streamed form fixed memory (no call holds more than a few KB, whatever the history
+holds) but not time, because a single JSON file can only be updated by
 rewriting all of it. Measured on the X3 with the worst-case history (100 books × 60 day buckets,
 108 KB):
 
@@ -33,7 +43,7 @@ book removes that.
 
 - **An update writes only what changed**: one book record and one fixed-size block of global
   figures, whatever the history holds. Target: under 0.3 s worst case on the X3 (measured before
-  the rest is built; see *Rollout*).
+  the gate was a timing build on both boards before the rest was built).
 - **Every update is atomic.** Power lost at any point loses at most the update in progress; it
   never corrupts the history.
 - **Memory stays bounded and independent of the history**: a fixed transient per call, nothing
@@ -59,7 +69,7 @@ book removes that.
   - the KOReader content hash (`KOReaderDocumentId::calculate()`) needs the book opened, which
     Home cannot afford for its recent list;
   - neither can be derived from the existing history, which stores no path.
-- **No `path` field** (still the follow-up from the predecessor's section 5; a slot has room for it).
+- **No `path` field** (a follow-up, see section 9; a slot has room for it).
 
 ## Design
 
@@ -131,7 +141,7 @@ The meta alone answers every aggregate: book count, finished count (entries with
 > 0), the global pace sums (`countsTowardPace` needs only progress and seconds), the time order,
 and the eviction victim (`evictsBefore` needs only lastReadEpoch and seconds).
 
-- **Home.** `prefetchRecent()` reads the meta on every Home entry and fills its ≤ 12 snapshots and
+- **Home.** `prefetchRecent()` reads the meta on every Home entry and fills its ≤ 10 snapshots (one per recent book) and
   the global pace. The write-through cache logic goes: a 15 ms read on entry cannot be stale.
 - **The list.** It sorts the directory by time and keeps each book's docId, plus the meta's seq it
   was read at. A page of rows loads the meta once. A different seq means the file changed under
@@ -177,7 +187,7 @@ Falling back one generation is always safe. The slot an update writes was free i
 update started from, and that copy is not touched until the next update.
 
 **Write volume per update:** one 1 KB slot plus one 6 KB meta copy, i.e. ~7 KB instead of the
-whole file. At the streamed rate that is ~0.12 s. In-place writes are not measured yet.
+whole file. At the streamed rate that is ~0.12 s.
 
 ### 4. First use, migration, corruption
 
@@ -280,66 +290,60 @@ does not change. Only where the handlers get their data changes.
 
   Resident: Home's snapshots, ~0.7 KB. The reader exit, the tightest place, measured 43 KB free
   with 23 KB contiguous.
-- **Time:** an update reads ~7 KB and writes ~7 KB. Estimated 0.1–0.2 s, measured first. Reads are
+- **Time:** an update reads ~7 KB and writes ~7 KB. Estimated at 0.1 to 0.2 s. Reads are
   in section 2.
 - **SD wear:** ~7 KB per update instead of the whole file. The two meta copies alternate, and the
   card's own wear levelling spreads the rest.
 - **Flash:** the binary layer and the import come; the rewrite and copy passes go. Expected
   roughly neutral; measured against the base branch.
 
-### 8. Testing
+### 8. No resident history
 
-**Host, the layer:**
+`ReadingStatsStore` holds no history: no per-book vector, no global day vector, no load/release
+state. Every call reads what it needs from the file and returns it; a screen keeps its own small copy.
+The one resident piece is Home's set of snapshots (at most 10 books, ~0.6 KB): per book the total
+seconds, dated-day count, last-read epoch, progress and the book's own pace, plus the global pace
+for books too new to have their own. Home calls `prefetchRecent()` on entry; the themes read the
+snapshots through `BookProgressPresentation`, and no theme `render()` touches the card. The only
+way the file changes behind the device's back is USB drive mode, which always leaves by rebooting.
 
-- encode/decode round trips for every field at its limits;
-- strings cut at UTF-8 boundaries;
-- CRC failures;
-- choice of the newest valid copy when that copy is torn, corrupt, or both copies are;
-- free-slot choice.
+A load that cannot get its memory drops that one update and logs it; the file stays as it was. A
+scan or read reports Ok, NoMemory or Malformed, so the store can tell the transient case from the
+permanent one.
 
-**Host, the store** (on the file-backed `HalStorage` shim in a temporary directory):
+### 9. Books no longer on the card
 
-- every current store test ported, with the same expected figures;
-- a write that stops partway at each failure point in section 3, leaving the old history;
-- 300 updates on a full file: no slot leaks, one free slot throughout, and the figures match a
-  reference;
-- eviction reusing the victim's slot.
+**Deleting a book from the card never touches its reading history.** Only *Remove from stats* does.
+A book that was read and then deleted was still read: its entry, figures and share of the totals and
+streaks stay. Neither delete path (the device file browser, the web file manager) touches the stats
+file.
 
-**Host, import and export:**
+Entries are keyed by `KOReaderDocumentId::calculateFromFilename()`, the MD5 of the basename; no
+path is stored and nothing checks an entry against the card. So:
 
-- JSON fixtures imported and queried;
-- more than 100 books, long titles, a malformed file, an interrupted import;
-- **round trip**: importing a file this firmware wrote (within the limits) and exporting it again
-  gives the same bytes.
+- a deleted book's entry stays and is listed like any other; *Remove from stats* works on the docId
+  alone and never opens the book;
+- moving a book between folders (for example to `/COMPLETED`) keeps its history, renaming it starts
+  a new entry and leaves the old one as history;
+- such entries hold a slot under the cap and leave only by least-recently-read eviction or removal;
+- nothing tells the user which books are gone; without a path, finding out means walking the card
+  and hashing every filename.
 
-**Device** (worst case from `scripts/gen_reading_stats_history.py`):
+A possible follow-up is an additive `path` field (the last path the book was read from) so the list
+could mark "not on card". It is display only and would not change eviction.
 
-- the timing check (Rollout, step 0);
-- import time;
-- reader exit and sleep entry from a book;
-- Home, summary, list and book screens;
-- web dashboard, export and removal.
+### 10. Testing
 
-### 9. Rollout
-
-- **Step 0, the gate.** A throwaway build rewrites 1 KB and 6 KB in place in a pre-sized 113 KB file,
-  20 times, logging each write, **on both the X3 and the X4**. Their cards differ: new-file writes
-  measured ~17.7 ms per KB on the X3 and ~28 ms per KB on the X4 (2 885 B in 80 ms, three calls).
-  Under ~0.3 s per update on both: proceed. Over it: revisit the meta, e.g. write only its changed
-  sectors, each with its own CRC, before building anything else.
-- **Branch** `feat/stats-slot-file`, on top of `feat/stats-streamed-store`. The JSON rewrite never
-  ships: the two go out together, after `feat/stats-remove-book`.
-- **Order of work**, each step leaving the firmware working:
-  1. the slot layer;
-  2. the store's writes and reads on it;
-  3. the import;
-  4. the web generation;
-  5. deleting the rewrite path;
-  6. device measurement.
+`test/reading_stats` covers the layer (round trips at the limits, UTF-8 cuts, CRC failures, choice of
+the newest valid copy, free-slot choice) and the store on the file-backed `HalStorage` shim: a write
+stopped at each failure point in section 3 leaves the old history, 300 updates on a full file leak
+no slot, eviction reuses the victim's slot, and importing a JSON this firmware wrote and exporting it
+again gives the same bytes. `scripts/gen_reading_stats_history.py` makes the worst-case history for
+device measurements.
 
 ## Open questions
 
 None blocking.
 
-- **The `path` field** — a slot has 120 spare bytes. Adding it later means a format version bump,
+- **The `path` field** (section 9) — a slot has 120 spare bytes. Adding it later means a format version bump,
   handled inside this format (older slots read it as absent), not another migration.

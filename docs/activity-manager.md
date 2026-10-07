@@ -1,74 +1,24 @@
-# Activity & ActivityManager Migration Guide
+# Activities and the ActivityManager
 
-This document explains the refactoring from the original per-activity render task model to the centralized `ActivityManager` introduced in [PR #1016](https://github.com/crosspoint-reader/crosspoint-reader/pull/1016). It covers the architectural differences, what changed for activity authors, and the FreeRTOS task and locking model that underpins the system.
+An activity is one screen. `ActivityManager` (`src/activities/ActivityManager.h`) owns the activity stack and the one render task, and makes sure only one activity is active at a time. This page is the reference for writing an activity: the base class, navigation, results, the task and locking model, and the pitfalls.
 
-## Overview of Changes
+Related headers: `src/activities/Activity.h` (base class), `ActivityResult.h` (result types), `RenderLock.h`.
 
-| Aspect | Old Model | New Model |
-|--------|-----------|-----------|
-| Render task | One per activity (8KB stack each) | Single shared task in `ActivityManager` |
-| Render mutex | Per-activity `renderingMutex` | Single global mutex in `ActivityManager` |
-| `RenderLock` | Inner class of `Activity` | Standalone class, acquires global mutex |
-| Subactivities | `ActivityWithSubactivity` base class | Activity stack managed by `ActivityManager` |
-| Navigation | Free functions in `main.cpp` | `activityManager.goHome()`, `goToReader()`, etc. |
-| Forward flow | Parent stays on stack (`pushActivity`) | Parent destroyed on forward flow (`replaceWith*` + `ReturnHint`) |
-| Subactivity results | Callback lambdas stored in parent | `startActivityForResult()` / `setResult()` / `finish()` |
-| `requestUpdate()` | Notifies activity's own render task | Delegates to `ActivityManager` (immediate or deferred) |
-
-## Architecture
-
-### Old Model: Per-Activity Render Tasks
-
-Each activity created its own FreeRTOS render task on entry and destroyed it on exit:
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│ Main Task (Arduino loop)                                │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ currentActivity->loop()                           │  │
-│  │   ├── handle input                                │  │
-│  │   ├── update state (under RenderLock)             │  │
-│  │   └── requestUpdate()  ──notify──►  Render Task   │  │
-│  │                                      (per-activity)│  │
-│  │                                      8KB stack     │  │
-│  │                                      owns mutex    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                                                         │
-│ ActivityWithSubactivity:                                │
-│  ┌──────────────┐     ┌──────────────┐                  │
-│  │ Parent        │────►│ SubActivity   │                 │
-│  │ (has render   │     │ (has own      │                 │
-│  │  task)        │     │  render task) │                 │
-│  └──────────────┘     └──────────────┘                  │
-└─────────────────────────────────────────────────────────┘
-```
-
-Problems with this approach:
-
-- **8KB per render task**: Each activity allocated an 8KB FreeRTOS stack for its render task, even though only one renders at a time
-- **Dangerous deletion patterns**: `exitActivity()` + `enterNewActivity()` in callbacks led to `delete this` situations where the caller was destroyed while its code was still on the stack
-- **Subactivity coupling**: Parents stored callbacks to child results, creating tight coupling and lifetime hazards
-
-### New Model: Centralized ActivityManager
-
-A single `ActivityManager` owns the render task and manages an activity stack:
+## The model
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
 │ Main Task (Arduino loop)                                 │
 │                                                          │
 │  activityManager.loop()                                  │
-│    │                                                     │
 │    ├── currentActivity->loop()                           │
 │    │     ├── handle input                                │
-│    │     ├── update state (under RenderLock)              │
+│    │     ├── update state (under RenderLock)             │
 │    │     └── requestUpdate()                             │
-│    │                                                     │
-│    ├── process pending actions (Push / Pop / Replace)    │
-│    │                                                     │
+│    ├── process pending action (Push / Pop / Replace)     │
 │    └── if requestedUpdate: ──notify──► Render Task       │
 │                                         (single, shared) │
-│                                         8KB stack        │
+│                                         10 KB stack      │
 │                                         global mutex     │
 │                                                          │
 │  Activity Stack:                                         │
@@ -80,249 +30,181 @@ A single `ActivityManager` owns the render task and manages an activity stack:
 └──────────────────────────────────────────────────────────┘
 ```
 
-## Migration Checklist
+- There is one render task and one render mutex for the whole firmware, not one per activity.
+- Navigation requests (`replaceActivity`, `pushActivity`, `popActivity`) do not act at once. They set a pending action that `ActivityManager::loop()` runs after the current `loop()` returns. An activity is never destroyed while its own code is on the stack.
+- There is no `onPause` / `onResume`. A buried activity is kept alive but gets no `loop()` and no `render()`.
+- Results come back through a callback passed to `startActivityForResult()`, not through a separate method.
 
-### 1. Change Base Class
+## Writing an activity
 
-If your activity extended `ActivityWithSubactivity`, change it to extend `Activity`:
+Derive from `Activity` and pass a name, the renderer and the input manager:
 
 ```cpp
-// BEFORE
-class MyActivity final : public ActivityWithSubactivity {
-  MyActivity(GfxRenderer& r, MappedInputManager& m, std::function<void()> goBack)
-      : ActivityWithSubactivity("MyActivity", r, m), goBack(goBack) {}
-};
-
-// AFTER
 class MyActivity final : public Activity {
-  MyActivity(GfxRenderer& r, MappedInputManager& m)
-      : Activity("MyActivity", r, m) {}
+ public:
+  MyActivity(GfxRenderer& r, MappedInputManager& m) : Activity("MyActivity", r, m) {}
+  void onEnter() override;
+  void onExit() override;
+  void loop() override;
+  void render(RenderLock&&) override;
 };
 ```
 
-Note that navigation callbacks like `goBack` are no longer stored — use `finish()`, `onGoHome()`, or a direct `activityManager.goHome()` / `goTo*()` / `replaceWith*()` call instead.
+Do not take navigation callbacks (`goBack`, `goHome`) in the constructor. Use `finish()`, `onGoHome()` or the `activityManager` navigation functions described below.
 
-### 2. Replace Navigation Functions
+### onEnter() and onExit()
 
-The free functions `exitActivity()` / `enterNewActivity()` in `main.cpp` are gone. Use `ActivityManager` methods:
-
-```cpp
-// BEFORE (in main.cpp or via stored callbacks)
-exitActivity();
-enterNewActivity(new SettingsActivity(renderer, mappedInput, onGoHome));
-
-// AFTER (from any Activity method)
-activityManager.goToSettings();
-// or for arbitrary navigation:
-activityManager.replaceActivity(std::make_unique<MyActivity>(renderer, mappedInput));
-```
-
-`replaceActivity()` destroys the current activity and clears the stack. Use it for top-level navigation (home, reader, settings, etc.). See the "Navigation Flow" section after the checklist for when to use replace vs push, and how the `ReturnHint` mechanism restores a parent's prior state without keeping it resident.
-
-### 3. Replace Subactivity Pattern
-
-The `enterNewActivity()` / `exitActivity()` subactivity pattern is replaced by a stack with typed results:
+Call the base class first in `onEnter()` and last in `onExit()`. The base versions reset the touch and hint-strip state and log.
 
 ```cpp
-// BEFORE
-void MyActivity::launchWifi() {
-  enterNewActivity(new WifiSelectionActivity(renderer, mappedInput,
-      [this](bool connected) { onWifiDone(connected); }));
-}
-// Child calls: onComplete(true); // triggers callback, which may call exitActivity()
-
-// AFTER
-void MyActivity::launchWifi() {
-  startActivityForResult(
-      std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-      [this](const ActivityResult& result) {
-        if (result.isCancelled) return;
-        auto& wifi = std::get<WifiResult>(result.data);
-        onWifiDone(wifi.connected);
-      });
-}
-// Child calls:
-//   setResult(WifiResult{.connected = true, .ssid = ssid});
-//   finish();
-```
-
-Key differences:
-
-- **`startActivityForResult()`** pushes the current activity onto the stack and launches the child
-- **`setResult()`** stores a typed result on the child activity
-- **`finish()`** signals the manager to pop the child, call the result handler, and resume the parent
-- The parent is never deleted during this process — it's safely stored on the stack
-
-### 4. Update `render()` Signature
-
-The `RenderLock` type changed from `Activity::RenderLock` (inner class) to standalone `RenderLock`:
-
-```cpp
-// BEFORE
-void render(Activity::RenderLock&&) override;
-
-// AFTER
-void render(RenderLock&&) override;
-```
-
-Include `RenderLock.h` if not transitively included via `Activity.h`.
-
-### 5. Update `onEnter()` / `onExit()`
-
-Activities no longer create or destroy render tasks:
-
-```cpp
-// BEFORE
 void MyActivity::onEnter() {
-  Activity::onEnter();       // created render task + logged
-  // ... allocate resources
+  Activity::onEnter();
+  // allocate resources, load state
   requestUpdate();
 }
 void MyActivity::onExit() {
-  // ... free resources
-  Activity::onExit();        // acquired RenderLock, deleted render task
-}
-
-// AFTER
-void MyActivity::onEnter() {
-  Activity::onEnter();       // just logs
-  // ... allocate resources
-  requestUpdate();
-}
-void MyActivity::onExit() {
-  // ... free resources
-  Activity::onExit();        // just logs
+  // free resources
+  Activity::onExit();
 }
 ```
 
-The render task lifecycle is handled entirely by `ActivityManager::begin()`.
+- `onEnter()` runs on the main task, after the manager has made the activity current. Request the first render here.
+- `onExit()` runs just before the activity is deleted. Free what you allocated. Keep it short and do not block.
+- Neither function creates or destroys a render task. The manager creates it once in `ActivityManager::begin()`.
 
-### 6. Update `requestUpdate()` Calls
+### loop()
 
-The signature changed to accept an `immediate` flag:
+`loop()` runs on the main task every iteration while the activity is current. Read input, change state, call `requestUpdate()`. Any state that `render()` also reads must be changed under a `RenderLock` (see below). Do not draw from `loop()`.
 
-```cpp
-// BEFORE
-void requestUpdate();  // always immediate notification to per-activity render task
+### render()
 
-// AFTER
-void requestUpdate(bool immediate = false);
-// immediate=false (default): deferred until end of current loop iteration
-// immediate=true: sends notification to render task right away
-```
+`render(RenderLock&&)` runs on the render task with the render mutex held. It must:
 
-**When to use `immediate`**: Almost never. Deferred updates are batched — if `loop()` triggers multiple state changes that each call `requestUpdate()`, only one render happens. Use `immediate` only when you need the render to start before the current function returns (e.g., before a blocking network call).
+- only read state; never navigate or `finish()` from it,
+- draw through `renderer` (and `GUI`) and finish with `renderer.displayBuffer()`,
+- not call `requestUpdateAndWait()` (it asserts).
 
-**`requestUpdateAndWait()`**: Blocks the calling task until the render completes. Use sparingly — it's designed for cases where you need the screen to reflect new state before proceeding (e.g., showing "Checking for update..." before calling a network API).
+Other virtual hooks (`skipLoopDelay`, `preventAutoSleep`, `keepAwake`, `usesWifi`, `prepareFramebufferForCapture`, `handleForcedRefresh`, `selectListRow`, `pageList` and so on) are documented in `Activity.h`. Override only what the screen needs.
 
-### 7. Remove Stored Navigation Callbacks
+## Navigation
 
-Old activities often stored `std::function` callbacks for navigation:
+### Push vs replace
 
-```cpp
-// BEFORE
-class SettingsActivity : public ActivityWithSubactivity {
-  const std::function<void()> goBack;   // stored callback
-  const std::function<void()> goHome;   // stored callback
-public:
-  SettingsActivity(GfxRenderer& r, MappedInputManager& m,
-                   std::function<void()> goBack, std::function<void()> goHome)
-      : ActivityWithSubactivity("Settings", r, m), goBack(goBack), goHome(goHome) {}
-};
-
-// AFTER
-class SettingsActivity : public Activity {
-public:
-  SettingsActivity(GfxRenderer& r, MappedInputManager& m)
-      : Activity("Settings", r, m) {}
-  // Use finish() to go back (pops the stack, or returns via ReturnHint if empty),
-  // onGoHome() to exit the flow ("up and out"), or activityManager.goHome() for a hard reset.
-};
-```
-
-This removes `std::function` overhead (~2-4KB per unique signature) and eliminates lifetime risks from captured `this` pointers.
-
-## Navigation Flow
-
-### Push vs Replace: Memory Matters
-
-On an ESP32-C3, heap fragmentation is a real constraint — especially when the next activity is heavy (EPUB reader, TLS sync). There are two ways to launch a new activity, and the choice matters:
+On an ESP32-C3 heap fragmentation is a real constraint, especially when the next activity is heavy (EPUB reader, TLS sync). The choice of call decides whether the caller's memory is freed first.
 
 | Call                                               | Current activity                | Stack            | When to use                                                 |
 |----------------------------------------------------|---------------------------------|------------------|-------------------------------------------------------------|
 | `replaceActivity()` / `goTo*()` / `replaceWith*()` | **destroyed** (onExit + delete) | cleared          | Forward flow: the caller has no reason to stay resident     |
 | `pushActivity()` / `startActivityForResult()`      | kept alive on stack             | parent preserved | Modal result flow: the caller needs to resume with a result |
 
-**Default to replace.** Push is only correct when you need to deliver a result back to a still-living parent (keyboard entry, confirmation dialog, chapter picker, etc.). For plain one-way transitions — opening a book, going to settings, switching tabs — use replace so the parent's memory is freed before the next activity runs.
+Default to replace. Push only when a still-living parent must receive a result (keyboard entry, confirmation dialog, chapter picker). For one-way transitions such as opening a book, going to settings or switching tabs, replace, so the parent is freed before the next activity runs.
 
-### The `ReturnHint` Pattern
+### Navigating
 
-Replace destroys the parent, but the user still expects Back to return "where they came from" — not always Home. To bridge that, `ActivityManager` holds a small `ReturnHint`:
+From any activity method:
 
 ```cpp
-enum class ReturnTo : uint8_t { Home, FileBrowser, RecentBooks };
+activityManager.goToSettings();
+activityManager.goToReader(path);
+activityManager.replaceActivity(std::make_unique<MyActivity>(renderer, mappedInput));
+```
+
+`replaceActivity()` destroys the current activity and clears the stack. The `goTo*()` helpers are thin wrappers around it. The full list is in `ActivityManager.h`. `goHome()` is the hard reset to the home screen.
+
+### Starting a child and receiving its result
+
+Use `startActivityForResult()` when the parent needs an answer:
+
+```cpp
+void MyActivity::launchWifi() {
+  startActivityForResult(
+      std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) return;
+        const auto& wifi = std::get<WifiResult>(result.data);
+        onWifiDone(wifi.connected);
+      });
+}
+```
+
+The child reports back with `setResult()` and `finish()`:
+
+```cpp
+setResult(WifiResult{.connected = true, .ssid = ssid});
+finish();
+
+// to cancel:
+ActivityResult res;
+res.isCancelled = true;
+setResult(std::move(res));
+finish();
+```
+
+- `startActivityForResult()` moves the parent onto the stack and makes the child current.
+- `finish()` queues a pop. On the next loop iteration the manager deletes the child, makes the parent current again, calls the parent's result handler with the child's result, and requests a re-render of the parent.
+- Result types are the structs in `ActivityResult.h`, held in the `ResultVariant`. A new result type goes into that variant. A child that calls `finish()` without `setResult()` delivers an empty result (`std::monostate`) with `isCancelled` false, so check the variant before `std::get`.
+- The handler is moved out before it runs, so it may start another child with `startActivityForResult()`.
+- Capturing `this` in the handler is safe: the parent stays alive on the stack while the child runs.
+
+### Leaving a flow: finish(), onGoHome(), goHome()
+
+- `finish()`: with a non-empty stack, pops back to the parent. With an empty stack (the activity was launched by a replace), it falls through to `returnFromChild()`.
+- `onGoHome()`: "up and out". It calls `returnFromChild()`, so a long press of Back in a reader returns to the view that opened the book, not always Home.
+- `activityManager.goHome()`: hard reset to Home. Clears the return hint.
+
+### The ReturnHint pattern
+
+Replace destroys the parent, but Back should still return to where the user came from. `ActivityManager` keeps one `ReturnHint` for that:
+
+```cpp
+enum class ReturnTo : uint8_t { Home, FileBrowser, AllFiles, RecentBooks, GlobalBookmarks };
 
 struct ReturnHint {
   ReturnTo target = ReturnTo::Home;
-  std::string path;        // FileBrowser directory to restore
-  std::string selectName;  // item to re-focus (file name, book path)
-  int selectIndex = -1;    // combined-list index (Home selector, Recents row)
+  std::string path;              // FileBrowser directory to restore
+  std::string selectName;        // item to re-focus (file name, book title)
+  int selectIndex = -1;          // e.g. the Home carousel's index
+  std::string selectionContext;  // optional activity-specific restore key
+  int selectBookmarkIndex = -1;  // optional bookmark index for GlobalBookmarks
 };
 ```
 
-A parent records a hint before launching a forward flow. When the launched activity (or anything it chains to) eventually exits with an empty stack, `ActivityManager::returnFromChild()` consumes the hint and routes to the correct parent — restoring its prior selection. If no hint is set, it falls back to `goHome()`.
+A parent records a hint before a forward flow. When the launched activity, or anything it chains to, exits with an empty stack, `returnFromChild()` consumes the hint and routes to the right parent, restoring its selection. With no hint it calls `goHome()`.
 
-Two ways to set a hint:
+There are two ways to set a hint.
 
-**1. Dedicated wrappers** — for the common book-open paths:
+1. The dedicated wrappers `replaceWithReader(path, hint)` and `replaceWithFileBrowser(path, hint, focusName)`, which record the hint and replace in one call:
 
-```cpp
-// FileBrowserActivity::onFileOpen
-ReturnHint hint;
-hint.target     = ReturnTo::FileBrowser;
-hint.path       = basepath;        // "/books/fiction"
-hint.selectName = entry;           // "war_and_peace.epub"
-activityManager.replaceWithReader(fullPath, std::move(hint));
+   ```cpp
+   // FileBrowserActivity, opening a book
+   ReturnHint hint;
+   hint.target     = ReturnTo::FileBrowser;
+   hint.path       = basepath;   // directory to restore
+   hint.selectName = entry;      // file to re-focus
+   activityManager.replaceWithReader(fullPath, std::move(hint));
+   ```
 
-// RecentBooksActivity::onSelect
-ReturnHint hint;
-hint.target      = ReturnTo::RecentBooks;
-hint.selectIndex = selectorIndex;
-activityManager.replaceWithReader(path, std::move(hint));
-```
+2. `setReturnHint()` followed by any plain `goTo*()`:
 
-**2. `setReturnHint()` + any `goTo*()`** — for arbitrary transitions where a dedicated wrapper would be overkill:
+   ```cpp
+   // HomeActivity, opening Settings
+   ReturnHint hint;
+   hint.target      = ReturnTo::Home;
+   hint.selectIndex = selectorIndex;   // restore focus on the same menu entry
+   activityManager.setReturnHint(std::move(hint));
+   activityManager.goToSettings();     // parent destroyed; hint survives
+   ```
 
-```cpp
-// HomeActivity::dispatchMenuAction
-ReturnHint hint;
-hint.target      = ReturnTo::Home;
-hint.selectIndex = selectorIndex;   // restore focus on the same menu entry
-activityManager.setReturnHint(std::move(hint));
-activityManager.goToSettings();     // parent destroyed; hint survives the round trip
-```
+Plain `goTo*()` helpers leave the hint alone, so it survives chains such as Home, Reader, KOReaderSync, Reader, back to Home. These clear or overwrite it: `goHome()`, the `replaceWith*()` helpers (they set their own), `goToGlobalBookmarks(hint)` (it takes its own), and `returnFromChild()` (it consumes it). `clearReturnHint()` drops it explicitly.
 
-`goTo*()` helpers do **not** clear the hint — only `goHome()` (explicit hard-reset) and the `replaceWith*()` helpers (which overwrite it with their own hint) do. This lets a hint survive chained transitions: Home → Reader → KOReaderSync → Reader → back to Home, hint intact.
+## Task model
 
-How `finish()` interacts with the hint:
-
-- **Non-empty stack**: `finish()` pops to the parent on the stack (classic modal result flow). Hint is untouched.
-- **Empty stack**: `finish()` falls through to `returnFromChild()` automatically. An activity launched via a `replaceWith*()` helper has no stack — so its Back-button `finish()` naturally routes via the hint.
-
-`onGoHome()` is now semantically "up and out" — it calls `returnFromChild()`, so long-press Back in a reader returns to whichever view opened the book, not always Home. For an explicit hard-reset, call `activityManager.goHome()` directly.
-
-## Technical Details
-
-### FreeRTOS Task Model
-
-The firmware runs on an ESP32-C3, a single-core RISC-V microcontroller. FreeRTOS provides cooperative and preemptive multitasking on this single core — only one task executes at any moment, and the scheduler switches between tasks at yield points (blocking calls, `vTaskDelay`, `taskYIELD`) or when a tick interrupt promotes a higher-priority task.
-
-There are two tasks relevant to the activity system:
+The firmware runs on two kinds of chip. The Xteink X3 and X4 use an ESP32-C3, a single-core RISC-V part. The X4 Pro and the LilyGo T5 S3 use a dual-core ESP32-S3. `ActivityManager::begin()` creates the render task with `xTaskCreatePinnedToCore()`, priority 1, 10 KB stack, on CPU 1 when the part has two cores and on CPU 0 otherwise. On the S3 the pin keeps multi-second page builds and cover decodes off CPU 0, where the system and Wi-Fi tasks and the idle-task watchdog live. The render stack is 10 KB because the render task runs the deepest call chains (page build, CSS resolve, image decode) and its stack abuts the heap top, so an overflow shows up as heap corruption elsewhere.
 
 ```text
 ┌──────────────────────┐     ┌──────────────────────────┐
 │ Main Task            │     │ Render Task              │
-│ (Arduino loop)       │     │ (ActivityManager-owned)   │
+│ (Arduino loop)       │     │ (ActivityManager-owned)  │
 │ Priority: 1          │     │ Priority: 1              │
 │                      │     │                          │
 │ Runs:                │     │ Runs:                    │
@@ -335,216 +217,133 @@ There are two tasks relevant to the activity system:
 └──────────────────────┘     └──────────────────────────┘
 ```
 
-Both tasks run at priority 1. Since the ESP32-C3 is single-core, they alternate execution: the main task runs `loop()`, then at the end of the loop iteration, notifies the render task if an update was requested. The render task wakes, acquires the mutex, calls `render()`, releases the mutex, and blocks again.
+On the C3 the two tasks alternate: the main task runs `loop()` and, at the end of the iteration, notifies the render task if an update was requested. The render task wakes, takes the mutex, calls `render()`, releases the mutex and blocks again.
 
-Do not use `xTaskCreate` inside activities. If you have a use case that seems to require a background task, open a discussion to propose a lifecycle-aware `Worker` abstraction first.
+Do not call `xTaskCreate` inside an activity. If a screen seems to need a background task, propose a lifecycle-aware worker abstraction first.
 
-### The Render Mutex and RenderLock
+## The render mutex and RenderLock
 
-A single FreeRTOS mutex (`renderingMutex`) protects shared state between `loop()` and `render()`. Since these run on different tasks, any state read by `render()` and written by `loop()` must be guarded.
-
-`RenderLock` is an RAII wrapper:
+One FreeRTOS mutex (`renderingMutex`, private to `ActivityManager`) protects state shared between `loop()` and `render()`. They run on different tasks, so anything `render()` reads and `loop()` writes must be guarded. `RenderLock` (`RenderLock.h`) is the RAII wrapper:
 
 ```cpp
-// Standalone class (not tied to any specific activity)
 class RenderLock {
-  bool isLocked = false;
-public:
-  explicit RenderLock();           // acquires activityManager.renderingMutex
-  explicit RenderLock(Activity&);  // same — Activity& param kept for compatibility
-  ~RenderLock();                   // releases mutex if still held
-  void unlock();                   // early release
+ public:
+  explicit RenderLock();                         // acquire the global mutex
+  explicit RenderLock(Activity&);                // same; parameter unused
+  explicit RenderLock(ExclusiveActivityAccess);  // mutex AND no render pass in flight
+  ~RenderLock();                                 // releases if still held
+  void unlock();                                 // early release
+  static bool peek();
 };
 ```
 
-**Usage patterns:**
+Activities use the plain constructor. `ExclusiveActivityAccess` is for the manager's own transitions: the render task drops the mutex mid-pass and keeps using the activity, so code that destroys the current activity must wait for the pass to end, not just for the mutex.
 
 ```cpp
-// In loop(): protect state mutations that render() reads
+// In loop(): guard state that render() reads
 void MyActivity::loop() {
   if (somethingChanged) {
     RenderLock lock;
-    state = newState;        // safe — render() can't run while lock is held
+    state = newState;        // render() cannot run while the lock is held
   }
-  requestUpdate();           // trigger render after lock is released
+  requestUpdate();           // after the lock is released
 }
 
-// In render(): lock is passed in, held for duration of render
+// In render(): the lock is passed in and held for the whole call
 void MyActivity::render(RenderLock&&) {
-  // Lock is held — safe to read shared state
   renderer.clearScreen();
-  renderer.drawText(..., stateString, ...);
+  renderer.drawText(/* ... */);
   renderer.displayBuffer();
-  // Lock released when RenderLock destructor runs
 }
 ```
 
-**Critical rule**: Never call `requestUpdateAndWait()` while holding a `RenderLock`. The render task needs the mutex to call `render()`, so holding it while waiting for the render to complete is a deadlock:
+Keep critical sections short. Acquire, change state, release, then do blocking work:
 
-```text
-Main Task                    Render Task
-──────────                   ───────────
-RenderLock lock;             (blocked on mutex)
-requestUpdateAndWait();
-  → notify render task
-  → block waiting for
-    render to complete        → wakes up
-                              → tries to acquire mutex
-                              → DEADLOCK: main holds mutex,
-                                waits for render; render
-                                waits for mutex
+```cpp
+// WRONG: render is blocked for the whole network call
+RenderLock lock;
+state = LOADING;
+auto result = http.get(url);
+state = DONE;
+
+// CORRECT
+{ RenderLock lock; state = LOADING; }
+requestUpdate(true);          // show "Loading..." before we block
+auto result = http.get(url);  // lock not held
+{ RenderLock lock; state = DONE; }
+requestUpdate();
 ```
 
-### requestUpdate() vs requestUpdateAndWait()
+## requestUpdate() and requestUpdateAndWait()
 
 ```text
-requestUpdate(false)          requestUpdate(true)
-─────────────────             ─────────────────
-Sets flag only.               Notifies render task
-Render happens after          immediately.
-loop() returns and            Render may start
-ActivityManager checks        before the calling
-the flag.                     function returns.
-                              (Does NOT wait for
-                              render to complete.)
-
-requestUpdateAndWait()
-──────────────────────
-Notifies render task AND
-blocks calling task until
-render is done. Uses
-FreeRTOS direct-to-task
-notification on the
-caller's task handle.
+requestUpdate()                 requestUpdate(true)           requestUpdateAndWait()
+───────────────                 ───────────────────           ──────────────────────
+Sets a flag. Render starts      Notifies the render task      Notifies the render task and
+after loop() returns and        at once. Does not wait for    blocks the caller until the
+the manager sees the flag.      the render to finish.         render is done.
 ```
 
-`requestUpdateAndWait()` flow in detail:
+- Default `requestUpdate()` is deferred and batched. Several state changes in one `loop()` give one render. Use it almost always.
+- `requestUpdate(true)` only when the render must start before the current function returns, for example before a blocking network call.
+- `requestUpdateAndWait()` when the screen must show the new state before you go on (for example "Checking for update..." before an API call). Use sparingly.
 
-```text
-Calling Task                 Render Task
-────────────                 ───────────
-requestUpdateAndWait()
-  ├─ assert: not render task
-  ├─ assert: not holding RenderLock
-  ├─ store waitingTaskHandle
-  ├─ xTaskNotify(renderTask)  → wakes render task
-  └─ ulTaskNotifyTake() ─┐
-     (blocked)           │    RenderLock lock;
-                         │    activity->render();
-                         │    // render complete
-                         │    taskENTER_CRITICAL
-                         │    waiter = waitingTaskHandle
-                         │    waitingTaskHandle = nullptr
-                         │    taskEXIT_CRITICAL
-                         │    xTaskNotify(waiter) ───┐
-                         │                           │
-  ┌──────────────────────┘                           │
-  │ (woken by notification) ◄────────────────────────┘
-  └─ return
-```
+`requestUpdateAndWait()` asserts that the caller is not the render task, does not hold a `RenderLock`, and that no other task is already waiting (only one waiter is supported). Holding the lock while waiting would deadlock: the render task needs the mutex to run `render()`, and the caller holds it while waiting for `render()` to finish.
 
-### Activity Lifecycle Under ActivityManager
+An activity can call `isUpdateSuperseded()` from `render()` to learn that another render is already queued, and skip a purely cosmetic tail of the current one. The answer is advisory.
+
+## Lifecycle
+
+Replace:
 
 ```text
 activityManager.replaceActivity(make_unique<MyActivity>(...))
-  │
-  ▼
-╔═══════════════════════════════════════════════════╗
-║  pendingAction = Replace                          ║
-║  pendingActivity = MyActivity                     ║
-╚═══════════════════════════════════════════════════╝
-  │
-  ▼ (next loop iteration)
-  ActivityManager::loop()
-  │
-  ├── currentActivity->loop()     // old activity's last loop
-  │
-  ├── process pending action:
-  │   ├── RenderLock lock;
-  │   ├── oldActivity->onExit()   // cleanup under lock
-  │   ├── delete oldActivity
-  │   ├── clear stack
-  │   ├── currentActivity = MyActivity
-  │   ├── lock.unlock()
-  │   └── MyActivity->onEnter()   // init new activity
-  │
-  └── if requestedUpdate:
-      └── notify render task
+  → pendingAction = Replace, pendingActivity = MyActivity
+  (next loop iteration, ActivityManager::loop())
+  ├── currentActivity->loop()        // old activity's last loop
+  ├── RenderLock (exclusive)
+  ├── oldActivity->onExit(); delete oldActivity; clear stack
+  ├── currentActivity = MyActivity
+  ├── unlock
+  └── MyActivity->onEnter()
 ```
 
-For push/pop (subactivity) navigation:
+Push and pop:
 
 ```text
-Parent calls: startActivityForResult(make_unique<Child>(...), handler)
-  │
-  ▼
-╔══════════════════════════════════════╗
-║  pendingAction = Push               ║
-║  pendingActivity = Child            ║
-║  parent->resultHandler = handler    ║
-╚══════════════════════════════════════╝
-  │
-  ▼ (next loop iteration)
-  ├── Parent moved to stackActivities[]
+Parent: startActivityForResult(make_unique<Child>(...), handler)
+  → handler stored on parent, pendingAction = Push
+  (next iteration)
+  ├── parent moved to stackActivities
   ├── currentActivity = Child
   └── Child->onEnter()
 
         ... child runs ...
 
-Child calls: setResult(MyResult{...}); finish();
-  │
-  ▼
-╔══════════════════════════════════════╗
-║  pendingAction = Pop                ║
-║  child->result = MyResult{...}      ║
-╚══════════════════════════════════════╝
-  │
-  ▼ (next loop iteration)
-  ├── result = child->result
+Child: setResult(MyResult{...}); finish();
+  → pendingAction = Pop
+  (next iteration)
+  ├── take child->result
   ├── Child->onExit(); delete Child
-  ├── currentActivity = Parent (popped from stack)
-  ├── Parent->resultHandler(result)
-  └── requestUpdate()   // automatic re-render for parent
+  ├── currentActivity = parent (popped from stack)
+  ├── parent's handler(result)
+  └── requestUpdate()                // automatic re-render for the parent
 ```
 
-### Common Pitfalls
+Every transition also arms an input drain: button events are discarded until all buttons are released, so the press that left one screen cannot act on the next. Queued transitions also paint a busy indicator first, unless the activity returns true from `suppressesBusyIndicator()`.
 
-**Calling `finish()` and continuing to access `this`**: `finish()` sets `pendingAction = Pop` but does not immediately destroy the activity. The activity is destroyed on the next `ActivityManager::loop()` iteration. It's safe to access member variables after `finish()` within the same function, but don't rely on the activity surviving past the current `loop()` call.
+## Common pitfalls
 
-**Modifying shared state without `RenderLock`**: If `render()` reads a variable and `loop()` writes it, the write must be under a `RenderLock`. Without it, `render()` could see a half-written value (e.g., a partially updated string or struct).
+**Continuing after `finish()`.** `finish()` only queues a pop. The activity is destroyed on the next `ActivityManager::loop()` iteration. Touching members later in the same function is safe, but do not rely on the activity surviving past the current `loop()`.
 
-**Creating background tasks that outlive the activity**: Any FreeRTOS task created in `onEnter()` must be deleted in `onExit()` before the activity is destroyed. The `ActivityManager` does not track or clean up background tasks.
+**Shared state without `RenderLock`.** If `render()` reads a value and `loop()` writes it, the write needs a `RenderLock`. Otherwise `render()` can see a half-written string or struct.
 
-**Using push for forward navigation**: `pushActivity()` / `startActivityForResult()` keeps the parent alive on the stack. For a heavy child (EPUB reader, TLS sync) on a fragmented heap, the parent's resident allocations can be the difference between a successful launch and OOM. Only push when you need the parent to receive a result — otherwise use `replaceActivity()` / `goTo*()` / `replaceWith*()` and let the parent be freed first. If you do need "back to where I came from" semantics, record a `ReturnHint` before the replace instead of pushing.
+**Background tasks that outlive the activity.** The manager does not track tasks. A task created in `onEnter()` must be deleted in `onExit()` before the activity is destroyed. Better, do not create one.
 
-**Stale `ReturnHint`**: A hint set by one activity persists until either `returnFromChild()` / `goHome()` clears it, or a `replaceWith*()` helper overwrites it. If you record a hint but the flow aborts down an unusual path (error screen, boot transition), the next unrelated `finish()` could consume it. Prefer setting the hint immediately before the transition, and call `activityManager.clearReturnHint()` if you abort the flow without launching the intended target.
+**Pushing for forward navigation.** A pushed parent stays resident. For a heavy child (EPUB reader, TLS sync) on a fragmented heap, that can decide between a clean launch and OOM. Push only to receive a result. For "back to where I came from", record a `ReturnHint` and replace.
 
-**Holding `RenderLock` across blocking calls**: The render task is blocked on the mutex while you hold the lock. Keep critical sections short — acquire, mutate state, release, then do blocking work.
+**Stale `ReturnHint`.** A hint lives until `returnFromChild()` or `goHome()` clears it or a `replaceWith*()` overwrites it. If a flow aborts down an unusual path (error screen, boot transition), the next unrelated `finish()` could consume it. Set the hint immediately before the transition, and call `activityManager.clearReturnHint()` if you abort without launching the target.
 
-```cpp
-// WRONG — blocks render for the entire network call
-void MyActivity::doNetworkStuff() {
-  RenderLock lock;
-  state = LOADING;
-  auto result = http.get(url);  // blocks for seconds with lock held
-  state = DONE;
-}
+**Holding `RenderLock` across blocking calls.** See the example in the render mutex section.
 
-// CORRECT — release lock before blocking
-void MyActivity::doNetworkStuff() {
-  {
-    RenderLock lock;
-    state = LOADING;
-  }
-  requestUpdate(true);           // render "Loading..." immediately, before we block
-  auto result = http.get(url);   // lock is not held
-  {
-    RenderLock lock;
-    state = DONE;
-  }
-  requestUpdate();
-}
-```
-
-**Re-syncing the write buffer on a path that already prepared it**: `dispatchLightPanelGesture()` does `syncWriteBufferFromDisplayed()` *then* `prepareFramebufferForCapture()`, in that order and for the reason documented at its call site — in the reader the secondary holds Background-A's pre-rendered *next* page, so the sync alone restores the wrong page and only `prepareFramebufferForCapture()` puts the visible one back. Any later code in the same `loop()` tick that syncs again undoes step two and composites the drawer onto the wrong page. If you add a step between the gesture dispatchers and the pending-action loop, it must not sync unconditionally.
-
+**Re-syncing the write buffer on a path that already prepared it.** `dispatchLightPanelGesture()` calls `syncWriteBufferFromDisplayed()` and then `prepareFramebufferForCapture()`, in that order. In the reader the secondary buffer holds Background-A's pre-rendered next page, so the sync alone restores the wrong page and only `prepareFramebufferForCapture()` puts the visible one back. Any later code in the same `loop()` tick that syncs again undoes the second step and composites the drawer onto the wrong page. A step added between the gesture dispatchers and the pending-action loop must not sync unconditionally. `ActivityManager::framebufferPreparedThisTick` records that the frame is already prepared.

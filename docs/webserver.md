@@ -9,7 +9,9 @@ CrossPoint Reader includes a built-in web server that allows you to:
 - Upload files wirelessly from any device on the same WiFi network
 - Browse and manage files on your device's SD card
 - Create folders to organize your library
-- Delete files and folders
+- Rename, move and delete files and folders
+- Change device settings, manage fonts, and view your reading stats
+- Mount the card as a WebDAV drive (see [Other ways in](#other-ways-in))
 
 ## Prerequisites
 
@@ -19,11 +21,14 @@ CrossPoint Reader includes a built-in web server that allows you to:
 
 ---
 
-## Step 1: Accessing the WiFi Screen
+## Step 1: Starting the Web Server
 
-1. From the main menu or file browser, navigate to the **Settings** screen
-2. Select the **WiFi** option
-3. The device will automatically start scanning for available networks
+1. On the Home screen, open **File Transfer**. If your Home screen does not show it, look under **More**.
+2. Choose how to connect:
+   - **Join a Network**: the device joins your WiFi (Step 2). Your computer or phone must be on the same network.
+   - **Create Hotspot**: the device makes its own WiFi network, **CrossPoint-Reader**. Join it from your computer or phone; the screen shows the address to open.
+
+The other entries on that screen (Calibre wireless, USB) are described in the [User Guide](../USER_GUIDE.md#36-file-transfer-screen).
 
 ---
 
@@ -106,19 +111,15 @@ Once connected, the screen will display:
 
 ## Step 5: Using the Web Interface
 
-### Home Page
+### Welcome Page
 
-The home page displays:
+The page you land on at `http://<device-ip>/` has one link per page:
 
-- Device status and version information
-- WiFi connection status
-- Current IP address
-- Available memory
-
-Navigation links:
-
-- **Home** - Returns to the status page
-- **File Manager** - Access file management features
+- **Open File Manager**: browse and manage the SD card (below)
+- **Settings**: device settings and saved networks (below)
+- **Font Manager**: install and remove SD-card fonts (below)
+- **Reading Stats**: your reading history (below)
+- **System Info**: device status and version, WiFi state, IP address, free memory and SD card usage
 
 <img src="./images/wifi/webserver_homepage.png" width="600">
 
@@ -181,16 +182,51 @@ This is useful for organizing your library by genre, author, series or file type
 
 ---
 
+### Settings
+
+The Settings page lists the same settings as the Settings screens on the device, grouped by
+category. Change a value and save. Two cards at the end manage the **Wi-Fi Networks** and **OPDS
+Servers** the device remembers. Saved passwords are never shown back; leave the password field
+empty when editing to keep the stored one. See
+[Web Settings](../USER_GUIDE.md#376-web-settings-wifi--opds) in the User Guide.
+
+### Reading Stats
+
+The Stats page shows your reading time, streaks and a list of books with per-book figures, the same
+numbers as the Reading Stats screens on the device. From it you can **export** the history as a
+`reading-stats.json` backup and **remove** a book from the stats.
+
+### Font Manager
+
+The Fonts page lists the font families installed on the SD card and the families available online.
+You can install or update one or all of them (the device downloads them itself, so it needs internet
+access), upload a `.cpfont` file from your computer, or delete a family.
+
+### Plugins
+
+Small add-ons kept on the SD card can add cards to the File Manager and Settings pages, for example
+to edit a book's cover and metadata. They appear on their own once installed. See
+[SD-card web plugins](./sd-plugins.md).
+
+### Other ways in
+
+- **WebDAV.** The card is also served over WebDAV at the same address, so you can mount
+  `http://<device-ip>/` as a network drive in your file manager and copy files without the web page.
+  Folders must be empty to delete.
+- **curl and scripts.** See the next section.
+
+---
+
 ## Command Line File Management
 
-For power users, you can manage files directly from your terminal using `curl` while the device is in File Upload mode. Detailed documentation can be found [here](./webserver-endpoints.md). 
+For power users, you can manage files directly from your terminal using `curl` while File Transfer is running. Detailed documentation can be found [here](./webserver-endpoints.md). 
 
 ## Security Notes
 
 - The web server runs on port 80 (standard HTTP)
 - **No authentication is required** - anyone on the same network can access the interface
-- The web server is only accessible while the WiFi screen shows "Connected"
-- The web server automatically stops when you exit the WiFi screen
+- The web server is only accessible while the File Transfer screen shows it is running
+- The web server automatically stops when you leave the File Transfer screen
 - For security, only use on trusted private networks
 
 ---
@@ -198,7 +234,7 @@ For power users, you can manage files directly from your terminal using `curl` w
 ## Technical Details
 
 - **Supported WiFi:** 2.4GHz networks (802.11 b/g/n)
-- **Web Server Port:** 80 (HTTP)
+- **Web Server Port:** 80 (HTTP); fast uploads from the File Manager use a WebSocket on port 81
 - **Maximum Upload Size:** Limited by available SD card space
 - **Browser Compatibility:** All modern browsers (Chrome, Firefox, Safari, Edge)
 
@@ -211,13 +247,13 @@ For power users, you can manage files directly from your terminal using `curl` w
 3. **Upload multiple files** - You can select and upload multiple files at once; the manager will queue them and refresh when the batch is finished
 4. **Use descriptive names** - Name your folders clearly (e.g., "SciFi", "Mystery", "Non-Fiction")
 5. **Keep credentials saved** - Save your WiFi password for quick reconnection in the future
-6. **Exit when done** - Press **Back** to exit the WiFi screen and save battery
+6. **Exit when done** - Press **Back** to leave the File Transfer screen and save battery
 
 ---
 
-## Exiting WiFi Mode
+## Stopping the Web Server
 
-When you're finished uploading files:
+When you are finished:
 
 1. Press the **Back** button on your CrossPoint Reader
 2. The web server will automatically stop

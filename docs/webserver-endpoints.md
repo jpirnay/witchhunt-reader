@@ -1,17 +1,34 @@
 # Webserver Endpoints
 
-This document describes all HTTP and WebSocket endpoints available on the CrossPoint Reader webserver.
+This document describes all HTTP, WebDAV and WebSocket endpoints available on the CrossPoint Reader webserver.
 
 - [Webserver Endpoints](#webserver-endpoints)
   - [Overview](#overview)
-  - [HTTP Endpoints](#http-endpoints)
-    - [GET `/` - Home Page](#get----home-page)
-    - [GET `/files` - File Browser Page](#get-files---file-browser-page)
+  - [Pages](#pages)
+  - [Status](#status)
     - [GET `/api/status` - Device Status](#get-apistatus---device-status)
+    - [GET `/api/status/fast` - Device Status without SD stats](#get-apistatusfast---device-status-without-sd-stats)
+  - [Files](#files)
     - [GET `/api/files` - List Files](#get-apifiles---list-files)
+    - [GET `/download` - Download File](#get-download---download-file)
     - [POST `/upload` - Upload File](#post-upload---upload-file)
     - [POST `/mkdir` - Create Folder](#post-mkdir---create-folder)
-    - [POST `/delete` - Delete File or Folder](#post-delete---delete-file-or-folder)
+    - [POST `/rename` - Rename File or Folder](#post-rename---rename-file-or-folder)
+    - [POST `/move` - Move File or Folder](#post-move---move-file-or-folder)
+    - [POST `/delete` - Delete Files or Folders](#post-delete---delete-files-or-folders)
+  - [Settings](#settings)
+    - [GET `/api/settings` - List Settings](#get-apisettings---list-settings)
+    - [POST `/api/settings` - Change Settings](#post-apisettings---change-settings)
+  - [Reading Stats](#reading-stats)
+    - [GET `/api/stats` - Dashboard Data](#get-apistats---dashboard-data)
+    - [GET `/api/stats/export` - Download a Backup](#get-apistatsexport---download-a-backup)
+    - [POST `/api/stats/remove` - Remove a Book from the Stats](#post-apistatsremove---remove-a-book-from-the-stats)
+  - [Fonts](#fonts)
+  - [Saved Networks and Servers](#saved-networks-and-servers)
+    - [Wi-Fi networks](#wi-fi-networks)
+    - [OPDS servers](#opds-servers)
+  - [Plugin Endpoints](#plugin-endpoints)
+  - [WebDAV](#webdav)
   - [WebSocket Endpoint](#websocket-endpoint)
     - [Port 81 - Fast Binary Upload](#port-81---fast-binary-upload)
   - [Network Modes](#network-modes)
@@ -24,38 +41,41 @@ This document describes all HTTP and WebSocket endpoints available on the CrossP
 
 The CrossPoint Reader exposes a webserver for file management and device monitoring:
 
-- **HTTP Server**: Port 80
+- **HTTP Server**: Port 80 (the routes below, plus [WebDAV](#webdav) on any other path)
 - **WebSocket Server**: Port 81 (for fast binary uploads)
+
+The routes are registered in `CrossPointWebServer::begin()`.
+
+When the largest free heap block is too small, the JSON endpoints answer
+`503` with `{"error":"low memory"}` and a `Retry-After: 5` header. Retry after a moment.
 
 ---
 
-## HTTP Endpoints
+## Pages
 
-### GET `/` - Home Page
+Each page is one HTML file from `src/network/html/`, served from flash as
+`text/html` with `200 OK`. The pages call the API below.
 
-Serves the home page HTML interface.
+| Path          | Page                                       |
+| ------------- | ------------------------------------------ |
+| `/`           | Welcome page, with links to the others     |
+| `/files`      | File Manager                               |
+| `/settings`   | Settings                                   |
+| `/stats`      | Reading Stats                              |
+| `/fonts`      | Font Manager                               |
+| `/systeminfo` | System Info                                |
 
-**Request:**
+`GET /js/jszip.min.js` serves the gzipped JSZip library (`Content-Encoding: gzip`),
+which the File Manager loads. Any other path that WebDAV does not claim answers
+`404` with a plain-text body.
+
 ```bash
 curl http://crosspoint.local/
 ```
 
-**Response:** HTML page (200 OK)
-
 ---
 
-### GET `/files` - File Browser Page
-
-Serves the file browser HTML interface.
-
-**Request:**
-```bash
-curl http://crosspoint.local/files
-```
-
-**Response:** HTML page (200 OK)
-
----
+## Status
 
 ### GET `/api/status` - Device Status
 
@@ -81,32 +101,71 @@ curl "http://crosspoint.local/api/status?phase=full"
 ```json
 {
   "version": "1.0.0",
+  "deviceType": "X4",
   "device": "X4",
+  "displayWidth": 800,
+  "displayHeight": 480,
+  "chipVersion": "ESP32-C3 rev 4",
+  "cpuMHz": 160,
   "ip": "192.168.1.100",
   "mode": "STA",
   "rssi": -45,
+  "macAddress": "AA:BB:CC:DD:EE:FF",
   "freeHeap": 123456,
+  "minFreeHeap": 98304,
+  "maxAllocHeap": 61440,
+  "flashTotal": 16777216,
+  "appPartitionSize": 6553600,
+  "batteryPercent": 87,
+  "charging": false,
   "uptime": 3600,
-  "sdReady": false
+  "sdReady": false,
+  "sdTotal": 0,
+  "sdUsed": 0,
+  "sdFree": 0
 }
 ```
 
-| Field      | Type   | Description                                                     |
-| ---------- | ------ | --------------------------------------------------------------- |
-| `version`  | string | CrossPoint firmware version                                     |
-| `device`   | string | Device model, `"X3"` or `"X4"` (also exposed as `deviceType`)   |
-| `ip`       | string | Device IP address                                               |
-| `mode`     | string | `"STA"` (connected to WiFi) or `"AP"` (access point mode)       |
-| `rssi`     | number | WiFi signal strength in dBm (0 in AP mode)                      |
-| `freeHeap` | number | Free heap memory in bytes                                       |
-| `uptime`   | number | Seconds since device boot                                       |
-| `sdReady`  | bool   | `true` only with `phase=full`; SD stats are valid only then     |
+| Field              | Type   | Description                                                                |
+| ------------------ | ------ | -------------------------------------------------------------------------- |
+| `version`          | string | CrossPoint firmware version                                                |
+| `deviceType`       | string | Board name: `"X3"`, `"X4"`, `"X4 Pro"` or `"T5 S3 Pro"`; other boards report their own name |
+| `device`           | string | Same value as `deviceType`, kept for the Calibre plugin's model detection  |
+| `displayWidth`, `displayHeight` | number | Panel size in pixels                                  |
+| `chipVersion`      | string | SoC model and revision                                                     |
+| `cpuMHz`           | number | CPU clock in MHz                                                           |
+| `ip`               | string | Device IP address                                                          |
+| `mode`             | string | `"STA"` (connected to WiFi) or `"AP"` (access point mode)                  |
+| `rssi`             | number | WiFi signal strength in dBm (0 in AP mode)                                 |
+| `macAddress`       | string | WiFi MAC address                                                           |
+| `freeHeap`         | number | Free heap memory in bytes                                                  |
+| `minFreeHeap`      | number | Lowest free heap since boot                                                |
+| `maxAllocHeap`     | number | Largest single block that can be allocated now                             |
+| `flashTotal`       | number | Flash size in bytes                                                        |
+| `appPartitionSize` | number | Size of the running app partition in bytes                                 |
+| `batteryPercent`   | number | Battery charge in percent                                                  |
+| `charging`         | bool   | `true` while charging                                                      |
+| `uptime`           | number | Seconds since device boot                                                  |
+| `sdReady`          | bool   | `true` only with `phase=full`; the `sd*` fields are valid only then        |
+| `sdTotal`, `sdUsed`, `sdFree` | number | SD card bytes; ignore unless `sdReady` is `true`                |
+
+### GET `/api/status/fast` - Device Status without SD stats
+
+The same JSON as `/api/status`, with `sdReady` always `false`. It takes no
+parameters and never scans the card. The System Info page uses it for its first paint.
+
+```bash
+curl http://crosspoint.local/api/status/fast
+```
 
 ---
 
+## Files
+
 ### GET `/api/files` - List Files
 
-Returns a JSON array of files and folders in the specified directory.
+Returns a JSON array of files and folders in the specified directory. The array
+is streamed in chunks.
 
 **Request:**
 ```bash
@@ -142,6 +201,39 @@ curl "http://crosspoint.local/api/files?path=/Books"
 **Notes:**
 - Hidden files (starting with `.`) are automatically filtered out
 - System folders (`System Volume Information`, `XTCache`) are hidden
+- Every path parameter on this page is normalised first, so `..` cannot step outside the folder it is joined to
+
+---
+
+### GET `/download` - Download File
+
+Streams one file to the client as an attachment.
+
+**Request:**
+```bash
+curl -OJ "http://crosspoint.local/download?path=/Books/mybook.epub"
+```
+
+**Query Parameters:**
+
+| Parameter | Required | Description                 |
+| --------- | -------- | --------------------------- |
+| `path`    | Yes      | Path of the file to fetch   |
+
+**Response (200 OK):** the file bytes, with `Content-Disposition: attachment`.
+`Content-Type` is `application/epub+zip` for `.epub` files, else `application/octet-stream`.
+
+**Error Responses:**
+
+| Status | Body                            | Cause                          |
+| ------ | ------------------------------- | ------------------------------ |
+| 400    | `Missing path`                  | `path` not provided            |
+| 400    | `Invalid path`                  | Empty path or `/`              |
+| 400    | `Path is a directory`           | Only files can be downloaded   |
+| 403    | `Cannot access system files`    | Name starts with `.`           |
+| 403    | `Cannot access protected items` | Protected system folder        |
+| 404    | `Item not found`                | Path does not exist            |
+| 500    | `Failed to open file`           | SD card error                  |
 
 ---
 
@@ -160,9 +252,10 @@ curl -X POST -F "file=@mybook.epub" "http://crosspoint.local/upload?path=/Books"
 
 **Query Parameters:**
 
-| Parameter | Required | Default | Description                     |
-| --------- | -------- | ------- | ------------------------------- |
-| `path`    | No       | `/`     | Target directory for the upload |
+| Parameter | Required | Default | Description                                                  |
+| --------- | -------- | ------- | ------------------------------------------------------------ |
+| `path`    | No       | `/`     | Target directory for the upload                              |
+| `t`       | No       | -       | Client Unix time in seconds; used to set the device clock when it is not synced (AP mode) |
 
 **Response (200 OK):**
 ```
@@ -173,6 +266,7 @@ File uploaded successfully: mybook.epub
 
 | Status | Body                                            | Cause                       |
 | ------ | ----------------------------------------------- | --------------------------- |
+| 400    | `Invalid file name`                             | Name has a separator, or is `.` or `..` |
 | 400    | `Failed to create file on SD card`              | Cannot create file          |
 | 400    | `Failed to write to SD card - disk may be full` | Write error during upload   |
 | 400    | `Failed to write final data to SD card`         | Error flushing final buffer |
@@ -180,8 +274,9 @@ File uploaded successfully: mybook.epub
 | 400    | `Unknown error during upload`                   | Unspecified error           |
 
 **Notes:**
-- Existing files with the same name will be overwritten
+- Existing files with the same name are replaced
 - Uses a 4KB buffer for efficient SD card writes
+- The book's layout cache is cleared on success, so an overwritten book is re-indexed
 
 ---
 
@@ -217,47 +312,314 @@ Folder created: NewFolder
 
 ---
 
-### POST `/delete` - Delete File or Folder
+### POST `/rename` - Rename File or Folder
 
-Deletes a file or folder from the SD card.
+Renames an item in place. Book layout caches under the item are cleared first.
 
 **Request:**
 ```bash
-# Delete a file
-curl -X POST -d "path=/Books/mybook.epub&type=file" http://crosspoint.local/delete
-
-# Delete an empty folder
-curl -X POST -d "path=/OldFolder&type=folder" http://crosspoint.local/delete
+curl -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/rename
 ```
 
 **Form Parameters:**
 
-| Parameter | Required | Default | Description                      |
-| --------- | -------- | ------- | -------------------------------- |
-| `path`    | Yes      | -       | Path to the item to delete       |
-| `type`    | No       | `file`  | Type of item: `file` or `folder` |
+| Parameter | Required | Description                                          |
+| --------- | -------- | ---------------------------------------------------- |
+| `path`    | Yes      | Current path of the item                             |
+| `name`    | Yes      | New name only, with no `/` or `\`; surrounding spaces are trimmed |
+
+**Response (200 OK):** `Renamed successfully`, or `Name unchanged` when the name is the same.
+
+**Error Responses:**
+
+| Status | Body                                | Cause                                         |
+| ------ | ----------------------------------- | --------------------------------------------- |
+| 400    | `Missing path or new name`          | A parameter is absent                         |
+| 400    | `Invalid path`                      | Empty path or `/`                             |
+| 400    | `New name cannot be empty`          | Empty name                                    |
+| 400    | `Invalid file name`                 | Name contains `/` or `\`                      |
+| 403    | `Cannot rename to protected name`   | New name starts with `.` or is a protected folder |
+| 403    | `Cannot rename protected item`      | The item itself is protected                  |
+| 404    | `Item not found`                    | Path does not exist                           |
+| 409    | `Target already exists`             | Something already has the new name            |
+| 500    | `Failed to open file`, `Failed to rename` | SD card error                           |
+
+Sidecar files are not renamed with the book (see [sidecar-files.md](sidecar-files.md)).
+
+---
+
+### POST `/move` - Move File or Folder
+
+Moves an item into another folder, keeping its name.
+
+**Request:**
+```bash
+curl -X POST -d "path=/Books/mybook.epub&dest=/Books/SciFi" http://crosspoint.local/move
+```
+
+**Form Parameters:**
+
+| Parameter | Required | Description                       |
+| --------- | -------- | --------------------------------- |
+| `path`    | Yes      | Path of the item to move          |
+| `dest`    | Yes      | Destination folder (must exist)   |
+
+**Response (200 OK):** `Moved successfully`, or `Already in destination`.
+
+**Error Responses:**
+
+| Status | Body                              | Cause                                 |
+| ------ | --------------------------------- | ------------------------------------- |
+| 400    | `Missing path or destination`     | A parameter is absent                 |
+| 400    | `Invalid path`, `Invalid destination` | Empty path or `/` as the item     |
+| 400    | `Cannot move folder into itself`  | `dest` is inside the item             |
+| 400    | `Destination is not a folder`     | `dest` is a file                      |
+| 403    | `Cannot move protected item`      | Hidden or protected item              |
+| 404    | `Item not found`, `Destination not found` | Path does not exist           |
+| 409    | `Target already exists`           | Name already used in `dest`           |
+| 500    | `Failed to open file`, `Failed to move` | SD card error                   |
+
+Sidecar files are not moved with the book (see [sidecar-files.md](sidecar-files.md)).
+
+---
+
+### POST `/delete` - Delete Files or Folders
+
+Deletes one or more files or empty folders from the SD card. A deleted book's
+layout cache is cleared too; its sidecar files are not touched.
+
+**Request:**
+```bash
+# Delete one item
+curl -X POST -d "path=/Books/mybook.epub" http://crosspoint.local/delete
+
+# Delete several items
+curl -X POST --data-urlencode 'paths=["/Books/a.epub","/OldFolder"]' http://crosspoint.local/delete
+```
+
+**Form Parameters** (send exactly one of the two):
+
+| Parameter | Description                                  |
+| --------- | -------------------------------------------- |
+| `path`    | Path to one item                             |
+| `paths`   | JSON array of paths                          |
+
+Files and folders are told apart on the device, so no `type` is needed.
 
 **Response (200 OK):**
 ```
-Deleted successfully
+All items deleted successfully
 ```
 
 **Error Responses:**
 
-| Status | Body                                          | Cause                         |
-| ------ | --------------------------------------------- | ----------------------------- |
-| 400    | `Missing path`                                | `path` parameter not provided |
-| 400    | `Cannot delete root directory`                | Attempted to delete `/`       |
-| 400    | `Folder is not empty. Delete contents first.` | Non-empty folder              |
-| 403    | `Cannot delete system files`                  | Hidden file (starts with `.`) |
-| 403    | `Cannot delete protected items`               | Protected system folder       |
-| 404    | `Item not found`                              | Path does not exist           |
-| 500    | `Failed to delete item`                       | SD card error                 |
+| Status | Body                                               | Cause                                  |
+| ------ | -------------------------------------------------- | -------------------------------------- |
+| 400    | ``Missing `path` or `paths` argument``             | Neither given                          |
+| 400    | `Provide either 'path' or 'paths', not both`       | Both given                             |
+| 400    | `Invalid paths format`, `No paths provided`        | `paths` is not a non-empty JSON array  |
+| 500    | `Failed to delete some items: <list>`              | At least one item failed               |
+
+The 500 body lists each failure as `<path> (<reason>)`, where the reason is one of
+`cannot delete root`, `hidden/system file`, `protected file`, `not found`,
+`folder not empty` or `deletion failed`. The other items in the request are still processed.
 
 **Protected Items:**
 - Files/folders starting with `.`
 - `System Volume Information`
 - `XTCache`
+
+---
+
+## Settings
+
+The Settings page edits the same settings as the on-device Settings screens.
+
+### GET `/api/settings` - List Settings
+
+Returns a streamed JSON array with one object per setting.
+
+```bash
+curl http://crosspoint.local/api/settings
+```
+
+**Response (200 OK)**, abridged and with illustrative values:
+```json
+[
+  {"key": "fontFamily", "name": "Font", "category": "Reader", "subcategory": "", "submenu": "",
+   "type": "enum", "value": 0, "options": ["Bookerly", "Noto Serif"]},
+  {"key": "sleepTimeoutMinutes", "name": "Time to sleep", "category": "Display", "subcategory": "",
+   "submenu": "", "type": "value", "value": 10, "min": 0, "max": 60, "step": 1}
+]
+```
+
+| Field                      | Type   | Description                                                       |
+| -------------------------- | ------ | ----------------------------------------------------------------- |
+| `key`                      | string | Setting key; the name used by `POST /api/settings`                |
+| `name`, `category`, `subcategory`, `submenu` | string | Labels in the device language; the last two may be empty |
+| `type`                     | string | `toggle`, `enum`, `value` or `string`                             |
+| `value`                    | number or string | Current value. Toggles are `0` or `1`; enums are an index into `options` |
+| `options`                  | array  | `enum` only: option labels. For the font rows this includes the families found on the SD card |
+| `min`, `max`, `step`       | number | `value` only: allowed range                                       |
+| `obfuscated`, `isSet`      | bool   | `string` only, for credentials: `value` is always `""`; `isSet` says whether one is stored |
+
+Actions without a key are not listed.
+
+### POST `/api/settings` - Change Settings
+
+Applies the keys present in a JSON body and saves. Unknown keys and out-of-range
+values are skipped silently.
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"sleepTimeoutMinutes": 15, "fontFamily": 1}' http://crosspoint.local/api/settings
+```
+
+**Response (200 OK):** `Applied <n> setting(s)`, where `<n>` counts the keys accepted.
+
+| Status | Body                    | Cause                    |
+| ------ | ----------------------- | ------------------------ |
+| 400    | `Missing JSON body`     | No body                  |
+| 400    | `Invalid JSON: <error>` | Body does not parse      |
+
+For a credential (`obfuscated`) string, sending the key replaces the stored
+value, so the page sends it only when the user typed something.
+
+---
+
+## Reading Stats
+
+The numbers behind the Reading Stats screens. The history is read one book at a
+time and streamed, never loaded whole.
+
+### GET `/api/stats` - Dashboard Data
+
+```bash
+curl http://crosspoint.local/api/stats
+```
+
+**Response (200 OK)**, abridged:
+```json
+{
+  "totalSeconds": 86400, "totalSessions": 41, "totalPagesTurned": 5200,
+  "bookCount": 12, "finishedBookCount": 3, "todayDayIndex": 20733,
+  "currentStreak": 4, "longestStreak": 9,
+  "globalDays": [],
+  "books": [
+    {"docId": "...", "title": "...", "author": "...", "totalSeconds": 7200, "pagesTurned": 300,
+     "sessions": 5, "firstReadEpoch": 0, "lastReadEpoch": 0, "progress": 42,
+     "finishedCount": 0, "lastFinishedEpoch": 0, "finished": false, "days": [],
+     "etaSeconds": 9000}
+  ]
+}
+```
+
+`currentStreak` and `longestStreak` appear only when the clock is set and there is history.
+`todayDayIndex` is the device's current local day; the browser uses it to place the
+`days` arrays on a calendar. `etaSeconds` is present when an estimate is possible.
+With no history at all the body is `{"totalSeconds":0,"books":[]}`.
+A history that cannot be read answers `500` with `{"error":"Reading stats could not be read"}`.
+
+### GET `/api/stats/export` - Download a Backup
+
+Streams the history in the `reading-stats.json` format older firmware reads, as an
+attachment named `reading-stats.json`. It is the backup, and the way back after a
+firmware downgrade.
+
+```bash
+curl -OJ http://crosspoint.local/api/stats/export
+```
+
+`404` with `{}` when there is no history; `500` with `{}` when it cannot be read.
+
+### POST `/api/stats/remove` - Remove a Book from the Stats
+
+Does what the on-device per-book stats screen does: the book's entry goes and its
+time comes out of the totals.
+
+```bash
+curl -X POST -H "Content-Type: application/json" -d '{"docId":"..."}' http://crosspoint.local/api/stats/remove
+```
+
+| Status | Body                                                  | Cause                      |
+| ------ | ----------------------------------------------------- | -------------------------- |
+| 200    | `{"ok":true}`                                         | Removed                    |
+| 400    | `{"error":"Invalid request"}`                         | No body, or no `docId`     |
+| 404    | `{"error":"Book not found"}`                          | Unknown `docId`            |
+| 500    | `{"error":"Could not update the reading stats"}`      | Write failed or no memory  |
+
+---
+
+## Fonts
+
+Manages the `.cpfont` families on the SD card. Bodies are JSON. `/api/fonts/manifest`
+and `/api/fonts/download` need the device to be online, because the device itself fetches
+from the font server over TLS.
+
+| Method | Path                  | Request                                                 | Response                                                                 |
+| ------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
+| GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","totalSize","fileCount"}]}` |
+| POST   | `/api/fonts/download` | `{"family":"Name"}` or `{"all":true}`                   | `{"ok":true,"installedCount":N}`                                         |
+| POST   | `/api/fonts/upload`   | multipart: one `.cpfont` file; `?family=Name` in the URL | `{"ok":true}`                                                           |
+| POST   | `/api/fonts/delete`   | `{"family":"Name"}`                                     | `{"ok":true}`                                                            |
+
+Notes:
+- `/api/fonts` rescans the SD card first. `maxFamilies` is the registry's limit on installed SD families.
+- `download` with `all` installs every family that is missing or has an update; with `family`, that one.
+  The files of a batch share one TLS connection.
+- `upload` takes the family name from the query string, because multipart fields are not
+  available until the file has arrived. The file must end in `.cpfont`, carry no path separators, and start
+  with the `CPFONT\0\0` magic; otherwise the partial file is deleted.
+
+**Errors:**
+
+| Status | Body                                                    | Cause                                      |
+| ------ | ------------------------------------------------------- | ------------------------------------------ |
+| 400    | `{"ok":false,"error":"Invalid request"}`                | `download` body is not JSON                |
+| 400    | `{"ok":false,"error":"Missing family"}`                 | `download` with neither `family` nor `all` |
+| 400    | `{"error":"Invalid .cpfont file"}`                      | `upload` failed validation                 |
+| 400    | `{"error":"Invalid request"}`                           | `delete` body has no `family`              |
+| 404    | `{"ok":false,"error":"Family not found in manifest"}`   | `download` of an unknown family            |
+| 500    | `{"ok":false,"error":"<message>"}`                      | Manifest fetch or install failed; install failures also carry `family` and `installedCount` |
+| 500    | `{"ok":false,"error":"Out of memory"}`                  | `download` could not build its list        |
+| 500    | `{"error":"Delete failed"}`                             | `delete` failed                            |
+
+---
+
+## Saved Networks and Servers
+
+Both stores follow the same pattern. A saved entry is addressed by its `index` in the
+list. Passwords are never returned: the list only says whether one is set. In a POST,
+leaving `password` out keeps the stored one; sending `""` sets an empty one.
+The delete routes are POSTs because the device's HTTP server cannot take a body on `DELETE`.
+
+### Wi-Fi networks
+
+| Method | Path               | Body                                            | Response                                   |
+| ------ | ------------------ | ----------------------------------------------- | ------------------------------------------ |
+| GET    | `/api/wifi`        | -                                               | `[{"index","ssid","hasPassword","isLastConnected"}]` |
+| POST   | `/api/wifi`        | `{"ssid","password"?,"index"?}`                 | `OK`                                       |
+| POST   | `/api/wifi/delete` | `{"index"}`                                     | `OK`                                       |
+
+POST with `index` edits that entry (the SSID can change); without it, adds a new one.
+Errors are `400` with a plain-text body: `Missing JSON body`, `Invalid JSON: ...`, `SSID is required`,
+`Invalid network index`, `Missing index`, `Failed to update Wi-Fi network`,
+`Cannot add network (limit reached)`, `Failed to delete Wi-Fi network`.
+
+### OPDS servers
+
+| Method | Path                | Body                                                   | Response                                    |
+| ------ | ------------------- | ------------------------------------------------------ | ------------------------------------------- |
+| GET    | `/api/opds`         | -                                                      | `[{"index","name","url","username","hasPassword"}]` |
+| POST   | `/api/opds`         | `{"name","url","username","password"?,"index"?}`       | `OK`                                        |
+| POST   | `/api/opds/delete`  | `{"index"}`                                            | `OK`                                        |
+
+POST with `index` edits that entry; without it, adds one. The URL is normalised and
+must be valid. Errors are `400` with a plain-text body: `Missing JSON body`, `Invalid JSON: ...`,
+`Invalid URL`, `Server name too long`, `URL too long`, `Username too long`, `Password too long`,
+`Invalid server index`, `Cannot add server (limit reached)`, `Missing index`;
+`500` for `Failed to save server` and `Failed to delete server`.
 
 ---
 
@@ -408,6 +770,32 @@ Content-Type is derived from the extension (`.js`, `.css`, `.html`, `.json`,
 
 ---
 
+## WebDAV
+
+A WebDAV class 1 handler (`WebDAVHandler`) answers the methods below on any path that no
+route above claims, so a file manager or a mounted network drive can use the card directly:
+
+```bash
+curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
+```
+
+| Method           | Behaviour                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| `OPTIONS`        | Returns `DAV: 1` and the `Allow` list                                                      |
+| `PROPFIND`       | Lists a file or folder. `Depth` 0 or 1 (anything else counts as 1). `207` multistatus; `404` if absent |
+| `GET`, `HEAD`    | Streams a file. A folder answers `405`                                                     |
+| `PUT`            | Writes `<name>.davtmp`, then renames it over the target, so a failed upload keeps the old file. The parent folder must exist. `201` new, `204` replaced |
+| `DELETE`         | Removes a file or an **empty** folder (`409` otherwise). `204`. A deleted book's layout cache is cleared; sidecars are not removed |
+| `MKCOL`          | Creates a folder. `201`; `405` if it exists; `409` if the parent is missing; `415` if the request has a body |
+| `MOVE`           | Needs a `Destination` header; `Overwrite: F` is honoured (`412`). `201` or `204`           |
+| `COPY`           | As `MOVE`, but files only: copying a folder answers `403`                                  |
+| `LOCK`, `UNLOCK` | Dummy: returns a fixed token so clients that insist on locking keep working. Nothing is locked |
+
+A path with a hidden segment (starting with `.`) or inside `System Volume Information`
+or `XTCache` answers `403`, at any depth. The root cannot be deleted or moved.
+
+---
+
 ## WebSocket Endpoint
 
 ### Port 81 - Fast Binary Upload
@@ -447,6 +835,8 @@ Server -> "DONE"
 | --------------------------------- | ---------------------------------- |
 | `ERROR:Failed to create file`     | Cannot create file on SD card      |
 | `ERROR:Invalid START format`      | Malformed START message            |
+| `ERROR:Invalid file name`         | File name has a separator, or is `.` or `..` |
+| `ERROR:Upload already in progress` | A second START arrived while an upload was active |
 | `ERROR:No upload in progress`     | Binary data received without START |
 | `ERROR:Write failed - disk full?` | SD card write error                |
 

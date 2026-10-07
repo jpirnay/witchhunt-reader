@@ -1,6 +1,12 @@
 # Architecture Overview
 
-CrossPoint is firmware for the Xteink X4 (unaffiliated with Xteink), built with PlatformIO targeting the ESP32-C3 microcontroller.
+This is firmware for four e-ink readers, built with PlatformIO:
+
+- Xteink X3 and X4 (ESP32-C3, RISC-V). Both are in one binary; the board is detected at runtime.
+- Xteink X4 Pro (ESP32-S3).
+- LilyGo T5S3 (ESP32-S3, touch panel).
+
+The ESP32-C3 boards are the tightest on RAM and flash, so most memory rules in these docs are written for them. See [Board Support](./board-support.md) for what differs per board. This project is unaffiliated with Xteink.
 
 At a high level, it is firmware that uses an activity-driven application architecture loop with persistent settings/state, SD-card-first caching, and a rendering pipeline optimized for e-ink constraints.
 
@@ -8,7 +14,7 @@ At a high level, it is firmware that uses an activity-driven application archite
 
 ```mermaid
 graph TD
-    A[Hardware: ESP32-C3 + SD + E-ink + Buttons] --> B[freeink-sdk HAL]
+    A[Hardware: ESP32-C3 or S3 + SD + E-ink + Buttons or touch] --> B[freeink-sdk HAL]
     B --> C[src/main.cpp runtime loop]
     C --> D[Activities layer]
     C --> E[State and settings]
@@ -47,7 +53,7 @@ In each loop iteration, the firmware updates input, runs the active activity, ha
 ## Activity model
 
 Activities are screen-level controllers deriving from `src/activities/Activity.h`.
-Some flows use `src/activities/ActivityWithSubactivity.h` to host nested activities.
+`src/activities/ActivityManager.h` keeps the activity stack; a screen opens another by pushing it and gets the answer back as an `ActivityResult` (`docs/activity-manager.md`).
 
 - `onEnter()` and `onExit()` manage setup/teardown
 - `loop()` handles per-frame behavior
@@ -55,11 +61,20 @@ Some flows use `src/activities/ActivityWithSubactivity.h` to host nested activit
 
 Top-level activity groups:
 
-- `src/activities/home/`: home and library navigation
-- `src/activities/reader/`: EPUB/XTC/TXT reading flows
+- `src/activities/home/`: home, file browser, book info and bookmarks
+- `src/activities/reader/`: EPUB/XTC/TXT/Markdown reading flows, reader menus, KOReader sync screens
 - `src/activities/settings/`: settings menus and configuration
-- `src/activities/network/`: WiFi selection, AP/STA mode, file transfer server
+- `src/activities/network/`: WiFi selection, AP/STA mode, file transfer server, USB drive and serial transfer
+- `src/activities/browser/`: OPDS catalog browser
+- `src/activities/weather/`: weather screen and its settings
+- `src/activities/util/`: shared dialogs and tools (confirmation, full-screen message, keyboard, BMP viewer, frontlight panel)
 - `src/activities/boot_sleep/`: boot and sleep transitions
+
+List screens share three bases in `src/activities/`, all driven by `ListController` (the button scheme is in `docs/design/list-input-harmonization.md`):
+
+- `MenuListActivity`: simple menus
+- `UiListActivity`: lists drawn through FreeInkUI; `TabbedUiListActivity` adds tabs
+- `ListController`: input handling a list screen holds as a member, not a base class
 
 ## Reader and content pipeline
 
@@ -81,7 +96,7 @@ flowchart LR
 
 Why caching matters:
 
-- RAM is limited on ESP32-C3, so expensive parsed/layout data is persisted to SD
+- RAM is limited, above all on the ESP32-C3, so expensive parsed/layout data is persisted to SD
 - repeat opens/page navigation can reuse cached data instead of full reparsing
 
 ## Reader internals call graph
@@ -197,13 +212,13 @@ When editing related source assets, regenerate via normal build steps/scripts.
 - `src/network/`: web server and OTA/update networking
 - `src/components/`: theming and shared UI components
 - `lib/Epub/`: EPUB parser, layout, CSS handling, and hyphenation
-- `lib/`: supporting libraries (fonts, text, filesystem helpers, etc.)
-- `freeink-sdk/`: hardware SDK submodule (display, input, storage, battery)
-- `docs/`: user and technical documentation
+- `lib/`: supporting libraries (fonts, text, Markdown, OPDS, KOReader sync, filesystem helpers, etc.)
+- `freeink-sdk/`: hardware SDK submodule (display, input, storage, battery, board profiles, UI toolkit)
+- `docs/`: user and technical documentation; `docs/design/` and `docs/future_work/` are described in the [contributing index](./README.md)
 
 ## Embedded constraints that shape design
 
-- constrained RAM drives SD-first caching and careful allocations
+- constrained RAM (above all on the C3 boards) drives SD-first caching and careful allocations
 - e-ink refresh cost drives render/update batching choices
 - main loop responsiveness matters for input, power handling, and watchdog safety
 - background/network flows must cooperate with sleep and loop timing logic
@@ -211,8 +226,8 @@ When editing related source assets, regenerate via normal build steps/scripts.
 For deeper design documentation on the memory-critical subsystems:
 
 - [Heap and Data Structure Design](./heap-and-data-structures.md) — allocation rules, ZipFile streaming, CSS index flat array
-- [Temporary Memory Increase Logic](./temporary-memory-increase.md) — secondary buffer release/realloc, degraded mode, pre-reboot scratch path
-- [Section Indexing Workflow](./section-indexing.md) — property hash, cache file structure, warm image pass, silent next-chapter indexing
+- [Temporary Memory Increase Logic](./temporary-memory-increase.md) — borrowing vs releasing the secondary buffer, the blocking build, degraded mode, pre-reboot scratch path
+- [Section Indexing Workflow](./section-indexing.md) — property hash, cache file structure, the sliceable build and its callers
 - [Flash Font Partition](./flash-font-partition.md) — raw partition layout, write/mmap API, kern matrix fast path
 - [Font Cache Structures](./font-cache-structures.md) — PerStyle tiers, ownership flags, mini prewarm lifecycle
 
