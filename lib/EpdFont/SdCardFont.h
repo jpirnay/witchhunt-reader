@@ -42,8 +42,9 @@ class SdCardFont {
   // Returns true on success.
   bool loadFromMmap(const uint8_t* base, size_t size, const char* sdPath);
 
-  // Serve every array this font allocates from `arena` instead of the heap. Nothing is freed one
-  // array at a time; the caller reclaims it all by rewinding the arena AFTER this font is destroyed.
+  // Serve every array this font allocates from `arena` instead of the heap, except the glyph-miss
+  // ring's bitmaps (OverflowEntry::bitmap). Nothing in the arena is freed one array at a time; the
+  // caller reclaims it all by rewinding the arena AFTER this font is destroyed.
   // Call before load()/loadFromMmap() and never change it afterwards: an array has to be freed the
   // way it was allocated. The font selector's previews use it (FontSelectionActivity::
   // loadPreviewFont); the reader never does.
@@ -240,6 +241,8 @@ class SdCardFont {
   static constexpr uint32_t OVERFLOW_CAPACITY = 8;
   struct OverflowEntry {
     EpdGlyph glyph;
+    // Always on the heap, even with an arena (useArena): the ring frees one slot at a time, which a
+    // bump arena cannot, so every eviction would strand its bitmap there until the block is rewound.
     uint8_t* bitmap = nullptr;
     uint32_t codepoint = 0;
     uint8_t styleIdx = 0;

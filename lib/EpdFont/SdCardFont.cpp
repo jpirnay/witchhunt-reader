@@ -269,7 +269,7 @@ void SdCardFont::clearOverflow() {
     if (!overflow_[i].occupied) {
       continue;
     }
-    freeArray(overflow_[i].bitmap);
+    delete[] overflow_[i].bitmap;  // heap even in arena mode (OverflowEntry::bitmap)
     overflow_[i].bitmap = nullptr;
     overflow_[i].codepoint = 0;
     overflow_[i].styleIdx = 0;
@@ -1905,7 +1905,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   // Read bitmap data into temporary (if any)
   uint8_t* tempBitmap = nullptr;
   if (tempGlyph.dataLength > 0) {
-    tempBitmap = self->allocArray<uint8_t>(tempGlyph.dataLength);
+    tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];  // heap even in arena mode (OverflowEntry)
     if (!tempBitmap) {
       LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
       file.close();
@@ -1913,13 +1913,13 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
     }
     if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
       LOG_ERR("SDCF", "Overflow: seek failed for bitmap U+%04X style %u", codepoint, styleIdx);
-      self->freeArray(tempBitmap);
+      delete[] tempBitmap;
       file.close();
       return nullptr;
     }
     if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
       LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
-      self->freeArray(tempBitmap);
+      delete[] tempBitmap;
       file.close();
       return nullptr;
     }
@@ -1931,7 +1931,7 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   if (overwriteOccupied) {
     LOG_DBG("SDCF", "Overflow: evicting U+%04X style %u from slot %u", self->overflow_[slot].codepoint,
             self->overflow_[slot].styleIdx, slot);
-    self->freeArray(self->overflow_[slot].bitmap);
+    delete[] self->overflow_[slot].bitmap;
   } else if (self->overflowCount_ < OVERFLOW_CAPACITY) {
     self->overflowCount_++;
   }

@@ -254,4 +254,33 @@ TEST(SdFontArena, ArenaTooSmallForTheLoadFailsCleanly) {
   EXPECT_GT(arena.failedAllocSize(), 0u);
 }
 
+// The glyph-miss ring frees one slot at a time, which a bump arena cannot do: in arena mode every
+// eviction would leave its bitmap behind, and a render that thrashes the ring (a prewarm that only
+// partly fit) would fill the block and draw blank glyphs into a preview strip that then gets stored.
+// So the ring stays on the heap, and a miss still serves the right bitmap with the arena full.
+TEST(SdFontArena, GlyphMissesServeFromTheHeapWithTheArenaFull) {
+  constexpr uint16_t kBitmap = 64;
+  const std::string path = writeTemp(buildFont(kBitmap, /*kerning=*/false));
+  BuildArena arena(64 * 1024);
+  ASSERT_TRUE(arena.valid());
+  SdCardFont font;
+  font.useArena(&arena);
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("A", 0x01));  // B-D are left to the miss handler
+  ASSERT_NE(nullptr, arena.alloc(arena.capacity() - arena.used(), 1));
+  const size_t full = arena.used();
+
+  const EpdFontData& data = *font.getEpdFont(0)->data;
+  ASSERT_NE(nullptr, data.glyphMissHandler);
+  for (uint32_t g = 1; g < LETTERS; g++) {
+    const EpdGlyph* glyph = data.glyphMissHandler(data.glyphMissCtx, FIRST_CP + g);
+    ASSERT_NE(nullptr, glyph) << "miss for glyph " << g << " was refused";
+    ASSERT_TRUE(font.isOverflowGlyph(glyph));
+    const uint8_t* bitmap = font.getOverflowBitmap(glyph);
+    ASSERT_NE(nullptr, bitmap);
+    for (uint32_t k = 0; k < kBitmap; k++) ASSERT_EQ(static_cast<uint8_t>(g * 31 + k), bitmap[k]) << "glyph " << g;
+  }
+  EXPECT_EQ(full, arena.used());
+}
+
 }  // namespace
