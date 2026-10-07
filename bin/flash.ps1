@@ -24,12 +24,18 @@
   .\bin\flash.ps1 -Environment x4pro -Port COM6
 .EXAMPLE
   .\bin\flash.ps1 -AppOnly -Wait 0
+.EXAMPLE
+  .\bin\flash.ps1 -f C:\tmp\firmware-run3.bin
+  Flash that file as the app image instead of .pio\build\<env>\firmware.bin; the bootloader and
+  partition table still come from the environment's build dir if it has one, else the app alone.
 #>
 [CmdletBinding()]
 param(
   [Alias('e')][string]$Environment = 'default',
   # Falls back to $env:FLASH_PORT, then to esptool's own auto-detection.
   [Alias('p')][string]$Port = $env:FLASH_PORT,
+  # An app image to flash instead of .pio\build\<env>\firmware.bin.
+  [Alias('f')][string]$Firmware = '',
   # Seconds to keep retrying while the device is still asleep. 0 = fail at once.
   [Alias('w')][int]$Wait = 120,
   [Alias('a')][switch]$AppOnly,
@@ -53,17 +59,32 @@ if (-not (Test-Path $esptool)) {
   throw "flash: no esptool at $esptool -- is PlatformIO installed?"
 }
 
-$app = Join-Path $buildDir 'firmware.bin'
-if (-not (Test-Path $app)) {
-  Write-Error "flash: $app does not exist. Nothing has been built for environment '$Environment' yet; run a normal build first."
-  exit 1
+if ($Firmware) {
+  if (-not (Test-Path $Firmware)) {
+    Write-Error "flash: $Firmware does not exist."
+    exit 1
+  }
+  $app = (Resolve-Path $Firmware).Path
+  # The app image is the caller's; the bootloader and partition table still have to come from a
+  # build of the same environment. Without one, write the app alone rather than guess.
+  if (-not $AppOnly -and -not ((Test-Path (Join-Path $buildDir 'bootloader.bin')) -and (Test-Path (Join-Path $buildDir 'partitions.bin')))) {
+    Write-Warning "flash: no bootloader/partitions for environment '$Environment' in .pio\build; flashing the app only."
+    $AppOnly = $true
+  }
+} else {
+  $app = Join-Path $buildDir 'firmware.bin'
+  if (-not (Test-Path $app)) {
+    Write-Error "flash: $app does not exist. Nothing has been built for environment '$Environment' yet; run a normal build first."
+    exit 1
+  }
 }
 
 # This tool exists to skip the build, so it has to say plainly what it is about
 # to write -- otherwise a stale image gets flashed and debugged as a live one.
 $appItem = Get-Item $app
 $ageMin = [int]((Get-Date) - $appItem.LastWriteTime).TotalMinutes
-Write-Host "flash: $Environment firmware.bin, built $ageMin min ago ($($appItem.LastWriteTime))"
+$appLabel = if ($Firmware) { $app } else { 'firmware.bin' }
+Write-Host "flash: $Environment $appLabel, built $ageMin min ago ($($appItem.LastWriteTime))"
 $newer = Get-ChildItem -Path (Join-Path $repoRoot 'src'), (Join-Path $repoRoot 'lib') -Recurse -Include *.cpp, *.h -ErrorAction SilentlyContinue |
          Where-Object { $_.LastWriteTime -gt $appItem.LastWriteTime } | Select-Object -First 1
 if ($newer) {

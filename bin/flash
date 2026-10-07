@@ -17,6 +17,8 @@
 #   ./bin/flash -a              app only; leave bootloader/partitions alone
 #   ./bin/flash -w 0            do not wait; fail at once if the device is absent
 #   ./bin/flash -n              print the esptool command and exit
+#   ./bin/flash -f FILE         flash FILE as the app image instead of .pio/build/<env>/firmware.bin
+#                               (bootloader/partitions still come from the env build dir if present)
 #
 # The port may also be set once via the FLASH_PORT environment variable.
 #
@@ -30,12 +32,13 @@ set -euo pipefail
 
 ENV_NAME="default"
 PORT="${FLASH_PORT:-}"
+FIRMWARE=""
 APP_ONLY=0
 DRY_RUN=0
 WAIT_SECONDS=120
 
 usage() {
-  sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -43,6 +46,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -e|--environment) ENV_NAME="${2:?-e needs an environment name}"; shift 2 ;;
     -p|--port)        PORT="${2:?-p needs a port}"; shift 2 ;;
+    -f|--firmware)    FIRMWARE="${2:?-f needs a firmware file}"; shift 2 ;;
     -w|--wait)        WAIT_SECONDS="${2:?-w needs a number of seconds}"; shift 2 ;;
     -a|--app-only)    APP_ONLY=1; shift ;;
     -n|--dry-run)     DRY_RUN=1; shift ;;
@@ -74,17 +78,31 @@ if [[ -z "${ESPTOOL}" ]]; then
   exit 1
 fi
 
-APP="${BUILD_DIR}/firmware.bin"
-if [[ ! -f "${APP}" ]]; then
-  echo "flash: ${APP} does not exist." >&2
-  echo "       Nothing has been built for environment '${ENV_NAME}' yet; run a normal build first." >&2
-  exit 1
+if [[ -n "${FIRMWARE}" ]]; then
+  APP="${FIRMWARE}"
+  if [[ ! -f "${APP}" ]]; then
+    echo "flash: ${APP} does not exist." >&2
+    exit 1
+  fi
+  # The app image is the caller's; the bootloader and partition table still have to come from a
+  # build of the same environment. Without one, write the app alone rather than guess.
+  if [[ "${APP_ONLY}" -eq 0 && ( ! -f "${BUILD_DIR}/bootloader.bin" || ! -f "${BUILD_DIR}/partitions.bin" ) ]]; then
+    echo "flash: no bootloader/partitions for environment '${ENV_NAME}' in .pio/build; flashing the app only." >&2
+    APP_ONLY=1
+  fi
+else
+  APP="${BUILD_DIR}/firmware.bin"
+  if [[ ! -f "${APP}" ]]; then
+    echo "flash: ${APP} does not exist." >&2
+    echo "       Nothing has been built for environment '${ENV_NAME}' yet; run a normal build first." >&2
+    exit 1
+  fi
 fi
 
 # This tool exists to skip the build, so it has to say plainly what it is about
 # to write -- otherwise a stale image gets flashed and debugged as a live one.
 AGE_MIN=$(( ( $(date +%s) - $(stat -c %Y "${APP}") ) / 60 ))
-echo "flash: ${ENV_NAME} firmware.bin, built ${AGE_MIN} min ago ($(stat -c %y "${APP}" | cut -d. -f1))"
+echo "flash: ${ENV_NAME} ${FIRMWARE:-firmware.bin}, built ${AGE_MIN} min ago ($(stat -c %y "${APP}" | cut -d. -f1))"
 if [[ -n "$(find "${REPO_ROOT}/src" "${REPO_ROOT}/lib" -name '*.cpp' -o -name '*.h' -newer "${APP}" 2>/dev/null | head -n1)" ]]; then
   echo "flash: WARNING - sources under src/ or lib/ are newer than this binary." >&2
   echo "flash:           You are about to flash a build that predates your edits." >&2
