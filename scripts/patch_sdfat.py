@@ -14,11 +14,18 @@ cache", Sung-jin Brian Hong / @serialx). The two patches are theirs, verbatim:
   0002  SdFatConfig: let -DUSE_SEPARATE_FAT_CACHE=1 (platformio.ini) override the
         ARM-only default, so FAT lookups stop evicting the file/directory sector.
 
+One more is OURS, not upstream's (see its header):
+
+  0003  FatPartition: with the separate FAT cache, sync the FAT before the
+        directory sector, the order the single shared cache gave by eviction, so a
+        power cut mid-sync cannot leave an entry pointing at clusters the FAT
+        still marks free.
+
 Their safety gates come along too: SdFat must be exactly the release the patches were
 reviewed against, and every file a patch touches must hash to that release's bytes or
 to the reviewed patched bytes. Everything is checked before anything is written, and
 an already-patched file is left untouched so incremental builds recompile nothing.
-Bumping SdFat therefore means re-reviewing both patches and re-deriving PATCHES.
+Bumping SdFat therefore means re-reviewing every patch and re-deriving PATCHES.
 
 What differs from upstream:
   * A pre: hook that looks the copy up in this env's libdeps dir, in the shape of
@@ -74,6 +81,12 @@ PATCHES = (
         "src/SdFatConfig.h",
         "7889975cad262158e1623c873730210c41c55c2198830d668952b82e588ff7cc",
         "32104db82acc857b70c7fe20740afbffa9f7dee0a7c685c106febfa989fdbe77",
+    ),
+    (
+        "0003-sync-fat-cache-before-data-cache.patch",
+        "src/FatLib/FatPartition.h",
+        "fb91c81beac2779a0d4b08e886a5fefdf8062b8ad422ccec4e178ae4e88b72e5",
+        "ad9d6a745aa8c91c8f006a61b2a6296e8dd89a1d05f1b335446e371ec541efcc",
     ),
 )
 

@@ -1,0 +1,37 @@
+Subject: [PATCH] FatPartition: sync the FAT cache before the data cache
+
+Not from upstream SdFat, and not part of crosspoint-reader PR #3685:
+written for witchhunt-reader to go with 0002.
+
+With USE_SEPARATE_FAT_CACHE, cacheSync() writes the data cache first. That
+cache holds the directory sector FatFile::sync() has just updated, so when
+a file has grown, its new size and first cluster reach the card before the
+FAT marks those clusters allocated. A power cut between the two writes
+leaves a directory entry pointing at clusters the FAT still shows as free,
+and the next allocation can hand them to another file (cross-linked files).
+
+Writing the FAT first turns that window into allocated but unreferenced
+clusters instead: lost clusters, which fsck reclaims. It is also the order
+a single shared cache produces, because loading the directory sector
+evicts, and so writes, the dirty FAT sector first.
+
+remove() and truncate() free clusters before they rewrite the entry, so
+for them this order briefly leaves an entry pointing at freed clusters.
+The single cache already does exactly that, so with this patch the
+separate cache creates no crash state the shared one could not.
+
+---
+--- a/src/FatLib/FatPartition.h
++++ b/src/FatLib/FatPartition.h
+@@ -203,7 +203,10 @@
+     return m_fatCache.prepare(sector, options);
+   }
+   bool cacheSync() {
+-    return m_cache.sync() && m_fatCache.sync() && syncDevice();
++    // FAT before directory, the order one shared cache gave by eviction: a
++    // power cut in between leaves allocated but unreferenced clusters, not an
++    // entry pointing at clusters the FAT still marks free.
++    return m_fatCache.sync() && m_cache.sync() && syncDevice();
+   }
+ #else   // USE_SEPARATE_FAT_CACHE
+   uint8_t* fatCachePrepare(Sector_t sector, uint8_t options) {
