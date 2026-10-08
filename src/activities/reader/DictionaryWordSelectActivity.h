@@ -18,17 +18,25 @@
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
 // DictionaryDefinitionActivity, Back returns to the reader.
 //
+// Highlight mode: the first Confirm drops an anchor on the word under
+// the cursor, moving extends the selection from it, and the second Confirm returns the
+// selected text as a HighlightResult.
+//
 // Owns the Page it draws, so the reader can hand over the page it already has
 // laid out instead of the overlay reloading it.
 class DictionaryWordSelectActivity final : public Activity {
  public:
+  enum class Mode : uint8_t { Dictionary, Highlight };
+
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                        std::unique_ptr<Page> page, int fontId, int marginLeft, int marginTop)
+                                        std::unique_ptr<Page> page, int fontId, int marginLeft, int marginTop,
+                                        Mode mode = Mode::Dictionary)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         fontId(fontId),
         marginLeft(marginLeft),
-        marginTop(marginTop) {}
+        marginTop(marginTop),
+        mode(mode) {}
 
   void onEnter() override;
   void loop() override;
@@ -156,6 +164,11 @@ class DictionaryWordSelectActivity final : public Activity {
   };
   WordTouch consumeWordTouch();
   void performLookup();
+  // Highlight mode: Confirm drops the anchor, then returns the anchored range as text.
+  void confirmHighlight();
+  // Inverts every word between the anchor and the cursor (full-repaint path only).
+  void drawSelectedRange();
+  void drawWordInverted(int index);
   bool drawHighlightWithSnapshot();
   void drawHints() const;
 
@@ -163,6 +176,9 @@ class DictionaryWordSelectActivity final : public Activity {
   const int fontId;
   const int marginLeft;
   const int marginTop;
+  const Mode mode;
+  int anchor = -1;  // highlight mode: word the selection started on, -1 before the first Confirm
+  static constexpr size_t HIGHLIGHT_TEXT_CAPACITY = 2048;  // a highlight is a passage, not a chapter
 
   std::vector<DrawStyle> drawStyles;
   std::vector<Fragment> fragments;
