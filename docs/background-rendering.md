@@ -57,7 +57,10 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
 `BufferDisplay` instead of a fresh render.
 
 - **Scheduled** in `renderContents()` (`pendingPreRender = true` + `requestUpdate()`) and **re-armed**
-  once per `(spine, page)` by `stepBackgroundSectionBuild()` after the deferred-AA frees its memory.
+  once per `(spine, page)` by `stepBackgroundSectionBuild()` after the deferred-AA frees its memory,
+  and once more by the image lane when it finishes warming the page after the one on screen (the
+  earlier attempts skipped it for its uncached images). Both re-arms key on the page actually on
+  screen (`lastRenderedSpineIndex_` / `lastRenderedPageIndex_`), never on `currentPage` (#351).
 - **Runs** as the `PreRender` pass (`renderPreRenderPass`) on the render task.
 - **Gate:** free heap ≥ `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB, derived from what the pass
   consumes; see the comment at its definition); an image page only once **every image replays from

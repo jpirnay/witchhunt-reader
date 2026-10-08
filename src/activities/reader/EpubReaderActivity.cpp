@@ -1977,17 +1977,31 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   const bool shownNowCached = shownWasUncached && !page.hasUncachedImages(true, true, false);
   const bool inputWaiting = CooperativeAbort::shouldAbortLongTask();
   const bool redraw = shownNowCached && !inputWaiting;
+  // The page after the one on screen just became pre-renderable. Its pre-render ran when this
+  // page was drawn and skipped it for its uncached images (as did the one re-arm, if it has run
+  // since), so nothing would try again before the turn. Keyed on the page actually on screen,
+  // not on currentPage: a navigation dispatched from main.cpp moves the position before its
+  // render runs, and arming then would shelve that render as a PreRender pass (#351).
+  const bool nextPageNowPreRenderable =
+      complete && !inputWaiting && spine == currentSpineIndex && lastRenderedSpineIndex_ == currentSpineIndex &&
+      lastRenderedPageIndex_ == section->currentPage && pageIndex == section->currentPage + 1 &&
+      !preRenderedPage.ready && !pendingPreRender && !backgroundBuildThrough_;
+  if (nextPageNowPreRenderable) {
+    pendingPreRender = true;
+    markStagedForCurrentPage();
+  }
   const char* note = !complete        ? (preempted ? " -- preempted by input, retries after the next settle"
                                          : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
                                                                              : " -- incomplete, will retry once")
                      : redraw         ? " -- on screen, redrawing"
                      : shownNowCached ? " -- on screen, input waiting (the next render shows it)"
-                                      : "";
+                     : nextPageNowPreRenderable ? " -- next page, pre-rendering it"
+                                                : "";
   LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", spine, pageIndex,
           millis() - t0, note, static_cast<unsigned long>(esp_get_free_heap_size()),
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("after_image_lane");
-  if (redraw) requestUpdate();
+  if (redraw || nextPageNowPreRenderable) requestUpdate();
   return true;
 }
 
