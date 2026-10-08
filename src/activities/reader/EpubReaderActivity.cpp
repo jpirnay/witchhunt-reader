@@ -363,6 +363,9 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #define RESIDENT_BUILD_ABORT_CONTIG_HEAP_BYTES (16 * 1024)
 #endif
 
+// The link Back stack's file in the book's cache directory, beside progress.bin (EpubLinkBackStack).
+constexpr const char* LINK_STACK_FILE = "/linkstack.bin";
+
 constexpr uint8_t TRUNCATED_SECTION_HINT_RENDER_COUNT = 2;
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_1 = "Chapter may be truncated (low memory).";
 constexpr const char* TRUNCATED_SECTION_HINT_LINE_2 = "Try: No embedded style | No images | AA Off";
@@ -740,6 +743,7 @@ void EpubReaderActivity::onEnter() {
   // Load bookmarks for this book
   bookmarkStore.load(epub->getCachePath());
   logReaderMemSnapshot("onEnter_after_bookmarks_loaded");
+  loadLinkBackStack();
 
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
@@ -865,6 +869,7 @@ void EpubReaderActivity::onExit() {
 
   // Save bookmarks before exit
   bookmarkStore.save();
+  saveLinkBackStack();
   if (epub) {
     GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, epub->getPath(), epub->getCachePath(), epub->getTitle(), false);
   }
@@ -5088,6 +5093,9 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   if (section && readerPhase_ == ReaderPhase::READING) {
     saveProgress(currentSpineIndex, page, pageCount);
   }
+  // The reboot skips onExit, which is where the stack is otherwise saved. Unlike the position it
+  // does not depend on the build phase: every entry was recorded when its link was followed.
+  saveLinkBackStack();
 
   // Release both framebuffers (primary + secondary already gone) to free ~48 KB
   // more contiguous heap, then do a pre-reboot warm pass for any images that
@@ -6390,28 +6398,9 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   if (!epub) return;
 
   int sourceSpineIndex;
-  // Push current position onto saved stack
   {
     RenderLock lock(*this);
     sourceSpineIndex = currentSpineIndex;
-    if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
-      SavedPosition& saved = savedPositions[footnoteDepth];
-      saved = {};
-      saved.spineIndex = currentSpineIndex;
-      saved.pageNumber = section->currentPage;
-      // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
-      // total; the paragraph anchor below is unaffected either way.
-      if (!section->hasActiveBuild()) {
-        saved.pageCount = section->pageCount;
-        if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
-          saved.paragraphIndex = *paragraphIndex;
-          saved.hasParagraph = true;
-        }
-      }
-      footnoteDepth++;
-      LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, saved.spineIndex,
-              saved.pageNumber, saved.hasParagraph ? saved.paragraphIndex : -1);
-    }
   }
 
   // Extract fragment anchor (e.g. "#note1" or "chapter2.xhtml#note1")
@@ -6433,12 +6422,33 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   if (targetSpineIndex < 0) {
     LOG_DBG("ERS", "Could not resolve href: %s", hrefStr.c_str());
-    if (savePosition && footnoteDepth > 0) footnoteDepth--;  // undo push
     return;
   }
 
+  // The origin is pushed only once the jump is certain. Pushing first and popping it again on an
+  // unresolvable href popped a DIFFERENT entry whenever the push itself had not happened (stack
+  // full, or no section), and with a full stack now dropping its oldest entry the pop could not
+  // bring that entry back anyway.
   {
     RenderLock lock(*this);
+    if (savePosition && section) {
+      SavedPosition saved;
+      saved.spineIndex = currentSpineIndex;
+      saved.pageNumber = section->currentPage;
+      // Mid-build pageCount is "pages so far", which would rescale the fallback against the wrong
+      // total; the paragraph anchor below is unaffected either way.
+      if (!section->hasActiveBuild()) {
+        saved.pageCount = section->pageCount;
+        if (const auto paragraphIndex = section->getParagraphIndexForPage(section->currentPage)) {
+          saved.paragraphIndex = *paragraphIndex;
+          saved.hasParagraph = true;
+        }
+      }
+      EpubLinkBackStack::push(savedPositions, footnoteDepth, sessionLinkDepth_, saved);
+      noteLinkBackStackChanged();
+      LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, saved.spineIndex,
+              saved.pageNumber, saved.hasParagraph ? saved.paragraphIndex : -1);
+    }
     navTarget = anchor.empty() ? NavigationTarget::makePage(0) : NavigationTarget::makeAnchor(std::move(anchor));
     currentSpineIndex = targetSpineIndex;
     section.reset();
@@ -6449,13 +6459,16 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
 void EpubReaderActivity::restoreSavedPosition() {
   if (footnoteDepth <= 0) return;
-  footnoteDepth--;
-  const auto& pos = savedPositions[footnoteDepth];
-  LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, pos.spineIndex,
-          pos.pageNumber, pos.hasParagraph ? pos.paragraphIndex : -1);
-
   {
+    // The pop and the file's removal happen together under the lock, as the push and its removal
+    // do: a heap-recovery reboot saves the stack from the render task (maybeRestartForFragmentedHeap),
+    // and between the two it could write back the entry just popped.
     RenderLock lock(*this);
+    EpubLinkBackStack::pop(footnoteDepth, sessionLinkDepth_);
+    noteLinkBackStackChanged();
+    const auto& pos = savedPositions[footnoteDepth];
+    LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, pos.spineIndex,
+            pos.pageNumber, pos.hasParagraph ? pos.paragraphIndex : -1);
     currentSpineIndex = pos.spineIndex;
     navTarget = pos.hasParagraph ? NavigationTarget::makeParagraph(pos.paragraphIndex, pos.pageNumber)
                                  : NavigationTarget::makePage(pos.pageNumber);
@@ -6464,6 +6477,62 @@ void EpubReaderActivity::restoreSavedPosition() {
     section.reset();
   }
   requestUpdate();
+}
+
+void EpubReaderActivity::loadLinkBackStack() {
+  const std::string path = epub->getCachePath() + LINK_STACK_FILE;
+  // Absent is the normal case; asking first keeps the open from logging a failed read for it.
+  if (!Storage.exists(path.c_str())) return;
+  // One byte more than the largest stack, so an over-long file reads as over-long, not as a stack.
+  uint8_t data[EpubLinkBackStack::kMaxSize + 1];
+  int size = 0;
+  {
+    FsFile f;
+    if (!Storage.openFileForRead("ERS", path, f)) return;
+    size = f.read(data, sizeof(data));
+    f.close();
+  }
+  const int depth = EpubLinkBackStack::decode(data, size > 0 ? static_cast<size_t>(size) : 0,
+                                              epub->getSpineItemsCount(), savedPositions);
+  if (depth == 0) {
+    // Torn, from another version, or for a spine the book no longer has: no Back stack at all is
+    // the safe reading, and removing the file stops it being read again on every open.
+    LOG_ERR("ERS", "Ignoring unusable link stack (%d bytes)", size);
+    Storage.remove(path.c_str());
+    return;
+  }
+  // sessionLinkDepth_ stays 0: none of these links was followed in this session.
+  footnoteDepth = depth;
+  linkStackOnDisk_ = true;
+  LOG_DBG("ERS", "Loaded link stack, depth %d", depth);
+}
+
+void EpubReaderActivity::saveLinkBackStack() {
+  if (!epub || footnoteDepth <= 0 || linkStackOnDisk_) return;
+  uint8_t data[EpubLinkBackStack::kMaxSize];
+  const size_t size = EpubLinkBackStack::encode(savedPositions, footnoteDepth, data);
+  FsFile f;
+  if (!Storage.openFileForWrite("ERS", epub->getCachePath() + LINK_STACK_FILE, f)) {
+    LOG_ERR("ERS", "Failed to open the link stack for writing");
+    return;
+  }
+  // A short write leaves a file whose size does not match its depth, which the next open rejects.
+  const bool written = f.write(data, size) == size;
+  f.close();
+  if (!written) {
+    LOG_ERR("ERS", "Failed to write the link stack");
+    return;
+  }
+  linkStackOnDisk_ = true;
+  LOG_DBG("ERS", "Saved link stack, depth %d", footnoteDepth);
+}
+
+void EpubReaderActivity::noteLinkBackStackChanged() {
+  if (!linkStackOnDisk_ || !epub) return;
+  linkStackOnDisk_ = false;
+  if (!Storage.remove((epub->getCachePath() + LINK_STACK_FILE).c_str())) {
+    LOG_ERR("ERS", "Failed to remove the outdated link stack");
+  }
 }
 
 bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, GfxRenderer& renderer) {
