@@ -1,13 +1,12 @@
 // FsHelpers::normalisePath is what keeps every web-server path inside the card.
 //
-// The web server's protected-item rules (dotfiles, "System Volume Information",
-// "XTCache") test only the LAST component of a requested path. That is sound only
-// if ".." has already been resolved: "/books/../.private/notes.txt" ends in
-// "notes.txt", which passes every one of those rules, while the filesystem reads
-// it inside the dot-folder the rules exist to protect. CrossPointWebServer routes
-// user input through normalizeWebPath -> normalisePath before those checks for
-// exactly that reason, so the property below is load-bearing rather than cosmetic.
-// crosspoint-reader PR #3353.
+// The web server's protection rules (ProtectedPaths, tested in protected_paths/)
+// judge every segment of a requested path, which is sound only if ".." has already
+// been resolved: "/books/../.private/notes.txt" has no protected segment as
+// written, while the filesystem reads it inside the dot-folder the rules exist to
+// protect. CrossPointWebServer routes user input through normalizeWebPath ->
+// normalisePath before those checks for exactly that reason, so the property below
+// is load-bearing rather than cosmetic. crosspoint-reader PR #3353.
 //
 // Contract note: normalisePath emits components joined by "/" with NO leading
 // slash -- "/books/x" comes back as "books/x". normalizeWebPath (a static in
@@ -46,9 +45,10 @@ TEST(PathContainment, TraversalCannotHideADotFolder) {
   const std::string raw = "/books/../.private/notes.txt";
   const std::string resolved = norm(raw);
   EXPECT_EQ(resolved, ".private/notes.txt");
-  // The guard reads the last component, and it looks harmless either way ...
+  // The last component looks harmless either way ...
   EXPECT_EQ(resolved.substr(resolved.rfind('/') + 1), "notes.txt");
-  // ... so containment has to come from the resolved prefix, which is now present.
+  // ... so protection has to judge every segment of the RESOLVED path, where the
+  // dot-folder is now present.
   EXPECT_EQ(resolved.rfind(".private/", 0), 0u);
 }
 

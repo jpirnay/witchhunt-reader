@@ -10,11 +10,9 @@
 
 #include "ChunkedResponse.h"
 #include "HttpFileStreamer.h"
+#include "WebPathGuard.h"
 
 namespace {
-const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
-constexpr size_t HIDDEN_ITEMS_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS[0]);
-
 // RFC 1123 date format helper: "Sun, 06 Nov 1994 08:49:37 GMT"
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date
 // as a fallback. The date is not critical for WebDAV Class 1 operations.
@@ -235,15 +233,7 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
       String fileName(name);
 
       // Skip hidden/protected items
-      bool shouldHide = fileName.startsWith(".");
-      if (!shouldHide) {
-        for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-          if (fileName.equals(HIDDEN_ITEMS[i])) {
-            shouldHide = true;
-            break;
-          }
-        }
-      }
+      const bool shouldHide = ProtectedPaths::isProtectedName(std::string_view(fileName.c_str(), fileName.length()));
 
       if (!shouldHide) {
         String childPath = path;
@@ -770,29 +760,11 @@ void WebDAVHandler::urlEncodePath(const String& path, String& out) const {
 }
 
 bool WebDAVHandler::isProtectedPath(const String& path) const {
-  // Check every segment of the path, not just the last one.
-  // This prevents access to e.g. /.hidden/somefile or /System Volume Information/foo
-  int start = 0;
-  while (start < (int)path.length()) {
-    if (path.charAt(start) == '/') {
-      start++;
-      continue;
-    }
-    int end = path.indexOf('/', start);
-    if (end == -1) end = path.length();
-
-    String segment = path.substring(start, end);
-
-    if (segment.startsWith(".")) return true;
-
-    for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-      if (segment.equals(HIDDEN_ITEMS[i])) return true;
-    }
-
-    start = end + 1;
-  }
-
-  return false;
+  // Every segment, as SdFat will open it, with 8.3 alias spellings resolved: see
+  // ProtectedPaths. WebDAV never reaches into dot-folders, whatever the file
+  // manager's hidden-files setting -- a mounted share has no per-request switch,
+  // and a desktop client walks every folder it is shown.
+  return isProtectedWebPath(path, ProtectedPaths::Target::Item, /*allowHidden=*/false);
 }
 
 int WebDAVHandler::getDepth(WebServer& s) const {
