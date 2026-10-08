@@ -11,7 +11,14 @@ class RenderLock {
   // read as a statement of intent instead of `RenderLock lock(true)`.
   struct ExclusiveActivityAccess {};
 
-  explicit RenderLock();
+  // Try takes the mutex only if it is free at this instant and never waits; check ownsLock()
+  // before touching anything the lock guards. It is for loop-task code that must read state
+  // the render task owns but would rather skip a tick than stall input behind a whole render
+  // pass. It answers "is the mutex free", not "is a pass in flight": the render task drops the
+  // mutex mid-pass (see ExclusiveActivityAccess below), so a Try can succeed during a pass.
+  enum class Mode { Blocking, Try };
+
+  explicit RenderLock(Mode mode = Mode::Blocking);
   explicit RenderLock(Activity&);  // unused for now, but keep for compatibility
 
   // Acquire the rendering mutex AND guarantee the render task is not inside
@@ -30,6 +37,7 @@ class RenderLock {
   RenderLock(const RenderLock&) = delete;
   RenderLock& operator=(const RenderLock&) = delete;
   ~RenderLock();
+  bool ownsLock() const { return isLocked; }
   void unlock();
   static bool peek();
 };
