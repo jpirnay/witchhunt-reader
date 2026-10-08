@@ -104,9 +104,7 @@ void KeyboardEntryActivity::onEnter() {
   passwordVisible = false;
   selRow = 0;
   selCol = 0;
-  delPressCount = 0;
   hintVisible = false;
-  hintShowTime = 0;
   rightHeld = false;
   rightLongHandled = false;
   savedCursorPos = 0;
@@ -247,14 +245,12 @@ bool KeyboardEntryActivity::backspaceUtf8() {
 bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPress) {
   switch (value) {
     case fui::QWERTY_KEY_SHIFT:
-      delPressCount = 0;
       hintVisible = false;
       // Letters: case toggle. Symbols: page one or two.
       shifted = !shifted;
       clampSelection();
       return true;
     case fui::QWERTY_KEY_MODE:
-      delPressCount = 0;
       hintVisible = false;
       if (urlPanel) {
         urlPanel = false;
@@ -265,7 +261,6 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
       clampSelection();
       return true;
     case fui::QWERTY_KEY_LANG: {
-      delPressCount = 0;
       hintVisible = false;
       const fui::KeyboardLayoutId nextId = keyboard_layouts::next(layoutId);
       // The Cyrillic layers draw the key even with one layout enabled; a
@@ -280,7 +275,6 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
       return true;
     }
     case URL_PANEL_KEY:
-      delPressCount = 0;
       hintVisible = false;
       urlPanel = !urlPanel;
       symbols = false;
@@ -296,15 +290,9 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
         cursorPos = 0;
         return true;
       }
-      delPressCount++;
-      if (delPressCount >= 2) {
-        hintVisible = true;
-        hintShowTime = millis();
-      }
       backspaceUtf8();
       return true;
     default: {
-      delPressCount = 0;
       hintVisible = false;
       const fui::KeyboardLayout& layer = currentLayout();
       // keyboardAltOutputFor covers explicit alternates and the letter case flip.
@@ -554,7 +542,6 @@ void KeyboardEntryActivity::loop() {
     cursorMode = true;
     upLongHandled = true;
     hintVisible = true;
-    hintShowTime = millis();
     requestUpdate();
   }
 
@@ -685,11 +672,6 @@ void KeyboardEntryActivity::loop() {
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     onCancel();
-  }
-
-  if (hintVisible && !cursorMode && millis() - hintShowTime > 4000) {
-    hintVisible = false;
-    requestUpdate();
   }
 }
 
@@ -834,28 +816,26 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  if (hintVisible && !text.empty()) {
+  // The tips block below starts under these rows (its tipsTop) whether or not
+  // they are drawn, so a row added here has to be reserved there as well.
+  if (hintVisible && cursorMode && !text.empty()) {
     const int hintLh = renderer.getLineHeight(SMALL_FONT_ID);
     const int underlineY = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing;
     const int hintY = underlineY + 4;
-    if (cursorMode) {
-      int hintLineY = hintY;
-      if (inputType == InputType::Password && togglePos) {
-        renderer.drawCenteredText(
-            SMALL_FONT_ID, hintLineY,
-            passwordVisible ? tr(STR_KB_HINT_TOGGLE_HIDE_PASSWORD) : tr(STR_KB_HINT_TOGGLE_SHOW_PASSWORD), true);
-        hintLineY += hintLh;
-        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_RETURN_CURSOR), true);
-      } else {
-        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_MOVE_CURSOR), true);
-        hintLineY += hintLh;
-        if (inputType == InputType::Password) {
-          const char* passTip = passwordVisible ? tr(STR_KB_HINT_HIDE_PASSWORD) : tr(STR_KB_HINT_SHOW_PASSWORD);
-          renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, passTip, true);
-        }
-      }
+    int hintLineY = hintY;
+    if (inputType == InputType::Password && togglePos) {
+      renderer.drawCenteredText(
+          SMALL_FONT_ID, hintLineY,
+          passwordVisible ? tr(STR_KB_HINT_TOGGLE_HIDE_PASSWORD) : tr(STR_KB_HINT_TOGGLE_SHOW_PASSWORD), true);
+      hintLineY += hintLh;
+      renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_RETURN_CURSOR), true);
     } else {
-      renderer.drawCenteredText(SMALL_FONT_ID, hintY, tr(STR_KB_HINT_EDIT_ENTRY), true);
+      renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, tr(STR_KB_HINT_MOVE_CURSOR), true);
+      hintLineY += hintLh;
+      if (inputType == InputType::Password) {
+        const char* passTip = passwordVisible ? tr(STR_KB_HINT_HIDE_PASSWORD) : tr(STR_KB_HINT_SHOW_PASSWORD);
+        renderer.drawCenteredText(SMALL_FONT_ID, hintLineY, passTip, true);
+      }
     }
   }
 
@@ -870,21 +850,42 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const int underlineBottom = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing + 4;
   auto drawTip = [&](const char* tip, int y) { renderer.drawCenteredText(SMALL_FONT_ID, y, tip, true); };
 
+  // Ported from crosspoint-reader PR #3863 ("fix: stable tip positions in keyboard activity",
+  // Uri Tauber / @Uri-Tauber). Theirs: the fixed row counts, the cursor-hint reservation, the
+  // fit check and "Hold UP to edit entry" as a standing tip. Different here: the double-DEL
+  // trigger that used to flash that tip for 4 s is gone too, with its timed repaint, which
+  // upstream keeps although the repaint no longer changes anything on screen.
+  //
+  // Every row a mode can show counts, drawn or not: the Clear Text row is
+  // blank while the field is empty, and counting it only once there was text
+  // re-centred the whole block, visibly, on the first keystroke and again
+  // whenever the field emptied.
   int tipCount = 0;
   if (cursorMode) {
     tipCount = 1;
   } else if (urlPanel) {
-    tipCount = 1 + (!text.empty() ? 1 : 0);
+    tipCount = 3;
   } else if (symbols) {
-    tipCount = !text.empty() ? 1 : 0;
+    tipCount = 2;
   } else {
-    tipCount = 1 + (inputType == InputType::Url ? 1 : 0) + (!text.empty() ? 1 : 0);
+    tipCount = 3 + (inputType == InputType::Url ? 1 : 0);
   }
+  const int tipsHeight = (tipCount + 1) * tipsLh;
+  // In cursor mode the instructions above sit right under the field; start
+  // below their rows, reserved even while an empty field hides them.
+  const int tipsTop = underlineBottom + (cursorMode ? (isPassword ? 2 : 1) * tipsLh : 0);
 
-  if (tipCount > 0) {
-    int y = (underlineBottom + kbRect.y) / 2 - (tipCount + 1) * tipsLh / 2;
+  // Without the room (landscape, where the keys start just under the field,
+  // or a long wrapped entry) the block would be drawn over the field and the
+  // keys; leave it out instead.
+  if (kbRect.y - tipsTop >= tipsHeight) {
+    int y = tipsTop + (kbRect.y - tipsTop - tipsHeight) / 2;
     drawTip(tr(STR_KB_TIPS), y);
     y += tipsLh;
+    if (!cursorMode) {
+      drawTip(tr(STR_KB_HINT_EDIT_ENTRY), y);
+      y += tipsLh;
+    }
     if (cursorMode) {
       drawTip(tr(STR_KB_HINT_RETURN_KEYBOARD), y);
     } else if (urlPanel) {
