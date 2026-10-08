@@ -442,6 +442,18 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
 
+// Ported from crosspoint-reader PR #3732 ("fix: let Back leave File Transfer during a slow HTTP
+// upload", Tuan Q. Nguyen / @martinqnguyen). The hook, the per-chunk drop and the END guard below
+// are theirs; what the activity checks inside the hook differs (see startWebServer()).
+bool CrossPointWebServer::dropUploadIfCancelled() const {
+  if (!uploadCancelCheck || !uploadCancelCheck()) return false;
+  // Closing the socket makes WebServer's next body read fail. It then raises UPLOAD_FILE_ABORTED,
+  // whose handler deletes the partial file, and handleClient() returns with the client released.
+  LOG_DBG("WEB", "[UPLOAD] Cancelled on the device, dropping the client");
+  server->client().stop();
+  return true;
+}
+
 void CrossPointWebServer::abortWsUpload(const char* tag) {
   wsUploadFile.close();
   String filePath = wsUploadPath;
@@ -1124,6 +1136,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
     LOG_DBG("WEB", "[UPLOAD] File created successfully: %s", filePath.c_str());
   } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (dropUploadIfCancelled()) return;
     if (state.file && state.error.isEmpty()) {
       // Buffer incoming data and flush when buffer is full
       // This reduces SD card write operations and improves throughput
@@ -1161,6 +1174,10 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
+    // A cancel on the last chunk still reaches END: WebServer raises it on the closing boundary,
+    // then raises ABORTED straight after because the client is gone. ABORTED deletes only a file
+    // that is still open, so finishing it here would keep the file of an aborted upload.
+    if (!server->client().connected()) return;
     if (state.file) {
       // Flush any remaining buffered data
       if (!flushUploadBuffer(state)) {
@@ -2318,7 +2335,9 @@ void CrossPointWebServer::handleFontUploadData() {
     }
 
     case UPLOAD_FILE_WRITE: {
-      if (!fontUpload.valid) break;
+      // No END guard needed here, unlike /upload: this ABORTED branch deletes the file whether or
+      // not END already closed it.
+      if (dropUploadIfCancelled() || !fontUpload.valid) break;
       HalSystem::feedWatchdog();
 
       if (!fontUpload.magicChecked) {

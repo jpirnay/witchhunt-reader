@@ -65,6 +65,7 @@ void CrossPointWebServerActivity::onEnter() {
   connectedIP.clear();
   connectedSSID.clear();
   lastHandleClientTime = 0;
+  leaveRequested = false;
   requestUpdate();
 
   // Launch network mode selection subactivity
@@ -321,6 +322,22 @@ void CrossPointWebServerActivity::startWebServer() {
     onGoHome();
     return;
   }
+  // Ported from crosspoint-reader PR #3732 ("fix: let Back leave File Transfer during a slow HTTP
+  // upload", Tuan Q. Nguyen / @martinqnguyen). Theirs pumps input here (update(), plus a second
+  // sample 6 ms later to clear the SDK debounce); ours only reads what the button sampler task has
+  // latched. That task outranks the loop task and keeps its 10 ms cadence while the loop is stuck
+  // in an upload, so a press made between two chunks is already waiting when the next one lands.
+  //
+  // Runs on the loop task inside handleClient(), holding no RenderLock, storage or I2C lock, and
+  // takes none: a snapshot read and a short critical section. Neither consumes the press, unlike
+  // update(), which would also drain the other buttons and the touch event from under the loop.
+  // Back can be in either place: still in the sampler's accumulator, or drained into this tick's
+  // snapshot by the main loop just before the upload began.
+  webServer->setUploadCancelCheck([this] {
+    leaveRequested = leaveRequested || mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+                     mappedInput.hasPendingPress(MappedInputManager::Button::Back);
+    return leaveRequested;
+  });
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -385,6 +402,11 @@ void CrossPointWebServerActivity::loop() {
       constexpr int MAX_ITERATIONS = 500;
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
+        // The upload cancel check saw Back and has already dropped the upload.
+        if (leaveRequested) {
+          onGoHome();
+          return;
+        }
         // Reset watchdog every 32 iterations
         if ((i & 0x1F) == 0x1F) {
           HalSystem::feedWatchdog();

@@ -120,6 +120,9 @@ class MappedInputManager {
   // True if any press has been sampled since the last update(). Safe to call
   // mid-stall from within loop() to yield expensive work to button input.
   bool hasPendingInput() const { return gpio.hasPendingInput(); }
+  // Same, for one logical button. Only sees presses since the last update(); one drained before
+  // it is in wasPressed() instead, so a caller that cannot call update() itself checks both.
+  bool hasPendingPress(Button button) const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
 
