@@ -2296,6 +2296,10 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
       fontUpload.buffer.resize(FontUploadState::BUFFER_SIZE);
+      // The END and ABORTED cases delete filePath whenever the upload is not valid. Left
+      // over from the previous upload, it named that upload's INSTALLED font, so a START
+      // refused below (bad family or file name, no family dir) deleted it.
+      fontUpload.filePath.clear();
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
