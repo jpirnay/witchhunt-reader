@@ -5167,6 +5167,10 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
+  // Read before the pin below overwrites it: this pass redraws the page already on the panel (a
+  // clock or battery tick, an overlay closing) rather than showing a new one.
+  const bool redrawOfPageOnScreen =
+      section && lastRenderedSpineIndex_ == currentSpineIndex && lastRenderedPageIndex_ == section->currentPage;
   // Pin the page identity now, while it still describes what this pass is about to draw.
   if (section) {
     lastRenderedSpineIndex_ = currentSpineIndex;
@@ -5330,8 +5334,15 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
 
-  bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
-  pendingHalfRefreshAfterImagePage = false;
+  // The image-page half refresh is owed to the page AFTER an image page. A redraw of the image page
+  // itself must leave it pending: consuming it here flashed a HALF on every clock minute while an
+  // image page was on screen (X3, 2026-10-08), and the page re-armed it each time since it still has
+  // images. Keyed on the page last drawn, spine included, not on the status-bar tick test below: a
+  // one-page chapter followed by the next chapter's page 0 has the same page number, and that turn,
+  // from a full-page illustration, is the one this refresh exists for.
+  bool forceHalfRefreshThisPage =
+      !redrawOfPageOnScreen && pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
+  if (!redrawOfPageOnScreen) pendingHalfRefreshAfterImagePage = false;
   lastRenderStats.imagePageWithAA = false;
   lastRenderStats.forcedHalfRefresh = forceHalfRefreshThisPage;
 
