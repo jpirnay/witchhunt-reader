@@ -31,7 +31,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 80;  // v80: the paragraph LUT entry carries the page's visible-text offset
+constexpr uint8_t SECTION_FILE_VERSION = 81;  // v81: a paragraph over 96 words gets its top margin and padding
                                               // v79: a <span> styled display:block is a block,
                                               // and every block in a heading keeps its centring
                                               // and size (#388); v78 pages run them together

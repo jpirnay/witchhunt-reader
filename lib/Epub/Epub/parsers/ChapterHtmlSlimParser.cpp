@@ -943,6 +943,13 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       // are NOT folded mid-block: more words with the same span size may still stream
       // in after this flush, and folding now would double-scale them.
       resolveBlockFont(splitBlockStyle);
+      // Before the float code below reads currentPageNextY: the first line starts under the spacing.
+      if (!applyBlockTopSpacing()) {
+        currentTextBlock.reset();
+        partWordBufferIndex = 0;
+        nextWordContinues = false;
+        return false;
+      }
 
       // A long paragraph (>96 words) beside a tall float lays out here, bypassing
       // makePages(). Inject the active float so it keeps wrapping in this mid-block
@@ -969,6 +976,11 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           splitBlockStyle.floatZones[zi].top = static_cast<int16_t>(currentPageNextY);
           splitBlockStyle.floatZones[zi].bottom = static_cast<int16_t>(currentPageNextY + imgH);
         }
+        // As in makePages(): the top spacing moved the float below where it was attached, and the
+        // blocks after this one wrap against the active-float extent, so it must move too.
+        activeFloatTop_ = static_cast<int16_t>(currentPageNextY);
+        activeFloatBottom_ = static_cast<int16_t>(
+            currentPageNextY + (splitBlockStyle.floatZones[0].bottom - splitBlockStyle.floatZones[0].top));
       }
       currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
@@ -4050,18 +4062,6 @@ void ChapterHtmlSlimParser::makePages() {
     return;
   }
 
-  if (!currentPage) {
-    currentPage.reset(new (std::nothrow) Page());
-    if (!currentPage) {
-      LOG_ERR("EHP", "OOM: page object");
-      layoutFailed = true;
-      currentTextBlock.reset();
-      return;
-    }
-    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
-    currentPageNextY = 0;
-  }
-
   // Snap the block to the size ladder before any metric below is computed. Uniform
   // per-word sizes (a span wrapping the whole paragraph) fold into the block multiplier
   // first so they benefit too; continuations skip the fold — their first chunk already
@@ -4071,24 +4071,13 @@ void ChapterHtmlSlimParser::makePages() {
   }
   resolveBlockFont(currentTextBlock->getBlockStyle());
 
+  if (!applyBlockTopSpacing()) {
+    currentTextBlock.reset();
+    return;
+  }
+
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
   const int lineHeight = effectiveLineHeight(blockStyle);
-
-  // Apply top spacing before the paragraph — skip for continuation fragments
-  // (words left over after an intermediate flush): the top margin was already
-  // applied before the first set of lines from this logical paragraph.
-  if (!currentTextBlock->isContinuation()) {
-    if (blockStyle.marginTop > 0) {
-      // CSS margin collapsing: gap between adjacent blocks = max(prevMarginBottom, thisMarginTop).
-      // lastBlockMarginBottom was already added after the previous block; subtract the overlap.
-      const int16_t collapse = std::min(lastBlockMarginBottom, blockStyle.marginTop);
-      currentPageNextY += static_cast<int16_t>(blockStyle.marginTop - collapse);
-    }
-    if (blockStyle.paddingTop > 0) {
-      currentPageNextY += blockStyle.paddingTop;
-    }
-  }
-  lastBlockMarginBottom = 0;
 
   // Calculate effective width accounting for horizontal margins/padding
   const int horizontalInset = blockStyle.totalHorizontalInset();
@@ -4175,6 +4164,48 @@ void ChapterHtmlSlimParser::makePages() {
   if (extraParagraphSpacing && preUntilDepth == INT_MAX) {
     currentPageNextY += lineHeight / 2;
   }
+}
+
+bool ChapterHtmlSlimParser::applyBlockTopSpacing() {
+  // The spacing is an offset into the current page, so the page has to exist first: left to
+  // addLineToPage(), the first line would create it and restart y at 0, dropping the spacing.
+  if (!currentPage) {
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "OOM: page object");
+      layoutFailed = true;
+      return false;
+    }
+    currentPage->elements.reserve(Page::TYPICAL_ELEMENTS);
+    currentPageNextY = 0;
+  }
+
+  // A paragraph over 96 words is laid out in chunks (flushPartWordBuffer), and every chunk after
+  // the first is a continuation: its top is already on the page. The first chunk is laid out by
+  // the split, so the split has to place the spacing too -- it once did not, and the continuation
+  // flag then kept makePages() from catching up, so a long paragraph lost its margin-top,
+  // padding-top and any <br> scene-break line stored there.
+  //
+  // Diagnosed in crosspoint-reader PR #3875 ("fix: preserve paragraph continuity across soft
+  // flushes", Phạm Bình An / @brianhuster). Their fix routes the split through makePages(); ours
+  // keeps the split's own path (isContinuation() already covers the indent half) and shares this.
+  //
+  // Not clamped to the page: spacing that runs past the bottom is dropped by the first line's
+  // page break in addLineToPage(), which starts the new page at y = 0.
+  const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
+  if (!currentTextBlock->isContinuation()) {
+    if (blockStyle.marginTop > 0) {
+      // CSS margin collapsing: gap between adjacent blocks = max(prevMarginBottom, thisMarginTop).
+      // lastBlockMarginBottom was already added after the previous block; subtract the overlap.
+      const int16_t collapse = std::min(lastBlockMarginBottom, blockStyle.marginTop);
+      currentPageNextY += static_cast<int16_t>(blockStyle.marginTop - collapse);
+    }
+    if (blockStyle.paddingTop > 0) {
+      currentPageNextY += blockStyle.paddingTop;
+    }
+  }
+  lastBlockMarginBottom = 0;
+  return true;
 }
 
 void ChapterHtmlSlimParser::commitPendingRow() {
