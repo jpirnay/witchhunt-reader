@@ -451,26 +451,47 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   uint8_t* newToOldLeft = base + 4 * 256;
   uint8_t* newToOldRight = base + 5 * 256;
 
-  // Step 1: mark used left/right classes (class IDs are uint8_t — 0 means none).
+  // Class IDs are uint8_t, 0 meaning none. A font is a user-supplied file, and an ID
+  // past the class count its header declares would index outside a matrix row and
+  // point the SD sweep below past the end of the matrix -- where `matrixEnd -
+  // chunkStart` underflows and the read asks for ~4 GB into a 4 KB buffer. Such an
+  // entry counts as unkerned. Steps 1, 3 and 5 all go through these two lookups, so
+  // they agree on which codepoints carry a class.
+  // Ported from crosspoint-reader PR #3838 ("fix: keep SD-font kerning and ligatures
+  // in edge cases", Sung-jin Brian Hong / @serialx), its bugs 2 and 3. Upstream drops
+  // such entries when the class tables load; here those tables can point straight
+  // into the read-only flash mapping, so the range check sits on the lookup instead.
+  const auto leftClass = [&s](const uint32_t cp) -> uint8_t {
+    const uint8_t c = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, cp);
+    return c <= s.header.kernLeftClassCount ? c : 0;
+  };
+  const auto rightClass = [&s](const uint32_t cp) -> uint8_t {
+    const uint8_t c = miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, cp);
+    return c <= s.header.kernRightClassCount ? c : 0;
+  };
+
+  // Step 1: mark used left/right classes.
   for (uint32_t i = 0; i < cpCount; i++) {
-    uint8_t lc = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, codepoints[i]);
+    const uint8_t lc = leftClass(codepoints[i]);
     if (lc) usedLeft[lc] = 1;
-    uint8_t rc = miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, codepoints[i]);
+    const uint8_t rc = rightClass(codepoints[i]);
     if (rc) usedRight[rc] = 1;
   }
 
   // Step 2: build renumber maps (oldClassId -> newClassId, 1-based) and
-  // reverse maps (newClassId -> oldClassId) for the SD read step.
-  uint8_t numLeft = 0, numRight = 0;
+  // reverse maps (newClassId -> oldClassId) for the SD read step. The counts are
+  // uint16_t: a page can use all 255 classes, and a uint8_t count would make every
+  // `<= num` loop below run forever, writing before the row on the way.
+  uint16_t numLeft = 0, numRight = 0;
   for (int i = 1; i < 256; i++) {
     if (usedLeft[i]) {
       numLeft++;
-      leftRenumber[i] = numLeft;
+      leftRenumber[i] = static_cast<uint8_t>(numLeft);
       newToOldLeft[numLeft] = static_cast<uint8_t>(i);
     }
     if (usedRight[i]) {
       numRight++;
-      rightRenumber[i] = numRight;
+      rightRenumber[i] = static_cast<uint8_t>(numRight);
       newToOldRight[numRight] = static_cast<uint8_t>(i);
     }
   }
@@ -483,8 +504,8 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   uint16_t miniLeftCount = 0;
   uint16_t miniRightCount = 0;
   for (uint32_t i = 0; i < cpCount; i++) {
-    if (miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, codepoints[i]) != 0) miniLeftCount++;
-    if (miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, codepoints[i]) != 0) miniRightCount++;
+    if (leftClass(codepoints[i]) != 0) miniLeftCount++;
+    if (rightClass(codepoints[i]) != 0) miniRightCount++;
   }
 
   // Step 4: allocate the three mini buffers. The matrix is <1KB in practice
@@ -507,13 +528,13 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   for (uint32_t i = 0; i < cpCount; i++) {
     uint32_t cp = codepoints[i];
     if (cp > 0xFFFF) continue;  // kern class entries are uint16_t
-    uint8_t lc = miniLookupKernClass(s.kernLeftClasses, s.header.kernLeftEntryCount, cp);
+    const uint8_t lc = leftClass(cp);
     if (lc) {
       s.miniKernLeftClasses[lIdx].codepoint = static_cast<uint16_t>(cp);
       s.miniKernLeftClasses[lIdx].classId = leftRenumber[lc];
       lIdx++;
     }
-    uint8_t rc = miniLookupKernClass(s.kernRightClasses, s.header.kernRightEntryCount, cp);
+    const uint8_t rc = rightClass(cp);
     if (rc) {
       s.miniKernRightClasses[rIdx].codepoint = static_cast<uint16_t>(cp);
       s.miniKernRightClasses[rIdx].classId = rightRenumber[rc];
@@ -540,10 +561,10 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   {
     uint8_t k = 0;
     for (int oldL = 1; oldL < 256; oldL++) {
-      for (uint8_t newL = 1; newL <= numLeft; newL++) {
+      for (uint16_t newL = 1; newL <= numLeft; newL++) {
         if (newToOldLeft[newL] == static_cast<uint8_t>(oldL)) {
           sortedOldL[k] = static_cast<uint8_t>(oldL);
-          sortedNewL[k] = newL;
+          sortedNewL[k] = static_cast<uint8_t>(newL);
           k++;
           break;
         }
@@ -561,7 +582,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
       const uint8_t newL = sortedNewL[k];
       const int8_t* srcRow = matrixBase + (oldL - 1u) * rowBytes;
       int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
-      for (uint8_t newR = 1; newR <= numRight; newR++) {
+      for (uint16_t newR = 1; newR <= numRight; newR++) {
         miniRow[newR - 1] = srcRow[newToOldRight[newR] - 1u];
       }
     }
@@ -600,7 +621,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
         }
         const int8_t* srcRow = chunkBuf.get() + (rowFileOff - chunkStart);
         int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
-        for (uint8_t newR = 1; newR <= numRight; newR++) {
+        for (uint16_t newR = 1; newR <= numRight; newR++) {
           miniRow[newR - 1] = srcRow[newToOldRight[newR] - 1u];
         }
       }
@@ -630,7 +651,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
           return false;
         }
         int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
-        for (uint8_t newR = 1; newR <= numRight; newR++) {
+        for (uint16_t newR = 1; newR <= numRight; newR++) {
           miniRow[newR - 1] = rowBuf[newToOldRight[newR] - 1u];
         }
       }
@@ -639,8 +660,8 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
 
   s.miniKernLeftEntryCount = lIdx;
   s.miniKernRightEntryCount = rIdx;
-  s.miniKernLeftClassCount = numLeft;
-  s.miniKernRightClassCount = numRight;
+  s.miniKernLeftClassCount = static_cast<uint8_t>(numLeft);
+  s.miniKernRightClassCount = static_cast<uint8_t>(numRight);
   return true;
 }
 
