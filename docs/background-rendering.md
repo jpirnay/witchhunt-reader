@@ -70,7 +70,9 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
   page incomplete (never shown) instead of falling into a decode. Not on a single-push panel
   (`supportsGrayFrame()`, T5S3), whose capture records no image greys. A refusal logs
   `PreRender skipped: ...` at DBG.
-  No pre-render while B is building through page turns (see B).
+  No pre-render while B is building through page turns (see B). It never crosses a section
+  boundary: a chapter's first page always renders fresh (open, see
+  [future_work/display-and-refresh.md](future_work/display-and-refresh.md)).
 - **Note on X3:** a page turn is *waveform-bound* (~0.5 s), so A only saves the ~90 ms of
   prewarm+BW compute. Its benefit is modest on X3; the panel, not the CPU, sets page-turn speed.
   At the time of writing the X3 reads below the floor and A does not run there (open, see

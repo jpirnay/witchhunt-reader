@@ -312,3 +312,52 @@ above).
 
 **Next.** Revisit once A runs on the X3 again. Reordering needs a C3 heap check and a device test, not
 an inference from one log.
+
+## Pre-render across a chapter boundary
+
+**Open.** Background A never crosses a section. `EpubReaderActivity::renderPreRenderPass()` skips when
+`nextPage >= availablePages`. All four arming sites require `currentPage + 1 < pageCount`:
+`renderContents()`, `renderBufferDisplayPass()`, the re-arm in `stepBackgroundSectionBuild()`, and the
+image lane's re-arm in `warmPageForImageLane()`. So the first page of every chapter renders fresh,
+including a chapter-opening illustration.
+
+**Why it matters.** X4, 2026-10-08, turn into a chapter whose first page has a cached image:
+
+| Step | Time |
+|---|---|
+| Section load | 35 ms |
+| Image size probe | 32 ms (removed by #407: `ImageBlock::wouldShowPlaceholder()` checks the cache first) |
+| Font prewarm | 36 ms |
+| BW render | 68 ms |
+| Waveform + inline AA | ~775 ms |
+
+A pre-render would bring the first pixels forward by ~105 ms, from ~146 ms after the press to
+~40 ms. That happens once per chapter. On the X4 the turn as a whole finishes at about the same
+time: a pre-rendered page runs its AA after the waveform instead of overlapping it. The expensive
+part, the decode, is already off the turn, because the image lane warms the next section's first
+pages.
+
+**Deferred** 2026-10-08: the gain is small for the change it needs.
+
+**Design, if picked up.**
+1. Arm on a section's last page when a next spine exists, at all four sites above.
+2. Pre-render (spine + 1, page 0). Use Background-B's `backgroundSection_` when it holds that spine
+   complete; otherwise load the section the way the image lane's spill into the next section does.
+   Skip the pass unless `buildSection()` would use that cache as it is.
+3. Extend the fast path in `pageTurn()`. On the last page, with that pre-render ready, make the same
+   crossing `stepPageStateLocked()` makes (`navTarget` to page 0, `currentSpineIndex++`,
+   `section.reset()`) and hand the buffer over through `usePreRenderedBuffer`.
+4. In the BufferDisplay pass, when there is no section yet, run `buildSection()` first. On a cache
+   hit it reads the LUT and draws nothing. Show the buffer only if it hit and resolved page 0.
+   Anything else falls back to the normal path, which redraws.
+
+**Risks.**
+- Steps 3 and 4 touch the code behind #351 (a render shelved as a PreRender pass) and the
+  deferred-AA buffer clobber.
+- Step 2 must apply exactly the rules `buildSection()` uses to throw a cache away: 0-page truncated,
+  embedded-style fallback, image-header, table-row or CSS degraded. Otherwise an "Indexing" popup
+  lands on a page that was shown as pre-rendered. Pull those rules into one predicate that both
+  call, as a separate refactor first.
+
+**Next.** Measure on the X3 before deciding. Its turns are waveform-bound, which may change the
+trade-off, but only once A runs there at all (see "X3 reads below the pre-render heap floor").
