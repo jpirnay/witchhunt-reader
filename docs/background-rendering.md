@@ -75,8 +75,9 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
   [future_work/display-and-refresh.md](future_work/display-and-refresh.md)).
 - **Note on X3:** a page turn is *waveform-bound* (~0.5 s), so A only saves the ~90 ms of
   prewarm+BW compute. Its benefit is modest on X3; the panel, not the CPU, sets page-turn speed.
-  At the time of writing the X3 reads below the floor and A does not run there (open, see
-  [future_work/display-and-refresh.md](future_work/display-and-refresh.md)).
+  On 2026-09-23 the X3 read below the floor and A did not run there; on 2026-10-08 it ran (58.5 KB
+  free at the pass's start). Not yet confirmed beyond one session, see
+  [future_work/display-and-refresh.md](future_work/display-and-refresh.md).
 
 ### Ordering: the deferred AA pass runs before the pre-render
 

@@ -282,21 +282,27 @@ still promises a choice between ~2.4 s and ~130 ms.
 **Next.** Either give the X3 driver a second grayscale bank selected by the flag, or remove the setting
 and its comment.
 
-## X3 reads below the pre-render heap floor
+## X3 and the pre-render heap floor
 
-**Open.** Background A (next-page pre-render) does not run on the X3. X3 (UC8253), 2026-09-23, AA on,
-17 turns: free heap after each AA pass ~42.9 KB, and `PreRender skipped: free < floor=45056` on every
-page. `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the
-X3 entered the pass at 53-55 KB free. Free returns to the same value after every pass, so this is not
-a leak: the retained baseline grew by ~10-14 KB.
+**Likely resolved: confirm, then delete this item.** On 2026-09-23 Background A (next-page
+pre-render) did not run on the X3 (UC8253, AA on, 17 turns). Free heap after each AA pass was
+~42.9 KB, and every page logged `PreRender skipped: free < floor=45056`.
+`PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the X3
+entered the pass at 53-55 KB free.
+
+On 2026-10-08 it ran (X3, AA on, one session in one book). After each deferred AA pass,
+`Reader mem[prerender_begin]` showed 58.5 KB free, the pass ran, and a turn found its page
+pre-rendered. What brought the retained baseline back down was not identified.
 
 **Why it matters.** Without A every turn pays the page render on top of the waveform.
 
 **Ruled out.** Lowering the floor. It is derived from what the pass consumes (~23 KB transient), and
 the pass must stay clear of the reserve the sliced section build needs.
 
-**Next.** Find what grew: bisect `6f097ad77`..master on one book, using the
-`Reader mem[...] ... allocBytes=` line in `EpubReaderActivity` as the metric.
+**Next.** Watch `Reader mem[prerender_begin]` and `PreRender skipped: free < floor` across a few
+books and a longer session. If no page skips for the floor, delete this item. If it recurs, find
+what grew: bisect from `6f097ad77` on one book, using the `Reader mem[...] ... allocBytes=` line in
+`EpubReaderActivity` as the metric.
 
 ## Pre-render before the deferred AA pass
 
@@ -307,11 +313,12 @@ AA ~605 ms (planes 80 + gray 473 + restore 52), pre-render ~53 ms; 2 of 6 quick 
 pre-rendered page.
 
 **Status.** The T5S3 now sends AA as a single push in normal reading, so the measured case no longer
-happens there. The X3 is the board left on the deferred path, and A does not run there at all (item
-above).
+happens there. The X3 is the board left on the deferred path, and A runs there again as of
+2026-10-08 (item above). That log shows the order on every page: the deferred AA (planes ~296 +
+gray ~357 + restore ~50 ms), then the pre-render (~70 ms).
 
-**Next.** Revisit once A runs on the X3 again. Reordering needs a C3 heap check and a device test, not
-an inference from one log.
+**Next.** Measure how often a quick turn on the X3 lands inside the AA window. Reordering needs a C3
+heap check and a device test, not an inference from one log.
 
 ## Pre-render across a chapter boundary
 
@@ -360,4 +367,4 @@ pages.
   call, as a separate refactor first.
 
 **Next.** Measure on the X3 before deciding. Its turns are waveform-bound, which may change the
-trade-off, but only once A runs there at all (see "X3 reads below the pre-render heap floor").
+trade-off. A runs there again as of 2026-10-08 (see "X3 and the pre-render heap floor").
