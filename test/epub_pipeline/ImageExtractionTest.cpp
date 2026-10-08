@@ -227,8 +227,37 @@ TEST_F(LargeImageFixture, PlaceholderIsSuppressedByForceLoad) {
   EXPECT_TRUE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
   EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/true, /*monochromeOutput=*/true))
       << "the user asked for it explicitly";
-  // (The other suppressor — an existing .pxc pixel cache — is not reachable from here: the cache
-  // path is derived internally from the tone filter id and is not exposed for a test to create.)
+}
+
+TEST_F(LargeImageFixture, PlaceholderIsSuppressedByThePixelCacheOfThatMode) {
+  const std::string big = writeExtracted("cached.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  ImageBlock block(big, 400, 600, "");
+  {
+    std::ofstream((work / "cached.1bit.pxc").string()) << 'x';
+  }
+
+  EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
+  EXPECT_TRUE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/false))
+      << "the greyscale variant has no cache yet";
+}
+
+// The size probe is the expensive half (a failed open plus a central-directory scan when the
+// image was never extracted), so it must not run while the cache already answers. Observed
+// through its memo: had the first call probed, it would have remembered "large", and the second
+// call -- cache gone, file now small -- would wrongly answer with a placeholder.
+TEST_F(LargeImageFixture, SizeIsNotProbedWhileTheCacheExists) {
+  const std::string path = writeExtracted("probe.png", LARGE_IMAGE_SOURCE_BYTES + 1);
+  const std::string cache = (work / "probe.1bit.pxc").string();
+  {
+    std::ofstream(cache) << 'x';
+  }
+  ImageBlock block(path, 400, 600, "");
+  ASSERT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true));
+
+  fs::remove(cache);
+  fs::resize_file(path, 1024);
+  EXPECT_FALSE(block.wouldShowPlaceholder(/*forceLoad=*/false, /*monochromeOutput=*/true))
+      << "the size was probed (and remembered) while the cache existed";
 }
 
 // --- heap-degraded image headers -------------------------------------------------------------
