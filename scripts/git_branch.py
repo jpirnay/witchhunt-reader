@@ -8,6 +8,10 @@ PlatformIO pre-build script: inject Git metadata into preprocessor defines.
 - All environments get CROSSPOINT_GIT_REPOSITORY, resolved from CI metadata
   or local Git remotes. A safe fallback is defined in src/network/OtaUpdater.h in case
   resolution here fails.
+- All environments get CROSSPOINT_DISPLAY_SDK, the display SDK name and Git version.
+
+CROSSPOINT_VERSION and CROSSPOINT_DISPLAY_SDK reach only the sources that name them
+(see add_scoped_defines), so a Git change recompiles those few objects, not the tree.
 """
 
 import configparser
@@ -180,48 +184,111 @@ def normalize_semver_patch(version: str) -> str:
     return version
 
 
-def inject_version(env):
-    project_dir = env['PROJECT_DIR']
-    git_repository = get_git_repository(project_dir)
-    if git_repository:
-        env.Append(CPPDEFINES=[('CROSSPOINT_GIT_REPOSITORY', f'\\"{git_repository}\\"')])
-        print(f'CrossPoint Git repository: {git_repository}')
+def get_injected_version(pioenv, project_dir):
+    """The CROSSPOINT_VERSION this script supplies for `pioenv`, or None.
 
-    # Which display/hardware SDK this firmware links against, for the System
-    # Information screen. Injected for every environment (unlike the version).
-    display_sdk = get_display_sdk(project_dir)
-    if display_sdk:
-        env.Append(CPPDEFINES=[('CROSSPOINT_DISPLAY_SDK', f'\\"{display_sdk}\\"')])
-        print(f'CrossPoint display SDK: {display_sdk}')
-
+    None means the env stamps its own version through build_flags in
+    platformio.ini (the release, slim, bench and board dev envs), which this
+    script leaves alone.
+    """
     # Release candidate builds use the CI-provided RC tag when available, but
     # keep local gh_release_rc builds identifiable instead of leaving the
     # firmware version empty. Every board has its own RC env named
     # <board>_gh_release_rc (plain gh_release_rc is the C3 X3/X4 one); the
     # board prefix becomes the version suffix, matching how the non-RC release
     # envs stamp themselves in platformio.ini.
-    pioenv = env['PIOENV']
     if pioenv.endswith('gh_release_rc'):
         base_version = normalize_semver_patch(get_base_version(project_dir))
         version_string = os.environ.get('CROSSPOINT_RC_VERSION') or f'{base_version}-rc.0+local'
         board_suffix = pioenv[: -len('gh_release_rc')].strip('_-')
         if board_suffix:
             version_string = f'{version_string}-{board_suffix}'
-        env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
+        return version_string
+
+    if pioenv == 'default':
+        return f'{get_base_version(project_dir)}-dev+{get_git_branch(project_dir)}'
+
+    return None
+
+
+# Ported from crosspoint-reader PR #3860 ("fix: scope Git version to sources that use it",
+# Uri Tauber). Theirs: a build middleware that gives the Git-derived version define only to
+# the sources whose text names it. Here it carries the display SDK identity as well (that one
+# changes on every SDK pin bump and on a dirty SDK tree, in every env), and the RC version
+# too, and SystemStatus.h's reads of both moved into SystemStatus.cpp, because the scan sees
+# one source file and not the headers it includes.
+#
+# Why: PlatformIO puts every global define on every object's command line, so a global
+# define whose value follows Git state rebuilt every object -- libraries included -- on each
+# branch switch or SDK bump. Scoped, only the sources that read it recompile.
+#
+# The rule this imposes: a header must not name a scoped define. A source that includes it
+# without naming the define would not get it. Neither define has a fallback a header could
+# pick up (CROSSPOINT_DISPLAY_SDK's lives in SystemStatus.cpp), so that mistake fails to
+# compile -- for the version in env:default, which CI builds -- rather than shipping a wrong
+# value. Keep it that way: an #ifndef fallback in a header would turn the error into "unknown".
+
+
+def defines_named_in(source, defines):
+    """The (name, value) pairs of `defines` whose name occurs in `source` (bytes).
+
+    A plain substring test: a mention in a comment also matches, which costs that
+    one object a recompile on a Git change and nothing else.
+    """
+    return [(name, value) for name, value in defines.items() if name.encode('ascii') in source]
+
+
+def add_scoped_defines(env, defines):
+    if not defines:
+        return
+
+    # A metadata dump (`pio check`, IDE IntelliSense) compiles nothing, so there a
+    # global define costs no rebuild, and those consumers read only the global
+    # defines. Without it cppcheck stops with unknownMacro on main.cpp's
+    # LOG_DBG("..." CROSSPOINT_VERSION), and CI runs it with --fail-on-defect high.
+    if env.IsIntegrationDump():
+        env.Append(CPPDEFINES=list(defines.items()))
+        return
+
+    # Exactly two parameters: PlatformIO picks the middleware calling convention
+    # from co_argcount, so a defaulted third parameter would break the call.
+    def scope_git_defines(build_env, node):
+        wanted = defines_named_in(node.srcnode().get_contents(), defines)
+        if not wanted:
+            return node
+        # Cloned from the env that is building this node (the project's or a
+        # library's), so the object keeps every other flag it would have had.
+        scoped_env = build_env.Clone()
+        scoped_env.Append(CPPDEFINES=wanted)
+        return scoped_env.Object(node)
+
+    env.AddBuildMiddleware(scope_git_defines)
+
+
+def inject_version(env):
+    project_dir = env['PROJECT_DIR']
+    # Global: it follows the remote, not the branch or commit, so it does not
+    # churn objects, and src/network/OtaUpdater.h reads it from a header.
+    git_repository = get_git_repository(project_dir)
+    if git_repository:
+        env.Append(CPPDEFINES=[('CROSSPOINT_GIT_REPOSITORY', f'\\"{git_repository}\\"')])
+        print(f'CrossPoint Git repository: {git_repository}')
+
+    scoped_defines = {}
+
+    # Which display/hardware SDK this firmware links against, for the System
+    # Information screen. Injected for every environment (unlike the version).
+    display_sdk = get_display_sdk(project_dir)
+    if display_sdk:
+        scoped_defines['CROSSPOINT_DISPLAY_SDK'] = f'\\"{display_sdk}\\"'
+        print(f'CrossPoint display SDK: {display_sdk}')
+
+    version_string = get_injected_version(env['PIOENV'], project_dir)
+    if version_string:
+        scoped_defines['CROSSPOINT_VERSION'] = f'\\"{version_string}\\"'
         print(f'CrossPoint build version: {version_string}')
-        return
 
-    # Only applies to the dev (default) environment; release envs set the
-    # version via build_flags in platformio.ini and are unaffected.
-    if pioenv != 'default':
-        return
-
-    base_version = get_base_version(project_dir)
-    branch = get_git_branch(project_dir)
-    version_string = f'{base_version}-dev+{branch}'
-
-    env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
-    print(f'CrossPoint build version: {version_string}')
+    add_scoped_defines(env, scoped_defines)
 
 
 # PlatformIO/SCons entry point — Import and env are SCons builtins injected at runtime.
@@ -233,6 +300,9 @@ try:
 except NameError:
     class _Env(dict):
         def Append(self, **_): pass
+        # Validation mode only reports the computed values.
+        def AddBuildMiddleware(self, _): pass
+        def IsIntegrationDump(self): return False
 
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     inject_version(_Env({'PIOENV': 'default', 'PROJECT_DIR': _project_dir}))

@@ -80,6 +80,8 @@ Environments in `platformio.ini`:
 
 Two more C3 environments are for measurement, not for daily use: `slim` is a release-style build with serial logging compiled out, and `bench` and `bench_font` flash a standalone benchmark that prints timings over serial (no SD card needed).
 
+`default` takes its version (`CROSSPOINT_VERSION`) from the current branch, and every environment records the display SDK's Git version (`CROSSPOINT_DISPLAY_SDK`). `scripts/git_branch.py` gives those two defines only to the source files that name them, so a branch switch or an SDK bump recompiles about a dozen objects instead of the whole tree. Read them from a `.cpp`, never from a header: a source that includes the header without naming the macro does not get the define. `src/SystemStatus.cpp` shows the pattern.
+
 ### Windows: use a short PlatformIO core directory
 
 On Windows, keep PlatformIO's core directory at a short path such as `C:\pio`:
