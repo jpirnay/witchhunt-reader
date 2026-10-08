@@ -671,7 +671,7 @@ class EpubReaderActivity final : public Activity {
   bool autoSyncReaderIsQuiet() const;
   void maybeAutoPullOnWake();
   bool pollAutoSyncPull();
-  void evaluateAutoSyncPull();
+  bool evaluateAutoSyncPull();
   bool handOffToInteractiveSync();
   void silentUploadCurrentPosition();
   void silentApplyRemote(const KOReaderProgress& remote);
