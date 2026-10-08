@@ -456,6 +456,9 @@ Borrow (the lent region becomes an arena):
   image-header walk, §9.3.
 - First-open indexing (`ReaderActivity`), Home's cover pass and frame cache (`HomeActivity`), and
   the file browser's cover work (`FileBrowserActivity::lendForBackgroundWork`).
+- The font selector's previews (`FontSelectionActivity::lendPreviewArena`): each uncached preview
+  loads its SD font into the lent region (`SdCardFont::useArena`), one block per font, rewound
+  after the font is unloaded. With nothing to lend, previews load on the heap.
 
 Release (the block goes back to the heap):
 

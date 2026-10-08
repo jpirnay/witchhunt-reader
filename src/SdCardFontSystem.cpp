@@ -231,7 +231,8 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* wantedFamily, const uint8_t pointSize,
-                                    const std::function<void()>& onColdLoad, const FlashCachePolicy policy) {
+                                    const std::function<void()>& onColdLoad, const FlashCachePolicy policy,
+                                    BuildArena* const arena) {
   const std::string& currentFamily = manager_.currentFamilyName();
   const uint8_t targetPt = sizeListFor(wantedFamily).snap(pointSize);
 
@@ -268,7 +269,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* wantedFam
   // Both now agree: the closest face is loaded and the requested size is served from it, scaled,
   // under an alias ID (SdCardFontManager::ensureSizeAlias). The chosen typeface AND the chosen
   // size, which is what the setting promised.
-  if (!manager_.loadFamily(*family, renderer, targetPt, onColdLoad, policy)) {
+  if (!manager_.loadFamily(*family, renderer, targetPt, onColdLoad, policy, arena)) {
     LOG_ERR("SDFS", "Failed to load SD font family: %s", wantedFamily);
   }
 }

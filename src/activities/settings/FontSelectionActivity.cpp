@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SdCardFontRegistry.h>
 #include <esp_heap_caps.h>
 
@@ -42,14 +43,65 @@ void FontSelectionActivity::onEnter() {
   }
 
   RenderLock lock(*this);
+  lendPreviewArena();
   UiListActivity::onEnter();
   nav.selected = selectedIndex;
   updatePreviewFontLocked(selectedIndex);
 }
 
 void FontSelectionActivity::onExit() {
-  sdFontSystem.unload(renderer);
+  // Nothing may be drawn before the return: the exit's busy indicator may still be finishing, and
+  // with the buffer lent its finish reads the write buffer (see returnPreviewArena).
+  dropPreviewFont();
+  returnPreviewArena();
   UiListActivity::onExit();
+}
+
+void FontSelectionActivity::lendPreviewArena() {
+  if (previewArena_ || !renderer.hasSecondaryBuffer()) return;
+  // HomeActivity's lend sequence. Safe with the transition's busy-indicator waveform still running:
+  // the copy only reads the displayed frame, and the RED seed and the borrow both drain it first.
+  renderer.syncWriteBufferFromDisplayed();
+  if (!renderer.isX3()) renderer.syncRedRamFromFrameBuffer();
+  size_t lentSize = 0;
+  uint8_t* lent = renderer.borrowSecondaryBuffer(&lentSize);
+  if (!lent) return;
+  previewArena_ = makeUniqueNoThrow<BuildArena>(lent, lentSize);
+  if (!previewArena_ || !previewArena_->valid()) {
+    previewArena_.reset();
+    renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    return;
+  }
+  // The selector draws only plain black-and-white frames, so FAST keeps diffing against the seeded
+  // RED baseline instead of degrading to HALF on the X4. No-op on X3.
+  renderer.setSingleBufferFastDiff(true);
+  LOG_DBG("FPRV", "Lent secondary framebuffer for previews (%u bytes)", static_cast<unsigned>(lentSize));
+}
+
+void FontSelectionActivity::returnPreviewArena() {
+  if (!previewArena_) return;
+  previewArena_.reset();
+  renderer.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+  renderer.setSingleBufferFastDiff(false);
+}
+
+void FontSelectionActivity::loadPreviewFont(const SdCardFontFamilyInfo& family) {
+  dropPreviewFont();
+  if (previewArena_) {
+    previewBlock_ = previewArena_->reserveBlock();
+    sdFontSystem.ensureLoadedForPreview(renderer, family.name.c_str(), selectedFontSize(), previewArena_.get());
+    if (sdFontSystem.resolveFontId(family.name.c_str(), selectedFontSize()) != 0) return;
+    LOG_ERR("FPRV", "%s did not load into the lent buffer (%u of %u bytes used); trying the heap", family.name.c_str(),
+            static_cast<unsigned>(previewArena_->used()), static_cast<unsigned>(previewArena_->capacity()));
+    dropPreviewFont();
+  }
+  sdFontSystem.ensureLoadedForPreview(renderer, family.name.c_str(), selectedFontSize());
+}
+
+void FontSelectionActivity::dropPreviewFont() {
+  sdFontSystem.unload(renderer);
+  // Only after the unload: the font's arrays live in this block (SdCardFont::useArena).
+  if (previewArena_ && previewBlock_.valid()) previewArena_->release(previewBlock_);
 }
 
 const char* FontSelectionActivity::headerTitle() const {
@@ -104,7 +156,7 @@ int FontSelectionActivity::prepareSdPreview(const SdCardFontFamilyInfo& family) 
   if (previewKey(key) && FontPreviewCache::available(key)) {
     // The pixels are on the card, so nothing has to be resident to draw them.
     // Dropping the font here is what keeps browsing flat on the heap.
-    sdFontSystem.unload(renderer);
+    dropPreviewFont();
     previewFromCache = true;
     return 0;
   }
@@ -112,7 +164,7 @@ int FontSelectionActivity::prepareSdPreview(const SdCardFontFamilyInfo& family) 
   // Preview-only: never let browsing the list rewrite the flash font partition.
   // The reader's own ensureLoaded() caches whatever the user actually picks
   // when the book opens.
-  sdFontSystem.ensureLoadedForPreview(renderer, family.name.c_str(), selectedFontSize());
+  loadPreviewFont(family);
   const int fontId = sdFontSystem.resolveFontId(family.name.c_str(), selectedFontSize());
   if (fontId != 0) prewarmPreviewGlyphs(fontId);
   previewNeedsStore = fontId != 0;
@@ -148,7 +200,7 @@ void FontSelectionActivity::updatePreviewFontLocked(const int index) {
   int previewFontId = 0;
   if (optionIndex < CrossPointSettings::BUILTIN_FONT_COUNT) {
     previewFamily.clear();
-    sdFontSystem.unload(renderer);
+    dropPreviewFont();
     previewFontId =
         CrossPointSettings::getBuiltinReaderFontIdForPoints(static_cast<uint8_t>(optionIndex), selectedFontSize());
   } else {
@@ -308,9 +360,10 @@ void FontSelectionActivity::advanceWarmup() {
   // With nothing resident this reads ~22.5 KB on an X3 against the ~15 KB a
   // kern-heavy family needs, so the brake only bites when something else has
   // genuinely taken the big block.
-  sdFontSystem.unload(renderer);
+  dropPreviewFont();
   const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  if (largest < WARMUP_MIN_CONTIGUOUS) {
+  // The brake only matters on the heap path: with the buffer lent, previews never touch the heap.
+  if (!previewArena_ && largest < WARMUP_MIN_CONTIGUOUS) {
     LOG_ERR("FPRV", "Stopping warm-up at %u/%u: largest free block %lu below floor", static_cast<unsigned>(warmupDone),
             static_cast<unsigned>(warmupQueue.size()), static_cast<unsigned long>(largest));
     finishWarmup();

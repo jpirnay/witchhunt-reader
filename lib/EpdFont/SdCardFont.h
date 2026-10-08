@@ -2,12 +2,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <new>
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
 
 class HalFile;
+class BuildArena;
 
 class SdCardFont {
  public:
@@ -39,6 +41,14 @@ class SdCardFont {
   // overflow handler to load glyph bitmaps from SD at draw time.
   // Returns true on success.
   bool loadFromMmap(const uint8_t* base, size_t size, const char* sdPath);
+
+  // Serve every array this font allocates from `arena` instead of the heap, except the glyph-miss
+  // ring's bitmaps (OverflowEntry::bitmap). Nothing in the arena is freed one array at a time; the
+  // caller reclaims it all by rewinding the arena AFTER this font is destroyed.
+  // Call before load()/loadFromMmap() and never change it afterwards: an array has to be freed the
+  // way it was allocated. The font selector's previews use it (FontSelectionActivity::
+  // loadPreviewFont); the reader never does.
+  void useArena(BuildArena* arena) { arena_ = arena; }
 
   // Pre-read glyphs needed for the given UTF-8 text from SD card.
   // styleMask: bitmask of styles to prewarm (bit 0=regular, 1=bold, 2=italic, 3=bolditalic).
@@ -231,6 +241,8 @@ class SdCardFont {
   static constexpr uint32_t OVERFLOW_CAPACITY = 8;
   struct OverflowEntry {
     EpdGlyph glyph;
+    // Always on the heap, even with an arena (useArena): the ring frees one slot at a time, which a
+    // bump arena cannot, so every eviction would strand its bitmap there until the block is rewound.
     uint8_t* bitmap = nullptr;
     uint32_t codepoint = 0;
     uint8_t styleIdx = 0;
@@ -254,6 +266,29 @@ class SdCardFont {
   // Non-null only when metadataOwned_ == false. Used to read sections (e.g. the
   // kern matrix) directly from flash without SD I/O.
   const uint8_t* mmapDataBase_ = nullptr;
+
+  // See useArena(). Null: every allocation below is the plain heap call it replaced.
+  BuildArena* arena_ = nullptr;
+  template <typename T>
+  T* allocArray(size_t count);
+  template <typename T>
+  void freeArray(T* p);
+  // A buffer that lives for one call. On the heap it is freed when the scope ends; in an arena it
+  // stays until the caller rewinds the font's block, so the deleter does nothing.
+  template <typename T>
+  struct ScratchDeleter {
+    bool heap = true;
+    void operator()(T* p) const {
+      if (heap) delete[] p;
+    }
+  };
+  template <typename T>
+  using Scratch = std::unique_ptr<T[], ScratchDeleter<T>>;
+  template <typename T>
+  Scratch<T> makeScratch(size_t count);
+  // The biggest single allocation the prewarm bitmap retry can make: the arena's remaining room,
+  // or the heap's largest free block.
+  uint32_t maxAllocatable() const;
 
   // Per-style helpers
   static bool allCpsCovered(const PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);

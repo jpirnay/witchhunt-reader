@@ -1,5 +1,5 @@
-add_executable(SdFontIntervalsTest
-  SdFontIntervalsTest.cpp
+add_executable(SdFontArenaTest
+  SdFontArenaTest.cpp
   ${REPO_ROOT}/lib/EpdFont/SdCardFont.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
@@ -7,7 +7,7 @@ add_executable(SdFontIntervalsTest
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
 )
 
-target_include_directories(SdFontIntervalsTest PRIVATE
+target_include_directories(SdFontArenaTest PRIVATE
   ${REPO_ROOT}/test/zip_entry_reader  # stdio-backed HalStorage.h; shadows test/shims stub
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/lib/Memory
@@ -16,9 +16,9 @@ target_include_directories(SdFontIntervalsTest PRIVATE
   ${REPO_ROOT}/test/shims
 )
 
-target_link_libraries(SdFontIntervalsTest PRIVATE
+target_link_libraries(SdFontArenaTest PRIVATE
   crosspoint_test_common
   GTest::gtest_main
 )
 
-gtest_discover_tests(SdFontIntervalsTest)
+gtest_discover_tests(SdFontArenaTest)

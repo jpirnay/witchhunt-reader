@@ -112,7 +112,8 @@ static bool writeFamily(const SdCardFontFamilyInfo& family, uint8_t requestedPoi
 }
 
 bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, uint8_t targetPtSize,
-                                   const std::function<void()>& onColdLoad, const FlashCachePolicy policy) {
+                                   const std::function<void()>& onColdLoad, const FlashCachePolicy policy,
+                                   BuildArena* const arena) {
   if (!renderer_) renderer_ = &renderer;
   if (!loadedFamilyName_.empty()) unloadAll(renderer);
 
@@ -127,6 +128,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
     LOG_ERR("SDMGR", "OOM allocating SdCardFont for %s", selected->path.c_str());
     return false;
   }
+  font->useArena(arena);
 
   // --- Flash partition cache ---
   // If the partition already has this exact entry, mmap directly — no write
