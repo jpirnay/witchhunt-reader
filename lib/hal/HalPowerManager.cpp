@@ -568,6 +568,69 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   return _batteryCachedPercent / 10;
 }
 
+namespace {
+// BQ27220 standard commands, read only for the before/after log lines below. The
+// load itself, and the decision whether one is needed, belong to the SDK.
+constexpr uint8_t BQ27220_FULL_CHARGE_CAPACITY_REG = 0x12;
+constexpr uint8_t BQ27220_DESIGN_CAPACITY_REG = 0x3C;
+
+void logGaugeCapacity(const char* when, const uint8_t addr, const uint16_t profileMah) {
+  uint16_t design = 0;
+  uint16_t fullCharge = 0;
+  if (X3GPIO::readI2CReg16LE(addr, BQ27220_DESIGN_CAPACITY_REG, &design) &&
+      X3GPIO::readI2CReg16LE(addr, BQ27220_FULL_CHARGE_CAPACITY_REG, &fullCharge)) {
+    LOG_INF("PWR", "BQ27220 %s: design %u mAh, full-charge %u mAh (profile %u mAh)", when, design, fullCharge,
+            profileMah);
+  } else {
+    LOG_INF("PWR", "BQ27220 %s: capacity read failed", when);
+  }
+}
+}  // namespace
+
+void HalPowerManager::serviceGaugeCapacityLoad() {
+  if (!_gaugeCapacityPending) return;
+
+  // Ported from crosspoint-reader PR #3730 ("fix: load the X3 battery capacity into
+  // its BQ27220 fuel gauge", Tuan Q. Nguyen / @martinqnguyen), which drives the SDK
+  // sequence from Free-Ink/freeink-sdk#132 by the same author. The gauge keeps Design
+  // Capacity in RAM: one that lost power comes back at TI's 3000 mAh default and then
+  // learns a full-charge capacity for a cell four times the X3's real 650 mAh. The
+  // SDK owns the protocol and decides whether anything needs writing; this drives it.
+  //
+  // Differs from upstream in the lock. They step under a try-RenderLock because their
+  // themes read the gauge while drawing. Every gauge access here already goes through
+  // HalI2cBus (getBatteryPercentage(), the X3's Current() read in HalGPIO), so that is
+  // the lock to hold, and for the whole step: one step can be a block select and its
+  // data read 10 ms apart.
+  //
+  // A deep sleep taken inside the ~8 s window can leave the gauge in CONFIG UPDATE;
+  // the SDK's first step on the next boot closes a load left open, with a reinit.
+  const auto& gauge = BoardConfig::ACTIVE.batteryGauge;
+  if (!_batteryUseI2C || gauge.gaugeType != BoardConfig::GaugeType::Bq27220 || gauge.designCapacityMah == 0) {
+    _gaugeCapacityPending = false;
+    return;
+  }
+
+  const unsigned long now = millis();
+  const bool firstCall = _gaugeCapacityStartMs == 0;
+  if (firstCall) {
+    _gaugeCapacityStartMs = now;
+    logGaugeCapacity("at boot", gauge.gaugeAddr, gauge.designCapacityMah);
+  }
+  {
+    HalI2cBus::Lock i2cLock;
+    _gaugeCapacityPending = BatteryMonitor::loadDesignCapacity();
+  }
+  if (_gaugeCapacityPending) return;
+
+  if (firstCall) {
+    LOG_INF("PWR", "BQ27220 capacity: nothing to load");
+  } else {
+    LOG_INF("PWR", "BQ27220 capacity load finished after %lu ms", now - _gaugeCapacityStartMs);
+    logGaugeCapacity("after load", gauge.gaugeAddr, gauge.designCapacityMah);
+  }
+}
+
 HalPowerManager::Lock::Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);
   // Counted, not exclusive: every Lock holds. See lockCount_ for what the old single-slot version
