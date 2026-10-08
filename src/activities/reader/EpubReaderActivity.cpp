@@ -1977,17 +1977,31 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   const bool shownNowCached = shownWasUncached && !page.hasUncachedImages(true, true, false);
   const bool inputWaiting = CooperativeAbort::shouldAbortLongTask();
   const bool redraw = shownNowCached && !inputWaiting;
-  const char* note = !complete        ? (preempted ? " -- preempted by input, retries after the next settle"
-                                         : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
-                                                                             : " -- incomplete, will retry once")
-                     : redraw         ? " -- on screen, redrawing"
-                     : shownNowCached ? " -- on screen, input waiting (the next render shows it)"
-                                      : "";
+  // The page after the one on screen just became pre-renderable. Its pre-render ran when this
+  // page was drawn and skipped it for its uncached images (as did the one re-arm, if it has run
+  // since), so nothing would try again before the turn. Keyed on the page actually on screen,
+  // not on currentPage: a navigation dispatched from main.cpp moves the position before its
+  // render runs, and arming then would shelve that render as a PreRender pass (#351).
+  const bool nextPageNowPreRenderable =
+      complete && !inputWaiting && spine == currentSpineIndex && lastRenderedSpineIndex_ == currentSpineIndex &&
+      lastRenderedPageIndex_ == section->currentPage && pageIndex == section->currentPage + 1 &&
+      !preRenderedPage.ready && !pendingPreRender && !backgroundBuildThrough_;
+  if (nextPageNowPreRenderable) {
+    pendingPreRender = true;
+    markStagedForCurrentPage();
+  }
+  const char* note = !complete                  ? (preempted ? " -- preempted by input, retries after the next settle"
+                                                   : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
+                                                                                       : " -- incomplete, will retry once")
+                     : redraw                   ? " -- on screen, redrawing"
+                     : shownNowCached           ? " -- on screen, input waiting (the next render shows it)"
+                     : nextPageNowPreRenderable ? " -- next page, pre-rendering it"
+                                                : "";
   LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", spine, pageIndex,
           millis() - t0, note, static_cast<unsigned long>(esp_get_free_heap_size()),
           static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   checkHeapIntegrity("after_image_lane");
-  if (redraw) requestUpdate();
+  if (redraw || nextPageNowPreRenderable) requestUpdate();
   return true;
 }
 
@@ -3744,8 +3758,8 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     return false;
   }
   auto p = section->loadPageFromSectionFile();
-  if (!p || p->hasImages()) {
-    // Page load failed or was an image page — caller falls through to full render.
+  if (!p) {
+    // Page load failed — caller falls through to full render.
     return false;
   }
   // Same reason as in renderContents(): pin the page identity before the pass does any work.
@@ -3821,13 +3835,32 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
                        : section->loadPageFromSectionFile();
   section->currentPage = savedPage;
   logReaderMemSnapshot("prerender_after_load");
+  // An image page qualifies once every image on it replays from its pixel caches, which the image
+  // lane has usually written pages ahead. Never with a decode: this pass holds the render lock and
+  // cannot abort, so a 1-4 s decode would stall the next turn behind it. The greyscale cache is
+  // required wherever the display replays it (the lane's warmGrayscale rule), or the images would
+  // come up without their grey levels. Not on a single-push panel: its capture rides the glyph
+  // blit and records no image greys, so the two-push fallback would show such a page differently
+  // from the same page rendered fresh.
+  const bool drawn =
+      p && (!p->hasImages() ||
+            (!renderer.supportsGrayFrame() &&
+             !p->hasUncachedImages(/*forceLoadLargeImages=*/true, /*monochromeOutput=*/true,
+                                   /*alsoWarmGrayscale=*/getEffectiveTextAntiAliasing() && !secondaryBufferDegraded_)));
+  const bool skippedForImages = p && !drawn;
   uint16_t glyphsDropped = 0;
-  const bool drawn = p && !p->hasImages();
+  uint16_t imagesMissed = 0;
   const unsigned long preRenderStart = millis();
   if (drawn) {
     section->currentPage = nextPage;
-    glyphsDropped =
-        renderPageContentOnly(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
+    {
+      // Belt and braces for the check above: a cache that exists can still fail to replay, and
+      // the draw would then fall through to the decode this pass must never run.
+      ImageBlock::PlaceholderOnlyScope cacheOnly;
+      glyphsDropped =
+          renderPageContentOnly(*p, layout.marginTop, layout.marginRight, layout.marginBottom, layout.marginLeft);
+      imagesMissed = cacheOnly.placeholdersDrawn();
+    }
     section->currentPage = savedPage;
     logReaderMemSnapshot("prerender_end");
   }
@@ -3842,18 +3875,24 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
     // An incomplete draw keeps `ready` (the framebuffer does hold that page now; the sleep
     // overlay and screenshots restore the current one from it) but is never shown: the turn
     // renders afresh, without this pass's Page in the heap.
-    preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis(), glyphsDropped > 0};
+    const bool incomplete = glyphsDropped > 0 || imagesMissed > 0;
+    preRenderedPage = {true, currentSpineIndex, nextPage, preRenderDuration, millis(), incomplete};
 #if DEBUG_BACKGROUND_WORK
-    if (glyphsDropped == 0) bgCounters_.aCompletes++;
+    if (!incomplete) bgCounters_.aCompletes++;
 #endif
     LOG_DBG("ERS", "Pre-rendered page %d/%d in %lums (heap %lu at start, %lu lowest, cost %lu)%s", nextPage,
             section->pageCount - 1, preRenderDuration, static_cast<unsigned long>(freeHeap),
             static_cast<unsigned long>(lowest),
             static_cast<unsigned long>(lowest && freeHeap > lowest ? freeHeap - lowest : 0),
-            glyphsDropped > 0 ? "; incomplete, will not be shown" : "");
+            incomplete ? "; incomplete, will not be shown" : "");
     if (glyphsDropped > 0) {
       LOG_ERR("ERS", "Pre-render of page %d dropped %u glyphs for lack of memory", nextPage, glyphsDropped);
     }
+    if (imagesMissed > 0) {
+      LOG_INF("ERS", "Pre-render of page %d: %u image(s) did not replay from cache", nextPage, imagesMissed);
+    }
+  } else if (skippedForImages) {
+    LOG_DBG("ERS", "PreRender skipped: page %d has images that would need a decode (or a single-push panel)", nextPage);
   }
   checkHeapIntegrity("after_prerender");
 }
@@ -5833,10 +5872,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   publishPageLinkTargets(page, orientedMarginLeft, contentTop);
   renderStatusBar();
 
-  // Pre-rendered pages are text-only (image pages are excluded from pre-rendering), so
-  // imagePageWithAA never applies here. The image-page follow-up half-refresh can still carry
-  // over if the previous page had images; honour and clear it here so the pre-render path
-  // doesn't skip it.
+  // The image-page follow-up half-refresh can carry over if the previous page had images; honour
+  // and clear it here so the pre-render path doesn't skip it.
   const bool forceHalfRefreshThisPage = pendingHalfRefreshAfterImagePage && SETTINGS.halfRefreshAfterImagePage;
   pendingHalfRefreshAfterImagePage = false;
   // Single push when the pre-render staged this page's planes: base and greys go
@@ -5875,6 +5912,15 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   lastPageRefreshMode_ = renderer.getLastRefreshMode();
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
 
+  // The image-page bookkeeping renderContents() does, in the form it takes for a pre-rendered
+  // page: the pre-render shows a page only when every image on it replayed from its cache, so
+  // none is a placeholder, and the half refresh that clears an image's grey particles is armed
+  // for the page after it whenever it has images at all.
+  pageHasPlaceholders = false;
+  if (page.hasImages() && getEffectiveImageRendering() != CrossPointSettings::IMAGES_SUPPRESS) {
+    pendingHalfRefreshAfterImagePage = true;
+  }
+
   // Same gate as renderContents(), and this is the path that matters most for it: a fast
   // forward burst is exactly what hits the pre-render cache, and the replay below costs a
   // glyph re-warm scan, two plane renders, the plane SPI writes and a gray flush — all on a
@@ -5908,7 +5954,11 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     bool planeAborted = false;
     const auto gt = renderer.renderGrayscalePlanesSequential(
         [&](GfxRenderer::RenderMode) {
-          planeAborted = !page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop, /*abortable=*/true);
+          if (!page.renderTextOnly(renderer, fontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+            return;
+          }
+          page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
         },
         [&] { return planeAborted || aaPreemptedByNavigation(); });
     if (gt.aborted) {

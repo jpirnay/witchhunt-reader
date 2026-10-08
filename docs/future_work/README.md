@@ -8,7 +8,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 |---|---|
 | [alternative-sync-providers.md](alternative-sync-providers.md) | OPDS progression sync (Kavita, Audiobookshelf) and BookOrbit, offered in the reader itself |
 | [boards-and-touch.md](boards-and-touch.md) | Board-name checks still to convert, light sleep with the frontlight, touch follow-ups |
-| [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator |
+| [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator, pre-render coverage |
 | [font-flash.md](font-flash.md) | Remaining flash and speed levers on the font path |
 | [list-input-harmonization.md](list-input-harmonization.md) | Screens not yet on ListController, and the cleanup after them |
 | [memory-and-parsing.md](memory-and-parsing.md) | Nested-table text, heap transients, preempted decodes |

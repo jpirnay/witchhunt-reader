@@ -28,7 +28,7 @@ task gets the CPU during the ~0.5 s refresh — that window is when background w
 
 | | What it hides | Runs on | Secondary buffer | When |
 |---|---|---|---|---|
-| **A** — next-page pre-render | per-page-turn render compute (~90 ms) | render task (`PreRender` pass) | resident | next page is text-only & heap ok |
+| **A** — next-page pre-render | per-page-turn render compute (~90 ms) | render task (`PreRender` pass) | resident | next page needs no image decode & heap ok |
 | **B** — next-section pre-build | the "Indexing…" parse when you cross a chapter | loop task | **borrowed** as a build arena; B waits when there is none to lend | idle, lookahead window, reader settled |
 | **C** — current-section build | the freeze when you *land* on an uncached section | loop task (build) + render task (draw only) | **borrowed**; released only when there is none to lend | on entry to an uncached section |
 
@@ -57,16 +57,27 @@ Renders the *next* logical page into the inactive framebuffer so a forward turn 
 `BufferDisplay` instead of a fresh render.
 
 - **Scheduled** in `renderContents()` (`pendingPreRender = true` + `requestUpdate()`) and **re-armed**
-  once per `(spine, page)` by `stepBackgroundSectionBuild()` after the deferred-AA frees its memory.
+  once per `(spine, page)` by `stepBackgroundSectionBuild()` after the deferred-AA frees its memory,
+  and once more by the image lane when it finishes warming the page after the one on screen (the
+  earlier attempts skipped it for its uncached images). Both re-arms key on the page actually on
+  screen (`lastRenderedSpineIndex_` / `lastRenderedPageIndex_`), never on `currentPage` (#351).
 - **Runs** as the `PreRender` pass (`renderPreRenderPass`) on the render task.
 - **Gate:** free heap ≥ `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB, derived from what the pass
-  consumes; see the comment at its definition); **text-only** pages only (image pages are excluded —
-  their decode is too heap-hungry and deep). A refusal logs `PreRender skipped: ...` at DBG.
-  No pre-render while B is building through page turns (see B).
+  consumes; see the comment at its definition); an image page only once **every image replays from
+  its pixel cache** (`.1bit.pxc`, plus `.bayer.pxc` when AA is on), which the image lane has usually
+  written pages ahead. The pass never decodes — that is seconds, unabortable, under the render lock.
+  The draw runs under `ImageBlock::PlaceholderOnlyScope`, so a cache that fails to replay marks the
+  page incomplete (never shown) instead of falling into a decode. Not on a single-push panel
+  (`supportsGrayFrame()`, T5S3), whose capture records no image greys. A refusal logs
+  `PreRender skipped: ...` at DBG.
+  No pre-render while B is building through page turns (see B). It never crosses a section
+  boundary: a chapter's first page always renders fresh (open, see
+  [future_work/display-and-refresh.md](future_work/display-and-refresh.md)).
 - **Note on X3:** a page turn is *waveform-bound* (~0.5 s), so A only saves the ~90 ms of
   prewarm+BW compute. Its benefit is modest on X3; the panel, not the CPU, sets page-turn speed.
-  At the time of writing the X3 reads below the floor and A does not run there (open, see
-  [future_work/display-and-refresh.md](future_work/display-and-refresh.md)).
+  On 2026-09-23 the X3 read below the floor and A did not run there; on 2026-10-08 it ran (58.5 KB
+  free at the pass's start). Not yet confirmed beyond one session, see
+  [future_work/display-and-refresh.md](future_work/display-and-refresh.md).
 
 ### Ordering: the deferred AA pass runs before the pre-render
 

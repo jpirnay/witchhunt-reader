@@ -169,6 +169,7 @@ class ImageBlock final : public Block {
   // "large image, press to load".
   void renderPlaceholder(GfxRenderer& renderer, int x, int y, bool loading = false) const;
   static bool placeholderOnly_;
+  static uint16_t placeholdersDrawn_;
 
  public:
   // While one of these is live, render() draws every image that is not already in its pixel
@@ -176,10 +177,18 @@ class ImageBlock final : public Block {
   // a page the reader is waiting on can be shown the moment its text exists, with the
   // decode left to the normal render once the build completes. Decoding there would run on
   // the build's starved heap while the secondary buffer is lent to the build.
+  //
+  // placeholdersDrawn() is for a caller that must not show a page with a placeholder on it at
+  // all (the next-page pre-render): a cache that exists can still fail to replay -- a stale
+  // version is deleted on read, a width mismatch is refused -- and only the draw finds out.
   struct PlaceholderOnlyScope {
-    PlaceholderOnlyScope() { placeholderOnly_ = true; }
+    PlaceholderOnlyScope() {
+      placeholderOnly_ = true;
+      placeholdersDrawn_ = 0;
+    }
     ~PlaceholderOnlyScope() { placeholderOnly_ = false; }
     PlaceholderOnlyScope(const PlaceholderOnlyScope&) = delete;
     PlaceholderOnlyScope& operator=(const PlaceholderOnlyScope&) = delete;
+    [[nodiscard]] uint16_t placeholdersDrawn() const { return placeholdersDrawn_; }
   };
 };

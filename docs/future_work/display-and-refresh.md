@@ -282,21 +282,27 @@ still promises a choice between ~2.4 s and ~130 ms.
 **Next.** Either give the X3 driver a second grayscale bank selected by the flag, or remove the setting
 and its comment.
 
-## X3 reads below the pre-render heap floor
+## X3 and the pre-render heap floor
 
-**Open.** Background A (next-page pre-render) does not run on the X3. X3 (UC8253), 2026-09-23, AA on,
-17 turns: free heap after each AA pass ~42.9 KB, and `PreRender skipped: free < floor=45056` on every
-page. `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the
-X3 entered the pass at 53-55 KB free. Free returns to the same value after every pass, so this is not
-a leak: the retained baseline grew by ~10-14 KB.
+**Likely resolved: confirm, then delete this item.** On 2026-09-23 Background A (next-page
+pre-render) did not run on the X3 (UC8253, AA on, 17 turns). Free heap after each AA pass was
+~42.9 KB, and every page logged `PreRender skipped: free < floor=45056`.
+`PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the X3
+entered the pass at 53-55 KB free.
+
+On 2026-10-08 it ran (X3, AA on, one session in one book). After each deferred AA pass,
+`Reader mem[prerender_begin]` showed 58.5 KB free, the pass ran, and a turn found its page
+pre-rendered. What brought the retained baseline back down was not identified.
 
 **Why it matters.** Without A every turn pays the page render on top of the waveform.
 
 **Ruled out.** Lowering the floor. It is derived from what the pass consumes (~23 KB transient), and
 the pass must stay clear of the reserve the sliced section build needs.
 
-**Next.** Find what grew: bisect `6f097ad77`..master on one book, using the
-`Reader mem[...] ... allocBytes=` line in `EpubReaderActivity` as the metric.
+**Next.** Watch `Reader mem[prerender_begin]` and `PreRender skipped: free < floor` across a few
+books and a longer session. If no page skips for the floor, delete this item. If it recurs, find
+what grew: bisect from `6f097ad77` on one book, using the `Reader mem[...] ... allocBytes=` line in
+`EpubReaderActivity` as the metric.
 
 ## Pre-render before the deferred AA pass
 
@@ -307,8 +313,58 @@ AA ~605 ms (planes 80 + gray 473 + restore 52), pre-render ~53 ms; 2 of 6 quick 
 pre-rendered page.
 
 **Status.** The T5S3 now sends AA as a single push in normal reading, so the measured case no longer
-happens there. The X3 is the board left on the deferred path, and A does not run there at all (item
-above).
+happens there. The X3 is the board left on the deferred path, and A runs there again as of
+2026-10-08 (item above). That log shows the order on every page: the deferred AA (planes ~296 +
+gray ~357 + restore ~50 ms), then the pre-render (~70 ms).
 
-**Next.** Revisit once A runs on the X3 again. Reordering needs a C3 heap check and a device test, not
-an inference from one log.
+**Next.** Measure how often a quick turn on the X3 lands inside the AA window. Reordering needs a C3
+heap check and a device test, not an inference from one log.
+
+## Pre-render across a chapter boundary
+
+**Open.** Background A never crosses a section. `EpubReaderActivity::renderPreRenderPass()` skips when
+`nextPage >= availablePages`. All four arming sites require `currentPage + 1 < pageCount`:
+`renderContents()`, `renderBufferDisplayPass()`, the re-arm in `stepBackgroundSectionBuild()`, and the
+image lane's re-arm in `warmPageForImageLane()`. So the first page of every chapter renders fresh,
+including a chapter-opening illustration.
+
+**Why it matters.** X4, 2026-10-08, turn into a chapter whose first page has a cached image:
+
+| Step | Time |
+|---|---|
+| Section load | 35 ms |
+| Image size probe | 32 ms (removed by #407: `ImageBlock::wouldShowPlaceholder()` checks the cache first) |
+| Font prewarm | 36 ms |
+| BW render | 68 ms |
+| Waveform + inline AA | ~775 ms |
+
+A pre-render would bring the first pixels forward by ~105 ms, from ~146 ms after the press to
+~40 ms. That happens once per chapter. On the X4 the turn as a whole finishes at about the same
+time: a pre-rendered page runs its AA after the waveform instead of overlapping it. The expensive
+part, the decode, is already off the turn, because the image lane warms the next section's first
+pages.
+
+**Deferred** 2026-10-08: the gain is small for the change it needs.
+
+**Design, if picked up.**
+1. Arm on a section's last page when a next spine exists, at all four sites above.
+2. Pre-render (spine + 1, page 0). Use Background-B's `backgroundSection_` when it holds that spine
+   complete; otherwise load the section the way the image lane's spill into the next section does.
+   Skip the pass unless `buildSection()` would use that cache as it is.
+3. Extend the fast path in `pageTurn()`. On the last page, with that pre-render ready, make the same
+   crossing `stepPageStateLocked()` makes (`navTarget` to page 0, `currentSpineIndex++`,
+   `section.reset()`) and hand the buffer over through `usePreRenderedBuffer`.
+4. In the BufferDisplay pass, when there is no section yet, run `buildSection()` first. On a cache
+   hit it reads the LUT and draws nothing. Show the buffer only if it hit and resolved page 0.
+   Anything else falls back to the normal path, which redraws.
+
+**Risks.**
+- Steps 3 and 4 touch the code behind #351 (a render shelved as a PreRender pass) and the
+  deferred-AA buffer clobber.
+- Step 2 must apply exactly the rules `buildSection()` uses to throw a cache away: 0-page truncated,
+  embedded-style fallback, image-header, table-row or CSS degraded. Otherwise an "Indexing" popup
+  lands on a page that was shown as pre-rendered. Pull those rules into one predicate that both
+  call, as a separate refactor first.
+
+**Next.** Measure on the X3 before deciding. Its turns are waveform-bound, which may change the
+trade-off. A runs there again as of 2026-10-08 (see "X3 and the pre-render heap floor").
