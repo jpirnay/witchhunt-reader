@@ -364,6 +364,7 @@ std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const
 }
 
 bool ImageBlock::placeholderOnly_ = false;
+uint16_t ImageBlock::placeholdersDrawn_ = 0;
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y, const bool loading) const {
   constexpr int BORDER = 1;
@@ -429,6 +430,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   // A mid-build draw (PlaceholderOnlyScope): the cache above was the only cheap source; no
   // decode on the build's heap.
   if (placeholderOnly_) {
+    if (placeholdersDrawn_ < UINT16_MAX) placeholdersDrawn_++;
     renderPlaceholder(renderer, x, y, /*loading=*/true);
     return;
   }
