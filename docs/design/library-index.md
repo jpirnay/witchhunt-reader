@@ -83,7 +83,8 @@ the walk needs the lent secondary framebuffer, one phase at a time. Working file
 4. **Resolve.** Books still waiting for their author are looked up one per step (`details.bin`, else
    a metadata-only parse in the framebuffer), patched into the working records and appended to the
    names file. Publish runs again every 100 books and at the end, so Authors fills in as it goes. An
-   interrupted build loses nothing: every answer is in `details.bin`, one small read each next time.
+   interrupted build loses no lookup: every answer is in `details.bin`, one small read each when the
+   next build runs (which needs a reason from "When it rebuilds").
 
 ## When it rebuilds
 
@@ -107,11 +108,14 @@ brings its own -- and built again only for a reason (`LibraryStaleness::rebuildN
   `HalStorage::noteFoundChange`). Folders count too, so a folder made on the device after its books is
   no false alarm. Not checked below the walk's depth, nor against a partial index. A copy that keeps an
   old date, or a book removed where the firmware did not see it, is not caught this way: New drops a
-  missing book on load, and **Refresh library** (Options on New and Authors) builds the index again,
-  resolving every author anew.
+  missing book on load, and **Refresh library** (Options on New and Authors,
+  `FileBrowserActivity::refreshLibrary`) builds the index again whatever the marker says, resolving
+  every author anew (`LibraryBuilder::Config::resolveAll`). Each book keeps its `firstSeen`, so New
+  keeps its order; a build already running starts over.
 
 While a build runs the previous index stays on screen and the header says *Indexing*, then *Indexing
-n/m* while authors are read.
+n/m* while authors are read. A build steps only while New or Authors is showing; on Books and Recent it
+waits, and it goes on when one of them is shown again.
 
 ## Memory
 
@@ -122,17 +126,18 @@ n/m* while authors are read.
 | Walk | The folders on the path (≤ 8), each with its sidecars: 8 B each, ≤ 128 | ≤ 1 KB heap a level, usually far less |
 | Join, publish, ordering an author | Lent framebuffer, one at a time | ≤ 44 KB at 2,000 books |
 | A book's metadata parse | Lent framebuffer (as for titles and covers) | ≤ 32 KB |
-| Working files | SD | ~16 B a book, plus paths |
+| Working files | SD | 40 B a book (staged and joined records), plus paths and author names |
 
 The screen gives the lent framebuffer to one job at a time: row titles first, then a build step, then
-covers. A build that cannot borrow it is abandoned, not marked built, and tried on the next visit.
+covers. A build that cannot borrow it is abandoned, not marked built, and tried on a later visit
+while a reason to rebuild holds.
 
 ## Failure handling
 
 | Case | Behaviour |
 |---|---|
 | Index missing, wrong version or truncated | Treated as missing; a build starts |
-| A write fails | The old index stays; the build fails and is tried again on the next visit |
+| A write fails | The index last published stays; the build fails, and runs again on a later visit while a reason to rebuild holds |
 | Out of memory | Nothrow allocations; the step fails and the old index stays |
 | Power lost mid-build | The old or the new index, never a broken one (rename); working files are rewritten next time |
 | A press during a build | The build yields to input between steps |
@@ -144,14 +149,17 @@ covers. A build that cannot borrow it is abandoned, not marked built, and tried 
   (`FileBrowserModel::Mode` Books, Recents, Added, Authors) rather than moving onto
   `TabbedUiListActivity`: the browser reads its own keys (`navigateButtons`, `handleCustomInput`) and
   never runs `ListController`, where that class keeps its tab-bar focus. So there is no bar focus: a
-  long Up/Down or a tap on a tab switches tab, the side hints say *Up / Tab* and *Down / Tab*, and
-  Back at a tab's top level goes Home. The bar itself is `ListTabBar`, shared with the tabbed screens.
+  long Up/Down or a tap on a tab switches tab, and the side hints say *Up / Tab* and *Down / Tab*.
+  Back on Recent, New and the Authors list goes Home; in a Books folder it goes up (ending a search
+  first), and in an opened author back to the Authors list, on that author. A long Back goes Home from
+  any tab. The bar itself is `ListTabBar`, shared with the tabbed screens.
 - **Each tab is left where it was**: its row, the Books tab its folder, the Authors tab the author open
   in it. Home opens the tab last left (`APP_STATE.libraryTab`); each tab has its own view.
 - **Returns.** `ReturnTo::Library` carries the tab and an open author's hash, so closing a book comes
   back to the tab, folder or author, and row it was opened from (`ActivityManager::goToLibrary`).
 - **Options** (`FileContextMenuActivity::ListSource`): New and Authors have no sort, hidden-files
-  toggle or search, and offer Go to folder; Remove there deletes the book (with its sidecars).
+  toggle, search, Move to folder or New folder; they offer Go to folder and Refresh library, and Remove
+  there deletes the book (with its sidecars).
 - **Books leaves out folders with no book below them** (`FolderSearch`), so folders emptied by a sync,
   or holding only covers, do not clutter it; All Files and the Move-to-folder picker list them. The
   check stops at the first book; folders found empty go into the folder counts as 0 until the card

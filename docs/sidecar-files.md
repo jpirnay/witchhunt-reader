@@ -19,7 +19,7 @@ Recognised extensions, in this order: `.jpg`, `.jpeg`, `.png`, `.bmp` (and their
 uppercase forms). The first one found wins.
 
 When present it replaces the book's embedded cover on the home screen and in the
-book browser, and the firmware skips extracting the embedded cover entirely.
+Library, and the firmware skips extracting the embedded cover entirely.
 Implemented by `ReaderActivity::sidecarCoverPath()`.
 
 The bundled `metadata-editor` plugin manages this from the web UI — preview the
@@ -32,7 +32,10 @@ cached per book, and `ReaderActivity::ensureCoverThumb()` compares the sidecar's
 modification time against it: a newer sidecar wins and the thumbnail is
 regenerated. Note this depends on the clock — files written while the RTC is
 unsynced all carry 1980-01-01, so on hardware without a working RTC a replaced
-cover may need a cache clear.
+cover may need a cache clear. The check covers the box-sized thumbnails
+(`thumb_<W>x<H>.bmp`) of the Library's Covers view and the Home carousel. The
+single-height `thumb_<H>.bmp` the other Home themes draw is not compared, and
+keeps the old picture until the book's cache is cleared.
 
 ## Metadata sidecar — `book.opf`
 
@@ -72,10 +75,12 @@ A minimal sidecar:
 
 ### Books other than EPUB
 
-TXT, Markdown and XTC books take their title, author and series from a metadata sidecar too, in
-the book lists (the Library's Details and Covers views). Without a sidecar, an XTC book is labelled
-from its own header, and a TXT or Markdown book, which carries no metadata, by its filename. The
-reader itself still shows the book's own title.
+TXT, Markdown and XTC books take their title, author, primary author and series from a metadata
+sidecar too, in the Library (the Details and Covers views, and the author the Authors tab files them
+under). Without a sidecar, an XTC book is labelled from its own header, and a TXT or Markdown book,
+which carries no metadata, by its filename. Language and description are taken for EPUBs only. The
+reader itself still shows the book's own title. Every format goes through the same reader,
+`MetadataSidecar::read()`, the book's OPF parser run over the plain file.
 
 ### Rules
 
@@ -97,11 +102,11 @@ The sidecar is deliberately **not** baked into the `book.bin` cache. That cache
 is only rebuilt when the EPUB's own bytes change, so a baked value would leave an
 edited sidecar silently ineffective. Instead the overlay is applied on every
 load, including the cached path (`Epub::applyMetadataSidecar()`). Cost when no
-sidecar exists is a single file-existence check.
+sidecar exists is a file-existence check per extension (`.opf`, `.OPF`).
 
 Deleting the sidecar restores the book's embedded metadata, again on next load.
 
-The home screen and the recent-books list are the exception: they show a copy
+The home screen and the Library's Recent tab are an exception: they show a copy
 of the title, author and series kept in `recent.json`, taken when the book is
 opened. So that a sidecar written later still shows without reopening the book,
 each entry also stores a hash of the sidecar it was taken with
@@ -110,6 +115,18 @@ sidecar hash has changed (sidecar added, edited or removed) has its metadata
 reloaded (`RecentBooksStore::refreshSidecarMetadata()`). Hashing the content
 rather than checking the modification time catches edits that keep the same
 length, and works on a device whose clock was never set.
+
+The Library's other lists keep a copy too, in `details.bin` in the book's cache
+directory ([file-formats.md](file-formats.md)). It records the same hash, so a
+sidecar added, edited or removed is read again the next time the book's row is
+drawn. The New and Authors tabs read the book index, which records a signature of
+each book's `.opf` (its size and date): when it changes, the next rebuild of the
+index looks the book's author up again ([design/library-index.md](design/library-index.md)).
+The index's walk pairs a sidecar with its book by the exact filename before the
+extension and takes `.opf` / `.OPF` only, so a sidecar whose name differs from
+the book's in case is read for the book's labels but gets no signature: editing
+it does not change the author the Authors tab files the book under until the
+index is refreshed (Options → Refresh library).
 
 ## Moving books
 
@@ -123,22 +140,26 @@ Who does this today:
   and every sidecar, resolving name collisions for each
   (`moveSidecarFilesToCompleted`).
 - **Move to folder / Remove in the Library.** Its tabs list books only,
-  so a sidecar is never a row of its own there. Moving a book takes its
-  sidecars along, and the move is refused if one of them would land on an
-  existing file (`SidecarFiles::anyTargetTaken` / `moveAll`). Removing a book
-  removes them too (`SidecarFiles::removeAll`). **All Files**
-  (Settings → System) lists sidecars as ordinary files and moves or removes
-  exactly the file selected.
+  so a sidecar is never a row of its own there. Moving a book (Books tab)
+  takes its sidecars along, and the move is refused if one of them would land
+  on an existing file (`SidecarFiles::anyTargetTaken` / `moveAll`). Removing a
+  book (Books, New and Authors tabs) removes them too
+  (`SidecarFiles::removeAll`); on the Recent tab Remove only takes the book off
+  the list. **All Files** (Settings → System) lists sidecars as ordinary files
+  and moves or removes exactly the file selected.
 - **The `organize-by-author` plugin** moves sidecars with the book — see
   [sd-plugins.md](sd-plugins.md).
 - **Manual moves** through the web File Manager or a script are your own
   responsibility: move `book.epub`, `book.jpg` and `book.opf` together.
 
-Adding another sidecar type means adding it to **one** place:
-`lib/FsHelpers/SidecarFiles.h`. Cover resolution, metadata resolution and the
-move-with-the-book path all read those tables — `ReaderActivity::sidecarCoverPath`
-and `Epub::metadataSidecarPath` are one-line delegates that add only their own
-logging.
+The firmware's sidecar tables are in `lib/FsHelpers/SidecarFiles.h`. Cover
+resolution, metadata resolution and the move, remove and stamp paths all read
+them: `ReaderActivity::sidecarCoverPath` is a one-line delegate that adds only
+its logging, and `MetadataSidecar::read()` finds the sidecar through
+`SidecarFiles::metadataPath`. Two places still keep their own list, and need the
+same change when a sidecar type is added: `Epub::ensureCoverImageCached` (the
+cover extensions, when it copies a cover sidecar to `cover.img`) and
+`LibraryBuilder`'s walk (`.opf` / `.OPF`, `isMetadataSidecar`).
 
 This used to be three independent copies, which is exactly how `.opf` came to be
 readable by the reader but left behind when a finished book moved. The copies had
