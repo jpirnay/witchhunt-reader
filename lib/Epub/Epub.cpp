@@ -892,7 +892,7 @@ static_assert(SidecarFiles::kMetadataStampBytes >= Epub::MAX_METADATA_SIDECAR_BY
 void Epub::applyMetadataSidecar() const {
   if (!bookMetadataCache) return;
   MetadataSidecarFields sidecar;
-  if (!MetadataSidecar::read(filepath, sidecar)) return;
+  if (MetadataSidecar::read(filepath, sidecar) != MetadataSidecar::Result::Read) return;
 
   auto& md = bookMetadataCache->coreMetadata;
   if (!sidecar.title.empty()) md.title = sidecar.title;

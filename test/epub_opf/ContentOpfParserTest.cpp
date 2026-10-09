@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "../../lib/Epub/Epub/BookMetadataCache.h"
@@ -83,6 +84,7 @@ namespace opf_test_hooks {
 extern std::vector<std::string>* g_spineHrefSink;
 extern size_t g_refuseNothrowArraysAbove;
 extern size_t g_refusedNothrowArrays;
+std::unordered_set<void*>& liveNothrowArrays();
 }  // namespace opf_test_hooks
 
 namespace {
@@ -616,6 +618,48 @@ TEST(ContentOpfParserCreators, ManyCreatorsAllReachTheDisplayLine) {
   ASSERT_TRUE(r.parsed);
   EXPECT_EQ(r.author, "I1, I2, I3, I4, A5, A6");
   EXPECT_EQ(r.primaryAuthor, "");
+}
+
+// EPUB 3 lets a creator hold several roles. Being credited as author is what counts: an author who
+// also illustrated stays the primary author whichever role is stated last.
+TEST(ContentOpfParserCreators, AnAuthorWithASecondRoleStaysTheAuthor) {
+  const auto r = parseCreators(
+      "<dc:creator id='c1'>Maurice Sendak</dc:creator>"
+      "<meta refines='#c1' property='role' scheme='marc:relators'>aut</meta>"
+      "<meta refines='#c1' property='role' scheme='marc:relators'>ill</meta>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.primaryAuthor, "Maurice Sendak");
+}
+
+TEST(ContentOpfParserCreators, AnOpfAuthorRoleSurvivesALaterRefinedRole) {
+  const auto r = parseCreators(
+      "<dc:creator id='c1' opf:role='aut'>Maurice Sendak</dc:creator>"
+      "<meta refines='#c1' property='role' scheme='marc:relators'>ill</meta>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.primaryAuthor, "Maurice Sendak");
+}
+
+// The creator table serves only to pick the primary author when <metadata> closes. It must be gone
+// by then: a first open goes on through the manifest and spine with this parser alive, and a large
+// book needs every byte of heap there.
+TEST(ContentOpfParserCreators, TheCreatorTableIsFreedWhenMetadataCloses) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  TempDirGuard dirGuard(cacheDir);
+  const std::string head =
+      "<?xml version='1.0' encoding='utf-8'?>"
+      "<package xmlns:opf='http://www.idpf.org/2007/opf' xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+      "<metadata><dc:creator>Ursula K. Le Guin</dc:creator></metadata>";
+  const std::string rest =
+      "<manifest><item id='ncx' href='toc.ncx' media-type='application/x-dtbncx+xml'/></manifest>"
+      "<spine/></package>";
+  ContentOpfParser parser(cacheDir, "/book/OEBPS/", head.size() + rest.size(), nullptr);
+  ASSERT_TRUE(parser.setup());
+  const size_t before = opf_test_hooks::liveNothrowArrays().size();
+  ASSERT_EQ(parser.write(reinterpret_cast<const uint8_t*>(head.data()), head.size()), head.size());
+  EXPECT_EQ(parser.primaryAuthor, "Ursula K. Le Guin");
+  EXPECT_EQ(opf_test_hooks::liveNothrowArrays().size(), before) << "the creator table outlived </metadata>";
+  ASSERT_EQ(parser.write(reinterpret_cast<const uint8_t*>(rest.data()), rest.size()), rest.size());
 }
 
 // Review focus 3: an empty creator adds nothing, not even a separator.

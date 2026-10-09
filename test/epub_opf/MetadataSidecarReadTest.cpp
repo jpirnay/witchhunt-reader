@@ -11,6 +11,10 @@
 
 namespace fs = std::filesystem;
 
+namespace opf_test_hooks {
+extern size_t g_refuseNothrowScalarsAbove;
+}  // namespace opf_test_hooks
+
 namespace {
 
 class MetadataSidecarReadTest : public ::testing::Test {
@@ -45,7 +49,7 @@ const char* kCalibreSidecar =
 TEST_F(MetadataSidecarReadTest, ReadsTheSidecarOfABookThatIsNotAnEpub) {
   writeSidecar(kCalibreSidecar);
   MetadataSidecarFields out;
-  ASSERT_TRUE(MetadataSidecar::read(book_, out));
+  ASSERT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::Read);
   EXPECT_EQ(out.title, "A Wizard of Earthsea");
   EXPECT_EQ(out.author, "Ursula K. Le Guin");
   EXPECT_EQ(out.primaryAuthor, "Ursula K. Le Guin");
@@ -68,22 +72,22 @@ TEST_F(MetadataSidecarReadTest, ReadsTheShapeTheMetadataEditorWritesWithASortNam
       "</metadata>\n"
       "</package>\n");
   MetadataSidecarFields out;
-  ASSERT_TRUE(MetadataSidecar::read(book_, out));
+  ASSERT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::Read);
   EXPECT_EQ(out.title, "The Dispossessed");
   EXPECT_EQ(out.primaryAuthor, "Ursula K. Le Guin");
   EXPECT_EQ(out.authorSort, "Le Guin, Ursula K.");
 }
 
-TEST_F(MetadataSidecarReadTest, NoSidecarIsNoAnswer) {
+TEST_F(MetadataSidecarReadTest, NoSidecarIsNone) {
   MetadataSidecarFields out;
-  EXPECT_FALSE(MetadataSidecar::read(book_, out));
+  EXPECT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::None);
 }
 
 // Review focus 4: these leave the book titled by its filename.
-TEST_F(MetadataSidecarReadTest, AnEmptySidecarIsNoAnswer) {
+TEST_F(MetadataSidecarReadTest, AnEmptySidecarIsIgnored) {
   writeSidecar("");
   MetadataSidecarFields out;
-  EXPECT_FALSE(MetadataSidecar::read(book_, out));
+  EXPECT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::Ignored);
 }
 
 // Whether the streaming parser reports an unclosed document as an error or simply never completes
@@ -92,16 +96,30 @@ TEST_F(MetadataSidecarReadTest, AnEmptySidecarIsNoAnswer) {
 TEST_F(MetadataSidecarReadTest, AMalformedSidecarGivesNothing) {
   writeSidecar("<package><metadata><dc:title>Unclosed");
   MetadataSidecarFields out;
-  MetadataSidecar::read(book_, out);
+  EXPECT_NE(MetadataSidecar::read(book_, out), MetadataSidecar::Result::Unavailable)
+      << "a malformed sidecar is permanent until edited; retrying it on every visit gains nothing";
   EXPECT_TRUE(out.title.empty());
   EXPECT_TRUE(out.author.empty());
   EXPECT_TRUE(out.primaryAuthor.empty());
 }
 
-TEST_F(MetadataSidecarReadTest, AnOversizedSidecarIsNoAnswer) {
+TEST_F(MetadataSidecarReadTest, AnOversizedSidecarIsIgnored) {
   writeSidecar(std::string(kCalibreSidecar) + "<!--" + std::string(17000, 'x') + "-->");
   MetadataSidecarFields out;
-  EXPECT_FALSE(MetadataSidecar::read(book_, out));
+  EXPECT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::Ignored);
+}
+
+// I3: a sidecar that is there but cannot be read right now -- here the parser's ~10 KB state is
+// refused, as on a device short of heap -- is not "no sidecar". A caller that recorded it as such
+// would label the book by its filename until the sidecar is edited.
+TEST_F(MetadataSidecarReadTest, ASidecarThatCannotBeReadForWantOfMemoryIsUnavailable) {
+  writeSidecar(kCalibreSidecar);
+  MetadataSidecarFields out;
+  opf_test_hooks::g_refuseNothrowScalarsAbove = 4096;
+  const auto result = MetadataSidecar::read(book_, out);
+  opf_test_hooks::g_refuseNothrowScalarsAbove = 0;
+  EXPECT_EQ(result, MetadataSidecar::Result::Unavailable);
+  EXPECT_TRUE(out.title.empty());
 }
 
 // The filing name belongs to the name it files.

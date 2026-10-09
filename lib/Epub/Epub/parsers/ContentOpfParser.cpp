@@ -251,14 +251,15 @@ void appendCapped(std::string& out, const char* s, const size_t len, const size_
   out.append(s, std::min(len, cap - out.size()));
 }
 
-// No role means the creator is the author; MARC relator codes are lowercase by definition, but
-// generators are not always careful.
-bool isAuthorRole(const std::string& role) {
+// The MARC relator code for an author. Lowercase by definition, but generators are not always careful.
+bool isAutCode(const std::string& role) {
   const std::string r = trim(role);
-  return r.empty() || (r.size() == 3 && std::tolower(static_cast<unsigned char>(r[0])) == 'a' &&
-                       std::tolower(static_cast<unsigned char>(r[1])) == 'u' &&
-                       std::tolower(static_cast<unsigned char>(r[2])) == 't');
+  return r.size() == 3 && std::tolower(static_cast<unsigned char>(r[0])) == 'a' &&
+         std::tolower(static_cast<unsigned char>(r[1])) == 'u' && std::tolower(static_cast<unsigned char>(r[2])) == 't';
 }
+
+// No role at all means the creator is the author.
+bool isAuthorRole(const std::string& role) { return trim(role).empty() || isAutCode(role); }
 }  // namespace
 
 ContentOpfParser::Creator* ContentOpfParser::beginCreator(const char** atts) {
@@ -282,26 +283,35 @@ ContentOpfParser::Creator* ContentOpfParser::beginCreator(const char** atts) {
   return &creator;
 }
 
-// The field a <meta refines="#id" property="..."> sets, or null when `id` is not a creator's or the
-// property is not one this parser keeps.
+// The field a <meta refines="#id" property="..."> sets, or null when `id` is not a creator's, the
+// property is not one this parser keeps, or the refinement must not change it.
 std::string* ContentOpfParser::creatorField(const char* id, const char* property) {
   const bool role = strcmp(property, "role") == 0;
   if (!role && strcmp(property, "file-as") != 0) return nullptr;
   for (uint8_t i = 0; i < creatorCount_; ++i) {
     Creator& creator = creators_[i];
-    if (!creator.id.empty() && creator.id == id) return role ? &creator.role : &creator.fileAs;
+    if (creator.id.empty() || creator.id != id) continue;
+    if (!role) return &creator.fileAs;
+    // EPUB 3 lets a creator hold several roles, and being credited as author is what counts: once a
+    // creator has "aut", a further role (an author who also illustrated) must not take it away.
+    return isAutCode(creator.role) ? nullptr : &creator.role;
   }
   return nullptr;
 }
 
 void ContentOpfParser::pickPrimaryAuthor() {
   for (uint8_t i = 0; i < creatorCount_; ++i) {
-    const Creator& creator = creators_[i];
+    Creator& creator = creators_[i];
     if (creator.name.empty() || !isAuthorRole(creator.role)) continue;
-    primaryAuthor = creator.name;
+    primaryAuthor = std::move(creator.name);
     authorSort = trim(creator.fileAs);
-    return;
+    break;
   }
+  // The table has served its purpose. A first open carries this parser on through the manifest and
+  // spine, where a large book needs every byte of heap, so nothing of it stays.
+  creators_.reset();
+  creatorCount_ = 0;
+  std::string().swap(creatorText_);
 }
 
 bool ContentOpfParser::setup() {
