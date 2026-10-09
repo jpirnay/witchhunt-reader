@@ -692,16 +692,13 @@ you have configured. *Holding* a hint is the same as holding that button.
 | Tap a row, cover, folder or button hint | Select it; tap again to open it |
 | Hold a button hint | The same as holding that button |
 | Swipe up / down over a list | Page the list (on Bookmarks, Starred pages and Wi-Fi networks, a swipe does nothing for now) |
-| **Tap the scroll bar** above / below the thumb | Page back / forward |
 | Swipe **right from the left edge** | Back |
 | Swipe **down from the top edge** | Reading light panel |
 | **Hold the top-left corner** | Toggle the reading light — the same as in a book |
 
-The scroll-bar strip is wider than the thin bar you can see, so you do not have to hit it
-precisely. Tapping the thumb itself does nothing.
-
 > The LilyGo T5 S3 has a **Down** key but no **Up** key, so paging a list *backward* has no
-> physical button there — the scroll bar and the swipe are how you do it. They work on the
+> physical button there — a swipe is how you do it, or, on the lists that follow
+> [Moving through lists](#moving-through-lists), holding the **«** hint box. Swipes work on the
 > X4 Pro as well, which has both keys.
 
 ### 5.3 The reading page: taps and holds
