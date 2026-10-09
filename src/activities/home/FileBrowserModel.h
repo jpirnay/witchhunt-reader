@@ -61,6 +61,12 @@ class FileBrowserModel {
   explicit FileBrowserModel(const Mode mode = Mode::Books) : mode(mode) {}
 
   [[nodiscard]] Mode getMode() const { return mode; }
+  // Switches what is listed -- the Library's tabs -- letting go of everything the old mode held. The
+  // folder path is kept; load() reads the new rows.
+  void setMode(const Mode newMode) {
+    clear();
+    mode = newMode;
+  }
 
   // The directory currently enumerated. setPath() only records it; call load() to re-read.
   [[nodiscard]] const std::string& path() const { return basepath; }
@@ -132,6 +138,13 @@ class FileBrowserModel {
   bool openAuthor(size_t row);
   // Back from an author's books to the author list; returns the row of the author that was open.
   size_t closeAuthor();
+  // Opens the author whose hash is `hash`, after load(): how a return from a book, or a tab switched
+  // back to, finds the author it left. False when the index has no such author.
+  bool openAuthorByHash(uint32_t hash);
+  // The open author's name as its row shows it; "" at the author list.
+  std::string openAuthorName();
+  // The open author's hash, for openAuthorByHash(); meaningful only while !atAuthorList().
+  [[nodiscard]] uint32_t openAuthorKey() const { return openAuthorHash; }
   // A row of the author list: its books, and its author hash (library::AUTHOR_UNKNOWN and
   // AUTHOR_PENDING gather books with no author and books not indexed yet).
   bool authorAt(size_t row, uint16_t& books, uint32_t& hash);

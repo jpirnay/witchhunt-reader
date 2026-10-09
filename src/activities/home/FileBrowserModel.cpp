@@ -632,15 +632,25 @@ void FileBrowserModel::loadAuthors() {
   deepRoot = "/";
   if (!bookIndex.isOpen()) bookIndex.open(library::INDEX_PATH);
   if (openAuthorRow < 0) return;
-  openAuthorRow = -1;
-  authorBooks.clear();
+  closeAuthor();
+  openAuthorByHash(openAuthorHash);
+}
+
+bool FileBrowserModel::openAuthorByHash(const uint32_t hash) {
+  if (mode != Mode::Authors) return false;
+  if (openAuthorRow >= 0) closeAuthor();
   library::AuthorRecord author{};
   for (uint16_t row = 0; row < bookIndex.header().authorCount; ++row) {
-    if (bookIndex.author(row, author) && author.hash == openAuthorHash) {
-      openAuthor(row);
-      return;
-    }
+    if (bookIndex.author(row, author) && author.hash == hash) return openAuthor(row);
   }
+  return false;
+}
+
+std::string FileBrowserModel::openAuthorName() {
+  if (mode != Mode::Authors || openAuthorRow < 0) return "";
+  std::string name = authorRowName(static_cast<size_t>(openAuthorRow));
+  if (!name.empty()) name.pop_back();  // the folder mark
+  return name;
 }
 
 bool FileBrowserModel::openAuthor(const size_t row) {
