@@ -1,7 +1,11 @@
 add_executable(LibraryIndexTest
   LibraryKeysTest.cpp
+  LibraryPublishTest.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibraryBlob.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibraryIndexReader.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryKeys.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibraryPublish.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
 
