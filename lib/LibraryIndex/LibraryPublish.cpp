@@ -233,8 +233,8 @@ bool placeBooks(const std::string& recordsPath, const uint16_t books, Tables& t)
   return true;
 }
 
-bool writeIndex(const LibraryPublish::Input& in, const std::string& tmpPath, const std::string& sectionPath,
-                Tables& t, const Newest& newest) {
+bool writeIndex(const LibraryPublish::Input& in, const std::string& tmpPath, const std::string& sectionPath, Tables& t,
+                const Newest& newest) {
   HalFile paths;
   if (!Storage.openFileForRead("LIB", in.pathsPath, paths)) return false;
   const auto pathsBytes = static_cast<uint32_t>(paths.fileSize());
@@ -276,7 +276,8 @@ bool writeIndex(const LibraryPublish::Input& in, const std::string& tmpPath, con
        serialization::copyBytes(paths, out, pathsBytes);
   {
     HalFile section;
-    ok = ok && Storage.openFileForRead("LIB", sectionPath, section) && serialization::copyBytes(section, out, sectionBytes);
+    ok = ok && Storage.openFileForRead("LIB", sectionPath, section) &&
+         serialization::copyBytes(section, out, sectionBytes);
   }
   header.blobLen = pathsBytes + sectionBytes;
   ok = ok && out.seek(0) && library::writeExact(out, &header, sizeof(header));

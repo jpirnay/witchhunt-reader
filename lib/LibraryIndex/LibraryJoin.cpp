@@ -81,7 +81,8 @@ bool join(const Input& in, BuildArena& arena, Result& out) {
       ++at;
       haveKnown = at < previousCount && previous.book(at, known);
     }
-    library::BookRecord record{book.identity, library::AUTHOR_PENDING, book.date, book.pathOff, book.sidecarSig, newGen};
+    library::BookRecord record{book.identity, library::AUTHOR_PENDING, book.date,
+                               book.pathOff,  book.sidecarSig,         newGen};
     if (haveKnown && known.identity == book.identity) {
       record.firstSeen = known.firstSeen;
       const bool sameSidecar = known.sidecarSig == book.sidecarSig && book.sidecarSig != library::SIDECAR_UNKNOWN;

@@ -9,16 +9,20 @@
 namespace {
 
 TEST(LibraryKeys, FoldLowercasesAndReducesLatinLettersToTheirBase) {
-  EXPECT_EQ(LibraryKeys::fold("\xC3\x89mile Zola"), "emile zola");                     // É
-  EXPECT_EQ(LibraryKeys::fold("\xC3\x96" "d\xC3\xB6n von Horv\xC3\xA1th"), "odon von horvath");  // Ö ö á
-  EXPECT_EQ(LibraryKeys::fold("\xC5\x81ukasz Orbitowski"), "lukasz orbitowski");       // Ł
-  EXPECT_EQ(LibraryKeys::fold("Dvo\xC5\x99\xC3\xA1k"), "dvorak");                      // ř á
+  EXPECT_EQ(LibraryKeys::fold("\xC3\x89mile Zola"), "emile zola");  // É
+  EXPECT_EQ(LibraryKeys::fold("\xC3\x96"
+                              "d\xC3\xB6n von Horv\xC3\xA1th"),
+            "odon von horvath");                                                  // Ö ö á
+  EXPECT_EQ(LibraryKeys::fold("\xC5\x81ukasz Orbitowski"), "lukasz orbitowski");  // Ł
+  EXPECT_EQ(LibraryKeys::fold("Dvo\xC5\x99\xC3\xA1k"), "dvorak");                 // ř á
 }
 
 TEST(LibraryKeys, FoldSpellsOutLettersThatAreTwo) {
-  EXPECT_EQ(LibraryKeys::fold("Stra\xC3\x9F" "e"), "strasse");          // ß
-  EXPECT_EQ(LibraryKeys::fold("\xC3\x86r\xC3\xB8"), "aero");            // Æ ø
-  EXPECT_EQ(LibraryKeys::fold("\xC5\x92uvre"), "oeuvre");               // Œ
+  EXPECT_EQ(LibraryKeys::fold("Stra\xC3\x9F"
+                              "e"),
+            "strasse");                                       // ß
+  EXPECT_EQ(LibraryKeys::fold("\xC3\x86r\xC3\xB8"), "aero");  // Æ ø
+  EXPECT_EQ(LibraryKeys::fold("\xC5\x92uvre"), "oeuvre");     // Œ
 }
 
 // macOS writes names decomposed: "O" followed by a combining diaeresis must file with "Ö".

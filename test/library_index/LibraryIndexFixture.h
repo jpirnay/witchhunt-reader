@@ -66,7 +66,7 @@ class LibraryIndexFixture : public ::testing::Test {
                            const uint32_t firstSeen = 1, const uint32_t size = 100) const {
     const std::string file = path.substr(path.rfind('/') + 1);
     return {LibraryKeys::bookIdentity(file.c_str(), size), LibraryKeys::authorHash(author), date,
-            appendString(at("paths.bin"), path), library::SIDECAR_NONE, firstSeen};
+            appendString(at("paths.bin"), path),           library::SIDECAR_NONE,           firstSeen};
   }
 
   // Publishes `records` in identity order, as a join leaves them.

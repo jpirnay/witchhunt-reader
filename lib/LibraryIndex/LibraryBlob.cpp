@@ -8,9 +8,7 @@ bool readExact(HalFile& file, void* out, const size_t len) {
   return len == 0 || file.read(out, len) == static_cast<int>(len);
 }
 
-bool writeExact(HalFile& file, const void* data, const size_t len) {
-  return len == 0 || file.write(data, len) == len;
-}
+bool writeExact(HalFile& file, const void* data, const size_t len) { return len == 0 || file.write(data, len) == len; }
 
 bool readBlobString(HalFile& file, std::string& out) {
   uint16_t len = 0;

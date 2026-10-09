@@ -9,7 +9,7 @@
 namespace LibraryJoin {
 
 struct Input {
-  std::string stagePath;     // library::StagedBook x stageCount, in walk order
+  std::string stagePath;  // library::StagedBook x stageCount, in walk order
   uint16_t stageCount = 0;
   std::string previousPath;  // the published index to carry from; missing or invalid = a first build
   bool resolveAll = false;   // Refresh library: carry no author, but keep firstSeen

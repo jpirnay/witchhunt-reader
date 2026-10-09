@@ -59,7 +59,8 @@ TEST_F(LibraryPublishTest, EachAuthorListsTheirOwnBooks) {
 
 // New lists the books first seen most recently; within one build, the newest file date first.
 TEST_F(LibraryPublishTest, NewIsByFirstSeenThenDate) {
-  ASSERT_TRUE(publish({book("/old.epub", "", 900, 1), book("/later.epub", "", 100, 2), book("/latest.epub", "", 200, 2)}));
+  ASSERT_TRUE(
+      publish({book("/old.epub", "", 900, 1), book("/later.epub", "", 100, 2), book("/latest.epub", "", 200, 2)}));
 
   LibraryIndexReader index;
   ASSERT_TRUE(index.open(at("library.bin")));
@@ -179,7 +180,9 @@ TEST_F(LibraryPublishTest, AnEmptyCardPublishesAnEmptyIndex) {
 
 // Review focus 4.
 TEST_F(LibraryPublishTest, ALongNonAsciiPathRoundTrips) {
-  std::string path = "/B\xC3\xBC" "cher/";
+  std::string path =
+      "/B\xC3\xBC"
+      "cher/";
   while (path.size() < 300) path += "\xC3\xA4";
   path += ".epub";
   ASSERT_TRUE(publish({book(path, "")}));
