@@ -225,9 +225,13 @@ void StreamingJsonParser::handleSkipString(char c) {
 void StreamingJsonParser::appendToken(char c) {
   if (tokenLen < TOKEN_BUF_SIZE - 1) {
     tokenBuf[tokenLen++] = c;
-  } else {
-    tokenOverflow = true;
+    return;
   }
+  if (!tokenOverflow && state == State::IN_STRING_VALUE && cb.onStringOverflow) {
+    tokenBuf[tokenLen] = '\0';
+    cb.onStringOverflow(cb.ctx, tokenBuf, tokenLen);
+  }
+  tokenOverflow = true;
 }
 
 void StreamingJsonParser::emitToken() {

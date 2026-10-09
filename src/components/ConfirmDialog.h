@@ -77,7 +77,16 @@ inline void draw(UiAppHost::UiScreen& screen, const Spec& spec) {
   props.buttonHeight = theme.minTouchSize;
   props.gap = theme.spaceMd;
 
-  screen.dialog(props);
+  // The panel is sized to its text and is not clipped, so a long message (release notes, in
+  // landscape at a large UI font) could push it off the screen. The message gives up lines first,
+  // its last one ending in an ellipsis, until the panel fits. Width as Screen::dialog()'s default.
+  const auto safe = screen.frame().safeRect();
+  const auto width = static_cast<int16_t>(safe.width * 4 / 5);
+  while (props.message && props.messageText.maxLines > 1 &&
+         fui::optionDialogHeight(screen.target(), props, width) > safe.height) {
+    --props.messageText.maxLines;
+  }
+  screen.dialog(props, width);
 }
 
 }  // namespace ConfirmDialog

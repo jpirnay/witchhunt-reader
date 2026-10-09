@@ -33,6 +33,13 @@ class ReleaseJsonParser {
   // digest in any other form; getFirmwareSha256() is then all zeros.
   bool hasFirmwareSha256() const;
   const uint8_t* getFirmwareSha256() const;  // 32 bytes
+  // The release's title ("name"), "" when it has none. Cut to 63 bytes on a codepoint boundary.
+  const char* getReleaseName() const;
+  // True once the notes ("body") have been read, or their start for a long body, or they turned
+  // out to be null. GitHub lists them after the assets, so the update check can stop reading here.
+  bool foundNotes() const;
+  // The opening lines of the notes, made plain for the update dialog (ReleaseNotesExcerpt.h).
+  const char* getReleaseNotes() const;
 
  private:
   bool inReleaseObject() const;
@@ -46,6 +53,8 @@ class ReleaseJsonParser {
   enum class LastKey : uint8_t {
     NONE,
     TAG_NAME,
+    RELEASE_NAME,
+    BODY,
     ASSETS,
     ASSET_NAME,
     ASSET_URL,
@@ -62,8 +71,11 @@ class ReleaseJsonParser {
   static void sOnObjectEnd(void* ctx);
   static void sOnArrayStart(void* ctx);
   static void sOnArrayEnd(void* ctx);
+  static void sOnStringOverflow(void* ctx, const char* prefix, size_t len);
 
   void commitAsset();
+  bool atReleaseKey(LastKey key) const;
+  void takeNotes(const char* body, size_t len, bool complete);
 
   StreamingJsonParser parser;
 
@@ -79,6 +91,10 @@ class ReleaseJsonParser {
   bool firmwareHasSha256;
   bool tagFound;
   bool firmwareFound;
+  // Both live where the parser does, on the update check's stack: 320 B, next to the ~1.7 KB above.
+  char releaseName[64];
+  char releaseNotes[256];
+  bool notesFound;
 
   char firmwareAssetName[32];
   char currentAssetName[32];
