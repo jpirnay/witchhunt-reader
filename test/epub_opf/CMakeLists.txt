@@ -1,6 +1,9 @@
 add_executable(ContentOpfParserTest
   ContentOpfParserTest.cpp
+  MetadataSidecarReadTest.cpp
   stubs.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/MetadataSidecar.cpp
+  ${REPO_ROOT}/lib/FsHelpers/SidecarFiles.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContentOpfParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/htmlEntities.cpp
