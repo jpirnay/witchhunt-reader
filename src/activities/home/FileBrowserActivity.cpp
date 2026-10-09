@@ -1152,8 +1152,11 @@ void FileBrowserActivity::drawFooter() {
   // Paging is bound to logical Left/Right and stepping to logical Up/Down, so which physical pair
   // carries which — and therefore which hint strip each label belongs on — is the orientation's
   // business, not this screen's.
-  const auto hints =
-      mappedInput.mapHints(backLabel, confirmLabel, prevLabel, nextLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  // In the Library a hold of Up/Down changes tab: the side strip says so, in the strip's own
+  // "press / hold" form ("» / Options").
+  const char* upLabel = libraryTabs() ? tr(STR_DIR_UP_OR_TAB) : tr(STR_DIR_UP);
+  const char* downLabel = libraryTabs() ? tr(STR_DIR_DOWN_OR_TAB) : tr(STR_DIR_DOWN);
+  const auto hints = mappedInput.mapHints(backLabel, confirmLabel, prevLabel, nextLabel, upLabel, downLabel);
   GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 }
@@ -1781,6 +1784,8 @@ void FileBrowserActivity::startLibraryBuildIfStale() {
   config.resolve = &resolveAuthor;
   libraryBuilder = makeUniqueNoThrow<LibraryBuilder>(std::move(config));
   libraryBuildGeneration = Storage.contentGeneration();
+  libraryBuildStartMs = millis();
+  LOG_INF("LIB", "build started (free=%lu)", static_cast<unsigned long>(esp_get_free_heap_size()));
   indexResolved = 0;
   indexTotal = 0;
   indexing = libraryBuilder != nullptr;
@@ -1813,12 +1818,22 @@ bool FileBrowserActivity::stepLibraryBuild() {
     model.releaseIndex();
   }
   HalPowerManager::Lock fullSpeed;
+  const LibraryBuilder::Phase before = libraryBuilder->phase();
   const LibraryBuilder::Phase phase = libraryBuilder->step(coverScratch.get());
+  const unsigned long elapsed = millis() - libraryBuildStartMs;
+  if (before == LibraryBuilder::Phase::Walk && phase != before) {
+    LOG_INF("LIB", "walk: %u books in %lu ms", static_cast<unsigned>(libraryBuilder->booksFound()), elapsed);
+  }
   if (phase == LibraryBuilder::Phase::Resolve) {
     indexResolved = libraryBuilder->resolved();
     indexTotal = libraryBuilder->toResolve();
   }
   const bool reload = libraryBuilder->takePublished() || phase == LibraryBuilder::Phase::Failed;
+  if (reload && phase != LibraryBuilder::Phase::Failed) {
+    LOG_INF("LIB", "published at %lu ms: %u books, authors resolved %u/%u", elapsed,
+            static_cast<unsigned>(libraryBuilder->booksFound()), static_cast<unsigned>(libraryBuilder->resolved()),
+            static_cast<unsigned>(libraryBuilder->toResolve()));
+  }
   if (reload) {
     RenderLock lock(*this);
     // A step that failed before any publish released nothing: the index is still open to read from.
@@ -1829,6 +1844,12 @@ bool FileBrowserActivity::stepLibraryBuild() {
   }
   const bool finished = libraryBuilder->finished();
   if (finished) {
+    LOG_INF("LIB", "build %s in %lu ms: %u books, authors resolved %u/%u (free=%lu min=%lu contig=%lu)",
+            phase == LibraryBuilder::Phase::Done ? "done" : "failed", elapsed,
+            static_cast<unsigned>(libraryBuilder->booksFound()), static_cast<unsigned>(libraryBuilder->resolved()),
+            static_cast<unsigned>(libraryBuilder->toResolve()), static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(esp_get_minimum_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     if (phase == LibraryBuilder::Phase::Done) LibraryFreshness::built(libraryBuildGeneration);
     libraryBuilder.reset();
     indexing = false;

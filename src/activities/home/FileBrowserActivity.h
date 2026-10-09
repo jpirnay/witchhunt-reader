@@ -99,6 +99,7 @@ class FileBrowserActivity final : public UiListActivity {
   // gets the lent framebuffer after the title parses and before the covers.
   std::unique_ptr<LibraryBuilder> libraryBuilder;
   uint32_t libraryBuildGeneration = 0;
+  unsigned long libraryBuildStartMs = 0;  // for the build's log lines
   void startLibraryBuildIfStale();
   bool stepLibraryBuild();
   // What the header and an empty New or Authors say while a build runs. The render task reads them;

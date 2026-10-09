@@ -171,7 +171,7 @@ The Library is where your books are. A row of tabs under the header switches bet
 * **New**: the ten books added to the card most recently.
 * **Authors**: everyone who wrote a book on the card; open one to see their books.
 
-Hold **Up** or **Down** to go to the previous or next tab, or tap a tab on a touch screen. While the Library is open each tab keeps your place in it, and the Library opens on the tab you left it on. **Back** at the top of a tab returns to the Home screen. The header names the folder you are in, or the author you opened, and otherwise reads **Library**.
+Hold **Up** or **Down** to go to the previous or next tab (their button hints read **Up / Tab** and **Down / Tab**), or tap a tab on a touch screen. While the Library is open each tab keeps your place in it, and the Library opens on the tab you left it on. **Back** at the top of a tab returns to the Home screen. The header names the folder you are in, or the author you opened, and otherwise reads **Library**.
 
 #### Books tab
 
@@ -224,9 +224,9 @@ The other three tabs list books from wherever they are on the card, with the sam
 
 * **Recent** lists the books you opened last, newest first, as covers unless you choose otherwise. **Remove from recents** in its options menu takes a book off the list; it stays on the card.
 * **New** lists the ten books added to the card most recently, newest first, as covers unless you choose otherwise. A book only moved to another folder does not count as new.
-* **Authors** lists the authors of the books on the card in order of surname, each with the number of books by them. Open an author to see their books, by series and then title; **Back** returns to the authors. A book that names no author is under **Unknown author**.
+* **Authors** lists the authors of the books on the card surname first, as "Pratchett, Terry", each with the number of books by them. Open an author to see their books, by series and then title, under the author's name as the books spell it; **Back** returns to the authors. A book that names no author is under **Unknown author**.
 
-New and Authors come from an index of the books on the card, kept in `/.crosspoint/library.bin`. It is brought up to date when you open either tab after the card has changed or the device has restarted. While that happens the header shows **Indexing**, the tab keeps showing what it had, and the lists fill in as it goes. A book that has never been opened has to be read once for its author, so the first time takes a while on a large card; books not read yet are under **Not yet indexed** until then. The author is the one an `.opf` metadata file beside the book names, if there is one, and that file's sort name ("file-as", such as "Pratchett, Terry") decides where the author is listed. Up to 2,000 books are indexed.
+New and Authors come from an index of the books on the card, kept in `/.crosspoint/library.bin`. It is brought up to date when you open either tab after the card has changed or the device has restarted. While that happens the header shows **Indexing**, the tab keeps showing what it had, and the lists fill in as it goes. A book that has never been opened has to be read once for its author, so the first time takes a while on a large card; books not read yet are under **Not yet indexed** until then. The author is the one an `.opf` metadata file beside the book names, if there is one, and that file's sort name ("file-as", such as "Pratchett, Terry") is how the author is listed. Without one, the last word of the name comes first. Up to 2,000 books are indexed.
 
 The options menu on these tabs has what you can do with the selected book: open it, mark it as read, show its details, delete its cache, **Remove** (Recent: **Remove from recents**), and **Go to folder**, which opens the Books tab in the folder the book is in, with the book selected. Sorting and searching are on the Books tab only.
 
