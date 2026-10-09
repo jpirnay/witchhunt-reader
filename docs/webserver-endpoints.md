@@ -199,9 +199,10 @@ curl "http://crosspoint.local/api/files?path=/Books"
 | `isEpub`      | boolean | `true` if the file has `.epub` extension |
 
 **Notes:**
-- Hidden files (starting with `.`) are automatically filtered out
-- System folders (`System Volume Information`, `XTCache`) are hidden
+- Hidden files (starting with `.`) are filtered out unless **Show Hidden Files** is on
+- System folders (`System Volume Information`, `XTCache`) are always hidden
 - Every path parameter on this page is normalised first, so `..` cannot step outside the folder it is joined to
+- Listing a protected folder answers `403 Cannot access protected items`; see [Protected paths](#protected-paths)
 
 ---
 
@@ -230,8 +231,7 @@ curl -OJ "http://crosspoint.local/download?path=/Books/mybook.epub"
 | 400    | `Missing path`                  | `path` not provided            |
 | 400    | `Invalid path`                  | Empty path or `/`              |
 | 400    | `Path is a directory`           | Only files can be downloaded   |
-| 403    | `Cannot access system files`    | Name starts with `.`           |
-| 403    | `Cannot access protected items` | Protected system folder        |
+| 403    | `Cannot access protected items` | A [protected path](#protected-paths) |
 | 404    | `Item not found`                | Path does not exist            |
 | 500    | `Failed to open file`           | SD card error                  |
 
@@ -267,6 +267,7 @@ File uploaded successfully: mybook.epub
 | Status | Body                                            | Cause                       |
 | ------ | ----------------------------------------------- | --------------------------- |
 | 400    | `Invalid file name`                             | Name has a separator, or is `.` or `..` |
+| 400    | `Cannot write to a protected location`          | Folder or target is a [protected path](#protected-paths) |
 | 400    | `Failed to create file on SD card`              | Cannot create file          |
 | 400    | `Failed to write to SD card - disk may be full` | Write error during upload   |
 | 400    | `Failed to write final data to SD card`         | Error flushing final buffer |
@@ -307,6 +308,8 @@ Folder created: NewFolder
 | ------ | ----------------------------- | ----------------------------- |
 | 400    | `Missing folder name`         | `name` parameter not provided |
 | 400    | `Folder name cannot be empty` | Empty folder name             |
+| 400    | `Invalid folder name`         | Name has a separator, or is `.` or `..` |
+| 403    | `Cannot create a protected folder` | Parent or new folder is a [protected path](#protected-paths) |
 | 400    | `Folder already exists`       | Folder with same name exists  |
 | 500    | `Failed to create folder`     | SD card error                 |
 
@@ -338,8 +341,8 @@ curl -X POST -d "path=/Books/old.epub&name=new.epub" http://crosspoint.local/ren
 | 400    | `Invalid path`                      | Empty path or `/`                             |
 | 400    | `New name cannot be empty`          | Empty name                                    |
 | 400    | `Invalid file name`                 | Name contains `/` or `\`                      |
-| 403    | `Cannot rename to protected name`   | New name starts with `.` or is a protected folder |
-| 403    | `Cannot rename protected item`      | The item itself is protected                  |
+| 403    | `Cannot rename to protected name`   | New name starts with `.`, is a protected folder, or lands on a [protected path](#protected-paths) |
+| 403    | `Cannot rename protected item`      | The item is a [protected path](#protected-paths) |
 | 404    | `Item not found`                    | Path does not exist                           |
 | 409    | `Target already exists`             | Something already has the new name            |
 | 500    | `Failed to open file`, `Failed to rename` | SD card error                           |
@@ -374,7 +377,7 @@ curl -X POST -d "path=/Books/mybook.epub&dest=/Books/SciFi" http://crosspoint.lo
 | 400    | `Invalid path`, `Invalid destination` | Empty path or `/` as the item     |
 | 400    | `Cannot move folder into itself`  | `dest` is inside the item             |
 | 400    | `Destination is not a folder`     | `dest` is a file                      |
-| 403    | `Cannot move protected item`      | Hidden or protected item              |
+| 403    | `Cannot move protected item`      | Item, destination or result is a [protected path](#protected-paths) |
 | 404    | `Item not found`, `Destination not found` | Path does not exist           |
 | 409    | `Target already exists`           | Name already used in `dest`           |
 | 500    | `Failed to open file`, `Failed to move` | SD card error                   |
@@ -421,13 +424,30 @@ All items deleted successfully
 | 500    | `Failed to delete some items: <list>`              | At least one item failed               |
 
 The 500 body lists each failure as `<path> (<reason>)`, where the reason is one of
-`cannot delete root`, `hidden/system file`, `protected file`, `not found`,
-`folder not empty` or `deletion failed`. The other items in the request are still processed.
+`cannot delete root`, `protected item`, `not found`, `folder not empty` or
+`deletion failed`. The other items in the request are still processed.
 
-**Protected Items:**
-- Files/folders starting with `.`
-- `System Volume Information`
-- `XTCache`
+### Protected paths
+
+Every path a request names is checked segment by segment, before the card is touched,
+by the file endpoints above, `/upload`, the WebSocket upload, the plugin write
+endpoints and WebDAV:
+
+- The credential stores (`/.crosspoint/wifi.json`, `opds.json`, `koreader.json`)
+  are never reachable. Their passwords are obfuscated with a key derived from the
+  device's MAC address, which any client on the network can see.
+- `System Volume Information` and `XTCache` are never reachable, at any depth.
+- A segment starting with `.` is refused at any depth, unless **Show Hidden Files**
+  is on. Then dot folders can be listed and walked through, so caches under
+  `/.crosspoint` can be cleaned up. But an item whose own name starts with `.` still
+  cannot be read, written, renamed, moved or deleted. WebDAV ignores the setting
+  and always refuses dot segments.
+- Names are judged as the SD library opens them: leading spaces and trailing dots
+  and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
+  `/.crosspoint`. Matching ignores case.
+- A path that names an entry by its 8.3 short alias rather than its real name, such
+  as `/CROSSP~1` for `/.crosspoint`, is refused. A file whose real name happens to
+  look like an alias stays reachable.
 
 ---
 
@@ -792,7 +812,8 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | `LOCK`, `UNLOCK` | Dummy: returns a fixed token so clients that insist on locking keep working. Nothing is locked |
 
 A path with a hidden segment (starting with `.`) or inside `System Volume Information`
-or `XTCache` answers `403`, at any depth. The root cannot be deleted or moved.
+or `XTCache` answers `403`, at any depth, including spellings the SD library maps onto
+one (see [Protected paths](#protected-paths)). The root cannot be deleted or moved.
 
 ---
 
@@ -836,6 +857,7 @@ Server -> "DONE"
 | `ERROR:Failed to create file`     | Cannot create file on SD card      |
 | `ERROR:Invalid START format`      | Malformed START message            |
 | `ERROR:Invalid file name`         | File name has a separator, or is `.` or `..` |
+| `ERROR:Cannot write to a protected location` | Folder or target is a [protected path](#protected-paths) |
 | `ERROR:Upload already in progress` | A second START arrived while an upload was active |
 | `ERROR:No upload in progress`     | Binary data received without START |
 | `ERROR:Write failed - disk full?` | SD card write error                |
