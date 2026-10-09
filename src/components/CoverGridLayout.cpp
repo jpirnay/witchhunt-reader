@@ -22,7 +22,14 @@ Layout compute(const Input& in) {
   // a panel too short to hold even one shrunk row.
   const int fitted = usableHeight / l.rows - kLabelHeight - kMargin;
   l.cellHeight = std::max(kMinCellHeight, std::min(maxCellHeight, fitted));
-  l.rowStride = l.cellHeight + kLabelHeight + kMargin;
+
+  // Height the capped cells leave over goes to the rows equally, rather than as a blank band under
+  // the last one; where each row's share holds another label line, the label takes a third line.
+  const int baseStride = l.cellHeight + kLabelHeight + kMargin;
+  const int spare = std::max(0, usableHeight / l.rows - baseStride);
+  l.labelLines = spare >= kLabelLineHeight ? 3 : 2;
+  l.labelHeight = kLabelHeight + (l.labelLines - 2) * kLabelLineHeight;
+  l.rowStride = baseStride + spare;
 
   // As many columns as hold a 2:3 cover at that height -- the usual shape, and what a fitted cover
   // of it fills -- each with its margin. A panel too narrow for even one still gets one column (a
@@ -37,6 +44,18 @@ Layout compute(const Input& in) {
   l.thumbWidth = std::max(1, thumbCellWidth - 2);
   l.thumbHeight = std::max(1, l.cellHeight - 2);
   return l;
+}
+
+Placement place(const Screen& screen) {
+  Placement p;
+  const int gap = screen.tabBarHeight > 0 ? kTabBarGap : screen.verticalSpacing;
+  p.top = screen.topPadding + screen.headerHeight + screen.tabBarHeight + gap;
+  p.cells = compute({.contentWidth = screen.contentWidth,
+                     .contentHeight = screen.contentBottom - p.top - screen.verticalSpacing,
+                     .bottomReserve = 0,
+                     .maxCellHeight = kMaxCellHeight,
+                     .maxCellWidth = kMaxCellWidth});
+  return p;
 }
 
 int rowBelow(const int index, const int count, const int cols) {
@@ -64,7 +83,7 @@ int hitTest(const Layout& l, const int originX, const int originY, const int pag
   if (dy < 0) return -1;
   const int row = dy / l.rowStride;
   if (row >= l.rows) return -1;
-  if (dy - row * l.rowStride >= l.cellHeight + kLabelHeight) return -1;
+  if (dy - row * l.rowStride >= l.cellHeight + l.labelHeight) return -1;
 
   // Columns: same shape, with the leading margin taken off first.
   const int dx = px - originX - kMargin;

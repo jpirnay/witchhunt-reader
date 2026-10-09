@@ -17,9 +17,11 @@
 // Pure arithmetic: no renderer, no theme, no storage, so it is exercised on the host.
 namespace CoverGridLayout {
 
-// Visual constants of the grid itself. The label block holds two small-font lines (title, author).
+// Visual constants of the grid itself. The label block holds two small-font lines (title, then
+// author and series), and a third where the panel has the height to spare (Layout::labelLines).
 inline constexpr int kMargin = 10;
 inline constexpr int kLabelHeight = 36;
+inline constexpr int kLabelLineHeight = 17;  // one more small-font line
 inline constexpr int kMinCellHeight = 96;
 
 // The full-size grid thumbnail's box. The cover is FITTED inside it (kThumbCrop false), whole: a
@@ -52,13 +54,39 @@ struct Layout {
   int rows = 1;         // rows per page
   int cellWidth = 0;    // cover box width, 1 px frame included
   int cellHeight = 0;   // cover box height, 1 px frame included
-  int rowStride = 0;    // cellHeight + label block + margin
+  int rowStride = 0;    // cellHeight + label block + margin, and an equal share of the spare height
+  int labelLines = 2;   // 3 where each row's share of the spare height holds another line
+  int labelHeight = 0;  // the label block: kLabelHeight, plus kLabelLineHeight for a third line
   int labelWidth = 0;   // text width available under a cover
   int thumbWidth = 0;   // the stored thumbnail's box: what the cover is fitted into, drawn 1:1
   int thumbHeight = 0;  //   (the cell less its frame, no wider than the full-size thumbnail)
 };
 
 Layout compute(const Input& in);
+
+// The space under a tab bar before the first row: the bar's own border sets the rows off already,
+// and the theme's spacing here would cost the X3 and X4 their full-size covers.
+inline constexpr int kTabBarGap = 4;
+
+// A screen the grid goes on, in the theme's metrics: from the top of the panel down to where the
+// button hints begin, under the header and -- the Library's -- a tab bar.
+struct Screen {
+  int contentWidth = 0;
+  int contentBottom = 0;  // y where the button hints begin
+  int topPadding = 0;
+  int headerHeight = 0;
+  int verticalSpacing = 0;
+  int tabBarHeight = 0;  // 0: no tab bar
+};
+
+struct Placement {
+  int top = 0;  // y of the first row
+  Layout cells;
+};
+
+// Where the grid goes on `screen` and how it is laid out: from below the header (and tab bar) down to
+// the theme's spacing above the button hints, all of it given to the rows (compute()).
+Placement place(const Screen& screen);
 
 // The cell a row step lands on, wrapping at both ends like the lists do: Down from the last row goes
 // to the same column of the first, Up from the first row to the same column of the last row that

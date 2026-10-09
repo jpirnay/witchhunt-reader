@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "activities/ListTabBar.h"
 #include "activities/UiListActivity.h"
 
 // A UiListActivity whose list is split across a row of tabs at the top of the screen.
@@ -35,7 +36,7 @@ class TabbedUiListActivity : public UiListActivity {
   // Back pressed while the bar holds focus. Default leaves the screen.
   virtual void onBackFromTabs() { finish(); }
   // Height the bar takes off the top of the screen.
-  [[nodiscard]] virtual int16_t tabBarHeight() const { return 54; }
+  [[nodiscard]] virtual int16_t tabBarHeight() const { return ListTabBar::HEIGHT; }
   // Last word on the composed props -- text style, icons, layout. The focus-dependent selected
   // styling is set before this runs and is meant to survive it.
   virtual void customizeTabBar(UiScreen& /*screen*/, freeink::ui::TabBarProps& /*props*/) {}

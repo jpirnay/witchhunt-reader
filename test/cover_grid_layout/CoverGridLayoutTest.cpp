@@ -25,9 +25,12 @@ constexpr Theme kLyra{5, 84, 16, 40, 30};  // the default theme, and the one wit
 // button hints by a body line (+5).
 constexpr Theme kLyraLarge{5, 91, 16, 45, 30};
 
-CoverGridLayout::Input portrait(int panelW, int panelH, const Theme& t, bool isX3) {
+// The Library's tab bar (ListTabBar::HEIGHT), between the header and the grid.
+constexpr int kTabBar = 54;
+
+CoverGridLayout::Input portrait(int panelW, int panelH, const Theme& t, bool isX3, int tabBar = 0) {
   const int contentWidth = panelW - (isX3 ? 2 * t.sideHints : t.sideHints);
-  const int contentTop = t.topPadding + t.header + t.spacing;
+  const int contentTop = t.topPadding + t.header + t.spacing + tabBar;
   const int contentHeight = (panelH - t.buttonHints) - contentTop - t.spacing;
   return {contentWidth, contentHeight, 12, kMaxCell, kMaxCellWidth};
 }
@@ -127,6 +130,94 @@ TEST(CoverGridLayout, EveryPageFitsTheContentArea) {
   }
 }
 
+// The height a page leaves below its last row goes to the rows equally, and where each row's share
+// is a label line, the label takes a third line: on the X4's Classic theme under the tab bar, 48 px
+// spare, 24 a row.
+TEST(CoverGridLayout, SpareHeightGoesToTheRowsAndMakesRoomForAThirdLabelLine) {
+  const auto in = portrait(480, 800, kClassic, /*isX3=*/false, kTabBar);
+  const auto l = CoverGridLayout::compute(in);
+  const int usable = in.contentHeight - in.bottomReserve;
+  EXPECT_EQ(l.rows, 2);
+  EXPECT_EQ(l.cellHeight, kMaxCell);  // the covers are the same size: only the rows spread
+  EXPECT_EQ(l.labelLines, 3);
+  EXPECT_EQ(l.labelHeight, CoverGridLayout::kLabelHeight + CoverGridLayout::kLabelLineHeight);
+  EXPECT_EQ(l.rowStride, usable / l.rows);
+  EXPECT_LE(l.cellHeight + l.labelHeight + CoverGridLayout::kMargin, l.rowStride);
+}
+
+// Less than a line to spare per row -- Lyra's taller header under the tab bar leaves none -- keeps
+// two label lines, as before.
+TEST(CoverGridLayout, WithoutALineToSpareTheLabelKeepsTwoLines) {
+  const auto in = portrait(480, 800, kLyra, /*isX3=*/false, kTabBar);
+  const auto l = CoverGridLayout::compute(in);
+  EXPECT_EQ(l.labelLines, 2);
+  EXPECT_EQ(l.labelHeight, CoverGridLayout::kLabelHeight);
+  EXPECT_EQ(l.rowStride, (in.contentHeight - in.bottomReserve) / l.rows);
+}
+
+// Every device and theme: what the label takes plus the cover always fits the row it is in.
+TEST(CoverGridLayout, TheLabelAlwaysFitsItsRow) {
+  for (const auto& theme : {kClassic, kLyra, kLyraLarge}) {
+    for (const int bar : {0, kTabBar}) {
+      for (const auto& in : {portrait(480, 800, theme, false, bar), portrait(528, 792, theme, true, bar),
+                             portrait(540, 960, theme, false, bar)}) {
+        const auto l = CoverGridLayout::compute(in);
+        EXPECT_GE(l.labelLines, 2);
+        EXPECT_LE(l.labelLines, 3);
+        EXPECT_LE(l.cellHeight + l.labelHeight + CoverGridLayout::kMargin, l.rowStride);
+        EXPECT_LE(l.rows * l.rowStride, in.contentHeight - in.bottomReserve);
+      }
+    }
+  }
+}
+
+// The Library's screen, as FileBrowserActivity hands it to place(): the band from the top of the
+// panel to the button hints, the theme's metrics, and the tab bar.
+CoverGridLayout::Screen libraryScreen(int panelW, int panelH, const Theme& t, bool isX3) {
+  return {panelW - (isX3 ? 2 * t.sideHints : t.sideHints),
+          panelH - t.buttonHints,
+          t.topPadding,
+          t.header,
+          t.spacing,
+          kTabBar};
+}
+
+// Under the tab bar, on the X3 and X4, whatever the theme and UI font size: the full-size cover --
+// the thumbnails already on the card, shared with the finished-book screen -- and no band left above
+// the button hints but the theme's spacing (and under a pixel a row of rounding).
+TEST(CoverGridLayout, UnderTheTabBarTheX3AndX4KeepFullSizeCoversAndFillTheHeight) {
+  for (const auto& theme : {kClassic, kLyra, kLyraLarge}) {
+    for (const bool isX3 : {false, true}) {
+      const auto screen = isX3 ? libraryScreen(528, 792, theme, true) : libraryScreen(480, 800, theme, false);
+      const auto placed = CoverGridLayout::place(screen);
+      EXPECT_EQ(placed.top, theme.topPadding + theme.header + kTabBar + CoverGridLayout::kTabBarGap);
+      EXPECT_EQ(placed.cells.rows, 2);
+      EXPECT_EQ(placed.cells.cellHeight, kMaxCell);
+      EXPECT_EQ(placed.cells.thumbHeight, 240);
+      const int end = screen.contentBottom - screen.verticalSpacing;
+      const int bottom = placed.top + placed.cells.rows * placed.cells.rowStride;
+      EXPECT_LE(bottom, end);
+      EXPECT_GT(bottom, end - placed.cells.rows);
+    }
+  }
+}
+
+// What the user saw on Lyra Carousel: two rows ending 29 px above the hints.
+TEST(CoverGridLayout, UnderTheTabBarLyraOnTheX4EndsAtTheHintsSpacing) {
+  const auto screen = libraryScreen(480, 800, kLyra, false);
+  const auto placed = CoverGridLayout::place(screen);
+  const int bottom = placed.top + placed.cells.rows * placed.cells.rowStride;
+  EXPECT_LE(bottom, 760 - 16);
+  EXPECT_GE(bottom, 760 - 16 - 1);  // the odd pixel an even split of the height leaves
+}
+
+// Without a tab bar the grid keeps the theme's spacing under the header.
+TEST(CoverGridLayout, WithoutATabBarTheGridSitsAtTheThemesSpacing) {
+  auto screen = libraryScreen(480, 800, kClassic, false);
+  screen.tabBarHeight = 0;
+  EXPECT_EQ(CoverGridLayout::place(screen).top, kClassic.topPadding + kClassic.header + kClassic.spacing);
+}
+
 TEST(CoverGridLayout, HigherResolutionPanelGetsMoreCellsNotBiggerOnes) {
   // A 1072x1448 300 dpi panel: nothing changes but the numbers handed in.
   const auto l = CoverGridLayout::compute(portrait(1072, 1448, kLyra, /*isX3=*/false));
@@ -185,7 +276,7 @@ CoverGridLayout::Layout x4Grid() { return CoverGridLayout::compute(portrait(480,
 // Centre of the cell at (row, col) on the current page, in the frame hitTest expects.
 void cellCentre(const CoverGridLayout::Layout& l, int row, int col, int& x, int& y) {
   x = kOriginX + CoverGridLayout::kMargin + col * (l.cellWidth + CoverGridLayout::kMargin) + l.cellWidth / 2;
-  y = kOriginY + row * l.rowStride + (l.cellHeight + CoverGridLayout::kLabelHeight) / 2;
+  y = kOriginY + row * l.rowStride + (l.cellHeight + l.labelHeight) / 2;
 }
 
 }  // namespace
@@ -235,7 +326,7 @@ TEST(CoverGridLayoutHitTest, TheRowGutterBelowTheLabelIsAMiss) {
   int x = 0;
   int y = 0;
   cellCentre(l, 0, 0, x, y);
-  const int cellBottom = kOriginY + l.cellHeight + CoverGridLayout::kLabelHeight;
+  const int cellBottom = kOriginY + l.cellHeight + l.labelHeight;
   EXPECT_EQ(0, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom - 1));
   EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom));
 }

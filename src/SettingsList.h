@@ -228,11 +228,8 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
                          {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
   // Home screen entries: on = on the home screen, off = behind its "More" entry.
-  emit(SettingInfo::Toggle(StrId::STR_BROWSE_FILES, &CrossPointSettings::showBrowseFilesOnHome, "showBrowseFilesOnHome",
+  emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
                            StrId::STR_CAT_DISPLAY)
-           .withSubmenu(StrId::STR_MENU_DISP_HOME));
-  emit(SettingInfo::Toggle(StrId::STR_MENU_RECENT_BOOKS, &CrossPointSettings::showRecentBooksOnHome,
-                           "showRecentBooksOnHome", StrId::STR_CAT_DISPLAY)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
                            "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)

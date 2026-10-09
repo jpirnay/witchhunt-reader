@@ -142,6 +142,12 @@ class CrossPointState {
   // Options > View. Its own, not Browse Files' (SETTINGS.fileBrowserView): changing one leaves the
   // other as it was. Covers by default, as the grid was the screen's own view.
   uint8_t recentBooksView = 2;
+  // The Library tab last left (a LibraryTab), reopened from Home.
+  uint8_t libraryTab = 0;
+  // How New and Authors show their lists, each chosen there from Options > View: New as covers, like
+  // Recent Books; Authors in Details, its rows being names.
+  uint8_t addedBooksView = 2;
+  uint8_t authorsView = 1;
   // When false, setup() skips the boot screen on wake and instead restores the
   // saved framebuffer overlaid with a loading icon (Quick Resume).
   bool showBootScreen = true;

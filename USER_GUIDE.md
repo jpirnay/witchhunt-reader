@@ -12,8 +12,8 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
   - [3. Screens](#3-screens)
     - [3.1 Home Screen](#31-home-screen)
     - [3.2 Reading Mode](#32-reading-mode)
-    - [3.3 Browse Files Screen](#33-browse-files-screen)
-    - [3.4 Recent Books Screen](#34-recent-books-screen)
+    - [3.3 Library Screen](#33-library-screen)
+    - [3.4 Recent, New and Authors](#34-recent-new-and-authors)
     - [3.5 Book Info Screen](#35-book-info-screen)
     - [3.6 File Transfer Screen](#36-file-transfer-screen)
       - [3.6.1 Calibre Wireless Transfers](#361-calibre-wireless-transfers)
@@ -150,21 +150,32 @@ Upon turning the device on for the first time, you will be placed on the **[Home
 
 ### 3.1 Home Screen
 
-The Home screen is the main entry point to the firmware. It shows the most recently read book as a cover thumbnail and provides navigation to **[Reading Mode](#4-reading-mode)**, the **[Browse Files](#33-browse-files-screen)** screen, the **[Recent Books](#34-recent-books-screen)** screen, **Reading Stats**, the **[File Transfer](#36-file-transfer-screen)** screen, and **[Settings](#37-settings)**. Bookmarks, the OPDS browser and a weather panel appear as well once they have something to show.
+The Home screen is the main entry point to the firmware. It shows the most recently read book as a cover thumbnail and provides navigation to **[Reading Mode](#4-reading-mode)**, the **[Library](#33-library-screen)**, **Reading Stats**, the **[File Transfer](#36-file-transfer-screen)** screen, and **[Settings](#37-settings)**. Bookmarks, the OPDS browser and a weather panel appear as well once they have something to show.
 
 Under each book's cover is a line of its reading history, such as *Read 3h 18m over 5 days - last 6m ago*. It counts the days you opened the book on, not the number of times you opened it. Each theme shows as much of it as it has room for: where the full line would not fit, as on the X3's Lyra Carousel or at the Large UI font size, a short form such as *3h 18m · 5d* sits in the cover's badge instead. The day count is left out until the device's clock has been set.
 
-**Choosing what is on the Home screen:** **Settings → Display → Home screen** has one switch each for Browse files, Recent books, Reading stats, Bookmarks, OPDS browser, File transfer and Weather. Everything is on by default. Anything you switch off moves behind a **More** row above Settings, so it is still one step away. More only appears when something has been moved there. Settings itself cannot be switched off, because it is where you undo the choice.
+**Choosing what is on the Home screen:** **Settings → Display → Home screen** has one switch each for Library, Reading stats, Bookmarks, OPDS browser, File transfer and Weather. Everything is on by default. Anything you switch off moves behind a **More** row above Settings, so it is still one step away. More only appears when something has been moved there. Settings itself cannot be switched off, because it is where you undo the choice.
 
-**Correcting a book's title or author:** a metadata file next to an EPUB with the same name (`Some Book.opf` beside `Some Book.epub`) takes precedence over the details inside the book. The metadata editor plugin in the web interface writes one for you. The Home screen and Recent Books notice when that file is added, changed or removed, over USB or from the plugin, and show the new details without the book having to be opened first.
+**Correcting a book's title or author:** a metadata file next to an EPUB with the same name (`Some Book.opf` beside `Some Book.epub`) takes precedence over the details inside the book. The metadata editor plugin in the web interface writes one for you. The Home screen and the Library's Recent tab notice when that file is added, changed or removed, over USB or from the plugin, and show the new details without the book having to be opened first.
 
 ### 3.2 Reading Mode
 
 See [Reading Mode](#4-reading-mode) below for more information.
 
-### 3.3 Browse Files Screen
+### 3.3 Library Screen
 
-The Browse Files screen is a full-featured browser for your books and the folders they are in. It lists the books the reader can open (EPUB, XTC/XTCH, TXT and Markdown) and nothing else: a cover image or `.opf` file saved beside a book (see [sidecar files](docs/sidecar-files.md)) is not listed on its own, so a book downloaded from an OPDS catalogue shows up once. Images and every other file are in **Settings → System → Tools → All Files**.
+The Library is where your books are. A row of tabs under the header switches between four lists of them:
+
+* **Books**: your folders and the books in them, as they are on the card.
+* **Recent**: the books you opened last.
+* **New**: the ten books added to the card most recently.
+* **Authors**: everyone who wrote a book on the card; open one to see their books.
+
+Hold **Up** or **Down** to go to the previous or next tab (their button hints read **Up / Tab** and **Down / Tab**), or tap a tab on a touch screen. While the Library is open each tab keeps your place in it, and the Library opens on the tab you left it on. **Back** at the top of a tab returns to the Home screen. The header names the folder you are in, or the author you opened, and otherwise reads **Library**.
+
+#### Books tab
+
+The Books tab is a full-featured browser for your books and the folders they are in. A folder with no book anywhere in it is not listed, so folders left behind by a sync or holding only covers do not get in the way; **All Files** still shows them, and so does the folder picker of **Move to folder**. A folder made with **New Folder** here opens straight away. It lists the books the reader can open (EPUB, XTC/XTCH, TXT and Markdown) and nothing else: a cover image or `.opf` file saved beside a book (see [sidecar files](docs/sidecar-files.md)) is not listed on its own, so a book downloaded from an OPDS catalogue shows up once. Images and every other file are in **Settings → System → Tools → All Files**.
 
 * **Navigate List:** Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to move the selection cursor up and down through folders and books. Long-pressing these buttons scrolls a full page at a time.
 * **Open Selection:** Press **Confirm** to open a folder or read a selected book.
@@ -180,7 +191,7 @@ The Browse Files screen is a full-featured browser for your books and the folder
 * **Details** shows each EPUB's title from its metadata, with the author and series underneath (for example "Thomas Mann · Werke #3"), and how far you have read on the right: a percentage, or **Finished**. An `.opf` metadata file beside the book overrides what is inside the book, as everywhere else. An XTC book shows the title and author from the XTC file. TXT and Markdown books carry no metadata of their own, so they keep their filename unless an `.opf` file beside them names them (the Metadata Editor plugin writes one for any book).
 
 * **Covers** shows the folder as a grid of covers, with the title and author under each. Each cover is shown whole, scaled to fit, never cropped. A finished book has a folded corner and one you are reading a bar along the bottom. A folder appears as a folder the size of a cover, with the number of books in it and in all the folders below it (up to "999+"; "..." while they are being counted). The grid holds as many covers as the screen has room for: two rows of two on the X3 and X4, three of three on the LilyGo T5S3. **Up**/**Down** move a row and **Left**/**Right** one cover, wrapping round at the ends, and the page follows the selection. On a touch screen a tap selects a cover, a second tap opens it, and a swipe turns the page. Hold **Right** for the options menu: its hint reads **Right / Options**.
-  * A book whose cover has not been made yet shows a card with its title at first. The covers of the page on screen are then made one at a time, and each appears as soon as it is ready. Pressing a button pauses this, so the screen stays responsive. A large cover can take several seconds. A cover is made once and kept, and Recent Books and the "book finished" screen use the same ones. A book with no cover at all keeps its title card; if making a cover fails, it is tried again the next time you open the folder.
+  * A book whose cover has not been made yet shows a card with its title at first. The covers of the page on screen are then made one at a time, and each appears as soon as it is ready. Pressing a button pauses this, so the screen stays responsive. A large cover can take several seconds. A cover is made once and kept, and the other tabs and the "book finished" screen use the same ones. A book with no cover at all keeps its title card; if making a cover fails, it is tried again the next time you open the folder.
 
 The first time a folder shows a book whose details have not been read yet, its row or card shows the filename for a moment while the book is read: every EPUB and XTC, and a TXT or Markdown book with an `.opf` file beside it. After a firmware update that changes what is kept, this happens once more for each book. The screen then redraws once with the details, and after that they come up at once. Sorting and **Search** still go by filename, and **Search all folders** lists its results by filename in every view.
 
@@ -207,13 +218,17 @@ Files and folders can be sorted by **name**, **date**, **size**, or **type**, in
 
 Folders with many entries are handled via an SD-card-backed index so memory use stays bounded regardless of folder size.
 
-### 3.4 Recent Books Screen
+### 3.4 Recent, New and Authors
 
-The Recent Books screen lists the books you opened last, newest first, from wherever they are on the card. Selecting a book opens it at the last read position, and a long **Confirm** on an EPUB fetches your KOReader progress first, as in Browse Files.
+The other three tabs list books from wherever they are on the card, with the same three views as the Books tab: **Covers**, **Details** and **Filenames**, chosen in the options menu under **Book view**. Each tab remembers its own choice. The keys are the Books tab's too: in Covers, **Up**/**Down** move a row and **Left**/**Right** one book, wrapping round at the ends; hold **Right** for the options menu. Selecting a book opens it at the last read position, and a long **Confirm** on an EPUB fetches your KOReader progress first. Closing the book brings you back to the tab, and the row, you opened it from.
 
-It is Browse Files over that list, with the same three views — **Covers** (the default), **Details** and **Filenames** — chosen in the options menu under **Book view**. Recent Books remembers its own choice, so changing it here leaves Browse Files as it was. The keys are Browse Files' too: in Covers, **Up**/**Down** move a row and **Left**/**Right** one book, wrapping round at the ends; hold **Right** for the options menu. **Back** returns to the Home screen.
+* **Recent** lists the books you opened last, newest first, as covers unless you choose otherwise. **Remove from recents** in its options menu takes a book off the list; it stays on the card.
+* **New** lists the ten books added to the card most recently, newest first, as covers unless you choose otherwise. A book only moved to another folder does not count as new.
+* **Authors** lists the authors of the books on the card surname first, as "Pratchett, Terry", each with the number of books by them. Open an author to see their books, by series and then title, under the author's name as the books spell it; **Back** returns to the authors. A book that names no author is under **Unknown author**.
 
-The options menu has what you can do with the selected book: open it, mark it as read, show its details, delete its cache, **Remove from recents** (it stays on the card) and **Go to folder**, which opens Browse Files in the folder the book is in.
+New and Authors come from an index of the books on the card, kept on the card in `/.crosspoint/library/`. It is kept from one session to the next, and brought up to date when you open either tab after the card has changed: a book added or removed on the device, through the web interface, Calibre or an OPDS catalogue, or over USB. Books copied onto the card in a computer's card reader are noticed when the Books tab shows one of them or the folder they are in; anything it misses, **Refresh library** in the options menu of New or Authors picks up. While the index is brought up to date the header shows **Indexing**, the tab keeps showing what it had, and the lists fill in as it goes. A book that has never been opened has to be read once for its author, so the first time takes a while on a large card; books not read yet are under **Not yet indexed** until then. The author is the one an `.opf` metadata file beside the book names, if there is one, and that file's sort name ("file-as", such as "Pratchett, Terry") is how the author is listed. Without one, the last word of the name comes first. Up to 2,000 books are indexed.
+
+The options menu on these tabs has what you can do with the selected book: open it, mark it as read, show its details, delete its cache, **Remove** (Recent: **Remove from recents**), and **Go to folder**, which opens the Books tab in the folder the book is in, with the book selected. On New and Authors it also has **Refresh library**, which builds the index again and reads every author anew. Sorting and searching are on the Books tab only.
 
 ### 3.5 Book Info Screen
 
@@ -381,7 +396,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - On the keyboard, hold **Confirm** on a key (or long-press it on a touch screen) for its alternate letter, such as an accented one or Ukrainian ґ and the extra Kazakh letters, or for the other case. Holding **Confirm** on Delete clears the whole text. Shift applies to the next letter only, and `-`, `=`, `.` and `,` are on the symbols page (**?123**).
 - **Show Hidden Files**: Show files and folders whose names start with `.`. "ON" / "OFF"
 - **Show File Extensions**: Show file extensions in the file browser. "ON" / "OFF"
-- **Book view**: How [Browse Files](#33-browse-files-screen) shows books. "Filenames" / "Details" / "Covers"
+- **Book view**: How the Library's [Books](#33-library-screen) tab shows books. "Filenames" / "Details" / "Covers"
 
 **Network**:
 - **WiFi Networks**: Add, remove, and connect to WiFi networks. If WiFi was switched on here, leaving the screen restarts the device quickly and returns to Settings. That frees the memory WiFi used; every screen that uses WiFi does the same.
@@ -398,7 +413,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
   - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
 - **Weather Settings**: Configure the Open-Meteo weather panel shown on the Home Screen. **Location** searches for a city: pick one of the matches with **Confirm**, or press **Back** to keep the current location. A search with no matches says so instead of returning silently.
-- **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like [Browse Files](#33-browse-files-screen): **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set as sleep screen**. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
+- **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set as sleep screen**. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
 
 **System**:
 - **Clear Reading Cache**: Clear the internal SD card cache.
@@ -410,7 +425,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 **Firmware Update**:
 - **Check for Updates**: Check for and download Witch Reader firmware updates over WiFi. The download is always checked against the certificate of GitHub's servers (**Skip HTTPS validation** does not apply), and the firmware against the SHA-256 checksum the release lists, before the reader switches to it. The reader restarts when you leave this screen.
 - **Include Beta Updates**: Whether to include release-candidate builds in update checks. "ON" / "OFF"
-- **SD Firmware Update**: Flash a firmware `.bin` file from the SD card. Press **Confirm** on a file to flash it. The **Options** button hint in the file picker opens a smaller menu than the Browse Files one: the sort and visibility options, **Search**, **Search all folders**, and **Remove** to delete a `.bin` you no longer need.
+- **SD Firmware Update**: Flash a firmware `.bin` file from the SD card. Press **Confirm** on a file to flash it. The **Options** button hint in the file picker opens a smaller menu than the Library's: the sort and visibility options, **Search**, **Search all folders**, and **Remove** to delete a `.bin` you no longer need.
 - **Switch to USB Drive**: Reboot the device into USB mass-storage mode to access the SD card directly from a computer.
 
 #### 3.7.5 OPDS Servers (Multiple Libraries)
@@ -590,7 +605,7 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 
 ### System Navigation
 * **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
-* **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
+* **Return to the Library:** Press and hold the **Back** button to close the book and return to the **[Library](#33-library-screen)**'s Books tab, in the book's folder.
 * **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book and return Home, as **Go Home** does; changes made in the menu are kept.
 * **Your place is kept by paragraph as well as by page.** If a book is laid out differently the next time you open it, for example after you changed the font size from outside the book or after a firmware update re-indexed it, it opens at the paragraph you were reading rather than at a page number scaled to the new length.
 
