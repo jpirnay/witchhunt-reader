@@ -58,7 +58,7 @@ class LibraryIndexFixture : public ::testing::Test {
       out.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
     }
     appendString(at("names.bin"), name);
-    appendString(at("names.bin"), LibraryKeys::authorSortKey(name, fileAs));
+    appendString(at("names.bin"), LibraryKeys::authorFilingName(name, fileAs));
   }
 
   // A book record whose path goes into the paths working file.

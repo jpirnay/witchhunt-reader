@@ -13,6 +13,7 @@
 
 #include "LibraryBlob.h"
 #include "LibraryFormat.h"
+#include "LibraryKeys.h"
 
 namespace {
 
@@ -106,12 +107,12 @@ uint16_t distinctAuthors(uint32_t* hashes, uint16_t* counts, const uint16_t book
   return authors;
 }
 
-bool readNameEntry(HalFile& names, const uint32_t at, std::string& name, std::string& key) {
+bool readNameEntry(HalFile& names, const uint32_t at, std::string& name, std::string& filing) {
   uint32_t hash = 0;
   uint8_t flags = 0;
   return names.seek(at & ~FILE_AS_BIT) && library::readExact(names, &hash, sizeof(hash)) &&
          library::readExact(names, &flags, sizeof(flags)) && library::readBlobString(names, name) &&
-         library::readBlobString(names, key);
+         library::readBlobString(names, filing);
 }
 
 // Every author's names-file entry, and its key prefix: one whose key came from a file-as beats one
@@ -126,13 +127,13 @@ void loadNames(const std::string& path, Tables& t, KeyPrefix* prefixes) {
   HalFile names;
   if (!Storage.openFileForRead("LIB", path, names)) return;
   std::string name;
-  std::string key;
+  std::string filing;
   while (true) {
     const auto at = static_cast<uint32_t>(names.position());
     uint32_t hash = 0;
     uint8_t flags = 0;
     if (!library::readExact(names, &hash, sizeof(hash)) || !library::readExact(names, &flags, sizeof(flags)) ||
-        !library::readBlobString(names, name) || !library::readBlobString(names, key)) {
+        !library::readBlobString(names, name) || !library::readBlobString(names, filing)) {
       break;
     }
     if (hash == library::AUTHOR_UNKNOWN || hash == library::AUTHOR_PENDING) continue;
@@ -143,7 +144,7 @@ void loadNames(const std::string& path, Tables& t, KeyPrefix* prefixes) {
     const uint32_t held = t.nameAt[index];
     if (held != NO_NAME && ((held & FILE_AS_BIT) != 0 || !fileAs)) continue;
     t.nameAt[index] = at | (fileAs ? FILE_AS_BIT : 0);
-    setPrefix(prefixes[index], key);
+    setPrefix(prefixes[index], LibraryKeys::filingKey(filing));
   }
 }
 
@@ -173,11 +174,12 @@ void orderTies(Tables& t, const KeyPrefix* prefixes, const std::string& namesPat
     if (end - start > 1 && end - start <= MAX_TIE_RUN && fullPrefix) {
       if (!opened) opened = Storage.openFileForRead("LIB", namesPath, names);
       run.clear();
+      std::string filing;
       for (uint16_t i = start; i < end; ++i) {
-        std::string key;
+        filing.clear();
         const uint32_t at = t.nameAt[t.order[i]];
-        if (opened && at != NO_NAME) readNameEntry(names, at, name, key);
-        run.emplace_back(std::move(key), t.order[i]);
+        if (opened && at != NO_NAME) readNameEntry(names, at, name, filing);
+        run.emplace_back(LibraryKeys::filingKey(filing), t.order[i]);
       }
       std::sort(run.begin(), run.end());
       for (uint16_t i = start; i < end; ++i) t.order[i] = run[i - start].second;
@@ -186,7 +188,7 @@ void orderTies(Tables& t, const KeyPrefix* prefixes, const std::string& namesPat
   }
 }
 
-// Writes the author table in key order, and each author's name and key into `section`. Leaves
+// Writes the author table in key order, and each author's name and filing name into `section`. Leaves
 // `nameAt` holding every author's rank and `order` every rank's first slot, with `counts` zeroed for
 // placing the books.
 bool writeAuthors(HalFile& out, HalFile& section, const std::string& namesPath, const uint32_t blobBase, Tables& t,
@@ -194,21 +196,21 @@ bool writeAuthors(HalFile& out, HalFile& section, const std::string& namesPath, 
   HalFile names;
   const bool haveNames = Storage.openFileForRead("LIB", namesPath, names);
   std::string name;
-  std::string key;
+  std::string filing;
   uint16_t firstBook = 0;
   sectionBytes = 0;
   for (uint16_t rank = 0; rank < t.authors; ++rank) {
     const uint16_t index = t.order[rank];
-    if (t.nameAt[index] == NO_NAME || !haveNames || !readNameEntry(names, t.nameAt[index], name, key)) {
-      name.clear();
-      key = t.hashes[index] == library::AUTHOR_PENDING ? PENDING_KEY : UNKNOWN_KEY;
+    if (t.nameAt[index] == NO_NAME || !haveNames || !readNameEntry(names, t.nameAt[index], name, filing)) {
+      name.clear();  // no author, or not known yet: the screen names those itself
+      filing.clear();
     }
     const library::AuthorRecord record{t.hashes[index], blobBase + sectionBytes, firstBook, t.counts[index]};
     if (!library::writeExact(out, &record, sizeof(record)) || !library::writeBlobString(section, name) ||
-        !library::writeBlobString(section, key)) {
+        !library::writeBlobString(section, filing)) {
       return false;
     }
-    sectionBytes += static_cast<uint32_t>(2 * sizeof(uint16_t) + name.size() + key.size());
+    sectionBytes += static_cast<uint32_t>(2 * sizeof(uint16_t) + name.size() + filing.size());
     t.nameAt[index] = rank;
     t.order[rank] = firstBook;
     firstBook = static_cast<uint16_t>(firstBook + t.counts[index]);

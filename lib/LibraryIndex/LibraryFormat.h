@@ -7,7 +7,7 @@
 namespace library {
 
 constexpr char MAGIC[4] = {'W', 'L', 'I', 'B'};
-constexpr uint8_t VERSION = 1;
+constexpr uint8_t VERSION = 2;  // 2: an author's filing name ("Pratchett, Terry"), not its folded key
 
 // Books beyond this are left out and the index is marked partial: publish sorts the whole author
 // table in one pass through the lent framebuffer, which this many books fit.
@@ -23,7 +23,7 @@ constexpr uint32_t SIDECAR_NONE = 0;
 constexpr uint32_t SIDECAR_UNKNOWN = 0xFFFFFFFFu;
 // Header flags.
 constexpr uint8_t FLAG_PARTIAL = 0x01;
-// Longest blob string: a path, an author's name or sort key.
+// Longest blob string: a path, an author's name or filing name.
 constexpr uint16_t MAX_STRING = 1024;
 
 // Where the index and a build's working files live on the card.
@@ -60,8 +60,9 @@ struct BookRecord {
   uint32_t firstSeen;  // buildGen of the build that first saw this identity
 };
 
-// One author, in sort-key order. nameOff (into the blob) holds the display name and then the sort
-// key; the author's books are the author-books table's slots [firstBook, firstBook + count).
+// One author, in sort-key order. nameOff (into the blob) holds the name as the books spell it and then
+// the filing name the list shows ("Pratchett, Terry"; LibraryKeys::authorFilingName), whose fold is
+// the sort key; the author's books are the author-books table's slots [firstBook, firstBook + count).
 struct AuthorRecord {
   uint32_t hash;
   uint32_t nameOff;

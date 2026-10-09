@@ -79,7 +79,8 @@ bool LibraryIndexReader::blobString(const uint32_t offset, std::string& out) {
   return library::readExact(file, len > 0 ? &out[0] : nullptr, len);
 }
 
-bool LibraryIndexReader::authorName(const library::AuthorRecord& author, std::string& name, std::string* key) {
+bool LibraryIndexReader::authorName(const library::AuthorRecord& author, std::string& name, std::string* filing) {
   if (!blobString(author.nameOff, name)) return false;
-  return key == nullptr || blobString(author.nameOff + sizeof(uint16_t) + static_cast<uint32_t>(name.size()), *key);
+  return filing == nullptr ||
+         blobString(author.nameOff + sizeof(uint16_t) + static_cast<uint32_t>(name.size()), *filing);
 }

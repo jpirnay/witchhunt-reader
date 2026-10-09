@@ -119,6 +119,21 @@ TEST_F(LibraryPublishTest, TheFirstNameEntryForAnAuthorWins) {
   EXPECT_EQ(authorNames(index), (std::vector<std::string>{"Terry Pratchett"}));
 }
 
+// What the Authors list shows: the name the author is filed under, readable.
+TEST_F(LibraryPublishTest, TheIndexKeepsEachAuthorsFilingName) {
+  addName("Terry Pratchett");
+  ASSERT_TRUE(publish({book("/a.epub", "Terry Pratchett")}));
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  library::AuthorRecord author{};
+  std::string name;
+  std::string filing;
+  ASSERT_TRUE(index.author(0, author));
+  ASSERT_TRUE(index.authorName(author, name, &filing));
+  EXPECT_EQ(name, "Terry Pratchett");
+  EXPECT_EQ(filing, "Pratchett, Terry");
+}
+
 // Spec §3.4: if any of the author's books supplies a file-as, that is the key.
 TEST_F(LibraryPublishTest, AFileAsEntryBeatsAnEarlierPlainOne) {
   addName("Ursula K. Le Guin");                        // a book without file-as: "guin ursula k le"
@@ -128,10 +143,10 @@ TEST_F(LibraryPublishTest, AFileAsEntryBeatsAnEarlierPlainOne) {
   ASSERT_TRUE(index.open(at("library.bin")));
   library::AuthorRecord author{};
   std::string name;
-  std::string key;
+  std::string filing;
   ASSERT_TRUE(index.author(0, author));
-  ASSERT_TRUE(index.authorName(author, name, &key));
-  EXPECT_EQ(key, "le guin ursula k");
+  ASSERT_TRUE(index.authorName(author, name, &filing));
+  EXPECT_EQ(filing, "Le Guin, Ursula K.");
 }
 
 // Review focus 1: power lost while the builder appended a name.

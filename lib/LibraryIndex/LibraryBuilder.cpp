@@ -276,7 +276,7 @@ void LibraryBuilder::resolveStep(BuildArena& arena) {
   }
   if (hash != library::AUTHOR_UNKNOWN &&
       !library::appendNameEntry(names_, hash, !author.fileAs.empty(), author.name,
-                                LibraryKeys::authorSortKey(author.name, author.fileAs))) {
+                                LibraryKeys::authorFilingName(author.name, author.fileAs))) {
     return fail("cannot record a name");
   }
   --pending_;

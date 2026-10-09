@@ -32,8 +32,9 @@ class LibraryIndexReader {
   // The record index at one slot of the author-books table.
   bool authorBook(uint32_t slot, uint16_t& recordIndex);
   bool blobString(uint32_t offset, std::string& out);
-  // An author's display name, and its sort key when `key` is given.
-  bool authorName(const library::AuthorRecord& author, std::string& name, std::string* key = nullptr);
+  // An author's name as the books spell it, and its filing name ("Pratchett, Terry") when `filing` is
+  // given.
+  bool authorName(const library::AuthorRecord& author, std::string& name, std::string* filing = nullptr);
 
  private:
   bool readAt(uint32_t offset, void* out, size_t len);

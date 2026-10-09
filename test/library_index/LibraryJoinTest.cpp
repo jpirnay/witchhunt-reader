@@ -185,10 +185,10 @@ TEST_F(LibraryJoinTest, ResolveAllCarriesNoNamesSoACorrectedFileAsTakesEffect) {
   ASSERT_TRUE(index.open(at("library.bin")));
   library::AuthorRecord author{};
   std::string name;
-  std::string key;
+  std::string filing;
   ASSERT_TRUE(index.author(0, author));
-  ASSERT_TRUE(index.authorName(author, name, &key));
-  EXPECT_EQ(key, "leguin ursula");
+  ASSERT_TRUE(index.authorName(author, name, &filing));
+  EXPECT_EQ(filing, "LeGuin, Ursula");
 }
 
 // Plan 2a review I3: a read error in the previous index fails the join. Taking it for the end of the

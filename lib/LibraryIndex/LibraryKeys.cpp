@@ -71,6 +71,21 @@ void appendUtf8(std::string& out, const uint32_t cp) {
   }
 }
 
+// Runs of whitespace as one space, none at either end; nothing else changed.
+std::string tidySpaces(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+      if (!out.empty() && out.back() != ' ') out += ' ';
+      continue;
+    }
+    out += c;
+  }
+  if (!out.empty() && out.back() == ' ') out.pop_back();
+  return out;
+}
+
 }  // namespace
 
 namespace LibraryKeys {
@@ -103,15 +118,17 @@ std::string fold(const std::string& text) {
   return out;
 }
 
-std::string authorSortKey(const std::string& name, const std::string& fileAs) {
-  std::string key = fold(fileAs);
-  if (key.empty()) {
-    key = fold(name);
-    const size_t lastSpace = key.rfind(' ');
-    if (key.find(',') == std::string::npos && lastSpace != std::string::npos) {
-      key = key.substr(lastSpace + 1) + ' ' + key.substr(0, lastSpace);
-    }
-  }
+std::string authorFilingName(const std::string& name, const std::string& fileAs) {
+  std::string filing = tidySpaces(fileAs);
+  if (!filing.empty()) return filing;
+  filing = tidySpaces(name);
+  const size_t lastSpace = filing.rfind(' ');
+  if (filing.find(',') != std::string::npos || lastSpace == std::string::npos) return filing;
+  return filing.substr(lastSpace + 1) + ", " + filing.substr(0, lastSpace);
+}
+
+std::string filingKey(const std::string& filing) {
+  const std::string key = fold(filing);
   std::string out;
   out.reserve(key.size());
   for (const char c : key) {
@@ -121,6 +138,10 @@ std::string authorSortKey(const std::string& name, const std::string& fileAs) {
   }
   if (!out.empty() && out.back() == ' ') out.pop_back();
   return out;
+}
+
+std::string authorSortKey(const std::string& name, const std::string& fileAs) {
+  return filingKey(authorFilingName(name, fileAs));
 }
 
 uint32_t authorHash(const std::string& name) {

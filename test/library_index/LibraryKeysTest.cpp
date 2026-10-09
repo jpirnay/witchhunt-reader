@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -52,6 +54,40 @@ TEST(LibraryKeys, OtherwiseTheLastWordComesFirst) {
   EXPECT_EQ(LibraryKeys::authorSortKey("Terry Pratchett", ""), "pratchett terry");
   EXPECT_EQ(LibraryKeys::authorSortKey("Homer", ""), "homer");
   EXPECT_EQ(LibraryKeys::authorSortKey("", ""), "");
+}
+
+// The Authors list shows what it is sorted by: the filing name, as readable as the book gives it.
+TEST(LibraryKeys, TheFilingNameIsTheFileAsAsWritten) {
+  EXPECT_EQ(LibraryKeys::authorFilingName("Ursula K. Le Guin", "Le Guin, Ursula K."), "Le Guin, Ursula K.");
+}
+
+TEST(LibraryKeys, ANameWithACommaFilesAsWritten) {
+  EXPECT_EQ(LibraryKeys::authorFilingName("Le Guin, Ursula K.", ""), "Le Guin, Ursula K.");
+}
+
+TEST(LibraryKeys, OtherwiseTheFilingNamePutsTheLastWordFirst) {
+  EXPECT_EQ(LibraryKeys::authorFilingName("Terry Pratchett", ""), "Pratchett, Terry");
+  EXPECT_EQ(LibraryKeys::authorFilingName("Homer", ""), "Homer");
+  EXPECT_EQ(LibraryKeys::authorFilingName("", ""), "");
+}
+
+TEST(LibraryKeys, TheFilingNameTidiesItsSpacing) {
+  EXPECT_EQ(LibraryKeys::authorFilingName("  Terry 	 Pratchett ", ""), "Pratchett, Terry");
+  EXPECT_EQ(LibraryKeys::authorFilingName("Terry Pratchett", "  Pratchett,   Terry "), "Pratchett, Terry");
+}
+
+// The list's order is the order of what it shows: the sort key is the filing name, folded.
+TEST(LibraryKeys, TheSortKeyIsTheFilingNameFolded) {
+  const std::vector<std::pair<std::string, std::string>> authors{{"Terry Pratchett", ""},
+                                                                 {"Ursula K. Le Guin", "Le Guin, Ursula K."},
+                                                                 {"Le Guin, Ursula K.", ""},
+                                                                 {"Homer", ""},
+                                                                 {"Ãmile  Zola", ""}};
+  for (const auto& [name, fileAs] : authors) {
+    EXPECT_EQ(LibraryKeys::filingKey(LibraryKeys::authorFilingName(name, fileAs)),
+              LibraryKeys::authorSortKey(name, fileAs))
+        << name;
+  }
 }
 
 TEST(LibraryKeys, TheAuthorHashIgnoresCaseAccentsAndSpacing) {

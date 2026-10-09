@@ -647,10 +647,16 @@ bool FileBrowserModel::openAuthorByHash(const uint32_t hash) {
   return false;
 }
 
+// The opened author's header: the name as the books spell it ("Terry Pratchett").
 std::string FileBrowserModel::openAuthorName() {
   if (mode != Mode::Authors || openAuthorRow < 0) return "";
-  std::string name = authorRowName(static_cast<size_t>(openAuthorRow));
-  if (!name.empty()) name.pop_back();  // the folder mark
+  library::AuthorRecord author{};
+  std::string name;
+  if (!bookIndex.author(static_cast<uint16_t>(openAuthorRow), author)) return "";
+  if (author.hash == library::AUTHOR_PENDING) return tr(STR_NOT_YET_INDEXED);
+  if (author.hash == library::AUTHOR_UNKNOWN || !bookIndex.authorName(author, name) || name.empty()) {
+    return tr(STR_UNKNOWN_AUTHOR);
+  }
   return name;
 }
 
@@ -686,15 +692,19 @@ bool FileBrowserModel::authorAt(const size_t row, uint16_t& books, uint32_t& has
   return true;
 }
 
-// An author row, marked as a folder: opening it lists the author's books.
+// An author row, marked as a folder: opening it lists the author's books. It shows the filing name
+// ("Pratchett, Terry"), which is what the list is sorted by.
 std::string FileBrowserModel::authorRowName(const size_t row) {
   library::AuthorRecord author{};
   std::string name;
+  std::string filing;
   if (row > UINT16_MAX || !bookIndex.author(static_cast<uint16_t>(row), author)) return "";
   if (author.hash == library::AUTHOR_PENDING) {
     name = tr(STR_NOT_YET_INDEXED);
-  } else if (author.hash == library::AUTHOR_UNKNOWN || !bookIndex.authorName(author, name) || name.empty()) {
+  } else if (author.hash == library::AUTHOR_UNKNOWN || !bookIndex.authorName(author, name, &filing) || name.empty()) {
     name = tr(STR_UNKNOWN_AUTHOR);
+  } else if (!filing.empty()) {
+    name = std::move(filing);
   }
   return name + '/';
 }

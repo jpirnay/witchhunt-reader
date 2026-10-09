@@ -29,16 +29,16 @@ bool carryNames(LibraryIndexReader& previous, const bool carry, const std::strin
   if (!carry) return true;
   library::AuthorRecord author{};
   std::string name;
-  std::string key;
+  std::string filing;
   for (uint16_t i = 0; i < previous.header().authorCount; ++i) {
-    if (!previous.author(i, author) || !previous.authorName(author, name, &key)) return false;
+    if (!previous.author(i, author) || !previous.authorName(author, name, &filing)) return false;
     if (author.hash == library::AUTHOR_UNKNOWN || author.hash == library::AUTHOR_PENDING) continue;
     // A resolved author whose name never reached the names file: carrying the blank entry would make
     // it outrank the real name when that arrives.
     if (name.empty()) continue;
-    // The index keeps no flag: a key that is not what the name alone gives came from a file-as.
-    const bool fromFileAs = key != LibraryKeys::authorSortKey(name, "");
-    if (!library::appendNameEntry(names, author.hash, fromFileAs, name, key)) return false;
+    // The index keeps no flag: a filing name that is not what the name alone gives came from a file-as.
+    const bool fromFileAs = filing != LibraryKeys::authorFilingName(name, "");
+    if (!library::appendNameEntry(names, author.hash, fromFileAs, name, filing)) return false;
   }
   return true;
 }
