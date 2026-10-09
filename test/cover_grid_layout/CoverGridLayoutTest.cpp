@@ -171,6 +171,53 @@ TEST(CoverGridLayout, TheLabelAlwaysFitsItsRow) {
   }
 }
 
+// The Library's screen, as FileBrowserActivity hands it to place(): the band from the top of the
+// panel to the button hints, the theme's metrics, and the tab bar.
+CoverGridLayout::Screen libraryScreen(int panelW, int panelH, const Theme& t, bool isX3) {
+  return {panelW - (isX3 ? 2 * t.sideHints : t.sideHints),
+          panelH - t.buttonHints,
+          t.topPadding,
+          t.header,
+          t.spacing,
+          kTabBar};
+}
+
+// Under the tab bar, on the X3 and X4, whatever the theme and UI font size: the full-size cover --
+// the thumbnails already on the card, shared with the finished-book screen -- and no band left above
+// the button hints but the theme's spacing (and under a pixel a row of rounding).
+TEST(CoverGridLayout, UnderTheTabBarTheX3AndX4KeepFullSizeCoversAndFillTheHeight) {
+  for (const auto& theme : {kClassic, kLyra, kLyraLarge}) {
+    for (const bool isX3 : {false, true}) {
+      const auto screen = isX3 ? libraryScreen(528, 792, theme, true) : libraryScreen(480, 800, theme, false);
+      const auto placed = CoverGridLayout::place(screen);
+      EXPECT_EQ(placed.top, theme.topPadding + theme.header + kTabBar + CoverGridLayout::kTabBarGap);
+      EXPECT_EQ(placed.cells.rows, 2);
+      EXPECT_EQ(placed.cells.cellHeight, kMaxCell);
+      EXPECT_EQ(placed.cells.thumbHeight, 240);
+      const int end = screen.contentBottom - screen.verticalSpacing;
+      const int bottom = placed.top + placed.cells.rows * placed.cells.rowStride;
+      EXPECT_LE(bottom, end);
+      EXPECT_GT(bottom, end - placed.cells.rows);
+    }
+  }
+}
+
+// What the user saw on Lyra Carousel: two rows ending 29 px above the hints.
+TEST(CoverGridLayout, UnderTheTabBarLyraOnTheX4EndsAtTheHintsSpacing) {
+  const auto screen = libraryScreen(480, 800, kLyra, false);
+  const auto placed = CoverGridLayout::place(screen);
+  const int bottom = placed.top + placed.cells.rows * placed.cells.rowStride;
+  EXPECT_LE(bottom, 760 - 16);
+  EXPECT_GE(bottom, 760 - 16 - 1);  // the odd pixel an even split of the height leaves
+}
+
+// Without a tab bar the grid keeps the theme's spacing under the header.
+TEST(CoverGridLayout, WithoutATabBarTheGridSitsAtTheThemesSpacing) {
+  auto screen = libraryScreen(480, 800, kClassic, false);
+  screen.tabBarHeight = 0;
+  EXPECT_EQ(CoverGridLayout::place(screen).top, kClassic.topPadding + kClassic.header + kClassic.spacing);
+}
+
 TEST(CoverGridLayout, HigherResolutionPanelGetsMoreCellsNotBiggerOnes) {
   // A 1072x1448 300 dpi panel: nothing changes but the numbers handed in.
   const auto l = CoverGridLayout::compute(portrait(1072, 1448, kLyra, /*isX3=*/false));

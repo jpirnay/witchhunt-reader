@@ -46,6 +46,18 @@ Layout compute(const Input& in) {
   return l;
 }
 
+Placement place(const Screen& screen) {
+  Placement p;
+  const int gap = screen.tabBarHeight > 0 ? kTabBarGap : screen.verticalSpacing;
+  p.top = screen.topPadding + screen.headerHeight + screen.tabBarHeight + gap;
+  p.cells = compute({.contentWidth = screen.contentWidth,
+                     .contentHeight = screen.contentBottom - p.top - screen.verticalSpacing,
+                     .bottomReserve = 0,
+                     .maxCellHeight = kMaxCellHeight,
+                     .maxCellWidth = kMaxCellWidth});
+  return p;
+}
+
 int rowBelow(const int index, const int count, const int cols) {
   if (count <= 0 || cols <= 0) return 0;
   if (index + cols < count) return index + cols;

@@ -64,6 +64,30 @@ struct Layout {
 
 Layout compute(const Input& in);
 
+// The space under a tab bar before the first row: the bar's own border sets the rows off already,
+// and the theme's spacing here would cost the X3 and X4 their full-size covers.
+inline constexpr int kTabBarGap = 4;
+
+// A screen the grid goes on, in the theme's metrics: from the top of the panel down to where the
+// button hints begin, under the header and -- the Library's -- a tab bar.
+struct Screen {
+  int contentWidth = 0;
+  int contentBottom = 0;  // y where the button hints begin
+  int topPadding = 0;
+  int headerHeight = 0;
+  int verticalSpacing = 0;
+  int tabBarHeight = 0;  // 0: no tab bar
+};
+
+struct Placement {
+  int top = 0;  // y of the first row
+  Layout cells;
+};
+
+// Where the grid goes on `screen` and how it is laid out: from below the header (and tab bar) down to
+// the theme's spacing above the button hints, all of it given to the rows (compute()).
+Placement place(const Screen& screen);
+
 // The cell a row step lands on, wrapping at both ends like the lists do: Down from the last row goes
 // to the same column of the first, Up from the first row to the same column of the last row that
 // has one. A step down into a partial last row from a column it does not reach lands on its last

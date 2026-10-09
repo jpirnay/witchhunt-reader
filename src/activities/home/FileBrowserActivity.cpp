@@ -226,14 +226,15 @@ FileBrowserActivity::CoverGrid FileBrowserActivity::coverGrid() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   CoverGrid g;
   g.content = UITheme::getContentRect(renderer, true, true);
-  g.top =
-      metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + (libraryTabs() ? ListTabBar::HEIGHT : 0);
-  // The 12 px floor at the bottom is where the scroll arrows go.
-  g.cells = CoverGridLayout::compute({.contentWidth = g.content.width,
-                                      .contentHeight = g.content.height - g.top - metrics.verticalSpacing,
-                                      .bottomReserve = 12,
-                                      .maxCellHeight = CoverGridLayout::kMaxCellHeight,
-                                      .maxCellWidth = CoverGridLayout::kMaxCellWidth});
+  const CoverGridLayout::Placement placed =
+      CoverGridLayout::place({.contentWidth = g.content.width,
+                              .contentBottom = g.content.height,
+                              .topPadding = metrics.topPadding,
+                              .headerHeight = metrics.headerHeight,
+                              .verticalSpacing = metrics.verticalSpacing,
+                              .tabBarHeight = libraryTabs() ? ListTabBar::HEIGHT : 0});
+  g.top = placed.top;
+  g.cells = placed.cells;
   g.perPage = std::max(1, g.cells.cols * g.cells.rows);
   return g;
 }
