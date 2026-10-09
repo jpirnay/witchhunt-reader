@@ -39,18 +39,19 @@ inline const char* displayControllerName(BoardConfig::DisplayController controll
   return "Unknown";
 }
 
-// Display/hardware SDK identity, injected by scripts/git_branch.py from the
-// EInkDisplay lib_dep (e.g. "FreeInk 61aa2aa"). Fallback keeps builds compiling
-// if the pre-script could not resolve it.
-#ifndef CROSSPOINT_DISPLAY_SDK
-#define CROSSPOINT_DISPLAY_SDK "unknown"
-#endif
-
 // Snapshot of device system status, shared between the web server and the
 // System Information activity so both surfaces show consistent data.
 struct SystemStatus {
+  // The build's Git-derived identity: CROSSPOINT_VERSION, and the display/hardware
+  // SDK name + version (CROSSPOINT_DISPLAY_SDK, e.g. "FreeInk 61aa2aa"). Defined out
+  // of line in SystemStatus.cpp, never read here: scripts/git_branch.py hands those
+  // two defines only to the sources whose own text names them, and this header is
+  // included by sources that do not (the web server, the settings dispatcher).
+  static const char* firmwareVersion();
+  static const char* displaySdkVersion();
+
   const char* version;
-  const char* displaySdk;  // display/hardware SDK name + version (CROSSPOINT_DISPLAY_SDK)
+  const char* displaySdk;  // display/hardware SDK name + version
   const char* deviceType;  // display name of the active board, e.g. "X4", "X4 Pro", "T5 S3 Pro"
   // Exact BoardProfile selected at boot, e.g. "xteink_x4" / "xteink_x3" /
   // "xteink_x3_uc8279" / "xteink_x4_pro". deviceType alone is not enough to identify a
@@ -97,8 +98,8 @@ struct SystemStatus {
 
   static SystemStatus collectFast() {
     SystemStatus s;
-    s.version = CROSSPOINT_VERSION;
-    s.displaySdk = CROSSPOINT_DISPLAY_SDK;
+    s.version = firmwareVersion();
+    s.displaySdk = displaySdkVersion();
     // From the active board profile, not a deviceIsX3() ternary. That ternary
     // reported every non-X3 board as "X4 (800 x 480)" -- correct on the C3 pair
     // it was written for, wrong on every S3 board, where deviceIsX3() is false by
