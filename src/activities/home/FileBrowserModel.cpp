@@ -14,12 +14,21 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <optional>
 
 #include "BookDetails.h"
 #include "FolderCountMemo.h"
+#include "FolderSearch.h"
 #include "RecentBooksStore.h"
 
 namespace {
+
+// Books leaves out a folder with no book anywhere below it; All files and the Move-to-folder picker
+// still list it. The accept function the SD index takes has no room for context, so the folder a
+// Books load() is listing lives here while that load runs -- on the loop task, one at a time. Empty
+// when folders are not being checked.
+std::string emptyFolderParent;
+bool folderHasBooks(const char* name);
 
 // The part of the filter that does not depend on what the browser is picking: a hidden entry and
 // the FAT volume-information folder are never listed, whatever the mode.
@@ -67,6 +76,10 @@ void FileBrowserModel::load() {
     return;
   }
 
+  // The enumeration below and the SD index's own scan both go through acceptForBooks.
+  std::optional<EmptyFolderCheck> emptyFolders;
+  if (mode == Mode::Books) emptyFolders.emplace(basepath);
+
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
     if (root) root.close();
@@ -111,7 +124,10 @@ void FileBrowserModel::load() {
 
 bool FileBrowserModel::acceptForBooks(const char* name, const bool isDir) {
   if (!isListableName(name)) return false;
-  if (isDir) return true;  // every folder is worth descending into
+  // Every folder is worth descending into -- but a Books folder being listed leaves out the ones with
+  // no book below them. The SD index applies this to its staleness scan too, so a folder that gains
+  // a book changes the index's signature and comes back.
+  if (isDir) return emptyFolderParent.empty() || folderHasBooks(name);
   return isReadableBook(std::string_view{name});
 }
 
@@ -144,6 +160,38 @@ uint32_t countStamp() { return (Storage.contentGeneration() << 1) | (SETTINGS.sh
 }  // namespace
 
 int FileBrowserModel::knownBooksBelow(const std::string& dirPath) { return rememberedCount(dirPath, countStamp()); }
+
+namespace {
+
+// A folder in the one a Books load() is listing: does it hold a book anywhere below? Stops at the
+// first book. What the folder counts already know is used, and every folder searched to its end
+// without one is recorded there as holding none -- an exact count -- so it is not walked again until
+// the card changes. A press gives up, and the folder is listed.
+bool folderHasBooks(const char* name) {
+  FolderSearch::Rules rules;
+  rules.listable = &isListableName;
+  rules.wanted = &FileBrowserModel::isBookName;
+  rules.known = [](void*, const std::string& path) { return rememberedCount(path, countStamp()); };
+  rules.foundNone = [](void*, const std::string& path) { rememberCount(path, 0, countStamp()); };
+  rules.stop = [](void*) {
+    HalSystem::feedWatchdog();
+    return CooperativeAbort::shouldAbortLongTask();
+  };
+  return FolderSearch::anyBelow(emptyFolderParent + name, rules);
+}
+
+// Turns that check on for one load() of a Books folder.
+struct EmptyFolderCheck {
+  explicit EmptyFolderCheck(const std::string& folder) {
+    emptyFolderParent = folder;
+    if (emptyFolderParent.empty() || emptyFolderParent.back() != '/') emptyFolderParent += '/';
+  }
+  ~EmptyFolderCheck() { emptyFolderParent.clear(); }
+  EmptyFolderCheck(const EmptyFolderCheck&) = delete;
+  EmptyFolderCheck& operator=(const EmptyFolderCheck&) = delete;
+};
+
+}  // namespace
 
 // Depth first, one open directory per level -- at most MAX_DEPTH + 1 of them, however wide the
 // tree -- so a folder's total is complete when its directory runs out, and is recorded then.

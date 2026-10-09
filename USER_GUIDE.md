@@ -175,7 +175,7 @@ Hold **Up** or **Down** to go to the previous or next tab (their button hints re
 
 #### Books tab
 
-The Books tab is a full-featured browser for your books and the folders they are in. It lists the books the reader can open (EPUB, XTC/XTCH, TXT and Markdown) and nothing else: a cover image or `.opf` file saved beside a book (see [sidecar files](docs/sidecar-files.md)) is not listed on its own, so a book downloaded from an OPDS catalogue shows up once. Images and every other file are in **Settings → System → Tools → All Files**.
+The Books tab is a full-featured browser for your books and the folders they are in. A folder with no book anywhere in it is not listed, so folders left behind by a sync or holding only covers do not get in the way; **All Files** still shows them, and so does the folder picker of **Move to folder**. A folder made with **New Folder** here opens straight away. It lists the books the reader can open (EPUB, XTC/XTCH, TXT and Markdown) and nothing else: a cover image or `.opf` file saved beside a book (see [sidecar files](docs/sidecar-files.md)) is not listed on its own, so a book downloaded from an OPDS catalogue shows up once. Images and every other file are in **Settings → System → Tools → All Files**.
 
 * **Navigate List:** Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to move the selection cursor up and down through folders and books. Long-pressing these buttons scrolls a full page at a time.
 * **Open Selection:** Press **Confirm** to open a folder or read a selected book.

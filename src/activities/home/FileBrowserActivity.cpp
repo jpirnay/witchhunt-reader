@@ -1243,6 +1243,13 @@ void FileBrowserActivity::createFolderHere() {
           RenderLock lock(*this);
           renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
           GUI.drawPopup(renderer, tr(STR_NEW_FOLDER_FAILED));
+        } else if (model.getMode() == Mode::Books) {
+          // Books lists no folder without a book in it, so the new one is opened instead: that is
+          // where its books go next.
+          mappedInput.flushTouchEvents();
+          model.setPath(target);
+          model.load();
+          resetNavigation();
         } else {
           model.load();
           const size_t idx = model.findEntry(std::string(safe) + "/");
